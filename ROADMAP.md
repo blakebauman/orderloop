@@ -4,9 +4,6 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 
 ## Next
 
-### Address validation node
-Add a `commerce.address_validate` node. It normalises the ship-to in `order.meta.shipTo`: trim, uppercase the country and region codes, check the postcode format. Its outputs are `valid`, `corrected` and `invalid`. A corrected address puts its suggestion in `vars.suggestedAddress`, so a flow can send it to an approval or ask the customer. Start with a deterministic validator. A real provider (USPS, Loqate) plugs in behind the same connector, like the other mocks in `apps/engine/src/connectors.ts`.
-
 ### Per-node timing and metrics
 - Record each node's duration (`startedAt` and `endedAt` are already reported to the OrderAgent).
 - Roll durations up into a D1 table: a new migration.

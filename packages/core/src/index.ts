@@ -1,3 +1,4 @@
+export * from './address';
 export * from './api';
 export * from './catalog';
 export * from './graph';

@@ -307,6 +307,21 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 
+  'commerce.address_validate': async ({ env, ctx }) => {
+    const r = await cx.validateAddress(env, ctx.order.meta?.shipTo);
+    return {
+      branches: [r.status],
+      output: r,
+      vars: r.status === 'corrected' ? { suggestedAddress: r.address } : undefined,
+      summary:
+        r.status === 'valid'
+          ? 'Address OK'
+          : r.status === 'corrected'
+            ? 'Suggested a corrected address'
+            : r.issues.join('; '),
+    };
+  },
+
   'commerce.restock': async ({ env, ctx, config, stepKey }) => {
     const expr = config.lines;
     const requested =
