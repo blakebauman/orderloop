@@ -114,7 +114,7 @@ pnpm exec wrangler login
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
 pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
-pnpm deploy                                    # engine first (web binds to it), then web
+pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
 Set `TIME_SCALE` to `"1"` in `apps/engine/wrangler.jsonc` for real-time waits. You can also set `AI_GATEWAY_ID` to route AI calls through AI Gateway.
