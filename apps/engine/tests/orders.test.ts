@@ -1,6 +1,12 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { type ChatMessage, type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
+import {
+  type ChatMessage,
+  type OrderInput,
+  type OrderState,
+  type StartOrderOnceInput,
+  verifyWebhook,
+} from '@orderloop/core';
 import {
   approvals,
   createDb,
@@ -17,7 +23,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic } from '../src/ai';
 import { refund } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
-import { startOrder } from '../src/orders';
+import { startOrder, startOrderOnce } from '../src/orders';
 
 const db = () => createDb(env.DB);
 const agent = (id: string) => env.ORDER_AGENT.getByName(id);
@@ -395,6 +401,12 @@ describe('storefront order', () => {
 });
 
 describe('idempotency', () => {
+  const once = async (req: StartOrderOnceInput) => {
+    const r = await startOrderOnce(env, req);
+    if ('mismatch' in r) throw new Error(`Idempotency mismatch for ${req.idempotencyKey}`);
+    return r;
+  };
+
   it('returns the same order for a repeated key, even when requests race', async () => {
     await introspect(['window#1']);
     const req = {
@@ -406,17 +418,49 @@ describe('idempotency', () => {
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
     };
-    const [a, b] = await Promise.all([startOrder(env, req), startOrder(env, req)]);
+    const [a, b] = await Promise.all([once(req), once(req)]);
     expect(a.orderId).toBe(b.orderId);
     expect([a.replayed, b.replayed].filter(Boolean)).toHaveLength(1);
-    expect(await startOrder(env, req)).toEqual({ orderId: a.orderId, replayed: true });
+    expect(await once(req)).toEqual({ orderId: a.orderId, replayed: true });
     const rows = await db().select().from(orders).where(eq(orders.idempotencyKey, 'checkout-7f3a'));
     expect(rows).toHaveLength(1);
     expect((await settled(a.orderId)).status).toBe('completed');
     // A different key is a different order.
-    const c = await startOrder(env, { ...req, idempotencyKey: 'checkout-8b1c' });
+    const c = await once({ ...req, idempotencyKey: 'checkout-8b1c' });
     expect(c.orderId).not.toBe(a.orderId);
     await settled(c.orderId);
+  });
+
+  it('refuses a repeated key with a different request, ignoring property order', async () => {
+    await introspect(['window#1']);
+    const req: StartOrderOnceInput = {
+      flowId: 'tpl-storefront-order',
+      idempotencyKey: 'checkout-9d2e',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+      }),
+    };
+    const a = await once(req);
+    // Same request, keys in another order: still a replay.
+    const reordered: StartOrderOnceInput = {
+      input: Object.fromEntries(Object.entries(req.input).reverse()) as OrderInput,
+      idempotencyKey: req.idempotencyKey,
+      flowId: req.flowId,
+    };
+    expect(await once(reordered)).toEqual({ orderId: a.orderId, replayed: true });
+    // A different quantity under the same key is refused and starts nothing.
+    expect(
+      await startOrderOnce(env, {
+        ...req,
+        input: { ...req.input, lines: [{ sku: 'GSK-010', qty: 6 }] },
+      }),
+    ).toEqual({ mismatch: true });
+    const rows = await db().select().from(orders).where(eq(orders.idempotencyKey, 'checkout-9d2e'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.idempotencyFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    await settled(a.orderId);
   });
 
   it('finishes starting an order whose first request failed after the insert', async () => {
@@ -451,12 +495,12 @@ describe('idempotency', () => {
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
     };
-    expect(await startOrder(env, req)).toEqual({ orderId, replayed: true });
+    expect(await once(req)).toEqual({ orderId, replayed: true });
     const done = await settled(orderId);
     expect(done.status).toBe('completed');
     expect(done.order!.createdAt).toBe(now);
     // Once running, a replay only returns it.
-    expect(await startOrder(env, req)).toEqual({ orderId, replayed: true });
+    expect(await once(req)).toEqual({ orderId, replayed: true });
     expect(
       (await state(orderId)).timeline.filter(
         (t) => t.kind === 'order' && t.message.startsWith('Order created'),

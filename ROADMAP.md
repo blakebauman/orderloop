@@ -30,7 +30,6 @@ Pricing sources go in D1. The resolver lives in `packages/core`, is pure and is 
 
 ## Gaps in shipped features
 
-- **Idempotency keys don't fingerprint the request.** A repeat key with a different body silently returns the first order. Store a hash of the request and answer `422` on a mismatch, as Stripe does.
 - **Relative times can flicker on load.** "in 42m" and "3m ago" are computed from `Date.now()` on the server and again in the browser, so they can differ by a unit at a minute boundary and log a hydration warning. Render them only after hydration, as `useDateTime` (`apps/web/app/lib/use-date-time.ts`) does for absolute times.
 - **Partial returns restock every line.** `commerce.restock` restocks the whole order. It should restock only the lines in the `return.requested` payload.
 
