@@ -35,6 +35,13 @@ export type Principal = {
   role: Role;
 };
 
+/** A session ends this long after sign-in, whatever happens. */
+export const SESSION_MAX_MS = 30 * 86_400_000;
+/** A session also ends after this long without a request, on a page or the order page's socket. */
+export const SESSION_IDLE_MS = 7 * 86_400_000;
+/** Activity is written back at most this often. */
+export const SESSION_TOUCH_MS = 5 * 60_000;
+
 /**
  * The header the web app sets when it proxies the order page's agent connection, after removing
  * any copy the browser sent. The engine is reachable only through that proxy.

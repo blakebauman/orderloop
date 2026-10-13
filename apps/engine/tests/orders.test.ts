@@ -8,6 +8,7 @@ import {
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
+  SESSION_IDLE_MS,
   type StartOrderOnceInput,
   verifyWebhook,
   withDefaults,
@@ -875,6 +876,45 @@ describe('agent socket roles', () => {
     expect((await forged.call('chat', ['hi'])).success).toBe(false);
     forged.close();
     expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
+    await agent(orderId).cancel('Cleanup');
+  });
+
+  it('ends an idle session and counts socket calls as activity', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        type: 'purchase_request',
+        customerId: 'cus_internal',
+        title: 'Chairs',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+    const kim = await who('viewer', 'kim@example.com');
+    const seen = async () =>
+      (await db().select().from(sessions).where(eq(sessions.tokenHash, kim.session!)).get())!
+        .lastSeenAt;
+
+    // Last seen 10 minutes ago: a call works and moves last-seen forward.
+    await db()
+      .update(sessions)
+      .set({ lastSeenAt: Date.now() - 10 * 60_000 })
+      .where(eq(sessions.tokenHash, kim.session!));
+    const page = await socket(orderId, kim);
+    expect((await page.call('chat', ['status?'])).success).toBe(true);
+    expect(Date.now() - (await seen())!).toBeLessThan(60_000);
+
+    // Idle for longer than the limit: refused, although the session hasn't reached its expiry.
+    await db()
+      .update(sessions)
+      .set({ lastSeenAt: Date.now() - SESSION_IDLE_MS - 1 })
+      .where(eq(sessions.tokenHash, kim.session!));
+    expect(await page.call('chat', ['status?'])).toMatchObject({
+      success: false,
+      error: 'Your sign-in has ended. Reload the page to sign in again.',
+    });
+    page.close();
     await agent(orderId).cancel('Cleanup');
   });
 });

@@ -33,6 +33,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0012_auth_failures.sql` | `auth_failures`, counts for throttling failed sign-ins |
 | `0013_audit_events.sql` | `audit_events`, the security audit log |
 | `0014_token_expiry.sql` | `api_tokens.expires_at` |
+| `0015_session_activity.sql` | `sessions.last_seen_at`, `ip`, `user_agent` |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -109,7 +110,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 | Table | Purpose |
 |---|---|
 | `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at` |
-| `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days) |
+| `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page) |
 | `api_tokens` | `name`, `prefix` (the first 12 characters, for lists), `token_hash` (SHA-256 of the `ol_live_` token, unique), `role`, `created_by`, `last_used_at` (updated at most every 5 minutes), `revoked_at`, `expires_at` (null never expires). For an expired token, `last_used_at` limits its `api.token_expired` audit events to one an hour |
 | `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `api-ip:` for shared-password bearers) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](/guides/team-and-roles/#failed-sign-ins) |
 | `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |

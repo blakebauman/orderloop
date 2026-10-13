@@ -108,9 +108,12 @@ session's id (the SHA-256 that keys `sessions`), which never reaches the browser
 
 Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from
 D1, so a page that is already open follows changes made since it connected: a lower role applies
-at once, and once the session has been signed out, reset or expired, or the user disabled, the
+at once, and once the session has been signed out, reset, expired or idle for `SESSION_IDLE_MS`,
+or the user disabled, the
 call fails with `Your sign-in has ended. Reload the page to sign in again.` and the connection
-closes with code `4401` just after. A caller without at least `min` gets `This needs the <Role>
+closes with code `4401` just after. A successful check also records the session's activity
+(`last_seen_at`, at most every `SESSION_TOUCH_MS`), so working on an order page keeps it from
+going idle. A caller without at least `min` gets `This needs the <Role>
 role.`; a socket with no principal is refused. The shared password and open local dev have no
 session to re-check. Calls over RPC have no connection and are trusted, because the web app's
 routes already checked the role.

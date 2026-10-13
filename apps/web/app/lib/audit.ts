@@ -11,6 +11,8 @@ export const AUDIT_ACTIONS = {
   'auth.sign_in_throttled': 'Sign-in refused: too many failures',
   'auth.sign_out': 'Signed out',
   'auth.password_changed': 'Changed own password',
+  'auth.session_ended': 'Signed out a session',
+  'auth.other_sessions_ended': 'Signed out everywhere else',
   'team.first_operator': 'Created the first operator',
   'team.user_added': 'Added a person',
   'team.role_changed': 'Changed a role',
