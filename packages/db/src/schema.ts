@@ -370,3 +370,23 @@ export const authFailures = sqliteTable('auth_failures', {
   count: integer('count').notNull(),
   windowStart: integer('window_start').notNull(),
 });
+
+/** Security audit log, written by the web app (`audit.server.ts`); kept 180 days. */
+export const auditEvents = sqliteTable(
+  'audit_events',
+  {
+    id: text('id').primaryKey(),
+    at: integer('at').notNull(),
+    action: text('action').notNull(),
+    /** Who acted, as the audit trail names them (email, `token:<name>`, `operator`); null if nobody signed in. */
+    actor: text('actor'),
+    actorId: text('actor_id'),
+    actorKind: text('actor_kind'),
+    /** What it acted on, e.g. a person's email or a token's name. */
+    target: text('target'),
+    /** JSON with action-specific fields, e.g. `{ "from": "viewer", "to": "approver" }`. */
+    detail: text('detail'),
+    ip: text('ip'),
+  },
+  (t) => [index('audit_events_at').on(t.at), index('audit_events_action').on(t.action, t.at)],
+);

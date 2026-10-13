@@ -13,6 +13,7 @@ export default [
     route('approvals', 'routes/approvals.tsx'),
     route('back-office', 'routes/back-office.tsx'),
     route('team', 'routes/team.tsx'),
+    route('audit', 'routes/audit.tsx'),
     route('account', 'routes/account.tsx'),
   ]),
   // Resource routes the editor and order page post to.
