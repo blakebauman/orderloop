@@ -8,7 +8,7 @@ Both Workers bind the same D1 database (`orderloop`, binding `DB`) and R2 bucket
 creates it is `packages/db/migrations/*.sql`.
 
 :::caution
-`schema.ts` must match the migrations column for column. To change the schema, add a new numbered
+`schema.ts` must match the migrations column for column and index for index. To change the schema, add a new numbered
 migration and update `schema.ts` to match; never edit a migration that has been applied.
 :::
 
@@ -57,7 +57,7 @@ unique index decides which one creates the order and the other returns it as `re
 Rows from before `0005` have none and replay without the check.
 
 `approvals.status` is `pending`, then the outcome (`approved`, `rejected`, `escalated`) or
-`cancelled`. Approvals are indexed by `(status, requested_at)`, and `0001_init.sql` makes
+`cancelled`. Approvals are indexed by `(status, requested_at)`, and `approvals_wait` makes
 `(order_id, event_type)` unique, so a retried `:open` step cannot insert a second row.
 
 ## Back office
@@ -76,6 +76,9 @@ writes embeds its step key.
 | `shipments` | Labels and return labels; `status` is `label_created`, `return_label` or `cancelled` |
 | `documents` | Index of R2 objects per order: `kind`, `r2_key`, `content_type` |
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
+
+`reservations`, `stock_movements`, `payments`, `shipments`, `documents` and `messages` are each indexed by
+`order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
 
 ## Webhooks
 

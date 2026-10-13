@@ -29,4 +29,4 @@ pnpm docs:dev / docs:build              # Starlight docs in apps/docs (build inc
 - Visual design is "Ledger" (tokens in `apps/web/app/app.css`). Don't reuse styling from other projects.
 - vitest is pinned to 5.0.3: 5.0.4's module cache breaks `@cloudflare/vitest-plugin`.
 - Docs live in `apps/docs` (Starlight). When a change touches a documented surface, update the docs in the same change: follow the `docs-sync` skill or delegate to the `docs-sync` agent. The source→page map is `.claude/skills/docs-sync/references/surface-map.tsv`. Reference pages render from `@orderloop/core` at build time; never hand-copy catalog data or enums into MDX. The docs import only `@orderloop/core` and `apps/web/app/lib/openapi.ts`, never engine source.
-- `@callable()` uses TC39 decorators; both Vite configs include `agents/vite` so they are transformed.
+- `@callable()` uses TC39 decorators; `apps/web/vite.config.ts` and `apps/engine/vitest.config.ts` include `agents/vite` so they are transformed (the engine has no Vite config of its own; in dev it runs inside the web app's Vite session).
