@@ -12,7 +12,13 @@ import {
 import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db } from './env.server';
 
-export type OrderFilters = { type?: string; status?: string; q?: string };
+export type OrderFilters = {
+  type?: string;
+  status?: string;
+  q?: string;
+  /** Newest first by default; "updated" and "total" sort descending too. */
+  sort?: 'created' | 'updated' | 'total';
+};
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
   const where = and(
@@ -26,7 +32,9 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
         )
       : undefined,
   );
-  return db().select().from(orders).where(where).orderBy(desc(orders.createdAt)).limit(limit);
+  const order =
+    f.sort === 'total' ? orders.total : f.sort === 'updated' ? orders.updatedAt : orders.createdAt;
+  return db().select().from(orders).where(where).orderBy(desc(order)).limit(limit);
 }
 
 export async function dashboardStats() {
@@ -67,9 +75,11 @@ export async function listApprovals(status = 'pending') {
       orderType: orders.type,
       orderTitle: orders.title,
       customerId: orders.customerId,
+      customerName: customers.name,
     })
     .from(approvals)
     .leftJoin(orders, eq(orders.id, approvals.orderId))
+    .leftJoin(customers, eq(customers.id, orders.customerId))
     .where(status === 'all' ? undefined : eq(approvals.status, status))
     .orderBy(desc(approvals.requestedAt))
     .limit(200);
@@ -135,4 +145,25 @@ export async function publishedFlows() {
     .from(flows)
     .where(sql`${flows.publishedVersion} is not null`)
     .orderBy(flows.name);
+}
+
+/** Customer display names by id, for lists that only carry the id. */
+export async function customerNames(): Promise<Record<string, string>> {
+  const rows = await db().select({ id: customers.id, name: customers.name }).from(customers);
+  return Object.fromEntries(rows.map((r) => [r.id, r.name]));
+}
+
+/**
+ * Cancelled orders that were declined by policy (their approval was rejected or escalated) rather
+ * than cancelled by a person. The index keeps one status; the approvals table says which.
+ */
+export async function declinedOrderIds(): Promise<Set<string>> {
+  const rows = await db()
+    .selectDistinct({ id: approvals.orderId })
+    .from(approvals)
+    .innerJoin(orders, eq(orders.id, approvals.orderId))
+    .where(
+      and(inArray(approvals.status, ['escalated', 'rejected']), eq(orders.status, 'cancelled')),
+    );
+  return new Set(rows.map((r) => r.id));
 }

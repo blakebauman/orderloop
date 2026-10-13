@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { DRAG_TYPE } from './flow-canvas';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
-/** Node palette: drag onto the canvas, or click to add next to the selection. */
+/** Node palette: drag onto the canvas, or click (or press Enter) to add after the selection. */
 export function Palette({ onPick }: { onPick: (type: string) => void }) {
   const [q, setQ] = useState('');
   const needle = q.toLowerCase();
@@ -15,7 +15,8 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search nodes"
-        className="h-8 text-xs"
+        aria-label="Search nodes"
+        className="h-8 text-sm"
       />
       <div className="mt-3 flex-1 space-y-4 overflow-y-auto pr-1">
         {cats.map((cat) => {
@@ -27,9 +28,7 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
           if (!items.length) return null;
           return (
             <section key={cat}>
-              <h3 className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-                {CATEGORY_LABELS[cat]}
-              </h3>
+              <h3 className="caption mb-1.5">{CATEGORY_LABELS[cat]}</h3>
               <div className="space-y-1">
                 {items.map((s) => (
                   <button
@@ -42,17 +41,13 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
                     }}
                     onClick={() => onPick(s.type)}
                     title={s.description}
-                    className="flex w-full cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-[12.5px] hover:border-border hover:bg-muted/60 active:cursor-grabbing"
+                    className="flex w-full cursor-grab items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-[13px] hover:border-border hover:bg-muted/60 active:cursor-grabbing"
                   >
-                    <span
-                      className="grid size-5 shrink-0 place-items-center rounded"
-                      style={{
-                        background: `color-mix(in oklch, ${CATEGORY_COLOR[cat]} 16%, transparent)`,
-                        color: CATEGORY_COLOR[cat],
-                      }}
-                    >
-                      <NodeIcon name={s.icon} className="size-3" />
-                    </span>
+                    <NodeIcon
+                      name={s.icon}
+                      className="size-3.5 shrink-0"
+                      style={{ color: CATEGORY_COLOR[cat] }}
+                    />
                     <span className="truncate">{s.label}</span>
                   </button>
                 ))}

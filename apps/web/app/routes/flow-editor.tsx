@@ -1,5 +1,4 @@
 import {
-  autoLayout,
   type CopilotResult,
   type Flow,
   type FlowGraph,
@@ -17,13 +16,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   FlaskConical,
+  Redo2,
   Rocket,
   Save,
   Sparkles,
   Undo2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { data, Link, useBlocker, useFetcher, useLoaderData, useNavigate } from 'react-router';
+import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Palette } from '~/components/palette';
@@ -53,10 +54,50 @@ type ActionResult = {
 export default function FlowEditor() {
   const loaded = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const [flow, setFlow] = useState<Flow>(loaded.flow);
+  const [flow, setFlowState] = useState<Flow>(loaded.flow);
+
+  // Edit history. Every change goes through setFlow; bursts (a drag, typing) within 400ms are one
+  // step, so ⌘Z undoes a whole move rather than one pixel of it.
+  const flowRef = useRef(flow);
+  const past = useRef<Flow[]>([]);
+  const future = useRef<Flow[]>([]);
+  const lastEdit = useRef(0);
+  const [, setHistoryTick] = useState(0);
+  const setFlow = useCallback((next: Flow | ((f: Flow) => Flow)) => {
+    const prev = flowRef.current;
+    const value = typeof next === 'function' ? next(prev) : next;
+    if (value === prev) return;
+    const now = Date.now();
+    if (now - lastEdit.current > 400) {
+      past.current.push(prev);
+      if (past.current.length > 100) past.current.shift();
+    }
+    lastEdit.current = now;
+    future.current = [];
+    flowRef.current = value;
+    setFlowState(value);
+    setHistoryTick((t) => t + 1);
+  }, []);
+  const [announce, setAnnounce] = useState('');
+  const travel = useCallback((from: React.RefObject<Flow[]>, to: React.RefObject<Flow[]>) => {
+    const target = from.current.pop();
+    if (!target) return;
+    setAnnounce(from === past ? 'Undone' : 'Redone');
+    to.current.push(flowRef.current);
+    flowRef.current = target;
+    lastEdit.current = 0;
+    setFlowState(target);
+    setHistoryTick((t) => t + 1);
+  }, []);
+  const undo = useCallback(() => travel(past, future), [travel]);
+  const redo = useCallback(() => travel(future, past), [travel]);
   const [baseline, setBaseline] = useState(() => JSON.stringify(loaded.flow));
   const [selected, setSelected] = useState<string | null>(null);
   const [published, setPublished] = useState(loaded.publishedVersion);
+  // The graph as last published, to know whether Publish would change anything.
+  const [publishedGraph, setPublishedGraph] = useState<FlowGraph | null>(loaded.publishedGraph);
+  // Publishing (directly or as part of a test run) always passes through one confirmation.
+  const [confirm, setConfirm] = useState<null | 'publish' | 'test'>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [prompt, setPrompt] = useState('');
   const [proposal, setProposal] = useState<CopilotResult | null>(null);
@@ -89,7 +130,7 @@ export default function FlowEditor() {
   );
 
   // Handle save / publish / test results.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: react to new results only
+  // React to new results only.
   useEffect(() => {
     const d = save.data;
     if (!d || save.state !== 'idle') return;
@@ -101,7 +142,10 @@ export default function FlowEditor() {
       });
     else {
       setBaseline(JSON.stringify(flow));
-      if (d.version) setPublished(d.version);
+      if (d.version) {
+        setPublished(d.version);
+        setPublishedGraph({ nodes: flow.nodes, edges: flow.edges });
+      }
       setNotice({ tone: 'ok', text: d.version ? `Published v${d.version}` : 'Draft saved' });
       if (d.orderId) navigate(`/orders/${d.orderId}`);
     }
@@ -113,18 +157,29 @@ export default function FlowEditor() {
     else setProposal(copilot.data);
   }, [copilot.data, copilot.state]);
 
-  // ⌘S saves, Escape deselects.
+  // ⌘S saves, ⌘Z / ⇧⌘Z undo and redo graph edits (text fields keep their own undo), Escape deselects.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === 's') {
         e.preventDefault();
         submit('save');
+      }
+      const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select');
+      if (mod && e.key.toLowerCase() === 'z' && !typing) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      }
+      if (mod && e.key.toLowerCase() === 'y' && !typing) {
+        e.preventDefault();
+        redo();
       }
       if (e.key === 'Escape') setSelected(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [submit]);
+  }, [submit, undo, redo]);
 
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -132,12 +187,9 @@ export default function FlowEditor() {
       currentLocation.pathname !== nextLocation.pathname &&
       !nextLocation.pathname.startsWith('/orders/'),
   );
-  useEffect(() => {
-    if (blocker.state === 'blocked') {
-      if (window.confirm('Discard unsaved changes to this flow?')) blocker.proceed();
-      else blocker.reset();
-    }
-  }, [blocker]);
+
+  const changes = useMemo(() => graphChanges(publishedGraph, flow), [publishedGraph, flow]);
+  const unpublished = !publishedGraph || changes.total > 0;
 
   const addNode = (type: string, position?: { x: number; y: number }) => {
     const anchor = node ?? flow.nodes.at(-1);
@@ -177,26 +229,27 @@ export default function FlowEditor() {
     : null;
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b px-5 py-2.5">
+    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+      <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
-          <div className="text-muted-foreground text-xs">
-            <Link to="/flows" className="hover:underline">
+          <div className="caption">
+            <Link to="/flows" className="hover:text-foreground hover:underline">
               Flows
             </Link>{' '}
             / <span className="font-mono">{flow.id}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               value={flow.name}
               onChange={(e) => setFlow({ ...flow, name: e.target.value })}
-              className="h-8 w-64 border-transparent bg-transparent px-1 font-semibold text-base hover:border-input"
+              className="h-8 w-full border-transparent bg-transparent px-1 font-semibold font-serif text-lg hover:border-input sm:w-64"
               aria-label="Flow name"
             />
             <NativeSelect
               value={flow.orderType}
               onChange={(e) => setFlow({ ...flow, orderType: e.target.value as OrderType })}
-              className="h-8 text-xs"
+              className="h-8 text-sm"
+              aria-label="Order type"
             >
               {ORDER_TYPES.map((t) => (
                 <NativeSelectOption key={t} value={t}>
@@ -204,21 +257,29 @@ export default function FlowEditor() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-              {published ? `live v${published}` : 'unpublished'}
+            <span className="text-muted-foreground text-xs">
+              {published
+                ? `Published v${published}${unpublished ? ' · changes not published' : ''}`
+                : 'Not published'}
             </span>
             {dirty ? (
-              <span className="rounded bg-wait/15 px-1.5 py-0.5 text-[11px] text-wait">
-                unsaved
+              <span className="rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
+                Unsaved
               </span>
             ) : null}
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <h1 className="sr-only">{flow.name}</h1>
+        <span className="sr-only" aria-live="polite">
+          {announce}
+        </span>
+        {/* Editing actions need the full editor; phones get a review-only view. */}
+        <div className="ml-auto hidden flex-wrap items-center gap-2 lg:flex">
           {notice ? (
             <span
+              role="status"
               className={cn(
-                'text-xs',
+                'text-sm',
                 notice.tone === 'ok'
                   ? 'text-ok'
                   : notice.tone === 'warn'
@@ -229,13 +290,36 @@ export default function FlowEditor() {
               {notice.text}
             </span>
           ) : null}
+          <div className="flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!past.current.length}
+              onClick={undo}
+              aria-label="Undo (⌘Z)"
+              title="Undo (⌘Z)"
+            >
+              <Undo2 />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!future.current.length}
+              onClick={redo}
+              aria-label="Redo (⇧⌘Z)"
+              title="Redo (⇧⌘Z)"
+            >
+              <Redo2 />
+            </Button>
+          </div>
           <Button
             variant="ghost"
             size="sm"
             disabled={!dirty}
             onClick={() => setFlow(JSON.parse(baseline))}
+            title="Back to the last saved draft (undoable)"
           >
-            <Undo2 /> Discard
+            Discard changes
           </Button>
           <Button
             variant="outline"
@@ -249,23 +333,89 @@ export default function FlowEditor() {
             variant="outline"
             size="sm"
             disabled={save.state !== 'idle' || issues.errors.length > 0}
-            onClick={() => submit('test')}
-            title="Publish and start a sample order"
+            onClick={() => (unpublished ? setConfirm('test') : submit('test'))}
+            title={
+              unpublished
+                ? 'Publishes your changes as a new version, then starts a sample order on it'
+                : `Starts a sample order on v${published}`
+            }
           >
             <FlaskConical /> Test run
           </Button>
           <Button
             size="sm"
-            disabled={save.state !== 'idle' || issues.errors.length > 0}
-            onClick={() => submit('publish')}
+            disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
+            onClick={() => setConfirm('publish')}
+            title={unpublished ? undefined : `Nothing to publish: v${published} is current`}
           >
             <Rocket /> Publish
           </Button>
         </div>
       </header>
 
+      {blocker.state === 'blocked' ? (
+        <div
+          role="alertdialog"
+          aria-label="Unsaved changes"
+          className="flex flex-wrap items-center gap-3 border-b bg-wait/10 px-5 py-2 text-sm"
+        >
+          <span className="flex-1">This flow has unsaved changes. Leave without saving them?</span>
+          <Button size="sm" variant="ghost" onClick={() => blocker.reset?.()} autoFocus>
+            Stay
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => blocker.proceed?.()}>
+            Leave without saving
+          </Button>
+        </div>
+      ) : null}
+
+      {confirm ? (
+        <div
+          role="alertdialog"
+          aria-label="Publish this flow"
+          className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-2.5 text-sm"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setConfirm(null);
+          }}
+        >
+          <p className="min-w-0 flex-1">
+            <span className="font-medium">
+              {confirm === 'test'
+                ? `A test run publishes v${(published ?? 0) + 1} first.`
+                : `Publish v${(published ?? 0) + 1}?`}
+            </span>{' '}
+            <span className="text-muted-foreground">
+              {publishedGraph
+                ? `${changes.summary} since v${published}. `
+                : 'This is the first version. '}
+              New {ORDER_TYPE_LABELS[flow.orderType]} orders will run it; orders already running
+              keep their version.
+            </span>
+          </p>
+          {/* Focus lands on the safe choice; publishing takes a deliberate click or Tab. */}
+          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)} autoFocus>
+            Not yet
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setConfirm(null);
+              submit(confirm);
+            }}
+          >
+            {confirm === 'test'
+              ? `Publish v${(published ?? 0) + 1} and test`
+              : `Publish v${(published ?? 0) + 1}`}
+          </Button>
+        </div>
+      ) : null}
+
+      <p className="border-b bg-muted/50 px-4 py-2 text-muted-foreground text-sm lg:hidden">
+        Building flows needs a wider screen. Here you can review the graph and its settings.
+      </p>
+
       <form
-        className="flex items-center gap-2 border-b bg-ai/[0.04] px-5 py-2"
+        className="hidden items-center gap-2 border-b bg-ai/[0.04] px-5 py-2 lg:flex"
         onSubmit={(e) => {
           e.preventDefault();
           if (!prompt.trim()) return;
@@ -280,7 +430,8 @@ export default function FlowEditor() {
         <Input
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Ask the copilot: “add a fraud risk score after credit and send high risk to approval”"
+          placeholder="Ask the copilot to change this flow, e.g. “add a fraud check after credit”"
+          aria-label="Ask the copilot to change this flow"
           className="h-8 border-ai/20 bg-transparent text-sm"
         />
         <Button type="submit" size="sm" variant="secondary" disabled={copilot.state !== 'idle'}>
@@ -291,9 +442,10 @@ export default function FlowEditor() {
       {proposal && diff ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-ai/10 px-5 py-2 text-sm">
           <span className="text-ai">{proposal.explanation}</span>
-          <span className="text-muted-foreground text-xs">
+          <span className="text-muted-foreground text-xs tabular">
             +{diff.added} / −{diff.removed} nodes, {diff.edges >= 0 ? '+' : ''}
-            {diff.edges} edges{proposal.errors.length ? ` · ${proposal.errors.length} issues` : ''}
+            {diff.edges} connections
+            {proposal.errors.length ? ` · ${proposal.errors.length} problems to fix` : ''}
           </span>
           <div className="ml-auto flex gap-2">
             <Button
@@ -304,10 +456,10 @@ export default function FlowEditor() {
                 setPrompt('');
               }}
             >
-              Apply
+              Apply changes
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setProposal(null)}>
-              Discard
+              Dismiss
             </Button>
           </div>
         </div>
@@ -317,7 +469,7 @@ export default function FlowEditor() {
         <aside className="hidden min-h-0 border-r p-3 lg:block">
           <Palette onPick={(t) => addNode(t)} />
         </aside>
-        <div className="min-h-[420px] p-3">
+        <div className="h-[60vh] min-h-[360px] p-3 lg:h-auto">
           <FlowCanvas
             graph={proposal ? proposal.graph : flow}
             editable={!proposal}
@@ -328,29 +480,29 @@ export default function FlowEditor() {
             onAddNode={(t, p) => addNode(t, p)}
           />
         </div>
-        <aside className="min-h-0 overflow-y-auto border-l p-4">
+        <aside className="min-h-0 overflow-y-auto border-t p-4 lg:border-t-0 lg:border-l">
           {node ? (
-            <Inspector node={node} onChange={updateNode} onDelete={() => deleteNode(node.id)} />
+            <div className="space-y-6">
+              <Inspector node={node} onChange={updateNode} onDelete={() => deleteNode(node.id)} />
+              <Connections node={node} graph={flow} onChange={setGraph} />
+            </div>
           ) : (
-            <div className="space-y-4">
-              <div>
-                <div className="mb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-                  Description
-                </div>
+            <div className="space-y-5">
+              <label className="block">
+                <span className="section-title mb-1.5 block">Description</span>
                 <textarea
                   value={flow.description}
                   onChange={(e) => setFlow({ ...flow, description: e.target.value })}
                   rows={4}
-                  className="w-full rounded-md border bg-transparent px-2 py-1.5 text-xs"
+                  className="w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
                 />
-              </div>
+              </label>
               <div>
-                <div className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-                  Validation
-                </div>
+                <h2 className="section-title mb-1.5">Checks</h2>
                 {issues.errors.length === 0 ? (
                   <div className="flex items-center gap-1.5 text-ok text-sm">
-                    <CheckCircle2 className="size-4" /> Ready to publish
+                    <CheckCircle2 className="size-4" />{' '}
+                    {unpublished ? 'Ready to publish' : `All checks pass; v${published} is live`}
                   </div>
                 ) : null}
                 <ul className="space-y-1.5">
@@ -359,7 +511,7 @@ export default function FlowEditor() {
                       <button
                         type="button"
                         onClick={() => e.nodeId && setSelected(e.nodeId)}
-                        className="flex gap-1.5 text-left text-bad text-xs"
+                        className="flex gap-1.5 text-left text-bad text-sm hover:underline"
                       >
                         <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {e.message}
                       </button>
@@ -370,7 +522,7 @@ export default function FlowEditor() {
                       <button
                         type="button"
                         onClick={() => e.nodeId && setSelected(e.nodeId)}
-                        className="flex gap-1.5 text-left text-wait/90 text-xs"
+                        className="flex gap-1.5 text-left text-sm text-wait hover:underline"
                       >
                         <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {e.message}
                       </button>
@@ -378,27 +530,54 @@ export default function FlowEditor() {
                   ))}
                 </ul>
               </div>
-              <div className="text-muted-foreground text-xs leading-relaxed">
+              <div className="max-w-[65ch] space-y-2 text-muted-foreground text-sm leading-relaxed">
                 <p>
                   Drag nodes from the palette, connect an output dot to an input, and press Delete
-                  to remove a selection.
+                  to remove a selection. From the keyboard: Enter on a palette item adds it after
+                  the selected node, and a node’s Connections list wires its outputs.
                 </p>
-                <p className="mt-2">
+                <p>
                   Branches are the labelled outputs on each node. To repeat steps, use a <b>Loop</b>{' '}
                   and connect the end of its body to the amber <b>next</b> input.
                 </p>
-                <p className="mt-2">
+                <p>
                   Publishing snapshots a new version. Running orders keep the version they started
                   on.
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setFlow((f) => autoLayout(f))}>
-                Tidy layout
-              </Button>
             </div>
           )}
         </aside>
       </div>
     </div>
   );
+}
+
+/** What publishing would change, counted against the published graph. */
+function graphChanges(published: FlowGraph | null, current: FlowGraph) {
+  if (!published) return { total: 1, summary: '' };
+  const strip = (n: FlowNode) => JSON.stringify({ ...n, position: null });
+  const before = new Map(published.nodes.map((n) => [n.id, strip(n)]));
+  const after = new Map(current.nodes.map((n) => [n.id, strip(n)]));
+  const added = [...after.keys()].filter((id) => !before.has(id)).length;
+  const removed = [...before.keys()].filter((id) => !after.has(id)).length;
+  const edited = [...after].filter(([id, v]) => before.has(id) && before.get(id) !== v).length;
+  const eb = new Set(published.edges.map((e) => e.id));
+  const ea = new Set(current.edges.map((e) => e.id));
+  const rewired =
+    [...ea].filter((id) => !eb.has(id)).length + [...eb].filter((id) => !ea.has(id)).length;
+  const moved = current.nodes.some((n) => {
+    const p = published.nodes.find((m) => m.id === n.id);
+    return p && (p.position.x !== n.position.x || p.position.y !== n.position.y);
+  });
+  const parts = [
+    added ? `${added} node${added === 1 ? '' : 's'} added` : '',
+    removed ? `${removed} removed` : '',
+    edited ? `${edited} edited` : '',
+    rewired ? `${rewired} connection${rewired === 1 ? '' : 's'} changed` : '',
+  ].filter(Boolean);
+  return {
+    total: added + removed + edited + rewired + (moved ? 1 : 0),
+    summary: parts.length ? parts.join(', ') : 'Layout changes only',
+  };
 }

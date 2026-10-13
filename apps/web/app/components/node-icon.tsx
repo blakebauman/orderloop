@@ -18,10 +18,12 @@ import {
   NotebookPen,
   PackageCheck,
   PackageMinus,
+  PackageOpen,
   Percent,
   Play,
   Repeat,
   RotateCw,
+  Scale,
   ScanText,
   Send,
   Shapes,
@@ -32,6 +34,7 @@ import {
   Timer,
   TrendingUp,
   Truck,
+  Undo2,
   UserCheck,
   Variable,
   Wallet,
@@ -57,10 +60,12 @@ const ICONS: Record<string, LucideIcon> = {
   NotebookPen,
   PackageCheck,
   PackageMinus,
+  PackageOpen,
   Percent,
   Play,
   Repeat,
   RotateCw,
+  Scale,
   ScanText,
   Send,
   Shapes,
@@ -71,6 +76,7 @@ const ICONS: Record<string, LucideIcon> = {
   Timer,
   TrendingUp,
   Truck,
+  Undo2,
   UserCheck,
   Variable,
   Wallet,
@@ -78,9 +84,17 @@ const ICONS: Record<string, LucideIcon> = {
   Webhook,
 };
 
-export function NodeIcon({ name, className }: { name: string; className?: string }) {
+export function NodeIcon({
+  name,
+  className,
+  style,
+}: {
+  name: string;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
   const Icon = ICONS[name] ?? Play;
-  return <Icon className={className} />;
+  return <Icon className={className} style={style} aria-hidden="true" />;
 }
 
 /** Category accent, as a CSS color. */

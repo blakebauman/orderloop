@@ -113,4 +113,19 @@ export const SCENARIOS: Scenario[] = [
       meta: { simulate: 'charge_fail' },
     },
   },
+  {
+    id: 'storefront-return',
+    label: 'Storefront order, returned',
+    blurb:
+      'Card checkout ships and captures, then the customer returns it: RMA label, restock, refund.',
+    flowId: 'tpl-storefront-order',
+    input: {
+      type: 'storefront_order',
+      currency: 'USD',
+      customerId: 'cus_ada',
+      title: 'Web order #10482',
+      lines: [{ sku: 'MON-27', qty: 1 }],
+      meta: {},
+    },
+  },
 ];

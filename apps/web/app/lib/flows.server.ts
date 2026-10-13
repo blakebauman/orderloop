@@ -72,7 +72,10 @@ export async function getFlow(id: string) {
     !published ||
     JSON.stringify({ nodes: published.flow.nodes, edges: published.flow.edges }) !==
       JSON.stringify(graph);
-  return { flow, publishedVersion: row.publishedVersion, versions, dirty };
+  const publishedGraph: FlowGraph | null = published
+    ? ({ nodes: published.flow.nodes, edges: published.flow.edges } as FlowGraph)
+    : null;
+  return { flow, publishedVersion: row.publishedVersion, versions, dirty, publishedGraph };
 }
 
 export function parseFlow(input: unknown): Flow {
@@ -108,4 +111,14 @@ export async function publish(flow: Flow) {
 export async function flowCount() {
   const r = await db().select({ n: sql<number>`count(*)` }).from(flows).get();
   return r?.n ?? 0;
+}
+
+/** Same nodes and edges, ignoring array order (the editor appends; the store keeps insertion order). */
+export function sameGraph(a: FlowGraph, b: FlowGraph) {
+  const norm = (g: FlowGraph) =>
+    JSON.stringify({
+      nodes: [...g.nodes].sort((x, y) => x.id.localeCompare(y.id)),
+      edges: [...g.edges].sort((x, y) => x.id.localeCompare(y.id)),
+    });
+  return norm(a) === norm(b);
 }

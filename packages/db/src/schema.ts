@@ -1,6 +1,15 @@
 /** Must match migrations/*.sql column for column. Add a numbered migration; never edit an applied one. */
 
-import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 export const flows = sqliteTable('flows', {
   id: text('id').primaryKey(),
@@ -43,10 +52,14 @@ export const orders = sqliteTable(
     waitingOn: text('waiting_on'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
+    idempotencyKey: text('idempotency_key'),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),
     index('orders_type').on(t.type, t.updatedAt),
+    uniqueIndex('orders_idempotency')
+      .on(t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
   ],
 );
 
@@ -146,3 +159,34 @@ export const messages = sqliteTable('messages', {
   body: text('body').notNull(),
   createdAt: integer('created_at').notNull(),
 });
+
+export const webhookSubscriptions = sqliteTable('webhook_subscriptions', {
+  id: text('id').primaryKey(),
+  url: text('url').notNull(),
+  secret: text('secret').notNull(),
+  /** JSON array of event names; "*" matches every event. */
+  events: text('events').notNull().default('["*"]'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    subscriptionId: text('subscription_id').notNull(),
+    orderId: text('order_id').notNull(),
+    event: text('event').notNull(),
+    payload: text('payload').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    responseStatus: integer('response_status'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    deliveredAt: integer('delivered_at'),
+  },
+  (t) => [
+    index('webhook_deliveries_order').on(t.orderId),
+    index('webhook_deliveries_subscription').on(t.subscriptionId, t.createdAt),
+  ],
+);

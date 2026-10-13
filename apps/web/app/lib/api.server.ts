@@ -3,29 +3,35 @@
  *
  *   GET  /api/v1/flows
  *   POST /api/v1/orders                         { flowId, version?, input: OrderInput, vars? }
+ *                                               Idempotency-Key header: a repeat returns 200 + the same order
  *   GET  /api/v1/orders?type=&status=&q=
  *   GET  /api/v1/orders/:id                     live state from the order's agent
  *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (webhooks)
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }
  *   POST /api/v1/orders/:id/cancel              { reason? }
  *
+ *   GET    /api/v1/webhook-subscriptions
+ *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
+ *   DELETE /api/v1/webhook-subscriptions/:id
+ *   GET    /api/v1/webhook-subscriptions/:id/deliveries
+ *
  * Signed webhooks (no password; see `handleSignedEvent`):
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  */
 
 import { env } from 'cloudflare:workers';
-import { orderInputSchema, SIGNATURE_HEADER, verifyWebhook } from '@orderloop/core';
-import { z } from 'zod';
+import { SIGNATURE_HEADER, verifyWebhook } from '@orderloop/core';
+import type { z } from 'zod';
+import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
 import { listOrders } from './orders.server';
-
-const startSchema = z.object({
-  flowId: z.string(),
-  version: z.number().int().positive().optional(),
-  input: orderInputSchema,
-  vars: z.record(z.string(), z.unknown()).optional(),
-});
+import {
+  createSubscription,
+  deleteSubscription,
+  listDeliveries,
+  listSubscriptions,
+} from './webhooks.server';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -41,6 +47,8 @@ export async function handleApi(request: Request): Promise<Response> {
     if (parts[0] === 'flows' && parts.length === 1 && request.method === 'GET') {
       return json({ flows: await listFlows() });
     }
+    if (parts[0] === 'webhook-subscriptions')
+      return await handleSubscriptions(request, parts, body);
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {
@@ -58,8 +66,12 @@ export async function handleApi(request: Request): Promise<Response> {
         const parsed = startSchema.safeParse(await body());
         if (!parsed.success)
           return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
+        const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;
+        if (idempotencyKey && idempotencyKey.length > 255)
+          return json({ error: 'Idempotency-Key must be at most 255 characters' }, 400);
         await ensureSeeded();
-        return json(await engine().startOrder(parsed.data), 201);
+        const res = await engine().startOrder({ ...parsed.data, idempotencyKey });
+        return json(res, res.replayed ? 200 : 201);
       }
     }
 
@@ -91,11 +103,26 @@ export async function handleApi(request: Request): Promise<Response> {
   }
 }
 
-const eventSchema = z.object({
-  orderId: z.string().min(1),
-  event: z.string().min(1).max(100),
-  payload: z.record(z.string(), z.unknown()).optional(),
-});
+async function handleSubscriptions(
+  request: Request,
+  parts: string[],
+  body: () => Promise<unknown>,
+): Promise<Response> {
+  if (parts.length === 1 && request.method === 'GET')
+    return json({ subscriptions: await listSubscriptions() });
+  if (parts.length === 1 && request.method === 'POST') {
+    const parsed = subscriptionInput.safeParse(await body());
+    if (!parsed.success)
+      return json({ error: 'Invalid subscription', issues: parsed.error.issues }, 400);
+    return json(await createSubscription(parsed.data), 201);
+  }
+  const id = parts[1]!;
+  if (parts.length === 2 && request.method === 'DELETE')
+    return (await deleteSubscription(id)) ? json({ ok: true }) : json({ error: 'Not found' }, 404);
+  if (parts[2] === 'deliveries' && parts.length === 3 && request.method === 'GET')
+    return json({ deliveries: await listDeliveries(id) });
+  return json({ error: 'Not found' }, 404);
+}
 
 /**
  * Signed business events from external systems. Authenticated by an HMAC of the raw body with

@@ -354,9 +354,119 @@ export function subscriptionFlow(): Flow {
   );
 }
 
+export function storefrontOrderFlow(): Flow {
+  return (
+    new Builder()
+      .n('checkout', 'trigger.webhook', 'Storefront checkout', { source: 'storefront' })
+      .n('validate', 'commerce.validate', 'Validate')
+      .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('tax', 'commerce.tax', 'Tax')
+      .n('policy', 'commerce.policy', 'Store policy', {
+        rules: [
+          { rule: 'min_order_amount', amount: 25 },
+          { rule: 'max_qty_per_sku', qty: 10 },
+          { rule: 'no_po_box' },
+        ],
+      })
+      .n('reject', 'commerce.notify', 'Explain rejection', {
+        to: 'customer',
+        subject: 'We couldn’t accept order {{order.id}}',
+        body: '{{vars.policyFailures}}',
+      })
+      .n('rejected', 'control.end', 'Rejected', {
+        outcome: 'cancelled',
+        reason: 'Failed store policy',
+      })
+      .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })
+      .n('reserve', 'commerce.reserve_inventory', 'Reserve stock')
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('capture', 'commerce.capture_payment', 'Capture payment')
+      .n('shipped', 'commerce.notify', 'Shipping confirmation', {
+        to: 'customer',
+        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+      })
+      .n('window', 'control.wait_event', 'Return window', {
+        event: 'return.requested',
+        timeout: '30 days',
+      })
+      .n('rma', 'commerce.return_label', 'Return label', { carrier: 'ups' })
+      .n('send_label', 'commerce.notify', 'Send return label', {
+        to: 'customer',
+        subject: 'Your return label for {{order.id}}: {{vars.returnTracking}}',
+      })
+      .n('back', 'control.wait_event', 'Return received', {
+        event: 'return.received',
+        timeout: '14 days',
+      })
+      .n('restock', 'commerce.restock', 'Restock')
+      // A partial refund comes from the return request's payload; the connector caps it.
+      .n('refund', 'commerce.refund', 'Refund', {
+        amount: { or: [{ var: 'vars.return_requested.amount' }, { var: 'order.total' }] },
+        reason: '{{vars.return_requested.reason}}',
+      })
+      .n('refunded', 'commerce.notify', 'Refund confirmation', {
+        to: 'customer',
+        subject: 'We refunded {{vars.refunded}} for {{order.id}}',
+      })
+      .n('review', 'commerce.notify', 'Refund needs review', {
+        to: 'team',
+        subject: 'Refund for {{order.id}} failed; please review',
+      })
+      .n('done', 'control.end', 'Fulfilled', { outcome: 'completed' })
+      .n('returned', 'control.end', 'Returned', { outcome: 'completed', reason: 'Returned' })
+      .n('lost', 'control.end', 'Return not received', {
+        outcome: 'completed',
+        reason: 'Return label issued but goods never arrived',
+      })
+      .n('declined', 'control.end', 'Card declined', { outcome: 'failed', reason: 'Card declined' })
+      .n('short', 'control.end', 'Out of stock', {
+        outcome: 'failed',
+        reason: 'Insufficient stock; authorization voided',
+      })
+      .n('uncaptured', 'control.end', 'Capture failed', {
+        outcome: 'failed',
+        reason: 'Payment capture failed',
+      })
+      .e('checkout', 'validate')
+      .e('validate', 'price')
+      .e('price', 'tax')
+      .e('tax', 'policy')
+      .e('policy.pass', 'authorize')
+      .e('policy.fail', 'reject')
+      .e('reject', 'rejected')
+      .e('authorize.ok', 'reserve')
+      .e('authorize.declined', 'declined')
+      .e('reserve.ok', 'ship')
+      .e('reserve.backorder', 'short')
+      .e('ship', 'capture')
+      .e('capture.ok', 'shipped')
+      .e('capture.failed', 'uncaptured')
+      .e('shipped', 'window')
+      .e('window.timeout', 'done')
+      .e('window.received', 'rma')
+      .e('rma', 'send_label')
+      .e('send_label', 'back')
+      .e('back.received', 'restock')
+      .e('back.timeout', 'lost')
+      .e('restock', 'refund')
+      .e('refund.ok', 'refunded')
+      .e('refund.failed', 'review')
+      .e('refunded', 'returned')
+      .e('review', 'returned')
+      .build({
+        id: 'tpl-storefront-order',
+        name: 'Storefront order',
+        description:
+          'Card checkout: store policy, authorize, reserve, ship and capture, then a 30-day return window: RMA label, goods received, restock and a full or partial refund.',
+        orderType: 'storefront_order',
+      })
+  );
+}
+
 export const TEMPLATES: Record<OrderType, () => Flow> = {
   purchase_request: purchaseRequestFlow,
   b2b_order: b2bOrderFlow,
   reorder: reorderFlow,
   subscription: subscriptionFlow,
+  storefront_order: storefrontOrderFlow,
 };

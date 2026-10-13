@@ -10,6 +10,7 @@ import { PageHeader } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
+import { humanize } from '~/lib/format';
 import { backOffice, publishedFlows } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
@@ -23,18 +24,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { flows, customers: office.customers, products: office.products };
 }
 
-/** "WID-100 x 50" / "50 WID-100" / "WID-100, 50" per line. */
-function parseLines(text: string): OrderLine[] {
-  return text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const sku = /[A-Z]{2,4}-\d{2,4}/i.exec(l)?.[0]?.toUpperCase();
-      const qty = Number(/(\d+(?:\.\d+)?)(?!.*\d)/.exec(l.replace(sku ?? '', ''))?.[1] ?? 1);
-      return sku ? { sku, qty } : null;
-    })
-    .filter((x): x is OrderLine => !!x);
+/** "WID-100 x 50" / "50 WID-100" / "WID-100, 50" per line. Lines without a SKU come back as errors. */
+function parseLines(text: string): { lines: OrderLine[]; unreadable: string[] } {
+  const lines: OrderLine[] = [];
+  const unreadable: string[] = [];
+  for (const raw of text.split('\n')) {
+    const l = raw.trim();
+    if (!l) continue;
+    const sku = /[A-Z]{2,4}-\d{2,4}/i.exec(l)?.[0]?.toUpperCase();
+    const qty = Number(/(\d+(?:\.\d+)?)(?!.*\d)/.exec(l.replace(sku ?? '', ''))?.[1] ?? 1);
+    if (sku) lines.push({ sku, qty });
+    else unreadable.push(l);
+  }
+  return { lines, unreadable };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -43,8 +45,16 @@ export async function action({ request }: Route.ActionArgs) {
   const flowId = String(f.get('flowId') ?? '');
   const flows = await publishedFlows();
   const flow = flows.find((x) => x.id === flowId);
-  if (!flow) return { error: 'Pick a published flow.' };
+  if (!flow)
+    return {
+      error: 'Pick a published flow. Flows must be published before orders can run on them.',
+    };
   const simulate = String(f.get('simulate') ?? '');
+  const parsed = parseLines(String(f.get('lines') ?? ''));
+  if (parsed.unreadable.length)
+    return {
+      error: `No SKU found on ${parsed.unreadable.length === 1 ? 'this line' : 'these lines'}: ${parsed.unreadable.map((l) => `“${l}”`).join(', ')}. Use “SKU x qty”, e.g. WID-100 x 5.`,
+    };
   try {
     const { orderId } = await engine().startOrder({
       flowId,
@@ -53,14 +63,16 @@ export async function action({ request }: Route.ActionArgs) {
         title: String(f.get('title') ?? '') || undefined,
         customerId: String(f.get('customerId') ?? '') || undefined,
         currency: 'USD',
-        lines: parseLines(String(f.get('lines') ?? '')),
+        lines: parsed.lines,
         documentText: String(f.get('documentText') ?? '') || undefined,
         meta: simulate ? { simulate } : {},
       },
     });
     return redirect(`/orders/${orderId}`);
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return {
+      error: `The order could not be started. ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
@@ -70,99 +82,139 @@ export default function NewOrder() {
   const nav = useNavigation();
   const [preset, setPreset] = useState(SCENARIOS[0]!);
   const [key, setKey] = useState(0);
+  const [lines, setLines] = useState(() => linesText(SCENARIOS[0]!));
   const pick = (id: string) => {
     const s = SCENARIOS.find((x) => x.id === id);
     if (s) {
       setPreset(s);
+      setLines(linesText(s));
       setKey((k) => k + 1);
     }
   };
+  const addSku = (sku: string) =>
+    setLines((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${sku} x 1`);
+  const preview = parseLines(lines);
   return (
     <>
       <PageHeader
         title="New order"
-        subtitle="Start an order on a published flow. Presets fill the form with a demo scenario."
+        subtitle="Start an order on a published flow. A preset fills the form with a demo scenario."
       />
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-6 pb-10 lg:grid-cols-[1fr_320px]">
-        <Form method="post" key={key} className="space-y-4 rounded-md border bg-card p-5">
+      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Form method="post" key={key} className="min-w-0 space-y-4 rounded-md border bg-card p-5">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Flow">
               <NativeSelect name="flowId" defaultValue={preset.flowId} className="h-9 w-full">
                 {flows.map((fl) => (
                   <NativeSelectOption key={fl.id} value={fl.id}>
-                    {fl.name} · {ORDER_TYPE_LABELS[fl.orderType as OrderType]} · v{fl.version}
+                    {fl.name === ORDER_TYPE_LABELS[fl.orderType as OrderType]
+                      ? fl.name
+                      : `${fl.name} (${ORDER_TYPE_LABELS[fl.orderType as OrderType]})`}{' '}
+                    · v{fl.version}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
             </Field>
-            <Field label="Customer" hint="blank lets AI extraction find it">
+            <Field label="Customer">
               <NativeSelect
                 name="customerId"
                 defaultValue={preset.input.customerId ?? ''}
                 className="h-9 w-full"
               >
-                <NativeSelectOption value="">—</NativeSelectOption>
+                <NativeSelectOption value="">Find it from the document</NativeSelectOption>
                 {customers.map((c) => (
                   <NativeSelectOption key={c.id} value={c.id}>
-                    {c.name} ({c.tier})
+                    {c.name} ({humanize(c.tier)})
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
             </Field>
           </div>
-          <Field label="Title">
-            <Input name="title" defaultValue={preset.input.title ?? ''} placeholder="Optional" />
+          <Field label="Title" hint="Optional">
+            <Input
+              name="title"
+              defaultValue={preset.input.title ?? ''}
+              placeholder="e.g. PO CT-2209"
+            />
           </Field>
-          <Field label="Lines" hint="one per line: SKU x qty">
+          <Field label="Lines" hint="One per line: SKU x qty">
             <Textarea
               name="lines"
               rows={4}
-              className="font-mono text-xs"
-              defaultValue={preset.input.lines.map((l) => `${l.sku} x ${l.qty}`).join('\n')}
+              className="font-mono text-sm"
+              placeholder={'WID-100 x 120\nGSK-010 x 40'}
+              value={lines}
+              onChange={(e) => setLines(e.target.value)}
             />
           </Field>
-          <Field label="Inbound document" hint="email or PO text for the AI extract node">
+          <p className="-mt-2 text-xs" aria-live="polite">
+            {preview.unreadable.length ? (
+              <span className="text-bad">
+                No SKU on: {preview.unreadable.map((l) => `“${l}”`).join(', ')}
+              </span>
+            ) : preview.lines.length ? (
+              <span className="text-muted-foreground">
+                {preview.lines.map((l) => `${l.qty} × ${l.sku}`).join(' · ')}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                No lines: the AI extract step reads them from the document.
+              </span>
+            )}
+          </p>
+          <Field label="Inbound document" hint="Email or PO text for AI extraction">
             <Textarea
               name="documentText"
               rows={6}
-              className="text-xs"
+              className="text-sm"
               defaultValue={preset.input.documentText ?? ''}
             />
           </Field>
-          <Field label="Simulate" hint="force a connector failure">
-            <NativeSelect
-              name="simulate"
-              defaultValue={String(preset.input.meta?.simulate ?? '')}
-              className="h-9 w-full"
-            >
-              <NativeSelectOption value="">Nothing — happy path</NativeSelectOption>
-              <NativeSelectOption value="out_of_stock">Out of stock</NativeSelectOption>
-              <NativeSelectOption value="payment_decline">
-                Payment authorization declined
-              </NativeSelectOption>
-              <NativeSelectOption value="charge_fail">Renewal charge fails</NativeSelectOption>
-              <NativeSelectOption value="three_way_mismatch">
-                Supplier invoice mismatch
-              </NativeSelectOption>
-            </NativeSelect>
-          </Field>
-          {data?.error ? <p className="text-destructive text-sm">{data.error}</p> : null}
-          <Button type="submit" disabled={nav.state !== 'idle'}>
+          <details
+            className="group rounded-md border px-3 py-2"
+            open={!!preset.input.meta?.simulate}
+          >
+            <summary className="caption cursor-pointer hover:text-foreground">Demo options</summary>
+            <div className="mt-2">
+              <Field label="Simulate a failure">
+                <NativeSelect
+                  name="simulate"
+                  defaultValue={String(preset.input.meta?.simulate ?? '')}
+                  className="h-9 w-full"
+                >
+                  <NativeSelectOption value="">Nothing — happy path</NativeSelectOption>
+                  <NativeSelectOption value="out_of_stock">Out of stock</NativeSelectOption>
+                  <NativeSelectOption value="payment_decline">
+                    Payment authorization declined
+                  </NativeSelectOption>
+                  <NativeSelectOption value="charge_fail">Renewal charge fails</NativeSelectOption>
+                  <NativeSelectOption value="three_way_mismatch">
+                    Supplier invoice mismatch
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+            </div>
+          </details>
+          {data?.error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {data.error}
+            </p>
+          ) : null}
+          <Button type="submit" disabled={nav.state !== 'idle' || preview.unreadable.length > 0}>
             {nav.state !== 'idle' ? 'Starting…' : 'Start order'}
           </Button>
         </Form>
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           <div className="rounded-md border bg-card p-4">
-            <h2 className="mb-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-              Presets
-            </h2>
-            <div className="space-y-1">
+            <h2 className="section-title mb-2">Demo presets</h2>
+            <div className="space-y-0.5">
               {SCENARIOS.map((s) => (
                 <button
                   key={s.id}
                   type="button"
+                  aria-pressed={preset.id === s.id}
                   onClick={() => pick(s.id)}
-                  className={`w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted/60 ${preset.id === s.id ? 'bg-primary/10 text-primary' : ''}`}
+                  className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:font-medium"
                 >
                   {s.label}
                 </button>
@@ -170,17 +222,24 @@ export default function NewOrder() {
             </div>
           </div>
           <div className="rounded-md border bg-card p-4">
-            <h2 className="mb-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-              Catalog
-            </h2>
-            <ul className="space-y-1 text-xs">
+            <h2 className="section-title">Catalog</h2>
+            <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
+              Click an item to add it to the lines. Numbers are units available.
+            </p>
+            <ul className="-mx-2 text-sm">
               {products.map((p) => (
-                <li key={p.sku} className="flex justify-between gap-2">
-                  <span>
-                    <span className="font-mono">{p.sku}</span>{' '}
-                    <span className="text-muted-foreground">{p.name}</span>
-                  </span>
-                  <span className="text-muted-foreground tabular">{p.stock - p.reserved}</span>
+                <li key={p.sku}>
+                  <button
+                    type="button"
+                    onClick={() => addSku(p.sku)}
+                    className="flex w-full justify-between gap-2 rounded-md px-2 py-1 text-left hover:bg-muted/60"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="font-mono text-xs">{p.sku}</span>{' '}
+                      <span className="text-muted-foreground">{p.name}</span>
+                    </span>
+                    <span className="text-muted-foreground tabular">{p.stock - p.reserved}</span>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -190,3 +249,6 @@ export default function NewOrder() {
     </>
   );
 }
+
+const linesText = (s: (typeof SCENARIOS)[number]) =>
+  s.input.lines.map((l) => `${l.sku} x ${l.qty}`).join('\n');

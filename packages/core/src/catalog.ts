@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { policyRulesSchema } from './policy';
 
 export type NodeCategory = 'trigger' | 'commerce' | 'control' | 'ai';
 
@@ -35,6 +36,8 @@ export type ConfigField = {
   required?: boolean;
   options?: string[];
   default?: unknown;
+  /** Overrides the kind's validation, for structured `json` fields. */
+  schema?: z.ZodType;
 };
 
 export type NodeSpec = {
@@ -145,6 +148,29 @@ export const NODE_SPECS = [
     outputs: OUT,
   }),
   node({
+    type: 'commerce.policy',
+    category: 'commerce',
+    label: 'Policy check',
+    description:
+      'Checks order rules: minimum or maximum total, per-SKU limits, business hours, PO boxes, restricted SKUs.',
+    icon: 'Scale',
+    fields: [
+      {
+        key: 'rules',
+        label: 'Rules',
+        kind: 'json',
+        required: true,
+        schema: policyRulesSchema.min(1),
+        default: [
+          { rule: 'min_order_amount', amount: 25 },
+          { rule: 'max_qty_per_sku', qty: 500 },
+        ],
+        hint: 'min_order_amount, max_order_amount, max_qty_per_sku, business_hours, no_po_box, restricted_skus',
+      },
+    ],
+    outputs: ['pass', 'fail'],
+  }),
+  node({
     type: 'commerce.credit_check',
     category: 'commerce',
     label: 'Credit check',
@@ -210,6 +236,24 @@ export const NODE_SPECS = [
     retries: 0,
   }),
   node({
+    type: 'commerce.refund',
+    category: 'commerce',
+    label: 'Refund',
+    description:
+      'Refunds captured or charged money, all of it or an amount computed from the context.',
+    icon: 'Undo2',
+    fields: [
+      {
+        key: 'amount',
+        label: 'Amount (expression)',
+        kind: 'logic',
+        hint: 'Empty refunds everything still refundable',
+      },
+      { key: 'reason', label: 'Reason', kind: 'text', default: 'Customer return' },
+    ],
+    outputs: ['ok', 'failed'],
+  }),
+  node({
     type: 'commerce.invoice',
     category: 'commerce',
     label: 'Generate invoice',
@@ -252,6 +296,23 @@ export const NODE_SPECS = [
     ],
     outputs: OUT,
     rollback: true,
+  }),
+  node({
+    type: 'commerce.return_label',
+    category: 'commerce',
+    label: 'Return label',
+    description: 'Issues a prepaid return label (an RMA) and sends it to the customer.',
+    icon: 'PackageOpen',
+    fields: [
+      {
+        key: 'carrier',
+        label: 'Carrier',
+        kind: 'select',
+        options: ['ups', 'fedex', 'dhl', 'freight'],
+        default: 'ups',
+      },
+    ],
+    outputs: OUT,
   }),
   node({
     type: 'commerce.three_way_match',
@@ -535,6 +596,7 @@ export function withDefaults(type: string, config: Record<string, unknown> = {})
 }
 
 function fieldSchema(f: ConfigField): z.ZodType {
+  if (f.schema) return f.schema;
   switch (f.kind) {
     case 'number':
       return z.number();

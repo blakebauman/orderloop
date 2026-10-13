@@ -5,7 +5,13 @@
 
 import { z } from 'zod';
 
-export const ORDER_TYPES = ['purchase_request', 'b2b_order', 'reorder', 'subscription'] as const;
+export const ORDER_TYPES = [
+  'purchase_request',
+  'b2b_order',
+  'reorder',
+  'subscription',
+  'storefront_order',
+] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
@@ -13,6 +19,7 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   b2b_order: 'B2B order',
   reorder: 'Reorder',
   subscription: 'Subscription',
+  storefront_order: 'Storefront order',
 };
 
 export const flowNodeSchema = z.object({

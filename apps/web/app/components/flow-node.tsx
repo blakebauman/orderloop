@@ -1,7 +1,8 @@
 /**
- * A flow node card: a ledger entry on the sheet. A status rule on the left edge, a mono category
- * tag, the label, the last summary line, and one labelled source handle per output branch. Loop
- * nodes get a second input ("next") on the bottom edge for back-edges.
+ * A flow node card: a ledger entry on the sheet. A status rule on the left edge, the category icon,
+ * undo/waits tags, the label, the last summary, and one labelled source handle per output branch.
+ * Loop nodes get a second input ("next") on the bottom edge for back-edges. Nothing on the card is
+ * set below 11px.
  */
 
 import { type NodeCategory, type NodeRun, nodeOutputs, nodeSpec } from '@orderloop/core';
@@ -25,10 +26,10 @@ export type FlowRfNode = Node<FlowNodeData, 'flow'>;
 
 const handleClass = '!size-2 !rounded-[2px] !border !border-[var(--node)] !bg-[var(--edge)]';
 
-const CATEGORY_TAG: Record<NodeCategory, string> = {
-  trigger: 'TRIGGER',
-  commerce: 'COMMERCE',
-  control: 'CONTROL',
+const CATEGORY_NAME: Record<NodeCategory, string> = {
+  trigger: 'Trigger',
+  commerce: 'Commerce',
+  control: 'Control',
   ai: 'AI',
 };
 
@@ -39,19 +40,36 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
   const multi = outputs.length > 1 || (outputs.length === 1 && outputs[0] !== 'out');
   const status = data.run?.status;
   const started = status && status !== 'pending';
-  const color = started ? statusColor(status) : undefined;
+  // An End step "succeeds" at ending the order; what matters is the outcome it ended with.
+  const outcome =
+    data.type === 'control.end' && status === 'succeeded'
+      ? String(data.config.outcome ?? 'completed')
+      : undefined;
+  // A wait that "succeeded" by timing out or being rejected is not good news; say what happened.
+  const resolved =
+    spec?.waits && status === 'succeeded'
+      ? data.run?.branches?.find((b) => ['escalated', 'timeout', 'rejected'].includes(b))
+      : undefined;
+  const shown = outcome && outcome !== 'completed' ? outcome : status;
+  const color = !started
+    ? undefined
+    : resolved === 'rejected'
+      ? 'var(--bad)'
+      : resolved
+        ? 'var(--undo)'
+        : statusColor(shown);
   const live = status === 'running' || status === 'waiting';
   const tags = [spec?.rollback ? 'undo' : null, spec?.waits ? 'waits' : null].filter(Boolean);
 
   return (
     <div
       className={cn(
-        'relative w-[210px] rounded-md border bg-[var(--node)] text-left shadow-[0_1px_0_var(--rule)] transition-[border-color,box-shadow,opacity]',
+        'relative w-[220px] rounded-md border bg-[var(--node)] text-left shadow-[0_1px_0_var(--rule)] transition-[border-color,box-shadow,opacity]',
         selected
           ? 'border-[var(--ink)] shadow-[0_0_0_2px_var(--ring)]'
           : 'border-[var(--node-border)]',
         data.issue && !selected && 'border-[var(--bad)]',
-        status === 'skipped' && 'opacity-40',
+        status === 'skipped' && 'opacity-60',
       )}
     >
       {/* Status rule */}
@@ -80,27 +98,27 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
         />
       ) : null}
 
-      <div className="flex items-center gap-1.5 px-3 pt-2">
-        <span style={{ color: CATEGORY_COLOR[category] }} className="flex items-center gap-1">
-          <NodeIcon name={spec?.icon ?? 'Play'} className="size-3" />
-          <span className="font-mono font-semibold text-[9.5px] tracking-wider">
-            {CATEGORY_TAG[category]}
-          </span>
+      <div className="flex items-center gap-1.5 px-3 pt-2 text-[11px] leading-4">
+        <span
+          style={{ color: CATEGORY_COLOR[category] }}
+          className="flex items-center"
+          title={CATEGORY_NAME[category]}
+        >
+          <NodeIcon name={spec?.icon ?? 'Play'} className="size-3.5" />
+          <span className="sr-only">{CATEGORY_NAME[category]}</span>
         </span>
-        {tags.map((t) => (
-          <span
-            key={t}
-            className="font-mono text-[9.5px] text-[var(--muted-foreground)] tracking-wider"
-          >
-            · {t}
-          </span>
-        ))}
+        {tags.length ? (
+          <span className="text-[var(--muted-foreground)]">{tags.join(' · ')}</span>
+        ) : null}
         {started ? (
-          <span
-            className="ml-auto font-mono font-semibold text-[9.5px] uppercase tracking-wider"
-            style={{ color }}
-          >
-            {statusLabel(status)}
+          <span className="ml-auto font-medium" style={{ color }}>
+            {outcome
+              ? `Ended: ${statusLabel(outcome).toLowerCase()}`
+              : resolved === 'rejected'
+                ? 'Rejected'
+                : resolved
+                  ? 'Timed out'
+                  : statusLabel(status)}
             {data.run && data.run.runs > 1 ? ` ×${data.run.runs}` : ''}
           </span>
         ) : null}
@@ -109,13 +127,13 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
         <div className="truncate font-semibold text-[13px] text-[var(--ink)] leading-tight">
           {data.label}
         </div>
-        <div className="truncate font-mono text-[10px] text-[var(--muted-foreground)]">{id}</div>
+        <div className="truncate font-mono text-[11px] text-[var(--muted-foreground)]">{id}</div>
       </div>
 
       {data.run?.summary || data.run?.error || data.issue ? (
         <div
           className={cn(
-            'mx-3 mt-1.5 truncate border-[var(--rule)] border-t border-dashed pt-1 font-mono text-[10.5px] text-[var(--muted-foreground)]',
+            'mx-3 mt-1.5 line-clamp-2 border-[var(--rule)] border-t border-dashed pt-1 text-[12px] text-[var(--muted-foreground)] leading-snug',
             (data.run?.error || data.issue) && 'text-[var(--bad)]',
           )}
           title={data.run?.error ?? data.issue ?? data.run?.summary}
@@ -129,21 +147,24 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
           outputs.map((o) => {
             const taken = data.run?.branches?.includes(o);
             return (
-              <div key={o} className="relative flex h-[18px] items-center justify-end pr-3">
+              <div key={o} className="relative flex h-5 items-center justify-end pr-3">
                 <span
                   className={cn(
-                    'font-mono text-[10px] text-[var(--muted-foreground)]',
-                    taken && 'font-semibold text-[var(--primary)]',
+                    'flex items-center gap-1 font-mono text-[11px] text-[var(--muted-foreground)]',
+                    taken && 'font-semibold text-[var(--ink)]',
                   )}
                 >
-                  {taken ? '● ' : ''}
+                  {taken ? (
+                    <span className="size-1.5 rounded-full bg-[var(--ink)]" aria-hidden="true" />
+                  ) : null}
                   {o}
+                  {taken ? <span className="sr-only"> (taken)</span> : null}
                 </span>
                 <Handle
                   type="source"
                   id={o}
                   position={Position.Right}
-                  className={cn(handleClass, '!-right-1', taken && '!bg-[var(--primary)]')}
+                  className={cn(handleClass, '!-right-1', taken && '!bg-[var(--ink)]')}
                 />
               </div>
             );
