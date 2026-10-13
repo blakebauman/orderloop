@@ -11,6 +11,7 @@ import { Check, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ApprovalContext } from '~/lib/approvals';
 import { until } from '~/lib/format';
+import { useDateTime } from '~/lib/use-date-time';
 
 const UNDO_MS = 5000;
 
@@ -19,6 +20,7 @@ export type Decision = 'approved' | 'rejected';
 /** The reason, the figures behind it, and the escalation clock. */
 export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; className?: string }) {
   const now = useNow(ctx.deadline ? 1000 : null);
+  const formatTime = useDateTime();
   if (!ctx.reason && !ctx.facts.length && !ctx.deadline) return null;
   return (
     <div className={cn('text-sm', className)}>
@@ -30,7 +32,7 @@ export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; clas
           {ctx.deadline ? (
             <span
               className={cn(ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait')}
-              title={new Date(ctx.deadline).toLocaleString()}
+              title={formatTime(ctx.deadline)}
               suppressHydrationWarning
             >
               {ctx.onTimeout

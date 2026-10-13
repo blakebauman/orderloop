@@ -1,6 +1,6 @@
 import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { ago, money, statusColor } from '../app/lib/format';
+import { ago, dateTime, money, statusColor } from '../app/lib/format';
 import { SCENARIOS } from '../app/lib/scenarios';
 
 const templates = Object.values(TEMPLATES).map((t) => t());
@@ -22,6 +22,12 @@ describe('format', () => {
     expect(money(1163.69)).toBe('$1,163.69');
     expect(ago(Date.now() - 90_000)).toBe('2m ago');
     expect(ago(null)).toBe('—');
+  });
+
+  it('formats date-times in a pinned zone for SSR and labels UTC', () => {
+    const t = Date.UTC(2026, 9, 13, 4, 46);
+    expect(dateTime(t, 'UTC')).toBe('Oct 13, 2026, 4:46 AM UTC');
+    expect(dateTime(t, 'America/Los_Angeles')).toBe('Oct 12, 2026, 9:46 PM');
   });
 
   it('maps statuses to theme tokens', () => {
