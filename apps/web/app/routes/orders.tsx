@@ -8,8 +8,8 @@ import { Form, Link, useLoaderData, useRevalidator, useSearchParams } from 'reac
 import { Empty, PageHeader } from '~/components/page';
 import { StatusBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
-import { ago, money, orderRef, statusLabel, waitLabel } from '~/lib/format';
-import { customerNames, listOrders } from '~/lib/orders.server';
+import { ago, money, orderRef, orderStatus, statusLabel, waitLabel } from '~/lib/format';
+import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
 import type { Route } from './+types/orders';
 
 export const meta = () => [{ title: 'Orders · Order Loop' }];
@@ -27,11 +27,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     }),
     customerNames(),
   ]);
-  return { orders, names, sort };
+  const declined = [...(await declinedOrderIds())];
+  return { orders, names, sort, declined };
 }
 
 export default function Orders() {
-  const { orders, names, sort } = useLoaderData<typeof loader>();
+  const { orders, names, sort, declined } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const filtered = !!(params.get('type') || params.get('status') || params.get('q'));
   const sortLink = (key: 'updated' | 'total') => {
@@ -151,7 +152,7 @@ export default function Orders() {
                       </div>
                     </td>
                     <td className="row-start-2 mt-1.5 md:mt-0 md:px-3 md:py-2">
-                      <StatusBadge status={o.status} />
+                      <StatusBadge status={orderStatus(o.status, o.id, declined)} />
                     </td>
                     <td className="col-span-2 mt-1 truncate text-muted-foreground text-xs md:max-w-64 md:px-3 md:py-2">
                       {o.waitingOn ? (

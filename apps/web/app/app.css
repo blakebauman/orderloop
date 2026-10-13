@@ -196,7 +196,7 @@
 
 /* Section headings inside panels: sentence case, ink, one step above body. */
 @utility section-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.3;
   color: var(--foreground);

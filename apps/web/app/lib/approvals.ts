@@ -15,6 +15,8 @@ export type ApprovalContext = {
   deadline?: number;
   /** The step the flow takes if nobody decides in time, e.g. "Decline order". */
   onTimeout?: string;
+  /** The approval step asking, e.g. "Sales approval". */
+  step?: string;
 };
 
 export function approvalContext(state: OrderState, nodeId: string): ApprovalContext {
@@ -22,6 +24,7 @@ export function approvalContext(state: OrderState, nodeId: string): ApprovalCont
   const wait = state.waits.find((w) => w.nodeId === nodeId);
   const ctx: ApprovalContext = { facts: [], deadline: wait?.deadline };
   if (!flow) return ctx;
+  ctx.step = flow.nodes.find((n) => n.id === nodeId)?.label;
   const currency = state.order?.currency ?? 'USD';
   const timeoutEdge = flow.edges.find(
     (e) => e.source === nodeId && (e.sourceHandle === 'escalated' || e.sourceHandle === 'timeout'),

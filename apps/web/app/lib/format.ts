@@ -13,8 +13,17 @@ export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
   rolled_back: 'var(--undo)',
 };
 
+/** Display-only statuses the UI derives (an order "declined" by policy is stored as cancelled). */
+const DERIVED_COLOR: Record<string, string> = { declined: 'var(--undo)' };
+
 export const statusColor = (s: string | undefined) =>
-  STATUS_COLOR[(s ?? 'pending') as NodeStatus] ?? 'var(--idle)';
+  STATUS_COLOR[(s ?? 'pending') as NodeStatus] ?? DERIVED_COLOR[s ?? ''] ?? 'var(--idle)';
+
+/** The status to show for an order: policy declines read "declined", not "cancelled". */
+export const orderStatus = (status: string, id: string, declined?: Set<string> | string[]) =>
+  status === 'cancelled' && (Array.isArray(declined) ? declined.includes(id) : declined?.has(id))
+    ? 'declined'
+    : status;
 
 /** Sentence-case status for badges: "rolled_back" → "Rolled back". */
 export const statusLabel = (s: string) => humanize(s);
@@ -57,7 +66,8 @@ export function until(ms: number | null | undefined, now = Date.now()) {
   if (!ms) return '';
   const s = Math.round((ms - now) / 1000);
   if (s <= 0) return 'overdue';
-  if (s < 120) return `in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (s < 60) return `in ${s}s`;
+  if (s < 120) return `in 1m ${s - 60}s`;
   const m = Math.round(s / 60);
   if (m < 60) return `in ${m}m`;
   const h = Math.round(m / 60);

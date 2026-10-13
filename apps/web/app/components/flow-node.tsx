@@ -45,8 +45,19 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
     data.type === 'control.end' && status === 'succeeded'
       ? String(data.config.outcome ?? 'completed')
       : undefined;
+  // A wait that "succeeded" by timing out or being rejected is not good news; say what happened.
+  const resolved =
+    spec?.waits && status === 'succeeded'
+      ? data.run?.branches?.find((b) => ['escalated', 'timeout', 'rejected'].includes(b))
+      : undefined;
   const shown = outcome && outcome !== 'completed' ? outcome : status;
-  const color = started ? statusColor(shown) : undefined;
+  const color = !started
+    ? undefined
+    : resolved === 'rejected'
+      ? 'var(--bad)'
+      : resolved
+        ? 'var(--undo)'
+        : statusColor(shown);
   const live = status === 'running' || status === 'waiting';
   const tags = [spec?.rollback ? 'undo' : null, spec?.waits ? 'waits' : null].filter(Boolean);
 
@@ -101,7 +112,13 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
         ) : null}
         {started ? (
           <span className="ml-auto font-medium" style={{ color }}>
-            {outcome ? `Ended: ${statusLabel(outcome).toLowerCase()}` : statusLabel(status)}
+            {outcome
+              ? `Ended: ${statusLabel(outcome).toLowerCase()}`
+              : resolved === 'rejected'
+                ? 'Rejected'
+                : resolved
+                  ? 'Timed out'
+                  : statusLabel(status)}
             {data.run && data.run.runs > 1 ? ` ×${data.run.runs}` : ''}
           </span>
         ) : null}

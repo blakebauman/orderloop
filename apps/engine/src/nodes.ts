@@ -45,6 +45,13 @@ type Exec = (i: ExecInput) => Promise<NodeResult>;
 
 const str = (v: unknown, fb = '') => (typeof v === 'string' ? v : fb);
 const num = (v: unknown, fb: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fb);
+/** Money for step summaries, in the order's currency: "$3,832.05". */
+const cash = (n: number, ctx: RunContext) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: ctx.order.currency || 'USD',
+  }).format(n);
+const lineCount = (n: number) => `${n} ${n === 1 ? 'line' : 'lines'}`;
 
 /** Recompute subtotal/tax/total from lines, keeping the current tax rate if one was applied. */
 export function totals(order: Order, taxRate?: number): Pick<Order, 'subtotal' | 'tax' | 'total'> {
@@ -84,7 +91,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       order: { lines },
       output: { customer: customer?.name ?? null, lines: lines.length },
-      summary: `${lines.length} lines${customer ? ` · ${customer.name}` : ''}`,
+      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''}`,
     };
   },
 
@@ -116,7 +123,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       order: { lines, ...t },
       output: { subtotal: t.subtotal, contracted },
-      summary: `Subtotal ${t.subtotal.toFixed(2)}${contracted ? ` · ${contracted} contract prices` : ''}`,
+      summary: `Subtotal ${cash(t.subtotal, ctx)}${contracted ? ` · ${contracted} contract prices` : ''}`,
     };
   },
 
@@ -126,7 +133,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       order: t,
       output: { rate, ...t },
-      summary: `Tax ${t.tax.toFixed(2)} · total ${t.total.toFixed(2)}`,
+      summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}`,
     };
   },
 
@@ -153,8 +160,8 @@ export const EXECUTORS: Record<string, Exec> = {
       branches: [ok ? 'ok' : 'over_limit'],
       output: { limit: c.creditLimit, balance: c.balance, available },
       summary: ok
-        ? `Within credit (${available.toFixed(0)} available)`
-        : `Over limit by ${(ctx.order.total - available).toFixed(0)}`,
+        ? `Within credit (${cash(available, ctx)} available)`
+        : `Over limit by ${cash(ctx.order.total - available, ctx)}`,
     };
   },
 
@@ -184,7 +191,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       branches: [ok ? 'ok' : 'declined'],
       output: r,
-      summary: ok ? `Authorized ${r.amount.toFixed(2)}` : 'Declined',
+      summary: ok ? `Authorized ${cash(r.amount, ctx)}` : 'Declined',
     };
   },
 
@@ -194,7 +201,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       branches: [ok ? 'ok' : 'failed'],
       output: r,
-      summary: ok ? `Captured ${r.amount.toFixed(2)}` : 'Nothing to capture',
+      summary: ok ? `Captured ${cash(r.amount, ctx)}` : 'Nothing to capture',
     };
   },
 
@@ -204,7 +211,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       branches: [ok ? 'ok' : 'failed'],
       output: r,
-      summary: ok ? `Charged ${r.amount.toFixed(2)}` : 'Charge failed',
+      summary: ok ? `Charged ${cash(r.amount, ctx)}` : 'Charge failed',
     };
   },
 
@@ -220,7 +227,7 @@ export const EXECUTORS: Record<string, Exec> = {
       branches: [ok ? 'ok' : 'failed'],
       output: { ...r, reason: interpolate(str(config.reason), ctx) },
       vars: ok ? { refunded: r.amount } : undefined,
-      summary: ok ? `Refunded ${r.amount.toFixed(2)}` : 'Nothing to refund',
+      summary: ok ? `Refunded ${cash(r.amount, ctx)}` : 'Nothing to refund',
     };
   },
 
@@ -296,7 +303,7 @@ export const EXECUTORS: Record<string, Exec> = {
 
   'commerce.pay_supplier': async ({ env, ctx, stepKey }) => {
     const r = await cx.charge(env, { ...ctx.order, meta: {} }, `ap_${stepKey}`);
-    return { output: r, summary: `Scheduled ${r.amount.toFixed(2)}` };
+    return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 
   'commerce.restock': async ({ env, ctx }) => {
@@ -373,7 +380,7 @@ export const EXECUTORS: Record<string, Exec> = {
       },
       output: { ...value, source },
       vars: { poNumber: value.poNumber },
-      summary: `${lines.length} lines${customer ? ` · ${customer.name}` : ''} (${source})`,
+      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''} (${source})`,
     };
   },
 

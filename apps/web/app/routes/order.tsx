@@ -81,6 +81,15 @@ function finishedAt(s: OrderState): string | undefined {
   return why ? `${why}, so the flow ended at ${end.label}` : `Ended at ${end.label}`;
 }
 
+/** Cancelled because an approval was rejected or timed out: a policy decline, not a human cancel. */
+const shownStatus = (s: OrderState) =>
+  s.status === 'cancelled' &&
+  Object.values(s.nodes).some((n) =>
+    n.branches?.some((b) => ['escalated', 'timeout', 'rejected'].includes(b)),
+  )
+    ? 'declined'
+    : s.status;
+
 const rolledBack = (s: OrderState) =>
   !!s.rollback || Object.values(s.nodes).some((n) => n.status === 'rolled_back');
 
@@ -191,7 +200,7 @@ export default function OrderPage() {
                 {orderRef(order.id)}
               </span>
             </span>
-            <StatusBadge status={state.status} />
+            <StatusBadge status={shownStatus(state)} />
           </h1>
           <p className="mt-1 text-muted-foreground text-xs">
             {customerName ?? order.customerId ?? 'No customer'} · {flow.name} v{flow.version}
@@ -236,15 +245,15 @@ export default function OrderPage() {
         <div
           className="flex items-start gap-2 border-b px-4 py-2 text-sm sm:px-6"
           style={{
-            color: statusColor(state.status),
-            background: `color-mix(in oklch, ${statusColor(state.status)} 7%, transparent)`,
+            color: statusColor(shownStatus(state)),
+            background: `color-mix(in oklch, ${statusColor(shownStatus(state))} 7%, transparent)`,
           }}
         >
           {state.status === 'rolled_back' ? (
             <Undo2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           ) : null}
-          <p>
-            <span className="font-medium">{humanize(state.status)}.</span>{' '}
+          <p className="max-w-[75ch]">
+            <span className="font-medium">{humanize(shownStatus(state))}.</span>{' '}
             {sentence(state.reason || finishedAt(state))}
             {state.rollback
               ? state.rollback.outcome === 'complete'
@@ -420,6 +429,11 @@ function Compensation({
   const reversed = Object.entries(state.nodes)
     .filter(([, r]) => r.status === 'rolled_back')
     .sort((a, b) => (undoneAt.get(a[0]) ?? 0) - (undoneAt.get(b[0]) ?? 0));
+  // A compensation that found nothing to undo ("Released 0 reservations") reversed nothing.
+  const noop = (summary?: string) =>
+    /^(Released|Voided) 0 |^No shipment to cancel/.test(summary ?? '');
+  const undone = reversed.filter(([, r]) => !noop(r.summary)).length;
+  const currency = state.order?.currency;
   const cause = Object.entries(state.nodes).find(([, r]) => r.status === 'failed');
   const voided = records.payments
     .filter((p) => p.status === 'voided')
@@ -474,9 +488,7 @@ function Compensation({
                   </button>
                 </td>
                 <td className="py-2 text-muted-foreground">
-                  {/^(Released|Voided) 0 /.test(r.summary ?? '')
-                    ? 'Nothing had been done yet'
-                    : (r.summary ?? 'Reversed')}
+                  {noop(r.summary) ? 'Nothing to undo yet' : (r.summary ?? 'Reversed')}
                 </td>
               </tr>
             ))
@@ -490,9 +502,11 @@ function Compensation({
         </tbody>
         <tfoot>
           <tr className="double-rule border-t">
-            <td className="pt-2 pb-1.5 font-medium">{plural(reversed.length, 'step')} reversed</td>
+            <td className="pt-2 pb-1.5 font-medium">
+              {undone ? `${plural(undone, 'step')} reversed` : 'Nothing needed undoing'}
+            </td>
             <td className="pt-2 pb-1.5 text-right font-medium tabular">
-              {voided ? `${money(voided)} released to the card` : ''}
+              {voided ? `${money(voided, currency)} released to the card` : ''}
             </td>
           </tr>
         </tfoot>
@@ -503,15 +517,18 @@ function Compensation({
           under Details and settle what is left by hand.
         </p>
       ) : null}
-      {state.rollback ? <NextSteps orderId={state.orderId!} /> : null}
+      {state.rollback ? (
+        <NextSteps orderId={state.orderId!} customer={state.order?.customerId} />
+      ) : null}
     </section>
   );
 }
 
 /** After a rollback: try again with the same lines, or look at what blocked it. */
-function NextSteps({ orderId }: { orderId: string }) {
+function NextSteps({ orderId, customer }: { orderId: string; customer?: string }) {
   const restart = useFetcher<{ ok: boolean; orderId?: string; error?: string }>();
   const navigate = useNavigate();
+  const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     if (restart.state === 'idle' && restart.data?.orderId)
       navigate(`/orders/${restart.data.orderId}`);
@@ -520,19 +537,39 @@ function NextSteps({ orderId }: { orderId: string }) {
     <div className="mt-5 border-t pt-4">
       <h3 className="section-title">Next</h3>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <restart.Form method="post" action={`/orders/${orderId}/action`}>
-          <input type="hidden" name="intent" value="restart" />
-          <Button size="sm" variant="outline" disabled={restart.state !== 'idle'}>
-            <RotateCcw />{' '}
-            {restart.state !== 'idle' ? 'Starting…' : 'Start again with the same lines'}
+        {confirming ? (
+          <restart.Form
+            method="post"
+            action={`/orders/${orderId}/action`}
+            className="flex flex-wrap items-center gap-2"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setConfirming(false);
+            }}
+          >
+            <input type="hidden" name="intent" value="restart" />
+            <span className="text-sm">
+              Start a new order{customer ? ' for the same customer' : ''} with these lines?
+            </span>
+            <Button size="sm" disabled={restart.state !== 'idle'}>
+              {restart.state !== 'idle' ? 'Starting…' : 'Start new order'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Not now
+            </Button>
+          </restart.Form>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
+            <RotateCcw /> Start again with the same lines
           </Button>
-        </restart.Form>
-        <Button asChild size="sm" variant="ghost">
-          <Link to="/back-office">Check stock and credit</Link>
-        </Button>
+        )}
       </div>
       <p className="mt-2 text-muted-foreground text-xs">
-        Starts a new order on the flow’s current version. This one stays as it is, for the record.
+        The new order runs on the flow’s current version; this one stays as it is, for the record.
+        To see what blocked it,{' '}
+        <Link to="/back-office" className="text-link hover:underline">
+          check stock and credit
+        </Link>
+        .
       </p>
       {restart.data?.error ? (
         <p className="mt-2 text-bad text-sm" role="alert">
@@ -759,7 +796,11 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
       ) : null}
       <Ledger
         title="Payments"
-        rows={records.payments.map((p) => [humanize(p.kind), humanize(p.status), money(p.amount)])}
+        rows={records.payments.map((p) => [
+          humanize(p.kind),
+          humanize(p.status),
+          money(p.amount, o.currency),
+        ])}
       />
       <Ledger
         title="Shipments"

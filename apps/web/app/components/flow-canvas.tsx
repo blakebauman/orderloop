@@ -234,7 +234,7 @@ function Inner({
         minZoom: 0.7,
         maxZoom: 1,
         duration: animate && !reduce ? 300 : 0,
-        nodes: focus.length && g.nodes.length > 10 ? focus.map((id) => ({ id })) : undefined,
+        nodes: focus.length && g.nodes.length > 10 ? withNeighbours(g, focus) : undefined,
       });
     },
     [fitView],
@@ -432,4 +432,15 @@ export function makeNode(graph: FlowGraph, type: string, position: { x: number; 
     config: withDefaults(type),
     position,
   };
+}
+
+/** The focus steps plus what leads into and out of them, so a framed step keeps its context. */
+function withNeighbours(g: FlowGraph, ids: string[]) {
+  const set = new Set(ids);
+  for (const e of g.edges) {
+    if (isBackEdge(e)) continue;
+    if (ids.includes(e.target)) set.add(e.source);
+    if (ids.includes(e.source)) set.add(e.target);
+  }
+  return [...set].map((id) => ({ id }));
 }

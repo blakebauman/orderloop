@@ -8,10 +8,11 @@ import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
-import { ago, humanize, money, orderRef, STATUS_COLOR, waitLabel } from '~/lib/format';
+import { ago, humanize, money, orderRef, orderStatus, STATUS_COLOR, waitLabel } from '~/lib/format';
 import {
   customerNames,
   dashboardStats,
+  declinedOrderIds,
   listApprovals,
   listOrders,
   waitingOrders,
@@ -24,13 +25,15 @@ export const meta = () => [{ title: 'Overview · Order Loop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   await ensureSeeded();
-  const [stats, recent, approvals, waiting, names] = await Promise.all([
+  const [stats, recent, approvals, waiting, names, declinedSet] = await Promise.all([
     dashboardStats(),
     listOrders({ sort: 'updated' }, 10),
     listApprovals('pending'),
     waitingOrders(),
     customerNames(),
+    declinedOrderIds(),
   ]);
+  const declined = [...declinedSet];
   const top = approvals.slice(0, 5);
   const states = await Promise.all(
     top.map((a) =>
@@ -55,6 +58,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     stats,
     recent,
     names,
+    declined,
     decisions,
     moreDecisions: Math.max(0, approvals.length - top.length),
     lanes: [...lanes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
@@ -72,7 +76,8 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Dashboard() {
-  const { stats, recent, names, decisions, moreDecisions, lanes } = useLoaderData<typeof loader>();
+  const { stats, recent, names, declined, decisions, moreDecisions, lanes } =
+    useLoaderData<typeof loader>();
   const nav = useNavigation();
   const count = (s: string[]) =>
     stats.byStatus.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
@@ -88,7 +93,12 @@ export default function Dashboard() {
     },
     { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
     { label: 'Failed', n: count(['failed']), status: 'failed' },
-    { label: 'Cancelled', n: count(['cancelled']), status: 'cancelled' },
+    {
+      label: 'Cancelled',
+      n: count(['cancelled']),
+      status: 'cancelled',
+      note: declined.length ? `${declined.length} declined by policy` : undefined,
+    },
   ];
   return (
     <>
@@ -210,7 +220,7 @@ export default function Dashboard() {
                         className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-muted/40 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto]"
                       >
                         <span className="order-3 col-span-2 sm:order-none sm:col-span-1">
-                          <StatusBadge status={o.status} />
+                          <StatusBadge status={orderStatus(o.status, o.id, declined)} />
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-sm">

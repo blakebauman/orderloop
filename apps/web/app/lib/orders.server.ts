@@ -152,3 +152,18 @@ export async function customerNames(): Promise<Record<string, string>> {
   const rows = await db().select({ id: customers.id, name: customers.name }).from(customers);
   return Object.fromEntries(rows.map((r) => [r.id, r.name]));
 }
+
+/**
+ * Cancelled orders that were declined by policy (their approval was rejected or escalated) rather
+ * than cancelled by a person. The index keeps one status; the approvals table says which.
+ */
+export async function declinedOrderIds(): Promise<Set<string>> {
+  const rows = await db()
+    .selectDistinct({ id: approvals.orderId })
+    .from(approvals)
+    .innerJoin(orders, eq(orders.id, approvals.orderId))
+    .where(
+      and(inArray(approvals.status, ['escalated', 'rejected']), eq(orders.status, 'cancelled')),
+    );
+  return new Set(rows.map((r) => r.id));
+}

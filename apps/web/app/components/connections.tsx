@@ -11,8 +11,9 @@ import {
   nodeOutputs,
   withDefaults,
 } from '@orderloop/core';
+import { Button } from '@orderloop/ui/button';
 import { X } from 'lucide-react';
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { edgeId, wouldCycle } from './flow-canvas';
 
 export function Connections({
@@ -37,8 +38,12 @@ export function Connections({
     if (graph.edges.some((e) => e.id === id)) return;
     onChange({ ...graph, edges: [...graph.edges, { id, ...edge }] });
   };
-  const disconnect = (id: string) =>
+  const disconnect = (id: string, output: string) => {
     onChange({ ...graph, edges: graph.edges.filter((e) => e.id !== id) });
+    // Keep keyboard focus in the same output instead of dropping it to the page.
+    requestAnimationFrame(() => document.getElementById(`${baseId}-${output}`)?.focus());
+  };
+  const [picks, setPicks] = useState<Record<string, string>>({});
 
   return (
     <div>
@@ -76,7 +81,7 @@ export function Connections({
                       <span className="min-w-0 truncate">{label(e.target)}</span>
                       <button
                         type="button"
-                        onClick={() => disconnect(e.id)}
+                        onClick={() => disconnect(e.id, o)}
                         className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                         aria-label={`Disconnect ${o} from ${label(e.target)}`}
                       >
@@ -91,19 +96,34 @@ export function Connections({
                   <label htmlFor={selectId} className="sr-only">
                     Connect {o} to
                   </label>
-                  <select
-                    id={selectId}
-                    value=""
-                    onChange={(e) => e.target.value && connect(o, e.target.value)}
-                    className="mt-1 h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm text-muted-foreground"
-                  >
-                    <option value="">Connect to…</option>
-                    {options.map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {n.label} ({n.id})
-                      </option>
-                    ))}
-                  </select>
+                  {/* Choosing is separate from connecting, so arrowing through the list is harmless. */}
+                  <div className="mt-1 flex gap-1.5">
+                    <select
+                      id={selectId}
+                      value={picks[o] ?? ''}
+                      onChange={(e) => setPicks((p) => ({ ...p, [o]: e.target.value }))}
+                      className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
+                    >
+                      <option value="">Connect to…</option>
+                      {options.map((n) => (
+                        <option key={n.id} value={n.id}>
+                          {n.label} ({n.id})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!picks[o]}
+                      onClick={() => {
+                        connect(o, picks[o]!);
+                        setPicks((p) => ({ ...p, [o]: '' }));
+                      }}
+                    >
+                      Connect
+                    </Button>
+                  </div>
                 </>
               ) : null}
             </li>

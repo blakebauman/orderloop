@@ -78,9 +78,11 @@ export default function FlowEditor() {
     setFlowState(value);
     setHistoryTick((t) => t + 1);
   }, []);
+  const [announce, setAnnounce] = useState('');
   const travel = useCallback((from: React.RefObject<Flow[]>, to: React.RefObject<Flow[]>) => {
     const target = from.current.pop();
     if (!target) return;
+    setAnnounce(from === past ? 'Undone' : 'Redone');
     to.current.push(flowRef.current);
     flowRef.current = target;
     lastEdit.current = 0;
@@ -267,7 +269,12 @@ export default function FlowEditor() {
             ) : null}
           </div>
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <h1 className="sr-only">{flow.name}</h1>
+        <span className="sr-only" aria-live="polite">
+          {announce}
+        </span>
+        {/* Editing actions need the full editor; phones get a review-only view. */}
+        <div className="ml-auto hidden flex-wrap items-center gap-2 lg:flex">
           {notice ? (
             <span
               role="status"
@@ -385,12 +392,12 @@ export default function FlowEditor() {
               keep their version.
             </span>
           </p>
-          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
+          {/* Focus lands on the safe choice; publishing takes a deliberate click or Tab. */}
+          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)} autoFocus>
             Not yet
           </Button>
           <Button
             size="sm"
-            autoFocus
             onClick={() => {
               setConfirm(null);
               submit(confirm);
@@ -494,7 +501,8 @@ export default function FlowEditor() {
                 <h2 className="section-title mb-1.5">Checks</h2>
                 {issues.errors.length === 0 ? (
                   <div className="flex items-center gap-1.5 text-ok text-sm">
-                    <CheckCircle2 className="size-4" /> Ready to publish
+                    <CheckCircle2 className="size-4" />{' '}
+                    {unpublished ? 'Ready to publish' : `All checks pass; v${published} is live`}
                   </div>
                 ) : null}
                 <ul className="space-y-1.5">

@@ -147,7 +147,14 @@ export default function BackOffice() {
                       <div className="text-muted-foreground text-xs">{humanize(c.tier)}</div>
                     </td>
                     <td className="px-2 py-1.5">{humanize(c.terms)}</td>
-                    <td className="px-2 py-1.5 text-right tabular">{money(c.balance)}</td>
+                    <td
+                      className={`px-2 py-1.5 text-right tabular ${c.creditLimit && c.balance > c.creditLimit ? 'font-medium text-bad' : ''}`}
+                    >
+                      {money(c.balance)}
+                      {c.creditLimit && c.balance > c.creditLimit ? (
+                        <span className="ml-1.5 text-xs">Over limit</span>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-1.5 text-right tabular">
                       {c.creditLimit ? money(c.creditLimit) : '—'}
                     </td>
