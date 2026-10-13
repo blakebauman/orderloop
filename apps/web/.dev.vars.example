@@ -1,1 +1,2 @@
 APP_PASSWORD=
+WEBHOOK_SECRET=whsec_local_dev

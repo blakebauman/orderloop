@@ -72,6 +72,23 @@ POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejecte
 POST /api/v1/orders/:id/cancel               { "reason": "…" }
 ```
 
+### Signed webhooks
+
+External systems resume orders without the admin password by signing the raw body with `WEBHOOK_SECRET`:
+
+```
+POST /api/v1/webhooks/events
+X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<raw body>")>
+
+{ "orderId": "ord_…", "event": "payment.received", "payload": { "amount": 3106.78 } }
+```
+
+Signatures older than 5 minutes are rejected. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook` in `@orderloop/core` produces the header.
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs lint, type-check, build and tests on every push and PR. On `main` it then migrates D1 and deploys the engine and the web app. It only deploys when the repository has `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets; without them the deploy job does nothing.
+
 ## Deploy
 
 ```bash
@@ -79,6 +96,7 @@ pnpm exec wrangler login
 ./scripts/provision.sh                         # D1 + R2
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
+pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
 pnpm deploy                                    # engine first (web binds to it), then web
 ```
 

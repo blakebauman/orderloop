@@ -1,5 +1,5 @@
 import { createRequestHandler } from 'react-router';
-import { handleApi } from '../app/lib/api.server';
+import { handleApi, handleSignedEvent } from '../app/lib/api.server';
 import { isApiAuthorized, isSignedIn } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 
@@ -12,6 +12,11 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
+
+    // Signed webhooks authenticate by HMAC, not by the admin password.
+    if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
+      return handleSignedEvent(request);
+    }
 
     if (url.pathname.startsWith('/api/v1/')) {
       if (!(await isApiAuthorized(request)))

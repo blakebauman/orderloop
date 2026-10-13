@@ -19,5 +19,6 @@
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
   "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }]
   // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
-  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1).
+  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). WEBHOOK_SECRET — enables
+  // signed events at POST /api/v1/webhooks/events.
 }

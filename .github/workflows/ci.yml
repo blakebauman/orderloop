@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Every check runs even when an earlier one fails, so a red build reports all of its
+      # problems in one go.
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: pnpm lint
+
+      - name: Type-check
+        if: ${{ !cancelled() }}
+        run: pnpm check-types
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: pnpm build
+
+      # Includes the engine's end-to-end Workflow runs in workerd (Durable Objects, Workflows,
+      # D1, R2) with AI_MODE=mock — no network or Cloudflare account needed.
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: pnpm test
+
+  deploy:
+    # Ships main to orderloop.io once the repository has CLOUDFLARE_API_TOKEN and
+    # CLOUDFLARE_ACCOUNT_ID secrets; without them the steps are skipped.
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+        if: env.CLOUDFLARE_API_TOKEN != ''
+      - uses: pnpm/action-setup@v4
+        if: env.CLOUDFLARE_API_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: env.CLOUDFLARE_API_TOKEN != ''
+        run: pnpm install --frozen-lockfile
+      - name: Migrate D1
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: pnpm --filter @orderloop/web db:migrate:remote
+      # The web Worker binds to the engine, so the engine goes first.
+      - name: Deploy engine
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: pnpm --filter @orderloop/engine run deploy
+      - name: Deploy web
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: pnpm --filter @orderloop/web run deploy
+      - name: Smoke test
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: curl -fsS https://orderloop.io/health
