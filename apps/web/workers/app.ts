@@ -7,6 +7,7 @@ import {
   sessionId,
   Throttled,
   TokenExpired,
+  TWO_FACTOR_DUE,
 } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { openApiDocument } from '../app/lib/openapi';
@@ -52,6 +53,7 @@ export default {
         );
       }
       if (!caller) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      if (caller.twoFactorDue) return Response.json({ error: TWO_FACTOR_DUE }, { status: 403 });
       return handleApi(request, caller);
     }
 
@@ -59,6 +61,7 @@ export default {
     if (url.pathname.startsWith('/agents/order-agent/')) {
       const caller = await principal(request);
       if (!caller) return new Response('Unauthorized', { status: 401 });
+      if (caller.twoFactorDue) return new Response(TWO_FACTOR_DUE, { status: 403 });
       // The agent checks each call against this; whatever the browser sent is replaced. A
       // person's session id lets it notice a sign-out, a disable or a role change mid-page.
       const headers = new Headers(request.headers);
@@ -77,7 +80,9 @@ export default {
 
     // Order documents (invoices, POs, inbound POs) from R2.
     if (url.pathname.startsWith('/docs/orders/')) {
-      if (!(await principal(request))) return new Response('Unauthorized', { status: 401 });
+      const caller = await principal(request);
+      if (!caller) return new Response('Unauthorized', { status: 401 });
+      if (caller.twoFactorDue) return new Response(TWO_FACTOR_DUE, { status: 403 });
       const obj = await docs().get(decodeURIComponent(url.pathname.slice('/docs/'.length)));
       if (!obj) return new Response('Not found', { status: 404 });
       return new Response(obj.body, {

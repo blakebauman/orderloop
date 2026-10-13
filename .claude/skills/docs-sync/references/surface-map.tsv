@@ -17,7 +17,7 @@
 ^packages/core/src/pricing\.ts$	reference/expressions internals/data-model	prose
 ^apps/web/app/lib/approvals\.ts$	guides/approvals-and-events	prose
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api	gen
-^apps/web/workers/app\.ts$	internals/architecture reference/rest-api	prose
+^apps/web/workers/app\.ts$	internals/architecture reference/rest-api guides/team-and-roles	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api	gen
 ^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api reference/configuration start/deploy internals/architecture	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
@@ -46,4 +46,4 @@
 ^(\.github/workflows/|scripts/provision\.sh$)	start/deploy	prose
 ^package\.json$	start/getting-started start/deploy	prose
 ^packages/core/src/roles\.ts$	guides/team-and-roles internals/order-agent	prose
-^apps/web/app/(lib/team\.server\.ts|lib/auth\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|lib/totp\.ts|lib/two-factor\.server\.ts|routes/audit\.tsx|routes/(team|account|login|login-two-factor)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose
+^apps/web/app/(lib/team\.server\.ts|lib/auth\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|lib/totp\.ts|lib/two-factor(\.server)?\.ts|lib/settings\.server\.ts|routes/shell\.tsx|routes/audit\.tsx|routes/(team|account|login|login-two-factor)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose

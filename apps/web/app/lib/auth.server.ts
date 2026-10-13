@@ -46,8 +46,10 @@ import {
   verifyPassword,
 } from './credentials';
 import { db } from './env.server';
+import { twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
 import { hashRecoveryCode, looksLikeTotp, verifyTotp } from './totp';
+import { mustUseTwoFactor } from './two-factor';
 
 const SESSION = '__Host-ol_session';
 /** Between a correct password and a correct code, for someone with two-factor sign-in on. */
@@ -115,8 +117,14 @@ export async function sessionId(request: Request): Promise<string | undefined> {
   return token ? sha256Hex(token) : undefined;
 }
 
+/**
+ * A browser caller. `twoFactorDue` marks a person whose role must use two-factor sign-in but who
+ * hasn't set it up: until they do, they may only use their Account page.
+ */
+export type Caller = Principal & { twoFactorDue?: true };
+
 /** The signed-in person (or shared-password operator) for a browser request, or null. */
-export async function principal(request: Request): Promise<Principal | null> {
+export async function principal(request: Request): Promise<Caller | null> {
   if (!(await authEnabled())) return OPEN;
   const token = cookie(request, SESSION);
   if (token) {
@@ -128,6 +136,7 @@ export async function principal(request: Request): Promise<Principal | null> {
         email: users.email,
         name: users.name,
         role: users.role,
+        totpEnabledAt: users.totpEnabledAt,
         seen: sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`,
       })
       .from(sessions)
@@ -143,13 +152,15 @@ export async function principal(request: Request): Promise<Principal | null> {
       )
       .get();
     if (row) {
-      const { seen, ...person } = row;
+      const { seen, totpEnabledAt, ...person } = row;
       if (now - seen > SESSION_TOUCH_MS)
         await db()
           .update(sessions)
           .set({ lastSeenAt: now, ip: clientIp(request) })
           .where(eq(sessions.tokenHash, hash));
-      return { kind: 'user', ...person, role: person.role as Role };
+      const role = person.role as Role;
+      const due = !totpEnabledAt && mustUseTwoFactor(role, await twoFactorRequirement());
+      return { kind: 'user', ...person, role, ...(due ? { twoFactorDue: true as const } : {}) };
     }
   }
   const pw = password();
@@ -198,7 +209,7 @@ async function recordFailure(keys: string[]) {
  * APP_PASSWORD are throttled per address (throws `Throttled`); `ol_live_` tokens are random
  * 192-bit values, so they aren't, and a busy address can't lock out working integrations.
  */
-export async function apiPrincipal(request: Request): Promise<Principal | null> {
+export async function apiPrincipal(request: Request): Promise<Caller | null> {
   const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return principal(request);
   if (!bearer.startsWith(API_TOKEN_PREFIX)) {
@@ -249,16 +260,24 @@ export class TokenExpired extends Error {
 export const forbidden = (min: Role) =>
   `This needs the ${ROLE_LABELS[min]} role. Ask an operator to change your role on the Team page.`;
 
+export const TWO_FACTOR_DUE =
+  'Your role needs two-factor sign-in. Set it up on your Account page first.';
+
+/** The page someone whose two-factor sign-in is due may still use, to set it up. */
+const SETUP_PATH = '/account';
+
 /**
- * Loader/action guard. Not signed in: redirect to sign-in. Signed in without `min`: 403. Returns
- * the principal for audit fields and for hiding what the role can't use.
+ * Loader/action guard. Not signed in: redirect to sign-in. Two-factor sign-in due: redirect to the
+ * Account page to set it up. Signed in without `min`: 403. Returns the principal for audit fields
+ * and for hiding what the role can't use.
  */
-export async function requireUser(request: Request, min: Role = 'viewer'): Promise<Principal> {
+export async function requireUser(request: Request, min: Role = 'viewer'): Promise<Caller> {
   const p = await principal(request);
-  if (!p) {
-    const url = new URL(request.url);
-    throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
-  }
+  const url = new URL(request.url);
+  if (!p) throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
+  // Client navigations fetch loader data from `<path>.data`.
+  if (p.twoFactorDue && url.pathname.replace(/\.data$/, '') !== SETUP_PATH)
+    throw redirect(SETUP_PATH);
   if (!atLeast(p.role, min)) throw data({ ok: false, error: forbidden(min) }, { status: 403 });
   return p;
 }

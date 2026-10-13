@@ -4,6 +4,7 @@
  */
 
 import { ROLE_LABELS, type Role } from '@orderloop/core';
+import { isTwoFactorRequirement, TWO_FACTOR_REQUIREMENTS } from './two-factor';
 
 export const AUDIT_ACTIONS = {
   'auth.sign_in': 'Signed in',
@@ -26,6 +27,7 @@ export const AUDIT_ACTIONS = {
   'team.user_disabled': 'Disabled a person',
   'team.user_enabled': 'Enabled a person',
   'team.two_factor_reset': 'Reset two-factor sign-in',
+  'team.two_factor_requirement': 'Changed who needs two-factor sign-in',
   'token.created': 'Created an API token',
   'token.revoked': 'Revoked an API token',
   'api.bearer_failed': 'API: wrong shared password',
@@ -65,6 +67,8 @@ export function describe(e: AuditEvent): string {
   if (e.target) parts.push(e.target);
   if (e.action === 'team.role_changed' && d.from && d.to)
     parts.push(`${role(d.from)} → ${role(d.to)}`);
+  else if (isTwoFactorRequirement(d.from) && isTwoFactorRequirement(d.to))
+    parts.push(`${TWO_FACTOR_REQUIREMENTS[d.from]} → ${TWO_FACTOR_REQUIREMENTS[d.to]}`);
   else if (d.role) parts.push(role(d.role));
   if (typeof d.reason === 'string') parts.push(d.reason);
   if (typeof d.twoFactor === 'string') parts.push(`two-factor ${d.twoFactor}`);

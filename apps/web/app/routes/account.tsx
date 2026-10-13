@@ -97,6 +97,15 @@ export default function Account() {
       <PageHeader title="Account" subtitle={`${me.email ?? me.name} · ${ROLE_LABELS[me.role]}`} />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="max-w-[560px]">
+          {me.twoFactorDue ? (
+            <p
+              role="alert"
+              className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm"
+            >
+              <span className="font-medium">Set up two-factor sign-in to continue.</span> Your role
+              needs it in this workspace; the rest of OrderLoop opens once it is on.
+            </p>
+          ) : null}
           <Section title="Password">
             {me.kind === 'user' ? (
               <Form method="post" className="space-y-3">

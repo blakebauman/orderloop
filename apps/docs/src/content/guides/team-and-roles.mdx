@@ -78,6 +78,17 @@ off, and each step's code works once. Recovery codes are stored as SHA-256 and d
 The app's secret has to be readable to check codes, so it is stored as is, in `users.totp_secret`.
 The workspace password and API tokens don't use two-factor sign-in.
 
+#### Requiring it
+
+Operators choose who must use two-factor sign-in under **Two-factor sign-in** on the Team page:
+nobody (the default), operators, approvers and operators, or everyone. The section counts the people
+covered who haven't set it up. Until they do, those people can only use their Account page: every
+other page sends them there, and the REST API, the order page's live connection and order documents
+answer `403`. They can't turn it off while it is required, but can make new recovery codes. Changing
+the setting takes effect at once on the isolate that saved it and within 30 seconds everywhere else.
+It is stored in D1 `workspace_settings`. Turn it on for your own role after setting up your own
+two-factor sign-in, or you'll be sent to your Account page to do it first.
+
 ### Failed sign-ins
 
 Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is refused with
@@ -120,7 +131,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Kind | Actions |
 |---|---|
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
-| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` |
+| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
