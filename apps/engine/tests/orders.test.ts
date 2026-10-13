@@ -13,6 +13,7 @@ import {
   orders,
   payments,
   products,
+  publishFlow,
   reservations,
   shipments,
   stockMovements,
@@ -436,6 +437,85 @@ describe('storefront order', () => {
       await db().select().from(payments).where(eq(payments.orderId, orderId))
     ).filter((p) => p.kind === 'refund');
     expect(refunds).toHaveLength(2);
+  });
+});
+
+describe('address validation', () => {
+  const node = (id: string, type: string, config: Record<string, unknown> = {}) => ({
+    id,
+    type,
+    label: id,
+    config,
+    position: { x: 0, y: 0 },
+  });
+  const edge = (source: string, target: string, sourceHandle: string | null = null) => ({
+    id: `${source}.${sourceHandle ?? 'out'}-${target}`,
+    source,
+    target,
+    sourceHandle,
+    targetHandle: null,
+  });
+
+  beforeAll(async () => {
+    await publishFlow(db(), {
+      id: 'test-address',
+      name: 'Address check',
+      description: '',
+      orderType: 'storefront_order',
+      nodes: [
+        node('start', 'trigger.manual'),
+        node('address', 'commerce.address_validate'),
+        node('ok', 'control.end', { outcome: 'completed', reason: 'valid' }),
+        node('fixed', 'control.end', { outcome: 'completed', reason: 'corrected' }),
+        node('bad', 'control.end', { outcome: 'declined', reason: 'invalid' }),
+      ],
+      edges: [
+        edge('start', 'address'),
+        edge('address', 'ok', 'valid'),
+        edge('address', 'fixed', 'corrected'),
+        edge('address', 'bad', 'invalid'),
+      ],
+    });
+  });
+
+  const run = async (shipTo: unknown) => {
+    const { orderId } = await startOrder(env, {
+      flowId: 'test-address',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 1 }],
+        meta: { shipTo },
+      }),
+    });
+    return settled(orderId);
+  };
+
+  it('branches on the check and suggests a corrected address', async () => {
+    await introspect();
+    const valid = await run({
+      line1: '1 Main St',
+      city: 'Springfield',
+      region: 'IL',
+      postalCode: '62701',
+      country: 'US',
+    });
+    expect([valid.status, valid.reason]).toEqual(['completed', 'valid']);
+    expect(valid.vars.suggestedAddress).toBeUndefined();
+
+    const fixed = await run({
+      line1: '1 Main St',
+      city: 'Springfield',
+      region: 'Illinois',
+      postalCode: '62701',
+      country: 'usa',
+    });
+    expect(fixed.reason).toBe('corrected');
+    expect(fixed.vars.suggestedAddress).toMatchObject({ region: 'IL', country: 'US' });
+
+    const bad = await run('PO Box 9, Springfield');
+    expect([bad.status, bad.reason]).toEqual(['declined', 'invalid']);
+    expect(bad.nodes.address!.summary).toMatch(/free text/);
   });
 });
 

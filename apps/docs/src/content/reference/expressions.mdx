@@ -63,6 +63,7 @@ Order {{order.id}} is on its way ({{vars.tracking}})
 | Variable | Set by |
 |---|---|
 | `policyFailures` | Policy check: the failure messages |
+| `suggestedAddress` | Validate address, on `corrected`: the normalised ship-to |
 | `refunded` | Refund, on `ok`: the amount refunded |
 | `invoiceKey`, `dueDate` | Generate invoice |
 | `poKey`, `supplier` | Generate PO (Demand forecast may also set `supplier`) |
@@ -102,6 +103,22 @@ rule names are <Values of="policy-rules" />.
   { "rule": "business_hours", "start": 8, "end": 18, "timeZone": "America/Chicago" },
   { "rule": "no_po_box" }
 ]
+```
+
+## Ship-to addresses
+
+[Validate address](/reference/nodes/#commerce.address_validate) reads `order.meta.shipTo` as an
+object with `line1`, `city`, `postalCode` and `country`, and optionally `name`, `line2` and
+`region`. `checkAddress` in `packages/core/src/address.ts` trims and collapses whitespace, maps
+country names to two-letter codes (`"usa"` → `US`, `"UK"` → `GB`), and requires a state or province
+for `US`, `CA` and `AU`, accepting the full name (`"Illinois"` → `IL`). It formats postcodes for `US`
+(`627011234` → `62701-1234`), `CA` (`M5V 3L9`), `GB` (`SW1A 2AA`), `AU` and `DE`; other countries
+only need one. The node takes `valid` when nothing changed, `corrected` when normalising changed a
+field (the result is in `vars.suggestedAddress`, the order is untouched), and `invalid` with every
+problem in its summary and output, including a missing or free-text ship-to.
+
+```json
+{ "line1": "1 Main St", "city": "Springfield", "region": "IL", "postalCode": "62701", "country": "US" }
 ```
 
 ## Durations

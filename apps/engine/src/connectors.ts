@@ -7,7 +7,7 @@
  * "payment_decline", "charge_fail", "out_of_stock", "three_way_mismatch".
  */
 
-import { money, newId, type Order, type StockLine } from '@orderloop/core';
+import { checkAddress, money, newId, type Order, type StockLine } from '@orderloop/core';
 import {
   contractPrices,
   createDb,
@@ -188,6 +188,13 @@ async function moveStock(
 export async function lowStock(env: Env) {
   const all = await getProducts(env);
   return all.filter((p) => p.stock - p.reserved <= p.reorderPoint);
+}
+
+// ── Addresses ──────────────────────────────────────────────────────────────
+
+/** Checks a ship-to. The mock is the deterministic core validator; a USPS or Loqate call goes here. */
+export async function validateAddress(_env: Env, shipTo: unknown) {
+  return checkAddress(shipTo);
 }
 
 // ── Payments ───────────────────────────────────────────────────────────────

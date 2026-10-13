@@ -171,6 +171,16 @@ export const NODE_SPECS = [
     outputs: ['pass', 'fail'],
   }),
   node({
+    type: 'commerce.address_validate',
+    category: 'commerce',
+    label: 'Validate address',
+    description:
+      'Checks and normalises the ship-to in order.meta.shipTo. A correction is offered in vars.suggestedAddress.',
+    icon: 'MapPin',
+    fields: [],
+    outputs: ['valid', 'corrected', 'invalid'],
+  }),
+  node({
     type: 'commerce.credit_check',
     category: 'commerce',
     label: 'Credit check',
