@@ -40,7 +40,13 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
   const multi = outputs.length > 1 || (outputs.length === 1 && outputs[0] !== 'out');
   const status = data.run?.status;
   const started = status && status !== 'pending';
-  const color = started ? statusColor(status) : undefined;
+  // An End step "succeeds" at ending the order; what matters is the outcome it ended with.
+  const outcome =
+    data.type === 'control.end' && status === 'succeeded'
+      ? String(data.config.outcome ?? 'completed')
+      : undefined;
+  const shown = outcome && outcome !== 'completed' ? outcome : status;
+  const color = started ? statusColor(shown) : undefined;
   const live = status === 'running' || status === 'waiting';
   const tags = [spec?.rollback ? 'undo' : null, spec?.waits ? 'waits' : null].filter(Boolean);
 
@@ -95,7 +101,7 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
         ) : null}
         {started ? (
           <span className="ml-auto font-medium" style={{ color }}>
-            {statusLabel(status)}
+            {outcome ? `Ended: ${statusLabel(outcome).toLowerCase()}` : statusLabel(status)}
             {data.run && data.run.runs > 1 ? ` ×${data.run.runs}` : ''}
           </span>
         ) : null}

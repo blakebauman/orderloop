@@ -16,12 +16,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   FlaskConical,
+  Redo2,
   Rocket,
   Save,
   Sparkles,
   Undo2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { data, Link, useBlocker, useFetcher, useLoaderData, useNavigate } from 'react-router';
 import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
@@ -53,7 +54,41 @@ type ActionResult = {
 export default function FlowEditor() {
   const loaded = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const [flow, setFlow] = useState<Flow>(loaded.flow);
+  const [flow, setFlowState] = useState<Flow>(loaded.flow);
+
+  // Edit history. Every change goes through setFlow; bursts (a drag, typing) within 400ms are one
+  // step, so ⌘Z undoes a whole move rather than one pixel of it.
+  const flowRef = useRef(flow);
+  const past = useRef<Flow[]>([]);
+  const future = useRef<Flow[]>([]);
+  const lastEdit = useRef(0);
+  const [, setHistoryTick] = useState(0);
+  const setFlow = useCallback((next: Flow | ((f: Flow) => Flow)) => {
+    const prev = flowRef.current;
+    const value = typeof next === 'function' ? next(prev) : next;
+    if (value === prev) return;
+    const now = Date.now();
+    if (now - lastEdit.current > 400) {
+      past.current.push(prev);
+      if (past.current.length > 100) past.current.shift();
+    }
+    lastEdit.current = now;
+    future.current = [];
+    flowRef.current = value;
+    setFlowState(value);
+    setHistoryTick((t) => t + 1);
+  }, []);
+  const travel = useCallback((from: React.RefObject<Flow[]>, to: React.RefObject<Flow[]>) => {
+    const target = from.current.pop();
+    if (!target) return;
+    to.current.push(flowRef.current);
+    flowRef.current = target;
+    lastEdit.current = 0;
+    setFlowState(target);
+    setHistoryTick((t) => t + 1);
+  }, []);
+  const undo = useCallback(() => travel(past, future), [travel]);
+  const redo = useCallback(() => travel(future, past), [travel]);
   const [baseline, setBaseline] = useState(() => JSON.stringify(loaded.flow));
   const [selected, setSelected] = useState<string | null>(null);
   const [published, setPublished] = useState(loaded.publishedVersion);
@@ -120,18 +155,29 @@ export default function FlowEditor() {
     else setProposal(copilot.data);
   }, [copilot.data, copilot.state]);
 
-  // ⌘S saves, Escape deselects.
+  // ⌘S saves, ⌘Z / ⇧⌘Z undo and redo graph edits (text fields keep their own undo), Escape deselects.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === 's') {
         e.preventDefault();
         submit('save');
+      }
+      const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select');
+      if (mod && e.key.toLowerCase() === 'z' && !typing) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      }
+      if (mod && e.key.toLowerCase() === 'y' && !typing) {
+        e.preventDefault();
+        redo();
       }
       if (e.key === 'Escape') setSelected(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [submit]);
+  }, [submit, undo, redo]);
 
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -237,13 +283,36 @@ export default function FlowEditor() {
               {notice.text}
             </span>
           ) : null}
+          <div className="flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!past.current.length}
+              onClick={undo}
+              aria-label="Undo (⌘Z)"
+              title="Undo (⌘Z)"
+            >
+              <Undo2 />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!future.current.length}
+              onClick={redo}
+              aria-label="Redo (⇧⌘Z)"
+              title="Redo (⇧⌘Z)"
+            >
+              <Redo2 />
+            </Button>
+          </div>
           <Button
             variant="ghost"
             size="sm"
             disabled={!dirty}
             onClick={() => setFlow(JSON.parse(baseline))}
+            title="Back to the last saved draft (undoable)"
           >
-            <Undo2 /> Discard
+            Discard changes
           </Button>
           <Button
             variant="outline"

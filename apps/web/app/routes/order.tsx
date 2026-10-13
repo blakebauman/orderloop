@@ -14,9 +14,9 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
-import { Bot, CircleSlash, FileText, Send, Undo2, Wrench, Zap } from 'lucide-react';
+import { Bot, CircleSlash, FileText, RotateCcw, Send, Undo2, Wrench, Zap } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { data, Link, useLoaderData, useRevalidator } from 'react-router';
+import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
@@ -503,7 +503,43 @@ function Compensation({
           under Details and settle what is left by hand.
         </p>
       ) : null}
+      {state.rollback ? <NextSteps orderId={state.orderId!} /> : null}
     </section>
+  );
+}
+
+/** After a rollback: try again with the same lines, or look at what blocked it. */
+function NextSteps({ orderId }: { orderId: string }) {
+  const restart = useFetcher<{ ok: boolean; orderId?: string; error?: string }>();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (restart.state === 'idle' && restart.data?.orderId)
+      navigate(`/orders/${restart.data.orderId}`);
+  }, [restart.state, restart.data, navigate]);
+  return (
+    <div className="mt-5 border-t pt-4">
+      <h3 className="section-title">Next</h3>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <restart.Form method="post" action={`/orders/${orderId}/action`}>
+          <input type="hidden" name="intent" value="restart" />
+          <Button size="sm" variant="outline" disabled={restart.state !== 'idle'}>
+            <RotateCcw />{' '}
+            {restart.state !== 'idle' ? 'Starting…' : 'Start again with the same lines'}
+          </Button>
+        </restart.Form>
+        <Button asChild size="sm" variant="ghost">
+          <Link to="/back-office">Check stock and credit</Link>
+        </Button>
+      </div>
+      <p className="mt-2 text-muted-foreground text-xs">
+        Starts a new order on the flow’s current version. This one stays as it is, for the record.
+      </p>
+      {restart.data?.error ? (
+        <p className="mt-2 text-bad text-sm" role="alert">
+          {restart.data.error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -27,6 +27,27 @@ export async function action({ request, params }: Route.ActionArgs) {
         })),
       };
     }
+    if (intent === 'restart') {
+      // A fresh order with the same customer and lines, on the flow's current version. Demo
+      // failure switches are dropped so the retry runs for real.
+      const prev = await engine().snapshot(params.orderId);
+      if (!prev?.order || !prev.flow) throw new Error('That order no longer exists');
+      const { simulate: _simulate, ...meta } = prev.order.meta ?? {};
+      const { orderId } = await engine().startOrder({
+        flowId: prev.flow.id,
+        input: {
+          type: prev.order.type,
+          title: prev.order.title,
+          customerId: prev.order.customerId,
+          currency: prev.order.currency,
+          lines: prev.order.lines.map(({ sku, qty }) => ({ sku, qty })),
+          documentText: prev.order.documentText,
+          documentKey: prev.order.documentKey,
+          meta: { ...meta, restartedFrom: params.orderId },
+        },
+      });
+      return { ok: true, orderId };
+    }
     if (intent === 'cancel') {
       await engine().cancel(params.orderId, String(f.get('reason') ?? 'Cancelled by operator'));
       return { ok: true };
@@ -47,6 +68,8 @@ function friendlyError(intent: string, err: unknown) {
       ? 'Could not deliver the event'
       : intent === 'cancel'
         ? 'Could not cancel the order'
-        : 'Could not record the decision';
+        : intent === 'restart'
+          ? 'Could not start the new order'
+          : 'Could not record the decision';
   return `${what}. ${detail}`;
 }
