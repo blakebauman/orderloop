@@ -363,3 +363,10 @@ export const apiTokens = sqliteTable(
   },
   (t) => [uniqueIndex('api_tokens_hash').on(t.tokenHash)],
 );
+
+/** Failed authentication attempts per key in a fixed window; see `throttle.ts` in the web app. */
+export const authFailures = sqliteTable('auth_failures', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  windowStart: integer('window_start').notNull(),
+});

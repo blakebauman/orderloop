@@ -22,7 +22,9 @@ people) needs no token. Two routes are exceptions: `GET /api/v1/openapi.json` is
 authenticated by an HMAC signature instead (see [signed events](#signed-events)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
-`401` means a missing, wrong or revoked token, `403` a role that can't use the route, `404` an unknown route or order, and `500` an engine error.
+`401` means a missing, wrong or revoked token, `403` a role that can't use the route, `429` too many wrong bearer tokens from one address (more
+than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWORD` produce; see
+`Retry-After`), `404` an unknown route or order, and `500` an engine error.
 
 ## Routes
 

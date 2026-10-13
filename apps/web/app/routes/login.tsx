@@ -1,15 +1,18 @@
 import { env } from 'cloudflare:workers';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { Form, redirect, useActionData, useLoaderData } from 'react-router';
+import { data, Form, redirect, useActionData, useLoaderData } from 'react-router';
 import { Mark } from '~/components/mark';
-import { authEnabled, principal, signIn } from '~/lib/auth.server';
+import { authEnabled, principal, signIn, Throttled } from '~/lib/auth.server';
 import type { Route } from './+types/login';
 
 const nextPath = (request: Request) => {
   const next = new URL(request.url).searchParams.get('next');
   return next?.startsWith('/') && !next.startsWith('//') ? next : '/';
 };
+
+/** Lets a throttled sign-in's Retry-After reach the response. */
+export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await authEnabled()) || (await principal(request))) throw redirect(nextPath(request));
@@ -19,7 +22,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
-  const cookie = await signIn(email, String(form.get('password') ?? ''));
+  let cookie: string | null;
+  try {
+    cookie = await signIn(request, email, String(form.get('password') ?? ''));
+  } catch (err) {
+    if (!(err instanceof Throttled)) throw err;
+    return data(
+      { error: err.message },
+      { status: 429, headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) } },
+    );
+  }
   if (!cookie)
     return {
       error: email.trim()

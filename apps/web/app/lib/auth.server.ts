@@ -15,8 +15,8 @@
 
 import { env } from 'cloudflare:workers';
 import { atLeast, type Principal, ROLE_LABELS, type Role } from '@orderloop/core';
-import { apiTokens, sessions, users } from '@orderloop/db';
-import { and, count, eq, gt, isNull } from 'drizzle-orm';
+import { apiTokens, authFailures, sessions, users } from '@orderloop/db';
+import { and, count, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { data, redirect } from 'react-router';
 import {
   API_TOKEN_PREFIX,
@@ -28,6 +28,7 @@ import {
   verifyPassword,
 } from './credentials';
 import { db } from './env.server';
+import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
 
 const SESSION = '__Host-ol_session';
 /** The shared-password cookie: an HMAC of APP_PASSWORD. */
@@ -108,13 +109,60 @@ export async function principal(request: Request): Promise<Principal | null> {
   return null;
 }
 
-/** The caller of a REST request: a bearer token, else the browser session. */
+// ── Throttling failed attempts (rules in throttle.ts, counts in D1 auth_failures) ──
+
+/** Thrown when a client must wait before trying to authenticate again. */
+export class Throttled extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`Too many failed attempts. ${retryText(retryAfterMs)}`);
+  }
+}
+
+const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'local';
+
+async function waitFor(keys: string[]) {
+  const rows = await db().select().from(authFailures).where(inArray(authFailures.key, keys));
+  return blockedFor(rows, Date.now());
+}
+
+/** Counts a failure against each key, starting a fresh window where the old one has ended. */
+async function recordFailure(keys: string[]) {
+  const now = Date.now();
+  const expired = sql`${now} - ${authFailures.windowStart} >= ${WINDOW_MS}`;
+  for (const key of keys)
+    await db()
+      .insert(authFailures)
+      .values({ key, count: 1, windowStart: now })
+      .onConflictDoUpdate({
+        target: authFailures.key,
+        set: {
+          count: sql`case when ${expired} then 1 else ${authFailures.count} + 1 end`,
+          windowStart: sql`case when ${expired} then ${now} else ${authFailures.windowStart} end`,
+        },
+      });
+  // Failures are rare, so this is a cheap place to drop windows that ended a day ago.
+  await db()
+    .delete(authFailures)
+    .where(lt(authFailures.windowStart, now - 86_400_000));
+}
+
+/**
+ * The caller of a REST request: a bearer token, else the browser session. Guesses at the shared
+ * APP_PASSWORD are throttled per address (throws `Throttled`); `ol_live_` tokens are random
+ * 192-bit values, so they aren't, and a busy address can't lock out working integrations.
+ */
 export async function apiPrincipal(request: Request): Promise<Principal | null> {
   const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return principal(request);
-  const pw = password();
-  if (pw && safeEqual(bearer, pw)) return SHARED_PRINCIPAL;
-  if (!bearer.startsWith(API_TOKEN_PREFIX)) return null;
+  if (!bearer.startsWith(API_TOKEN_PREFIX)) {
+    const key = [throttleKey('api-ip', clientIp(request))];
+    const wait = await waitFor(key);
+    if (wait) throw new Throttled(wait);
+    const pw = password();
+    if (pw && safeEqual(bearer, pw)) return SHARED_PRINCIPAL;
+    await recordFailure(key);
+    return null;
+  }
   const row = await db()
     .select()
     .from(apiTokens)
@@ -149,8 +197,27 @@ const sessionCookie = (token: string) =>
 // Compared against when the email is unknown, so a miss costs the same PBKDF2 work as a hit.
 let decoy: Promise<string> | null = null;
 
-/** Signs in and returns the cookie to set, or null. No email means the shared APP_PASSWORD. */
-export async function signIn(email: string, given: string): Promise<string | null> {
+/**
+ * Signs in and returns the cookie to set, or null for a wrong email or password. No email means
+ * the shared APP_PASSWORD. Throws `Throttled`, before checking anything, when this person, this
+ * address or this account has failed too often in the current window.
+ */
+export async function signIn(
+  request: Request,
+  email: string,
+  given: string,
+): Promise<string | null> {
+  const keys = signInKeys(email, clientIp(request));
+  const wait = await waitFor(keys);
+  if (wait) throw new Throttled(wait);
+  const cookie = await checkCredentials(email, given);
+  if (!cookie) await recordFailure(keys);
+  // Success clears this person-and-place count; the wider counts age out with their window.
+  else await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
+  return cookie;
+}
+
+async function checkCredentials(email: string, given: string): Promise<string | null> {
   if (!email.trim()) {
     const pw = password();
     if (!pw || !safeEqual(given, pw)) return null;
