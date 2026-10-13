@@ -1,8 +1,8 @@
 ---
 /*
- * Light / dark only. Starlight's picker adds "auto" and, with nothing stored, re-applies the OS
- * scheme on load, which would undo ThemeProvider.astro's light default. The storage key is
- * Starlight's own (`starlight-theme`), so the Scalar page at /api/ reads the same choice.
+ * The web app's theme menu, as a select: Light (the default), Dark, Match system. Starlight's own
+ * picker re-applies the OS scheme on load when nothing is stored, which would undo the light
+ * default; this one only acts on a change. See ThemeProvider.astro.
  */
 // biome-ignore lint/correctness/noUnusedImports: rendered below
 import Select from '@astrojs/starlight/components/Select.astro';
@@ -11,12 +11,13 @@ import Select from '@astrojs/starlight/components/Select.astro';
 <starlight-theme-select>
   <Select
     icon="sun"
-    label={Astro.locals.t('themeSelect.accessibleLabel')}
+    label="Theme"
     options={[
-      { label: Astro.locals.t('themeSelect.light'), selected: true, value: 'light' },
-      { label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
+      { label: 'Light', selected: true, value: 'light' },
+      { label: 'Dark', selected: false, value: 'dark' },
+      { label: 'Match system', selected: false, value: 'auto' },
     ]}
-    width="5.5em"
+    width="8.25em"
   />
 </starlight-theme-select>
 
@@ -30,12 +31,13 @@ import Select from '@astrojs/starlight/components/Select.astro';
       super();
       this.querySelector('select')?.addEventListener('change', (e) => {
         if (!(e.currentTarget instanceof HTMLSelectElement)) return;
-        const theme = e.currentTarget.value === 'dark' ? 'dark' : 'light';
-        document.documentElement.dataset.theme = theme;
-        StarlightThemeProvider.updatePickers(theme);
+        const v = e.currentTarget.value;
+        const choice = v === 'dark' || v === 'auto' ? v : 'light';
         try {
-          localStorage.setItem('starlight-theme', theme);
+          localStorage.setItem('starlight-theme', choice);
         } catch {}
+        StarlightThemeProvider.apply(choice);
+        StarlightThemeProvider.updatePickers(choice);
       });
     }
   }

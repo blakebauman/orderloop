@@ -1,0 +1,42 @@
+---
+/*
+ * A node type's icon: the lucide glyph the catalog names (`NodeSpec.icon`), drawn at the web app's
+ * stroke weight. `lucide` is pinned to the version of `lucide-react` the app uses, so a node looks
+ * the same in the palette and in these docs.
+ */
+import { icons } from 'lucide';
+
+interface Props {
+  name: string;
+  size?: number;
+  class?: string;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: `size` and `className` are used in the markup
+const { name, size = 14, class: className } = Astro.props;
+const node = (icons as Record<string, [string, Record<string, string>][]>)[name] ?? icons.Circle;
+// biome-ignore lint/correctness/noUnusedVariables: rendered with set:html
+const body = node
+  .map(
+    ([tag, attrs]) =>
+      `<${tag} ${Object.entries(attrs)
+        .map(([k, v]) => `${k}="${v}"`)
+        .join(' ')}/>`,
+  )
+  .join('');
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  class={className}
+  set:html={body}
+/>

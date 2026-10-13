@@ -23,12 +23,14 @@ this commit, for operators (Start, Guides, Reference) and contributors (Internal
 | Node → event table | `NODE_EVENTS`, `packages/core/src/webhooks.ts` | `NodeEvents.astro` |
 | Enum lists (statuses, order types, events, policy rules) | `packages/core/src/{types,webhooks,policy}.ts` | `Values.astro` |
 | `/openapi.json` and the `/api/` explorer | `apps/web/app/lib/openapi.ts` + `api-schemas.ts` | `src/pages/openapi.json.ts` |
+| Docs theme (`src/styles/theme.css`) and the explorer's palette | `packages/design/src/tokens.ts` | `pnpm sync:theme`, `scalarThemeCss()` |
+| The home page's run figure | `src/data/sample-run.json`, captured from the engine | `OrderRun.astro`; `apps/engine/tests/docs-sample-run.test.ts` fails when it's stale |
 
 Rebuilding refreshes these. But the prose *around* them still makes claims (a node's behaviour, a
 branch name used in an example, a default quoted in a sentence), and those are yours to check.
 
-**Hand-written, so they drift:** everything else in `src/content/`, plus `src/styles/ledger.css`
-and `src/pages/api.astro`, which mirror the Ledger tokens in `apps/web/app/app.css` by value.
+**Hand-written, so they drift:** everything else in `src/content/`, plus `src/styles/brand.css`
+(the app's components carried into Starlight) and `DESIGN.md`, which describes them.
 
 ## Procedure
 
@@ -47,11 +49,17 @@ and `src/pages/api.astro`, which mirror the Ledger tokens in `apps/web/app/app.c
    sentence over a rewritten section. If you would restate an enum, use `Values.astro` instead.
 6. **New page?** Follow the `docs-page` skill. It is invisible until it is in `sidebar` in
    `apps/docs/astro.config.mjs`.
-7. **Ledger tokens.** If `apps/web/app/app.css` changed a colour or font, change the same value in
-   `apps/docs/src/styles/ledger.css` and, for the explorer, `apps/docs/src/pages/api.astro`.
-8. **Repo-level docs.** `README.md`, `CLAUDE.md` and `ROADMAP.md` describe the same system; if the
+7. **Ledger tokens.** If `apps/web/app/app.css` changed a token, make the same change in
+   `packages/design/src/tokens.ts` and run `pnpm sync:theme`; `pnpm --filter @orderloop/design test`
+   fails until both agree and `theme.css` is regenerated. If an app component the docs mirror
+   changed (`flow-node.tsx`, `status.tsx`, `page.tsx`, `shell.tsx`), update its counterpart in
+   `apps/docs/src/styles/brand.css` and the matching section of `apps/docs/DESIGN.md`.
+8. **The run figure.** If `docs-sample-run.test.ts` fails, the engine now runs the B2B scenario
+   differently: copy the "Received" side of its diff into `apps/docs/src/data/sample-run.json`,
+   keeping the `$comment`, and check the figure still reads right.
+9. **Repo-level docs.** `README.md`, `CLAUDE.md` and `ROADMAP.md` describe the same system; if the
    change falsifies them, fix them too (a shipped roadmap item moves out of the roadmap).
-9. **Build:** `pnpm docs:build`. It fails on bad frontmatter, an unknown sidebar slug, an MDX
+10. **Build:** `pnpm docs:build`. It fails on bad frontmatter, an unknown sidebar slug, an MDX
    syntax error, a broken import from `@orderloop/core`, and (via `scripts/check-links.mjs`) any
    internal link or `#anchor` that doesn't resolve. It does not catch a wrong claim.
 

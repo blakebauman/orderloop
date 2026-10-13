@@ -7,7 +7,7 @@
 #      prose around it), else "prose"
 # Keep rows narrow: a row that matches everything nags on every edit and gets ignored.
 ^packages/core/src/catalog\.ts$	reference/nodes guides/building-flows guides/ai	gen
-^packages/core/src/templates\.ts$	guides/templates start/getting-started	gen
+^packages/core/src/templates\.ts$	guides/templates start/getting-started index	gen
 ^packages/core/src/graph\.ts$	internals/planner guides/building-flows start/concepts	prose
 ^packages/core/src/types\.ts$	start/concepts reference/rest-api reference/expressions	gen
 ^packages/core/src/api\.ts$	reference/rest-api internals/architecture internals/order-agent	prose
@@ -25,7 +25,9 @@
 ^apps/web/app/components/decision\.tsx$	guides/approvals-and-events	prose
 ^apps/web/app/routes/flow-(editor|action)\.tsx?$	guides/building-flows	prose
 ^apps/web/app/routes/(approvals|order)\.tsx$	guides/approvals-and-events	prose
-^apps/web/app/app\.css$	apps/docs/src/styles/ledger.css apps/docs/src/pages/api.astro	prose
+^apps/web/app/app\.css$	packages/design/src/tokens.ts apps/docs/src/styles/brand.css apps/docs/DESIGN.md	prose
+^packages/design/src/tokens\.ts$	apps/docs/src/styles/theme.css apps/docs/DESIGN.md	gen
+^apps/web/app/(routes/shell|components/(flow-node|node-icon|status|page))\.tsx$	apps/docs/src/styles/brand.css apps/docs/DESIGN.md	prose
 ^apps/engine/src/workflow\.ts$	internals/workflow guides/approvals-and-events guides/building-flows	prose
 ^apps/engine/src/agent\.ts$	internals/order-agent guides/approvals-and-events guides/ai	prose
 ^apps/engine/src/nodes\.ts$	reference/expressions guides/building-flows internals/workflow	prose

@@ -5,6 +5,8 @@
  */
 // biome-ignore lint/correctness/noUnusedImports: used in the markup
 import { nodeSpec, ORDER_TYPE_LABELS, TEMPLATES } from '@orderloop/core';
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import NodeIcon from './NodeIcon.astro';
 
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const flows = Object.values(TEMPLATES).map((t) => t());
@@ -13,15 +15,24 @@ const flows = Object.values(TEMPLATES).map((t) => t());
 {
   flows.map((f) => (
     <section class="ol-node" id={f.id}>
-      <h3>
-        {f.name}
-        <code>{f.id}</code>
-      </h3>
+      <div class="ol-node-head">
+        <h3>{f.name}</h3>
+        <code class="ol-node-type">{f.id}</code>
+      </div>
       <p>{f.description}</p>
-      <ul class="ol-tags">
-        <li>Order type: {ORDER_TYPE_LABELS[f.orderType]}</li>
-        <li>{f.nodes.length} nodes</li>
-        <li>{f.edges.length} edges</li>
+      <ul class="ol-node-facts">
+        <li>
+          <span class="ol-fact-label">Order type</span>
+          {ORDER_TYPE_LABELS[f.orderType]}
+        </li>
+        <li>
+          <span class="ol-fact-label">Nodes</span>
+          {f.nodes.length}
+        </li>
+        <li>
+          <span class="ol-fact-label">Edges</span>
+          {f.edges.length}
+        </li>
       </ul>
       <details>
         <summary>Nodes</summary>
@@ -41,7 +52,12 @@ const flows = Object.values(TEMPLATES).map((t) => t());
                 </td>
                 <td>{n.label}</td>
                 <td>
-                  <a href={`/reference/nodes/#${n.type}`}>{nodeSpec(n.type)?.label ?? n.type}</a>
+                  <a class="ol-node-link" href={`/reference/nodes/#${n.type}`}>
+                    <span class="ol-run-cat" data-cat={nodeSpec(n.type)?.category}>
+                      <NodeIcon name={nodeSpec(n.type)?.icon ?? 'Circle'} size={13} />
+                    </span>
+                    {nodeSpec(n.type)?.label ?? n.type}
+                  </a>
                 </td>
               </tr>
             ))}

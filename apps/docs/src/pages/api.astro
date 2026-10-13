@@ -4,13 +4,22 @@
  * web app's source. A page of its own rather than a Starlight route, because Scalar owns the
  * viewport (sidebar, search, request panel) and Starlight's chrome would be a second sidebar.
  *
- * It keeps the docs' Ledger palette and the reader's theme: Starlight stores the choice as
- * `starlight-theme` in localStorage ('dark', or anything else for light), and the inline script
- * applies it before first paint. Scalar's own toggle is hidden, so there is one switch.
+ * It keeps the docs' look: the Ledger palette and faces from @orderloop/design, the app's top bar,
+ * and the reader's theme. Starlight stores the choice as `starlight-theme` ('light', 'dark' or
+ * 'auto' for Match system), the inline script applies it before first paint, and Scalar's own
+ * toggle is hidden, so there is one switch.
  *
  * The bundle is pinned with an SRI hash; the URL and hash move together on an upgrade:
  *   curl -s <url> | openssl dgst -sha384 -binary | openssl base64 -A
  */
+
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-serif/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import { FONTS, palette, scalarThemeCss } from '@orderloop/design/tokens';
 
 // Biome parses only the frontmatter, so constants used in the markup read as dead.
 // biome-ignore lint/correctness/noUnusedVariables: used in the <script> below
@@ -18,9 +27,6 @@ const SCALAR_JS_URL =
   'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.67.0/dist/browser/standalone.js';
 // biome-ignore lint/correctness/noUnusedVariables: used in the <script> below
 const SCALAR_JS_SRI = 'sha384-6c7Vmx+i0yi8gBbltn0x1cavD+zsMGw2xmXXVyacPJLIGBxwaVimW5TW0WiW17Ir';
-
-const SANS = "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
-const MONO = "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace";
 
 // biome-ignore lint/correctness/noUnusedVariables: passed to the page via define:vars
 const config = {
@@ -40,66 +46,52 @@ const config = {
   showDeveloperTools: 'never',
   hideDarkModeToggle: true,
   withDefaultFonts: false,
-  customCss: `
-  .light-mode {
-    --scalar-background-1: oklch(0.972 0.01 85);
-    --scalar-background-2: oklch(0.955 0.011 85);
-    --scalar-background-3: oklch(0.935 0.012 85);
-    --scalar-color-1: oklch(0.25 0.022 262);
-    --scalar-color-2: oklch(0.36 0.018 262);
-    --scalar-color-3: oklch(0.46 0.016 70);
-    --scalar-color-accent: oklch(0.47 0.13 256);
-    --scalar-border-color: oklch(0.86 0.014 80);
-  }
-  .dark-mode {
-    --scalar-background-1: oklch(0.2 0.016 264);
-    --scalar-background-2: oklch(0.232 0.018 264);
-    --scalar-background-3: oklch(0.262 0.018 264);
-    --scalar-color-1: oklch(0.95 0.012 85);
-    --scalar-color-2: oklch(0.86 0.014 85);
-    --scalar-color-3: oklch(0.72 0.014 80);
-    --scalar-color-accent: oklch(0.76 0.11 250);
-    --scalar-border-color: oklch(0.33 0.018 264);
-  }
-  .scalar-app, .light-mode, .dark-mode {
-    --scalar-font: ${SANS};
-    --scalar-font-code: ${MONO};
-  }`,
+  // The palette from @orderloop/design, the same tokens the docs' theme.css is generated from.
+  customCss: scalarThemeCss(),
   metaData: { title: 'Order Loop API reference' },
 };
 
+const light = palette('light');
+const dark = palette('dark');
+// The app's top bar (apps/web/app/routes/shell.tsx): 48px, a rule under it, the serif wordmark.
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup below
 const headerCss = `
 :root {
-  --bg: oklch(0.972 0.01 85);
-  --rule: oklch(0.86 0.014 80);
-  --ink: oklch(0.25 0.022 262);
-  --muted: oklch(0.46 0.016 70);
-  --link: oklch(0.47 0.13 256);
-  --scalar-custom-header-height: 3.5rem;
+  --bg: ${light.paper};
+  --rule: ${light.rule};
+  --ink: ${light.ink};
+  --muted: ${light['muted-foreground']};
+  --link: ${light.link};
+  --scalar-custom-header-height: 3rem;
   color-scheme: light;
 }
 :root[data-theme='dark'] {
-  --bg: oklch(0.2 0.016 264);
-  --rule: oklch(0.33 0.018 264);
-  --ink: oklch(0.95 0.012 85);
-  --muted: oklch(0.72 0.014 80);
-  --link: oklch(0.76 0.11 250);
+  --bg: ${dark.paper};
+  --rule: ${dark.rule};
+  --ink: ${dark.ink};
+  --muted: ${dark['muted-foreground']};
+  --link: ${dark.link};
   color-scheme: dark;
 }
 html, body { margin: 0; background: var(--bg); }
+::selection { background: color-mix(in oklch, var(--link) 24%, transparent); }
 .ref-header {
   position: sticky; top: 0; z-index: 1000; box-sizing: border-box;
   height: var(--scalar-custom-header-height);
-  display: flex; align-items: center; gap: 1.5rem; padding-inline: 1.5rem;
+  display: flex; align-items: center; gap: 1.5rem; padding-inline: 1.25rem;
   background: var(--bg); border-bottom: 1px solid var(--rule);
-  font-family: ${SANS}; font-size: 0.875rem; color: var(--muted);
+  font-family: ${FONTS.sans}; font-size: 0.8125rem; color: var(--muted);
 }
-.ref-header a { color: var(--ink); text-decoration: none; }
-.ref-header a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ref-header a { color: var(--muted); text-decoration: none; }
+.ref-header a:hover { color: var(--ink); }
 .ref-header a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 3px; }
-.ref-title { font-weight: 600; font-size: 1.05rem; }
+.ref-header .ref-title {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-family: ${FONTS.serif}; font-weight: 600; font-size: 1rem; color: var(--ink);
+}
+.ref-title svg { width: 1.25rem; height: 1.25rem; }
 .ref-note { margin-inline-start: auto; }
+.ref-note a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 50rem) { .ref-note { display: none; } }
 `;
 ---
@@ -115,26 +107,29 @@ html, body { margin: 0; background: var(--bg); }
       content="OpenAPI 3.1 reference for the Order Loop REST API: flows, orders, events, approvals and webhook subscriptions."
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
-    />
     <script is:inline>
       (() => {
         let stored = null;
         try {
           stored = localStorage.getItem('starlight-theme');
         } catch {}
-        document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+        const dark =
+          stored === 'dark' ||
+          (stored === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       })();
     </script>
     <style is:inline set:html={headerCss}></style>
   </head>
   <body>
     <header class="ref-header">
-      <a class="ref-title" href="/">Order Loop</a>
+      <a class="ref-title" href="/"
+        ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+          ><path d="M20 12a8 8 0 1 1-3.1-6.3"></path><path d="M17.5 2.5v4h-4"></path><rect
+            x="9" y="9" width="6" height="6" rx="1" fill="currentColor" stroke="none"></rect></svg
+        >Order Loop</a
+      >
       <a href="/reference/rest-api/">REST API guide</a>
       <a href="/guides/outbound-webhooks/">Webhooks</a>
       <p class="ref-note">
