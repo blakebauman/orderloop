@@ -31,7 +31,7 @@ Pricing sources go in D1. The resolver lives in `packages/core`, is pure and is 
 ## Gaps in shipped features
 
 - **Relative times can flicker on load.** "in 42m" and "3m ago" are computed from `Date.now()` on the server and again in the browser, so they can differ by a unit at a minute boundary and log a hydration warning. Render them only after hydration, as `useDateTime` (`apps/web/app/lib/use-date-time.ts`) does for absolute times.
-- **Partial returns restock every line.** `commerce.restock` restocks the whole order. It should restock only the lines in the `return.requested` payload.
+- **Restock and a part-finished reserve aren't keyed by step.** `restock` adds stock with no record of the step that did it, so a step retried after its write restocks twice. `reserveInventory` returns early once any line is held, so a step that died after holding some lines never holds the rest. Record stock movements per step key and line, like reservations, and drop the early return.
 
 ## Not planned
 

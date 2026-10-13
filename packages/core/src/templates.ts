@@ -398,7 +398,10 @@ export function storefrontOrderFlow(): Flow {
         event: 'return.received',
         timeout: '14 days',
       })
-      .n('restock', 'commerce.restock', 'Restock')
+      // Only the returned lines come back; without a list in the request, the whole order does.
+      .n('restock', 'commerce.restock', 'Restock', {
+        lines: { var: 'vars.return_requested.lines' },
+      })
       // A partial refund comes from the return request's payload; the connector caps it.
       .n('refund', 'commerce.refund', 'Refund', {
         amount: { or: [{ var: 'vars.return_requested.amount' }, { var: 'order.total' }] },

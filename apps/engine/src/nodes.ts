@@ -19,6 +19,7 @@ import {
   type OrderLine,
   policyRulesSchema,
   type RunContext,
+  stockLines,
   stringList,
   truthy,
 } from '@orderloop/core';
@@ -306,9 +307,16 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 
-  'commerce.restock': async ({ env, ctx }) => {
-    await cx.restock(env, ctx.order);
-    return { summary: `+${ctx.order.lines.reduce((s, l) => s + l.qty, 0)} units` };
+  'commerce.restock': async ({ env, ctx, config }) => {
+    const expr = config.lines;
+    const requested =
+      expr === undefined || expr === null || expr === '' ? null : evaluate(expr, ctx);
+    const lines = stockLines(requested, ctx.order.lines);
+    await cx.restock(env, lines);
+    return {
+      output: { lines },
+      summary: `+${lines.reduce((s, l) => s + l.qty, 0)} units`,
+    };
   },
 
   'commerce.erp_sync': async ({ ctx, config }) => {

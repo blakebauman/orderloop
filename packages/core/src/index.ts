@@ -2,6 +2,7 @@ export * from './api';
 export * from './catalog';
 export * from './graph';
 export * from './layout';
+export * from './lines';
 export * from './logic';
 export * from './policy';
 export * from './templates';
