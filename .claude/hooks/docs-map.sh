@@ -2,7 +2,7 @@
 # Shared by docs-impact.sh and docs-drift.sh: reads repo-relative paths on stdin and prints
 # "path<TAB>pages<TAB>kind" for each one the surface map covers. The map is
 # .claude/skills/docs-sync/references/surface-map.tsv; edit it there, not here.
-map="${CLAUDE_PROJECT_DIR:-.}/.claude/skills/docs-sync/references/surface-map.tsv"
+map="$(cd "$(dirname "$0")/.." && pwd)/skills/docs-sync/references/surface-map.tsv"
 [ -r "$map" ] || exit 0
 while IFS= read -r path; do
   [ -z "$path" ] && continue

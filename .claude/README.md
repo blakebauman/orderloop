@@ -41,8 +41,13 @@ or let Claude pick them by description.
 
 | Event | Script | Behaviour |
 |---|---|---|
-| `PostToolUse` (Edit/Write) | `docs-impact.sh` | Names the docs pages for an edited surface, once per file per session. Advisory |
-| `Stop` | `docs-drift.sh` | **Blocks once** per drift-set when documented surfaces changed and nothing under `apps/docs/` did |
+| `PostToolUse` (Edit/Write) | `docs-impact.sh` | Logs the edited file for this session, and names the docs pages for an edited surface, once per file per session. Advisory |
+| `Stop` | `docs-drift.sh` | **Blocks once** per drift-set when files *this session* edited are documented surfaces, still uncommitted, and this session edited nothing under `apps/docs/` |
+
+The Stop hook only counts files in the session's edit log, kept per git root, so another session's
+uncommitted work in a shared checkout never trips it, and edits inside a git worktree are checked
+against that worktree. Edits made through Bash (`sed`, heredocs) don't reach the log and aren't
+counted; the hook fails open.
 
 Both use `docs-map.sh` to read the surface map. They fail open (exit 0) and stay silent when there
 is nothing to say. Test them with:
