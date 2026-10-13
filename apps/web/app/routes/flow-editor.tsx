@@ -101,6 +101,44 @@ export default function FlowEditor() {
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [prompt, setPrompt] = useState('');
   const [proposal, setProposal] = useState<CopilotResult | null>(null);
+
+  // A newer built-in template, offered once per template version until applied or set aside.
+  const tpl = loaded.templateUpdate;
+  const tplKey = tpl ? `ol-template:${loaded.flow.id}:${hashGraph(tpl)}` : '';
+  const [tplHidden, setTplHidden] = useState(true);
+  useEffect(() => {
+    if (!tplKey) return;
+    try {
+      setTplHidden(localStorage.getItem(tplKey) === 'hidden');
+    } catch {
+      setTplHidden(false);
+    }
+  }, [tplKey]);
+  const hideTemplate = () => {
+    setTplHidden(true);
+    try {
+      localStorage.setItem(tplKey, 'hidden');
+    } catch {
+      // Storage blocked: hidden for this visit only.
+    }
+  };
+  const reviewTemplate = () => {
+    if (!tpl) return;
+    // Keep the author's layout for steps that still exist; only the logic comes from the template.
+    const at = new Map(flowRef.current.nodes.map((n) => [n.id, n.position]));
+    const graph = {
+      nodes: tpl.nodes.map((n) => ({ ...n, position: at.get(n.id) ?? n.position })),
+      edges: tpl.edges,
+    };
+    const { errors, warnings } = validateGraph({ ...flowRef.current, ...graph });
+    setProposal({
+      graph,
+      explanation: `Latest built-in template: ${graphChanges(flowRef.current, graph).summary.toLowerCase()}. Applying replaces your own changes to those steps.`,
+      errors,
+      warnings,
+    });
+    hideTemplate();
+  };
   const save = useFetcher<ActionResult>();
   const copilot = useFetcher<CopilotResult & { error?: string }>();
 
@@ -439,6 +477,21 @@ export default function FlowEditor() {
         </Button>
       </form>
 
+      {tpl && !tplHidden && !proposal ? (
+        <div className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-2 text-sm">
+          <p className="min-w-0 flex-1">
+            The built-in {ORDER_TYPE_LABELS[flow.orderType]} template has changed since this flow
+            was set up.
+          </p>
+          <Button size="sm" variant="outline" onClick={reviewTemplate}>
+            Review the update
+          </Button>
+          <Button size="sm" variant="ghost" onClick={hideTemplate}>
+            Keep mine
+          </Button>
+        </div>
+      ) : null}
+
       {proposal && diff ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-ai/10 px-5 py-2 text-sm">
           <span className="text-ai">{proposal.explanation}</span>
@@ -581,4 +634,12 @@ function graphChanges(published: FlowGraph | null, current: FlowGraph) {
     total: added + removed + edited + rewired + (moved ? 1 : 0),
     summary: parts.length ? parts.join(', ') : 'Layout changes only',
   };
+}
+
+/** A short stable fingerprint, so "Keep mine" applies to this template version only. */
+function hashGraph(g: FlowGraph) {
+  const text = JSON.stringify(g);
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
 }
