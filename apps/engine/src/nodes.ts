@@ -9,10 +9,12 @@
 
 import { NonRetryableError } from 'cloudflare:workflows';
 import {
+  BASE_CURRENCY,
   durationMs,
   evaluate,
   evaluatePolicy,
   type FlowNode,
+  fromBase,
   interpolate,
   money,
   type Order,
@@ -23,6 +25,7 @@ import {
   resolvePrice,
   stockLines,
   stringList,
+  toBase,
   truthy,
 } from '@orderloop/core';
 import * as ai from './ai';
@@ -57,11 +60,15 @@ const cash = (n: number, ctx: RunContext) =>
 const lineCount = (n: number) => `${n} ${n === 1 ? 'line' : 'lines'}`;
 
 /** Recompute subtotal/tax/total from lines, keeping the current tax rate if one was applied. */
-export function totals(order: Order, taxRate?: number): Pick<Order, 'subtotal' | 'tax' | 'total'> {
+export function totals(
+  order: Order,
+  taxRate?: number,
+): Pick<Order, 'subtotal' | 'tax' | 'total' | 'baseTotal'> {
   const subtotal = money(order.lines.reduce((s, l) => s + l.qty * (l.unitPrice ?? 0), 0));
   const rate = taxRate ?? (order.subtotal > 0 ? order.tax / order.subtotal : 0);
   const tax = money(subtotal * rate);
-  return { subtotal, tax, total: money(subtotal + tax) };
+  const total = money(subtotal + tax);
+  return { subtotal, tax, total, baseTotal: toBase(total, order.fxRate) };
 }
 
 const passthrough: Exec = async () => ({ summary: 'Started' });
@@ -109,6 +116,9 @@ export const EXECUTORS: Record<string, Exec> = {
     );
     // Replenishment and procurement buy at cost; selling flows run the pricing chain.
     const buying = ctx.order.type === 'reorder' || ctx.order.type === 'purchase_request';
+    // Base-currency prices convert at the order's rate, fixed here for the life of the order.
+    const fx = await cx.fxRate(env, ctx.order.currency);
+    if (fx === null) throw new NonRetryableError(`No exchange rate for ${ctx.order.currency}`);
     const chain = buying ? null : await cx.pricingFor(env, ctx.order.customerId);
     const sources =
       chain?.sources.filter((s) =>
@@ -121,16 +131,17 @@ export const EXECUTORS: Record<string, Exec> = {
         priced.push({ sku: l.sku, unitPrice: l.unitPrice, by: 'list', rule: 'Given on the order' });
         return l;
       }
-      if (!chain) return { ...l, unitPrice: p?.cost ?? 0 };
+      if (!chain) return { ...l, unitPrice: fromBase(p?.cost ?? 0, fx) };
       const r = resolvePrice(l, p?.price ?? 0, sources, chain.rules, {
         customerId: ctx.order.customerId,
         customerTier: chain.tier,
         now: ctx.now,
       });
-      priced.push({ sku: l.sku, unitPrice: r.unitPrice, by: r.by.source, rule: r.by.name });
-      return { ...l, unitPrice: r.unitPrice };
+      const unitPrice = fromBase(r.unitPrice, fx);
+      priced.push({ sku: l.sku, unitPrice, by: r.by.source, rule: r.by.name });
+      return { ...l, unitPrice };
     });
-    const order = { ...ctx.order, lines };
+    const order = { ...ctx.order, lines, fxRate: fx };
     const t = totals(order);
     const bySource = (k: string) => priced.filter((x) => x.by === k).length;
     const notes = [
@@ -142,8 +153,14 @@ export const EXECUTORS: Record<string, Exec> = {
       .filter(([n]) => n)
       .map(([n, label]) => `${n} ${label}`);
     return {
-      order: { lines, ...t },
-      output: { subtotal: t.subtotal, contracted: bySource('contract'), lines: priced },
+      order: { lines, fxRate: fx, ...t },
+      output: {
+        subtotal: t.subtotal,
+        currency: ctx.order.currency,
+        fxRate: fx,
+        contracted: bySource('contract'),
+        lines: priced,
+      },
       summary: `Subtotal ${cash(t.subtotal, ctx)}${notes.length ? ` · ${notes.join(', ')}` : ''}`,
     };
   },
@@ -175,24 +192,27 @@ export const EXECUTORS: Record<string, Exec> = {
     const c = await cx.getCustomer(env, ctx.order.customerId);
     if (!c)
       return { branches: ['over_limit'], summary: 'No credit account', output: { available: 0 } };
+    // Limits and balances are in the base currency; compare the order there too.
     const available = money(c.creditLimit - c.balance);
-    const ok = ctx.order.total <= available;
+    const total = ctx.order.baseTotal ?? toBase(ctx.order.total, ctx.order.fxRate);
+    const ok = total <= available;
+    const local = (n: number) => cash(fromBase(n, ctx.order.fxRate), ctx);
     return {
       branches: [ok ? 'ok' : 'over_limit'],
-      output: { limit: c.creditLimit, balance: c.balance, available },
+      output: { limit: c.creditLimit, balance: c.balance, available, currency: BASE_CURRENCY },
       summary: ok
-        ? `Within credit (${cash(available, ctx)} available)`
-        : `Over limit by ${cash(ctx.order.total - available, ctx)}`,
+        ? `Within credit (${local(available)} available)`
+        : `Over limit by ${local(total - available)}`,
     };
   },
 
   'commerce.budget_check': async ({ ctx, config }) => {
     const budget = num(config.budget, 25_000);
-    const within = ctx.order.total <= budget;
+    const within = (ctx.order.baseTotal ?? toBase(ctx.order.total, ctx.order.fxRate)) <= budget;
     return {
       branches: [within ? 'within' : 'over'],
       output: { budget },
-      summary: `${within ? 'Within' : 'Over'} budget of ${budget}`,
+      summary: `${within ? 'Within' : 'Over'} budget of ${budget} ${BASE_CURRENCY}`,
     };
   },
 
@@ -263,7 +283,7 @@ export const EXECUTORS: Record<string, Exec> = {
       `${stepKey.replace('#', '-')}.html`,
       cx.renderDocument(`Invoice ${ctx.order.id}`, ctx.order, { Terms: terms, Due: due }),
     );
-    await cx.addToBalance(env, ctx.order.customerId, ctx.order.total);
+    await cx.addToBalance(env, ctx.order.customerId, toBase(ctx.order.total, ctx.order.fxRate));
     return {
       output: { key, terms, due },
       vars: { invoiceKey: key, dueDate: due },

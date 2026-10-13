@@ -54,3 +54,13 @@ export function interpolate(template: string, ctx: RunContext): string {
 export function money(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/** An amount in the order's currency, converted to BASE_CURRENCY at the order's rate. */
+export function toBase(amount: number, fxRate: number | undefined): number {
+  return money(amount / (fxRate || 1));
+}
+
+/** An amount in BASE_CURRENCY, converted to the order's currency at its rate. */
+export function fromBase(amount: number, fxRate: number | undefined): number {
+  return money(amount * (fxRate || 1));
+}

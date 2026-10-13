@@ -8,6 +8,7 @@
  */
 
 import {
+  BASE_CURRENCY,
   checkAddress,
   money,
   newId,
@@ -22,6 +23,7 @@ import {
   createDb,
   customers,
   documents,
+  fxRates,
   messages,
   payments,
   priceRules,
@@ -53,6 +55,13 @@ export async function findCustomerByName(env: Env, name: string) {
 export async function getProducts(env: Env, skus?: string[]) {
   const q = db(env).select().from(products);
   return skus ? q.where(inArray(products.sku, skus)) : q;
+}
+
+/** Units of `currency` per one base currency, or null when there is no rate for it. */
+export async function fxRate(env: Env, currency: string) {
+  if (currency === BASE_CURRENCY) return 1;
+  const row = await db(env).select().from(fxRates).where(eq(fxRates.currency, currency)).get();
+  return row?.rate ?? null;
 }
 
 /**
@@ -432,10 +441,12 @@ export async function sendMessage(
 }
 
 export function renderDocument(title: string, order: Order, extra: Record<string, string> = {}) {
+  const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: order.currency });
+  const cash = (n: number) => esc(fmt.format(n));
   const rows = order.lines
     .map(
       (l) =>
-        `<tr><td>${esc(l.sku)}</td><td>${esc(l.name ?? '')}</td><td>${l.qty}</td><td>${(l.unitPrice ?? 0).toFixed(2)}</td><td>${money(l.qty * (l.unitPrice ?? 0)).toFixed(2)}</td></tr>`,
+        `<tr><td>${esc(l.sku)}</td><td>${esc(l.name ?? '')}</td><td>${l.qty}</td><td>${cash(l.unitPrice ?? 0)}</td><td>${cash(money(l.qty * (l.unitPrice ?? 0)))}</td></tr>`,
     )
     .join('');
   const meta = Object.entries(extra)
@@ -445,7 +456,7 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 <style>body{font:14px system-ui;margin:40px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:6px;text-align:left}</style>
 <h1>${esc(title)}</h1><p>Order ${esc(order.id)} · ${new Date().toISOString().slice(0, 10)}</p>${meta}
 <table><tr><th>SKU</th><th>Item</th><th>Qty</th><th>Unit</th><th>Line</th></tr>${rows}</table>
-<p>Subtotal ${order.subtotal.toFixed(2)} · Tax ${order.tax.toFixed(2)} · <b>Total ${order.total.toFixed(2)} ${esc(order.currency)}</b></p>`;
+<p>Subtotal ${cash(order.subtotal)} · Tax ${cash(order.tax)} · <b>Total ${cash(order.total)} ${esc(order.currency)}</b></p>`;
 }
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */

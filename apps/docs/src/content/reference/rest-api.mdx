@@ -64,7 +64,10 @@ Idempotency-Key: po-NW-7781
 
 - `flowId` names a flow with a published version. `version` pins one; it defaults to the latest.
 - `input.type` is one of <Values of="order-types" />.
-- `input.lines` are `{ sku, name?, qty, unitPrice? }`. Pricing nodes fill in prices.
+- `input.currency` defaults to `USD` and must have an exchange rate (`EUR`, `GBP` and `CAD` are
+  seeded); another code returns `400`. See [Currency](/reference/expressions/#currency).
+- `input.lines` are `{ sku, name?, qty, unitPrice? }`. Pricing nodes fill in prices, in the order's
+  currency.
 - `input.documentText` (up to 50,000 characters) is an inbound email or PO for the
   [Extract order](/reference/nodes/#ai.extract) node; it is stored in R2 before the run starts.
 - `input.meta` is free-form and is the run context's `input`. Some keys mean something to nodes:

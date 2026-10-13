@@ -3,7 +3,7 @@
  * routed the order here and, for credit checks, the numbers behind it. Pure; runs on both sides.
  */
 
-import type { OrderState } from '@orderloop/core';
+import { BASE_CURRENCY, type OrderState, toBase } from '@orderloop/core';
 import { money } from './format';
 
 export type ApprovalContext = {
@@ -38,19 +38,29 @@ export function approvalContext(state: OrderState, nodeId: string): ApprovalCont
     if (!run || !source || run.status !== 'succeeded') continue;
     // Only the branch that actually led here explains the request.
     if (e.sourceHandle && run.branches && !run.branches.includes(e.sourceHandle)) continue;
-    const out = (run.output ?? {}) as { limit?: number; balance?: number; available?: number };
+    const out = (run.output ?? {}) as {
+      limit?: number;
+      balance?: number;
+      available?: number;
+      currency?: string;
+    };
     if (source.type === 'commerce.credit_check' && typeof out.available === 'number') {
-      const over = (state.order?.total ?? 0) - out.available;
+      // Limits and balances are in the base currency; so is the comparison.
+      const base = out.currency ?? BASE_CURRENCY;
+      const order = state.order;
+      const total = order?.baseTotal ?? toBase(order?.total ?? 0, order?.fxRate);
+      const over = total - out.available;
       ctx.reason =
         over > 0
-          ? `Over credit limit by ${money(over, currency)}`
-          : `Within credit, ${money(out.available, currency)} available`;
-      ctx.facts.push(`This order ${money(state.order?.total ?? 0, currency)}`);
-      if (typeof out.limit === 'number') ctx.facts.push(`Limit ${money(out.limit, currency)}`);
-      if (typeof out.balance === 'number')
-        ctx.facts.push(`Balance ${money(out.balance, currency)}`);
+          ? `Over credit limit by ${money(over, base)}`
+          : `Within credit, ${money(out.available, base)} available`;
+      ctx.facts.push(
+        `This order ${money(order?.total ?? 0, currency)}${currency !== base ? ` (${money(total, base)})` : ''}`,
+      );
+      if (typeof out.limit === 'number') ctx.facts.push(`Limit ${money(out.limit, base)}`);
+      if (typeof out.balance === 'number') ctx.facts.push(`Balance ${money(out.balance, base)}`);
       if (out.available < 0)
-        ctx.facts.push(`Already ${money(-out.available, currency)} over before this order`);
+        ctx.facts.push(`Already ${money(-out.available, base)} over before this order`);
       return ctx;
     }
     if (run.summary) {

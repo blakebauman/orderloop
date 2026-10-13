@@ -204,7 +204,8 @@ export async function riskScore(env: Env, order: Order, customer: unknown) {
       const reasons: string[] = [];
       let score = 10;
       if (!order.customerId) (score += 30), reasons.push('Unknown customer');
-      if (order.total > 20_000) (score += 30), reasons.push('High order value');
+      if ((order.baseTotal ?? order.total) > 20_000)
+        (score += 30), reasons.push('High order value');
       if (order.lines.some((l) => l.qty > 1000)) (score += 20), reasons.push('Unusual quantity');
       return { score: Math.min(score, 100), reasons };
     },
@@ -301,7 +302,7 @@ export async function route(
           route: pick('ask_customer', routes.at(-1)!),
           reason: 'No lines could be matched to our catalog.',
         };
-      if (order.total > 10_000)
+      if ((order.baseTotal ?? order.total) > 10_000)
         return {
           route: pick('needs_approval', routes[0]!),
           reason: 'Order total is above $10,000.',

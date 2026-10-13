@@ -115,5 +115,7 @@ export function orderSummary(o: Order) {
     subtotal: o.subtotal,
     tax: o.tax,
     total: o.total,
+    fxRate: o.fxRate ?? 1,
+    baseTotal: o.baseTotal ?? o.total,
   };
 }

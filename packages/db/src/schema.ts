@@ -54,6 +54,7 @@ export const orders = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
     idempotencyKey: text('idempotency_key'),
     idempotencyFingerprint: text('idempotency_fingerprint'),
+    fxRate: real('fx_rate').notNull().default(1),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),
@@ -152,6 +153,13 @@ export const nodeRuns = sqliteTable(
     index('node_runs_type').on(t.nodeType, t.endedAt),
   ],
 );
+
+/** Units of each currency per one base currency (USD), for per-order currency. */
+export const fxRates = sqliteTable('fx_rates', {
+  currency: text('currency').primaryKey(),
+  rate: real('rate').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
 
 /** The pricing chain's sources, run in `priority` order; see `resolvePrice` in core. */
 export const priceSources = sqliteTable('price_sources', {

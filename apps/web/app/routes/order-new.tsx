@@ -1,4 +1,4 @@
-import { ORDER_TYPE_LABELS, type OrderLine, type OrderType } from '@orderloop/core';
+import { BASE_CURRENCY, ORDER_TYPE_LABELS, type OrderLine, type OrderType } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
@@ -11,7 +11,7 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { humanize } from '~/lib/format';
-import { backOffice, publishedFlows } from '~/lib/orders.server';
+import { backOffice, currencies, publishedFlows } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
@@ -21,7 +21,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   await ensureSeeded();
   const [flows, office] = await Promise.all([publishedFlows(), backOffice()]);
-  return { flows, customers: office.customers, products: office.products };
+  return {
+    flows,
+    customers: office.customers,
+    products: office.products,
+    currencies: office.pricing.rates.map((r) => r.currency),
+  };
 }
 
 /** "WID-100 x 50" / "50 WID-100" / "WID-100, 50" per line. Lines without a SKU come back as errors. */
@@ -49,6 +54,9 @@ export async function action({ request }: Route.ActionArgs) {
     return {
       error: 'Pick a published flow. Flows must be published before orders can run on them.',
     };
+  const currency = String(f.get('currency') ?? '') || BASE_CURRENCY;
+  if (!(await currencies()).some((c) => c.currency === currency))
+    return { error: `There is no exchange rate for ${currency}.` };
   const simulate = String(f.get('simulate') ?? '');
   const parsed = parseLines(String(f.get('lines') ?? ''));
   if (parsed.unreadable.length)
@@ -62,7 +70,7 @@ export async function action({ request }: Route.ActionArgs) {
         type: flow.orderType as OrderType,
         title: String(f.get('title') ?? '') || undefined,
         customerId: String(f.get('customerId') ?? '') || undefined,
-        currency: 'USD',
+        currency,
         lines: parsed.lines,
         documentText: String(f.get('documentText') ?? '') || undefined,
         meta: simulate ? { simulate } : {},
@@ -77,7 +85,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function NewOrder() {
-  const { flows, customers, products } = useLoaderData<typeof loader>();
+  const { flows, customers, products, currencies: codes } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
   const nav = useNavigation();
   const [preset, setPreset] = useState(SCENARIOS[0]!);
@@ -130,13 +138,28 @@ export default function NewOrder() {
               </NativeSelect>
             </Field>
           </div>
-          <Field label="Title" hint="Optional">
-            <Input
-              name="title"
-              defaultValue={preset.input.title ?? ''}
-              placeholder="e.g. PO CT-2209"
-            />
-          </Field>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+            <Field label="Title" hint="Optional">
+              <Input
+                name="title"
+                defaultValue={preset.input.title ?? ''}
+                placeholder="e.g. PO CT-2209"
+              />
+            </Field>
+            <Field label="Currency" hint={`Prices convert from ${BASE_CURRENCY}`}>
+              <NativeSelect
+                name="currency"
+                defaultValue={preset.input.currency ?? BASE_CURRENCY}
+                className="h-9 w-full"
+              >
+                {codes.map((c) => (
+                  <NativeSelectOption key={c} value={c}>
+                    {c}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+          </div>
           <Field label="Lines" hint="One per line: SKU x qty">
             <Textarea
               name="lines"
