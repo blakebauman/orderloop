@@ -1,0 +1,147 @@
+---
+/*
+ * The home page's figure: one real order, drawn the way the web app's canvas draws it. Each step
+ * is the app's flow-node card (apps/web/app/components/flow-node.tsx): a 3px status rule, the
+ * category icon, the undo/waits tags, the label, the durable step key and the summary the node
+ * reported, with its output branches listed and the taken one marked. The cards sit on the
+ * editor's dotted sheet.
+ *
+ * The run is data, not a mock. Node labels, types, outputs and icons come from the built-in flow
+ * in @orderloop/core; statuses, branches and summaries come from src/data/sample-run.json, captured
+ * from the engine (apps/engine/tests/docs-sample-run.test.ts checks it still matches). Only the
+ * nodes the order reached are drawn; the rest were skipped, and the caption counts them.
+ */
+import {
+  type NodeStatus,
+  nodeOutputs,
+  nodeSpec,
+  ORDER_TYPE_LABELS,
+  TEMPLATES,
+} from '@orderloop/core';
+import run from '../data/sample-run.json';
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import NodeIcon from './NodeIcon.astro';
+
+type RunNode = { status: NodeStatus; summary?: string; branches?: string[] };
+
+const flow = TEMPLATES.b2b_order();
+const nodes = run.nodes as Record<string, RunNode>;
+const reached = flow.nodes.filter((n) => {
+  const s = nodes[n.id]?.status;
+  return s && s !== 'pending' && s !== 'skipped';
+});
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const skipped = flow.nodes.filter((n) => nodes[n.id]?.status === 'skipped').length;
+const waits = new Map(run.waits.map((w) => [w.nodeId, w]));
+
+const STATUS: Partial<Record<NodeStatus, { label: string; color: string }>> = {
+  succeeded: { label: 'Succeeded', color: 'var(--ol-ok)' },
+  running: { label: 'Running', color: 'var(--ol-run)' },
+  waiting: { label: 'Waiting', color: 'var(--ol-wait)' },
+  failed: { label: 'Failed', color: 'var(--ol-bad)' },
+  rolled_back: { label: 'Rolled back', color: 'var(--ol-undo)' },
+};
+const CATEGORY = {
+  trigger: 'Trigger',
+  commerce: 'Commerce',
+  control: 'Control',
+  ai: 'AI',
+} as const;
+
+const steps = reached.map((n) => {
+  const spec = nodeSpec(n.type)!;
+  const r = nodes[n.id]!;
+  const outputs = nodeOutputs(n.type, n.config);
+  return {
+    id: n.id,
+    key: `${n.id}#1`,
+    label: n.label,
+    category: spec.category,
+    categoryName: CATEGORY[spec.category],
+    icon: spec.icon,
+    tags: [spec.rollback ? 'undo' : null, spec.waits ? 'waits' : null].filter(Boolean).join(' · '),
+    status: STATUS[r.status] ?? { label: r.status, color: 'var(--ol-idle)' },
+    live: r.status === 'running' || r.status === 'waiting',
+    summary: r.summary ?? waits.get(n.id)?.title ?? '',
+    branches: outputs.length > 1 ? outputs : [],
+    taken: r.branches ?? [],
+  };
+});
+
+const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const totals = [
+  ['Subtotal', money.format(run.order.subtotal)],
+  ['Tax', money.format(run.order.tax)],
+  ['Total', money.format(run.order.total)],
+];
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const waiting = steps.find((s) => s.live);
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const orderType = ORDER_TYPE_LABELS[flow.orderType];
+---
+
+<figure class="ol-run not-content" aria-labelledby="ol-run-title">
+  <div class="ol-run-head">
+    <h2 id="ol-run-title">One {orderType}, as the engine ran it</h2>
+    {
+      waiting && (
+        <span class="ol-stamp" style={`--c: ${waiting.status.color}`}>
+          <span class="ol-stamp-dot" aria-hidden="true" />
+          Waiting on {run.waits[0]?.event}
+        </span>
+      )
+    }
+  </div>
+
+  <ol class="ol-run-sheet">
+    {
+      steps.map((s) => (
+        <li class="ol-run-node" data-live={s.live || undefined} style={`--c: ${s.status.color}`}>
+          <span class="ol-run-rule" aria-hidden="true" />
+          <div class="ol-run-meta">
+            <span class="ol-run-cat" data-cat={s.category} title={s.categoryName}>
+              <NodeIcon name={s.icon} size={14} />
+              <span class="sr-only">{s.categoryName}</span>
+            </span>
+            {s.tags && <span class="ol-run-tags">{s.tags}</span>}
+            <span class="ol-run-status">{s.status.label}</span>
+          </div>
+          <p class="ol-run-label">{s.label}</p>
+          <p class="ol-run-key">{s.key}</p>
+          {s.summary && <p class="ol-run-summary">{s.summary}</p>}
+          {s.branches.length > 0 && (
+            <ul class="ol-run-branches" aria-label="Outputs">
+              {s.branches.map((b) => (
+                <li data-taken={s.taken.includes(b) || undefined}>
+                  {b}
+                  {s.taken.includes(b) && <span class="sr-only"> (taken)</span>}
+                  <span class="ol-run-handle" aria-hidden="true" />
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+
+  <div class="ol-run-foot">
+    <dl class="ol-run-totals">
+      {
+        totals.map(([k, v]) => (
+          <div data-total={k === 'Total' || undefined}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))
+      }
+    </dl>
+    <figcaption>
+      <a href="/guides/templates/#tpl-b2b-order"><code>{flow.id}</code></a> run by the engine in
+      workerd for <code>{run.order.customerId}</code> from the dashboard's “B2B PO by email” scenario,
+      with <code>AI_MODE=mock</code> (hence “heuristic” on the extract step). {skipped} other nodes
+      were skipped: the branches this order didn't take.
+    </figcaption>
+  </div>
+</figure>

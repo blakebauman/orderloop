@@ -1,0 +1,15 @@
+---
+/*
+ * The header's right side, in the web app's top bar order: the API explorer as a text link, the
+ * app itself as the one ink button (the app's "New order" position), then Starlight's own icons.
+ * Starlight has no setting for header links, and SocialIcons is the one slot in its header's
+ * right group, so the links ride an override of it rather than a fork of Header. The right group
+ * is hidden below 50rem; the sidebar keeps "OpenAPI explorer" for small screens.
+ */
+// biome-ignore lint/correctness/noUnusedImports: rendered as <Default /> below
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+---
+
+<a class="ol-header-link" href="/api/">API explorer</a>
+<a class="ol-header-button" href="https://orderloop.io/">Open the app</a>
+<Default><slot /></Default>

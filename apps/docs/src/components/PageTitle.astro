@@ -1,0 +1,14 @@
+---
+/*
+ * The web app's page header (apps/web/app/components/page.tsx): the title in IBM Plex Serif, the
+ * one place the serif appears, with a muted line under it. Here that line is the page's
+ * `description`, which Starlight otherwise only puts in <meta>.
+ */
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const { title, description } = Astro.locals.starlightRoute.entry.data;
+---
+
+<header class="ol-page-header">
+  <h1 id="_top">{title}</h1>
+  {description && <p class="ol-lede">{description}</p>}
+</header>

@@ -1,9 +1,9 @@
 ---
 /*
- * Starlight's ThemeProvider, with Ledger's rule: light unless the reader chose dark. Starlight's
- * own provider follows the OS when nothing is stored; the web app never does (its theme switch
- * sets `data-theme`, default light), so the docs don't either. Paired with ThemeSelect.astro.
- * Inline so the first paint is already the right theme.
+ * Starlight's ThemeProvider with the web app's rule (apps/web/app/root.tsx): light unless the
+ * reader chose otherwise. The choices are the app's three: Light, Dark and Match system. They are
+ * stored as Starlight's `starlight-theme` ('light', 'dark' or 'auto'), so the OpenAPI explorer at
+ * /api/ reads the same choice. Inline, so the first paint is already the right theme.
  */
 // Biome parses only the frontmatter, so components used in the markup read as dead.
 // biome-ignore lint/correctness/noUnusedImports: rendered below
@@ -12,18 +12,29 @@ import { Icon } from '@astrojs/starlight/components';
 
 <script is:inline>
   window.StarlightThemeProvider = (() => {
-    let stored = null;
-    try {
-      stored = localStorage.getItem('starlight-theme');
-    } catch {}
-    const initial = stored === 'dark' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = initial;
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    const read = () => {
+      try {
+        const v = localStorage.getItem('starlight-theme');
+        return v === 'dark' || v === 'auto' ? v : 'light';
+      } catch {
+        return 'light';
+      }
+    };
+    const apply = (choice) => {
+      document.documentElement.dataset.theme =
+        choice === 'auto' ? (media.matches ? 'dark' : 'light') : choice;
+    };
+    apply(read());
+    media.addEventListener('change', () => read() === 'auto' && apply('auto'));
     return {
-      updatePickers(theme = initial) {
+      read,
+      apply,
+      updatePickers(choice = read()) {
         document.querySelectorAll('starlight-theme-select').forEach((picker) => {
           const select = picker.querySelector('select');
-          if (select) select.value = theme;
-          const icon = document.querySelector('#theme-icons')?.content.querySelector(`.${theme}`);
+          if (select) select.value = choice;
+          const icon = document.querySelector('#theme-icons')?.content.querySelector(`.${choice}`);
           const current = picker.querySelector('svg.label-icon');
           if (icon && current) current.replaceChildren(...icon.cloneNode(true).childNodes);
         });
@@ -35,4 +46,5 @@ import { Icon } from '@astrojs/starlight/components';
 <template id="theme-icons">
   <Icon name="sun" class="light" />
   <Icon name="moon" class="dark" />
+  <Icon name="laptop" class="auto" />
 </template>

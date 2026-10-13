@@ -2,10 +2,11 @@ import { BASE_CURRENCY, DEFAULT_INTAKE_MAILBOXES, type OrderState } from '@order
 import { Button } from '@orderloop/ui/button';
 import { Mail, RefreshCw, Zap } from 'lucide-react';
 import { Form, Link, useFetcher, useLoaderData, useNavigation } from 'react-router';
+import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { ago, count, humanize, money, orderRef } from '~/lib/format';
+import { count, humanize, money, orderRef } from '~/lib/format';
 import { backOffice, recentInboundEmails, waitingOrders } from '~/lib/orders.server';
 import type { Route } from './+types/back-office';
 
@@ -128,7 +129,7 @@ export default function BackOffice() {
                     </Link>
                   ) : null}
                   <span className="w-20 text-right text-muted-foreground text-xs">
-                    {ago(e.receivedAt)}
+                    <Ago ms={e.receivedAt} />
                   </span>
                 </li>
               ))}
