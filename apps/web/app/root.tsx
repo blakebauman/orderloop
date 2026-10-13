@@ -19,7 +19,7 @@ export const links: Route.LinksFunction = () => [
   },
 ];
 
-export const meta: Route.MetaFunction = () => [{ title: 'Order Loop' }];
+export const meta: Route.MetaFunction = () => [{ title: 'OrderLoop' }];
 
 /**
  * Resolves the stored theme choice ("light" by default, "dark", or "system") to `data-theme` before

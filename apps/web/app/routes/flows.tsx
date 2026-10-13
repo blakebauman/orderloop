@@ -21,7 +21,7 @@ import { listFlows, saveFlow } from '~/lib/flows.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/flows';
 
-export const meta = () => [{ title: 'Flows · Order Loop' }];
+export const meta = () => [{ title: 'Flows · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);

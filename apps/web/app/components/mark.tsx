@@ -1,4 +1,4 @@
-/** The Order Loop mark: an open loop with an arrowhead (an order coming back around). */
+/** The OrderLoop mark: an open loop with an arrowhead (an order coming back around). */
 export function Mark({ className }: { className?: string }) {
   return (
     <svg

@@ -15,7 +15,7 @@ import { listApprovals } from '~/lib/orders.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/approvals';
 
-export const meta = () => [{ title: 'Approvals · Order Loop' }];
+export const meta = () => [{ title: 'Approvals · OrderLoop' }];
 
 const FILTERS = ['pending', 'approved', 'rejected', 'escalated', 'all'] as const;
 

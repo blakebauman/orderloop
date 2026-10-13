@@ -13,7 +13,7 @@ import { money, orderRef, orderStatus, statusLabel, waitLabel } from '~/lib/form
 import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
 import type { Route } from './+types/orders';
 
-export const meta = () => [{ title: 'Orders · Order Loop' }];
+export const meta = () => [{ title: 'Orders · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
