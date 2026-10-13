@@ -84,6 +84,15 @@ export async function authEnabled(): Promise<boolean> {
   return !!password() || (await anyUsers());
 }
 
+/**
+ * The id of the request's session (the SHA-256 its `sessions` row is keyed by), or undefined. The
+ * agent proxy passes it on so the order page's socket can be checked against the live session.
+ */
+export async function sessionId(request: Request): Promise<string | undefined> {
+  const token = cookie(request, SESSION);
+  return token ? sha256Hex(token) : undefined;
+}
+
 /** The signed-in person (or shared-password operator) for a browser request, or null. */
 export async function principal(request: Request): Promise<Principal | null> {
   if (!(await authEnabled())) return OPEN;

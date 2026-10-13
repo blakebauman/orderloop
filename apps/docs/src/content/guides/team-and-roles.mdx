@@ -81,6 +81,20 @@ for an API token. On the order page's live connection, the agent takes the name 
 connection, never from what the page sends; see
 [OrderAgent](/internals/order-agent/#roles-on-the-socket).
 
+Changes reach pages that are already open. Each action on the order page's live connection checks
+the person's session again, so a lower role applies to the next action, and signing out, a
+password reset or being disabled ends it.
+
+## Cross-site requests
+
+Every `*.orderloop.io` host counts as the same site, so the `SameSite=Lax` cookie would still be
+sent with a form post from a sibling subdomain. The web Worker therefore refuses a browser request
+that changes something (any method but `GET`, `HEAD` and `OPTIONS`), or opens the order page's
+WebSocket, unless its `Origin` is the app's own; without `Origin` it reads `Sec-Fetch-Site`, and
+accepts only `same-origin` or `none`. The answer is `403 { "error": "Cross-site request refused" }`.
+Requests with a bearer token are exempt, since they carry no cookie, and so are clients that send
+neither header. The check is `crossOrigin` in `apps/web/app/lib/origin.ts`.
+
 ## Outside identity providers
 
 `users.external_sub` is reserved for linking an outside identity. Signing in through an OpenID

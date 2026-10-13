@@ -7,6 +7,7 @@ import {
   type OrderState,
   PRINCIPAL_HEADER,
   type Principal,
+  type ProxiedPrincipal,
   type StartOrderOnceInput,
   verifyWebhook,
   withDefaults,
@@ -22,8 +23,10 @@ import {
   products,
   publishFlow,
   reservations,
+  sessions,
   shipments,
   stockMovements,
+  users,
   webhookDeliveries,
   webhookSubscriptions,
 } from '@orderloop/db';
@@ -744,7 +747,7 @@ describe('pricing chain', () => {
 
 describe('agent socket roles', () => {
   /** Opens the order page's socket the way the web proxy does, as `principal`. */
-  const socket = async (orderId: string, principal: Principal | null) => {
+  const socket = async (orderId: string, principal: ProxiedPrincipal | null) => {
     const headers = new Headers({ Upgrade: 'websocket' });
     if (principal) headers.set(PRINCIPAL_HEADER, encodePrincipal(principal));
     const res = await worker.fetch(
@@ -769,13 +772,25 @@ describe('agent socket roles', () => {
       close: () => ws.close(),
     };
   };
-  const who = (role: Principal['role'], email: string): Principal => ({
-    kind: 'user',
-    id: `usr_${role}`,
-    name: email.split('@')[0]!,
-    email,
-    role,
-  });
+  /** A person with a live session, as the web proxy describes them. */
+  const who = async (role: Principal['role'], email: string): Promise<ProxiedPrincipal> => {
+    const id = `usr_${email.split('@')[0]}`;
+    const session = `sess_${id}`;
+    await db()
+      .insert(users)
+      .values({ id, email, name: email.split('@')[0]!, role, createdAt: Date.now() })
+      .onConflictDoUpdate({ target: users.id, set: { role, disabledAt: null } });
+    await db()
+      .insert(sessions)
+      .values({
+        tokenHash: session,
+        userId: id,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 3_600_000,
+      })
+      .onConflictDoNothing();
+    return { kind: 'user', id, name: email.split('@')[0]!, email, role, session };
+  };
 
   it('checks the caller role on the socket and records who decided', async () => {
     await introspect();
@@ -790,7 +805,7 @@ describe('agent socket roles', () => {
     });
     await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
 
-    const viewer = await socket(orderId, who('viewer', 'vee@example.com'));
+    const viewer = await socket(orderId, await who('viewer', 'vee@example.com'));
     expect(await viewer.call('decide', ['mgr', 'approved', 'boss@example.com'])).toMatchObject({
       success: false,
       error: 'This needs the Approver role.',
@@ -804,7 +819,7 @@ describe('agent socket roles', () => {
     expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
 
     // An approver decides, and the record names them, not what the page claimed.
-    const approver = await socket(orderId, who('approver', 'ann@example.com'));
+    const approver = await socket(orderId, await who('approver', 'ann@example.com'));
     expect(await approver.call('decide', ['mgr', 'approved', 'boss@example.com'])).toMatchObject({
       success: true,
     });
@@ -817,6 +832,50 @@ describe('agent socket roles', () => {
     // RPC from the web app's own routes is trusted and keeps its `by`.
     await agent(orderId).cancel('Cleanup');
     expect((await state(orderId)).status).toBe('cancelled');
+  });
+
+  it('applies role changes, disabling and sign-out to a page that is already open', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        type: 'purchase_request',
+        customerId: 'cus_internal',
+        title: 'Monitors',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+
+    // Opened as an approver, then demoted: the open page gets the new role.
+    const pat = await who('approver', 'pat@example.com');
+    const page = await socket(orderId, pat);
+    expect((await page.call('chat', ['status?'])).success).toBe(true);
+    await db().update(users).set({ role: 'viewer' }).where(eq(users.id, pat.id));
+    expect(await page.call('decide', ['mgr', 'approved'])).toMatchObject({
+      success: false,
+      error: 'This needs the Approver role.',
+    });
+    // Disabled: the session no longer counts, so even reading through the socket stops.
+    await db().update(users).set({ disabledAt: Date.now() }).where(eq(users.id, pat.id));
+    expect(await page.call('chat', ['status?'])).toMatchObject({
+      success: false,
+      error: 'Your sign-in has ended. Reload the page to sign in again.',
+    });
+    page.close();
+
+    // Signed out elsewhere (the session row is gone): refused the same way.
+    const sam = await who('operator', 'sam@example.com');
+    const other = await socket(orderId, sam);
+    await db().delete(sessions).where(eq(sessions.tokenHash, sam.session!));
+    expect((await other.call('cancel', ['nope'])).success).toBe(false);
+    other.close();
+    // A forged session id can't stand in for a real one.
+    const forged = await socket(orderId, { ...sam, session: 'made-up' });
+    expect((await forged.call('chat', ['hi'])).success).toBe(false);
+    forged.close();
+    expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
+    await agent(orderId).cancel('Cleanup');
   });
 });
 

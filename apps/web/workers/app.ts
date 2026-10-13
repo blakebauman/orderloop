@@ -1,9 +1,10 @@
 import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent } from '../app/lib/api.server';
-import { apiPrincipal, principal, Throttled } from '../app/lib/auth.server';
+import { apiPrincipal, principal, sessionId, Throttled } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { openApiDocument } from '../app/lib/openapi';
+import { crossOrigin } from '../app/lib/origin';
 
 const requestHandler = createRequestHandler(
   () => import('virtual:react-router/server-build'),
@@ -19,6 +20,12 @@ export default {
     if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
       return handleSignedEvent(request);
     }
+
+    // A browser's state-changing requests and the order page's socket must come from this origin;
+    // bearer-token calls carry no ambient cookie, so they're exempt.
+    const bearer = /^Bearer\s/i.test(request.headers.get('authorization') ?? '');
+    if (!bearer && crossOrigin(request, url.origin))
+      return Response.json({ error: 'Cross-site request refused' }, { status: 403 });
 
     // The API description is public, like any published spec.
     if (url.pathname === '/api/v1/openapi.json' && request.method === 'GET') {
@@ -44,9 +51,14 @@ export default {
     if (url.pathname.startsWith('/agents/order-agent/')) {
       const caller = await principal(request);
       if (!caller) return new Response('Unauthorized', { status: 401 });
-      // The agent checks each call against this; whatever the browser sent is replaced.
+      // The agent checks each call against this; whatever the browser sent is replaced. A
+      // person's session id lets it notice a sign-out, a disable or a role change mid-page.
       const headers = new Headers(request.headers);
-      headers.set(PRINCIPAL_HEADER, encodePrincipal(caller));
+      const session = caller.kind === 'user' ? await sessionId(request) : undefined;
+      headers.set(
+        PRINCIPAL_HEADER,
+        encodePrincipal({ ...caller, ...(session ? { session } : {}) }),
+      );
       return engine().fetch(
         new Request(
           `https://engine${url.pathname}${url.search}`,
