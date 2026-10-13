@@ -190,7 +190,7 @@ export default function OrderPage() {
             </Link>{' '}
             / {ORDER_TYPE_LABELS[order.type as OrderType]}
           </div>
-          <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold font-serif text-xl leading-tight">
+          <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
             <span className="min-w-0 truncate">
               {order.title || ORDER_TYPE_LABELS[order.type as OrderType]}{' '}
               <span className="font-mono font-normal text-base text-muted-foreground">

@@ -11,7 +11,7 @@ export default defineConfig({
   image: { service: passthroughImageService() },
   integrations: [
     starlight({
-      title: 'Order Loop',
+      title: 'OrderLoop',
       logo: {
         light: './src/assets/mark-light.svg',
         dark: './src/assets/mark-dark.svg',
@@ -51,7 +51,7 @@ export default defineConfig({
         // The web app's theme rule: light by default, then Dark or Match system.
         ThemeProvider: './src/components/ThemeProvider.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
-        // The app's page header: serif title, muted description under it.
+        // The app's page header: the title, muted description under it.
         PageTitle: './src/components/PageTitle.astro',
         // The app's top-bar links: API explorer, then "Open the app" as the one ink button.
         SocialIcons: './src/components/SocialIcons.astro',
@@ -62,7 +62,6 @@ export default defineConfig({
         '@fontsource/ibm-plex-sans/400.css',
         '@fontsource/ibm-plex-sans/500.css',
         '@fontsource/ibm-plex-sans/600.css',
-        '@fontsource/ibm-plex-serif/600.css',
         '@fontsource/ibm-plex-mono/400.css',
         '@fontsource/ibm-plex-mono/500.css',
         './src/styles/theme.css',

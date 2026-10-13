@@ -34,16 +34,17 @@ colors:
   node-border: "oklch(0.8 0.016 75)"
 typography:
   display:
-    fontFamily: "'IBM Plex Serif', ui-serif, Georgia, serif"
+    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "clamp(2.125rem, 1.4rem + 3vw, 3.5rem)"
     fontWeight: 600
     lineHeight: 1.08
-    letterSpacing: "-0.015em"
+    letterSpacing: "-0.025em"
   page-title:
-    fontFamily: "'IBM Plex Serif', ui-serif, Georgia, serif"
+    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "clamp(1.875rem, 1.35rem + 1.6vw, 2.375rem)"
     fontWeight: 600
     lineHeight: 1.15
+    letterSpacing: "-0.015em"
   section:
     fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1.375rem"
@@ -67,9 +68,10 @@ typography:
     fontSize: "0.8125rem"
     fontWeight: 400
   wordmark:
-    fontFamily: "'IBM Plex Serif', ui-serif, Georgia, serif"
+    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 600
+    letterSpacing: "-0.015em"
 rounded:
   md: "0.375rem"
   stamp: "2px"
@@ -133,15 +135,15 @@ material is the app's, and the page shows the mechanism with real data: real nod
 keys, a real run.
 
 Most of the chrome is Starlight's, recoloured and re-set from the app's tokens rather than redrawn.
-What is Order Loop's own is small: the serif page header, ruled sections, the app's top-bar
+What is Order Loop's own is small: the page header, ruled sections, the app's top-bar
 button, its node cards, status stamps, and the run figure on the home page.
 
 **Key characteristics**
 
 - Warm paper and blue-black ink; light by default, "ink night" when the reader picks Dark or Match
   system. Never dark by category.
-- IBM Plex: Serif for the page title, the hero and the wordmark only; Sans for everything else;
-  Mono for code, ids and step keys. Self-hosted.
+- IBM Plex, one family: Sans for everything, titles and the wordmark included; Mono for code,
+  ids and step keys. Self-hosted. No serif.
 - Hue only from the status ramp and the node categories, and only where there is a status or a
   node type to show.
 - One 48rem reading column; the home page widens to 72rem for the run figure.
@@ -181,15 +183,16 @@ hue lands on a Ledger one.
 
 ## Typography
 
-- **Display** (hero title): Plex Serif 600, `clamp(34px, …, 56px)`, 1.08, −0.015em, max 24ch.
-- **Page title**: Plex Serif 600, `clamp(30px, …, 38px)`. The one serif on an ordinary page, as
-  the app's `PageHeader` uses it.
+- **Display** (hero title): Plex Sans 600, `clamp(34px, …, 56px)`, 1.08, −0.025em, max 24ch.
+- **Page title**: Plex Sans 600, `clamp(30px, …, 38px)`, −0.015em, as the app's `PageHeader` sets
+  it (`tracking-title`). Size and weight carry it; there is no second face.
 - **Lede**: the page's `description` under its title, 17px muted, max 68ch.
 - **Section (h2)**: Plex Sans 600, 22px, opening on a rule. h3 17px, h4 15px.
 - **Body**: 16px, 1.7.
 - **Caption**: 12px 500 muted. Table column labels, fact labels.
 - **Code**: Plex Mono, 13px in blocks, 0.875em inline.
-- **Wordmark**: Plex Serif 600, 16px, beside the mark, as in the app's top bar.
+- **Wordmark**: "OrderLoop", one word, Plex Sans 600, 16px, −0.015em, beside the mark, never
+  wrapping.
 
 Sentence case everywhere. No uppercase labels, no letter-spaced eyebrows.
 
@@ -223,7 +226,7 @@ the docs author. Starlight's own shadows (search, link cards, pagination) are re
 
 ### Top bar
 
-The serif wordmark with the mark; search as an app input (card ground, hairline, 32px); then "API
+The wordmark with the mark; search as an app input (card ground, hairline, 32px); then "API
 explorer" as a muted text link and **Open the app** as the one ink button, the app's "New order"
 slot; GitHub; the theme select. The links ride an override of `SocialIcons`, the one slot in
 Starlight's header right group, so `Header` stays Starlight's. Below 50rem the right group hides
@@ -237,7 +240,7 @@ The app's three choices: **Light** (the default), **Dark**, **Match system**. St
 
 ### Page header
 
-`PageTitle.astro`: the serif title and, under it, the page's `description` in muted text.
+`PageTitle.astro`: the title and, under it, the page's `description` in muted text.
 Starlight otherwise only puts the description in `<meta>`.
 
 ### Sidebar
@@ -292,7 +295,7 @@ Expressive Code with GitHub light and dark-dimmed syntax on the card ground, a h
 
 ### OpenAPI explorer (`src/pages/api.astro`)
 
-Scalar under the app's top bar (48px, rule, serif wordmark with the mark), with its palette from
+Scalar under the app's top bar (48px, rule, wordmark with the mark), with its palette from
 `scalarThemeCss()` in `@orderloop/design` and the docs' faces. Its own dark-mode toggle is hidden.
 
 ### Browser surfaces
@@ -311,7 +314,7 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
   for nodes, real step keys and branch names.
 - **Do** use real data in figures, with a test or a script that keeps it real.
 - **Do** separate with 1px hairlines and tonal steps.
-- **Do** keep the serif to the page title, the hero and the wordmark.
+- **Do** set every title in Plex Sans 600 with negative tracking; don't bring back a serif.
 
 ### Don't
 

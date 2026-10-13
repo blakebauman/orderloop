@@ -31,7 +31,6 @@ describe('Ledger tokens match apps/web/app/app.css', () => {
     expect({
       sans: theme['font-sans'],
       mono: theme['font-mono'],
-      serif: theme['font-serif'],
     }).toEqual(FONTS);
   });
 

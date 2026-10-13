@@ -282,7 +282,7 @@ export default function FlowEditor() {
             <Input
               value={flow.name}
               onChange={(e) => setFlow({ ...flow, name: e.target.value })}
-              className="h-8 w-full border-transparent bg-transparent px-1 font-semibold font-serif text-lg hover:border-input sm:w-64"
+              className="h-8 w-full border-transparent bg-transparent px-1 font-semibold tracking-title text-lg hover:border-input sm:w-64"
               aria-label="Flow name"
             />
             <NativeSelect
