@@ -1,0 +1,29 @@
+{
+  "name": "@orderloop/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Order engine Worker: the OrderAgent Durable Object (one per order), the OrderLoop Workflow that interprets flow graphs, mock commerce connectors, Workers AI nodes and the EngineApi RPC entrypoint.",
+  "scripts": {
+    "dev": "wrangler dev --port 8788",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orderloop/core": "workspace:*",
+    "@orderloop/db": "workspace:*",
+    "agents": "catalog:",
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

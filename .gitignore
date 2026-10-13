@@ -1,0 +1,19 @@
+node_modules
+.wrangler
+dist
+build
+.react-router
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.log
+worker-configuration.d.ts.bak
+
+# Claude Code local state
+.claude/logs/
+.claude/worktrees/
+
+# Turborepo local cache
+.turbo/
+.DS_Store
+.secrets/

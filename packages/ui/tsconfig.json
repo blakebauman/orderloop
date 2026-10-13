@@ -1,0 +1,11 @@
+{
+  "extends": "@orderloop/typescript-config/react-app.json",
+  "compilerOptions": {
+    // Lets the shadcn CLI resolve its aliases when adding components here.
+    "paths": {
+      "@orderloop/ui": ["./src"],
+      "@orderloop/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}

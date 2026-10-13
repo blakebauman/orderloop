@@ -1,0 +1,398 @@
+/**
+ * OrderLoop: one generic Workflow that interprets a pinned flow version for one order.
+ *
+ * Determinism: the planner (`@orderloop/core` graph.ts) is pure, every node's effects come back as
+ * a memoized step result, and nodes in a batch are applied in graph order, so a replay after
+ * hibernation rebuilds exactly the same plan. Reports to the OrderAgent carry a sequence number;
+ * the agent ignores anything not newer than what it has, so replays never move the UI backwards.
+ *
+ * Steps per node: `${nodeId}#${run}` (run counts make loop iterations distinct). Waiting nodes
+ * add `:open` / `:close` steps around `step.waitForEvent`.
+ */
+
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
+import { NonRetryableError } from 'cloudflare:workflows';
+import {
+  beginNode,
+  completeLoop,
+  completeNode,
+  evaluate,
+  type FlowNode,
+  type FlowVersion,
+  initPlan,
+  interpolate,
+  nodeSpec,
+  type Order,
+  type OrderStatus,
+  type PendingWait,
+  type PlanState,
+  type RunContext,
+  readyNodes,
+  truthy,
+  withDefaults,
+} from '@orderloop/core';
+import type { Report } from './agent';
+import { loadFlowVersion } from './flows';
+import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
+
+export type OrderLoopParams = {
+  orderId: string;
+  flowId: string;
+  version: number;
+  generation: number;
+  order: Order;
+  vars: Record<string, unknown>;
+};
+
+type Outcome =
+  | { kind: 'complete'; result: NodeResult }
+  | { kind: 'loop'; next: boolean; result: NodeResult }
+  | { kind: 'end'; outcome: 'completed' | 'cancelled' | 'failed'; reason: string }
+  | { kind: 'continue' };
+
+/** Workflow event types allow only [a-zA-Z0-9_-]. */
+const eventTypeFor = (prefix: string, stepKey: string) =>
+  `${prefix}-${stepKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100);
+
+/** "goods.received" → "goods_received": where an event's payload lands in vars. */
+export const eventVar = (event: string) => event.replace(/[^a-zA-Z0-9]+/g, '_');
+
+export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
+  override async run(event: Readonly<WorkflowEvent<OrderLoopParams>>, step: WorkflowStep) {
+    const p = event.payload;
+    const agent = this.env.ORDER_AGENT.getByName(p.orderId);
+    const flow = JSON.parse(
+      await step.do('load-flow', async () => {
+        const f = await loadFlowVersion(this.env, p.flowId, p.version);
+        if (!f) throw new NonRetryableError(`Flow ${p.flowId} v${p.version} not found`);
+        return JSON.stringify(f);
+      }),
+    ) as FlowVersion;
+
+    const plan = initPlan(flow);
+    const ctx: RunContext = {
+      order: p.order,
+      nodes: {},
+      vars: { ...p.vars },
+      input: p.order.meta ?? {},
+      now: event.timestamp.getTime(),
+    };
+    let seq = 0;
+    const report = async (r: Omit<Report, 'seq' | 'generation'>, durable = false) => {
+      // Non-durable reports (plan snapshots) are sequenced; durable ones are already exactly-once.
+      const msg: Report = { ...r, generation: p.generation, ...(durable ? {} : { seq: ++seq }) };
+      try {
+        await agent.report(msg);
+      } catch (err) {
+        console.warn('report failed', err);
+      }
+    };
+    const snapshot = (status: OrderStatus, extra: Partial<Report> = {}) =>
+      report({ status, plan: clonePlan(plan), order: ctx.order, vars: ctx.vars, ...extra });
+
+    await snapshot('running');
+
+    let end: Extract<Outcome, { kind: 'end' }> | null = null;
+    while (!end) {
+      const { ready } = readyNodes(flow, plan);
+      if (!ready.length) break;
+      const nodes = ready.map((id) => flow.nodes.find((n) => n.id === id)!);
+      const keys = nodes.map((n) => beginNode(plan, n.id));
+      for (const n of nodes)
+        if (nodeSpec(n.type)?.waits || n.type === 'control.wait')
+          plan.nodes[n.id]!.status = 'waiting';
+      await snapshot(
+        nodes.some((n) => plan.nodes[n.id]!.status === 'waiting') ? 'waiting' : 'running',
+      );
+
+      const outcomes = await Promise.all(
+        nodes.map((n, i) => this.runNode(step, flow, plan, ctx, n, keys[i]!, p, report)),
+      );
+
+      // Apply in graph order so the plan is identical on replay.
+      for (const [i, out] of outcomes.entries()) {
+        const n = nodes[i]!;
+        if (out.kind === 'end') {
+          completeNode(flow, plan, n.id, []);
+          end = out;
+          continue;
+        }
+        if (out.kind === 'continue') {
+          completeNode(flow, plan, n.id, []);
+          await snapshot('running');
+          return { continuedAs: p.generation + 1 };
+        }
+        applyResult(ctx, n.id, out.result);
+        if (out.kind === 'loop') completeLoop(flow, plan, n.id, out.next);
+        else completeNode(flow, plan, n.id, out.result.branches ?? ['out']);
+      }
+      await snapshot('running');
+    }
+
+    const outcome = end?.outcome ?? 'completed';
+    const reason = end?.reason ?? '';
+    await snapshot(outcome, { reason });
+    if (outcome === 'failed') {
+      // Fails the instance; Workflows then runs every registered rollback in reverse order.
+      throw new NonRetryableError(reason || 'Order failed');
+    }
+    return { outcome, total: ctx.order.total };
+  }
+
+  private async runNode(
+    step: WorkflowStep,
+    flow: FlowVersion,
+    plan: PlanState,
+    ctx: RunContext,
+    node: FlowNode,
+    key: string,
+    p: OrderLoopParams,
+    report: (r: Omit<Report, 'seq' | 'generation'>, durable?: boolean) => Promise<void>,
+  ): Promise<Outcome> {
+    const env = this.env;
+    const agent = env.ORDER_AGENT.getByName(p.orderId);
+    const spec = nodeSpec(node.type);
+    const config = withDefaults(node.type, node.config);
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+    switch (node.type) {
+      case 'control.approval':
+      case 'control.wait_event': {
+        const approval = node.type === 'control.approval';
+        const eventType = eventTypeFor(approval ? 'approval' : 'event', key);
+        const timeout = str(config.timeout) || '7 days';
+        const wait: PendingWait = {
+          nodeId: node.id,
+          eventType,
+          kind: approval ? 'approval' : 'event',
+          title: approval
+            ? interpolate(str(config.title), ctx)
+            : `Waiting for ${str(config.event)}`,
+          event: approval ? undefined : str(config.event),
+          assignee: approval ? str(config.assignee) : undefined,
+          amount: ctx.order.total,
+          deadline: ctx.now + scaled(env, timeout),
+          since: Date.now(),
+        };
+        await step.do(`${key}:open`, async () => {
+          await agent.openWait({
+            ...wait,
+            since: Date.now(),
+            deadline: Date.now() + scaled(env, timeout),
+          });
+          return true;
+        });
+        let branch: string;
+        let payload: Record<string, unknown> = {};
+        try {
+          const ev = await step.waitForEvent<Record<string, string | number | boolean | null>>(
+            key,
+            {
+              type: eventType,
+              timeout: scaled(env, timeout),
+            },
+          );
+          payload = (ev.payload ?? {}) as Record<string, unknown>;
+          branch = approval
+            ? payload.decision === 'approved'
+              ? 'approved'
+              : 'rejected'
+            : 'received';
+        } catch {
+          branch = approval ? 'escalated' : 'timeout';
+        }
+        await step.do(`${key}:close`, async () => {
+          await agent.closeWait(eventType, branch, payload);
+          return true;
+        });
+        const result: NodeResult = {
+          branches: [branch],
+          output: { ...payload, outcome: branch },
+          summary: approval
+            ? `${branch}${payload.by ? ` by ${String(payload.by)}` : ''}`
+            : branch === 'received'
+              ? `${str(config.event)} received`
+              : 'Timed out',
+          vars: approval ? undefined : { [eventVar(str(config.event))]: payload },
+        };
+        await report(
+          {
+            node: {
+              id: node.id,
+              summary: result.summary,
+              output: result.output,
+              endedAt: Date.now(),
+            },
+          },
+          true,
+        );
+        return { kind: 'complete', result };
+      }
+
+      case 'control.wait': {
+        const until = config.until
+          ? await step.do(`${key}:until`, async () => Number(evaluate(config.until, ctx)) || 0)
+          : 0;
+        if (until > 0) await step.sleepUntil(key, until);
+        else await step.sleep(key, scaled(env, str(config.duration) || '1 day'));
+        const result: NodeResult = {
+          summary: until
+            ? `Until ${new Date(until).toISOString()}`
+            : `Waited ${str(config.duration)}`,
+        };
+        await report({ node: { id: node.id, summary: result.summary, endedAt: Date.now() } }, true);
+        return { kind: 'complete', result };
+      }
+
+      case 'control.loop': {
+        const runs = plan.nodes[node.id]!.runs;
+        const max = Number(config.maxIterations ?? 12);
+        const next = await step.do(
+          key,
+          async () => runs <= max && truthy(config.while ?? true, ctx),
+        );
+        const result: NodeResult = {
+          output: { iteration: runs, next },
+          summary: next ? `Iteration ${runs}` : `Done after ${runs - 1}`,
+        };
+        await report(
+          { node: { id: node.id, summary: result.summary, output: result.output } },
+          true,
+        );
+        return { kind: 'loop', next, result };
+      }
+
+      case 'control.end': {
+        const outcome = (str(config.outcome) || 'completed') as
+          | 'completed'
+          | 'cancelled'
+          | 'failed';
+        const reason = interpolate(str(config.reason), ctx);
+        await report(
+          { node: { id: node.id, summary: reason || outcome, endedAt: Date.now() } },
+          true,
+        );
+        return { kind: 'end', outcome, reason };
+      }
+
+      case 'control.continue_as_new': {
+        await step.do(key, async () => {
+          const generation = p.generation + 1;
+          const id = `${p.orderId}-g${generation}`;
+          const params: OrderLoopParams = { ...p, generation, order: ctx.order, vars: ctx.vars };
+          await env.ORDER_LOOP.create({ id, params });
+          await agent.continuedAs(id, generation);
+          return id;
+        });
+        return { kind: 'continue' };
+      }
+    }
+
+    const exec = EXECUTORS[node.type];
+    if (!exec) throw new NonRetryableError(`No executor for ${node.type}`);
+    const rollback = spec?.rollback ? ROLLBACKS[node.type] : undefined;
+    const retries = node.retries ?? spec?.retries ?? 3;
+    try {
+      const result = (await step.do(
+        key,
+        {
+          retries: { limit: retries, delay: '5 seconds', backoff: 'exponential' },
+          timeout: (node.timeout as `${number} seconds`) ?? '5 minutes',
+        },
+        async (sctx) => {
+          await report(
+            {
+              node: { id: node.id, startedAt: Date.now() },
+              log:
+                sctx.attempt > 1
+                  ? {
+                      at: Date.now(),
+                      nodeId: node.id,
+                      kind: 'node',
+                      message: `${node.label}: attempt ${sctx.attempt}`,
+                      key: `${key}:a${sctx.attempt}`,
+                    }
+                  : undefined,
+            },
+            true,
+          );
+          const r = await exec({ env, node, config, ctx, stepKey: key });
+          await report(
+            {
+              node: {
+                id: node.id,
+                summary: r.summary,
+                output: r.output,
+                endedAt: Date.now(),
+                error: undefined,
+              },
+              log: {
+                at: Date.now(),
+                nodeId: node.id,
+                kind: node.type.startsWith('ai.') ? 'ai' : 'node',
+                message: `${node.label}: ${r.summary ?? 'done'}`,
+                key,
+              },
+            },
+            true,
+          );
+          return JSON.parse(JSON.stringify(r)) as NodeResult & Rpc.Serializable<NodeResult>;
+        },
+        rollback
+          ? {
+              rollback: async ({ output, error }) => {
+                const message = await rollback(
+                  env,
+                  p.orderId,
+                  (output as NodeResult | undefined)?.output,
+                );
+                await agent.report({
+                  generation: p.generation,
+                  node: { id: node.id, status: 'rolled_back', summary: message },
+                  log: {
+                    at: Date.now(),
+                    nodeId: node.id,
+                    kind: 'rollback',
+                    message: `${node.label}: ${message} (${error.message})`,
+                    key: `${key}:rollback`,
+                  },
+                });
+              },
+              rollbackConfig: {
+                retries: { limit: 3, delay: '10 seconds', backoff: 'linear' },
+                timeout: '2 minutes',
+              },
+            }
+          : undefined,
+      )) as NodeResult;
+      return { kind: 'complete', result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await report(
+        {
+          node: { id: node.id, status: 'failed', error: message, endedAt: Date.now() },
+          log: {
+            at: Date.now(),
+            nodeId: node.id,
+            kind: 'node',
+            message: `${node.label} failed: ${message}`,
+            key: `${key}:failed`,
+          },
+        },
+        true,
+      );
+      await report({ status: 'failed', reason: `${node.label}: ${message}` });
+      throw err;
+    }
+  }
+}
+
+function applyResult(ctx: RunContext, nodeId: string, r: NodeResult) {
+  ctx.nodes[nodeId] = r.output ?? null;
+  if (r.order) ctx.order = { ...ctx.order, ...r.order };
+  if (r.vars) ctx.vars = { ...ctx.vars, ...r.vars };
+}
+
+function clonePlan(plan: PlanState): PlanState {
+  return { nodes: structuredClone(plan.nodes), edges: { ...plan.edges } };
+}

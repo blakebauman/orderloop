@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orderloop-web",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  "routes": [{ "pattern": "orderloop.io", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orderloop",
+      "database_id": "958e09f6-63a9-4634-ac1e-18ae3b7ce044",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+  // Same bucket as the engine: the web app serves invoices, POs and inbound documents from it.
+  "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
+  "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }]
+  // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
+  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1).
+}

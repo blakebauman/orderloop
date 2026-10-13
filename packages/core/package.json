@@ -1,0 +1,25 @@
+{
+  "name": "@orderloop/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Order Loop logic with no bindings: flow schema, node catalog, the DAG planner the Workflow interpreter drives, expressions, templates and the engine RPC contract.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "json-logic-js": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/json-logic-js": "^2.0.8",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

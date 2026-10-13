@@ -1,0 +1,4 @@
+{
+  "extends": "@orderloop/typescript-config/worker.json",
+  "include": ["src"]
+}

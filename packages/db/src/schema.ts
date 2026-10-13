@@ -1,0 +1,148 @@
+/** Must match migrations/*.sql column for column. Add a numbered migration; never edit an applied one. */
+
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+
+export const flows = sqliteTable('flows', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  orderType: text('order_type').notNull(),
+  graphJson: text('graph_json').notNull(),
+  publishedVersion: integer('published_version'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const flowVersions = sqliteTable(
+  'flow_versions',
+  {
+    flowId: text('flow_id')
+      .notNull()
+      .references(() => flows.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    flowJson: text('flow_json').notNull(),
+    publishedAt: integer('published_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.flowId, t.version] })],
+);
+
+export const orders = sqliteTable(
+  'orders',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    status: text('status').notNull(),
+    title: text('title').notNull().default(''),
+    flowId: text('flow_id').notNull(),
+    flowVersion: integer('flow_version').notNull(),
+    instanceId: text('instance_id'),
+    generation: integer('generation').notNull().default(1),
+    customerId: text('customer_id'),
+    currency: text('currency').notNull().default('USD'),
+    total: real('total').notNull().default(0),
+    waitingOn: text('waiting_on'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('orders_status').on(t.status, t.updatedAt),
+    index('orders_type').on(t.type, t.updatedAt),
+  ],
+);
+
+export const approvals = sqliteTable(
+  'approvals',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    nodeId: text('node_id').notNull(),
+    eventType: text('event_type').notNull(),
+    title: text('title').notNull(),
+    assignee: text('assignee').notNull().default(''),
+    amount: real('amount'),
+    status: text('status').notNull().default('pending'),
+    note: text('note'),
+    requestedAt: integer('requested_at').notNull(),
+    decidedAt: integer('decided_at'),
+    decidedBy: text('decided_by'),
+  },
+  (t) => [index('approvals_status').on(t.status, t.requestedAt)],
+);
+
+export const customers = sqliteTable('customers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  tier: text('tier').notNull().default('standard'),
+  creditLimit: real('credit_limit').notNull().default(0),
+  balance: real('balance').notNull().default(0),
+  terms: text('terms').notNull().default('net_30'),
+});
+
+export const products = sqliteTable('products', {
+  sku: text('sku').primaryKey(),
+  name: text('name').notNull(),
+  price: real('price').notNull(),
+  cost: real('cost').notNull(),
+  stock: integer('stock').notNull().default(0),
+  reserved: integer('reserved').notNull().default(0),
+  reorderPoint: integer('reorder_point').notNull().default(0),
+  reorderQty: integer('reorder_qty').notNull().default(0),
+  supplier: text('supplier').notNull().default(''),
+});
+
+export const contractPrices = sqliteTable(
+  'contract_prices',
+  {
+    customerId: text('customer_id').notNull(),
+    sku: text('sku').notNull(),
+    price: real('price').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.customerId, t.sku] })],
+);
+
+export const reservations = sqliteTable('reservations', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  sku: text('sku').notNull(),
+  qty: integer('qty').notNull(),
+  status: text('status').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const payments = sqliteTable('payments', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  kind: text('kind').notNull(),
+  amount: real('amount').notNull(),
+  status: text('status').notNull(),
+  ref: text('ref'),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const shipments = sqliteTable('shipments', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  carrier: text('carrier').notNull(),
+  tracking: text('tracking').notNull(),
+  status: text('status').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const documents = sqliteTable('documents', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  kind: text('kind').notNull(),
+  r2Key: text('r2_key').notNull(),
+  contentType: text('content_type').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const messages = sqliteTable('messages', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  recipient: text('recipient').notNull(),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  createdAt: integer('created_at').notNull(),
+});

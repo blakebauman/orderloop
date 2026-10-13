@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orderloop-engine",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Reachable only through the web app's service binding: no workers.dev URL, no routes.
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  "durable_objects": {
+    "bindings": [{ "name": "ORDER_AGENT", "class_name": "OrderAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OrderAgent"] }],
+  "workflows": [
+    {
+      // Interprets a pinned flow version for one order. One instance per order "generation".
+      "name": "orderloop-order",
+      "binding": "ORDER_LOOP",
+      "class_name": "OrderLoop",
+      "limits": { "steps": 10000 }
+    },
+    {
+      // Daily stock review: starts a reorder for SKUs at or below their reorder point.
+      "name": "orderloop-replenish",
+      "binding": "REPLENISH",
+      "class_name": "Replenish",
+      "schedules": ["0 6 * * *"]
+    }
+  ],
+  // Resource ids are provisioned by `wrangler deploy` on first deploy.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orderloop",
+      "database_id": "958e09f6-63a9-4634-ac1e-18ae3b7ce044",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
+  "ai": { "binding": "AI" },
+  "vars": {
+    // Text model for every structured AI call (JSON mode).
+    "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    // Optional AI Gateway id for caching, rate limits and logs. Empty = call Workers AI directly.
+    "AI_GATEWAY_ID": "",
+    // "live" calls Workers AI; "mock" uses deterministic heuristics (tests, offline dev).
+    "AI_MODE": "live",
+    // Divides every wait and timeout so demos finish in minutes ("1440": a day becomes a minute).
+    "TIME_SCALE": "1440"
+  }
+}

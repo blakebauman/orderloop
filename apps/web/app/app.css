@@ -1,0 +1,233 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@xyflow/react/dist/style.css";
+
+/* `@orderloop/ui` is consumed as raw source from outside this app's root, so Tailwind's
+   automatic content detection never sees it. */
+@source "../../../packages/ui/src";
+
+/* Ledger: a commerce back office on warm paper. Ink type, hairline rules, one deep-green accent
+   for money moving forward, and signal colours reserved for order and step status. */
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-paper: var(--paper);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+
+  /* Status signals. */
+  --color-ok: var(--ok);
+  --color-run: var(--run);
+  --color-wait: var(--wait);
+  --color-bad: var(--bad);
+  --color-undo: var(--undo);
+  --color-idle: var(--idle);
+  --color-ai: var(--ai);
+
+  /* Node categories (a small tag on each card, not a fill). */
+  --color-cat-trigger: var(--cat-trigger);
+  --color-cat-commerce: var(--cat-commerce);
+  --color-cat-control: var(--cat-control);
+  --color-cat-ai: var(--cat-ai);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.375rem;
+  --paper: oklch(0.972 0.01 85);
+  --background: var(--paper);
+  --foreground: oklch(0.22 0.012 60);
+  --ink: oklch(0.22 0.012 60);
+  --card: oklch(0.995 0.003 85);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.995 0.003 85);
+  --popover-foreground: var(--ink);
+  --primary: oklch(0.44 0.1 158);
+  --primary-foreground: oklch(0.985 0.006 120);
+  --secondary: oklch(0.935 0.012 85);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.94 0.011 85);
+  --muted-foreground: oklch(0.47 0.014 70);
+  --accent: oklch(0.93 0.03 158);
+  --accent-foreground: oklch(0.32 0.08 158);
+  --destructive: oklch(0.53 0.19 28);
+  --destructive-foreground: oklch(0.985 0 0);
+  --rule: oklch(0.86 0.014 80);
+  --border: var(--rule);
+  --input: oklch(0.82 0.016 80);
+  --ring: oklch(0.44 0.1 158);
+
+  --ok: oklch(0.5 0.12 155);
+  --run: oklch(0.5 0.13 255);
+  --wait: oklch(0.62 0.14 70);
+  --bad: oklch(0.53 0.19 28);
+  --undo: oklch(0.58 0.15 45);
+  --idle: oklch(0.66 0.012 75);
+  --ai: oklch(0.5 0.16 310);
+
+  --cat-trigger: oklch(0.5 0.12 155);
+  --cat-commerce: oklch(0.42 0.05 250);
+  --cat-control: oklch(0.55 0.12 70);
+  --cat-ai: oklch(0.5 0.16 310);
+
+  /* The flow graph sheet. */
+  --sheet: oklch(0.985 0.006 85);
+  --sheet-grid: oklch(0.87 0.012 80);
+  --node: oklch(0.998 0.002 85);
+  --node-border: oklch(0.8 0.016 75);
+  --edge: oklch(0.62 0.015 70);
+  --edge-active: var(--primary);
+  --edge-idle: oklch(0.86 0.012 80);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: oklch(0.19 0.008 70);
+    --foreground: oklch(0.93 0.01 85);
+    --ink: oklch(0.93 0.01 85);
+    --card: oklch(0.225 0.009 70);
+    --popover: oklch(0.24 0.009 70);
+    --primary: oklch(0.72 0.12 158);
+    --primary-foreground: oklch(0.2 0.03 158);
+    --secondary: oklch(0.27 0.01 70);
+    --muted: oklch(0.255 0.009 70);
+    --muted-foreground: oklch(0.7 0.012 80);
+    --accent: oklch(0.3 0.05 158);
+    --accent-foreground: oklch(0.9 0.05 158);
+    --destructive: oklch(0.68 0.17 28);
+    --rule: oklch(0.32 0.01 70);
+    --input: oklch(0.36 0.012 70);
+    --ring: oklch(0.72 0.12 158);
+
+    --ok: oklch(0.74 0.13 155);
+    --run: oklch(0.72 0.12 250);
+    --wait: oklch(0.8 0.13 75);
+    --bad: oklch(0.7 0.17 28);
+    --undo: oklch(0.74 0.14 50);
+    --idle: oklch(0.55 0.012 75);
+    --ai: oklch(0.74 0.14 310);
+
+    --cat-trigger: oklch(0.74 0.13 155);
+    --cat-commerce: oklch(0.75 0.05 250);
+    --cat-control: oklch(0.8 0.12 75);
+    --cat-ai: oklch(0.74 0.14 310);
+
+    --sheet: oklch(0.205 0.008 70);
+    --sheet-grid: oklch(0.3 0.01 70);
+    --node: oklch(0.24 0.009 70);
+    --node-border: oklch(0.38 0.012 70);
+    --edge: oklch(0.55 0.012 75);
+    --edge-idle: oklch(0.32 0.01 70);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--rule);
+  }
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "ss02";
+    @apply antialiased;
+  }
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small-caps section labels used throughout. */
+@utility eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* React Flow chrome on the Ledger sheet. */
+.react-flow {
+  --xy-background-color: var(--sheet);
+}
+.react-flow__controls {
+  box-shadow: none !important;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--card) !important;
+  border-bottom: 1px solid var(--rule) !important;
+  fill: var(--muted-foreground) !important;
+  color: var(--muted-foreground) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--muted) !important;
+}
+.react-flow__minimap {
+  background: var(--card) !important;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.react-flow__edge-textbg {
+  fill: var(--sheet) !important;
+}
+.react-flow__edge-text {
+  fill: var(--muted-foreground) !important;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+@keyframes ol-dash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.ol-edge-live path.react-flow__edge-path {
+  stroke-dasharray: 6 4;
+  animation: ol-dash 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ol-edge-live path.react-flow__edge-path {
+    animation: none;
+  }
+}

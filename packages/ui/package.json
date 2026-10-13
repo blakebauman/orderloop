@@ -1,0 +1,30 @@
+{
+  "name": "@orderloop/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared React UI primitives (shadcn/ui) for Raisin web apps.",
+  "exports": {
+    "./*": "./src/*.tsx",
+    "./lib/utils": "./src/lib/utils.ts"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "lucide-react": "catalog:",
+    "radix-ui": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwind-merge": "catalog:"
+  },
+  "devDependencies": {
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "catalog:"
+  }
+}

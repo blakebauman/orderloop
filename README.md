@@ -1,0 +1,85 @@
+# Order Loop
+
+An agent loop for commerce. Every order is a durable loop that runs from intake to its outcome: purchase requests, B2B orders, reorders and subscriptions. Each loop is defined as a flow graph you draw in React Flow, and it runs entirely on Cloudflare: Workers, Workflows, Durable Objects (the Agents SDK), Workers AI, D1 and R2.
+
+## How it works
+
+```
+browser ──► apps/web (React Router on Workers) ──RPC──► apps/engine
+              │ D1: flows + versions, orders index,        ├─ OrderAgent DO (one per order, Agents SDK):
+              │     approvals, mock back office            │    live state, waits, approvals, ops chat
+              │ flow editor, live order view, /api/v1       ├─ OrderLoop Workflow: interprets the pinned
+              └─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
+                                                            ├─ Replenish Workflow (cron schedule): daily stock review
+                                                            └─ Workers AI (extract, classify, risk, forecast, router,
+                                                               copilot, chat), R2 (POs, invoices, inbound docs)
+```
+
+- **Flows are data.** A flow is a JSON graph of catalog nodes (`packages/core/src/catalog.ts`):
+  - triggers;
+  - commerce steps (validate, price, tax, credit, reserve, authorize, invoice, ship, …);
+  - control (condition, approval, wait for event, wait, loop, continue-as-new, end);
+  - AI (extract, classify, risk score, forecast, summarize, and an LLM **router** that chooses a branch).
+
+  The editor saves drafts to D1. Publishing creates an immutable version, and each order pins the version it started on.
+- **One generic Workflow interprets every flow** (`apps/engine/src/workflow.ts`). A pure planner in `packages/core/src/graph.ts` decides what can run:
+  - **AND-join that tolerates untaken branches:** a node runs once its inputs are resolved, as long as at least one was taken.
+  - **Skip propagation:** a node whose inputs were all untaken is skipped, and so is everything downstream that depends only on it.
+  - **Loops:** loops use back-edges into a Loop node's `next` input.
+
+  The Workflow makes each node one memoized `step.do` named `${nodeId}#${run}`, so loop iterations replay deterministically.
+- **Saga rollback is native.** Reserve inventory, authorize payment and create shipment register `rollback` handlers on their step. An End node with outcome `failed` throws `NonRetryableError`, and Workflows then runs the compensations in reverse order.
+- **Humans and other systems resume orders with events.** Approval and Wait-for-event nodes call `step.waitForEvent` with a timeout; approvals escalate when it expires. The OrderAgent records every open wait and delivers decisions and business events (for example `payment.received`) to the right instance.
+- **Live UI.** The Workflow reports sequenced plan snapshots to the order's OrderAgent, which ignores stale or replayed ones, and the agent syncs its state to every open order page through `useAgent`. The same socket carries actions: approve, reject, deliver event, cancel, and chat.
+- **Long-lived subscriptions** loop over billing periods, then use **continue-as-new**: they start a fresh Workflow instance with their variables carried over, so the step history never grows without bound.
+- **Mock connectors** (`apps/engine/src/connectors.ts`) cover inventory, payments, shipping, documents and the outbox, against D1 and R2. Every write is keyed by its step and every compensation is idempotent. They are where real adapters (Stripe, a WMS, carriers, an ERP) plug in. To exercise failure paths, set `meta.simulate` to one of `out_of_stock`, `payment_decline`, `charge_fail` or `three_way_mismatch`.
+- **AI never blocks an order.** Every model call uses JSON mode with a schema, has a 20-second cap, and falls back to a deterministic heuristic. Set `AI_MODE=mock` to use the heuristics only.
+
+## Repository
+
+| Path | Role |
+|---|---|
+| `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, copilot), live order view, approvals inbox, back office, REST API. React Router on Workers |
+| `apps/engine` (`@orderloop/engine`) | OrderAgent DO, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
+| `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
+| `packages/db` (`@orderloop/db`) | D1 schema (Drizzle), migrations and seed data, flow persistence |
+| `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
+| `packages/typescript-config` | Shared tsconfig bases |
+
+## Develop
+
+```bash
+pnpm install
+pnpm db:migrate:local
+pnpm web:dev            # web + engine in one Vite session (engine runs as an auxiliary Worker)
+pnpm test               # core planner tests, engine Workflow e2e (workerd), web tests
+pnpm lint && pnpm check-types
+```
+
+Open the dashboard and run one of the scenarios. `TIME_SCALE` (default `1440`) compresses waits, so a day becomes a minute. Workers AI always calls your Cloudflare account, even in local dev; if the call fails or times out, the node uses its heuristic.
+
+## REST API
+
+When `APP_PASSWORD` is set, authenticate with `Authorization: Bearer <APP_PASSWORD>`.
+
+```
+GET  /api/v1/flows
+POST /api/v1/orders                          { "flowId": "tpl-b2b-order", "input": { "type": "b2b_order", "customerId": "cus_northwind", "lines": [{ "sku": "WID-100", "qty": 50 }] } }
+GET  /api/v1/orders?type=&status=&q=
+GET  /api/v1/orders/:id                      live state from the order's agent
+POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
+POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "by": "…", "note": "…" }
+POST /api/v1/orders/:id/cancel               { "reason": "…" }
+```
+
+## Deploy
+
+```bash
+pnpm exec wrangler login
+./scripts/provision.sh                         # D1 + R2
+pnpm --filter @orderloop/web db:migrate:remote
+pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
+pnpm deploy                                    # engine first (web binds to it), then web
+```
+
+Set `TIME_SCALE` to `"1"` in `apps/engine/wrangler.jsonc` for real-time waits. You can also set `AI_GATEWAY_ID` to route AI calls through AI Gateway.

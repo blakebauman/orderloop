@@ -1,0 +1,138 @@
+import {
+  approvals,
+  customers,
+  documents,
+  flows,
+  messages,
+  orders,
+  payments,
+  products,
+  shipments,
+} from '@orderloop/db';
+import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { db } from './env.server';
+
+export type OrderFilters = { type?: string; status?: string; q?: string };
+
+export async function listOrders(f: OrderFilters = {}, limit = 200) {
+  const where = and(
+    f.type ? eq(orders.type, f.type) : undefined,
+    f.status ? eq(orders.status, f.status) : undefined,
+    f.q
+      ? or(
+          like(orders.id, `%${f.q}%`),
+          like(orders.title, `%${f.q}%`),
+          like(orders.customerId, `%${f.q}%`),
+        )
+      : undefined,
+  );
+  return db().select().from(orders).where(where).orderBy(desc(orders.createdAt)).limit(limit);
+}
+
+export async function dashboardStats() {
+  const byStatus = await db()
+    .select({
+      status: orders.status,
+      n: sql<number>`count(*)`,
+      total: sql<number>`coalesce(sum(${orders.total}), 0)`,
+    })
+    .from(orders)
+    .groupBy(orders.status);
+  const byType = await db()
+    .select({ type: orders.type, n: sql<number>`count(*)` })
+    .from(orders)
+    .groupBy(orders.type);
+  const pending = await db()
+    .select({ n: sql<number>`count(*)` })
+    .from(approvals)
+    .where(eq(approvals.status, 'pending'))
+    .get();
+  return { byStatus, byType, pendingApprovals: pending?.n ?? 0 };
+}
+
+export async function listApprovals(status = 'pending') {
+  return db()
+    .select({
+      id: approvals.id,
+      orderId: approvals.orderId,
+      nodeId: approvals.nodeId,
+      title: approvals.title,
+      assignee: approvals.assignee,
+      amount: approvals.amount,
+      status: approvals.status,
+      note: approvals.note,
+      requestedAt: approvals.requestedAt,
+      decidedAt: approvals.decidedAt,
+      decidedBy: approvals.decidedBy,
+      orderType: orders.type,
+      orderTitle: orders.title,
+      customerId: orders.customerId,
+    })
+    .from(approvals)
+    .leftJoin(orders, eq(orders.id, approvals.orderId))
+    .where(status === 'all' ? undefined : eq(approvals.status, status))
+    .orderBy(desc(approvals.requestedAt))
+    .limit(200);
+}
+
+export async function orderRecords(orderId: string) {
+  const [docs, msgs, pays, ships] = await Promise.all([
+    db()
+      .select()
+      .from(documents)
+      .where(eq(documents.orderId, orderId))
+      .orderBy(desc(documents.createdAt)),
+    db()
+      .select()
+      .from(messages)
+      .where(eq(messages.orderId, orderId))
+      .orderBy(desc(messages.createdAt)),
+    db()
+      .select()
+      .from(payments)
+      .where(eq(payments.orderId, orderId))
+      .orderBy(desc(payments.createdAt)),
+    db()
+      .select()
+      .from(shipments)
+      .where(eq(shipments.orderId, orderId))
+      .orderBy(desc(shipments.createdAt)),
+  ]);
+  return { documents: docs, messages: msgs, payments: pays, shipments: ships };
+}
+
+export async function getOrderRow(orderId: string) {
+  return db().select().from(orders).where(eq(orders.id, orderId)).get();
+}
+
+export async function backOffice() {
+  const [cust, prods] = await Promise.all([
+    db().select().from(customers).orderBy(customers.name),
+    db().select().from(products).orderBy(products.sku),
+  ]);
+  return { customers: cust, products: prods };
+}
+
+export async function waitingOrders() {
+  return db()
+    .select()
+    .from(orders)
+    .where(
+      and(inArray(orders.status, ['waiting', 'running']), sql`${orders.waitingOn} is not null`),
+    )
+    .orderBy(desc(orders.updatedAt))
+    .limit(50);
+}
+
+export async function publishedFlows() {
+  return db()
+    .select({
+      id: flows.id,
+      name: flows.name,
+      orderType: flows.orderType,
+      version: flows.publishedVersion,
+    })
+    .from(flows)
+    .where(sql`${flows.publishedVersion} is not null`)
+    .orderBy(flows.name);
+}

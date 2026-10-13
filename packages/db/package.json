@@ -1,0 +1,22 @@
+{
+  "name": "@orderloop/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "D1 schema (Drizzle) and migrations: flows and versions, the orders index, approvals, and the mock commerce back office (customers, products, contracts, reservations, payments, shipments, documents, outbox).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
