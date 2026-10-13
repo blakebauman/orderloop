@@ -22,7 +22,7 @@ import {
   TERMINAL_ORDER_STATUSES,
   type TimelineEntry,
 } from '@orderloop/core';
-import { approvals, createDb, orders } from '@orderloop/db';
+import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
 import { Agent, type Connection, callable } from 'agents';
 import { and, eq } from 'drizzle-orm';
 import { runJson } from './ai';
@@ -161,20 +161,56 @@ export class OrderAgent extends Agent<Env, State> {
         );
       }
     }
+    let finished: { id: string; run: NodeRun } | null = null;
     if (r.node) {
       const { id, ...detail } = r.node;
       const cur = next.nodes[id] ?? { status: 'pending', runs: 0 };
-      next.nodes = { ...next.nodes, [id]: { ...cur, ...detail } };
+      const running = cur.startedAt !== undefined && cur.endedAt === undefined;
+      if (detail.startedAt !== undefined) {
+        // A retried attempt keeps the run's first start; a new run starts afresh.
+        if (running) detail.startedAt = cur.startedAt;
+        else detail.endedAt = undefined;
+      }
+      const merged = { ...cur, ...detail };
+      next.nodes = { ...next.nodes, [id]: merged };
+      // Only the first end of a running node counts, so replayed reports never add a row.
+      if (running && detail.endedAt !== undefined && detail.endedAt >= cur.startedAt!)
+        finished = { id, run: merged };
     }
     if (r.log) next.timeline = this.log(r.log, next.timeline);
     next = { ...next, updatedAt: Date.now() };
     this.setState(next);
+
+    if (finished) await this.recordRun(finished.id, finished.run);
 
     const statusChanged = next.status !== s.status;
     if (statusChanged || r.order) await this.syncIndex();
     // A failed order rolls back inside the Workflow; poll it until it settles to record the outcome.
     if (statusChanged && next.status === 'failed')
       await this.schedule(5, 'checkInstance', { attempt: 0 });
+  }
+
+  /** Writes one finished node run for the dashboard's timing; a repeat is a no-op. */
+  private async recordRun(nodeId: string, run: NodeRun) {
+    const s = this.state;
+    const type = s.flow?.nodes.find((n) => n.id === nodeId)?.type;
+    if (!s.orderId || !s.order || !type || run.startedAt === undefined || run.endedAt === undefined)
+      return;
+    await this.db()
+      .insert(nodeRuns)
+      .values({
+        orderId: s.orderId,
+        generation: s.generation,
+        nodeId,
+        run: Math.max(1, run.runs),
+        nodeType: type,
+        orderType: s.order.type,
+        status: run.status === 'failed' ? 'failed' : 'succeeded',
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        durationMs: run.endedAt - run.startedAt,
+      })
+      .onConflictDoNothing();
   }
 
   async openWait(w: PendingWait) {
@@ -195,7 +231,13 @@ export class OrderAgent extends Agent<Env, State> {
         })
         .onConflictDoNothing();
     }
+    const node = this.state.nodes[w.nodeId] ?? { status: 'pending' as const, runs: 0 };
     this.patch({
+      // A wait's run starts when it opens; this runs in the Workflow's memoized `:open` step.
+      nodes: {
+        ...this.state.nodes,
+        [w.nodeId]: { ...node, startedAt: w.since, endedAt: undefined },
+      },
       waits: [...this.state.waits, w],
       timeline: this.log({
         nodeId: w.nodeId,

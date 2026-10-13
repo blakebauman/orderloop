@@ -71,7 +71,7 @@ Workflows against local D1 and R2, from the engine's own `wrangler.jsonc`:
 | File | Covers |
 |---|---|
 | `tests/agent.test.ts` | `OrderAgent.report`: replayed snapshots ignored, timeline keys deduped, a new generation accepted; terminal statuses and rolled-back nodes kept once set |
-| `tests/orders.test.ts` | End-to-end orders on every template: B2B extraction, auto-approval, shipping and payment; credit-limit approval and decline; chat proposals that don't act; the dunning loop; out-of-stock failure and rollback; cancel releasing everything; subscription retries; reorder forecast and restock; storefront ship, capture, return and partial refund; restocking only a partial return's lines; per-order reservations and the stock ledger under retries; policy cancel; return window closing; idempotent capped refunds; `Idempotency-Key` races, half-started replays and fingerprint mismatches; outbound webhook signing, retry and give-up; `order.cancelled` and `order.failed`; address validation branching on a published test flow; the offline copilot |
+| `tests/orders.test.ts` | End-to-end orders on every template: B2B extraction, auto-approval, shipping and payment; credit-limit approval and decline; chat proposals that don't act; the dunning loop, with a timed `node_runs` row per run of each step and wait; out-of-stock failure and rollback; cancel releasing everything; subscription retries; reorder forecast and restock; storefront ship, capture, return and partial refund; restocking only a partial return's lines; per-order reservations and the stock ledger under retries; policy cancel; return window closing; idempotent capped refunds; `Idempotency-Key` races, half-started replays and fingerprint mismatches; outbound webhook signing, retry and give-up; `order.cancelled` and `order.failed`; address validation branching on a published test flow; the offline copilot |
 
 Tests drive orders through `startOrder`, then poll the agent's `snapshot()` until a predicate holds
 (`until`, `waitingOn`, `settled`), and assert on D1 rows (`payments`, `reservations`, `shipments`,
@@ -85,7 +85,7 @@ Tests drive orders through `startOrder`, then poll the agent's `snapshot()` unti
 |---|---|
 | `openapi.test.ts` | The OpenAPI document serialises, request bodies come from the zod schemas, every outbound event is listed, signed inbound events are unauthenticated; subscription URLs require https except on localhost and default to every event |
 | `proposal.test.ts` | The chat proposal card offers only the proposed decision, prefilled, sends nothing on render, and has nothing to confirm once the step stopped waiting or the order ended |
-| `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its order type; money, relative time and UTC date formatting; status-to-token mapping |
+| `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its order type; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
 ## What isn't covered
 

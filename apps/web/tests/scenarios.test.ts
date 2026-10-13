@@ -1,6 +1,6 @@
 import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { ago, dateTime, money, statusColor } from '../app/lib/format';
+import { ago, dateTime, duration, money, statusColor } from '../app/lib/format';
 import { SCENARIOS } from '../app/lib/scenarios';
 
 const templates = Object.values(TEMPLATES).map((t) => t());
@@ -33,5 +33,13 @@ describe('format', () => {
   it('maps statuses to theme tokens', () => {
     expect(statusColor('waiting')).toBe('var(--wait)');
     expect(statusColor('nonsense')).toBe('var(--idle)');
+  });
+});
+
+describe('duration', () => {
+  it('picks a unit that keeps the figure short', () => {
+    expect(
+      [12, 1_400, 45_000, 180_000, 9_000_000, 7_200_000 * 3, 4 * 86_400_000].map(duration),
+    ).toEqual(['12ms', '1s', '45s', '3m', '2.5h', '6h', '4d']);
   });
 });

@@ -4,12 +4,6 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 
 ## Next
 
-### Per-node timing and metrics
-- Record each node's duration (`startedAt` and `endedAt` are already reported to the OrderAgent).
-- Roll durations up into a D1 table: a new migration.
-- Add dashboard tiles: completion rate by order type, p95 duration per node type, revenue per period, refund rate.
-- The rollup can run on the Replenish Workflow's daily cron, or on a second schedule on the same binding.
-
 ### Roles instead of a single `APP_PASSWORD`
 Add `viewer`, `approver` and `operator` roles, so the approvals `by` field is a real identity and only approvers can decide. API tokens get a role as well. This keeps the web app's current session cookie, and `apps/web/app/lib/auth.server.ts` gains a principal with a role.
 

@@ -26,6 +26,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0005_idempotency_fingerprint.sql` | `orders.idempotency_fingerprint`: a replayed key must carry the same request |
 | `0006_stock_movements.sql` | `stock_movements`, the inventory ledger |
 | `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
+| `0008_node_runs.sql` | `node_runs`, per-node timing for the dashboard |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -80,6 +81,18 @@ writes embeds its step key.
 
 `reservations`, `stock_movements`, `payments`, `shipments`, `documents` and `messages` are each indexed by
 `order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
+
+## Metrics
+
+| Table | Purpose |
+|---|---|
+| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `order_type`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` |
+
+The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at
+request time: completion rate by order type from `orders` (completed over finished, by
+`created_at`), p50 and p95 duration per node type from `node_runs` (nearest rank, with window
+functions), revenue per day from completed `orders`, and refund rate from `payments` (succeeded
+`refund` over succeeded `capture` and `charge`).
 
 ## Webhooks
 

@@ -4,12 +4,14 @@ import { Form, Link, redirect, useLoaderData, useNavigation } from 'react-router
 import { Ago } from '~/components/ago';
 import { DecisionContext } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
+import { Performance } from '~/components/performance';
 import { StatusBadge } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { humanize, money, orderRef, orderStatus, STATUS_COLOR, waitLabel } from '~/lib/format';
+import { performance } from '~/lib/metrics.server';
 import {
   customerNames,
   dashboardStats,
@@ -26,13 +28,14 @@ export const meta = () => [{ title: 'Overview · Order Loop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   await ensureSeeded();
-  const [stats, recent, approvals, waiting, names, declinedSet] = await Promise.all([
+  const [stats, recent, approvals, waiting, names, declinedSet, perf] = await Promise.all([
     dashboardStats(),
     listOrders({ sort: 'updated' }, 10),
     listApprovals('pending'),
     waitingOrders(),
     customerNames(),
     declinedOrderIds(),
+    performance(),
   ]);
   const declined = [...declinedSet];
   const top = approvals.slice(0, 5);
@@ -57,6 +60,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   return {
     stats,
+    perf,
     recent,
     names,
     declined,
@@ -77,7 +81,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Dashboard() {
-  const { stats, recent, names, declined, decisions, moreDecisions, lanes } =
+  const { stats, perf, recent, names, declined, decisions, moreDecisions, lanes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
   const count = (s: string[]) =>
@@ -316,6 +320,8 @@ export default function Dashboard() {
             </details>
           </aside>
         </div>
+
+        <Performance p={perf} />
       </div>
     </>
   );
