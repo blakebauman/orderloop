@@ -217,6 +217,15 @@
 /* React Flow chrome on the Ledger sheet. */
 .react-flow {
   --xy-background-color: var(--sheet);
+  --xy-controls-box-shadow: none;
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--muted);
+  --xy-controls-button-border-color: var(--rule);
+  --xy-controls-button-color: var(--muted-foreground);
+  --xy-controls-button-color-hover: var(--muted-foreground);
+  --xy-minimap-background-color: var(--card);
+  --xy-edge-label-background-color: var(--sheet);
+  --xy-edge-label-color: var(--muted-foreground);
 }
 .react-flow .react-flow__attribution {
   background: transparent;
@@ -225,30 +234,15 @@
   color: var(--muted-foreground);
 }
 .react-flow__controls {
-  box-shadow: none !important;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   overflow: hidden;
 }
-.react-flow__controls-button {
-  background: var(--card) !important;
-  border-bottom: 1px solid var(--rule) !important;
-  fill: var(--muted-foreground) !important;
-  color: var(--muted-foreground) !important;
-}
-.react-flow__controls-button:hover {
-  background: var(--muted) !important;
-}
 .react-flow__minimap {
-  background: var(--card) !important;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
 }
-.react-flow__edge-textbg {
-  fill: var(--sheet) !important;
-}
 .react-flow__edge-text {
-  fill: var(--muted-foreground) !important;
   font-size: 11px;
   font-family: var(--font-mono);
 }

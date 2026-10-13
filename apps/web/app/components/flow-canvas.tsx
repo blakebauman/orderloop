@@ -241,7 +241,7 @@ function Inner({
   );
   // Fit when the graph first appears and whenever its shape changes (template load, copilot).
   const topo = topologyKey(graph);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refit on topology only
+  // Refit on topology only.
   useEffect(() => {
     const t = window.setTimeout(() => frame(), 30);
     return () => window.clearTimeout(t);

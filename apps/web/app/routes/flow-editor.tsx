@@ -128,7 +128,7 @@ export default function FlowEditor() {
   );
 
   // Handle save / publish / test results.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: react to new results only
+  // React to new results only.
   useEffect(() => {
     const d = save.data;
     if (!d || save.state !== 'idle') return;

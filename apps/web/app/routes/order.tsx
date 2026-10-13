@@ -808,7 +808,7 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
 function Chat({ state, busy, call }: { state: OrderState; busy: string | null; call: Call }) {
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when messages arrive
+  // Scroll when messages arrive.
   useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [state.chat.length]);
   const send = async () => {
     const t = text.trim();
