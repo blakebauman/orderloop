@@ -56,6 +56,12 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    # The Cloudflare API sometimes fails a request outright (codes 7403, 10013) and succeeds on
+    # the next try. Each step below is idempotent, so `retry` runs it up to three times; without
+    # it a blip between the engine and web steps leaves production running mismatched Workers.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
         if: env.CLOUDFLARE_API_TOKEN != ''
@@ -68,20 +74,35 @@ jobs:
           cache: pnpm
       - if: env.CLOUDFLARE_API_TOKEN != ''
         run: pnpm install --frozen-lockfile
+      - name: Install retry helper
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/retry" <<'SH'
+          #!/usr/bin/env bash
+          for attempt in 1 2 3; do
+            "$@" && exit 0
+            echo "::warning::attempt $attempt failed: $*"
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+          done
+          exit 1
+          SH
+          chmod +x "$HOME/.local/bin/retry"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Migrate D1
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: pnpm --filter @orderloop/web db:migrate:remote
+        run: retry pnpm --filter @orderloop/web db:migrate:remote
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: pnpm --filter @orderloop/engine run deploy
+        run: retry pnpm --filter @orderloop/engine run deploy
       - name: Deploy web
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: pnpm --filter @orderloop/web run deploy
+        run: retry pnpm --filter @orderloop/web run deploy
       - name: Smoke test
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: curl -fsS https://orderloop.io/health
+        run: curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health
       # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
       - name: Deploy docs
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: pnpm docs:deploy
+        run: retry pnpm docs:deploy

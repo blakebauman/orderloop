@@ -127,7 +127,7 @@ pnpm docs:deploy     # build and deploy the orderloop-docs Worker
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs lint, type-check, build and tests on every push and PR. On `main` it then migrates D1 and deploys the engine and the web app. It only deploys when the repository has `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets; without them the deploy job does nothing.
+`.github/workflows/ci.yml` runs lint, type-check, build and tests on every push and PR. Production deploys from CI: on `main` it migrates D1, then deploys the engine, the web app and the docs, retrying each step on transient Cloudflare API errors. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
 
 ## Deploy
 

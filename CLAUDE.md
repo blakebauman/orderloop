@@ -19,6 +19,7 @@ pnpm sync:theme                         # regenerate the docs theme from package
 ## Rules
 
 - Never use a trailing "z" in endpoint names (`/health`, not `/healthz`).
+- Production deploys from CI: merging to `main` runs `.github/workflows/ci.yml` (migrate D1, engine, web, docs). Don't deploy or run remote migrations by hand; if the deploy job fails, re-run its failed jobs.
 - `packages/core` has no bindings and no Cloudflare imports. Anything that needs `env` belongs in an app.
 - Planner semantics (readiness, skips, loops) live only in `packages/core/src/graph.ts` and are unit tested there. The Workflow adds durability; it must not re-implement scheduling.
 - Workflow determinism: every effect happens inside a `step.do`, and anything that touches time or a model also goes in a step. Nodes are applied in graph order after each batch. Step names are `${nodeId}#${run}`; never rename them in a way that would change a published flow's names.
