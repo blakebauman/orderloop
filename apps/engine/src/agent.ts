@@ -27,12 +27,14 @@ import {
   type ProxiedPrincipal,
   ROLE_LABELS,
   type Role,
+  SESSION_IDLE_MS,
+  SESSION_TOUCH_MS,
   TERMINAL_ORDER_STATUSES,
   type TimelineEntry,
 } from '@orderloop/core';
 import { approvals, createDb, nodeRuns, orders, sessions, users } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { runJson } from './ai';
 import { compensateOrder } from './connectors';
 import { emit, orderSummary } from './outbox';
@@ -385,19 +387,30 @@ export class OrderAgent extends Agent<Env, State> {
     const { session, ...principal } = p;
     if (p.kind !== 'user') return principal;
     if (!session) return null;
+    const now = Date.now();
+    const seen = sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`;
     const row = await this.db()
-      .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+      .select({ id: users.id, email: users.email, name: users.name, role: users.role, seen })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(
         and(
           eq(sessions.tokenHash, session),
-          gt(sessions.expiresAt, Date.now()),
+          gt(sessions.expiresAt, now),
+          gt(seen, now - SESSION_IDLE_MS),
           isNull(users.disabledAt),
         ),
       )
       .get();
-    return row && isRole(row.role) ? { kind: 'user', ...row, role: row.role } : null;
+    if (!row || !isRole(row.role)) return null;
+    // Working on an order page counts as activity, so it keeps the session from going idle.
+    if (now - row.seen > SESSION_TOUCH_MS)
+      await this.db()
+        .update(sessions)
+        .set({ lastSeenAt: now })
+        .where(eq(sessions.tokenHash, session));
+    const { seen: _seen, ...person } = row;
+    return { kind: 'user', ...person, role: row.role };
   }
 
   /** Approve or reject the approval a node is waiting on. */

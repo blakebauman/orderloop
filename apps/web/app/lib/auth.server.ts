@@ -14,7 +14,15 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { atLeast, type Principal, ROLE_LABELS, type Role } from '@orderloop/core';
+import {
+  atLeast,
+  type Principal,
+  ROLE_LABELS,
+  type Role,
+  SESSION_IDLE_MS,
+  SESSION_MAX_MS,
+  SESSION_TOUCH_MS,
+} from '@orderloop/core';
 import { apiTokens, authFailures, sessions, users } from '@orderloop/db';
 import { and, count, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { data, redirect } from 'react-router';
@@ -34,7 +42,6 @@ import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './thr
 const SESSION = '__Host-ol_session';
 /** The shared-password cookie: an HMAC of APP_PASSWORD. */
 const SHARED = 'ol_session';
-const SESSION_DAYS = 30;
 const TOKEN_TOUCH_MS = 5 * 60_000;
 const EXPIRED_AUDIT_MS = 60 * 60_000;
 
@@ -100,19 +107,37 @@ export async function principal(request: Request): Promise<Principal | null> {
   if (!(await authEnabled())) return OPEN;
   const token = cookie(request, SESSION);
   if (token) {
+    const now = Date.now();
+    const hash = await sha256Hex(token);
     const row = await db()
-      .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+      .select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        role: users.role,
+        seen: sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`,
+      })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(
         and(
-          eq(sessions.tokenHash, await sha256Hex(token)),
-          gt(sessions.expiresAt, Date.now()),
+          eq(sessions.tokenHash, hash),
+          gt(sessions.expiresAt, now),
+          // Idle too long: the session has ended even though its cookie hasn't.
+          gt(sql`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`, now - SESSION_IDLE_MS),
           isNull(users.disabledAt),
         ),
       )
       .get();
-    if (row) return { kind: 'user', ...row, role: row.role as Role };
+    if (row) {
+      const { seen, ...person } = row;
+      if (now - seen > SESSION_TOUCH_MS)
+        await db()
+          .update(sessions)
+          .set({ lastSeenAt: now, ip: clientIp(request) })
+          .where(eq(sessions.tokenHash, hash));
+      return { kind: 'user', ...person, role: person.role as Role };
+    }
   }
   const pw = password();
   const shared = cookie(request, SHARED);
@@ -226,7 +251,7 @@ export async function requireUser(request: Request, min: Role = 'viewer'): Promi
 }
 
 const sessionCookie = (token: string) =>
-  `${SESSION}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`;
+  `${SESSION}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_MS / 1000}`;
 
 // Compared against when the email is unknown, so a miss costs the same PBKDF2 work as a hit.
 let decoy: Promise<string> | null = null;
@@ -248,7 +273,7 @@ export async function signIn(
     await audit(request, 'auth.sign_in_throttled', { target });
     throw new Throttled(wait);
   }
-  const r = await checkCredentials(email, given);
+  const r = await checkCredentials(request, email, given);
   if ('reason' in r) {
     await recordFailure(keys);
     // The audit log says why; the person signing in only hears that it didn't match.
@@ -262,6 +287,7 @@ export async function signIn(
 }
 
 async function checkCredentials(
+  request: Request,
   email: string,
   given: string,
 ): Promise<{ cookie: string; principal: Principal } | { reason: string }> {
@@ -286,7 +312,7 @@ async function checkCredentials(
   if (!ok) return { reason: 'wrong password' };
   if (user.disabledAt) return { reason: 'disabled' };
   return {
-    cookie: await startSession(user.id),
+    cookie: await startSession(request, user.id),
     principal: {
       kind: 'user',
       id: user.id,
@@ -298,7 +324,7 @@ async function checkCredentials(
 }
 
 /** Creates a session for a user and returns the cookie to set. */
-export async function startSession(userId: string): Promise<string> {
+export async function startSession(request: Request, userId: string): Promise<string> {
   const token = randomToken();
   const now = Date.now();
   await db()
@@ -307,7 +333,10 @@ export async function startSession(userId: string): Promise<string> {
       tokenHash: await sha256Hex(token),
       userId,
       createdAt: now,
-      expiresAt: now + SESSION_DAYS * 86_400_000,
+      expiresAt: now + SESSION_MAX_MS,
+      lastSeenAt: now,
+      ip: clientIp(request),
+      userAgent: request.headers.get('user-agent')?.slice(0, 300) ?? null,
     });
   await db().update(users).set({ lastLoginAt: now }).where(eq(users.id, userId));
   return sessionCookie(token);

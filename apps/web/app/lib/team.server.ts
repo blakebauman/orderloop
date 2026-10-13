@@ -4,9 +4,9 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { isRole, newId, type Principal, type Role } from '@orderloop/core';
+import { isRole, newId, type Principal, type Role, SESSION_IDLE_MS } from '@orderloop/core';
 import { apiTokens, sessions, users } from '@orderloop/db';
-import { and, desc, eq, isNull, ne } from 'drizzle-orm';
+import { and, count, desc, eq, gt, isNull, like, ne } from 'drizzle-orm';
 import { audit } from './audit.server';
 import { actor, forgetUserCount } from './auth.server';
 import {
@@ -19,6 +19,7 @@ import {
   verifyPassword,
 } from './credentials';
 import { db } from './env.server';
+import { describeAgent, sessionRef } from './sessions';
 import { expiresAtFor, isTokenLifetime } from './tokens';
 
 export class TeamError extends Error {}
@@ -261,4 +262,73 @@ export async function changeOwnPassword(
     .set({ passwordHash: await hashPassword(next) })
     .where(eq(users.id, by.id));
   await audit(request, 'auth.password_changed', { actor: by, target: user.email });
+}
+
+/** The signed-in person's live sessions, newest activity first; `current` marks this browser. */
+export async function ownSessions(by: Principal, currentHash: string | undefined) {
+  if (by.kind !== 'user') return [];
+  const now = Date.now();
+  const rows = await db()
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.userId, by.id), gt(sessions.expiresAt, now)))
+    .all();
+  return rows
+    .map((r) => ({
+      ref: sessionRef(r.tokenHash),
+      current: r.tokenHash === currentHash,
+      device: describeAgent(r.userAgent),
+      ip: r.ip,
+      createdAt: r.createdAt,
+      lastSeenAt: r.lastSeenAt ?? r.createdAt,
+    }))
+    .filter((r) => now - r.lastSeenAt < SESSION_IDLE_MS)
+    .sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt - a.lastSeenAt);
+}
+
+/** Signs out one of the person's own sessions, by its reference; never the current one. */
+export async function endOwnSession(
+  request: Request,
+  by: Principal,
+  ref: string,
+  currentHash: string | undefined,
+) {
+  if (by.kind !== 'user' || !/^[0-9a-f]{16}$/.test(ref))
+    throw new TeamError('That session is no longer active.');
+  if (currentHash && sessionRef(currentHash) === ref)
+    throw new TeamError('Use Sign out to end this session.');
+  const row = await db()
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.userId, by.id), like(sessions.tokenHash, `${ref}%`)))
+    .get();
+  if (!row) throw new TeamError('That session is no longer active.');
+  await db().delete(sessions).where(eq(sessions.tokenHash, row.tokenHash));
+  await audit(request, 'auth.session_ended', {
+    actor: by,
+    target: by.email,
+    detail: { device: describeAgent(row.userAgent), ip: row.ip },
+  });
+}
+
+/** Signs out every session of the person's except this one. */
+export async function endOtherSessions(
+  request: Request,
+  by: Principal,
+  currentHash: string | undefined,
+) {
+  if (by.kind !== 'user') return 0;
+  const others = and(
+    eq(sessions.userId, by.id),
+    currentHash ? ne(sessions.tokenHash, currentHash) : undefined,
+  );
+  const n = (await db().select({ n: count() }).from(sessions).where(others).get())?.n ?? 0;
+  await db().delete(sessions).where(others);
+  if (n)
+    await audit(request, 'auth.other_sessions_ended', {
+      actor: by,
+      target: by.email,
+      detail: { count: n },
+    });
+  return n;
 }

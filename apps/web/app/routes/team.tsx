@@ -44,7 +44,7 @@ export async function action({ request }: Route.ActionArgs) {
         name: str('name'),
         password: str('password'),
       });
-      return redirect('/team', { headers: { 'set-cookie': await startSession(id) } });
+      return redirect('/team', { headers: { 'set-cookie': await startSession(request, id) } });
     }
     switch (str('intent')) {
       case 'add-user': {

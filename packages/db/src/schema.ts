@@ -343,6 +343,10 @@ export const sessions = sqliteTable(
       .references(() => users.id),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
+    /** Last request on this session (updated at most every few minutes); null means `created_at`. */
+    lastSeenAt: integer('last_seen_at'),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
   },
   (t) => [index('sessions_user').on(t.userId)],
 );

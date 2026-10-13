@@ -42,8 +42,19 @@ Passwords must be 10 to 256 characters, not a common password and not contain th
 They are stored as PBKDF2-SHA256 (100,000 iterations, the Workers limit) as
 `pbkdf2:<iterations>:<salt>:<hash>`.
 
-Sessions last 30 days in a `__Host-ol_session` cookie that holds a random token; D1 stores only
-its SHA-256. Signing out deletes the session.
+A session is a `__Host-ol_session` cookie holding a random token; D1 stores only its SHA-256. It
+ends 30 days after sign-in, or after 7 days without use, whichever comes first
+(`SESSION_MAX_MS` and `SESSION_IDLE_MS` in `packages/core/src/roles.ts`). Pages and the order page's
+live connection both count as use, recorded at most every 5 minutes. Signing out deletes the
+session.
+
+### Your sessions
+
+The **Account** page lists where you're signed in: each session's browser and system, address,
+sign-in time and last activity, with this browser marked. **Sign out** ends one other session;
+**Sign out everywhere else** ends all but this one. Changing your password also signs you out
+everywhere else. An operator's **Reset password** or **Disable** on the Team page ends all of a
+person's sessions.
 
 ### Failed sign-ins
 
@@ -85,7 +96,7 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many) |
 | Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
@@ -104,7 +115,7 @@ connection, never from what the page sends; see
 
 Changes reach pages that are already open. Each action on the order page's live connection checks
 the person's session again, so a lower role applies to the next action, and signing out, a
-password reset or being disabled ends it.
+password reset, being disabled or the session going idle ends it.
 
 ## Cross-site requests
 
