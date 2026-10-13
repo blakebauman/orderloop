@@ -124,6 +124,21 @@ export const reservations = sqliteTable('reservations', {
   createdAt: integer('created_at').notNull(),
 });
 
+/** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
+export const stockMovements = sqliteTable(
+  'stock_movements',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    sku: text('sku').notNull(),
+    kind: text('kind').notNull(),
+    qty: real('qty').notNull(),
+    applied: integer('applied', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('stock_movements_order').on(t.orderId)],
+);
+
 export const payments = sqliteTable('payments', {
   id: text('id').primaryKey(),
   orderId: text('order_id').notNull(),

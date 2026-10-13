@@ -15,13 +15,14 @@ import {
   products,
   reservations,
   shipments,
+  stockMovements,
   webhookDeliveries,
   webhookSubscriptions,
 } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic } from '../src/ai';
-import { refund, reserveInventory } from '../src/connectors';
+import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { startOrder, startOrderOnce } from '../src/orders';
 
@@ -439,25 +440,27 @@ describe('storefront order', () => {
 });
 
 describe('inventory', () => {
+  const product = async (sku: string) =>
+    (await db().select().from(products).where(eq(products.sku, sku)).get())!;
+  const order = (id: string, lines: OrderInput['lines']) => ({
+    ...input({ type: 'storefront_order', customerId: 'cus_ada' }),
+    id,
+    createdAt: Date.now(),
+    subtotal: 0,
+    tax: 0,
+    total: 0,
+    lines,
+  });
+  const two = [
+    { sku: 'GSK-010', qty: 2 },
+    { sku: 'GSK-010', qty: 3 },
+  ];
+
   it('keeps reservations per order and line, and holds stock once per step', async () => {
-    const product = async () =>
-      (await db().select().from(products).where(eq(products.sku, 'GSK-010')).get())!;
-    const before = (await product()).reserved;
-    const order = (id: string) => ({
-      ...input({ type: 'storefront_order', customerId: 'cus_ada' }),
-      id,
-      createdAt: Date.now(),
-      subtotal: 0,
-      tax: 0,
-      total: 0,
-      lines: [
-        { sku: 'GSK-010', qty: 2 },
-        { sku: 'GSK-010', qty: 3 },
-      ],
-    });
+    const before = (await product('GSK-010')).reserved;
     // Two orders run the same flow, so their reserve steps share a step key.
-    await reserveInventory(env, order('ord_inv_a'), 'reserve#1');
-    await reserveInventory(env, order('ord_inv_b'), 'reserve#1');
+    await reserveInventory(env, order('ord_inv_a', two), 'reserve#1');
+    await reserveInventory(env, order('ord_inv_b', two), 'reserve#1');
     const held = await db().select().from(reservations).where(eq(reservations.sku, 'GSK-010'));
     const mine = held.filter((r) => r.orderId === 'ord_inv_a' || r.orderId === 'ord_inv_b');
     expect(mine.map((r) => [r.orderId, r.qty]).sort()).toEqual([
@@ -466,10 +469,53 @@ describe('inventory', () => {
       ['ord_inv_b', 2],
       ['ord_inv_b', 3],
     ]);
-    expect((await product()).reserved).toBe(before + 10);
-    // A retried step holds nothing more.
-    await reserveInventory(env, order('ord_inv_a'), 'reserve#1');
-    expect((await product()).reserved).toBe(before + 10);
+    expect((await product('GSK-010')).reserved).toBe(before + 10);
+    // A retried step holds nothing more, and a later run (a loop) keeps the first hold.
+    await reserveInventory(env, order('ord_inv_a', two), 'reserve#1');
+    await reserveInventory(env, order('ord_inv_a', two), 'reserve#2');
+    expect((await product('GSK-010')).reserved).toBe(before + 10);
+  });
+
+  it('finishes a reserve step that died after holding some lines', async () => {
+    const before = (await product('GSK-010')).reserved;
+    await reserveInventory(env, order('ord_inv_c', two), 'reserve#1');
+    // Each line is one atomic batch, so a crash leaves a line wholly held or not at all: undo
+    // the second line as if the step had died before it.
+    const [, second] = await db()
+      .select()
+      .from(reservations)
+      .where(eq(reservations.orderId, 'ord_inv_c'))
+      .orderBy(reservations.id);
+    await db().delete(reservations).where(eq(reservations.id, second!.id));
+    await db().delete(stockMovements).where(eq(stockMovements.id, second!.id));
+    await db()
+      .update(products)
+      .set({ reserved: before + 2 })
+      .where(eq(products.sku, 'GSK-010'));
+
+    const r = await reserveInventory(env, order('ord_inv_c', two), 'reserve#1');
+    expect(r.short).toEqual([]);
+    expect(r.reservationIds).toHaveLength(2);
+    expect((await product('GSK-010')).reserved).toBe(before + 5);
+  });
+
+  it('restocks once per step and line', async () => {
+    const before = (await product('MON-27')).stock;
+    const lines = [{ sku: 'MON-27', qty: 1 }];
+    await restock(env, 'ord_inv_d', 'restock#1', lines);
+    await restock(env, 'ord_inv_d', 'restock#1', lines);
+    expect((await product('MON-27')).stock).toBe(before + 1);
+    // A second return on another step is a separate movement.
+    await restock(env, 'ord_inv_d', 'restock#2', lines);
+    expect((await product('MON-27')).stock).toBe(before + 2);
+    const moves = await db()
+      .select()
+      .from(stockMovements)
+      .where(eq(stockMovements.orderId, 'ord_inv_d'));
+    expect(moves.map((m) => [m.kind, m.qty, m.applied])).toEqual([
+      ['restock', 1, true],
+      ['restock', 1, true],
+    ]);
   });
 });
 
