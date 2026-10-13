@@ -1,7 +1,13 @@
 import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent } from '../app/lib/api.server';
-import { apiPrincipal, principal, sessionId, Throttled } from '../app/lib/auth.server';
+import {
+  apiPrincipal,
+  principal,
+  sessionId,
+  Throttled,
+  TokenExpired,
+} from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
@@ -37,6 +43,8 @@ export default {
       try {
         caller = await apiPrincipal(request);
       } catch (err) {
+        if (err instanceof TokenExpired)
+          return Response.json({ error: err.message }, { status: 401 });
         if (!(err instanceof Throttled)) throw err;
         return Response.json(
           { error: err.message },

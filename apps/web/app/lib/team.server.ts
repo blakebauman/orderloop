@@ -19,6 +19,7 @@ import {
   verifyPassword,
 } from './credentials';
 import { db } from './env.server';
+import { expiresAtFor, isTokenLifetime } from './tokens';
 
 export class TeamError extends Error {}
 
@@ -46,6 +47,7 @@ export async function listTeam() {
         createdAt: apiTokens.createdAt,
         lastUsedAt: apiTokens.lastUsedAt,
         revokedAt: apiTokens.revokedAt,
+        expiresAt: apiTokens.expiresAt,
       })
       .from(apiTokens)
       .orderBy(desc(apiTokens.createdAt)),
@@ -197,9 +199,11 @@ export async function setDisabled(request: Request, by: Principal, id: string, d
 export async function createToken(
   request: Request,
   by: Principal,
-  input: { name: string; role: unknown },
+  input: { name: string; role: unknown; lifetime: unknown },
 ) {
   const name = input.name.trim();
+  if (!isTokenLifetime(input.lifetime)) throw new TeamError('Pick how long the token lasts.');
+  const expiresAt = expiresAtFor(input.lifetime, Date.now());
   if (!name) throw new TeamError('Name the token after what will use it, e.g. “ERP sync”.');
   const t = await newApiToken();
   const r = role(input.role);
@@ -213,13 +217,14 @@ export async function createToken(
       role: r,
       createdBy: actor(by),
       createdAt: Date.now(),
+      expiresAt,
     });
   await audit(request, 'token.created', {
     actor: by,
     target: name,
-    detail: { role: r, prefix: t.prefix },
+    detail: { role: r, prefix: t.prefix, expiresAt },
   });
-  return { name, token: t.token };
+  return { name, token: t.token, expiresAt };
 }
 
 export async function revokeToken(request: Request, by: Principal, id: string) {

@@ -360,6 +360,8 @@ export const apiTokens = sqliteTable(
     createdAt: integer('created_at').notNull(),
     lastUsedAt: integer('last_used_at'),
     revokedAt: integer('revoked_at'),
+    /** When the token stops working; null never expires. */
+    expiresAt: integer('expires_at'),
   },
   (t) => [uniqueIndex('api_tokens_hash').on(t.tokenHash)],
 );

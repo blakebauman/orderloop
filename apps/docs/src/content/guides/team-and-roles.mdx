@@ -68,9 +68,12 @@ Systems that call the [REST API](/reference/rest-api/) use a token:
 curl https://orderloop.io/api/v1/orders -H "Authorization: Bearer ol_live_…"
 ```
 
-Create one on the Team page with a name (what will use it) and a role. The token is shown once and
-stored only as a SHA-256; the list shows its first 12 characters, who created it and when it was
-last used. Revoke it there. A token's role limits it like a person's: an `approver` token can
+Create one on the Team page with a name (what will use it), a role and how long it lasts: 30 days,
+90 days (the default), 1 year or never. The token is shown once and stored only as a SHA-256; the
+list shows its first 12 characters, who created it, when it was last used and when it expires,
+highlighting tokens that expire within 14 days. Revoke it there. An expired token gets `401` with
+`This API token expired on <date>…`; create a new one and switch the integration over before the
+old one runs out. Tokens made before expiry existed never expire. A token's role limits it like a person's: an `approver` token can
 decide approvals but not start orders. Approval decisions made with a token are recorded as
 `token:<name>`.
 
@@ -84,8 +87,8 @@ Each event records when, who acted, what they acted on, details and the address:
 |---|---|
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` |
 | Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled` |
-| API tokens | `token.created` (role and prefix), `token.revoked` |
-| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password |
+| API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
+| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
 A person signing in only hears that the email and password didn't match; the reason is for
 operators. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
