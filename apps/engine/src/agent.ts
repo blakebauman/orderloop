@@ -16,6 +16,7 @@ import {
   type Order,
   type OrderState,
   type OrderStatus,
+  type OutboundEvent,
   type PendingWait,
   type PlanNode,
   TERMINAL_ORDER_STATUSES,
@@ -26,6 +27,7 @@ import { Agent, type Connection, callable } from 'agents';
 import { and, eq } from 'drizzle-orm';
 import { runJson } from './ai';
 import { compensateOrder } from './connectors';
+import { emit, orderSummary } from './outbox';
 
 export type Report = {
   /** Plan snapshots are sequenced per generation; stale ones are dropped. */
@@ -43,6 +45,8 @@ export type Report = {
 type State = OrderState & { seq: number };
 
 const TIMELINE_CAP = 400;
+// Matches the Workflow's emit step: 5 retries with exponential backoff from 10 seconds.
+const WEBHOOK_RETRIES = 5;
 
 export class OrderAgent extends Agent<Env, State> {
   override initialState: State = { ...EMPTY_ORDER_STATE, seq: 0 };
@@ -335,7 +339,39 @@ export class OrderAgent extends Agent<Env, State> {
       }),
     });
     await this.syncIndex();
+    // Cancelling terminates the Workflow, so no End node announces it; the agent does.
+    await this.schedule(0, 'emitWebhook', {
+      key: 'cancel',
+      event: 'order.cancelled',
+      data: {
+        order: this.state.order ? orderSummary(this.state.order) : null,
+        outcome: 'cancelled',
+        reason,
+      },
+      attempt: 0,
+    });
     return { ok: true };
+  }
+
+  /**
+   * Delivers an outbound webhook from the agent, for endings the Workflow doesn't see. Retries on
+   * the agent's own schedule with the same backoff as `emitStep`, then leaves the row `failed`.
+   */
+  async emitWebhook(p: {
+    key: string;
+    event: OutboundEvent;
+    data: Record<string, unknown>;
+    attempt: number;
+  }) {
+    if (!this.state.orderId) return;
+    let pending = 1;
+    try {
+      ({ pending } = await emit(this.env, p.key, this.state.orderId, p.event, p.data));
+    } catch (err) {
+      console.warn('webhook emit', p.event, err);
+    }
+    if (pending && p.attempt < WEBHOOK_RETRIES)
+      await this.schedule(10 * 2 ** p.attempt, 'emitWebhook', { ...p, attempt: p.attempt + 1 });
   }
 
   /** Ops chat: the model answers from the order state and may act through tools. */

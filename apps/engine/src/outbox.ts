@@ -8,6 +8,7 @@
 import {
   DELIVERY_HEADER,
   EVENT_HEADER,
+  type Order,
   type OutboundEvent,
   type OutboundPayload,
   SIGNATURE_HEADER,
@@ -102,4 +103,17 @@ function parseEvents(json: string): string[] {
   } catch {
     return [];
   }
+}
+
+export function orderSummary(o: Order) {
+  return {
+    id: o.id,
+    type: o.type,
+    title: o.title ?? null,
+    customerId: o.customerId ?? null,
+    currency: o.currency,
+    subtotal: o.subtotal,
+    tax: o.tax,
+    total: o.total,
+  };
 }

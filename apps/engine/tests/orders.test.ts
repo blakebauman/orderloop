@@ -505,6 +505,76 @@ describe('outbound webhooks', () => {
     expect(row).toMatchObject({ event: 'order.completed', status: 'failed', responseStatus: 503 });
     expect(row!.attempts).toBe(6);
   });
+
+  const capture = () => {
+    const received: { event: string; orderId: string; data: Record<string, unknown> }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      received.push(JSON.parse(String(init?.body)));
+      return new Response('ok');
+    });
+    return received;
+  };
+
+  it('announces an order cancelled from the UI or API', async () => {
+    const received = capture();
+    await subscribe('all', ['*']);
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        type: 'purchase_request',
+        customerId: 'cus_internal',
+        title: 'Laptops',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+    await agent(orderId).cancel('Duplicate request');
+
+    const cancelled = await until(
+      async () => received.find((r) => r.orderId === orderId && r.event === 'order.cancelled'),
+      'order.cancelled delivery',
+    );
+    expect(cancelled.data).toMatchObject({
+      outcome: 'cancelled',
+      reason: 'Duplicate request',
+      order: { id: orderId, type: 'purchase_request' },
+    });
+    // A repeat cancel is a no-op and sends nothing more.
+    await agent(orderId).cancel('again');
+    const rows = await db()
+      .select()
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.orderId, orderId));
+    expect(rows.map((r) => [r.event, r.status])).toEqual([['order.cancelled', 'delivered']]);
+  });
+
+  it('announces an order that fails because a node threw', async () => {
+    const received = capture();
+    await subscribe('failures', ['order.failed']);
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-b2b-order',
+      input: input({
+        type: 'b2b_order',
+        customerId: 'cus_northwind',
+        lines: [{ sku: 'NOPE-404', qty: 1 }],
+      }),
+    });
+    await waitingOn(orderId, (s) => s.status === 'failed', 'failure');
+
+    const failed = await until(async () => {
+      const mine = received.filter((r) => r.orderId === orderId);
+      return mine.length ? mine : false;
+    }, 'order.failed delivery');
+    expect(failed.map((r) => r.event)).toEqual(['order.failed']);
+    expect(failed[0]!.data).toMatchObject({
+      outcome: 'failed',
+      order: { id: orderId },
+      node: { id: 'validate', type: 'commerce.validate' },
+    });
+    expect(String(failed[0]!.data.reason)).toContain('Unknown SKUs: NOPE-404');
+  });
 });
 
 describe('copilot (offline)', () => {
