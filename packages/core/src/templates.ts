@@ -149,7 +149,9 @@ export function b2bOrderFlow(): Flow {
       timeout: '3 days',
     })
     .n('approval', 'control.approval', 'Sales approval', {
-      title: 'Approve B2B order {{order.id}} for {{order.customerId}}',
+      // No customer in the title: the approvals inbox shows it beside each row, and an order from an
+      // unknown sender has none to show.
+      title: 'Approve B2B order {{order.id}}',
       assignee: 'sales_ops',
       timeout: '1 day',
     })

@@ -1,6 +1,6 @@
 import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { ago, dateTime, duration, money, statusColor } from '../app/lib/format';
+import { ago, dateTime, duration, money, statusColor, waitLabel } from '../app/lib/format';
 import { SCENARIOS } from '../app/lib/scenarios';
 
 const templates = Object.values(TEMPLATES).map((t) => t());
@@ -18,6 +18,18 @@ describe('demo scenarios', () => {
 });
 
 describe('format', () => {
+  it('names a wait without engine ids, or a customer that interpolated to nothing', () => {
+    expect(waitLabel('Approve B2B order ord_mv6r5qrzvb6sbz for cus_contoso')).toBe(
+      'Approve B2B order',
+    );
+    // Flows published before the B2B template dropped the customer, for an unknown sender.
+    expect(waitLabel('Approve B2B order ord_mv6r5qrzvb6sbz for ')).toBe('Approve B2B order');
+    expect(waitLabel('Approve B2B order ord_mv6r5qrzvb6sbz')).toBe('Approve B2B order');
+    expect(waitLabel('Waiting for payment.received · Approve B2B order ord_x1 for ')).toBe(
+      'payment.received · Approve B2B order',
+    );
+  });
+
   it('formats money and relative time', () => {
     expect(money(1163.69)).toBe('$1,163.69');
     expect(ago(Date.now() - 90_000)).toBe('2m ago');
