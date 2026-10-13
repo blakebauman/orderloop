@@ -537,8 +537,9 @@ export default function FlowEditor() {
                   the selected node, and a node’s Connections list wires its outputs.
                 </p>
                 <p>
-                  Branches are the labelled outputs on each node. To repeat steps, use a <b>Loop</b>{' '}
-                  and connect the end of its body to the amber <b>next</b> input.
+                  Branches are the labelled outputs on each node. To repeat steps, use a{' '}
+                  <b className="font-semibold">Loop</b> and connect the end of its body to the amber{' '}
+                  <b className="font-semibold">next</b> input.
                 </p>
                 <p>
                   Publishing snapshots a new version. Running orders keep the version they started

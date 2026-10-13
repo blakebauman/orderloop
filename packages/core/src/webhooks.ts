@@ -81,6 +81,7 @@ export const OUTBOUND_EVENTS = [
   'order.shipped',
   'order.refunded',
   'order.completed',
+  'order.declined',
   'order.cancelled',
   'order.failed',
 ] as const;

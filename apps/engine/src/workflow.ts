@@ -50,7 +50,7 @@ export type OrderLoopParams = {
 type Outcome =
   | { kind: 'complete'; result: NodeResult }
   | { kind: 'loop'; next: boolean; result: NodeResult }
-  | { kind: 'end'; outcome: 'completed' | 'cancelled' | 'failed'; reason: string }
+  | { kind: 'end'; outcome: 'completed' | 'declined' | 'cancelled' | 'failed'; reason: string }
   | { kind: 'continue' };
 
 /** Workflow event types allow only [a-zA-Z0-9_-]. */
@@ -268,6 +268,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       case 'control.end': {
         const outcome = (str(config.outcome) || 'completed') as
           | 'completed'
+          | 'declined'
           | 'cancelled'
           | 'failed';
         const reason = interpolate(str(config.reason), ctx);

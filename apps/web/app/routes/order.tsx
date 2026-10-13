@@ -5,6 +5,7 @@
  */
 
 import {
+  type ChatProposal,
   ORDER_TYPE_LABELS,
   type OrderState,
   type OrderType,
@@ -329,7 +330,7 @@ export default function OrderPage() {
             </div>
             {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
             {tab === 'details' ? <Details state={state} records={records} /> : null}
-            {tab === 'chat' ? <Chat state={state} busy={busy} call={call} /> : null}
+            {tab === 'chat' ? <Chat state={state} busy={busy} call={call} by={by} /> : null}
             {tab === 'node' ? (
               node ? (
                 <Inspector node={node} run={state.nodes[node.id]} />
@@ -846,11 +847,24 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
   );
 }
 
-function Chat({ state, busy, call }: { state: OrderState; busy: string | null; call: Call }) {
+function Chat({
+  state,
+  busy,
+  call,
+  by,
+}: {
+  state: OrderState;
+  busy: string | null;
+  call: Call;
+  by: string;
+}) {
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
-  // Scroll when messages arrive.
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [state.chat.length]);
+  // Scroll when messages arrive. Block body: scrollIntoView now returns a Promise in Chrome, and
+  // React would call a returned value as the effect's cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'end' });
+  }, [state.chat.length]);
   const send = async () => {
     const t = text.trim();
     if (!t) return;
@@ -893,6 +907,9 @@ function Chat({ state, busy, call }: { state: OrderState; busy: string | null; c
                   ))}
                 </ul>
               ) : null}
+              {m.proposal ? (
+                <Proposal p={m.proposal} state={state} busy={busy} call={call} by={by} />
+              ) : null}
             </div>
           </div>
         ))}
@@ -917,6 +934,74 @@ function Chat({ state, busy, call }: { state: OrderState; busy: string | null; c
           <Send />
         </Button>
       </form>
+    </div>
+  );
+}
+
+/**
+ * An action the chat agent prepared. Nothing happens until a person confirms it here, and a
+ * decision still gets the usual undo window.
+ */
+function Proposal({
+  p,
+  state,
+  busy,
+  call,
+  by,
+}: {
+  p: ChatProposal;
+  state: OrderState;
+  busy: string | null;
+  call: Call;
+  by: string;
+}) {
+  const [done, setDone] = useState<null | 'sent' | 'dismissed'>(null);
+  const note = (text: string) => <p className="mt-2 text-muted-foreground text-xs">{text}</p>;
+  if (done === 'dismissed') return note('Dismissed. Nothing was sent.');
+  if (done === 'sent') return note('Sent.');
+  const dismiss = (
+    <Button type="button" size="sm" variant="ghost" onClick={() => setDone('dismissed')}>
+      Dismiss
+    </Button>
+  );
+  if (p.kind === 'decide') {
+    const open = state.waits.some((w) => w.kind === 'approval' && w.nodeId === p.nodeId);
+    if (!open) return note('That step is no longer waiting, so there is nothing to confirm.');
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-card p-2">
+        <DecisionControls
+          compact
+          only={p.decision}
+          defaultNote={p.note ?? ''}
+          busy={busy === 'decide'}
+          disabled={!!busy}
+          onDecide={(decision, n) => {
+            setDone('sent');
+            void call('decide', 'decide', [p.nodeId, decision, `${by} via chat`, n || undefined]);
+          }}
+          onFlush={(decision, n) => sendDecision(state.orderId!, p.nodeId, decision, n)}
+        />
+        {dismiss}
+      </div>
+    );
+  }
+  if (TERMINAL_ORDER_STATUSES.includes(state.status))
+    return note('The order has already finished, so there is nothing to cancel.');
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-card p-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="destructive"
+        disabled={!!busy}
+        onClick={() => {
+          setDone('sent');
+          void call('cancel', 'cancel', [p.reason]);
+        }}
+      >
+        Cancel order
+      </Button>
+      {dismiss}
     </div>
   );
 }

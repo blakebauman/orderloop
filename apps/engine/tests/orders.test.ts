@@ -1,6 +1,6 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
+import { type ChatMessage, type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
 import {
   approvals,
   createDb,
@@ -51,7 +51,7 @@ const waitingOn = (id: string, pred: (s: OrderState) => boolean, what: string, m
 const settled = (id: string) =>
   waitingOn(
     id,
-    (s) => ['completed', 'cancelled', 'failed', 'rolled_back'].includes(s.status),
+    (s) => ['completed', 'declined', 'cancelled', 'failed', 'rolled_back'].includes(s.status),
     'a terminal status',
   );
 
@@ -144,10 +144,36 @@ describe('B2B order', () => {
 
     await agent(orderId).decide('approval', 'rejected', 'dana', 'Over limit');
     const done = await settled(orderId);
-    expect(done.status).toBe('cancelled');
+    expect(done.status).toBe('declined');
     expect(done.nodes.reserve!.status).toBe('skipped');
     const decided = await db().select().from(approvals).where(eq(approvals.orderId, orderId)).get();
     expect(decided).toMatchObject({ status: 'rejected', decidedBy: 'dana', note: 'Over limit' });
+  });
+
+  it('prepares chat approvals and cancels for a person to confirm, without acting', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-b2b-order',
+      input: input({
+        type: 'b2b_order',
+        customerId: 'cus_contoso',
+        lines: [{ sku: 'WID-200', qty: 100 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.kind === 'approval'), 'approval');
+
+    // The DO stub types chat() loosely; the agent returns the assistant's ChatMessage.
+    const approve = (await agent(orderId).chat('approve it')) as ChatMessage;
+    expect(approve.proposal).toEqual({ kind: 'decide', nodeId: 'approval', decision: 'approved' });
+    const cancel = (await agent(orderId).chat('cancel this order')) as ChatMessage;
+    expect(cancel.proposal).toMatchObject({ kind: 'cancel' });
+
+    // Nothing was decided or cancelled: the order still waits on the same approval.
+    const s = await state(orderId);
+    expect(s.status).toBe('waiting');
+    expect(s.waits.map((w) => w.nodeId)).toEqual(['approval']);
+    const pending = await db().select().from(approvals).where(eq(approvals.orderId, orderId));
+    expect(pending).toMatchObject([{ status: 'pending' }]);
   });
 
   it('runs the dunning loop three times, then sends the invoice to collections', async () => {
@@ -316,7 +342,7 @@ describe('storefront order', () => {
       }),
     });
     const done = await settled(orderId);
-    expect(done.status).toBe('cancelled');
+    expect(done.status).toBe('declined');
     expect(done.reason).toBe('Failed store policy');
     expect(done.vars.policyFailures).toEqual([
       'More than 10 of GSK-010',

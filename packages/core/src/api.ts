@@ -35,7 +35,16 @@ export type ChatMessage = {
   at: number;
   /** Tools the assistant called while answering. */
   tools?: { name: string; args: unknown; result: unknown }[];
+  /**
+   * An action the assistant prepared but did not take. Decisions and cancellations from chat are
+   * confirmed by a person on the order page, with the same undo window as any other decision.
+   */
+  proposal?: ChatProposal;
 };
+
+export type ChatProposal =
+  | { kind: 'decide'; nodeId: string; decision: 'approved' | 'rejected'; note?: string }
+  | { kind: 'cancel'; reason: string };
 
 /** The OrderAgent's synced state: everything the order page renders. */
 export type OrderState = {
