@@ -3,6 +3,7 @@ export * from './catalog';
 export * from './graph';
 export * from './layout';
 export * from './logic';
+export * from './policy';
 export * from './templates';
 export * from './types';
 

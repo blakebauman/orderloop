@@ -1,10 +1,21 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import type { OrderInput, OrderState } from '@orderloop/core';
-import { approvals, createDb, orders, payments, reservations, shipments } from '@orderloop/db';
+import { type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
+import {
+  approvals,
+  createDb,
+  orders,
+  payments,
+  products,
+  reservations,
+  shipments,
+  webhookDeliveries,
+  webhookSubscriptions,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic } from '../src/ai';
+import { refund } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
 
@@ -246,6 +257,227 @@ describe('reorder', () => {
     await waitingOn(orderId, (x) => x.waits.some((w) => w.event === 'goods.received'), 'receipt');
     await agent(orderId).deliver('goods.received');
     expect((await settled(orderId)).status).toBe('completed');
+  });
+});
+
+describe('storefront order', () => {
+  const stock = async (sku: string) =>
+    (await db().select().from(products).where(eq(products.sku, sku)).get())!.stock;
+
+  it('ships and captures, then restocks and partially refunds a return', async () => {
+    await introspect();
+    const before = await stock('MON-27');
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'MON-27', qty: 2 }],
+      }),
+    });
+    await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    expect(await stock('MON-27')).toBe(before - 2);
+
+    await agent(orderId).deliver('return.requested', { amount: 100, reason: 'Damaged box' });
+    const labelled = await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.received'),
+      'return received wait',
+    );
+    expect(labelled.vars.returnTracking).toMatch(/^UPSR\d{9}$/);
+
+    await agent(orderId).deliver('return.received');
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.reason).toBe('Returned');
+    expect(done.vars.refunded).toBe(100);
+    expect(done.nodes.review!.status).toBe('skipped');
+    expect(await stock('MON-27')).toBe(before);
+
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    expect(pays.filter((p) => p.kind === 'refund').map((p) => p.amount)).toEqual([100]);
+    const rma = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect(rma.map((r) => r.status).sort()).toEqual(['label_created', 'return_label']);
+  });
+
+  it('cancels before authorizing when the store policy fails', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 12 }],
+        meta: { shipTo: 'PO Box 42, Springfield' },
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('cancelled');
+    expect(done.reason).toBe('Failed store policy');
+    expect(done.vars.policyFailures).toEqual([
+      'More than 10 of GSK-010',
+      'Cannot ship to a PO box',
+    ]);
+    expect(done.nodes.authorize!.status).toBe('skipped');
+    expect(await db().select().from(payments).where(eq(payments.orderId, orderId))).toEqual([]);
+  });
+
+  it('completes without a refund when the return window closes', async () => {
+    await introspect(['window#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 3 }],
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.done!.status).toBe('succeeded');
+    expect(done.nodes.refund!.status).toBe('skipped');
+  });
+
+  it('refunds idempotently per step and never more than was captured', async () => {
+    await introspect(['window#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 4 }],
+      }),
+    });
+    const s = await settled(orderId);
+    const order = s.order!;
+    const first = await refund(env, order, 'manual#1', 10);
+    expect(first).toMatchObject({ amount: 10, status: 'succeeded' });
+    // A retried step returns the refund it already made.
+    expect(await refund(env, order, 'manual#1', 10)).toMatchObject({ amount: 10 });
+    const rest = await refund(env, order, 'manual#2');
+    expect(rest.amount).toBe(Math.round((order.total - 10) * 100) / 100);
+    expect(await refund(env, order, 'manual#3')).toMatchObject({ status: 'failed', amount: 0 });
+    const refunds = (
+      await db().select().from(payments).where(eq(payments.orderId, orderId))
+    ).filter((p) => p.kind === 'refund');
+    expect(refunds).toHaveLength(2);
+  });
+});
+
+describe('idempotency', () => {
+  it('returns the same order for a repeated key, even when requests race', async () => {
+    await introspect(['window#1']);
+    const req = {
+      flowId: 'tpl-storefront-order',
+      idempotencyKey: 'checkout-7f3a',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+      }),
+    };
+    const [a, b] = await Promise.all([startOrder(env, req), startOrder(env, req)]);
+    expect(a.orderId).toBe(b.orderId);
+    expect([a.replayed, b.replayed].filter(Boolean)).toHaveLength(1);
+    expect(await startOrder(env, req)).toEqual({ orderId: a.orderId, replayed: true });
+    const rows = await db().select().from(orders).where(eq(orders.idempotencyKey, 'checkout-7f3a'));
+    expect(rows).toHaveLength(1);
+    expect((await settled(a.orderId)).status).toBe('completed');
+    // A different key is a different order.
+    const c = await startOrder(env, { ...req, idempotencyKey: 'checkout-8b1c' });
+    expect(c.orderId).not.toBe(a.orderId);
+    await settled(c.orderId);
+  });
+});
+
+describe('outbound webhooks', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db().delete(webhookSubscriptions);
+  });
+
+  const subscribe = (id: string, events: string[]) =>
+    db()
+      .insert(webhookSubscriptions)
+      .values({
+        id,
+        url: `https://hooks.example/${id}`,
+        secret: `whsec_${id}`,
+        events: JSON.stringify(events),
+        createdAt: Date.now(),
+      });
+
+  it('signs and delivers the events each subscription asked for', async () => {
+    const received: { url: string; body: string; headers: Headers }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      received.push({
+        url: String(url),
+        body: String(init?.body),
+        headers: new Headers(init?.headers),
+      });
+      return new Response('ok');
+    });
+    await subscribe('all', ['*']);
+    await subscribe('ship', ['order.shipped']);
+    await introspect(['window#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+      }),
+    });
+    expect((await settled(orderId)).status).toBe('completed');
+
+    const mine = received.filter((r) => JSON.parse(r.body).orderId === orderId);
+    const events = (id: string) =>
+      mine.filter((r) => r.url.endsWith(`/${id}`)).map((r) => JSON.parse(r.body).event);
+    expect(events('all')).toEqual(['order.shipped', 'order.paid', 'order.completed']);
+    expect(events('ship')).toEqual(['order.shipped']);
+
+    for (const r of mine) {
+      const id = r.url.split('/').pop()!;
+      expect(
+        await verifyWebhook(`whsec_${id}`, r.body, r.headers.get('x-orderloop-signature')),
+      ).toEqual({ ok: true });
+      expect(r.headers.get('x-orderloop-delivery')).toBe(JSON.parse(r.body).id);
+    }
+    const shipped = JSON.parse(mine.find((r) => r.url.endsWith('/ship'))!.body);
+    expect(shipped.data.node.output.tracking).toMatch(/^UPS/);
+    const rows = await db()
+      .select()
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.orderId, orderId));
+    expect(rows).toHaveLength(4);
+    expect(rows.every((r) => r.status === 'delivered' && r.attempts === 1)).toBe(true);
+  });
+
+  it('retries a failing endpoint, then gives up without failing the order', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response('no', { status: 503 }),
+    );
+    await subscribe('down', ['order.completed']);
+    await introspect(['window#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+      }),
+    });
+    expect((await settled(orderId)).status).toBe('completed');
+    const [row] = await db()
+      .select()
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.orderId, orderId));
+    expect(row).toMatchObject({ event: 'order.completed', status: 'failed', responseStatus: 503 });
+    expect(row!.attempts).toBe(6);
   });
 });
 

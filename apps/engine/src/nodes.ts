@@ -11,11 +11,13 @@ import { NonRetryableError } from 'cloudflare:workflows';
 import {
   durationMs,
   evaluate,
+  evaluatePolicy,
   type FlowNode,
   interpolate,
   money,
   type Order,
   type OrderLine,
+  policyRulesSchema,
   type RunContext,
   stringList,
   truthy,
@@ -128,6 +130,19 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
+  'commerce.policy': async ({ ctx, config }) => {
+    const rules = policyRulesSchema.safeParse(config.rules);
+    if (!rules.success)
+      throw new NonRetryableError(`Invalid policy rules: ${rules.error.issues[0]?.message}`);
+    const r = evaluatePolicy(rules.data, ctx.order, ctx.now);
+    return {
+      branches: [r.pass ? 'pass' : 'fail'],
+      output: r,
+      vars: { policyFailures: r.failures },
+      summary: r.pass ? `${rules.data.length} rules passed` : r.failures.join('; '),
+    };
+  },
+
   'commerce.credit_check': async ({ env, ctx }) => {
     const c = await cx.getCustomer(env, ctx.order.customerId);
     if (!c)
@@ -193,6 +208,22 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
+  'commerce.refund': async ({ env, ctx, config, stepKey }) => {
+    const expr = config.amount;
+    const value = expr === undefined || expr === null || expr === '' ? null : evaluate(expr, ctx);
+    const requested = value === null || value === undefined ? undefined : Number(value);
+    if (requested !== undefined && !(requested >= 0))
+      throw new NonRetryableError(`Refund amount is not a number: ${JSON.stringify(value)}`);
+    const r = await cx.refund(env, ctx.order, stepKey, requested);
+    const ok = r.status === 'succeeded';
+    return {
+      branches: [ok ? 'ok' : 'failed'],
+      output: { ...r, reason: interpolate(str(config.reason), ctx) },
+      vars: ok ? { refunded: r.amount } : undefined,
+      summary: ok ? `Refunded ${r.amount.toFixed(2)}` : 'Nothing to refund',
+    };
+  },
+
   'commerce.invoice': async ({ env, ctx, config, stepKey }) => {
     const terms = str(config.terms, 'net_30');
     const days = { due_on_receipt: 0, net_15: 15, net_30: 30, net_60: 60 }[terms] ?? 30;
@@ -234,6 +265,15 @@ export const EXECUTORS: Record<string, Exec> = {
       output: r,
       vars: { tracking: r.tracking },
       summary: `${r.carrier.toUpperCase()} ${r.tracking}`,
+    };
+  },
+
+  'commerce.return_label': async ({ env, ctx, config, stepKey }) => {
+    const r = await cx.createReturnLabel(env, ctx.order, stepKey, str(config.carrier, 'ups'));
+    return {
+      output: r,
+      vars: { returnTracking: r.tracking },
+      summary: `Return ${r.carrier.toUpperCase()} ${r.tracking}`,
     };
   },
 

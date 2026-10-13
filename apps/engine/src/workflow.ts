@@ -21,9 +21,11 @@ import {
   type FlowVersion,
   initPlan,
   interpolate,
+  NODE_EVENTS,
   nodeSpec,
   type Order,
   type OrderStatus,
+  type OutboundEvent,
   type PendingWait,
   type PlanState,
   type RunContext,
@@ -34,6 +36,7 @@ import {
 import type { Report } from './agent';
 import { loadFlowVersion } from './flows';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
+import { emit } from './outbox';
 
 export type OrderLoopParams = {
   orderId: string;
@@ -272,6 +275,11 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
           { node: { id: node.id, summary: reason || outcome, endedAt: Date.now() } },
           true,
         );
+        await emitStep(step, env, key, p.orderId, `order.${outcome}`, {
+          order: orderSummary(ctx.order),
+          outcome,
+          reason,
+        });
         return { kind: 'end', outcome, reason };
       }
 
@@ -365,6 +373,13 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
             }
           : undefined,
       )) as NodeResult;
+      const emits = NODE_EVENTS[node.type];
+      if (emits && (!emits.branch || (result.branches ?? ['out']).includes(emits.branch))) {
+        await emitStep(step, env, key, p.orderId, emits.event, {
+          order: orderSummary({ ...ctx.order, ...result.order }),
+          node: { id: node.id, type: node.type, output: result.output ?? null },
+        });
+      }
       return { kind: 'complete', result };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -385,6 +400,47 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       throw err;
     }
   }
+}
+
+/**
+ * Delivers an outbound webhook in its own step (`${key}:emit`). The step throws while deliveries
+ * are pending so Workflows retries it with backoff; once retries run out the error is swallowed,
+ * because a subscriber being down must never fail the order. Undelivered rows stay `failed`.
+ */
+async function emitStep(
+  step: WorkflowStep,
+  env: Env,
+  key: string,
+  orderId: string,
+  event: OutboundEvent,
+  data: Record<string, unknown>,
+) {
+  try {
+    await step.do(
+      `${key}:emit`,
+      { retries: { limit: 5, delay: '10 seconds', backoff: 'exponential' }, timeout: '1 minute' },
+      async () => {
+        const r = await emit(env, key, orderId, event, data);
+        if (r.pending) throw new Error(`${r.pending} ${event} deliveries pending`);
+        return r;
+      },
+    );
+  } catch (err) {
+    console.warn('webhook delivery gave up', event, err);
+  }
+}
+
+function orderSummary(o: Order) {
+  return {
+    id: o.id,
+    type: o.type,
+    title: o.title ?? null,
+    customerId: o.customerId ?? null,
+    currency: o.currency,
+    subtotal: o.subtotal,
+    tax: o.tax,
+    total: o.total,
+  };
 }
 
 function applyResult(ctx: RunContext, nodeId: string, r: NodeResult) {

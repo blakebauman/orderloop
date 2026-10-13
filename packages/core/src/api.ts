@@ -82,7 +82,11 @@ export type StartOrderInput = {
   version?: number;
   input: OrderInput;
   vars?: Record<string, unknown>;
+  /** A repeat of the same key returns the order it already created instead of a new one. */
+  idempotencyKey?: string;
 };
+
+export type StartOrderResult = { orderId: string; replayed?: boolean };
 
 export type CopilotRequest = {
   prompt: string;
@@ -100,7 +104,7 @@ export type CopilotResult = {
 };
 
 export interface EngineRpc {
-  startOrder(input: StartOrderInput): Promise<{ orderId: string }>;
+  startOrder(input: StartOrderInput): Promise<StartOrderResult>;
   /** Delivers a business event (e.g. "payment.received") to whichever node waits for it. */
   sendEvent(
     orderId: string,

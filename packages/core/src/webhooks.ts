@@ -65,3 +65,45 @@ export async function verifyWebhook(
     ? { ok: true }
     : { ok: false, reason: 'Signature mismatch' };
 }
+
+// ── Outbound ───────────────────────────────────────────────────────────────
+
+/**
+ * Order events sent to webhook subscribers, signed with each subscription's own secret using the
+ * same header scheme. `X-OrderLoop-Delivery` is stable across retries so receivers can dedupe.
+ */
+export const EVENT_HEADER = 'x-orderloop-event';
+export const DELIVERY_HEADER = 'x-orderloop-delivery';
+
+export const OUTBOUND_EVENTS = [
+  'order.paid',
+  'order.invoiced',
+  'order.shipped',
+  'order.refunded',
+  'order.completed',
+  'order.cancelled',
+  'order.failed',
+] as const;
+export type OutboundEvent = (typeof OUTBOUND_EVENTS)[number];
+
+/** Nodes that emit an event when they finish, and the branch that counts as success. */
+export const NODE_EVENTS: Record<string, { event: OutboundEvent; branch?: string }> = {
+  'commerce.capture_payment': { event: 'order.paid', branch: 'ok' },
+  'commerce.charge': { event: 'order.paid', branch: 'ok' },
+  'commerce.invoice': { event: 'order.invoiced' },
+  'commerce.ship': { event: 'order.shipped' },
+  'commerce.refund': { event: 'order.refunded', branch: 'ok' },
+};
+
+export type OutboundPayload = {
+  id: string;
+  event: OutboundEvent;
+  occurredAt: number;
+  orderId: string;
+  data: Record<string, unknown>;
+};
+
+/** A subscription's event filter: exact names, or "*" for everything. */
+export function subscribedTo(events: readonly string[], event: string): boolean {
+  return events.includes('*') || events.includes(event);
+}

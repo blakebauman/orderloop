@@ -17,7 +17,7 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
 
 - **Flows are data.** A flow is a JSON graph of catalog nodes (`packages/core/src/catalog.ts`):
   - triggers;
-  - commerce steps (validate, price, tax, credit, reserve, authorize, invoice, ship, …);
+  - commerce steps (validate, policy check, price, tax, credit, reserve, authorize, invoice, ship, return label, refund, …);
   - control (condition, approval, wait for event, wait, loop, continue-as-new, end);
   - AI (extract, classify, risk score, forecast, summarize, and an LLM **router** that chooses a branch).
 
@@ -34,6 +34,8 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
 - **Long-lived subscriptions** loop over billing periods, then use **continue-as-new**: they start a fresh Workflow instance with their variables carried over, so the step history never grows without bound.
 - **Mock connectors** (`apps/engine/src/connectors.ts`) cover inventory, payments, shipping, documents and the outbox, against D1 and R2. Every write is keyed by its step and every compensation is idempotent. They are where real adapters (Stripe, a WMS, carriers, an ERP) plug in. To exercise failure paths, set `meta.simulate` to one of `out_of_stock`, `payment_decline`, `charge_fail` or `three_way_mismatch`.
 - **AI never blocks an order.** Every model call uses JSON mode with a schema, has a 20-second cap, and falls back to a deterministic heuristic. Set `AI_MODE=mock` to use the heuristics only.
+
+See [ROADMAP.md](ROADMAP.md) for planned work.
 
 ## Repository
 
@@ -63,14 +65,29 @@ Open the dashboard and run one of the scenarios. `TIME_SCALE` (default `1440`) c
 When `APP_PASSWORD` is set, authenticate with `Authorization: Bearer <APP_PASSWORD>`.
 
 ```
+GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)
 GET  /api/v1/flows
 POST /api/v1/orders                          { "flowId": "tpl-b2b-order", "input": { "type": "b2b_order", "customerId": "cus_northwind", "lines": [{ "sku": "WID-100", "qty": 50 }] } }
+                                             Idempotency-Key header: a repeat returns 200 and the same order
 GET  /api/v1/orders?type=&status=&q=
 GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
 POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "by": "…", "note": "…" }
 POST /api/v1/orders/:id/cancel               { "reason": "…" }
 ```
+
+### Outbound webhooks
+
+Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`, `order.completed`, `order.cancelled` and `order.failed`.
+
+```
+GET    /api/v1/webhook-subscriptions
+POST   /api/v1/webhook-subscriptions               { "url": "https://…", "events": ["order.shipped"] }   ← returns the secret once
+DELETE /api/v1/webhook-subscriptions/:id
+GET    /api/v1/webhook-subscriptions/:id/deliveries
+```
+
+Each delivery is signed with the subscription's secret in the same `X-OrderLoop-Signature` scheme as inbound events, so `verifyWebhook` checks it. `X-OrderLoop-Delivery` stays the same across retries; use it to dedupe. A delivery runs in its own `${nodeId}#${run}:emit` step and is retried with backoff. If the endpoint is still down when retries run out, the delivery is left `failed` and the order carries on.
 
 ### Signed webhooks
 

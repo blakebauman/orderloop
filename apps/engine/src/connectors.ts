@@ -220,6 +220,29 @@ export async function charge(env: Env, order: Order, stepKey: string) {
   );
 }
 
+/**
+ * Refunds up to `requested` (everything still refundable when omitted) of the money captured or
+ * charged on the order. Keyed by step: a retried step returns the refund it already made.
+ */
+export async function refund(env: Env, order: Order, stepKey: string, requested?: number) {
+  const d = db(env);
+  const id = `rfd_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
+  const done = await d.select().from(payments).where(eq(payments.id, id)).get();
+  if (done) return { paymentId: id, amount: done.amount, status: done.status };
+
+  const rows = await d.select().from(payments).where(eq(payments.orderId, order.id));
+  const paid = rows
+    .filter((p) => p.status === 'succeeded' && (p.kind === 'capture' || p.kind === 'charge'))
+    .reduce((s, p) => s + p.amount, 0);
+  const refunded = rows
+    .filter((p) => p.kind === 'refund' && p.status === 'succeeded')
+    .reduce((s, p) => s + p.amount, 0);
+  const refundable = money(paid - refunded);
+  const amount = money(Math.min(requested ?? refundable, refundable));
+  if (amount <= 0) return { paymentId: null, amount: 0, status: 'failed' };
+  return recordPayment(env, id, order.id, 'refund', amount, 'succeeded');
+}
+
 export async function addToBalance(env: Env, customerId: string | undefined, amount: number) {
   if (!customerId) return;
   await db(env)
@@ -246,6 +269,24 @@ export async function createShipment(env: Env, order: Order, stepKey: string, ca
     .onConflictDoNothing();
   await consumeInventory(env, order.id);
   return { shipmentId: id, carrier, tracking };
+}
+
+/** A prepaid return label. Stock comes back with `restock` once the goods arrive. */
+export async function createReturnLabel(env: Env, order: Order, stepKey: string, carrier: string) {
+  const id = `rma_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
+  const tracking = `${carrier.toUpperCase()}R${Math.abs(hash(id)).toString().padStart(9, '0').slice(0, 9)}`;
+  await db(env)
+    .insert(shipments)
+    .values({
+      id,
+      orderId: order.id,
+      carrier,
+      tracking,
+      status: 'return_label',
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing();
+  return { rmaId: id, carrier, tracking };
 }
 
 /** Compensation: cancel a shipment that was booked by this step. */

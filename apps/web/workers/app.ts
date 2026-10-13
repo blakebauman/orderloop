@@ -2,6 +2,7 @@ import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent } from '../app/lib/api.server';
 import { isApiAuthorized, isSignedIn } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
+import { openApiDocument } from '../app/lib/openapi';
 
 const requestHandler = createRequestHandler(
   () => import('virtual:react-router/server-build'),
@@ -16,6 +17,11 @@ export default {
     // Signed webhooks authenticate by HMAC, not by the admin password.
     if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
       return handleSignedEvent(request);
+    }
+
+    // The API description is public, like any published spec.
+    if (url.pathname === '/api/v1/openapi.json' && request.method === 'GET') {
+      return Response.json(openApiDocument(url.origin));
     }
 
     if (url.pathname.startsWith('/api/v1/')) {
