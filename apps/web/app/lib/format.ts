@@ -50,6 +50,19 @@ export function money(n: number | null | undefined, currency = 'USD') {
   }).format(n ?? 0);
 }
 
+/**
+ * "Oct 13, 2026, 4:46 AM". Pass `timeZone` to pin the zone (server rendering uses UTC, so the
+ * markup matches during hydration); omit it for the viewer's own zone. See `useDateTime`.
+ */
+export function dateTime(ms: number, timeZone?: string) {
+  const s = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone,
+  }).format(ms);
+  return timeZone === 'UTC' ? `${s} UTC` : s;
+}
+
 export function ago(ms: number | null | undefined, now = Date.now()) {
   if (!ms) return '—';
   const s = Math.round((now - ms) / 1000);

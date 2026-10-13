@@ -37,6 +37,7 @@ import {
   statusColor,
 } from '~/lib/format';
 import { customerNames, orderRecords } from '~/lib/orders.server';
+import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/order';
 
 export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
@@ -594,6 +595,7 @@ function Actions({
   by: string;
   onSelect: (id: string) => void;
 }) {
+  const formatTime = useDateTime();
   if (!state.waits.length) {
     if (rolledBack(state)) return null;
     return (
@@ -643,8 +645,7 @@ function Actions({
             <>
               <p className="mt-1 text-muted-foreground text-xs">
                 Resumes when <span className="font-mono text-foreground">{w.event}</span> arrives
-                {w.deadline ? `, or times out ${new Date(w.deadline).toLocaleString()}` : ''}.
-                Systems send it to{' '}
+                {w.deadline ? `, or times out ${formatTime(w.deadline)}` : ''}. Systems send it to{' '}
                 <span className="break-all font-mono">
                   POST /api/v1/orders/{state.orderId}/events
                 </span>
@@ -682,6 +683,7 @@ const KIND_TONE: Record<string, string> = {
 };
 
 function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: string) => void }) {
+  const formatTime = useDateTime();
   const items = [...state.timeline].reverse();
   const start = state.timeline[0]?.at ?? 0;
   const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
@@ -692,7 +694,7 @@ function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: strin
         <li key={`${t.at}-${i}`} className="flex gap-3 text-sm">
           <time
             dateTime={new Date(t.at).toISOString()}
-            title={new Date(t.at).toLocaleString()}
+            title={formatTime(t.at)}
             className="w-14 shrink-0 pt-px text-right text-muted-foreground text-xs tabular"
           >
             {offset(t.at, start)}
