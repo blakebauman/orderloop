@@ -153,6 +153,37 @@ export const nodeRuns = sqliteTable(
   ],
 );
 
+/** The pricing chain's sources, run in `priority` order; see `resolvePrice` in core. */
+export const priceSources = sqliteTable('price_sources', {
+  id: text('id').primaryKey(),
+  label: text('label').notNull(),
+  priority: integer('priority').notNull(),
+  stopProcessing: integer('stop_processing', { mode: 'boolean' }).notNull().default(true),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+});
+
+/** Price-book and volume entries. Empty scope columns match anything. */
+export const priceRules = sqliteTable(
+  'price_rules',
+  {
+    id: text('id').primaryKey(),
+    sourceId: text('source_id')
+      .notNull()
+      .references(() => priceSources.id),
+    name: text('name').notNull(),
+    sku: text('sku'),
+    customerId: text('customer_id'),
+    customerTier: text('customer_tier'),
+    minQty: real('min_qty'),
+    price: real('price'),
+    discountPct: real('discount_pct'),
+    startsAt: integer('starts_at'),
+    endsAt: integer('ends_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('price_rules_source').on(t.sourceId)],
+);
+
 /** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
 export const stockMovements = sqliteTable(
   'stock_movements',

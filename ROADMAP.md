@@ -7,15 +7,6 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 ### Roles instead of a single `APP_PASSWORD`
 Add `viewer`, `approver` and `operator` roles, so the approvals `by` field is a real identity and only approvers can decide. API tokens get a role as well. This keeps the web app's current session cookie, and `apps/web/app/lib/auth.server.ts` gains a principal with a role.
 
-### Pricing priority chain
-`commerce.price` uses a contract price, falling back to list price. Make it a chain of sources, each with a priority and a `stopProcessing` flag:
-1. price book
-2. contract price
-3. tier or volume price
-4. list price
-
-Pricing sources go in D1. The resolver lives in `packages/core`, is pure and is unit tested, like `policy.ts`.
-
 ### Per-order presentment currency
 `currency` is already on the order input but is fixed to USD in practice. Store each order's currency on the order row. Format amounts by currency in the UI, and use the currency in documents, refunds and webhook payloads. Reporting converts to a base currency.
 

@@ -7,7 +7,16 @@
  * "payment_decline", "charge_fail", "out_of_stock", "three_way_mismatch".
  */
 
-import { checkAddress, money, newId, type Order, type StockLine } from '@orderloop/core';
+import {
+  checkAddress,
+  money,
+  newId,
+  type Order,
+  type PriceRule,
+  type PriceSource,
+  type PriceSourceKind,
+  type StockLine,
+} from '@orderloop/core';
 import {
   contractPrices,
   createDb,
@@ -15,6 +24,8 @@ import {
   documents,
   messages,
   payments,
+  priceRules,
+  priceSources,
   products,
   reservations,
   shipments,
@@ -44,12 +55,46 @@ export async function getProducts(env: Env, skus?: string[]) {
   return skus ? q.where(inArray(products.sku, skus)) : q;
 }
 
-export async function contractPricesFor(env: Env, customerId: string) {
-  const rows = await db(env)
-    .select()
-    .from(contractPrices)
-    .where(eq(contractPrices.customerId, customerId));
-  return new Map(rows.map((r) => [r.sku, r.price]));
+/**
+ * The pricing chain for one customer: active sources, their entries, and the customer's tier.
+ * Contract prices become the contract source's entries.
+ */
+export async function pricingFor(env: Env, customerId: string | undefined) {
+  const d = db(env);
+  const [sources, rules, contracts, customer] = await Promise.all([
+    d.select().from(priceSources).where(eq(priceSources.active, true)),
+    d.select().from(priceRules),
+    customerId
+      ? d.select().from(contractPrices).where(eq(contractPrices.customerId, customerId))
+      : Promise.resolve([]),
+    customerId
+      ? d.select({ tier: customers.tier }).from(customers).where(eq(customers.id, customerId)).get()
+      : Promise.resolve(undefined),
+  ]);
+  return {
+    sources: sources.map(
+      (s): PriceSource => ({
+        id: s.id as PriceSourceKind,
+        label: s.label,
+        priority: s.priority,
+        stopProcessing: s.stopProcessing,
+      }),
+    ),
+    rules: [
+      ...rules.map((r): PriceRule => ({ ...r, source: r.sourceId as PriceSourceKind })),
+      ...contracts.map(
+        (c): PriceRule => ({
+          id: `contract_${c.customerId}_${c.sku}`,
+          source: 'contract',
+          name: 'Contract price',
+          sku: c.sku,
+          customerId: c.customerId,
+          price: c.price,
+        }),
+      ),
+    ],
+    tier: customer?.tier ?? null,
+  };
 }
 
 // ── Inventory ──────────────────────────────────────────────────────────────

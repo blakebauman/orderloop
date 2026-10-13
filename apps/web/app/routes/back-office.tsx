@@ -46,7 +46,8 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function BackOffice() {
-  const { products, customers, events, emails, mailboxes } = useLoaderData<typeof loader>();
+  const { products, customers, pricing, events, emails, mailboxes } =
+    useLoaderData<typeof loader>();
   const nav = useNavigation();
   return (
     <>
@@ -192,6 +193,7 @@ export default function BackOffice() {
             </table>
           </div>
         </Section>
+        <Pricing pricing={pricing} customers={customers} />
         <Section title="Customers" flush>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -272,5 +274,84 @@ function EventRow({ e }: { e: { orderId: string; title: string; event: string } 
         </f.Form>
       )}
     </li>
+  );
+}
+
+type Office = Awaited<ReturnType<typeof backOffice>>;
+
+/** The pricing chain, in the order `commerce.price` runs it, with each source's entries. */
+function Pricing({ pricing, customers }: Pick<Office, 'pricing' | 'customers'>) {
+  const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? id;
+  const entries = (id: string) =>
+    id === 'contract'
+      ? pricing.contracts.map((c) => ({
+          key: `${c.customerId}-${c.sku}`,
+          name: `${customerName(c.customerId)}`,
+          scope: c.sku,
+          price: money(c.price),
+        }))
+      : pricing.rules
+          .filter((r) => r.sourceId === id)
+          .map((r) => ({
+            key: r.id,
+            name: r.name,
+            scope: [
+              r.sku,
+              r.customerTier ? `${humanize(r.customerTier)} tier` : null,
+              r.customerId ? customerName(r.customerId) : null,
+              r.minQty ? `${count(r.minQty)}+` : null,
+            ]
+              .filter(Boolean)
+              .join(' · '),
+            price: r.price != null ? money(r.price) : `${r.discountPct}% off list`,
+          }));
+  return (
+    <Section title="Pricing" className="xl:col-span-2" flush>
+      <ol className="divide-y">
+        {pricing.sources.map((s, i) => {
+          const rows = entries(s.id);
+          return (
+            <li key={s.id} className={s.active ? undefined : 'opacity-60'}>
+              <div className="flex items-baseline gap-3 px-4 pt-2.5 pb-1">
+                <span className="text-muted-foreground text-xs tabular">{i + 1}</span>
+                <span className="font-medium text-sm">{s.label}</span>
+                <span className="text-muted-foreground text-xs">
+                  priority {s.priority}
+                  {s.active
+                    ? s.stopProcessing
+                      ? ' · stops the chain'
+                      : ' · keeps going'
+                    : ' · off'}
+                </span>
+              </div>
+              {rows.length ? (
+                <table className="mb-2 w-full table-fixed text-sm">
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.key}>
+                        <td className="w-1/2 truncate py-0.5 pr-2 pl-10">{r.name}</td>
+                        <td className="w-1/3 truncate px-2 py-0.5 text-muted-foreground text-xs">
+                          {r.scope}
+                        </td>
+                        <td className="py-0.5 pr-4 pl-2 text-right tabular">{r.price}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="pb-2 pl-10 text-muted-foreground text-xs">No entries.</p>
+              )}
+            </li>
+          );
+        })}
+        <li className="flex items-baseline gap-3 px-4 py-2.5">
+          <span className="text-muted-foreground text-xs tabular">
+            {pricing.sources.length + 1}
+          </span>
+          <span className="font-medium text-sm">List price</span>
+          <span className="text-muted-foreground text-xs">when nothing above matches</span>
+        </li>
+      </ol>
+    </Section>
   );
 }

@@ -17,8 +17,10 @@ import {
   money,
   type Order,
   type OrderLine,
+  type PricedBy,
   policyRulesSchema,
   type RunContext,
+  resolvePrice,
   stockLines,
   stringList,
   truthy,
@@ -105,26 +107,44 @@ export const EXECUTORS: Record<string, Exec> = {
         )
       ).map((p) => [p.sku, p]),
     );
-    const contracts =
-      config.useContracts && ctx.order.customerId
-        ? await cx.contractPricesFor(env, ctx.order.customerId)
-        : new Map<string, number>();
-    // Replenishment and procurement buy at cost; selling flows use list or contract price.
+    // Replenishment and procurement buy at cost; selling flows run the pricing chain.
     const buying = ctx.order.type === 'reorder' || ctx.order.type === 'purchase_request';
-    let contracted = 0;
+    const chain = buying ? null : await cx.pricingFor(env, ctx.order.customerId);
+    const sources =
+      chain?.sources.filter((s) =>
+        s.id === 'contract' ? config.useContracts : config.usePriceRules,
+      ) ?? [];
+    const priced: { sku: string; unitPrice: number; by: PricedBy['source']; rule: string }[] = [];
     const lines = ctx.order.lines.map((l) => {
       const p = products.get(l.sku);
-      const c = contracts.get(l.sku);
-      if (c !== undefined) contracted++;
-      const unitPrice = l.unitPrice ?? c ?? (buying ? p?.cost : p?.price) ?? 0;
-      return { ...l, unitPrice };
+      if (l.unitPrice !== undefined) {
+        priced.push({ sku: l.sku, unitPrice: l.unitPrice, by: 'list', rule: 'Given on the order' });
+        return l;
+      }
+      if (!chain) return { ...l, unitPrice: p?.cost ?? 0 };
+      const r = resolvePrice(l, p?.price ?? 0, sources, chain.rules, {
+        customerId: ctx.order.customerId,
+        customerTier: chain.tier,
+        now: ctx.now,
+      });
+      priced.push({ sku: l.sku, unitPrice: r.unitPrice, by: r.by.source, rule: r.by.name });
+      return { ...l, unitPrice: r.unitPrice };
     });
     const order = { ...ctx.order, lines };
     const t = totals(order);
+    const bySource = (k: string) => priced.filter((x) => x.by === k).length;
+    const notes = [
+      ['contract', 'contract'],
+      ['price_book', 'price book'],
+      ['volume', 'volume'],
+    ]
+      .map(([k, label]) => [bySource(k!), label] as const)
+      .filter(([n]) => n)
+      .map(([n, label]) => `${n} ${label}`);
     return {
       order: { lines, ...t },
-      output: { subtotal: t.subtotal, contracted },
-      summary: `Subtotal ${cash(t.subtotal, ctx)}${contracted ? ` · ${contracted} contract prices` : ''}`,
+      output: { subtotal: t.subtotal, contracted: bySource('contract'), lines: priced },
+      summary: `Subtotal ${cash(t.subtotal, ctx)}${notes.length ? ` · ${notes.join(', ')}` : ''}`,
     };
   },
 

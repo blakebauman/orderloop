@@ -125,7 +125,8 @@ export const NODE_SPECS = [
     type: 'commerce.price',
     category: 'commerce',
     label: 'Price & quote',
-    description: 'Applies list or contract pricing and computes the subtotal.',
+    description:
+      'Prices each line through the pricing chain (price books, contract prices, volume tiers, then list price) and computes the subtotal.',
     icon: 'Tags',
     fields: [
       {
@@ -134,6 +135,13 @@ export const NODE_SPECS = [
         kind: 'boolean',
         default: true,
         hint: 'Use the customer’s negotiated prices',
+      },
+      {
+        key: 'usePriceRules',
+        label: 'Price books and volume tiers',
+        kind: 'boolean',
+        default: true,
+        hint: 'Use the price-book and volume entries in the back office',
       },
     ],
     outputs: OUT,
