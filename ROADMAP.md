@@ -28,10 +28,6 @@ Pricing sources go in D1. The resolver lives in `packages/core`, is pure and is 
 ### Per-order presentment currency
 `currency` is already on the order input but is fixed to USD in practice. Store each order's currency on the order row. Format amounts by currency in the UI, and use the currency in documents, refunds and webhook payloads. Reporting converts to a base currency.
 
-## Gaps in shipped features
-
-- **Relative times can flicker on load.** "in 42m" and "3m ago" are computed from `Date.now()` on the server and again in the browser, so they can differ by a unit at a minute boundary and log a hydration warning. Render them only after hydration, as `useDateTime` (`apps/web/app/lib/use-date-time.ts`) does for absolute times.
-
 ## Not planned
 
 These are platform concerns that Order Loop doesn't have: multi-tenancy, hostname dispatch and edge caching, Postgres with Hyperdrive, a control plane with billing, PIM and supplier catalog ingest, GraphQL parity, and plan or feature gating. Workers for Platforms merchant functions could one day become a sandboxed "custom code" node, but that would be its own project.

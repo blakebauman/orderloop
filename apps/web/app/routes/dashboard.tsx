@@ -1,6 +1,7 @@
 import { ORDER_TYPE_LABELS, type OrderState, type OrderType } from '@orderloop/core';
 import { ArrowRight, ChevronRight, Play } from 'lucide-react';
 import { Form, Link, redirect, useLoaderData, useNavigation } from 'react-router';
+import { Ago } from '~/components/ago';
 import { DecisionContext } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StatusBadge } from '~/components/status';
@@ -8,7 +9,7 @@ import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
-import { ago, humanize, money, orderRef, orderStatus, STATUS_COLOR, waitLabel } from '~/lib/format';
+import { humanize, money, orderRef, orderStatus, STATUS_COLOR, waitLabel } from '~/lib/format';
 import {
   customerNames,
   dashboardStats,
@@ -175,7 +176,8 @@ export default function Dashboard() {
                           </div>
                           <DecisionContext ctx={d.ctx} className="mt-1" />
                           <p className="mt-1 text-muted-foreground text-xs">
-                            For {humanize(d.assignee) || 'anyone'} · requested {ago(d.requestedAt)}
+                            For {humanize(d.assignee) || 'anyone'} · requested{' '}
+                            <Ago ms={d.requestedAt} />
                           </p>
                         </div>
                         <span className="font-semibold tabular">{money(d.amount)}</span>
@@ -237,7 +239,7 @@ export default function Dashboard() {
                             {money(o.total, o.currency)}
                           </span>
                           <span className="block text-muted-foreground text-xs">
-                            {ago(o.updatedAt)}
+                            <Ago ms={o.updatedAt} />
                           </span>
                         </span>
                       </Link>

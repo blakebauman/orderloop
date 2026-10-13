@@ -17,6 +17,7 @@ import { useAgent } from 'agents/react';
 import { Bot, CircleSlash, FileText, RotateCcw, Send, Undo2, Wrench, Zap } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
+import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
@@ -26,16 +27,7 @@ import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
 import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import {
-  ago,
-  humanize,
-  money,
-  offset,
-  orderRef,
-  plainLog,
-  plural,
-  statusColor,
-} from '~/lib/format';
+import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
 import { customerNames, orderRecords } from '~/lib/orders.server';
 import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/order';
@@ -616,7 +608,9 @@ function Actions({
             {w.kind === 'approval'
               ? `Approval for ${humanize(w.assignee) || 'anyone'}`
               : 'Waiting for an outside event'}
-            <span className="ml-auto text-muted-foreground">since {ago(w.since)}</span>
+            <span className="ml-auto text-muted-foreground">
+              since <Ago ms={w.since} />
+            </span>
           </div>
           <button
             type="button"

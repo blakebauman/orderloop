@@ -12,12 +12,12 @@ import { Textarea } from '@orderloop/ui/textarea';
 import { GitBranch, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { Ago } from '~/components/ago';
 import { Field } from '~/components/inspector';
 import { PageHeader } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { listFlows, saveFlow } from '~/lib/flows.server';
-import { ago } from '~/lib/format';
 import type { Route } from './+types/flows';
 
 export const meta = () => [{ title: 'Flows · Order Loop' }];
@@ -114,7 +114,7 @@ export default function Flows() {
               </p>
               <div className="mt-3 text-muted-foreground text-xs">
                 {ORDER_TYPE_LABELS[f.orderType as OrderType]} · {f.nodeCount} nodes · edited{' '}
-                {ago(f.updatedAt)}
+                <Ago ms={f.updatedAt} />
               </div>
             </Link>
           ))}

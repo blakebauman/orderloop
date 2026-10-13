@@ -3,13 +3,14 @@ import { cn } from '@orderloop/ui/lib/utils';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
+import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { Empty, PageHeader } from '~/components/page';
 import { ApprovalBadge } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { ago, humanize, money, orderRef } from '~/lib/format';
+import { humanize, money, orderRef } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
 import type { Route } from './+types/approvals';
 
@@ -262,7 +263,7 @@ function Row({
         ) : null}
         <p className="mt-1 text-muted-foreground text-xs">
           {ctx?.step ? `${ctx.step} · ` : ''}
-          for {humanize(r.assignee) || 'anyone'} · requested {ago(r.requestedAt)}
+          for {humanize(r.assignee) || 'anyone'} · requested <Ago ms={r.requestedAt} />
           {r.decidedBy ? ` · ${r.status} by ${r.decidedBy}` : ''}
           {r.note ? ` · “${r.note}”` : ''}
         </p>
