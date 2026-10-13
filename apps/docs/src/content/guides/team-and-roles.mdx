@@ -35,6 +35,9 @@ Operators manage people and tokens at `/team`:
 - **Role:** change and save. You can't lower your own role.
 - **Reset password:** shows a new one-time password and signs the person out everywhere.
 - **Disable / Enable:** a disabled person can't sign in, and their sessions end.
+- **Reset two-factor:** for someone who has lost their phone and their recovery codes. It turns
+  their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
+  can set it up again. You can't reset your own.
 - Without `APP_PASSWORD`, the last active operator can't be demoted or disabled, so someone can
   always manage the team.
 
@@ -56,16 +59,36 @@ sign-in time and last activity, with this browser marked. **Sign out** ends one 
 everywhere else. An operator's **Reset password** or **Disable** on the Team page ends all of a
 person's sessions.
 
+### Two-factor sign-in
+
+On the **Account** page, **Set up two-factor sign-in** shows a QR code and the same key as text.
+Scan it with an authenticator app (1Password, Google Authenticator, Authy and others), then enter
+the code the app shows and your password to turn it on. From then on, after a correct password,
+sign-in goes to `/login/two-factor` and asks for the app's current 6-digit code. You have 10
+minutes to enter it.
+
+Turning it on shows 10 recovery codes once, like `k7mqp-3xw9d`. Each one signs you in once instead
+of an app code, for a lost or broken phone; the Account page shows how many are left. **New recovery
+codes** replaces them all, and **Turn off** removes two-factor sign-in; both ask for your password.
+If you have no phone and no codes left, an operator can **Reset two-factor** on the Team page.
+
+Codes are time-based one-time passwords (RFC 6238: HMAC-SHA1, 30-second steps, 6 digits). The code
+for the step before or after the current one is accepted too, in case the phone's clock is a little
+off, and each step's code works once. Recovery codes are stored as SHA-256 and deleted when used.
+The app's secret has to be readable to check codes, so it is stored as is, in `users.totp_secret`.
+The workspace password and API tokens don't use two-factor sign-in.
+
 ### Failed sign-ins
 
 Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is refused with
-`429` and a wait before any password is checked, even when it is right:
+`429` and a wait before any password or code is checked, even when it is right:
 
 | Counted per | Failures allowed | Stops |
 |---|---|---|
 | Email and address together | 5 | Guessing one person's password from one place |
 | Address | 30 | One place trying many accounts |
 | Email | 50 | Many places trying one account; high, so nobody can easily lock a person out |
+| Person, at the code step | 5 | Guessing two-factor codes after a correct password |
 
 A successful sign-in clears its email-and-address count. The workspace password counts as one
 email. Addresses come from `cf-connecting-ip`, which Cloudflare sets. The limits are `LIMITS` in
@@ -96,8 +119,8 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many) |
-| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled` |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
+| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
 

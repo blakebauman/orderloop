@@ -18,6 +18,7 @@ import {
   TeamError,
 } from '~/lib/team.server';
 import { DEFAULT_LIFETIME, TOKEN_LIFETIMES, type TokenState, tokenState } from '~/lib/tokens';
+import { resetTwoFactor } from '~/lib/two-factor.server';
 import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/team';
 
@@ -66,6 +67,9 @@ export async function action({ request }: Route.ActionArgs) {
         const r = await resetPassword(request, me, str('id'));
         return { secret: { label: `New password for ${r.email}`, value: r.password } as Secret };
       }
+      case 'reset-two-factor':
+        await resetTwoFactor(request, me, str('id'));
+        return { ok: true };
       case 'disable':
       case 'enable':
         await setDisabled(request, me, str('id'), str('intent') === 'disable');
@@ -177,6 +181,7 @@ export default function Team() {
                           ) : null}
                           <div className="text-muted-foreground text-xs">
                             {p.email}
+                            {p.twoFactorAt ? ' · two-factor' : ''}
                             {p.disabledAt ? ' · disabled' : ''}
                           </div>
                         </td>
@@ -202,6 +207,15 @@ export default function Team() {
                                 Reset password
                               </Button>
                             </fetcher.Form>
+                            {p.twoFactorAt && p.id !== me.id ? (
+                              <fetcher.Form method="post">
+                                <input type="hidden" name="intent" value="reset-two-factor" />
+                                <input type="hidden" name="id" value={p.id} />
+                                <Button size="sm" variant="ghost" type="submit" disabled={busy}>
+                                  Reset two-factor
+                                </Button>
+                              </fetcher.Form>
+                            ) : null}
                             {p.id !== me.id ? (
                               <fetcher.Form method="post">
                                 <input

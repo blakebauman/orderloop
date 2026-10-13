@@ -32,6 +32,12 @@ describe('throttle', () => {
     ];
     expect(blockedFor(rows, now)).toBe(13 * 60_000);
     expect(blockedFor([{ key: 'unknown:x', count: 1e6, windowStart: now }], now)).toBe(0);
+    expect(
+      blockedFor(
+        [{ key: 'two-factor:usr_ann', count: LIMITS['two-factor'], windowStart: now }],
+        now,
+      ),
+    ).toBe(WINDOW_MS);
   });
 
   it('rounds the wait up to whole minutes', () => {

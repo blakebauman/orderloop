@@ -3,13 +3,9 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { data, Form, redirect, useActionData, useLoaderData } from 'react-router';
 import { Mark } from '~/components/mark';
-import { authEnabled, principal, signIn, Throttled } from '~/lib/auth.server';
+import { authEnabled, principal, type SignInResult, signIn, Throttled } from '~/lib/auth.server';
+import { nextPath } from '~/lib/next-path';
 import type { Route } from './+types/login';
-
-const nextPath = (request: Request) => {
-  const next = new URL(request.url).searchParams.get('next');
-  return next?.startsWith('/') && !next.startsWith('//') ? next : '/';
-};
 
 /** Lets a throttled sign-in's Retry-After reach the response. */
 export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
@@ -22,9 +18,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
-  let cookie: string | null;
+  let result: SignInResult | null;
   try {
-    cookie = await signIn(request, email, String(form.get('password') ?? ''));
+    result = await signIn(request, email, String(form.get('password') ?? ''));
   } catch (err) {
     if (!(err instanceof Throttled)) throw err;
     return data(
@@ -32,13 +28,16 @@ export async function action({ request }: Route.ActionArgs) {
       { status: 429, headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) } },
     );
   }
-  if (!cookie)
+  if (!result)
     return {
       error: email.trim()
         ? 'That email and password don’t match an active account.'
         : 'That workspace password is not right.',
     };
-  return redirect(nextPath(request), { headers: { 'set-cookie': cookie } });
+  const next = nextPath(request);
+  return redirect(result.twoFactor ? `/login/two-factor?next=${encodeURIComponent(next)}` : next, {
+    headers: { 'set-cookie': result.cookie },
+  });
 }
 
 export default function Login() {

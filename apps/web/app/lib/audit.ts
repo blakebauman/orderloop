@@ -13,12 +13,19 @@ export const AUDIT_ACTIONS = {
   'auth.password_changed': 'Changed own password',
   'auth.session_ended': 'Signed out a session',
   'auth.other_sessions_ended': 'Signed out everywhere else',
+  'auth.two_factor_failed': 'Two-factor code wrong',
+  'auth.two_factor_throttled': 'Two-factor refused: too many wrong codes',
+  'auth.two_factor_enabled': 'Turned on two-factor sign-in',
+  'auth.two_factor_disabled': 'Turned off two-factor sign-in',
+  'auth.recovery_codes_replaced': 'Made new recovery codes',
+  'auth.recovery_code_used': 'Used a recovery code',
   'team.first_operator': 'Created the first operator',
   'team.user_added': 'Added a person',
   'team.role_changed': 'Changed a role',
   'team.password_reset': 'Reset a password',
   'team.user_disabled': 'Disabled a person',
   'team.user_enabled': 'Enabled a person',
+  'team.two_factor_reset': 'Reset two-factor sign-in',
   'token.created': 'Created an API token',
   'token.revoked': 'Revoked an API token',
   'api.bearer_failed': 'API: wrong shared password',
@@ -60,5 +67,8 @@ export function describe(e: AuditEvent): string {
     parts.push(`${role(d.from)} → ${role(d.to)}`);
   else if (d.role) parts.push(role(d.role));
   if (typeof d.reason === 'string') parts.push(d.reason);
+  if (typeof d.twoFactor === 'string') parts.push(`two-factor ${d.twoFactor}`);
+  if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
+    parts.push(`${d.left} left`);
   return parts.length ? `${label}: ${parts.join(', ')}` : label;
 }

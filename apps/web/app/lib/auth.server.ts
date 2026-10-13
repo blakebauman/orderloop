@@ -3,7 +3,9 @@
  * operator).
  *
  * - People sign in with an email and password from D1 `users`; the `__Host-ol_session` cookie holds
- *   a random token whose SHA-256 is a `sessions` row.
+ *   a random token whose SHA-256 is a `sessions` row. Someone with two-factor sign-in on gets a
+ *   `__Host-ol_2fa` cookie (a `sign_in_challenges` row) instead, and the session only once a code
+ *   from their authenticator app, or a recovery code, checks out.
  * - The REST API takes `Authorization: Bearer ol_live_…`, an `api_tokens` row with its own role.
  * - `APP_PASSWORD`, when set, is a break-glass operator: sign in with the password and no email
  *   (the older HMAC cookie), or send it as the bearer token.
@@ -23,8 +25,15 @@ import {
   SESSION_MAX_MS,
   SESSION_TOUCH_MS,
 } from '@orderloop/core';
-import { apiTokens, authFailures, sessions, users } from '@orderloop/db';
-import { and, count, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
+import {
+  apiTokens,
+  authFailures,
+  recoveryCodes,
+  sessions,
+  signInChallenges,
+  users,
+} from '@orderloop/db';
+import { and, count, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { data, redirect } from 'react-router';
 import { audit, clientIp } from './audit.server';
 import {
@@ -38,8 +47,12 @@ import {
 } from './credentials';
 import { db } from './env.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
+import { hashRecoveryCode, looksLikeTotp, verifyTotp } from './totp';
 
 const SESSION = '__Host-ol_session';
+/** Between a correct password and a correct code, for someone with two-factor sign-in on. */
+const CHALLENGE = '__Host-ol_2fa';
+const CHALLENGE_MS = 10 * 60_000;
 /** The shared-password cookie: an HMAC of APP_PASSWORD. */
 const SHARED = 'ol_session';
 const TOKEN_TOUCH_MS = 5 * 60_000;
@@ -257,15 +270,21 @@ const sessionCookie = (token: string) =>
 let decoy: Promise<string> | null = null;
 
 /**
- * Signs in and returns the cookie to set, or null for a wrong email or password. No email means
- * the shared APP_PASSWORD. Throws `Throttled`, before checking anything, when this person, this
- * address or this account has failed too often in the current window.
+ * What a correct password leads to: a session, or (with two-factor sign-in on) the code step,
+ * with the cookie to set either way.
+ */
+export type SignInResult = { cookie: string; twoFactor: boolean };
+
+/**
+ * Checks an email and password. Null for a wrong one. No email means the shared APP_PASSWORD.
+ * Throws `Throttled`, before checking anything, when this person, this address or this account
+ * has failed too often in the current window.
  */
 export async function signIn(
   request: Request,
   email: string,
   given: string,
-): Promise<string | null> {
+): Promise<SignInResult | null> {
   const keys = signInKeys(email, clientIp(request));
   const target = normalizeEmail(email) || null;
   const wait = await waitFor(keys);
@@ -282,15 +301,16 @@ export async function signIn(
   }
   // Success clears this person-and-place count; the wider counts age out with their window.
   await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
+  if (r.twoFactor) return { cookie: await startChallenge(r.principal.id), twoFactor: true };
   await audit(request, 'auth.sign_in', { actor: r.principal });
-  return r.cookie;
+  return { cookie: r.cookie ?? (await startSession(request, r.principal.id)), twoFactor: false };
 }
 
 async function checkCredentials(
   request: Request,
   email: string,
   given: string,
-): Promise<{ cookie: string; principal: Principal } | { reason: string }> {
+): Promise<{ cookie?: string; principal: Principal; twoFactor: boolean } | { reason: string }> {
   if (!email.trim()) {
     const pw = password();
     if (!pw) return { reason: 'no workspace password is set' };
@@ -298,6 +318,7 @@ async function checkCredentials(
     return {
       cookie: `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
       principal: SHARED_PRINCIPAL,
+      twoFactor: false,
     };
   }
   const user = await db()
@@ -312,7 +333,7 @@ async function checkCredentials(
   if (!ok) return { reason: 'wrong password' };
   if (user.disabledAt) return { reason: 'disabled' };
   return {
-    cookie: await startSession(request, user.id),
+    twoFactor: !!user.totpEnabledAt,
     principal: {
       kind: 'user',
       id: user.id,
@@ -342,6 +363,137 @@ export async function startSession(request: Request, userId: string): Promise<st
   return sessionCookie(token);
 }
 
+// ── The two-factor step ──
+
+async function startChallenge(userId: string): Promise<string> {
+  const token = randomToken();
+  const now = Date.now();
+  // Sign-ins are rare enough to drop finished challenges here.
+  await db().delete(signInChallenges).where(lte(signInChallenges.expiresAt, now));
+  await db()
+    .insert(signInChallenges)
+    .values({
+      tokenHash: await sha256Hex(token),
+      userId,
+      createdAt: now,
+      expiresAt: now + CHALLENGE_MS,
+    });
+  return `${CHALLENGE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${CHALLENGE_MS / 1000}`;
+}
+
+export const clearChallengeCookie = `${CHALLENGE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+/** The person a live challenge belongs to: their password was right, their code is still due. */
+export async function pendingChallenge(request: Request) {
+  const token = cookie(request, CHALLENGE);
+  if (!token) return null;
+  const hash = await sha256Hex(token);
+  const row = await db()
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      totpSecret: users.totpSecret,
+      totpLastStep: users.totpLastStep,
+    })
+    .from(signInChallenges)
+    .innerJoin(users, eq(users.id, signInChallenges.userId))
+    .where(
+      and(
+        eq(signInChallenges.tokenHash, hash),
+        gt(signInChallenges.expiresAt, Date.now()),
+        isNull(users.disabledAt),
+        isNotNull(users.totpEnabledAt),
+      ),
+    )
+    .get();
+  return row ? { ...row, challenge: hash } : null;
+}
+
+/**
+ * Finishes a two-factor sign-in with a code from the authenticator app or a recovery code.
+ * Returns the cookies to set, or null when there is no live challenge or the code is wrong.
+ * Throws `Throttled` after too many wrong codes for this person.
+ */
+export async function verifySecondFactor(request: Request, code: string): Promise<string[] | null> {
+  const pending = await pendingChallenge(request);
+  if (!pending) return null;
+  const person: Principal = {
+    kind: 'user',
+    id: pending.id,
+    email: pending.email,
+    name: pending.name,
+    role: pending.role as Role,
+  };
+  const key = [throttleKey('two-factor', pending.id)];
+  const wait = await waitFor(key);
+  if (wait) {
+    await audit(request, 'auth.two_factor_throttled', { target: pending.email });
+    throw new Throttled(wait);
+  }
+  const method = looksLikeTotp(code) ? 'app' : 'recovery code';
+  const ok =
+    method === 'app' ? await useTotp(pending, code) : await useRecoveryCode(pending.id, code);
+  if (!ok) {
+    await recordFailure(key);
+    await audit(request, 'auth.two_factor_failed', {
+      target: pending.email,
+      detail: { reason: `wrong ${method === 'app' ? 'code' : 'recovery code'}` },
+    });
+    return null;
+  }
+  await db().delete(signInChallenges).where(eq(signInChallenges.tokenHash, pending.challenge));
+  await db().delete(authFailures).where(eq(authFailures.key, key[0]!));
+  await audit(request, 'auth.sign_in', { actor: person, detail: { twoFactor: method } });
+  if (method === 'recovery code') {
+    const left =
+      (
+        await db()
+          .select({ n: count() })
+          .from(recoveryCodes)
+          .where(eq(recoveryCodes.userId, pending.id))
+          .get()
+      )?.n ?? 0;
+    await audit(request, 'auth.recovery_code_used', {
+      actor: person,
+      target: pending.email,
+      detail: { left },
+    });
+  }
+  return [await startSession(request, pending.id), clearChallengeCookie];
+}
+
+/** Accepts a code once: the step it matched must be later than the last one used. */
+async function useTotp(
+  user: { id: string; totpSecret: string | null; totpLastStep: number | null },
+  code: string,
+) {
+  if (!user.totpSecret) return false;
+  const step = await verifyTotp(user.totpSecret, code, Date.now(), user.totpLastStep);
+  if (step === null) return false;
+  // Conditional, so two requests racing with the same code can't both win.
+  const r = await db()
+    .update(users)
+    .set({ totpLastStep: step })
+    .where(and(eq(users.id, user.id), or(isNull(users.totpLastStep), lt(users.totpLastStep, step))))
+    .run();
+  return r.meta.changes > 0;
+}
+
+async function useRecoveryCode(userId: string, code: string) {
+  const r = await db()
+    .delete(recoveryCodes)
+    .where(
+      and(
+        eq(recoveryCodes.codeHash, await hashRecoveryCode(code)),
+        eq(recoveryCodes.userId, userId),
+      ),
+    )
+    .run();
+  return r.meta.changes > 0;
+}
+
 /** Ends the session server-side and returns cookies that clear both kinds. */
 export async function signOut(request: Request): Promise<string[]> {
   const who = await principal(request);
@@ -354,6 +506,7 @@ export async function signOut(request: Request): Promise<string[]> {
   return [
     `${SESSION}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
     `${SHARED}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    clearChallengeCookie,
   ];
 }
 

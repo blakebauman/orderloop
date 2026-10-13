@@ -2,6 +2,7 @@ import { ROLE_LABELS } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { data, Form, useActionData, useFetcher, useLoaderData } from 'react-router';
+import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
 import { PageHeader, Section } from '~/components/page';
 import { requireUser, sessionId } from '~/lib/auth.server';
@@ -12,6 +13,13 @@ import {
   ownSessions,
   TeamError,
 } from '~/lib/team.server';
+import {
+  disableTwoFactor,
+  enableTwoFactor,
+  regenerateRecoveryCodes,
+  startSetup,
+  twoFactorStatus,
+} from '~/lib/two-factor.server';
 import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/account';
 
@@ -19,20 +27,49 @@ export const meta = () => [{ title: 'Account · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  return { me, sessions: await ownSessions(me, await sessionId(request)) };
+  const [sessions, twoFactor] = await Promise.all([
+    ownSessions(me, await sessionId(request)),
+    twoFactorStatus(me),
+  ]);
+  return { me, sessions, twoFactor };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const me = await requireUser(request);
   const f = await request.formData();
   const current = await sessionId(request);
+  const str = (k: string) => String(f.get(k) ?? '');
   try {
-    switch (String(f.get('intent'))) {
+    switch (str('intent')) {
       case 'end-session':
         await endOwnSession(request, me, String(f.get('ref') ?? ''), current);
         return { ended: 1 };
       case 'end-others':
         return { ended: await endOtherSessions(request, me, current) };
+      case 'two-factor-start':
+        if (me.kind !== 'user')
+          throw new TeamError('Only people with their own sign-in can use two-factor sign-in.');
+        return { setup: startSetup(me) };
+      case 'two-factor-enable': {
+        const setup = { secret: str('secret'), uri: str('uri') };
+        try {
+          const codes = await enableTwoFactor(request, me, {
+            secret: setup.secret,
+            code: str('code'),
+            password: str('password'),
+          });
+          return { recoveryCodes: codes };
+        } catch (err) {
+          // Keep the QR code on screen so the person can try another code.
+          if (err instanceof TeamError) return data({ error: err.message, setup }, { status: 400 });
+          throw err;
+        }
+      }
+      case 'two-factor-codes':
+        return { recoveryCodes: await regenerateRecoveryCodes(request, me, str('password')) };
+      case 'two-factor-disable':
+        await disableTwoFactor(request, me, str('password'));
+        return { disabled: true };
     }
     await changeOwnPassword(
       request,
@@ -50,7 +87,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Account() {
-  const { me, sessions } = useLoaderData<typeof loader>();
+  const { me, sessions, twoFactor } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const end = useFetcher<typeof action>();
   const formatTime = useDateTime();
@@ -106,6 +143,7 @@ export default function Account() {
               </p>
             )}
           </Section>
+          {twoFactor ? <TwoFactor status={twoFactor} /> : null}
           {me.kind === 'user' ? (
             <Section
               title="Where you're signed in"
@@ -168,5 +206,159 @@ export default function Account() {
         </div>
       </div>
     </>
+  );
+}
+
+function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLeft: number } }) {
+  const tf = useFetcher<typeof action>();
+  const formatTime = useDateTime();
+  const busy = tf.state !== 'idle';
+  const d = tf.data;
+  const error = d && 'error' in d ? d.error : null;
+  const setup = d && 'setup' in d ? d.setup : null;
+  const codes = d && 'recoveryCodes' in d ? d.recoveryCodes : null;
+  const errorLine = error ? (
+    <p role="alert" className="text-destructive text-sm">
+      {error}
+    </p>
+  ) : null;
+  return (
+    <Section title="Two-factor sign-in" className="mt-6">
+      {codes ? (
+        <div role="status" className="mb-4 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
+          <p className="font-medium">Your recovery codes</p>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            Keep them somewhere safe, apart from your phone. Each one signs you in once if you can’t
+            use your authenticator app. They are shown once; any older codes no longer work.
+          </p>
+          <ul className="mt-2 grid select-all grid-cols-2 gap-x-6 gap-y-0.5 rounded-sm bg-card px-3 py-2 font-mono text-sm">
+            {codes.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {status.enabledAt ? (
+        <tf.Form method="post" className="space-y-3">
+          <p className="text-sm">
+            <span className="font-medium text-ok">On</span>{' '}
+            <span className="text-muted-foreground">
+              since {formatTime(status.enabledAt)}. After your password, sign-in asks for a code
+              from your authenticator app. {status.recoveryLeft} of 10 recovery codes left.
+            </span>
+          </p>
+          <label className="block text-sm" htmlFor="tf-password">
+            Password
+          </label>
+          <Input
+            id="tf-password"
+            name="password"
+            type="password"
+            required
+            autoComplete="current-password"
+          />
+          {errorLine}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="submit"
+              name="intent"
+              value="two-factor-codes"
+              variant="outline"
+              disabled={busy}
+            >
+              New recovery codes
+            </Button>
+            <Button
+              type="submit"
+              name="intent"
+              value="two-factor-disable"
+              variant="ghost"
+              disabled={busy}
+            >
+              Turn off
+            </Button>
+          </div>
+        </tf.Form>
+      ) : setup ? (
+        <tf.Form method="post" className="space-y-3">
+          <input type="hidden" name="intent" value="two-factor-enable" />
+          <input type="hidden" name="secret" value={setup.secret} />
+          <input type="hidden" name="uri" value={setup.uri} />
+          <p className="text-sm">
+            Scan this with an authenticator app (1Password, Google Authenticator, Authy and others),
+            then enter the code it shows.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <QrCode value={setup.uri} />
+            <div className="min-w-0 text-xs">
+              <p className="text-muted-foreground">Can’t scan? Enter this key in the app:</p>
+              <code className="mt-1 block select-all break-all font-mono text-sm">
+                {setup.secret.match(/.{1,4}/g)?.join(' ')}
+              </code>
+            </div>
+          </div>
+          <label className="block text-sm" htmlFor="tf-code">
+            Code from the app
+          </label>
+          <Input
+            id="tf-code"
+            name="code"
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            className="font-mono"
+          />
+          <label className="block text-sm" htmlFor="tf-password">
+            Your password
+          </label>
+          <Input
+            id="tf-password"
+            name="password"
+            type="password"
+            required
+            autoComplete="current-password"
+          />
+          {errorLine}
+          <Button type="submit" disabled={busy}>
+            Turn on
+          </Button>
+        </tf.Form>
+      ) : (
+        <tf.Form method="post" className="space-y-3">
+          <input type="hidden" name="intent" value="two-factor-start" />
+          <p className="text-muted-foreground text-sm">
+            Off. With it on, signing in also needs a 6-digit code from an app on your phone, so a
+            leaked password alone can’t get in.
+          </p>
+          {errorLine}
+          <Button type="submit" variant="outline" disabled={busy}>
+            Set up two-factor sign-in
+          </Button>
+        </tf.Form>
+      )}
+    </Section>
+  );
+}
+
+/** Dark modules on a white field whatever the theme, which is what scanners expect. */
+function QrCode({ value }: { value: string }) {
+  const { data: rows, size } = encode(value, { ecc: 'M', border: 2 });
+  let path = '';
+  rows.forEach((row, y) => {
+    row.forEach((on, x) => {
+      if (on) path += `M${x} ${y}h1v1h-1z`;
+    });
+  });
+  return (
+    <svg
+      viewBox={`0 0 ${size} ${size}`}
+      className="size-40 shrink-0 rounded-sm"
+      shapeRendering="crispEdges"
+      role="img"
+      aria-label="QR code for your authenticator app"
+    >
+      <rect width={size} height={size} fill="#fff" />
+      <path d={path} fill="#000" />
+    </svg>
   );
 }
