@@ -1,6 +1,6 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
+import { type ChatMessage, type OrderInput, type OrderState, verifyWebhook } from '@orderloop/core';
 import {
   approvals,
   createDb,
@@ -162,9 +162,10 @@ describe('B2B order', () => {
     });
     await waitingOn(orderId, (x) => x.waits.some((w) => w.kind === 'approval'), 'approval');
 
-    const approve = await agent(orderId).chat('approve it');
+    // The DO stub types chat() loosely; the agent returns the assistant's ChatMessage.
+    const approve = (await agent(orderId).chat('approve it')) as ChatMessage;
     expect(approve.proposal).toEqual({ kind: 'decide', nodeId: 'approval', decision: 'approved' });
-    const cancel = await agent(orderId).chat('cancel this order');
+    const cancel = (await agent(orderId).chat('cancel this order')) as ChatMessage;
     expect(cancel.proposal).toMatchObject({ kind: 'cancel' });
 
     // Nothing was decided or cancelled: the order still waits on the same approval.
