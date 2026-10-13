@@ -99,7 +99,8 @@ export function offset(ms: number, from: number) {
 
 /**
  * What an order waits on, without engine identifiers: "Approve B2B order ord_x1 for cus_contoso"
- * reads "Approve B2B order". Same waits then group together.
+ * reads "Approve B2B order". Same waits then group together. A title whose customer interpolated
+ * to nothing ("… for ", from flows published before the B2B template dropped it) loses the "for".
  */
 export const waitLabel = (s: string | null | undefined): string =>
   (s ?? '')
@@ -113,6 +114,7 @@ const cleanWait = (s: string) =>
     .replace(/^Waiting for\s+/i, '')
     .replace(/\s+for\s+cus_[\w-]+/g, '')
     .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')
+    .replace(/\s+for\s*$/, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 
