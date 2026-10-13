@@ -1,4 +1,4 @@
-/** Must match migrations/*.sql column for column. Add a numbered migration; never edit an applied one. */
+/** Must match migrations/*.sql column for column and index for index. Add a numbered migration; never edit an applied one. */
 
 import { sql } from 'drizzle-orm';
 import {
@@ -80,7 +80,11 @@ export const approvals = sqliteTable(
     decidedAt: integer('decided_at'),
     decidedBy: text('decided_by'),
   },
-  (t) => [index('approvals_status').on(t.status, t.requestedAt)],
+  (t) => [
+    index('approvals_status').on(t.status, t.requestedAt),
+    // One approval row per wait: a replayed `openWait` can't insert a second.
+    uniqueIndex('approvals_wait').on(t.orderId, t.eventType),
+  ],
 );
 
 export const customers = sqliteTable('customers', {
@@ -115,51 +119,71 @@ export const contractPrices = sqliteTable(
   (t) => [primaryKey({ columns: [t.customerId, t.sku] })],
 );
 
-export const reservations = sqliteTable('reservations', {
-  id: text('id').primaryKey(),
-  orderId: text('order_id').notNull(),
-  sku: text('sku').notNull(),
-  qty: integer('qty').notNull(),
-  status: text('status').notNull(),
-  createdAt: integer('created_at').notNull(),
-});
+export const reservations = sqliteTable(
+  'reservations',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    sku: text('sku').notNull(),
+    qty: integer('qty').notNull(),
+    status: text('status').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('reservations_order').on(t.orderId)],
+);
 
-export const payments = sqliteTable('payments', {
-  id: text('id').primaryKey(),
-  orderId: text('order_id').notNull(),
-  kind: text('kind').notNull(),
-  amount: real('amount').notNull(),
-  status: text('status').notNull(),
-  ref: text('ref'),
-  createdAt: integer('created_at').notNull(),
-});
+export const payments = sqliteTable(
+  'payments',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    kind: text('kind').notNull(),
+    amount: real('amount').notNull(),
+    status: text('status').notNull(),
+    ref: text('ref'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('payments_order').on(t.orderId)],
+);
 
-export const shipments = sqliteTable('shipments', {
-  id: text('id').primaryKey(),
-  orderId: text('order_id').notNull(),
-  carrier: text('carrier').notNull(),
-  tracking: text('tracking').notNull(),
-  status: text('status').notNull(),
-  createdAt: integer('created_at').notNull(),
-});
+export const shipments = sqliteTable(
+  'shipments',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    carrier: text('carrier').notNull(),
+    tracking: text('tracking').notNull(),
+    status: text('status').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('shipments_order').on(t.orderId)],
+);
 
-export const documents = sqliteTable('documents', {
-  id: text('id').primaryKey(),
-  orderId: text('order_id').notNull(),
-  kind: text('kind').notNull(),
-  r2Key: text('r2_key').notNull(),
-  contentType: text('content_type').notNull(),
-  createdAt: integer('created_at').notNull(),
-});
+export const documents = sqliteTable(
+  'documents',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    kind: text('kind').notNull(),
+    r2Key: text('r2_key').notNull(),
+    contentType: text('content_type').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('documents_order').on(t.orderId)],
+);
 
-export const messages = sqliteTable('messages', {
-  id: text('id').primaryKey(),
-  orderId: text('order_id').notNull(),
-  recipient: text('recipient').notNull(),
-  subject: text('subject').notNull(),
-  body: text('body').notNull(),
-  createdAt: integer('created_at').notNull(),
-});
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    recipient: text('recipient').notNull(),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('messages_order').on(t.orderId)],
+);
 
 export const webhookSubscriptions = sqliteTable('webhook_subscriptions', {
   id: text('id').primaryKey(),
