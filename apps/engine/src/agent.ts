@@ -95,6 +95,8 @@ export class OrderAgent extends Agent<Env, State> {
   }
 
   async init(order: Order, flow: FlowVersion, instanceId: string) {
+    // A replayed start may call this again; never reset a run that has begun.
+    if (this.state.instanceId === instanceId) return;
     this.setState({
       ...EMPTY_ORDER_STATE,
       seq: 0,

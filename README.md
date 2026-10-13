@@ -68,7 +68,8 @@ When `APP_PASSWORD` is set, authenticate with `Authorization: Bearer <APP_PASSWO
 GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)
 GET  /api/v1/flows
 POST /api/v1/orders                          { "flowId": "tpl-b2b-order", "input": { "type": "b2b_order", "customerId": "cus_northwind", "lines": [{ "sku": "WID-100", "qty": 50 }] } }
-                                             Idempotency-Key header: a repeat returns 200 and the same order
+                                             Idempotency-Key header: a repeat returns 200 and the same order,
+                                             finishing the start if the first request failed part-way
 GET  /api/v1/orders?type=&status=&q=
 GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks

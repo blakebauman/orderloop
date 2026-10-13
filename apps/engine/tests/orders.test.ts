@@ -418,6 +418,51 @@ describe('idempotency', () => {
     expect(c.orderId).not.toBe(a.orderId);
     await settled(c.orderId);
   });
+
+  it('finishes starting an order whose first request failed after the insert', async () => {
+    await introspect(['window#1']);
+    // What a request leaves behind when it dies between the insert and the Workflow create.
+    const orderId = 'ord_halfstarted1';
+    const now = Date.now();
+    await db()
+      .insert(orders)
+      .values({
+        id: orderId,
+        type: 'storefront_order',
+        status: 'queued',
+        title: '',
+        flowId: 'tpl-storefront-order',
+        flowVersion: 1,
+        instanceId: `${orderId}-g1`,
+        generation: 1,
+        customerId: 'cus_ada',
+        currency: 'USD',
+        total: 0,
+        createdAt: now,
+        updatedAt: now,
+        idempotencyKey: 'checkout-half',
+      });
+    const req = {
+      flowId: 'tpl-storefront-order',
+      idempotencyKey: 'checkout-half',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+      }),
+    };
+    expect(await startOrder(env, req)).toEqual({ orderId, replayed: true });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.order!.createdAt).toBe(now);
+    // Once running, a replay only returns it.
+    expect(await startOrder(env, req)).toEqual({ orderId, replayed: true });
+    expect(
+      (await state(orderId)).timeline.filter(
+        (t) => t.kind === 'order' && t.message.startsWith('Order created'),
+      ),
+    ).toHaveLength(1);
+  });
 });
 
 describe('outbound webhooks', () => {
