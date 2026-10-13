@@ -1,0 +1,873 @@
+/*
+ * Ledger in the docs: the web app's components carried into Starlight. Hand-written and safe to
+ * edit. Colours come only from theme.css (generated from @orderloop/design, never hand-edited):
+ * Starlight's slots, plus `--ol-*` for the app's own tokens. Each block names the app component
+ * it follows, so a change there has an obvious counterpart here. See apps/docs/DESIGN.md.
+ */
+
+:root {
+  /* The app's top bar is 48px (apps/web/app/routes/shell.tsx). */
+  --sl-nav-height: 3rem;
+  --sl-content-width: 48rem;
+  --sl-text-h1: clamp(1.875rem, 1.35rem + 1.6vw, 2.375rem);
+  --sl-text-h2: 1.375rem;
+  --sl-text-h3: 1.0625rem;
+  --sl-text-h4: 0.9375rem;
+  --ol-r: var(--ol-radius);
+}
+
+body {
+  font-feature-settings: "ss02";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Browser surfaces ───────────────────────────────────────────────────── */
+
+::selection {
+  background-color: color-mix(in oklch, var(--ol-link) 24%, transparent);
+}
+
+:where(input, textarea) {
+  caret-color: var(--ol-link);
+}
+
+/* One focus ring for every control, as in app.css. */
+:where(a, button, summary, select, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--ol-link);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+html {
+  scrollbar-color: var(--ol-rule) transparent;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  text-wrap: balance;
+}
+
+.sl-markdown-content :is(ul, ol) ::marker {
+  color: var(--ol-muted-foreground);
+}
+
+/* ── Top bar (shell.tsx) ────────────────────────────────────────────────── */
+
+.header {
+  border-bottom: 1px solid var(--ol-rule);
+}
+
+.site-title {
+  gap: 0.5rem;
+  font-family: var(--ol-font-serif);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.site-title img {
+  height: 1.25rem;
+  width: auto;
+}
+
+/* Search reads as one of the app's inputs: card ground, hairline, 6px corners. */
+site-search > button[data-open-modal] {
+  height: 2rem;
+  border: 1px solid var(--ol-rule);
+  border-radius: var(--ol-r);
+  background: var(--ol-card);
+  color: var(--ol-muted-foreground);
+  font-size: 0.8125rem;
+  box-shadow: none;
+}
+
+site-search > button[data-open-modal]:hover {
+  border-color: var(--ol-input);
+  color: var(--ol-ink);
+}
+
+site-search kbd {
+  background: var(--ol-muted);
+  border-radius: 3px;
+}
+
+.ol-header-link {
+  color: var(--ol-muted-foreground);
+  font-size: 0.8125rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ol-header-link:hover {
+  color: var(--ol-ink);
+}
+
+/* The app's one primary in the bar ("New order"): ink, 32px, 13px. */
+.ol-header-button {
+  display: inline-flex;
+  align-items: center;
+  height: 2rem;
+  padding-inline: 0.75rem;
+  border-radius: var(--ol-r);
+  background: var(--ol-ink);
+  color: var(--ol-paper);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ol-header-button:hover {
+  background: color-mix(in oklch, var(--ol-ink) 90%, var(--ol-paper));
+}
+
+starlight-theme-select select {
+  font-size: 0.8125rem;
+}
+
+/* Table of contents: quiet until current, then ink. */
+starlight-toc a,
+mobile-starlight-toc a {
+  color: var(--ol-muted-foreground);
+}
+
+starlight-toc a[aria-current="true"],
+mobile-starlight-toc a[aria-current="true"] {
+  color: var(--ol-ink);
+  font-weight: 500;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+
+.sidebar-content {
+  --sl-sidebar-item-padding-inline: 0.625rem;
+}
+
+.sidebar-content .large {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.sidebar-content a {
+  font-size: 0.875rem;
+  color: var(--ol-muted-foreground);
+  border-radius: var(--ol-r);
+}
+
+.sidebar-content a:hover {
+  color: var(--ol-ink);
+}
+
+/* Where you are is a tonal step in ink, like the app's active nav, not an inverted pill. */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  background: var(--ol-muted);
+  color: var(--ol-ink);
+  font-weight: 600;
+}
+
+/* ── Page header (page.tsx PageHeader) ─────────────────────────────────── */
+
+.ol-page-header {
+  margin-top: 1rem;
+}
+
+.ol-page-header h1 {
+  font-family: var(--ol-font-serif);
+  font-size: var(--sl-text-h1);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--ol-ink);
+}
+
+.ol-page-header .ol-lede {
+  margin-top: 0.5rem;
+  max-width: 68ch;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--ol-muted-foreground);
+}
+
+/* ── Prose ──────────────────────────────────────────────────────────────── */
+
+.sl-markdown-content {
+  line-height: 1.7;
+}
+
+/* A section opens on a rule, as the app's panels open on their header row. Starlight wraps a
+   heading in `.sl-heading-wrapper` for its anchor link, so the rule goes on the wrapper; on the
+   bare h2 it stopped at the heading's text. */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--ol-rule);
+}
+
+/* A page that opens on a section already has the page header's rule above it. */
+.sl-markdown-content > .sl-heading-wrapper.level-h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sl-markdown-content h2:not(:where(.not-content *)) {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ol-ink);
+}
+
+.sl-markdown-content h3:not(:where(.not-content *)) {
+  margin-top: 2rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--ol-link);
+  text-decoration-color: color-mix(in oklch, var(--ol-link) 40%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-color: currentColor;
+}
+
+.sl-markdown-content code:not(:where(.not-content *, pre *)) {
+  padding: 0.1em 0.35em;
+  border: 0;
+  border-radius: 3px;
+  background: var(--ol-muted);
+  color: var(--ol-ink);
+  font-size: 0.875em;
+}
+
+.sl-markdown-content strong {
+  color: var(--ol-ink);
+  font-weight: 600;
+}
+
+.sl-markdown-content hr {
+  border-color: var(--ol-rule);
+}
+
+/* ── Tables (packages/ui table.tsx) ────────────────────────────────────── */
+
+.sl-markdown-content table:not(:where(.not-content *)) {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--ol-rule);
+  vertical-align: top;
+}
+
+.sl-markdown-content :is(th, td):first-child:not(:where(.not-content *)) {
+  padding-inline-start: 0;
+}
+
+/* Column labels use the app's caption: 12px, medium, muted, on no fill. */
+.sl-markdown-content th:not(:where(.not-content *)) {
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ol-muted-foreground);
+  border-bottom-color: var(--ol-input);
+}
+
+.sl-markdown-content tbody tr:hover {
+  background: color-mix(in oklch, var(--ol-muted) 50%, transparent);
+}
+
+/* ── Callouts: hue from the status ramp only ───────────────────────────── */
+
+.starlight-aside {
+  --ol-aside: var(--ol-ink);
+  border: 1px solid color-mix(in oklch, var(--ol-aside) 30%, var(--ol-paper));
+  border-radius: var(--ol-r);
+  background: color-mix(in oklch, var(--ol-aside) 5%, var(--ol-paper));
+  color: var(--sl-color-text);
+}
+
+.starlight-aside--note {
+  --ol-aside: var(--ol-ink);
+}
+.starlight-aside--tip {
+  --ol-aside: var(--ol-ok);
+}
+.starlight-aside--caution {
+  --ol-aside: var(--ol-wait);
+}
+.starlight-aside--danger {
+  --ol-aside: var(--ol-bad);
+}
+
+.starlight-aside {
+  --sl-color-asides-text-accent: var(--ol-aside);
+}
+
+.starlight-aside__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* ── Buttons (packages/ui button.tsx) ──────────────────────────────────── */
+
+.sl-link-button {
+  min-height: 2.25rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--ol-r);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25;
+  box-shadow: none;
+}
+
+.sl-link-button.primary {
+  background: var(--ol-ink);
+  border-color: var(--ol-ink);
+  color: var(--ol-paper);
+}
+
+.sl-link-button.primary:hover {
+  background: color-mix(in oklch, var(--ol-ink) 90%, var(--ol-paper));
+  border-color: transparent;
+}
+
+.sl-link-button.secondary {
+  background: var(--ol-card);
+  border-color: var(--ol-rule);
+  color: var(--ol-ink);
+}
+
+.sl-link-button.secondary:hover {
+  background: var(--ol-muted);
+}
+
+.sl-link-button.minimal {
+  color: var(--ol-link);
+  padding-inline: 0.25rem;
+}
+
+/* ── Cards (page.tsx Section): hairline, card ground, no shadow ─────────── */
+
+.sl-link-card,
+.card {
+  border: 1px solid var(--ol-rule);
+  border-radius: var(--ol-r);
+  background: var(--ol-card);
+  box-shadow: none;
+}
+
+.sl-link-card:hover {
+  border-color: var(--ol-ink);
+  background: var(--ol-card);
+}
+
+.sl-link-card .title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.sl-link-card .description {
+  font-size: 0.875rem;
+  color: var(--ol-muted-foreground);
+}
+
+/* Previous / next: the app's outline buttons. */
+.pagination-links a {
+  border: 1px solid var(--ol-rule);
+  border-radius: var(--ol-r);
+  background: var(--ol-card);
+  box-shadow: none;
+  color: var(--ol-muted-foreground);
+}
+
+.pagination-links a:hover {
+  border-color: var(--ol-ink);
+}
+
+.pagination-links .link-title {
+  color: var(--ol-ink);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Expressive Code frames sit on the app's card ground. */
+.expressive-code .frame {
+  box-shadow: none;
+}
+
+/* ── Home (splash) ──────────────────────────────────────────────────────── */
+
+/* The hero stays left-aligned at every width, like the app's page headers. */
+.hero {
+  padding-bottom: 0.5rem;
+}
+
+.hero .stack {
+  text-align: start;
+}
+
+.hero .copy {
+  align-items: flex-start;
+}
+
+.hero .actions {
+  justify-content: flex-start;
+  gap: 0.75rem 1rem;
+}
+
+.hero h1 {
+  max-width: 24ch;
+  font-family: var(--ol-font-serif);
+  font-size: clamp(2.125rem, 1.4rem + 3vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  color: var(--ol-ink);
+}
+
+.hero .tagline {
+  max-width: 60ch;
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  line-height: 1.6;
+  color: var(--ol-muted-foreground);
+}
+
+@media (min-width: 50rem) {
+  .hero {
+    grid-template-columns: 1fr;
+    padding-block: clamp(2.5rem, 1rem + 6vmin, 5rem) 1.5rem;
+  }
+}
+
+/* ── Status stamp (status.tsx Stamp) ───────────────────────────────────── */
+
+.ol-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--c) 11%, transparent);
+  color: var(--c);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ol-stamp-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--c);
+}
+
+/* ── The run figure (OrderRun.astro) on the editor's sheet ─────────────── */
+
+.ol-run {
+  margin: 0.5rem 0 2.5rem;
+  border: 1px solid var(--ol-rule);
+  border-radius: var(--ol-r);
+  background: var(--ol-card);
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.ol-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--ol-rule);
+}
+
+.ol-run-head h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ol-ink);
+}
+
+/* flow-canvas.tsx: dots, 20px apart, 1.2px. */
+.ol-run-sheet {
+  --gap-x: 1.75rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem var(--gap-x);
+  margin: 0;
+  padding: 1.5rem 1.25rem;
+  list-style: none;
+  background-color: var(--ol-sheet);
+  background-image: radial-gradient(var(--ol-sheet-grid) 1.2px, transparent 1.2px);
+  background-size: 20px 20px;
+  background-position: -10px -10px;
+  counter-reset: none;
+}
+
+/* flow-node.tsx: the card. */
+.ol-run-node {
+  position: relative;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.625rem 0.9375rem;
+  border: 1px solid var(--ol-node-border);
+  border-radius: var(--ol-r);
+  background: var(--ol-node);
+  box-shadow: 0 1px 0 var(--ol-rule);
+  min-width: 0;
+}
+
+/* Edges: one ink segment into each card from the previous one. */
+.ol-run-node + .ol-run-node::before {
+  content: "";
+  position: absolute;
+  left: 1.25rem;
+  top: -1.25rem;
+  height: 1.25rem;
+  border-left: 1px solid var(--ol-edge-active);
+}
+
+.ol-run-rule {
+  position: absolute;
+  inset-block: -1px;
+  left: -1px;
+  width: 3px;
+  border-radius: var(--ol-r) 0 0 var(--ol-r);
+  background: var(--c);
+}
+
+.ol-run-node[data-live] .ol-run-rule,
+.ol-run-node[data-live] + * {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ol-run-node[data-live] .ol-run-rule {
+    animation: ol-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes ol-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.ol-run-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+}
+
+.ol-run-cat {
+  display: inline-flex;
+  color: var(--ol-cat-control);
+}
+.ol-run-cat[data-cat="trigger"] {
+  color: var(--ol-cat-trigger);
+}
+.ol-run-cat[data-cat="commerce"] {
+  color: var(--ol-cat-commerce);
+}
+.ol-run-cat[data-cat="ai"] {
+  color: var(--ol-cat-ai);
+}
+
+.ol-run-tags {
+  color: var(--ol-muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.ol-run-status {
+  margin-inline-start: auto;
+  font-weight: 500;
+  color: var(--c);
+}
+
+.ol-run-node p {
+  margin: 0;
+}
+
+.ol-run-label {
+  padding-top: 0.125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ol-ink);
+}
+
+.ol-run-key {
+  font-family: var(--sl-font-mono);
+  font-size: 0.6875rem;
+  color: var(--ol-muted-foreground);
+}
+
+.ol-run-node .ol-run-summary {
+  margin-top: 0.375rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--ol-rule);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--ol-muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+/* Output handles, right-aligned as on the canvas; the taken branch is ink with a filled handle. */
+.ol-run-branches {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.125rem 0.75rem;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--sl-font-mono);
+  font-size: 0.6875rem;
+  color: var(--ol-muted-foreground);
+}
+
+.ol-run-branches li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  margin: 0;
+}
+
+.ol-run-handle {
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1px solid var(--ol-edge);
+  border-radius: 2px;
+  background: var(--ol-node);
+}
+
+.ol-run-branches li[data-taken] {
+  color: var(--ol-ink);
+  font-weight: 500;
+}
+
+.ol-run-branches li[data-taken] .ol-run-handle {
+  border-color: var(--ol-edge-active);
+  background: var(--ol-edge-active);
+}
+
+.ol-run-foot {
+  display: grid;
+  gap: 0.75rem 2rem;
+  padding: 0.875rem 1rem 1rem;
+  border-top: 1px solid var(--ol-rule);
+}
+
+.ol-run-foot figcaption {
+  max-width: 62ch;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--ol-muted-foreground);
+}
+
+.ol-run-foot figcaption a {
+  color: var(--ol-link);
+}
+
+.ol-run-foot figcaption code {
+  font-size: 0.875em;
+  color: var(--ol-ink);
+}
+
+/* The accounting double rule under the total (app.css `double-rule`). */
+.ol-run-totals {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  gap: 0.125rem 1.5rem;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ol-run-totals > div {
+  display: contents;
+}
+
+.ol-run-totals dt {
+  color: var(--ol-muted-foreground);
+}
+
+.ol-run-totals dd {
+  margin: 0;
+  text-align: end;
+  color: var(--ol-ink);
+}
+
+.ol-run-totals [data-total] dt,
+.ol-run-totals [data-total] dd {
+  padding-top: 0.25rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.ol-run-totals [data-total] dd {
+  padding-bottom: 0.125rem;
+  border-bottom: 3px double var(--ol-ink);
+}
+
+/* Two columns, then four: reading order runs left to right, row by row. */
+@container (min-width: 34rem) {
+  .ol-run-sheet {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ol-run-node + .ol-run-node::before {
+    left: calc(-1 * var(--gap-x));
+    top: 1.125rem;
+    width: var(--gap-x);
+    height: 0;
+    border-left: 0;
+    border-top: 1px solid var(--ol-edge-active);
+  }
+  .ol-run-node:nth-child(2n + 1)::before {
+    display: none;
+  }
+}
+
+@container (min-width: 58rem) {
+  .ol-run-sheet {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .ol-run-node:nth-child(2n + 1)::before {
+    display: block;
+  }
+  .ol-run-node:nth-child(4n + 1)::before {
+    display: none;
+  }
+  .ol-run-foot {
+    grid-template-columns: auto 1fr;
+    align-items: end;
+  }
+}
+
+/* The home page widens to hold the four-column sheet. */
+:root[data-has-hero] {
+  --sl-content-width: 72rem;
+}
+
+:root[data-has-hero] .sl-markdown-content > :not(.ol-run, .card-grid) {
+  max-width: 48rem;
+}
+
+/* ── Node catalog and built-in flows (palette entries) ─────────────────── */
+
+.ol-node {
+  padding: 0.875rem 1rem 1rem;
+  border: 1px solid var(--ol-rule);
+  border-radius: var(--ol-r);
+  background: var(--ol-card);
+  scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+}
+
+.ol-node + .ol-node {
+  margin-top: 0.75rem;
+}
+
+.ol-node-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+}
+
+.ol-node-head .ol-run-cat {
+  align-self: center;
+}
+
+.sl-markdown-content .ol-node h3 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ol-ink);
+}
+
+.sl-markdown-content .ol-node .ol-node-type {
+  padding: 0;
+  background: none;
+  font-size: 0.75rem;
+  color: var(--ol-muted-foreground);
+}
+
+.ol-node-head .ol-run-tags {
+  margin-inline-start: auto;
+}
+
+.sl-markdown-content .ol-node > p {
+  margin-top: 0.375rem;
+  font-size: 0.9375rem;
+}
+
+.sl-markdown-content .ol-node-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+  color: var(--sl-color-text);
+}
+
+.sl-markdown-content .ol-node-facts li {
+  margin: 0;
+}
+
+.ol-fact-label {
+  margin-inline-end: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ol-muted-foreground);
+}
+
+.ol-outputs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.sl-markdown-content .ol-node table {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.sl-markdown-content .ol-node details {
+  margin-top: 0.75rem;
+}
+
+.sl-markdown-content .ol-node summary {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ol-ink);
+  cursor: pointer;
+}

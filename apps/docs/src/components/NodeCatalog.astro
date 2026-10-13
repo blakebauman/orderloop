@@ -5,6 +5,8 @@
  * engine read, so this page cannot drift. Pass `category` to render one group.
  */
 import { CATEGORY_LABELS, NODE_SPECS, type NodeCategory, type NodeSpec } from '@orderloop/core';
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import NodeIcon from './NodeIcon.astro';
 
 interface Props {
   category: NodeCategory;
@@ -14,9 +16,6 @@ const { category } = Astro.props;
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const specs: readonly NodeSpec[] = NODE_SPECS.filter((s) => s.category === category);
 
-// biome-ignore lint/correctness/noUnusedVariables: used in the markup
-const outputs = (s: NodeSpec) =>
-  typeof s.outputs === 'function' ? 'One per entry in Routes (configurable)' : s.outputs.join(', ');
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const show = (v: unknown) =>
   v === undefined ? '' : typeof v === 'string' ? (v === '' ? '""' : v) : JSON.stringify(v);
@@ -28,20 +27,55 @@ const label = CATEGORY_LABELS[category];
   {
     specs.map((s) => (
       <section class="ol-node" id={s.type}>
-        <h3>
-          <span class="ol-cat" data-cat={s.category} aria-hidden="true" />
-          {s.label}
-          <code>{s.type}</code>
-        </h3>
+        <div class="ol-node-head">
+          <span class="ol-run-cat" data-cat={s.category} title={label}>
+            <NodeIcon name={s.icon} size={16} />
+          </span>
+          <h3>{s.label}</h3>
+          <code class="ol-node-type">{s.type}</code>
+          {(s.rollback || s.waits) && (
+            <span class="ol-run-tags">
+              {[s.rollback && 'undo', s.waits && 'waits'].filter(Boolean).join(' · ')}
+            </span>
+          )}
+        </div>
         <p>{s.description}</p>
-        <ul class="ol-tags">
+        <ul class="ol-node-facts">
           <li>
-            Outputs: {s.outputs.length === 0 ? 'none (ends the run)' : outputs(s)}
+            <span class="ol-fact-label">Outputs</span>
+            {s.outputs.length === 0 ? (
+              'none: ends the run'
+            ) : typeof s.outputs === 'function' ? (
+              'one per entry in Routes'
+            ) : (
+              <span class="ol-outputs">
+                {s.outputs.map((o) => (
+                  <code>{o}</code>
+                ))}
+              </span>
+            )}
           </li>
-          {s.rollback && <li data-tag="rollback">Rolls back on failure</li>}
-          {s.waits && <li data-tag="waits">Waits for a person or event</li>}
-          {s.loop && <li>Accepts a “next” back-edge</li>}
-          {s.retries !== undefined && <li>Default retries: {s.retries}</li>}
+          {s.rollback && (
+            <li>
+              <span class="ol-fact-label">Undo</span>compensated when the order fails or is cancelled
+            </li>
+          )}
+          {s.waits && (
+            <li>
+              <span class="ol-fact-label">Waits</span>for a person or an event
+            </li>
+          )}
+          {s.loop && (
+            <li>
+              <span class="ol-fact-label">Loop</span>accepts a <code>next</code> back-edge
+            </li>
+          )}
+          {s.retries !== undefined && (
+            <li>
+              <span class="ol-fact-label">Retries</span>
+              {s.retries} by default
+            </li>
+          )}
         </ul>
         {s.fields.length > 0 && (
           <table>

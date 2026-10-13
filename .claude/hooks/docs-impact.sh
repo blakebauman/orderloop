@@ -25,7 +25,7 @@ printf '%s\n' "$line" >>"$log"
 hits=$(printf '%s\n' "$rel" | "$(dirname "$0")/docs-map.sh")
 [ -z "$hits" ] && exit 0
 
-pages=$(printf '%s\n' "$hits" | cut -f2 | tr ' ' '\n' | sort -u | sed 's#^\([a-z]*/[a-z-]*\)$#apps/docs/src/content/\1.mdx#' | tr '\n' ' ' | sed 's/ $//')
+pages=$(printf '%s\n' "$hits" | cut -f2 | tr ' ' '\n' | sort -u | sed -E 's#^([a-z-]+(/[a-z-]+)?)$#apps/docs/src/content/\1.mdx#' | tr '\n' ' ' | sed 's/ $//')
 gen=""
 printf '%s\n' "$hits" | cut -f3 | grep -qx gen && gen=" A reference page renders from this file at build time: run \`pnpm docs:build\`, then check the prose around it."
 msg="Docs: $rel is described in $pages.$gen Sync them before you finish (docs-sync skill), or say why no change is needed."

@@ -1,0 +1,23 @@
+{
+  "name": "@orderloop/design",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ledger design tokens shared by the web app and the docs: the palette and faces apps/web/app/app.css authors, held to it by a test, and the builders for the docs' generated Starlight and Scalar themes.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "sync:theme": "tsx scripts/sync-theme.ts",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/node": "^25.7.0",
+    "tsx": "^4.23.15",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

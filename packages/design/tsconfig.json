@@ -1,0 +1,5 @@
+{
+  "extends": "@orderloop/typescript-config/base.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["src", "scripts", "tests", "vitest.config.ts"]
+}

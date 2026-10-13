@@ -5,15 +5,18 @@ Today the toolkit has one job: keeping the docs site (`apps/docs`) in sync with 
 
 ## How the docs stay in sync
 
-1. **Generated reference pages.** The node catalog, the built-in flows, the node→event table, every
+1. **Generated pages and styling.** The docs theme is generated from `@orderloop/design`, whose
+   tests hold it to the web app's `app.css`; the home page's run figure is a captured run that an
+   engine test checks.
+2. **Generated reference pages.** The node catalog, the built-in flows, the node→event table, every
    status and event list, and the OpenAPI explorer render from `@orderloop/core` and
    `apps/web/app/lib/openapi.ts` at build time. Rebuilding refreshes them.
-2. **A build that fails loudly.** `pnpm docs:build` rejects unknown sidebar slugs and broken
+3. **A build that fails loudly.** `pnpm docs:build` rejects unknown sidebar slugs and broken
    imports, and `apps/docs/scripts/check-links.mjs` fails on any internal link or anchor that
    doesn't resolve.
-3. **Hooks that notice.** Editing a documented file names the pages that describe it; ending a turn
+4. **Hooks that notice.** Editing a documented file names the pages that describe it; ending a turn
    with documented code changed and no docs touched blocks once and asks for a sync.
-4. **An agent and skills that do the prose.** The `docs-sync` agent and skill map a change to its
+5. **An agent and skills that do the prose.** The `docs-sync` agent and skill map a change to its
    pages and verify every claim against the source.
 
 The map from source files to pages is one file,
@@ -41,6 +44,7 @@ or let Claude pick them by description.
 
 | Event | Script | Behaviour |
 |---|---|---|
+| `PreToolUse` (Edit/Write) | `block-generated.sh` | **Denies** hand edits to generated files: the docs `theme.css` and `worker-configuration.d.ts` |
 | `PostToolUse` (Edit/Write) | `docs-impact.sh` | Logs the edited file for this session, and names the docs pages for an edited surface, once per file per session. Advisory |
 | `Stop` | `docs-drift.sh` | **Blocks once** per drift-set when files *this session* edited are documented surfaces, still uncommitted, and this session edited nothing under `apps/docs/` |
 
@@ -60,4 +64,4 @@ Editing `settings.json` takes effect in a new session; skills and agents reload 
 
 ## Permissions
 
-`settings.json` allows the docs build, lint and type-check, and **asks** before a docs deploy.
+`settings.json` allows the docs build, lint and type-check, `pnpm sync:theme` and the design tests, and **asks** before a docs deploy.

@@ -1,0 +1,115 @@
+{
+  "$comment": "One real run of tpl-b2b-order: the engine in workerd (AI_MODE=mock) with the dashboard's \"B2B PO by email\" document and customerId cus_northwind, stopped at its payment wait. Drawn by apps/docs/src/components/OrderRun.astro; apps/engine/tests/docs-sample-run.test.ts fails when the engine would now run it differently, and its diff is the update.",
+  "flowId": "tpl-b2b-order",
+  "status": "waiting",
+  "order": {
+    "customerId": "cus_northwind",
+    "subtotal": 3286,
+    "tax": 271.1,
+    "total": 3557.1
+  },
+  "waits": [
+    {
+      "nodeId": "paid",
+      "kind": "event",
+      "event": "payment.received",
+      "title": "Waiting for payment.received"
+    }
+  ],
+  "nodes": {
+    "po_in": {
+      "status": "succeeded",
+      "summary": "Document po.txt",
+      "branches": ["out"]
+    },
+    "extract": {
+      "status": "succeeded",
+      "summary": "3 lines (heuristic)",
+      "branches": ["out"]
+    },
+    "validate": {
+      "status": "succeeded",
+      "summary": "3 lines · Northwind Traders",
+      "branches": ["out"]
+    },
+    "price": {
+      "status": "succeeded",
+      "summary": "Subtotal $3,286.00 · 3 contract",
+      "branches": ["out"]
+    },
+    "tax": {
+      "status": "succeeded",
+      "summary": "Tax $271.10 · total $3,557.10",
+      "branches": ["out"]
+    },
+    "credit": {
+      "status": "succeeded",
+      "summary": "Within credit ($88,000.00 available)",
+      "branches": ["ok"]
+    },
+    "router": {
+      "status": "succeeded",
+      "summary": "→ auto_approve",
+      "branches": ["auto_approve"]
+    },
+    "clarify": {
+      "status": "skipped"
+    },
+    "reply": {
+      "status": "skipped"
+    },
+    "approval": {
+      "status": "skipped"
+    },
+    "reserve": {
+      "status": "succeeded",
+      "summary": "Reserved 3 lines",
+      "branches": ["ok"]
+    },
+    "invoice": {
+      "status": "succeeded",
+      "summary": "net_30 · due 2026-11-12",
+      "branches": ["out"]
+    },
+    "ship": {
+      "status": "succeeded",
+      "summary": "FREIGHT FREIGHT1188453459",
+      "branches": ["out"]
+    },
+    "erp": {
+      "status": "succeeded",
+      "summary": "NETSUITE-lgmyhwwo",
+      "branches": ["out"]
+    },
+    "paid": {
+      "status": "waiting"
+    },
+    "dunning": {
+      "status": "pending"
+    },
+    "remind": {
+      "status": "pending"
+    },
+    "paid_late": {
+      "status": "pending"
+    },
+    "collections": {
+      "status": "pending"
+    },
+    "done": {
+      "status": "pending"
+    },
+    "unpaid": {
+      "status": "pending"
+    },
+    "decline": {
+      "status": "skipped"
+    },
+    "declined": {
+      "status": "skipped"
+    },
+    "backorder": {
+      "status": "skipped"
+    }
+  }
+}

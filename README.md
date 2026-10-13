@@ -47,6 +47,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 | `apps/engine` (`@orderloop/engine`) | OrderAgent DO, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
 | `apps/docs` (`@orderloop/docs`) | Documentation site (Starlight), deployed as a static-assets Worker. Reference pages render from `@orderloop/core` at build time |
 | `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
+| `packages/design` (`@orderloop/design`) | Ledger tokens as data, held to `apps/web/app/app.css` by a test; generates the docs theme (`pnpm sync:theme`) |
 | `packages/db` (`@orderloop/db`) | D1 schema (Drizzle), migrations and seed data, flow persistence |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `packages/typescript-config` | Shared tsconfig bases |

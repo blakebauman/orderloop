@@ -22,32 +22,53 @@ export default defineConfig({
       // Prose lives at src/content/ (see content.config.ts). Without this Starlight skips its
       // Markdown transforms (asides, heading anchors) for files outside src/content/docs/.
       markdown: { processedDirs: ['./src/content'] },
-      expressiveCode: { defaultProps: { frame: 'code' } },
+      // Code blocks on the app's card ground with its hairline and corners. GitHub's themes keep
+      // syntax colour quiet next to Ledger's ink; Night Owl (Starlight's default) did not.
+      expressiveCode: {
+        themes: ['github-light', 'github-dark-dimmed'],
+        defaultProps: { frame: 'code' },
+        styleOverrides: {
+          borderColor: 'var(--ol-rule)',
+          borderRadius: 'var(--ol-radius)',
+          codeBackground: 'var(--ol-card)',
+          codeFontFamily: 'var(--sl-font-mono)',
+          codeFontSize: '0.8125rem',
+          uiFontFamily: 'var(--sl-font)',
+          frames: {
+            editorBackground: 'var(--ol-card)',
+            editorActiveTabBackground: 'var(--ol-card)',
+            editorTabBarBackground: 'var(--ol-muted)',
+            editorTabBarBorderBottomColor: 'var(--ol-rule)',
+            frameBoxShadowCssValue: 'none',
+            inlineButtonBorder: 'var(--ol-rule)',
+          },
+        },
+      },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/blakebauman/orderloop' },
       ],
       components: {
-        // Ledger is light by default with a light/dark switch; Starlight's pair follows the OS.
+        // The web app's theme rule: light by default, then Dark or Match system.
         ThemeProvider: './src/components/ThemeProvider.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
+        // The app's page header: serif title, muted description under it.
+        PageTitle: './src/components/PageTitle.astro',
+        // The app's top-bar links: API explorer, then "Open the app" as the one ink button.
+        SocialIcons: './src/components/SocialIcons.astro',
       },
-      customCss: ['./src/styles/ledger.css'],
-      head: [
-        { tag: 'link', attrs: { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' } },
-        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
-        {
-          tag: 'link',
-          attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
-        },
-        // The faces the web app sets (apps/web/app/root.tsx).
-        {
-          tag: 'link',
-          attrs: {
-            rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
-          },
-        },
+      // The app's faces, self-hosted (the docs fetch no font from a third party), then Ledger:
+      // theme.css is generated from @orderloop/design (`pnpm sync:theme`); brand.css is hand-written.
+      customCss: [
+        '@fontsource/ibm-plex-sans/400.css',
+        '@fontsource/ibm-plex-sans/500.css',
+        '@fontsource/ibm-plex-sans/600.css',
+        '@fontsource/ibm-plex-serif/600.css',
+        '@fontsource/ibm-plex-mono/400.css',
+        '@fontsource/ibm-plex-mono/500.css',
+        './src/styles/theme.css',
+        './src/styles/brand.css',
       ],
+      head: [{ tag: 'link', attrs: { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' } }],
       // Explicit sidebar: autogenerate expects src/content/docs/. A new page is invisible until
       // it is listed here. Start reads as a sequence (Starlight's prev/next follows this order).
       sidebar: [

@@ -21,10 +21,19 @@ stop() { printf '{"session_id":"%s"}' "$1" | "$hooks/docs-drift.sh"; }
 check "catalog edit names the node catalog" "reference/nodes.mdx" "$(edit s1 "$root/packages/core/src/catalog.ts")"
 check "catalog edit says it is generated" "renders from this file" "$(edit s2 "$root/packages/core/src/catalog.ts")"
 check "second edit of the same file is quiet" "" "$(edit s2 "$root/packages/core/src/catalog.ts")"
-check "app.css edit names ledger.css" "apps/docs/src/styles/ledger.css" "$(edit s3 "$root/apps/web/app/app.css")"
+check "app.css edit names brand.css" "apps/docs/src/styles/brand.css" "$(edit s3 "$root/apps/web/app/app.css")"
 check "undocumented file is quiet" "" "$(edit s5 "$root/packages/ui/src/button.tsx")"
 check "file outside any repo is quiet" "" "$(edit s6 /etc/hosts)"
 check "map lookup is exact" "" "$(printf 'packages/core/src/catalog.tsx\n' | "$hooks/docs-map.sh")"
+
+check "templates edit names the home page" "apps/docs/src/content/index.mdx" "$(edit s7 "$root/packages/core/src/templates.ts")"
+check "app.css edit names the design tokens" "packages/design/src/tokens.ts" "$(edit s8 "$root/apps/web/app/app.css")"
+
+# ── block-generated: generated files are denied, everything else allowed ─────
+guard() { printf '{"tool_input":{"file_path":"%s"}}' "$1" | "$hooks/block-generated.sh"; }
+check "hand edit of the generated docs theme is denied" '"permissionDecision":"deny"' "$(guard "$root/apps/docs/src/styles/theme.css")"
+check "wrangler-generated types are denied" '"permissionDecision":"deny"' "$(guard "$root/apps/web/worker-configuration.d.ts")"
+check "hand-written docs styles are allowed" "" "$(guard "$root/apps/docs/src/styles/brand.css")"
 
 # ── docs-drift: only this session's uncommitted edits count ───────────────────
 repo="$TMPDIR/repo"
