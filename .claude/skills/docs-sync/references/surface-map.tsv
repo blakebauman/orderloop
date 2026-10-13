@@ -46,4 +46,4 @@
 ^(\.github/workflows/|scripts/provision\.sh$)	start/deploy	prose
 ^package\.json$	start/getting-started start/deploy	prose
 ^packages/core/src/roles\.ts$	guides/team-and-roles internals/order-agent	prose
-^apps/web/app/(lib/team\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|routes/audit\.tsx|routes/(team|account|login)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose
+^apps/web/app/(lib/team\.server\.ts|lib/auth\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|lib/totp\.ts|lib/two-factor\.server\.ts|routes/audit\.tsx|routes/(team|account|login|login-two-factor)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose

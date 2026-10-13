@@ -27,6 +27,22 @@ suite('audit vocabulary', () => {
         detail: { reason: 'wrong email or password' },
       }),
     ).toBe('Sign-in failed: ann@example.com, wrong email or password');
+    expect(
+      describe({
+        action: 'auth.sign_in',
+        actor: 'ann@example.com',
+        target: null,
+        detail: { twoFactor: 'app' },
+      }),
+    ).toBe('Signed in: two-factor app');
+    expect(
+      describe({
+        action: 'auth.recovery_code_used',
+        actor: 'ann@example.com',
+        target: 'ann@example.com',
+        detail: { left: 9 },
+      }),
+    ).toBe('Used a recovery code: ann@example.com, 9 left');
     expect(describe({ action: 'auth.sign_out', actor: 'ann', target: null, detail: null })).toBe(
       'Signed out',
     );

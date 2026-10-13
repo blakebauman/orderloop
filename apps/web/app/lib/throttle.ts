@@ -15,6 +15,8 @@ export const LIMITS = {
   email: 50,
   /** Guesses at the shared APP_PASSWORD as an API bearer token, per place. */
   'api-ip': 20,
+  /** Wrong two-factor codes for one person, after a correct password. */
+  'two-factor': 5,
 } as const;
 
 export type ThrottleKind = keyof typeof LIMITS;

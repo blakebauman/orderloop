@@ -326,6 +326,11 @@ export const users = sqliteTable(
     createdAt: integer('created_at').notNull(),
     lastLoginAt: integer('last_login_at'),
     disabledAt: integer('disabled_at'),
+    /** Authenticator-app secret (base32), set once two-factor sign-in is on. */
+    totpSecret: text('totp_secret'),
+    totpEnabledAt: integer('totp_enabled_at'),
+    /** The last 30-second step a code was accepted for; older or equal steps are refused. */
+    totpLastStep: integer('totp_last_step'),
   },
   (t) => [
     uniqueIndex('users_email').on(t.email),
@@ -350,6 +355,32 @@ export const sessions = sqliteTable(
   },
   (t) => [index('sessions_user').on(t.userId)],
 );
+
+/** One-use two-factor recovery codes, stored as SHA-256; a row is deleted when its code is used. */
+export const recoveryCodes = sqliteTable(
+  'recovery_codes',
+  {
+    codeHash: text('code_hash').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('recovery_codes_user').on(t.userId)],
+);
+
+/**
+ * A correct password from someone with two-factor on, waiting for their code. The
+ * `__Host-ol_2fa` cookie holds a random token; only its SHA-256 is stored.
+ */
+export const signInChallenges = sqliteTable('sign_in_challenges', {
+  tokenHash: text('token_hash').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+});
 
 /** REST API bearer tokens (`ol_live_…`), stored as SHA-256, each with a role. */
 export const apiTokens = sqliteTable(

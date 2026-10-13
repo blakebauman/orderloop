@@ -35,6 +35,7 @@ export async function listTeam() {
         createdAt: users.createdAt,
         lastLoginAt: users.lastLoginAt,
         disabledAt: users.disabledAt,
+        twoFactorAt: users.totpEnabledAt,
       })
       .from(users)
       .orderBy(users.email),

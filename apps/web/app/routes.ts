@@ -2,6 +2,7 @@ import { index, layout, type RouteConfig, route } from '@react-router/dev/routes
 
 export default [
   route('login', 'routes/login.tsx'),
+  route('login/two-factor', 'routes/login-two-factor.tsx'),
   route('logout', 'routes/logout.ts'),
   layout('routes/shell.tsx', [
     index('routes/dashboard.tsx'),
