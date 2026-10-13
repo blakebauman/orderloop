@@ -36,7 +36,7 @@ import {
 import type { Report } from './agent';
 import { loadFlowVersion } from './flows';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
-import { emit } from './outbox';
+import { emit, orderSummary } from './outbox';
 
 export type OrderLoopParams = {
   orderId: string;
@@ -397,7 +397,15 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         },
         true,
       );
-      await report({ status: 'failed', reason: `${node.label}: ${message}` });
+      const reason = `${node.label}: ${message}`;
+      await report({ status: 'failed', reason });
+      // A thrown node fails the instance without reaching an End node, so announce it here.
+      await emitStep(step, env, key, p.orderId, 'order.failed', {
+        order: orderSummary(ctx.order),
+        outcome: 'failed',
+        reason,
+        node: { id: node.id, type: node.type, error: message },
+      });
       throw err;
     }
   }
@@ -429,19 +437,6 @@ async function emitStep(
   } catch (err) {
     console.warn('webhook delivery gave up', event, err);
   }
-}
-
-function orderSummary(o: Order) {
-  return {
-    id: o.id,
-    type: o.type,
-    title: o.title ?? null,
-    customerId: o.customerId ?? null,
-    currency: o.currency,
-    subtotal: o.subtotal,
-    tax: o.tax,
-    total: o.total,
-  };
 }
 
 function applyResult(ctx: RunContext, nodeId: string, r: NodeResult) {
