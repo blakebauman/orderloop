@@ -1,4 +1,5 @@
 import {
+  type FlowVersion,
   newId,
   type Order,
   orderInputSchema,
@@ -14,37 +15,59 @@ import type { OrderLoopParams } from './workflow';
 /**
  * Creates the order row, initialises its OrderAgent and starts generation 1 of its Workflow.
  * With an idempotency key the row is inserted first, so the unique index decides which of two
- * concurrent requests creates the order; the other gets the existing order back.
+ * concurrent requests creates the order; the other gets the existing order back. Every step after
+ * the insert is safe to repeat, so a replay of an order whose start failed part-way finishes it.
  */
 export async function startOrder(env: Env, req: StartOrderInput): Promise<StartOrderResult> {
   const db = createDb(env.DB);
   const key = req.idempotencyKey;
   const existing = async () =>
     key
-      ? await db.select({ id: orders.id }).from(orders).where(eq(orders.idempotencyKey, key)).get()
+      ? await db
+          .select({
+            id: orders.id,
+            status: orders.status,
+            flowId: orders.flowId,
+            flowVersion: orders.flowVersion,
+            instanceId: orders.instanceId,
+            createdAt: orders.createdAt,
+          })
+          .from(orders)
+          .where(eq(orders.idempotencyKey, key))
+          .get()
       : undefined;
+  const replay = async (row: NonNullable<Awaited<ReturnType<typeof existing>>>) => {
+    // Still queued with no Workflow: the first request failed after the insert.
+    if (
+      row.status === 'queued' &&
+      !(await instanceExists(env, row.instanceId ?? instanceIdFor(row.id)))
+    ) {
+      const flow = await loadFlowVersion(env, row.flowId, row.flowVersion);
+      if (!flow) throw new Error(`Flow ${row.flowId} v${row.flowVersion} not found`);
+      await launch(env, req, flow, row.id, row.createdAt);
+    }
+    return { orderId: row.id, replayed: true };
+  };
   const prior = await existing();
-  if (prior) return { orderId: prior.id, replayed: true };
+  if (prior) return replay(prior);
 
   const flow = await loadFlowVersion(env, req.flowId, req.version);
   if (!flow) throw new Error(`Flow ${req.flowId} has no published version`);
   const input = orderInputSchema.parse(req.input);
   const orderId = newId('ord');
   const now = Date.now();
-  const order: Order = { ...input, id: orderId, createdAt: now, subtotal: 0, tax: 0, total: 0 };
-  const instanceId = `${orderId}-g1`;
   try {
     await db.insert(orders).values({
       id: orderId,
-      type: order.type,
+      type: input.type,
       status: 'queued',
-      title: order.title ?? '',
+      title: input.title ?? '',
       flowId: flow.id,
       flowVersion: flow.version,
-      instanceId,
+      instanceId: instanceIdFor(orderId),
       generation: 1,
-      customerId: order.customerId ?? null,
-      currency: order.currency,
+      customerId: input.customerId ?? null,
+      currency: input.currency,
       total: 0,
       createdAt: now,
       updatedAt: now,
@@ -52,9 +75,26 @@ export async function startOrder(env: Env, req: StartOrderInput): Promise<StartO
     });
   } catch (err) {
     const raced = await existing();
-    if (raced) return { orderId: raced.id, replayed: true };
+    if (raced) return replay(raced);
     throw err;
   }
+  await launch(env, req, flow, orderId, now);
+  return { orderId };
+}
+
+const instanceIdFor = (orderId: string) => `${orderId}-g1`;
+
+/** Stores the inbound document, initialises the agent and creates the Workflow; all repeatable. */
+async function launch(
+  env: Env,
+  req: StartOrderInput,
+  flow: FlowVersion,
+  orderId: string,
+  createdAt: number,
+) {
+  const input = orderInputSchema.parse(req.input);
+  const order: Order = { ...input, id: orderId, createdAt, subtotal: 0, tax: 0, total: 0 };
+  const instanceId = instanceIdFor(orderId);
   if (input.documentText && !input.documentKey) {
     order.documentKey = await storeDocument(
       env,
@@ -74,6 +114,19 @@ export async function startOrder(env: Env, req: StartOrderInput): Promise<StartO
     order,
     vars: req.vars ?? {},
   };
-  await env.ORDER_LOOP.create({ id: instanceId, params });
-  return { orderId };
+  try {
+    await env.ORDER_LOOP.create({ id: instanceId, params });
+  } catch (err) {
+    // A concurrent replay created it first.
+    if (!(await instanceExists(env, instanceId))) throw err;
+  }
+}
+
+async function instanceExists(env: Env, id: string) {
+  try {
+    await env.ORDER_LOOP.get(id);
+    return true;
+  } catch {
+    return false;
+  }
 }

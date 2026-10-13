@@ -30,7 +30,6 @@ Pricing sources go in D1. The resolver lives in `packages/core`, is pure and is 
 
 ## Gaps in shipped features
 
-- **A half-started order can get stuck.** If `startOrder` fails after inserting the order row (agent init or Workflow create), a retry with the same key returns an order stuck in `queued`. On replay, check whether the Workflow instance exists and finish starting it, or mark the row failed so the key can be reused.
 - **Idempotency keys don't fingerprint the request.** A repeat key with a different body silently returns the first order. Store a hash of the request and answer `422` on a mismatch, as Stripe does.
 - **Relative times can flicker on load.** "in 42m" and "3m ago" are computed from `Date.now()` on the server and again in the browser, so they can differ by a unit at a minute boundary and log a hydration warning. Render them only after hydration, as `useDateTime` (`apps/web/app/lib/use-date-time.ts`) does for absolute times.
 - **Partial returns restock every line.** `commerce.restock` restocks the whole order. It should restock only the lines in the `return.requested` payload.
