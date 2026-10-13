@@ -7,7 +7,7 @@
  * "payment_decline", "charge_fail", "out_of_stock", "three_way_mismatch".
  */
 
-import { money, newId, type Order } from '@orderloop/core';
+import { money, newId, type Order, type StockLine } from '@orderloop/core';
 import {
   contractPrices,
   createDb,
@@ -76,10 +76,11 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
     .map((l) => l.sku);
 
   const reservationIds: string[] = [];
-  for (const line of order.lines) {
+  for (const [i, line] of order.lines.entries()) {
     if (short.includes(line.sku)) continue;
-    const id = `res_${stepKey}_${line.sku}`.replace(/[^\w-]/g, '_');
-    await d
+    // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
+    const id = `res_${order.id}_${stepKey}_${i}_${line.sku}`.replace(/[^\w-]/g, '_');
+    const inserted = await d
       .insert(reservations)
       .values({
         id,
@@ -89,11 +90,14 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
         status: 'held',
         createdAt: Date.now(),
       })
-      .onConflictDoNothing();
-    await d
-      .update(products)
-      .set({ reserved: sql`${products.reserved} + ${line.qty}` })
-      .where(eq(products.sku, line.sku));
+      .onConflictDoNothing()
+      .returning({ id: reservations.id });
+    // Only a new reservation holds stock, so a retried step never holds it twice.
+    if (inserted.length)
+      await d
+        .update(products)
+        .set({ reserved: sql`${products.reserved} + ${line.qty}` })
+        .where(eq(products.sku, line.sku));
     reservationIds.push(id);
   }
   return { reservationIds, short };
@@ -135,8 +139,8 @@ export async function consumeInventory(env: Env, orderId: string) {
   }
 }
 
-export async function restock(env: Env, order: Order) {
-  for (const l of order.lines) {
+export async function restock(env: Env, lines: StockLine[]) {
+  for (const l of lines) {
     await db(env)
       .update(products)
       .set({ stock: sql`${products.stock} + ${l.qty}` })

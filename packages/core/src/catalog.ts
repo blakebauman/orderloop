@@ -336,9 +336,16 @@ export const NODE_SPECS = [
     type: 'commerce.restock',
     category: 'commerce',
     label: 'Restock',
-    description: 'Adds received quantities to on-hand inventory.',
+    description: 'Adds received or returned quantities to on-hand inventory.',
     icon: 'Warehouse',
-    fields: [],
+    fields: [
+      {
+        key: 'lines',
+        label: 'Lines (expression)',
+        kind: 'logic',
+        hint: 'A list of { sku, qty }; empty restocks every order line. Capped at the ordered quantity.',
+      },
+    ],
     outputs: OUT,
   }),
   node({

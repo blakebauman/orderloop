@@ -21,7 +21,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic } from '../src/ai';
-import { refund } from '../src/connectors';
+import { refund, reserveInventory } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { startOrder, startOrderOnce } from '../src/orders';
 
@@ -336,6 +336,44 @@ describe('storefront order', () => {
     expect(rma.map((r) => r.status).sort()).toEqual(['label_created', 'return_label']);
   });
 
+  it('restocks only the lines a partial return lists', async () => {
+    await introspect();
+    const before = { mon: await stock('MON-27'), gsk: await stock('GSK-010') };
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        type: 'storefront_order',
+        customerId: 'cus_ada',
+        lines: [
+          { sku: 'MON-27', qty: 2 },
+          { sku: 'GSK-010', qty: 5 },
+        ],
+      }),
+    });
+    await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    // One monitor comes back; the gaskets and the other monitor stay with the customer.
+    await agent(orderId).deliver('return.requested', {
+      amount: 50,
+      reason: 'One arrived cracked',
+      lines: [{ sku: 'MON-27', qty: 1 }],
+    });
+    await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.received'),
+      'return received wait',
+    );
+    await agent(orderId).deliver('return.received');
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.restock!.summary).toBe('+1 units');
+    expect(await stock('MON-27')).toBe(before.mon - 1);
+    expect(await stock('GSK-010')).toBe(before.gsk - 5);
+  });
+
   it('cancels before authorizing when the store policy fails', async () => {
     await introspect();
     const { orderId } = await startOrder(env, {
@@ -397,6 +435,41 @@ describe('storefront order', () => {
       await db().select().from(payments).where(eq(payments.orderId, orderId))
     ).filter((p) => p.kind === 'refund');
     expect(refunds).toHaveLength(2);
+  });
+});
+
+describe('inventory', () => {
+  it('keeps reservations per order and line, and holds stock once per step', async () => {
+    const product = async () =>
+      (await db().select().from(products).where(eq(products.sku, 'GSK-010')).get())!;
+    const before = (await product()).reserved;
+    const order = (id: string) => ({
+      ...input({ type: 'storefront_order', customerId: 'cus_ada' }),
+      id,
+      createdAt: Date.now(),
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+      lines: [
+        { sku: 'GSK-010', qty: 2 },
+        { sku: 'GSK-010', qty: 3 },
+      ],
+    });
+    // Two orders run the same flow, so their reserve steps share a step key.
+    await reserveInventory(env, order('ord_inv_a'), 'reserve#1');
+    await reserveInventory(env, order('ord_inv_b'), 'reserve#1');
+    const held = await db().select().from(reservations).where(eq(reservations.sku, 'GSK-010'));
+    const mine = held.filter((r) => r.orderId === 'ord_inv_a' || r.orderId === 'ord_inv_b');
+    expect(mine.map((r) => [r.orderId, r.qty]).sort()).toEqual([
+      ['ord_inv_a', 2],
+      ['ord_inv_a', 3],
+      ['ord_inv_b', 2],
+      ['ord_inv_b', 3],
+    ]);
+    expect((await product()).reserved).toBe(before + 10);
+    // A retried step holds nothing more.
+    await reserveInventory(env, order('ord_inv_a'), 'reserve#1');
+    expect((await product()).reserved).toBe(before + 10);
   });
 });
 
