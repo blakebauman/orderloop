@@ -41,18 +41,32 @@ export type Principal = {
  */
 export const PRINCIPAL_HEADER = 'x-orderloop-principal';
 
-export function encodePrincipal(p: Principal): string {
+/**
+ * What the proxy header carries: the principal plus, for a signed-in person, their session's id
+ * (the SHA-256 the `sessions` table is keyed by), so the agent can check the session is still live.
+ * The session id never reaches the browser.
+ */
+export type ProxiedPrincipal = Principal & { session?: string };
+
+export function encodePrincipal(p: ProxiedPrincipal): string {
   return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(p))));
 }
 
 /** The principal in a proxied request, or null when the header is missing or malformed. */
-export function decodePrincipal(header: string | null | undefined): Principal | null {
+export function decodePrincipal(header: string | null | undefined): ProxiedPrincipal | null {
   if (!header) return null;
   try {
     const bytes = Uint8Array.from(atob(header), (c) => c.charCodeAt(0));
-    const p = JSON.parse(new TextDecoder().decode(bytes)) as Partial<Principal>;
+    const p = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ProxiedPrincipal>;
     if (typeof p.id !== 'string' || typeof p.name !== 'string' || !isRole(p.role)) return null;
-    return { kind: p.kind ?? 'user', id: p.id, name: p.name, email: p.email, role: p.role };
+    return {
+      kind: p.kind ?? 'user',
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      role: p.role,
+      ...(typeof p.session === 'string' ? { session: p.session } : {}),
+    };
   } catch {
     return null;
   }

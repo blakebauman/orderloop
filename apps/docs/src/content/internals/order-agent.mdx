@@ -103,10 +103,17 @@ the same methods over RPC.
 The web app proxies the socket with the signed-in principal in `x-orderloop-principal`
 (`PRINCIPAL_HEADER`, base64 JSON from `encodePrincipal` in `packages/core/src/roles.ts`), set by the
 web Worker after removing any copy the browser sent; the engine has no public route. `onConnect`
-stores it as the connection's state. Each callable calls `authorize(min)`: on a socket call it
-throws `This needs the <Role> role.` unless the caller has at least `min`, and refuses a socket with
-no principal. Calls over RPC have no connection and are trusted, because the web app's routes
-already checked the role.
+stores it as the connection's state. For a signed-in person the header also carries their
+session's id (the SHA-256 that keys `sessions`), which never reaches the browser.
+
+Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from
+D1, so a page that is already open follows changes made since it connected: a lower role applies
+at once, and once the session has been signed out, reset or expired, or the user disabled, the
+call fails with `Your sign-in has ended. Reload the page to sign in again.` and the connection
+closes with code `4401` just after. A caller without at least `min` gets `This needs the <Role>
+role.`; a socket with no principal is refused. The shared password and open local dev have no
+session to re-check. Calls over RPC have no connection and are trusted, because the web app's
+routes already checked the role.
 
 | Method | Socket role |
 |---|---|

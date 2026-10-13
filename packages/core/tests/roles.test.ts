@@ -19,6 +19,10 @@ describe('roles', () => {
       role: 'approver',
     };
     expect(decodePrincipal(encodePrincipal(p))).toEqual(p);
+    expect(decodePrincipal(encodePrincipal({ ...p, session: 'ab12' }))).toEqual({
+      ...p,
+      session: 'ab12',
+    });
   });
 
   it('rejects a missing, malformed or role-less header', () => {

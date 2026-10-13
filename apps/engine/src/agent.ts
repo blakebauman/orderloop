@@ -13,6 +13,7 @@ import {
   type EdgeState,
   EMPTY_ORDER_STATE,
   type FlowVersion,
+  isRole,
   type NodeRun,
   newId,
   type Order,
@@ -23,14 +24,15 @@ import {
   type PlanNode,
   PRINCIPAL_HEADER,
   type Principal,
+  type ProxiedPrincipal,
   ROLE_LABELS,
   type Role,
   TERMINAL_ORDER_STATUSES,
   type TimelineEntry,
 } from '@orderloop/core';
-import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
+import { approvals, createDb, nodeRuns, orders, sessions, users } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { runJson } from './ai';
 import { compensateOrder } from './connectors';
 import { emit, orderSummary } from './outbox';
@@ -50,7 +52,7 @@ export type Report = {
 
 type State = OrderState & { seq: number };
 /** Per-connection state: who opened the order page's socket. */
-type ConnectionState = { principal: Principal | null };
+type ConnectionState = { principal: ProxiedPrincipal | null };
 
 const TIMELINE_CAP = 400;
 // Matches the Workflow's emit step: 5 retries with exponential backoff from 10 seconds.
@@ -346,30 +348,62 @@ export class OrderAgent extends Agent<Env, State> {
   // ── Callable from the order page ──
   //
   // The web app proxies the page's WebSocket here with the signed-in principal in a header it sets
-  // itself (PRINCIPAL_HEADER); `onConnect` keeps it on the connection. Socket calls are checked
-  // against the caller's role. The same methods called over RPC (EngineApi, from the web app's
-  // own authorized routes) or by the Workflow have no connection and are trusted.
+  // itself (PRINCIPAL_HEADER); `onConnect` keeps it on the connection. Each socket call re-reads a
+  // person's session and user from D1, so signing out, a password reset, being disabled or a role
+  // change applies to a page that is already open. The same methods called over RPC (EngineApi,
+  // from the web app's own authorized routes) or by the Workflow have no connection and are trusted.
 
   override onConnect(connection: Connection<ConnectionState>, ctx: ConnectionContext) {
     connection.setState({ principal: decodePrincipal(ctx.request.headers.get(PRINCIPAL_HEADER)) });
   }
 
   /**
-   * For a socket call, the caller if they hold at least `min`, else throws. For an RPC call, null.
-   * A socket without a principal (which only a misconfigured proxy could open) is refused.
+   * For a socket call, the caller as they are now if they hold at least `min`, else throws. For an
+   * RPC call, null. A socket without a principal (which only a misconfigured proxy could open), or
+   * whose session has ended, is refused and closed.
    */
-  private authorize(min: Role): Principal | null {
+  private async authorize(min: Role): Promise<Principal | null> {
     const { connection } = getCurrentAgent();
     if (!connection) return null;
-    const p = (connection.state as ConnectionState | null)?.principal ?? null;
-    if (!p || !atLeast(p.role, min)) throw new Error(`This needs the ${ROLE_LABELS[min]} role.`);
+    const stored = (connection.state as ConnectionState | null)?.principal ?? null;
+    const p = stored ? await this.current(stored) : null;
+    if (!p) {
+      // Close once the refusal has gone out, so the page can show why.
+      setTimeout(() => connection.close(4401, 'Session ended'), 100);
+      throw new Error('Your sign-in has ended. Reload the page to sign in again.');
+    }
+    if (!atLeast(p.role, min)) throw new Error(`This needs the ${ROLE_LABELS[min]} role.`);
     return p;
+  }
+
+  /**
+   * A person's principal from their live session: null once it has expired or been deleted, or the
+   * user is disabled; otherwise with their current role, name and email. The shared password and
+   * open local dev have no session to check.
+   */
+  private async current(p: ProxiedPrincipal): Promise<Principal | null> {
+    const { session, ...principal } = p;
+    if (p.kind !== 'user') return principal;
+    if (!session) return null;
+    const row = await this.db()
+      .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .where(
+        and(
+          eq(sessions.tokenHash, session),
+          gt(sessions.expiresAt, Date.now()),
+          isNull(users.disabledAt),
+        ),
+      )
+      .get();
+    return row && isRole(row.role) ? { kind: 'user', ...row, role: row.role } : null;
   }
 
   /** Approve or reject the approval a node is waiting on. */
   @callable()
   async decide(nodeId: string, decision: 'approved' | 'rejected', by = 'operator', note?: string) {
-    const caller = this.authorize('approver');
+    const caller = await this.authorize('approver');
     // On a socket the audit trail names the signed-in person, never what the page sent.
     if (caller) by = caller.email ?? caller.name;
     const w = this.state.waits.find((x) => x.kind === 'approval' && x.nodeId === nodeId);
@@ -382,7 +416,7 @@ export class OrderAgent extends Agent<Env, State> {
   /** Deliver a business event (e.g. "payment.received") to whichever node waits for it. */
   @callable()
   async deliver(event: string, payload: Record<string, unknown> = {}) {
-    this.authorize('operator');
+    await this.authorize('operator');
     const w = this.state.waits.find((x) => x.kind === 'event' && x.event === event);
     if (!w || !this.state.instanceId) return { delivered: false };
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
@@ -392,7 +426,7 @@ export class OrderAgent extends Agent<Env, State> {
 
   @callable()
   async cancel(reason = 'Cancelled by operator') {
-    this.authorize('operator');
+    await this.authorize('operator');
     if (TERMINAL_ORDER_STATUSES.includes(this.state.status)) return { ok: false };
     if (this.state.instanceId) {
       try {
@@ -456,7 +490,7 @@ export class OrderAgent extends Agent<Env, State> {
   /** Ops chat: the model answers from the order state and may act through tools. */
   @callable()
   async chat(text: string) {
-    this.authorize('viewer');
+    await this.authorize('viewer');
     const user: ChatMessage = {
       id: newId('msg'),
       role: 'user',
