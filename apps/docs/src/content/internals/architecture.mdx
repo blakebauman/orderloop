@@ -89,16 +89,21 @@ Variables and secrets are listed in [Configuration](/reference/configuration/).
 ## Connectors
 
 `apps/engine/src/connectors.ts` holds mock commerce connectors over the D1 back office
-(`customers`, `products`, `contract_prices`, `reservations`, `payments`, `shipments`, `messages`)
+(`customers`, `products`, `contract_prices`, `reservations`, `stock_movements`, `payments`,
+`shipments`, `messages`)
 and R2. Each function is the seam where a real adapter (Stripe, a WMS, a carrier API, an ERP)
 replaces the mock.
 
 Two rules hold for every connector:
 
-- **Writes are keyed by the step that made them.** Ids embed the step key, for example
-  `res_${stepKey}_${sku}`, `pay_${orderId}_${stepKey}`, `shp_${orderId}_${stepKey}`, and inserts use
-  `onConflictDoNothing`. A retried step finds its own row instead of writing a second one. `refund`
-  returns the refund its step already made, and never refunds more than was captured or charged.
+- **Writes are keyed by the step that made them.** Ids embed the order id and the step key, for
+  example `res_${orderId}_${stepKey}_${line}_${sku}`, `pay_${orderId}_${stepKey}`,
+  `shp_${orderId}_${stepKey}`, and inserts use `onConflictDoNothing`. Every order on a flow shares
+  its step keys, so the order id is what keeps two orders apart. A retried step finds its own row
+  instead of writing a second one. `refund` returns the refund its step already made, and never
+  refunds more than was captured or charged. Stock changes (`reserveInventory`'s holds and
+  `restock`) go through the `stock_movements` ledger, which records each change and applies it to
+  `products` in one batch, once.
 - **Compensations are idempotent.** `releaseInventory` releases only `held` reservations,
   `voidAuthorizations` voids only `authorized` payments, `cancelShipment` sets one shipment
   `cancelled`. Running one twice changes nothing.

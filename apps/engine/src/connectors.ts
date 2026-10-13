@@ -18,8 +18,10 @@ import {
   products,
   reservations,
   shipments,
+  stockMovements,
 } from '@orderloop/db';
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 
 const db = (env: Env) => createDb(env.DB);
 const simulate = (order: Order) => String(order.meta?.simulate ?? '');
@@ -54,11 +56,18 @@ export async function contractPricesFor(env: Env, customerId: string) {
 
 export async function reserveInventory(env: Env, order: Order, stepKey: string) {
   const d = db(env);
-  const existing = await d
+  const idFor = (i: number, sku: string) =>
+    `res_${order.id}_${stepKey}_${i}_${sku}`.replace(/[^\w-]/g, '_');
+  const prefix = idFor(0, '').slice(0, -2);
+  const held = await d
     .select()
     .from(reservations)
     .where(and(eq(reservations.orderId, order.id), eq(reservations.status, 'held')));
-  if (existing.length) return { reservationIds: existing.map((r) => r.id), short: [] as string[] };
+  // Stock held by an earlier step (another loop run): the order already has it.
+  const earlier = held.filter((r) => !r.id.startsWith(prefix));
+  if (earlier.length) return { reservationIds: earlier.map((r) => r.id), short: [] as string[] };
+  // Lines this step already held before it was retried count as available.
+  const mine = new Set(held.map((r) => r.id));
 
   const stock = new Map(
     (
@@ -69,7 +78,8 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
     ).map((p) => [p.sku, p]),
   );
   const short = order.lines
-    .filter((l) => {
+    .filter((l, i) => {
+      if (mine.has(idFor(i, l.sku))) return false;
       const p = stock.get(l.sku);
       return simulate(order) === 'out_of_stock' || !p || p.stock - p.reserved < l.qty;
     })
@@ -79,25 +89,22 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
   for (const [i, line] of order.lines.entries()) {
     if (short.includes(line.sku)) continue;
     // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
-    const id = `res_${order.id}_${stepKey}_${i}_${line.sku}`.replace(/[^\w-]/g, '_');
-    const inserted = await d
-      .insert(reservations)
-      .values({
-        id,
-        orderId: order.id,
-        sku: line.sku,
-        qty: line.qty,
-        status: 'held',
-        createdAt: Date.now(),
-      })
-      .onConflictDoNothing()
-      .returning({ id: reservations.id });
-    // Only a new reservation holds stock, so a retried step never holds it twice.
-    if (inserted.length)
-      await d
-        .update(products)
-        .set({ reserved: sql`${products.reserved} + ${line.qty}` })
-        .where(eq(products.sku, line.sku));
+    const id = idFor(i, line.sku);
+    await moveStock(
+      env,
+      { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty },
+      d
+        .insert(reservations)
+        .values({
+          id,
+          orderId: order.id,
+          sku: line.sku,
+          qty: line.qty,
+          status: 'held',
+          createdAt: Date.now(),
+        })
+        .onConflictDoNothing(),
+    );
     reservationIds.push(id);
   }
   return { reservationIds, short };
@@ -139,13 +146,43 @@ export async function consumeInventory(env: Env, orderId: string) {
   }
 }
 
-export async function restock(env: Env, lines: StockLine[]) {
-  for (const l of lines) {
-    await db(env)
-      .update(products)
-      .set({ stock: sql`${products.stock} + ${l.qty}` })
-      .where(eq(products.sku, l.sku));
+/** Adds returned or received stock, once per step and line. */
+export async function restock(env: Env, orderId: string, stepKey: string, lines: StockLine[]) {
+  for (const [i, l] of lines.entries()) {
+    const id = `stk_${orderId}_${stepKey}_${i}_${l.sku}`.replace(/[^\w-]/g, '_');
+    await moveStock(env, { id, orderId, sku: l.sku, kind: 'restock', qty: l.qty });
   }
+}
+
+/**
+ * Records one inventory change in the ledger and applies it in the same batch, only if it hasn't
+ * been applied yet. D1 runs a batch as one transaction, so a crash can't leave the ledger and the
+ * product row disagreeing, and a retry with the same id changes nothing. `first` runs at the
+ * start of the batch (the reservation row for a hold).
+ */
+async function moveStock(
+  env: Env,
+  m: { id: string; orderId: string; sku: string; kind: 'hold' | 'restock'; qty: number },
+  first?: BatchItem<'sqlite'>,
+) {
+  const d = db(env);
+  const pending = and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false));
+  const change =
+    m.kind === 'hold'
+      ? { reserved: sql`${products.reserved} + ${m.qty}` }
+      : { stock: sql`${products.stock} + ${m.qty}` };
+  const record = d
+    .insert(stockMovements)
+    .values({ ...m, createdAt: Date.now() })
+    .onConflictDoNothing();
+  const apply = d
+    .update(products)
+    .set(change)
+    .where(
+      and(eq(products.sku, m.sku), sql`exists (select 1 from ${stockMovements} where ${pending})`),
+    );
+  const mark = d.update(stockMovements).set({ applied: true }).where(eq(stockMovements.id, m.id));
+  await (first ? d.batch([first, record, apply, mark]) : d.batch([record, apply, mark]));
 }
 
 export async function lowStock(env: Env) {
