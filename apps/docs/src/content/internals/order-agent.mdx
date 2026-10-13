@@ -55,6 +55,15 @@ state and call methods, never write state.
 After a status change or an order patch the agent writes the index row (`syncIndex`). When the
 status becomes `failed` it schedules `checkInstance`.
 
+### Node timing
+
+A node patch with `startedAt` starts a run, unless the node is already running (started, not
+ended); a retried attempt then keeps the run's first start, so a duration includes its retries.
+Waits start in `openWait`. The first `endedAt` for a running node, at or after its start, writes a
+`node_runs` row (`recordRun`, `onConflictDoNothing`), with the run number from the plan and the
+generation. A replayed report reaches a node that has already ended, or a later run of it, so it
+never adds a row. Nodes without a start (an End node, a `control.wait` sleep) are not timed.
+
 These rules are what make replays and retries safe: `apps/engine/tests/agent.test.ts` covers
 replayed snapshots, deduped keys, new generations and sticky terminal statuses.
 
@@ -71,7 +80,8 @@ The Workflow calls `openWait` from a node's `:open` step and `closeWait` from it
 
 - `openWait(w)` is a no-op if a wait with the same `eventType` is already open (a retried step).
   For an approval it inserts an `approvals` row (`status: 'pending'`, `onConflictDoNothing`), then
-  adds the wait and an `open:${eventType}` timeline entry.
+  adds the wait, starts the node's run at the wait's `since`, and adds an `open:${eventType}`
+  timeline entry.
 - `closeWait(eventType, outcome, payload)` updates the approval row with the outcome, `decided_at`,
   `decided_by` (the payload's `by`, `timeout` for an escalation) and `note`, removes the wait, and
   adds a `close:${eventType}` entry.

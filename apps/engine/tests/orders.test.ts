@@ -10,6 +10,7 @@ import {
 import {
   approvals,
   createDb,
+  nodeRuns,
   orders,
   payments,
   products,
@@ -199,6 +200,26 @@ describe('B2B order', () => {
     expect(done.reason).toBe('Sent to collections');
     expect(done.nodes.remind!.runs).toBe(3);
     expect(done.nodes.dunning!.runs).toBe(4);
+
+    // Every finished run is timed once: executor steps, waits and each loop iteration.
+    const rows = await db().select().from(nodeRuns).where(eq(nodeRuns.orderId, orderId));
+    const runs = (id: string) =>
+      rows
+        .filter((r) => r.nodeId === id)
+        .map((r) => r.run)
+        .sort();
+    expect(runs('remind')).toEqual([1, 2, 3]);
+    expect(runs('paid_late')).toEqual([1, 2, 3]);
+    expect(runs('price')).toEqual([1]);
+    const late = rows.find((r) => r.nodeId === 'paid_late')!;
+    expect(late).toMatchObject({
+      nodeType: 'control.wait_event',
+      orderType: 'b2b_order',
+      status: 'succeeded',
+    });
+    expect(rows.every((r) => r.durationMs >= 0 && r.durationMs === r.endedAt - r.startedAt)).toBe(
+      true,
+    );
   });
 
   it('fails when stock is short and rolls back through the Workflow', async () => {

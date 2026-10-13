@@ -130,3 +130,15 @@ export const plainLog = (s: string) =>
     .replace(/\(([a-z]+(?:_[a-z]+)+)\)/g, (_, slug: string) => `(${humanize(slug)})`)
     .replace(/\s{2,}/g, ' ')
     .trim();
+
+/** A node's run time: "12ms", "12s", "3m", "2.5h", "4d". */
+export function duration(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = s / 60;
+  if (m < 60) return `${Math.round(m)}m`;
+  const h = m / 60;
+  if (h < 48) return `${h < 10 ? h.toFixed(1).replace(/\.0$/, '') : Math.round(h)}h`;
+  return `${Math.round(h / 24)}d`;
+}

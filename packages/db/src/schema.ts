@@ -132,6 +132,27 @@ export const reservations = sqliteTable(
   (t) => [index('reservations_order').on(t.orderId)],
 );
 
+/** One row per finished node run, for per-node timing. Written by the OrderAgent. */
+export const nodeRuns = sqliteTable(
+  'node_runs',
+  {
+    orderId: text('order_id').notNull(),
+    generation: integer('generation').notNull(),
+    nodeId: text('node_id').notNull(),
+    run: integer('run').notNull(),
+    nodeType: text('node_type').notNull(),
+    orderType: text('order_type').notNull(),
+    status: text('status').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at').notNull(),
+    durationMs: integer('duration_ms').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orderId, t.generation, t.nodeId, t.run] }),
+    index('node_runs_type').on(t.nodeType, t.endedAt),
+  ],
+);
+
 /** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
 export const stockMovements = sqliteTable(
   'stock_movements',

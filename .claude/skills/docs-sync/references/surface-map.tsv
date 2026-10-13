@@ -20,6 +20,7 @@
 ^apps/web/app/lib/auth\.server\.ts$	reference/rest-api reference/configuration start/deploy	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
 ^apps/web/app/lib/scenarios\.ts$	guides/templates start/getting-started	prose
+^apps/web/app/(lib/metrics\.server\.ts|components/performance\.tsx)$	internals/data-model start/getting-started	prose
 ^apps/web/app/components/decision\.tsx$	guides/approvals-and-events	prose
 ^apps/web/app/routes/flow-(editor|action)\.tsx?$	guides/building-flows	prose
 ^apps/web/app/routes/(approvals|order)\.tsx$	guides/approvals-and-events	prose
