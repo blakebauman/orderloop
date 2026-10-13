@@ -18,6 +18,7 @@ import { atLeast, type Principal, ROLE_LABELS, type Role } from '@orderloop/core
 import { apiTokens, authFailures, sessions, users } from '@orderloop/db';
 import { and, count, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { data, redirect } from 'react-router';
+import { audit, clientIp } from './audit.server';
 import {
   API_TOKEN_PREFIX,
   hashPassword,
@@ -127,8 +128,6 @@ export class Throttled extends Error {
   }
 }
 
-const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'local';
-
 async function waitFor(keys: string[]) {
   const rows = await db().select().from(authFailures).where(inArray(authFailures.key, keys));
   return blockedFor(rows, Date.now());
@@ -166,10 +165,14 @@ export async function apiPrincipal(request: Request): Promise<Principal | null> 
   if (!bearer.startsWith(API_TOKEN_PREFIX)) {
     const key = [throttleKey('api-ip', clientIp(request))];
     const wait = await waitFor(key);
-    if (wait) throw new Throttled(wait);
+    if (wait) {
+      await audit(request, 'api.bearer_throttled');
+      throw new Throttled(wait);
+    }
     const pw = password();
     if (pw && safeEqual(bearer, pw)) return SHARED_PRINCIPAL;
     await recordFailure(key);
+    await audit(request, 'api.bearer_failed');
     return null;
   }
   const row = await db()
@@ -217,20 +220,37 @@ export async function signIn(
   given: string,
 ): Promise<string | null> {
   const keys = signInKeys(email, clientIp(request));
+  const target = normalizeEmail(email) || null;
   const wait = await waitFor(keys);
-  if (wait) throw new Throttled(wait);
-  const cookie = await checkCredentials(email, given);
-  if (!cookie) await recordFailure(keys);
+  if (wait) {
+    await audit(request, 'auth.sign_in_throttled', { target });
+    throw new Throttled(wait);
+  }
+  const r = await checkCredentials(email, given);
+  if ('reason' in r) {
+    await recordFailure(keys);
+    // The audit log says why; the person signing in only hears that it didn't match.
+    await audit(request, 'auth.sign_in_failed', { target, detail: { reason: r.reason } });
+    return null;
+  }
   // Success clears this person-and-place count; the wider counts age out with their window.
-  else await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
-  return cookie;
+  await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
+  await audit(request, 'auth.sign_in', { actor: r.principal });
+  return r.cookie;
 }
 
-async function checkCredentials(email: string, given: string): Promise<string | null> {
+async function checkCredentials(
+  email: string,
+  given: string,
+): Promise<{ cookie: string; principal: Principal } | { reason: string }> {
   if (!email.trim()) {
     const pw = password();
-    if (!pw || !safeEqual(given, pw)) return null;
-    return `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
+    if (!pw) return { reason: 'no workspace password is set' };
+    if (!safeEqual(given, pw)) return { reason: 'wrong workspace password' };
+    return {
+      cookie: `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      principal: SHARED_PRINCIPAL,
+    };
   }
   const user = await db()
     .select()
@@ -239,8 +259,20 @@ async function checkCredentials(email: string, given: string): Promise<string | 
     .get();
   decoy ??= hashPassword(randomToken());
   const ok = await verifyPassword(given, user?.passwordHash ?? (await decoy));
-  if (!user || !ok || user.disabledAt || !user.passwordHash) return null;
-  return startSession(user.id);
+  if (!user) return { reason: 'unknown email' };
+  if (!user.passwordHash) return { reason: 'no password set' };
+  if (!ok) return { reason: 'wrong password' };
+  if (user.disabledAt) return { reason: 'disabled' };
+  return {
+    cookie: await startSession(user.id),
+    principal: {
+      kind: 'user',
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as Role,
+    },
+  };
 }
 
 /** Creates a session for a user and returns the cookie to set. */
@@ -261,6 +293,8 @@ export async function startSession(userId: string): Promise<string> {
 
 /** Ends the session server-side and returns cookies that clear both kinds. */
 export async function signOut(request: Request): Promise<string[]> {
+  const who = await principal(request);
+  if (who && who.kind !== 'open') await audit(request, 'auth.sign_out', { actor: who });
   const token = cookie(request, SESSION);
   if (token)
     await db()

@@ -37,6 +37,7 @@ than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWOR
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }` |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
+| `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (operator) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
@@ -167,6 +168,14 @@ minutes from now are rejected.
 | `400` | Body is not `{ orderId, event, payload? }` |
 | `401` | Missing, malformed, stale or wrong signature |
 | `503` | `WEBHOOK_SECRET` is not set |
+
+## Audit events
+
+`GET /api/v1/audit-events` returns the security audit log, newest first, for feeding a log
+system; it needs the `operator` role. `type` filters to `auth`, `team`, `token` or `api`; `limit` is
+1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
+you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
+(an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions.
 
 ## Webhook subscriptions
 

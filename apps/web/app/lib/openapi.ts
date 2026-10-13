@@ -7,6 +7,8 @@ import { ORDER_STATUSES, ORDER_TYPES, OUTBOUND_EVENTS } from '@orderloop/core';
 import { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
 
+import { AUDIT_GROUPS } from './audit';
+
 const schema = (s: z.ZodType) => z.toJSONSchema(s, { io: 'input', unrepresentable: 'any' });
 const body = (s: z.ZodType) => ({
   required: true,
@@ -134,6 +136,28 @@ export function openApiDocument(serverUrl: string) {
             '409': ok('No node is waiting for this event yet; retry later'),
             ...errors,
           },
+        },
+      },
+      '/api/v1/audit-events': {
+        get: {
+          summary: 'Security audit log, newest first (operator)',
+          description:
+            'Sign-ins, failed and throttled sign-ins, team and token changes, and refused shared-password API attempts. Kept 180 days.',
+          parameters: [
+            {
+              name: 'type',
+              in: 'query',
+              schema: { type: 'string', enum: Object.keys(AUDIT_GROUPS) },
+            },
+            {
+              name: 'before',
+              in: 'query',
+              description: 'Only events before this time (ms since the epoch), to page back',
+              schema: { type: 'integer' },
+            },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500 } },
+          ],
+          responses: { '200': ok('{ events }'), ...errors },
         },
       },
       '/api/v1/webhook-subscriptions': {

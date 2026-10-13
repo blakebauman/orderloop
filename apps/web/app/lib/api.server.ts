@@ -12,6 +12,8 @@
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }
  *   POST /api/v1/orders/:id/cancel              { reason? }
  *
+ *   GET    /api/v1/audit-events                 ?type=auth|team|token|api&before=<ms>&limit=  (operator)
+ *
  *   GET    /api/v1/webhook-subscriptions
  *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
  *   DELETE /api/v1/webhook-subscriptions/:id
@@ -31,6 +33,8 @@ import {
 } from '@orderloop/core';
 import type { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
+import { isAuditGroup } from './audit';
+import { listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
@@ -58,6 +62,19 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
   try {
     if (parts[0] === 'flows' && parts.length === 1 && request.method === 'GET') {
       return json({ flows: await listFlows() });
+    }
+    if (parts[0] === 'audit-events' && parts.length === 1 && request.method === 'GET') {
+      const denied = need('operator');
+      if (denied) return denied;
+      const q = url.searchParams;
+      const type = q.get('type');
+      return json({
+        events: await listAudit({
+          group: isAuditGroup(type) ? type : undefined,
+          before: Number(q.get('before')) || undefined,
+          limit: Number(q.get('limit')) || 100,
+        }),
+      });
     }
     if (parts[0] === 'webhook-subscriptions')
       return need('operator') ?? (await handleSubscriptions(request, parts, body));

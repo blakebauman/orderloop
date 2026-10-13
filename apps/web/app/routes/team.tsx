@@ -2,7 +2,7 @@ import { ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
-import { data, Form, redirect, useActionData, useFetcher, useLoaderData } from 'react-router';
+import { data, Form, Link, redirect, useActionData, useFetcher, useLoaderData } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
@@ -36,7 +36,7 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     if (str('intent') === 'first-operator') {
       if (me.kind !== 'open') throw new TeamError('The team already has people.');
-      const id = await createFirstOperator({
+      const id = await createFirstOperator(request, {
         email: str('email'),
         name: str('name'),
         password: str('password'),
@@ -49,26 +49,30 @@ export async function action({ request }: Route.ActionArgs) {
           throw new TeamError(
             'Create your own operator account first; adding people turns on sign-in.',
           );
-        const r = await addUser({ email: str('email'), name: str('name'), role: str('role') });
+        const r = await addUser(request, me, {
+          email: str('email'),
+          name: str('name'),
+          role: str('role'),
+        });
         return { secret: { label: `Password for ${r.email}`, value: r.password } as Secret };
       }
       case 'role':
-        await setRole(me, str('id'), str('role'));
+        await setRole(request, me, str('id'), str('role'));
         return { ok: true };
       case 'reset': {
-        const r = await resetPassword(str('id'));
+        const r = await resetPassword(request, me, str('id'));
         return { secret: { label: `New password for ${r.email}`, value: r.password } as Secret };
       }
       case 'disable':
       case 'enable':
-        await setDisabled(me, str('id'), str('intent') === 'disable');
+        await setDisabled(request, me, str('id'), str('intent') === 'disable');
         return { ok: true };
       case 'add-token': {
-        const r = await createToken(me, { name: str('name'), role: str('role') });
+        const r = await createToken(request, me, { name: str('name'), role: str('role') });
         return { secret: { label: `API token “${r.name}”`, value: r.token } as Secret };
       }
       case 'revoke':
-        await revokeToken(str('id'));
+        await revokeToken(request, me, str('id'));
         return { ok: true };
     }
     return data({ error: 'Unknown action' }, { status: 400 });
@@ -104,6 +108,11 @@ export default function Team() {
       <PageHeader
         title="Team"
         subtitle="Who can sign in, what each role may do, and the tokens other systems use."
+        actions={
+          <Link to="/audit" className="text-link text-sm hover:underline">
+            Audit log
+          </Link>
+        }
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="max-w-[1000px] space-y-6">

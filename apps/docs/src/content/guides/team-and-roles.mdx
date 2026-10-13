@@ -74,6 +74,24 @@ last used. Revoke it there. A token's role limits it like a person's: an `approv
 decide approvals but not start orders. Approval decisions made with a token are recorded as
 `token:<name>`.
 
+## Audit log
+
+Operators see security events at **Audit log** (linked from the Team page, `/audit`), newest first,
+filtered by kind, and through [`GET /api/v1/audit-events`](/reference/rest-api/#audit-events).
+Each event records when, who acted, what they acted on, details and the address:
+
+| Kind | Actions |
+|---|---|
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` |
+| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled` |
+| API tokens | `token.created` (role and prefix), `token.revoked` |
+| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password |
+
+A person signing in only hears that the email and password didn't match; the reason is for
+operators. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
+never blocks the action it records. Approval decisions are recorded on the approval itself (below),
+not here.
+
 ## Who decided
 
 An approval's `by` is the person who decided: their email for a signed-in person, `token:<name>`

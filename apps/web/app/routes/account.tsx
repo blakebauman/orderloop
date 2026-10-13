@@ -17,7 +17,12 @@ export async function action({ request }: Route.ActionArgs) {
   const me = await requireUser(request);
   const f = await request.formData();
   try {
-    await changeOwnPassword(me, String(f.get('current') ?? ''), String(f.get('next') ?? ''));
+    await changeOwnPassword(
+      request,
+      me,
+      String(f.get('current') ?? ''),
+      String(f.get('next') ?? ''),
+    );
     return { ok: true as const };
   } catch (err) {
     if (err instanceof TeamError) return data({ error: err.message }, { status: 400 });

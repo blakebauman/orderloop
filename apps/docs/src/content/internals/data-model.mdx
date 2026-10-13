@@ -31,6 +31,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0010_fx_rates.sql` | `fx_rates` with demo rates, and `orders.fx_rate` |
 | `0011_users.sql` | `users`, `sessions` and `api_tokens`, for roles and sign-in |
 | `0012_auth_failures.sql` | `auth_failures`, counts for throttling failed sign-ins |
+| `0013_audit_events.sql` | `audit_events`, the security audit log |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -110,6 +111,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 | `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days) |
 | `api_tokens` | `name`, `prefix` (the first 12 characters, for lists), `token_hash` (SHA-256 of the `ol_live_` token, unique), `role`, `created_by`, `last_used_at` (updated at most every 5 minutes), `revoked_at` |
 | `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `api-ip:` for shared-password bearers) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](/guides/team-and-roles/#failed-sign-ins) |
+| `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
 
 No secret is stored in the clear. See [Team and roles](/guides/team-and-roles/).
 
