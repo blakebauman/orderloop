@@ -22,12 +22,14 @@ import type { Route } from './+types/shell';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
+  // Until their two-factor sign-in is set up, a person sees only their Account page.
+  if (me.twoFactorDue) return { pending: 0, auth: true, me, nav: false };
   const pending = await db()
     .select({ n: sql<number>`count(*)` })
     .from(approvals)
     .where(eq(approvals.status, 'pending'))
     .get();
-  return { pending: pending?.n ?? 0, auth: await authEnabled(), me };
+  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true };
 }
 
 const NAV = [
@@ -54,8 +56,9 @@ function PendingCount({ n }: { n: number }) {
 }
 
 export default function Shell() {
-  const { pending, auth, me } = useLoaderData<typeof loader>();
-  const operator = atLeast(me.role, 'operator');
+  const { pending, auth, me, nav: showNav } = useLoaderData<typeof loader>();
+  const operator = showNav && atLeast(me.role, 'operator');
+  const nav = showNav ? NAV : [];
   const theme = useTheme();
   const ThemeIcon = THEMES.find((t) => t.value === theme.choice)?.icon ?? Sun;
   return (
@@ -77,7 +80,7 @@ export default function Shell() {
             <span className="hidden sm:inline">OrderLoop</span>
           </Link>
           <nav aria-label="Main" className="-mb-px hidden h-full items-stretch gap-1 md:flex">
-            {NAV.map(({ to, label, end, badge }) => (
+            {nav.map(({ to, label, end, badge }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -147,7 +150,7 @@ export default function Shell() {
                 <Menu className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                {NAV.map(({ to, label, badge }) => (
+                {nav.map(({ to, label, badge }) => (
                   <DropdownMenuItem key={to} asChild>
                     <Link to={to} className="justify-between">
                       {label}

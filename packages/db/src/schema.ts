@@ -401,6 +401,15 @@ export const apiTokens = sqliteTable(
   (t) => [uniqueIndex('api_tokens_hash').on(t.tokenHash)],
 );
 
+/** Settings operators change in the app; `key` names one, e.g. `two_factor_required`. */
+export const workspaceSettings = sqliteTable('workspace_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  /** Who changed it, as the audit trail names them. */
+  updatedBy: text('updated_by').notNull(),
+});
+
 /** Failed authentication attempts per key in a fixed window; see `throttle.ts` in the web app. */
 export const authFailures = sqliteTable('auth_failures', {
   key: text('key').primaryKey(),

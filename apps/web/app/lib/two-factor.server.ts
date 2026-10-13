@@ -9,6 +9,7 @@ import { count, eq } from 'drizzle-orm';
 import { audit } from './audit.server';
 import { verifyPassword } from './credentials';
 import { db } from './env.server';
+import { twoFactorRequirement } from './settings.server';
 import { TeamError } from './team.server';
 import {
   fromBase32,
@@ -18,6 +19,7 @@ import {
   otpauthUri,
   verifyTotp,
 } from './totp';
+import { mustUseTwoFactor, TWO_FACTOR_REQUIREMENTS } from './two-factor';
 
 /** Whether the person has two-factor sign-in on, and how many recovery codes they have left. */
 export async function twoFactorStatus(by: Principal) {
@@ -85,6 +87,11 @@ export async function enableTwoFactor(
 export async function disableTwoFactor(request: Request, by: Principal, password: string) {
   const user = await confirmPassword(by, password);
   if (!user.totpEnabledAt) return;
+  const required = await twoFactorRequirement();
+  if (mustUseTwoFactor(by.role, required))
+    throw new TeamError(
+      `${TWO_FACTOR_REQUIREMENTS[required]} must use two-factor sign-in here, so it can’t be turned off. You can make new recovery codes instead.`,
+    );
   await clear(user.id);
   await audit(request, 'auth.two_factor_disabled', { actor: by, target: user.email });
 }

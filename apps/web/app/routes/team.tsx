@@ -6,6 +6,7 @@ import { data, Form, Link, redirect, useActionData, useFetcher, useLoaderData } 
 import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
+import { setTwoFactorRequirement, twoFactorRequirement } from '~/lib/settings.server';
 import {
   addUser,
   createFirstOperator,
@@ -18,6 +19,12 @@ import {
   TeamError,
 } from '~/lib/team.server';
 import { DEFAULT_LIFETIME, TOKEN_LIFETIMES, type TokenState, tokenState } from '~/lib/tokens';
+import {
+  isTwoFactorRequirement,
+  mustUseTwoFactor,
+  TWO_FACTOR_REQUIREMENTS,
+  type TwoFactorRequirement,
+} from '~/lib/two-factor';
 import { resetTwoFactor } from '~/lib/two-factor.server';
 import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/team';
@@ -27,7 +34,8 @@ export const meta = () => [{ title: 'Team · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'operator');
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
-  return { ...(await listTeam()), me, now: Date.now() };
+  const [team, twoFactorRequired] = await Promise.all([listTeam(), twoFactorRequirement()]);
+  return { ...team, twoFactorRequired, me, now: Date.now() };
 }
 
 /** One-time secrets come back from the action and are shown once, never stored in the clear. */
@@ -66,6 +74,13 @@ export async function action({ request }: Route.ActionArgs) {
       case 'reset': {
         const r = await resetPassword(request, me, str('id'));
         return { secret: { label: `New password for ${r.email}`, value: r.password } as Secret };
+      }
+      case 'two-factor-requirement': {
+        const next = str('required');
+        if (!isTwoFactorRequirement(next))
+          throw new TeamError('Pick who must use two-factor sign-in.');
+        await setTwoFactorRequirement(request, me, next);
+        return { ok: true };
       }
       case 'reset-two-factor':
         await resetTwoFactor(request, me, str('id'));
@@ -106,7 +121,7 @@ function RoleSelect({ name = 'role', value }: { name?: string; value?: string })
 }
 
 export default function Team() {
-  const { people, tokens, me, now } = useLoaderData<typeof loader>();
+  const { people, tokens, me, now, twoFactorRequired } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
@@ -256,6 +271,18 @@ export default function Team() {
             </fetcher.Form>
           </Section>
 
+          <TwoFactorRequirementForm
+            required={twoFactorRequired}
+            missing={
+              people.filter(
+                (p) =>
+                  !p.disabledAt &&
+                  !p.twoFactorAt &&
+                  mustUseTwoFactor(p.role as Role, twoFactorRequired),
+              ).length
+            }
+          />
+
           <Section title="API tokens" flush>
             {tokens.length ? (
               <ul className="divide-y text-sm">
@@ -385,5 +412,43 @@ function TokenExpiry({ state, expiresAt }: { state: TokenState; expiresAt: numbe
     >
       expires {formatTime(expiresAt)}
     </span>
+  );
+}
+
+/** Which roles must use two-factor sign-in; people without it are sent to set it up. */
+function TwoFactorRequirementForm({
+  required,
+  missing,
+}: {
+  required: TwoFactorRequirement;
+  missing: number;
+}) {
+  const fetcher = useFetcher();
+  return (
+    <Section title="Two-factor sign-in">
+      <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="intent" value="two-factor-requirement" />
+        <label htmlFor="tf-required" className="text-sm">
+          Required for
+        </label>
+        <NativeSelect id="tf-required" name="required" defaultValue={required} className="h-8">
+          {Object.entries(TWO_FACTOR_REQUIREMENTS).map(([k, label]) => (
+            <NativeSelectOption key={k} value={k}>
+              {label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+          Save
+        </Button>
+      </fetcher.Form>
+      <p className="mt-2 text-muted-foreground text-xs">
+        People in these roles without two-factor sign-in can only use their Account page until they
+        set it up, and can’t turn it off. The workspace password and API tokens aren’t affected.
+        {required !== 'off' && missing
+          ? ` ${missing} ${missing === 1 ? 'person hasn’t' : 'people haven’t'} set it up yet.`
+          : ''}
+      </p>
+    </Section>
   );
 }
