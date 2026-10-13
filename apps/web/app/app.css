@@ -17,8 +17,8 @@
 @theme {
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  /* Page and order titles only: the ledger's ruled-book voice. */
-  --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
+  /* Titles and the wordmark: Plex Sans 600, set a touch tighter than running text. */
+  --tracking-title: -0.015em;
 }
 
 @theme inline {

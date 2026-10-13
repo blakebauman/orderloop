@@ -70,7 +70,7 @@ export default function Shell() {
         <div className="flex h-12 items-center gap-3 px-4 sm:gap-6 sm:px-5">
           <Link
             to="/"
-            className="flex shrink-0 items-center gap-2 font-semibold font-serif text-[16px]"
+            className="flex shrink-0 items-center gap-2 font-semibold tracking-title text-[16px]"
             aria-label="Order Loop overview"
           >
             <Mark className="size-5" />

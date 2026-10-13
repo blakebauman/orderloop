@@ -15,7 +15,9 @@ export function PageHeader({
     <header className="mx-auto flex w-full max-w-[1400px] flex-wrap items-end justify-between gap-3 px-4 pt-7 pb-5 sm:px-6">
       <div className="min-w-0">
         {crumbs ? <div className="caption mb-1">{crumbs}</div> : null}
-        <h1 className="truncate font-semibold font-serif text-[1.75rem] leading-tight">{title}</h1>
+        <h1 className="truncate font-semibold tracking-title text-[1.75rem] leading-tight">
+          {title}
+        </h1>
         {subtitle ? (
           <p className="mt-1 max-w-[68ch] text-muted-foreground text-sm">{subtitle}</p>
         ) : null}

@@ -91,11 +91,10 @@ export const DARK_OVERRIDES: Partial<Record<Token, string>> = {
   'edge-idle': 'oklch(0.33 0.018 264)',
 };
 
-/** The faces app.css's `@theme` sets. Serif is for page and order titles only. */
+/** The faces app.css's `@theme` sets: Plex Sans for everything, titles included; Plex Mono for data. */
 export const FONTS = {
   sans: '"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   mono: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-  serif: '"IBM Plex Serif", ui-serif, Georgia, serif',
 } as const;
 
 export type Scheme = 'light' | 'dark';
@@ -224,7 +223,6 @@ export function starlightThemeCss(): string {
     ':root {',
     `  --sl-font: ${FONTS.sans};`,
     `  --sl-font-mono: ${FONTS.mono};`,
-    `  --ol-font-serif: ${FONTS.serif};`,
     `  --ol-radius: ${LIGHT.radius};`,
     '}',
     '',

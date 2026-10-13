@@ -15,7 +15,7 @@ export const links: Route.LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   {
     rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
   },
 ];
 
@@ -63,7 +63,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
   return (
     <main className="mx-auto max-w-2xl px-6 py-24">
-      <h1 className="font-serif font-semibold text-3xl">{title}</h1>
+      <h1 className="tracking-title font-semibold text-3xl">{title}</h1>
       <p className="mt-2 text-muted-foreground">{details}</p>
       {stack && <pre className="mt-6 overflow-x-auto rounded-lg bg-muted p-4 text-xs">{stack}</pre>}
       <a href="/" className="mt-8 inline-block font-medium text-link text-sm hover:underline">

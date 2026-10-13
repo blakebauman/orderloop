@@ -57,15 +57,18 @@ html {
 
 /* ── Top bar (shell.tsx) ────────────────────────────────────────────────── */
 
-.header {
+/* `header.header`, not `.header`: Starlight's inner header div shares the class. */
+header.header {
   border-bottom: 1px solid var(--ol-rule);
 }
 
 .site-title {
   gap: 0.5rem;
-  font-family: var(--ol-font-serif);
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--ol-ink);
 }
 
@@ -179,11 +182,10 @@ mobile-starlight-toc a[aria-current="true"] {
 }
 
 .ol-page-header h1 {
-  font-family: var(--ol-font-serif);
   font-size: var(--sl-text-h1);
   font-weight: 600;
   line-height: 1.15;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--ol-ink);
 }
 
@@ -433,11 +435,10 @@ mobile-starlight-toc a[aria-current="true"] {
 
 .hero h1 {
   max-width: 24ch;
-  font-family: var(--ol-font-serif);
   font-size: clamp(2.125rem, 1.4rem + 3vw, 3.5rem);
   font-weight: 600;
   line-height: 1.08;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.025em;
   color: var(--ol-ink);
 }
 
