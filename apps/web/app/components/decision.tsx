@@ -12,6 +12,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { ApprovalContext } from '~/lib/approvals';
 import { until } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
+import { useNow } from '~/lib/use-now';
 
 const UNDO_MS = 5000;
 
@@ -210,17 +211,6 @@ export function DecisionControls({
 }
 
 /** A clock that ticks only while something on screen depends on it. */
-function useNow(interval: number | null) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!interval) return;
-    setNow(Date.now());
-    const t = window.setInterval(() => setNow(Date.now()), interval);
-    return () => window.clearInterval(t);
-  }, [interval]);
-  return now;
-}
-
 /**
  * Records a decision through the order's action route with `keepalive`, so it still arrives when
  * the page is being closed or navigated away from.

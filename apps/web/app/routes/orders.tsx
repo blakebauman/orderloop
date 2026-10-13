@@ -5,10 +5,11 @@ import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { ArrowDown } from 'lucide-react';
 import { useEffect } from 'react';
 import { Form, Link, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
+import { Ago } from '~/components/ago';
 import { Empty, PageHeader } from '~/components/page';
 import { StatusBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
-import { ago, money, orderRef, orderStatus, statusLabel, waitLabel } from '~/lib/format';
+import { money, orderRef, orderStatus, statusLabel, waitLabel } from '~/lib/format';
 import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
 import type { Route } from './+types/orders';
 
@@ -143,7 +144,7 @@ export default function Orders() {
                         {orderRef(o.id)}
                       </span>
                       <div className="truncate text-muted-foreground text-xs">
-                        {ORDER_TYPE_LABELS[o.type as OrderType]} · started {ago(o.createdAt)}
+                        {ORDER_TYPE_LABELS[o.type as OrderType]} · started <Ago ms={o.createdAt} />
                         {o.generation > 1 ? ` · run ${o.generation}` : ''}
                         <span className="md:hidden">
                           {' '}
@@ -171,7 +172,7 @@ export default function Orders() {
                       {money(o.total, o.currency)}
                     </td>
                     <td className="col-start-2 row-start-2 mt-1.5 text-right text-muted-foreground text-xs md:mt-0 md:px-3 md:py-2">
-                      {ago(o.updatedAt)}
+                      <Ago ms={o.updatedAt} />
                     </td>
                   </tr>
                 ))}
