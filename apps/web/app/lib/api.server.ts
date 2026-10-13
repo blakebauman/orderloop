@@ -8,9 +8,13 @@
  *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (webhooks)
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }
  *   POST /api/v1/orders/:id/cancel              { reason? }
+ *
+ * Signed webhooks (no password; see `handleSignedEvent`):
+ *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  */
 
-import { orderInputSchema } from '@orderloop/core';
+import { env } from 'cloudflare:workers';
+import { orderInputSchema, SIGNATURE_HEADER, verifyWebhook } from '@orderloop/core';
 import { z } from 'zod';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
@@ -82,6 +86,37 @@ export async function handleApi(request: Request): Promise<Response> {
       return json({ ok: true });
     }
     return json({ error: 'Not found' }, 404);
+  } catch (err) {
+    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+const eventSchema = z.object({
+  orderId: z.string().min(1),
+  event: z.string().min(1).max(100),
+  payload: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * Signed business events from external systems. Authenticated by an HMAC of the raw body with
+ * WEBHOOK_SECRET (`X-OrderLoop-Signature: t=…,v1=…`), not the admin password. Answers 409 when no
+ * node is waiting for the event yet, so a sender's retry policy delivers it later.
+ */
+export async function handleSignedEvent(request: Request): Promise<Response> {
+  const secret = (env as { WEBHOOK_SECRET?: string }).WEBHOOK_SECRET;
+  if (!secret) return json({ error: 'Webhooks are not configured' }, 503);
+  const raw = await request.text();
+  const check = await verifyWebhook(secret, raw, request.headers.get(SIGNATURE_HEADER));
+  if (!check.ok) return json({ error: check.reason }, 401);
+  let parsed: z.infer<typeof eventSchema>;
+  try {
+    parsed = eventSchema.parse(JSON.parse(raw));
+  } catch {
+    return json({ error: 'Body must be { orderId, event, payload? }' }, 400);
+  }
+  try {
+    const res = await engine().sendEvent(parsed.orderId, parsed.event, parsed.payload ?? {});
+    return json(res, res.delivered ? 200 : 409);
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
