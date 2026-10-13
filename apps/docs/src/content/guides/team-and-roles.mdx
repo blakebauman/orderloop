@@ -1,0 +1,73 @@
+---
+title: Team and roles
+description: Who can sign in, what viewers, approvers and operators may do, setting up the first operator, and API tokens.
+---
+
+Each person signs in with their own email and password, and has one role. API tokens carry a role
+too. The roles are ordered, so each one can do everything the roles before it can:
+
+| Role | Can |
+|---|---|
+| `viewer` | See orders, flows, approvals and the back office; use the ops chat (its proposals still need a person with the right role to confirm) |
+| `approver` | Also approve and reject approvals |
+| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, manage webhook subscriptions, and manage the team and API tokens |
+
+The roles and the order are `ROLES` in `packages/core/src/roles.ts`. Every route checks the role on
+the server; the dashboard also hides controls a role can't use.
+
+## Setting up sign-in
+
+A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an operator, which is
+the local development default. To turn sign-in on, open **Set up sign-in** in the menu (the Team
+page) and create your operator account with a password you choose. You are signed in as it, and
+from then on everyone signs in.
+
+With `APP_PASSWORD` set, sign-in is on from the start. Sign in with no email and the workspace
+password to reach the Team page as an operator. The password stays a break-glass operator sign-in
+and API credential; it has no identity, so its decisions are recorded as `operator`.
+
+## The Team page
+
+Operators manage people and tokens at `/team`:
+
+- **Add person:** email, optional name and role. The page shows a generated 20-character password
+  once; hand it over and ask them to change it on their **Account** page.
+- **Role:** change and save. You can't lower your own role.
+- **Reset password:** shows a new one-time password and signs the person out everywhere.
+- **Disable / Enable:** a disabled person can't sign in, and their sessions end.
+- Without `APP_PASSWORD`, the last active operator can't be demoted or disabled, so someone can
+  always manage the team.
+
+Passwords must be 10 to 256 characters, not a common password and not contain the email address.
+They are stored as PBKDF2-SHA256 (100,000 iterations, the Workers limit) as
+`pbkdf2:<iterations>:<salt>:<hash>`.
+
+Sessions last 30 days in a `__Host-ol_session` cookie that holds a random token; D1 stores only
+its SHA-256. Signing out deletes the session.
+
+## API tokens
+
+Systems that call the [REST API](/reference/rest-api/) use a token:
+
+```bash
+curl https://orderloop.io/api/v1/orders -H "Authorization: Bearer ol_live_…"
+```
+
+Create one on the Team page with a name (what will use it) and a role. The token is shown once and
+stored only as a SHA-256; the list shows its first 12 characters, who created it and when it was
+last used. Revoke it there. A token's role limits it like a person's: an `approver` token can
+decide approvals but not start orders. Approval decisions made with a token are recorded as
+`token:<name>`.
+
+## Who decided
+
+An approval's `by` is the person who decided: their email for a signed-in person, `token:<name>`
+for an API token. On the order page's live connection, the agent takes the name from the
+connection, never from what the page sends; see
+[OrderAgent](/internals/order-agent/#roles-on-the-socket).
+
+## Outside identity providers
+
+`users.external_sub` is reserved for linking an outside identity. Signing in through an OpenID
+Connect provider would match a person by that subject and start the same kind of session, keeping
+roles and tokens in Order Loop.

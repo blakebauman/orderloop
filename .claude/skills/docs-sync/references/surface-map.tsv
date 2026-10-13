@@ -19,7 +19,7 @@
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api	gen
 ^apps/web/workers/app\.ts$	internals/architecture reference/rest-api	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api	gen
-^apps/web/app/lib/auth\.server\.ts$	reference/rest-api reference/configuration start/deploy	prose
+^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api reference/configuration start/deploy internals/architecture	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
 ^apps/web/app/lib/scenarios\.ts$	guides/templates start/getting-started	prose
 ^apps/web/app/(lib/metrics\.server\.ts|components/performance\.tsx)$	internals/data-model start/getting-started	prose
@@ -45,3 +45,5 @@
 ^(apps|packages)/[^/]+/(vitest\.config\.ts|tests/)	internals/testing	prose
 ^(\.github/workflows/|scripts/provision\.sh$)	start/deploy	prose
 ^package\.json$	start/getting-started start/deploy	prose
+^packages/core/src/roles\.ts$	guides/team-and-roles internals/order-agent	prose
+^apps/web/app/(lib/team\.server\.ts|lib/credentials\.ts|routes/(team|account|login)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose

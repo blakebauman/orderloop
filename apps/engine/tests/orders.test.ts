@@ -2,8 +2,11 @@ import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   type ChatMessage,
+  encodePrincipal,
   type OrderInput,
   type OrderState,
+  PRINCIPAL_HEADER,
+  type Principal,
   type StartOrderOnceInput,
   verifyWebhook,
   withDefaults,
@@ -29,6 +32,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
+import worker from '../src/index';
 import { EXECUTORS } from '../src/nodes';
 import { startOrder, startOrderOnce } from '../src/orders';
 
@@ -735,6 +739,84 @@ describe('pricing chain', () => {
       await db().update(priceSources).set({ priority: 30 }).where(eq(priceSources.id, 'volume'));
       await db().update(priceSources).set({ active: true }).where(eq(priceSources.id, 'contract'));
     }
+  });
+});
+
+describe('agent socket roles', () => {
+  /** Opens the order page's socket the way the web proxy does, as `principal`. */
+  const socket = async (orderId: string, principal: Principal | null) => {
+    const headers = new Headers({ Upgrade: 'websocket' });
+    if (principal) headers.set(PRINCIPAL_HEADER, encodePrincipal(principal));
+    const res = await worker.fetch(
+      new Request(`http://engine/agents/order-agent/${orderId}`, { headers }),
+      env,
+    );
+    const ws = res.webSocket!;
+    ws.accept();
+    const pending = new Map<string, (m: { success: boolean; error?: string }) => void>();
+    ws.addEventListener('message', (e) => {
+      const m = JSON.parse(String(e.data));
+      if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
+    });
+    let n = 0;
+    return {
+      call: (method: string, args: unknown[]) =>
+        new Promise<{ success: boolean; error?: string }>((resolve) => {
+          const id = `c${++n}`;
+          pending.set(id, resolve);
+          ws.send(JSON.stringify({ type: 'rpc', id, method, args }));
+        }),
+      close: () => ws.close(),
+    };
+  };
+  const who = (role: Principal['role'], email: string): Principal => ({
+    kind: 'user',
+    id: `usr_${role}`,
+    name: email.split('@')[0]!,
+    email,
+    role,
+  });
+
+  it('checks the caller role on the socket and records who decided', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        type: 'purchase_request',
+        customerId: 'cus_internal',
+        title: 'Laptops',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+
+    const viewer = await socket(orderId, who('viewer', 'vee@example.com'));
+    expect(await viewer.call('decide', ['mgr', 'approved', 'boss@example.com'])).toMatchObject({
+      success: false,
+      error: 'This needs the Approver role.',
+    });
+    expect((await viewer.call('cancel', ['nope'])).error).toBe('This needs the Operator role.');
+    viewer.close();
+    // A socket with no principal (not opened through the web proxy) can't act either.
+    const anonymous = await socket(orderId, null);
+    expect((await anonymous.call('decide', ['mgr', 'approved'])).success).toBe(false);
+    anonymous.close();
+    expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
+
+    // An approver decides, and the record names them, not what the page claimed.
+    const approver = await socket(orderId, who('approver', 'ann@example.com'));
+    expect(await approver.call('decide', ['mgr', 'approved', 'boss@example.com'])).toMatchObject({
+      success: true,
+    });
+    approver.close();
+    const row = await until(async () => {
+      const a = await db().select().from(approvals).where(eq(approvals.orderId, orderId)).get();
+      return a?.status === 'approved' ? a : false;
+    }, 'the approval to close');
+    expect(row.decidedBy).toBe('ann@example.com');
+    // RPC from the web app's own routes is trusted and keeps its `by`.
+    await agent(orderId).cancel('Cleanup');
+    expect((await state(orderId)).status).toBe('cancelled');
   });
 });
 

@@ -13,13 +13,16 @@ described here.
 
 ## Authentication
 
-When `APP_PASSWORD` is set, every `/api/v1` route needs `Authorization: Bearer <APP_PASSWORD>`
-(a signed-in dashboard session cookie also works). When it is unset, the API is open. Two routes
-are exceptions: `GET /api/v1/openapi.json` is public, and `POST /api/v1/webhooks/events` is
+Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a signed-in dashboard
+session cookie also works, and so does `APP_PASSWORD` as a break-glass operator). Each route needs
+a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
+(starting, cancelling, events, webhook subscriptions) `operator`; a token or person without it gets
+`403`. See [Team and roles](/guides/team-and-roles/). An open deployment (no `APP_PASSWORD`, no
+people) needs no token. Two routes are exceptions: `GET /api/v1/openapi.json` is public, and `POST /api/v1/webhooks/events` is
 authenticated by an HMAC signature instead (see [signed events](#signed-events)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
-`401` means a missing or wrong token, `404` an unknown route or order, and `500` an engine error.
+`401` means a missing, wrong or revoked token, `403` a role that can't use the route, `404` an unknown route or order, and `500` an engine error.
 
 ## Routes
 

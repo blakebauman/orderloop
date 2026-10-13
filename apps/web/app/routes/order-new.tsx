@@ -18,7 +18,7 @@ import type { Route } from './+types/order-new';
 export const meta = () => [{ title: 'New order · Order Loop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   await ensureSeeded();
   const [flows, office] = await Promise.all([publishedFlows(), backOffice()]);
   return {
@@ -45,7 +45,7 @@ function parseLines(text: string): { lines: OrderLine[]; unreadable: string[] } 
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   const f = await request.formData();
   const flowId = String(f.get('flowId') ?? '');
   const flows = await publishedFlows();

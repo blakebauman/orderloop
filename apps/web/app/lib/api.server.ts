@@ -1,5 +1,6 @@
 /**
- * REST API (/api/v1). Every route is authorized by `isApiAuthorized` in workers/app.ts.
+ * REST API (/api/v1). workers/app.ts resolves the caller (`apiPrincipal`); each route here checks
+ * its role: reads need viewer, approval decisions approver, everything else operator.
  *
  *   GET  /api/v1/flows
  *   POST /api/v1/orders                         { flowId, version?, input: OrderInput, vars? }
@@ -21,9 +22,16 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { SIGNATURE_HEADER, verifyWebhook } from '@orderloop/core';
+import {
+  atLeast,
+  type Principal,
+  type Role,
+  SIGNATURE_HEADER,
+  verifyWebhook,
+} from '@orderloop/core';
 import type { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
+import { actor, forbidden } from './auth.server';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
 import { currencies, listOrders } from './orders.server';
@@ -36,7 +44,10 @@ import {
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
-export async function handleApi(request: Request): Promise<Response> {
+export async function handleApi(request: Request, caller: Principal): Promise<Response> {
+  // Reads need viewer; approvals need approver; anything else that changes state needs operator.
+  const need = (min: Role) =>
+    atLeast(caller.role, min) ? null : json({ error: forbidden(min) }, 403);
   const url = new URL(request.url);
   const parts = url.pathname
     .replace(/^\/api\/v1\/?/, '')
@@ -49,7 +60,7 @@ export async function handleApi(request: Request): Promise<Response> {
       return json({ flows: await listFlows() });
     }
     if (parts[0] === 'webhook-subscriptions')
-      return await handleSubscriptions(request, parts, body);
+      return need('operator') ?? (await handleSubscriptions(request, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {
@@ -64,6 +75,8 @@ export async function handleApi(request: Request): Promise<Response> {
         });
       }
       if (request.method === 'POST') {
+        const denied = need('operator');
+        if (denied) return denied;
         const parsed = startSchema.safeParse(await body());
         if (!parsed.success)
           return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
@@ -93,18 +106,26 @@ export async function handleApi(request: Request): Promise<Response> {
       return s ? json(s) : json({ error: 'Not found' }, 404);
     }
     if (parts[2] === 'events' && request.method === 'POST') {
+      const denied = need('operator');
+      if (denied) return denied;
       const b = (await body()) as { event?: string; payload?: Record<string, unknown> };
       if (!b.event) return json({ error: '`event` is required' }, 400);
       return json(await engine().sendEvent(orderId, b.event, b.payload ?? {}));
     }
     if (parts[2] === 'approvals' && parts[3] && request.method === 'POST') {
+      const denied = need('approver');
+      if (denied) return denied;
       const b = (await body()) as { decision?: string; by?: string; note?: string };
       if (b.decision !== 'approved' && b.decision !== 'rejected')
         return json({ error: '`decision` must be approved or rejected' }, 400);
-      await engine().decide(orderId, parts[3], b.decision, b.by ?? 'api', b.note);
+      // A person or a named token decides; only the shared password may name someone else.
+      const by = caller.kind === 'password' ? (b.by ?? 'api') : actor(caller);
+      await engine().decide(orderId, parts[3], b.decision, by, b.note);
       return json({ ok: true });
     }
     if (parts[2] === 'cancel' && request.method === 'POST') {
+      const denied = need('operator');
+      if (denied) return denied;
       const b = (await body()) as { reason?: string };
       await engine().cancel(orderId, b.reason ?? 'Cancelled via API');
       return json({ ok: true });

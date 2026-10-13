@@ -12,6 +12,7 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { humanize, money, orderRef } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/approvals';
 
 export const meta = () => [{ title: 'Approvals · Order Loop' }];
@@ -216,6 +217,7 @@ function Row({
   /** No longer in the pending queue (escalated or decided elsewhere); kept in place briefly. */
   gone?: boolean;
 }) {
+  const canApprove = useCan('approver');
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const ref = useRef<HTMLLIElement>(null);
   const titleId = useId();
@@ -279,7 +281,7 @@ function Row({
         <span className="hidden font-semibold tabular sm:block">
           {money(r.amount, r.currency ?? undefined)}
         </span>
-        {open ? (
+        {open && canApprove ? (
           <DecisionControls
             compact
             shortcuts={ref}

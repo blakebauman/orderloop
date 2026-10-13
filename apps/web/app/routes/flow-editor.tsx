@@ -30,6 +30,7 @@ import { Inspector } from '~/components/inspector';
 import { Palette } from '~/components/palette';
 import { requireUser } from '~/lib/auth.server';
 import { getFlow } from '~/lib/flows.server';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/flow-editor';
 
 export const meta = ({ loaderData: d }: Route.MetaArgs) => [
@@ -52,6 +53,7 @@ type ActionResult = {
 };
 
 export default function FlowEditor() {
+  const canOperate = useCan('operator');
   const loaded = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [flow, setFlowState] = useState<Flow>(loaded.flow);
@@ -350,44 +352,52 @@ export default function FlowEditor() {
               <Redo2 />
             </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!dirty}
-            onClick={() => setFlow(JSON.parse(baseline))}
-            title="Back to the last saved draft (undoable)"
-          >
-            Discard changes
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={save.state !== 'idle'}
-            onClick={() => submit('save')}
-          >
-            <Save /> Save
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={save.state !== 'idle' || issues.errors.length > 0}
-            onClick={() => (unpublished ? setConfirm('test') : submit('test'))}
-            title={
-              unpublished
-                ? 'Publishes your changes as a new version, then starts a sample order on it'
-                : `Starts a sample order on v${published}`
-            }
-          >
-            <FlaskConical /> Test run
-          </Button>
-          <Button
-            size="sm"
-            disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
-            onClick={() => setConfirm('publish')}
-            title={unpublished ? undefined : `Nothing to publish: v${published} is current`}
-          >
-            <Rocket /> Publish
-          </Button>
+          {canOperate ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!dirty}
+                onClick={() => setFlow(JSON.parse(baseline))}
+                title="Back to the last saved draft (undoable)"
+              >
+                Discard changes
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={save.state !== 'idle'}
+                onClick={() => submit('save')}
+              >
+                <Save /> Save
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={save.state !== 'idle' || issues.errors.length > 0}
+                onClick={() => (unpublished ? setConfirm('test') : submit('test'))}
+                title={
+                  unpublished
+                    ? 'Publishes your changes as a new version, then starts a sample order on it'
+                    : `Starts a sample order on v${published}`
+                }
+              >
+                <FlaskConical /> Test run
+              </Button>
+              <Button
+                size="sm"
+                disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
+                onClick={() => setConfirm('publish')}
+                title={unpublished ? undefined : `Nothing to publish: v${published} is current`}
+              >
+                <Rocket /> Publish
+              </Button>
+            </>
+          ) : (
+            <span className="text-muted-foreground text-xs">
+              View only: operators edit and publish flows.
+            </span>
+          )}
         </div>
       </header>
 

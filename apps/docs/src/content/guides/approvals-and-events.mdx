@@ -44,18 +44,20 @@ shows why a person is being asked (for a credit check: how far over the limit, t
 balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval escalates and to which step. Keyboard: `j`/`k` (or the arrow keys)
 move between rows, `a` approves, `r` rejects.
 
-`by` is the signed-in email when Cloudflare Access sets `cf-access-authenticated-user-email`,
-otherwise `operator`.
+Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`operator` for
+the shared workspace password); see [Team and roles](/guides/team-and-roles/#who-decided).
 
 From the **API**:
 
 ```bash
 curl -X POST https://orderloop.io/api/v1/orders/ord_…/approvals/approval \
-  -H "Authorization: Bearer $APP_PASSWORD" -H 'content-type: application/json' \
-  -d '{ "decision": "approved", "by": "ana@example.com", "note": "Paid last invoice" }'
+  -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
+  -d '{ "decision": "approved", "note": "Paid last invoice" }'
 ```
 
-`by` defaults to `api`. A decision for a node that isn't waiting for an approval fails with
+`$ORDERLOOP_TOKEN` is an API token with the `approver` role or higher. The decision is recorded
+`by` the token (`token:<name>`) or the signed-in person; a body `by` is used only with the shared
+`APP_PASSWORD`, where it defaults to `api`. A decision for a node that isn't waiting for an approval fails with
 `That node is not waiting for an approval`. See the [REST API](/reference/rest-api/).
 
 From the **order chat**, the assistant can prepare an approval or rejection, but a person confirms
@@ -86,7 +88,7 @@ waiting.
 
   ```bash
   curl -X POST https://orderloop.io/api/v1/orders/ord_…/events \
-    -H "Authorization: Bearer $APP_PASSWORD" -H 'content-type: application/json' \
+    -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
     -d '{ "event": "payment.received", "payload": { "amount": 3106.78 } }'
   ```
 
