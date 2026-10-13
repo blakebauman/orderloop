@@ -56,11 +56,17 @@ All settings are listed in [Configuration](/reference/configuration/).
 
 ## CI
 
-`.github/workflows/ci.yml` runs lint, type-check, build and tests on every push and pull request. On
-`main` it then migrates D1, deploys the engine, deploys the web app, smoke-tests `/health` and
-deploys these docs. The
-deploy job only does anything when the repository has `CLOUDFLARE_API_TOKEN` and
-`CLOUDFLARE_ACCOUNT_ID` secrets.
+Production deploys from CI: merging to `main` is the release. `.github/workflows/ci.yml` runs lint,
+type-check, build and tests on every push and pull request. On `main` it then migrates D1, deploys
+the engine, deploys the web app, smoke-tests `/health` and deploys these docs, in that order, so a
+change never reaches production before its migration. The deploy job needs the repository secrets
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; without them it does nothing.
+
+Each deploy step runs through a small `retry` helper (three attempts, 15 then 30 seconds apart),
+because the Cloudflare API occasionally fails a request outright (codes `7403`, `10013`) and every
+step is safe to repeat. If the job still fails, re-run its failed jobs in GitHub Actions rather
+than deploying from a laptop. The manual commands under [First deploy](#first-deploy) are for
+setting up a new account.
 
 ## The docs site
 
