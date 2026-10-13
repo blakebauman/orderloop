@@ -139,9 +139,10 @@ const orderType = ORDER_TYPE_LABELS[flow.orderType];
     </dl>
     <figcaption>
       <a href="/guides/templates/#tpl-b2b-order"><code>{flow.id}</code></a> run by the engine in
-      workerd for <code>{run.order.customerId}</code> from the dashboard's “B2B PO by email” scenario,
-      with <code>AI_MODE=mock</code> (hence “heuristic” on the extract step). {skipped} other nodes
-      were skipped: the branches this order didn't take.
+      workerd on the dashboard's “B2B PO by email” scenario, with <code>AI_MODE=mock</code> (hence
+      “heuristic” on the extract step, which found <code>{run.order.customerId}</code> from the
+      email's <code>From:</code> line). {skipped} other nodes were skipped: the branches this order
+      didn't take.
     </figcaption>
   </div>
 </figure>

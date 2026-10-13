@@ -1,5 +1,5 @@
 {
-  "$comment": "One real run of tpl-b2b-order: the engine in workerd (AI_MODE=mock) with the dashboard's \"B2B PO by email\" document and customerId cus_northwind, stopped at its payment wait. Drawn by apps/docs/src/components/OrderRun.astro; apps/engine/tests/docs-sample-run.test.ts fails when the engine would now run it differently, and its diff is the update.",
+  "$comment": "One real run of tpl-b2b-order: the engine in workerd (AI_MODE=mock) on the dashboard's \"B2B PO by email\" scenario, stopped at its payment wait. Drawn by apps/docs/src/components/OrderRun.astro; apps/engine/tests/docs-sample-run.test.ts fails when the engine would now run it differently, and its diff is the update.",
   "flowId": "tpl-b2b-order",
   "status": "waiting",
   "order": {
@@ -24,7 +24,7 @@
     },
     "extract": {
       "status": "succeeded",
-      "summary": "3 lines (heuristic)",
+      "summary": "3 lines · Northwind Traders (heuristic)",
       "branches": ["out"]
     },
     "validate": {

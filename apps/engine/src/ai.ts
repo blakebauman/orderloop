@@ -98,7 +98,10 @@ export function extractHeuristic(text: string): Extracted {
   for (const m of text.matchAll(LINE_RE)) lines.set(m[2]!.toUpperCase(), Number(m[1]));
   for (const m of text.matchAll(SKU_FIRST_RE)) lines.set(m[1]!.toUpperCase(), Number(m[2]));
   const po = /\bPO\s*(?:#|no\.?|number)?\s*[:#]?\s*([A-Z0-9-]{3,})/i.exec(text)?.[1] ?? null;
-  const from = /\bfrom\s*[:-]?\s*([A-Z][\w&. ]{2,40}?)(?:\n|,|<|$)/.exec(text)?.[1]?.trim() ?? null;
+  // "From" or "from", then a capitalised name. Not /i: that would let the name match any lowercase
+  // run of words after "from" in the body ("from the warehouse").
+  const from =
+    /\b[Ff]rom\s*[:-]?\s*([A-Z][\w&. ]{2,40}?)(?:\n|,|<|$)/.exec(text)?.[1]?.trim() ?? null;
   return {
     customerName: from,
     poNumber: po,
