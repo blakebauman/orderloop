@@ -1,0 +1,47 @@
+---
+title: Documentation
+description: A durable agent loop for the commerce order lifecycle, drawn as a flow graph and run on Cloudflare.
+template: splash
+hero:
+  title: Every order is a loop that runs to its outcome.
+  tagline: >-
+    Draw a flow from catalog nodes: pricing, credit, approvals, payments, shipping, AI triage. Order Loop
+    runs each order through it as a durable Workflow with its own live agent, on Workers, Workflows,
+    Durable Objects, Workers AI, D1 and R2.
+  actions:
+    - text: Run it locally
+      link: /start/getting-started/
+      icon: right-arrow
+    - text: How it works
+      link: /start/concepts/
+      variant: secondary
+    - text: REST API
+      link: /reference/rest-api/
+      variant: minimal
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What it runs
+
+Purchase requests, B2B orders, reorders, subscriptions and storefront orders. Each order type ships
+with a [built-in flow](/guides/templates/) you can open in the editor, change and republish.
+
+- **Flows are data.** A flow is a JSON graph of [catalog nodes](/reference/nodes/). Publishing makes an
+  immutable version, and each order pins the version it started on.
+- **One Workflow interprets every flow.** Each node is a memoized `step.do`, so an order survives
+  restarts, waits days for a person or a payment, and rolls back its reservations, holds and shipments
+  when it fails.
+- **Each order has an agent.** A Durable Object holds the order's live state, delivers approvals and
+  events to the waiting node, and streams every change to the order page.
+- **AI never blocks an order.** Every model call has a schema, a 20-second cap and a deterministic
+  fallback.
+
+## Where next
+
+<CardGrid>
+  <LinkCard title="Getting started" href="/start/getting-started/" description="Install, migrate D1, run web and engine together, start a scenario." />
+  <LinkCard title="Building flows" href="/guides/building-flows/" description="Nodes, branches, joins, loops, expressions and publishing." />
+  <LinkCard title="Node catalog" href="/reference/nodes/" description="Every node type, its config fields and its output branches." />
+  <LinkCard title="Architecture" href="/internals/architecture/" description="How the web app, the engine, the Workflow and the agent fit together." />
+</CardGrid>

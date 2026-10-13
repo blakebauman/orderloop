@@ -1,0 +1,64 @@
+---
+title: Built-in flows
+description: The flow seeded for each order type, how seeding works, and the dashboard scenarios that exercise them.
+---
+
+import Templates from '../../components/Templates.astro';
+
+Order Loop seeds one flow per order type. Each is an ordinary flow: open it in the editor,
+change it and publish a new version. The list below is rendered from `TEMPLATES` in
+`packages/core/src/templates.ts`, the same builders the seed publishes.
+
+## Seeding
+
+`seedFlows` (`packages/db/src/flows.ts`) publishes each template whose flow id doesn't exist yet
+as version 1. It runs:
+
+- in the web app, through `ensureSeeded()`, the first time a worker isolate lists or loads flows
+  (the dashboard, `/flows`, a flow page, `GET /api/v1/flows`) or starts an order with
+  `POST /api/v1/orders`;
+- in the engine, through `ensureTemplates()`, before the Replenish Workflow starts a reorder.
+
+Seeding never overwrites a flow that exists, so your edits survive. When a template changes in
+the code, the editor of a template-based flow offers the new graph as a proposal to review
+(see [Building flows](/guides/building-flows/#the-editor)).
+
+## The flows
+
+<Templates />
+
+## Scenarios
+
+The dashboard's **Demo scenarios** start an order on a seeded flow with a canned input
+(`apps/web/app/lib/scenarios.ts`). Each exercises a different path:
+
+| Scenario | Flow | Path |
+|---|---|---|
+| B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the agent router auto-approves, ships, waits for payment |
+| B2B over credit limit | `tpl-b2b-order` | `cus_contoso` is near its limit, so the credit check routes to a person |
+| B2B out of stock | `tpl-b2b-order` | `meta.simulate: "out_of_stock"`: the reservation comes up short and the order fails and rolls back |
+| Purchase request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |
+| Reorder (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
+| Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
+| Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
+| Storefront order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund |
+
+### Simulating failures
+
+The mock [connectors](/internals/architecture/#connectors) read `order.meta.simulate`, so any
+order (from the API too) can take a failure path:
+
+| Value | Effect |
+|---|---|
+| `out_of_stock` | Reserve inventory reports every line short |
+| `payment_decline` | Authorize payment takes `declined` |
+| `charge_fail` | Charge takes `failed` |
+| `three_way_mismatch` | 3-way match sees an invoice 10% over the PO and takes `mismatch` |
+
+Restarting an order from its page drops `meta.simulate`, so the retry runs for real.
+
+### Stock review
+
+The Replenish Workflow runs daily (`0 6 * * *`, set in `apps/engine/wrangler.jsonc`). It scans for
+SKUs at or below their reorder point and, if there are any, starts one order on `tpl-reorder`
+titled `Replenish <skus>`. **Run stock review now** on the back office page starts it on demand.

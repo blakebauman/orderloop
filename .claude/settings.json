@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/docs-impact.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/docs-drift.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(pnpm docs:dev)",
+      "Bash(pnpm docs:build)",
+      "Bash(pnpm --filter @orderloop/docs build)",
+      "Bash(pnpm --filter @orderloop/docs lint)",
+      "Bash(pnpm --filter @orderloop/docs check-types)",
+      "Bash(.claude/hooks/tests/docs-hooks.test.sh)"
+    ],
+    "ask": [
+      "Bash(pnpm docs:deploy*)",
+      "Bash(pnpm --filter @orderloop/docs deploy*)",
+      "Bash(pnpm --filter @orderloop/docs run deploy*)"
+    ]
+  }
+}

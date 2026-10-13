@@ -69,7 +69,7 @@ export const NODE_SPECS = [
     type: 'trigger.manual',
     category: 'trigger',
     label: 'Manual / API',
-    description: 'Started from the dashboard or POST /api/orders.',
+    description: 'Started from the dashboard or POST /api/v1/orders.',
     icon: 'Play',
     fields: [],
     outputs: OUT,

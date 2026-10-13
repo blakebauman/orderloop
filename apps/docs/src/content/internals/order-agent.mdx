@@ -1,0 +1,139 @@
+---
+title: OrderAgent
+description: The per-order Durable Object that holds live state, owns waits and approvals, cancels, and answers the ops chat.
+---
+
+import Values from '../../components/Values.astro';
+
+`OrderAgent` (`apps/engine/src/agent.ts`) is an Agents SDK `Agent`, one Durable Object per order,
+named by the order id (`orderAgentName` in `@orderloop/core`). It:
+
+- holds the order's live state, synced to every browser on the order page through `useAgent`;
+- records what the Workflow reports;
+- owns the order's waits and delivers approvals and events to the right instance;
+- cancels with compensation;
+- answers the ops chat with tools over the same state.
+
+## State
+
+The synced state is `OrderState` from `packages/core/src/api.ts`, plus a private `seq`:
+
+| Field | Meaning |
+|---|---|
+| `orderId`, `order`, `flow` | The order and the pinned `FlowVersion` |
+| `status` | One of <Values of="order-statuses" /> |
+| `nodes` | `NodeRun` per node: status, runs, summary, output, error, branches, `startedAt`, `endedAt` |
+| `edges` | `EdgeState` per edge, from the latest plan |
+| `waits` | Open `PendingWait`s: node, event type, kind, title, event, amount, assignee, deadline |
+| `vars` | Run variables |
+| `timeline` | `TimelineEntry`s, capped at the last 400 (`TIMELINE_CAP`) |
+| `chat` | Ops chat messages, capped at the last 100 |
+| `instanceId`, `generation` | The Workflow instance driving the order and its generation |
+| `rollback` | `{ outcome: 'complete' \| 'failed', error }` once a failed run has settled |
+| `reason` | Why it was cancelled, declined or failed |
+
+`validateStateChange` throws for any change whose source is not the server: browsers may read
+state and call methods, never write state.
+
+`init(order, flow, instanceId)` is called once by `startOrder`: status `queued`, every node
+`pending`, generation 1, and a first timeline entry naming the flow and version.
+
+## Reports
+
+`report(r)` merges a report from the Workflow (see
+[OrderLoop Workflow](/internals/workflow/#reports-to-the-agent)):
+
+- **Sequenced** reports (with `seq`) are fresh if they come from a newer generation, or the same
+  generation with a higher `seq`. Only fresh ones update `plan`, `order` and `vars`. A plan never
+  clears a node already `rolled_back` or `failed`; those come from their own reports.
+- **Unsequenced** detail reports always apply their `node` patch and `log` entry.
+- A `status` applies only if the order is not already terminal
+  (<Values of="terminal-order-statuses" />), so a late report cannot reopen a finished order. A
+  status change adds a timeline entry keyed `status:${generation}:${status}`.
+- Timeline entries with a `key` replace the entry with the same key rather than appending.
+
+After a status change or an order patch the agent writes the index row (`syncIndex`). When the
+status becomes `failed` it schedules `checkInstance`.
+
+These rules are what make replays and retries safe: `apps/engine/tests/agent.test.ts` covers
+replayed snapshots, deduped keys, new generations and sticky terminal statuses.
+
+## The orders index
+
+`syncIndex` updates the order's D1 `orders` row from state: `status`, `total`, `customer_id`,
+`title`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `) and
+`updated_at`. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
+the agent.
+
+## Waits
+
+The Workflow calls `openWait` from a node's `:open` step and `closeWait` from its `:close` step.
+
+- `openWait(w)` is a no-op if a wait with the same `eventType` is already open (a retried step).
+  For an approval it inserts an `approvals` row (`status: 'pending'`, `onConflictDoNothing`), then
+  adds the wait and an `open:${eventType}` timeline entry.
+- `closeWait(eventType, outcome, payload)` updates the approval row with the outcome, `decided_at`,
+  `decided_by` (the payload's `by`, `timeout` for an escalation) and `note`, removes the wait, and
+  adds a `close:${eventType}` entry.
+
+## Callable methods
+
+Methods marked `@callable()` can be called from the order page over the socket (the web app has
+already authorized it); `EngineApi` calls the same methods over RPC.
+
+| Method | Behaviour |
+|---|---|
+| `decide(nodeId, decision, by = 'operator', note?)` | Finds the approval wait for `nodeId` (throws if none) and sends its event type to the instance with `{ decision, by, note }` |
+| `deliver(event, payload = {})` | Finds the event wait for `event`. If none is open, returns `{ delivered: false }`; otherwise sends `{ ...payload, event, at }` and returns `{ delivered: true, nodeId }` |
+| `cancel(reason = 'Cancelled by operator')` | See below. Returns `{ ok: false }` for an order that has already ended |
+| `chat(text)` | See below |
+
+`deliver` returning `delivered: false` is what lets `POST /api/v1/webhooks/events` answer `409`
+until a node is waiting for the event.
+
+## Cancel
+
+`cancel` terminates the Workflow instance (logging, not failing, if that throws), runs
+`compensateOrder` (release held stock, void open authorizations, cancel booked shipments), marks
+every pending approval row `cancelled`, sets status `cancelled` with the reason and clears the
+waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
+`emitWebhook` for `order.cancelled`.
+
+## Agent-side webhooks
+
+`emitWebhook({ key, event, data, attempt })` calls the same `emit` as the Workflow's emit steps,
+keyed by `key`. While deliveries are pending it reschedules itself after `10 * 2^attempt` seconds,
+up to 5 retries (`WEBHOOK_RETRIES`), matching the Workflow's backoff, then leaves the rows `failed`.
+
+## Rollback outcome
+
+A failed instance runs its compensations inside Workflows, after the order is already `failed`.
+`checkInstance` polls the instance status every 10 seconds (up to 60 attempts) until it is
+`errored`, `terminated` or `complete`, then records `rollback` from the instance's `rollback`
+field. Runtimes that omit that field (including local dev) fall back to the node reports: an
+errored instance with any `rolled_back` node counts as a complete rollback. A complete rollback
+sets status `rolled_back`; a failed one stays `failed` with the error.
+
+## Continue as new
+
+`continuedAs(instanceId, generation)` ignores anything not newer than the current generation, then
+switches `instanceId` and `generation`, resets `seq` to 0 and logs `Continued as run N`.
+
+## Ops chat
+
+`chat(text)` appends the user's message (truncated to 4000 characters), then runs up to four model
+turns through `runJson` with a schema of `{ action: 'reply' | 'tool', tool?, args?, reply? }`. The
+model sees a brief of the order state (status, order, waits, vars, non-pending nodes, the last 10
+timeline messages), the tools called so far and the last eight messages.
+
+| Tool | Effect |
+|---|---|
+| `get_state` | Returns the brief |
+| `approve`, `reject` | Prepares a `ChatProposal` of kind `decide` for the waiting approval; does not decide |
+| `deliver_event` | Calls `deliver` directly |
+| `cancel` | Prepares a `ChatProposal` of kind `cancel`; does not cancel |
+
+Decisions and cancellations from chat are only ever proposals: the answer carries the `proposal`,
+and a person confirms it on the order page with the same undo window as any other decision. With
+`AI_MODE=mock` or a model error, `chatHeuristic` picks a tool from keywords or replies with the
+order's status. See [AI nodes and the copilot](/guides/ai/).

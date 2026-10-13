@@ -1,0 +1,38 @@
+---
+/*
+ * Starlight's ThemeProvider, with Ledger's rule: light unless the reader chose dark. Starlight's
+ * own provider follows the OS when nothing is stored; the web app never does (its theme switch
+ * sets `data-theme`, default light), so the docs don't either. Paired with ThemeSelect.astro.
+ * Inline so the first paint is already the right theme.
+ */
+// Biome parses only the frontmatter, so components used in the markup read as dead.
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import { Icon } from '@astrojs/starlight/components';
+---
+
+<script is:inline>
+  window.StarlightThemeProvider = (() => {
+    let stored = null;
+    try {
+      stored = localStorage.getItem('starlight-theme');
+    } catch {}
+    const initial = stored === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = initial;
+    return {
+      updatePickers(theme = initial) {
+        document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+          const select = picker.querySelector('select');
+          if (select) select.value = theme;
+          const icon = document.querySelector('#theme-icons')?.content.querySelector(`.${theme}`);
+          const current = picker.querySelector('svg.label-icon');
+          if (icon && current) current.replaceChildren(...icon.cloneNode(true).childNodes);
+        });
+      },
+    };
+  })();
+</script>
+
+<template id="theme-icons">
+  <Icon name="sun" class="light" />
+  <Icon name="moon" class="dark" />
+</template>

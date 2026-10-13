@@ -1,0 +1,24 @@
+{
+  "name": "@orderloop/docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Order Loop docs: a Starlight static site deployed as a Workers static-assets Worker. Reference pages render from @orderloop/core and the web app's OpenAPI document at build time.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node scripts/check-links.mjs",
+    "preview": "astro preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "lint": "biome check .",
+    "check-types": "astro sync && tsc --noEmit"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.3",
+    "@orderloop/core": "workspace:*",
+    "astro": "^7.0.7",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "wrangler": "catalog:"
+  }
+}

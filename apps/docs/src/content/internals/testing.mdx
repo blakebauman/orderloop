@@ -1,0 +1,90 @@
+---
+title: Testing
+description: What pnpm test runs in each package, how the engine runs real Workflows in workerd, and where to add a test.
+---
+
+`pnpm test` runs `turbo run test`, which runs `vitest run` in every package that has tests. The
+`test` task has no `dependsOn`, so a failing dependency never silently skips a package's tests.
+CI runs it after lint, type-check and build (`.github/workflows/ci.yml`), each step running even
+when an earlier one failed.
+
+| Package | Environment | Config |
+|---|---|---|
+| `packages/core` | Node | `packages/core/vitest.config.ts` |
+| `apps/engine` | workerd, through `@cloudflare/vitest-plugin` | `apps/engine/vitest.config.ts` |
+| `apps/web` | Node | `apps/web/vitest.config.ts` |
+
+:::caution
+vitest is pinned to `5.0.3` in the workspace catalog (`pnpm-workspace.yaml`): 5.0.4's module cache
+breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine suite.
+:::
+
+## Core: the planner and pure logic
+
+`packages/core/tests/`:
+
+| File | Covers |
+|---|---|
+| `graph.test.ts` | Every template validates; the planner's paths (the cheap purchase request skipping approvals, a rejection reaching its end through a join, the dunning loop to its limit and its early exit, subscription periods with distinct step runs then continue-as-new, a failed retry stopping a subscription, `isSettled`); `validateGraph` (forward cycles, unknown outputs, disconnected nodes, a second trigger, back-edges from outside the body, node config) |
+| `policy.test.ts` | `evaluatePolicy`: every rule, all failures reported together, quantities summed per SKU, business hours in a time zone, PO boxes in string and structured addresses, malformed rules rejected at validation |
+| `webhooks.test.ts` | `signWebhook` / `verifyWebhook`: a valid signature, a tampered body, a wrong secret, a missing header, a replay outside the tolerance |
+
+### Adding a planner test
+
+Planner semantics live only in `packages/core/src/graph.ts`, so a planner change comes with a test
+in `graph.test.ts`. Its `simulate(graph, choose)` helper drives the planner the way the Workflow
+does: it loops `readyNodes` → `beginNode` → complete, calling `choose(id, run)` to pick each node's
+branches (or a loop's `next`), and returns `{ ran, state, ended }`, where `ran` lists node ids in
+the order they ran.
+
+```ts
+it('skips the approval for a small order', () => {
+  const { ran, ended } = simulate(tpl('purchase_request'), (id) =>
+    id === 'needs_mgr' ? ['false'] : undefined,
+  );
+  expect(ran).not.toContain('mgr');
+  expect(ended).toBe('done');
+});
+```
+
+`undefined` from `choose` takes the node's first output (and, for a loop, continues while
+`run <= maxIterations`). Check node ids against `packages/core/src/templates.ts` before writing
+them into a test.
+
+## Engine: real Workflows in workerd
+
+The engine suite runs the real `OrderAgent` Durable Object and `OrderLoop` and `Replenish`
+Workflows against local D1 and R2, from the engine's own `wrangler.jsonc`:
+
+- `remoteBindings: false` and the binding `AI_MODE: 'mock'`, so every AI node and the copilot use
+  their heuristics. No network or Cloudflare account is needed.
+- `TIME_SCALE: '1'`; tests skip waits with `introspectWorkflow(env.ORDER_LOOP)` and
+  `modifyAll(m => { m.disableSleeps(); m.disableRetryDelays(); m.forceEventTimeout({ name }) })`,
+  forcing named `waitForEvent` steps (by step key, for example `mgr#1`) to time out.
+- `tests/setup.ts` applies `packages/db/migrations` (read with `readD1Migrations`) to the test D1.
+- The plugin list includes `agents/vite` so the `@callable()` TC39 decorators are transformed.
+- `testTimeout` is 60 seconds.
+
+| File | Covers |
+|---|---|
+| `tests/agent.test.ts` | `OrderAgent.report`: replayed snapshots ignored, timeline keys deduped, a new generation accepted; terminal statuses and rolled-back nodes kept once set |
+| `tests/orders.test.ts` | End-to-end orders on every template: B2B extraction, auto-approval, shipping and payment; credit-limit approval and decline; chat proposals that don't act; the dunning loop; out-of-stock failure and rollback; cancel releasing everything; subscription retries; reorder forecast and restock; storefront ship, capture, return and partial refund; policy cancel; return window closing; idempotent capped refunds; `Idempotency-Key` races; outbound webhook signing, retry and give-up; `order.cancelled` and `order.failed`; the offline copilot |
+
+Tests drive orders through `startOrder`, then poll the agent's `snapshot()` until a predicate holds
+(`until`, `waitingOn`, `settled`), and assert on D1 rows (`payments`, `reservations`, `shipments`,
+`approvals`, `webhook_deliveries`) as well as state.
+
+## Web
+
+`apps/web/tests/`:
+
+| File | Covers |
+|---|---|
+| `openapi.test.ts` | The OpenAPI document serialises, request bodies come from the zod schemas, every outbound event is listed, signed inbound events are unauthenticated; subscription URLs require https except on localhost and default to every event |
+| `proposal.test.ts` | The chat proposal card offers only the proposed decision, prefilled, sends nothing on render, and has nothing to confirm once the step stopped waiting or the order ended |
+| `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its order type; money, relative time and UTC date formatting; status-to-token mapping |
+
+## What isn't covered
+
+The flow editor canvas and the live order page are not under test; verify UI changes by running
+`pnpm web:dev` and driving a scenario. See [Getting started](/start/getting-started/).

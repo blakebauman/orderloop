@@ -1,0 +1,116 @@
+---
+title: Outbound webhooks
+description: Subscribe an endpoint to signed order events, verify them, and handle retries and duplicates.
+---
+
+import NodeEvents from '../../components/NodeEvents.astro';
+import Values from '../../components/Values.astro';
+
+Order Loop POSTs signed order events to the endpoints you subscribe. The events are
+<Values of="outbound-events" />.
+
+## Subscribing
+
+Subscriptions are managed through the [REST API](/reference/rest-api/) with the admin password;
+there is no UI for them.
+
+```bash
+curl -X POST https://orderloop.io/api/v1/webhook-subscriptions \
+  -H "Authorization: Bearer $APP_PASSWORD" -H 'content-type: application/json' \
+  -d '{ "url": "https://erp.example.com/hooks/orderloop", "events": ["order.shipped", "order.paid"] }'
+```
+
+- `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`.
+- `events` is a list of event names, or `["*"]` for every event (the default).
+
+The `201` response is `{ "subscription": { … }, "secret": "whsec_…" }`. **The secret is returned
+once**, here; listing subscriptions never shows it. Store it with the receiver.
+
+| Route | Does |
+|---|---|
+| `GET /api/v1/webhook-subscriptions` | List subscriptions (no secrets) |
+| `POST /api/v1/webhook-subscriptions` | Create one; returns the secret |
+| `DELETE /api/v1/webhook-subscriptions/:id` | Delete one |
+| `GET /api/v1/webhook-subscriptions/:id/deliveries` | The 50 most recent deliveries, newest first |
+
+## When events are sent
+
+Some nodes send an event when they finish:
+
+<NodeEvents />
+
+The ending events cover every way an order ends:
+
+| Event | Sent by |
+|---|---|
+| `order.completed`, `order.declined`, `order.cancelled`, `order.failed` | An [End node](/reference/nodes/#control.end) with that outcome |
+| `order.failed` | A node that throws after its retries, so the order fails without reaching an End node |
+| `order.cancelled` | A cancel from the order page, the order chat or `POST /api/v1/orders/:id/cancel`, sent by the order's agent because the Workflow is terminated |
+
+## The request
+
+```http
+POST /hooks/orderloop HTTP/1.1
+content-type: application/json
+x-orderloop-signature: t=1760340000,v1=5f2c…
+x-orderloop-event: order.shipped
+x-orderloop-delivery: whd_ord_…_ship_1_whs_…
+
+{
+  "id": "whd_ord_…_ship_1_whs_…",
+  "event": "order.shipped",
+  "occurredAt": 1760340000123,
+  "orderId": "ord_…",
+  "data": { … }
+}
+```
+
+`data` depends on what sent the event:
+
+- **A node** (`order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`):
+  `{ order, node: { id, type, output } }`, where `output` is the node's output.
+- **An End node**: `{ order, outcome, reason }`.
+- **A node that threw**: `{ order, outcome: "failed", reason, node: { id, type, error } }`.
+- **A cancel**: `{ order, outcome: "cancelled", reason }`.
+
+`order` is a summary: `id`, `type`, `title`, `customerId`, `currency`, `subtotal`, `tax`, `total`.
+
+## Verifying the signature
+
+Each subscription signs with its own secret, in the same scheme as
+[signed inbound events](/guides/approvals-and-events/#signed-events):
+`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`. Verify against the raw body,
+before parsing it. In TypeScript, `verifyWebhook` from `@orderloop/core` does it and rejects
+timestamps more than 5 minutes off:
+
+```ts
+import { SIGNATURE_HEADER, verifyWebhook } from '@orderloop/core';
+
+const raw = await request.text();
+const check = await verifyWebhook(secret, raw, request.headers.get(SIGNATURE_HEADER));
+if (!check.ok) return new Response(check.reason, { status: 401 });
+```
+
+Elsewhere, compute the HMAC of `` `${t}.${raw}` `` with the secret, compare it with `v1` in
+constant time, and check that `t` is recent.
+
+## Retries and duplicates
+
+Any `2xx` response counts as delivered; anything else, or no response within 10 seconds, is a
+failure.
+
+- **From the Workflow** (node and End events, failures): the delivery runs in its own step,
+  `${nodeId}#${run}:emit`, retried 5 times with exponential backoff from 10 seconds.
+- **From the agent** (`order.cancelled` on cancel): retried 5 times on the agent's schedule,
+  10 seconds doubling each time.
+
+Each attempt only resends deliveries that haven't succeeded. When retries run out the delivery
+stays `failed` in the deliveries list, and the order carries on: a subscriber being down never
+fails an order. Backoff isn't affected by `TIME_SCALE`.
+
+The delivery id (`X-OrderLoop-Delivery`, and `id` in the body) is derived from the order, the
+step that sent it and the subscription, and stays the same across retries. Use it to dedupe:
+a receiver can see the same delivery more than once.
+
+Each delivery row records `status` (`pending`, `delivered` or `failed`), `attempts`,
+`responseStatus`, `lastError` and `deliveredAt`.

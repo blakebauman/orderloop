@@ -13,6 +13,9 @@
     "check-types": "turbo run check-types",
     "web:dev": "pnpm --filter @orderloop/web dev",
     "engine:dev": "pnpm --filter @orderloop/engine dev",
+    "docs:dev": "pnpm --filter @orderloop/docs dev",
+    "docs:build": "pnpm --filter @orderloop/docs build",
+    "docs:deploy": "pnpm --filter @orderloop/docs run deploy",
     "db:migrate:local": "pnpm --filter @orderloop/web db:migrate:local",
     "deploy": "pnpm --filter @orderloop/engine run deploy && pnpm --filter @orderloop/web run deploy"
   },
