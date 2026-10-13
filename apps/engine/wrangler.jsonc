@@ -48,6 +48,14 @@
     // "live" calls Workers AI; "mock" uses deterministic heuristics (tests, offline dev).
     "AI_MODE": "live",
     // Divides every wait and timeout so demos finish in minutes ("1440": a day becomes a minute).
-    "TIME_SCALE": "1440"
+    "TIME_SCALE": "1440",
+    // Email intake: mailbox local part → flow id. Empty = orders@/po@ → B2B, purchasing@ → requests.
+    "INTAKE_MAILBOXES": "",
+    // "false" accepts mail without a passing DMARC/DKIM/SPF result (never in production).
+    "INTAKE_REQUIRE_AUTH": "true",
+    // "false" turns off the acknowledgement reply.
+    "INTAKE_REPLY": "true"
   }
+  // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
+  // addresses or @domains (customers' own addresses are always allowed).
 }

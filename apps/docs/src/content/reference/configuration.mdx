@@ -16,6 +16,17 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
 | `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
 | `TIME_SCALE` | `1440` | Divides every wait and timeout, so `1440` turns a day into a minute. Use `"1"` in production |
+| `INTAKE_MAILBOXES` | `""` | Email intake: JSON object of mailbox local part to flow id. Empty uses `orders@` and `po@` → `tpl-b2b-order`, `purchasing@` → `tpl-purchase-request` |
+| `INTAKE_REQUIRE_AUTH` | `true` | `"false"` accepts mail without a passing DMARC, DKIM or SPF result. Never in production |
+| `INTAKE_REPLY` | `true` | `"false"` turns off the acknowledgement reply to accepted email |
+
+## Engine secrets
+
+Set with `pnpm --filter @orderloop/engine exec wrangler secret put <NAME>`.
+
+| Secret | Meaning |
+|---|---|
+| `INTAKE_ALLOWLIST` | Extra senders allowed to start orders by email: addresses or `@domains`, comma-separated. Customers' own addresses and company domains are always allowed. See [Email intake](/guides/email-intake/#who-may-send) |
 
 ## Web secrets
 
@@ -46,7 +57,8 @@ created; they are not configuration.
 
 The web Worker serves `orderloop.io` as a custom domain; change `routes` in
 `apps/web/wrangler.jsonc` for your own. The engine has no routes, no `workers.dev` URL and no preview
-URLs: only the web app's service binding reaches it. The docs Worker (`apps/docs/wrangler.jsonc`)
+URLs: only the web app's service binding reaches it, plus Email Routing rules that send mail to it
+(see [Email intake](/guides/email-intake/#setting-up-email-routing)). The docs Worker (`apps/docs/wrangler.jsonc`)
 serves `docs.orderloop.io`.
 
 Both app Workers answer `GET /health` with `{ ok: true, service }`.

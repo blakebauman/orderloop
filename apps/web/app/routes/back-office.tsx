@@ -1,19 +1,28 @@
-import type { OrderState } from '@orderloop/core';
+import { DEFAULT_INTAKE_MAILBOXES, type OrderState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
-import { RefreshCw, Zap } from 'lucide-react';
+import { Mail, RefreshCw, Zap } from 'lucide-react';
 import { Form, Link, useFetcher, useLoaderData, useNavigation } from 'react-router';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { count, humanize, money, orderRef } from '~/lib/format';
-import { backOffice, waitingOrders } from '~/lib/orders.server';
+import { ago, count, humanize, money, orderRef } from '~/lib/format';
+import { backOffice, recentInboundEmails, waitingOrders } from '~/lib/orders.server';
 import type { Route } from './+types/back-office';
 
 export const meta = () => [{ title: 'Back office · Order Loop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const [office, waiting] = await Promise.all([backOffice(), waitingOrders()]);
+  const [office, waiting, emails] = await Promise.all([
+    backOffice(),
+    waitingOrders(),
+    recentInboundEmails(),
+  ]);
+  const host = new URL(request.url).hostname;
+  const mailboxes = Object.entries(DEFAULT_INTAKE_MAILBOXES).map(([local, flowId]) => ({
+    address: `${local}@${host === 'localhost' ? 'orderloop.io' : host}`,
+    flowId,
+  }));
   const states = await Promise.all(waiting.slice(0, 20).map((o) => engine().snapshot(o.id)));
   const events = states
     .filter((s): s is OrderState => !!s)
@@ -27,7 +36,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           nodeId: w.nodeId,
         })),
     );
-  return { ...office, events };
+  return { ...office, events, emails, mailboxes };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -37,7 +46,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function BackOffice() {
-  const { products, customers, events } = useLoaderData<typeof loader>();
+  const { products, customers, events, emails, mailboxes } = useLoaderData<typeof loader>();
   const nav = useNavigation();
   return (
     <>
@@ -63,6 +72,69 @@ export default function BackOffice() {
           ) : (
             <Empty>
               No order is waiting for an outside event, such as a payment or a delivery.
+            </Empty>
+          )}
+        </Section>
+        <Section title="Email intake" className="xl:col-span-2" flush>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-2.5 text-sm">
+            <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+            {mailboxes.map((m) => (
+              <span key={m.address}>
+                <a href={`mailto:${m.address}`} className="font-mono text-link hover:underline">
+                  {m.address}
+                </a>{' '}
+                <span className="text-muted-foreground">→ {m.flowId}</span>
+              </span>
+            ))}
+            <span className="text-muted-foreground text-xs">
+              Customers’ own addresses, their company domains and INTAKE_ALLOWLIST may send.
+            </span>
+          </div>
+          {emails.length ? (
+            <ul className="divide-y">
+              {emails.map((e) => (
+                <li
+                  key={e.id}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm"
+                >
+                  <span
+                    className={`w-20 shrink-0 font-medium text-xs uppercase tracking-wide ${
+                      e.status === 'accepted'
+                        ? 'text-ok'
+                        : e.status === 'duplicate'
+                          ? 'text-muted-foreground'
+                          : 'text-bad'
+                    }`}
+                  >
+                    {e.status}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium">{e.subject || '(no subject)'}</span>{' '}
+                    <span className="text-muted-foreground">
+                      from {e.sender} to {e.mailbox}
+                      {e.attachments
+                        ? ` · ${count(e.attachments)} attachment${e.attachments === 1 ? '' : 's'}`
+                        : ''}
+                      {e.reason ? ` · ${e.reason}` : ''}
+                    </span>
+                  </span>
+                  {e.orderId ? (
+                    <Link
+                      to={`/orders/${e.orderId}`}
+                      className="font-mono text-link text-xs hover:underline"
+                    >
+                      {orderRef(e.orderId)}
+                    </Link>
+                  ) : null}
+                  <span className="w-20 text-right text-muted-foreground text-xs">
+                    {ago(e.receivedAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>
+              No email received yet. Send a purchase order to one of the addresses above.
             </Empty>
           )}
         </Section>

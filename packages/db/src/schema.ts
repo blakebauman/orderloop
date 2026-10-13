@@ -230,3 +230,24 @@ export const webhookDeliveries = sqliteTable(
     index('webhook_deliveries_subscription').on(t.subscriptionId, t.createdAt),
   ],
 );
+
+export const inboundEmails = sqliteTable(
+  'inbound_emails',
+  {
+    id: text('id').primaryKey(),
+    messageId: text('message_id').notNull(),
+    mailbox: text('mailbox').notNull(),
+    sender: text('sender').notNull(),
+    subject: text('subject').notNull().default(''),
+    status: text('status').notNull(),
+    reason: text('reason'),
+    orderId: text('order_id'),
+    r2Key: text('r2_key'),
+    attachments: integer('attachments').notNull().default(0),
+    receivedAt: integer('received_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('inbound_emails_message').on(t.messageId),
+    index('inbound_emails_received').on(t.receivedAt),
+  ],
+);

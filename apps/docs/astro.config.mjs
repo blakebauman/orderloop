@@ -65,6 +65,7 @@ export default defineConfig({
             { label: 'Building flows', slug: 'guides/building-flows' },
             { label: 'Built-in flows', slug: 'guides/templates' },
             { label: 'Approvals and events', slug: 'guides/approvals-and-events' },
+            { label: 'Email intake', slug: 'guides/email-intake' },
             { label: 'Outbound webhooks', slug: 'guides/outbound-webhooks' },
             { label: 'AI nodes and the copilot', slug: 'guides/ai' },
           ],

@@ -123,6 +123,9 @@ importers:
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.4(@cloudflare/workers-types@5.20261013.1)
+      postal-mime:
+        specifier: ^4.0.5
+        version: 4.0.5
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -3944,6 +3947,10 @@ packages:
 
   postal-mime@2.7.6:
     resolution: {integrity: sha512-UUlyE2KlxmvwMGq060onF/VWU3zD6dVW31FwokQ5v26jWd35fbs2MoTFzh+jXnPwAyV2MULMKXcBInGOl5TO6Q==}
+
+  postal-mime@4.0.5:
+    resolution: {integrity: sha512-fWu1Cmo2ef6LCwgHU1fVrqo55eyFP31F7hH0j/wMWkQYYdh+H8zz3nBf3EYRQelkmTfDrbDfTvPUQEBT8DS/jw==}
+    engines: {node: '>=20'}
 
   postcss-nested@6.2.0:
     resolution: {integrity: sha512-HQbt28KulC5AJzG+cZtj9kvKB93CFCdLvog1WFLf1D+xmMvPGlBstkpTEZfK5+AN9hfJocyBFCNiqyS48bpgzQ==}
@@ -8616,6 +8623,8 @@ snapshots:
       pathe: 2.0.3
 
   postal-mime@2.7.6: {}
+
+  postal-mime@4.0.5: {}
 
   postcss-nested@6.2.0(postcss@8.5.30):
     dependencies:
