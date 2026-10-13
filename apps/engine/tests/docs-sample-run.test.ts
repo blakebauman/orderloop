@@ -40,8 +40,7 @@ it('still runs the B2B order drawn on the docs home page', async () => {
       currency: 'USD',
       lines: [],
       meta: {},
-      customerId: sample.order.customerId,
-      // The dashboard's "B2B PO by email" scenario (apps/web/app/lib/scenarios.ts).
+      // The dashboard's "B2B PO by email" scenario (apps/web/app/lib/scenarios.ts), as it sends it.
       documentText:
         'From: Northwind Traders\nSubject: PO #NW-7781\n\nHi team, please ship 120 x WID-100 (industrial widgets), 40 x GSK-010 gasket kits and 8 x WID-200.\nDeliver to dock 4. Thanks, Priya — Purchasing',
     },

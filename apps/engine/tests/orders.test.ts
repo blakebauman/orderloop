@@ -25,7 +25,7 @@ import {
 } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { copilotHeuristic } from '../src/ai';
+import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { EXECUTORS } from '../src/nodes';
@@ -94,6 +94,37 @@ afterEach(async () => {
 });
 
 describe('B2B order', () => {
+  it('reads the sender from an email header, but not from a sentence', () => {
+    expect(extractHeuristic('From: Northwind Traders\nSubject: PO #NW-7781').customerName).toBe(
+      'Northwind Traders',
+    );
+    expect(extractHeuristic('from: Contoso Ltd\n').customerName).toBe('Contoso Ltd');
+    expect(extractHeuristic('Please ship these from the warehouse.\n').customerName).toBeNull();
+  });
+
+  it('identifies the customer from the email alone, as the dashboard scenario sends it', async () => {
+    await introspect();
+    // The dashboard's "B2B PO by email" scenario: no customerId, just the email.
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-b2b-order',
+      input: input({
+        type: 'b2b_order',
+        documentText:
+          'From: Northwind Traders\nSubject: PO #NW-7781\n\nHi team, please ship 120 x WID-100 (industrial widgets), 40 x GSK-010 gasket kits and 8 x WID-200.\nDeliver to dock 4. Thanks, Priya — Purchasing',
+      }),
+    });
+    const waiting = await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'payment.received'),
+      'payment wait',
+    );
+    expect(waiting.order!.customerId).toBe('cus_northwind');
+    expect(waiting.order!.title).toBe('PO NW-7781');
+    expect(waiting.nodes.credit!.branches).toEqual(['ok']);
+    expect(waiting.nodes.router!.branches).toEqual(['auto_approve']);
+    expect(waiting.nodes.approval!.status).toBe('skipped');
+  });
+
   it('extracts a PO, auto-approves, ships and completes on payment', async () => {
     await introspect();
     const { orderId } = await startOrder(env, {
