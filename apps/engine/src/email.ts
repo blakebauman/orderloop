@@ -147,7 +147,7 @@ export async function receiveEmail(
   if (String(env.INTAKE_REPLY) !== 'false') {
     try {
       await message.reply({
-        from: { email: message.to, name: 'Order Loop' },
+        from: { email: message.to, name: 'OrderLoop' },
         subject: subject.toLowerCase().startsWith('re:')
           ? subject
           : `Re: ${subject || 'your order'}`,
@@ -157,7 +157,7 @@ export async function receiveEmail(
           `Reference: ${result.orderId}`,
           `It is now being processed${attachments.length ? ` (${attachments.length} attachment${attachments.length === 1 ? '' : 's'} read)` : ''}. We will email you if we need anything else.`,
           '',
-          '— Order Loop',
+          '— OrderLoop',
         ].join('\n'),
       });
     } catch (err) {
