@@ -34,9 +34,9 @@ version 1 of each.
 
 The dashboard lists one-click scenarios, each a real order on a seeded flow: a B2B purchase order
 read from an email, an order over its credit limit, an out-of-stock order that rolls back, a purchase
-request, a stock review, two subscriptions and a storefront order that is returned. Start one and the
+request, a stock review, two subscriptions, a storefront order that is returned and one priced in euros. Start one and the
 order page opens: the flow graph colours each node as it runs, waits and finishes, and the timeline
-records every step. Below the queues, the dashboard's **Last 30 days** section shows completion rate
+records every step. Below the queues, the dashboard's **Last 30 days** section shows, in USD, completion rate
 by order type, revenue per day, refund rate and the slowest steps by p95 duration.
 
 Waits are compressed in development. `TIME_SCALE` (default `1440`) divides every wait and timeout,

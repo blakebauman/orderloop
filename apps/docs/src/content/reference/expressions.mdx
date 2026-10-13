@@ -15,7 +15,7 @@ Every expression and template sees one object:
 
 | Path | Contents |
 |---|---|
-| `order` | The order: `id`, `type`, `title`, `customerId`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`. Pricing and tax nodes update the totals as they run |
+| `order` | The order: `id`, `type`, `title`, `customerId`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
 | `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
 | `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
 | `input` | The order's `meta` |
@@ -145,6 +145,25 @@ volume sources for that node. A line with its own `unitPrice` keeps it, and purc
 reorders price at `products.cost` without the chain. The node's output lists each line's
 `unitPrice`, the source (`by`) and the entry (`rule`), and its summary counts lines per source. The
 back office shows the chain in order.
+
+## Currency
+
+An order's `currency` is any code with a row in `fx_rates`; the REST API answers `400` for one
+without. Prices, price rules, credit limits, balances, budgets and reports are in the base currency,
+`USD` (`BASE_CURRENCY` in core). Price & quote reads the rate (units of the order's currency per one
+USD), converts each base price at it, and stores it on the order as `fxRate` and on the `orders` row
+as `fx_rate`, so later rate changes never reprice the order. A `unitPrice` given on the order is
+already in the order's currency. Totals carry `baseTotal`, the total in USD.
+
+- Amounts on the order, its documents, payments and refunds are in the order's currency.
+- Credit check and budget check compare `baseTotal`; the credit check reports in the order's
+  currency, and invoicing adds `baseTotal` to the customer's balance.
+- The dashboard converts at each order's `fx_rate`, so its figures are in USD.
+- `order.total` in an expression is in the order's currency; use `order.baseTotal` for a threshold
+  that should hold across currencies. Policy rule amounts compare `order.total`.
+
+The seeded rates (`EUR` 0.92, `GBP` 0.79, `CAD` 1.37) are demo values; a real deployment refreshes
+`fx_rates` from a rates provider.
 
 ## Durations
 

@@ -78,6 +78,7 @@ export class OrderAgent extends Agent<Env, State> {
       .set({
         status: s.status,
         total: s.order.total,
+        fxRate: s.order.fxRate ?? 1,
         customerId: s.order.customerId ?? null,
         title: s.order.title ?? '',
         instanceId: s.instanceId,

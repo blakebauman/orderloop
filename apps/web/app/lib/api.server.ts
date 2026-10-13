@@ -26,7 +26,7 @@ import type { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
-import { listOrders } from './orders.server';
+import { currencies, listOrders } from './orders.server';
 import {
   createSubscription,
   deleteSubscription,
@@ -70,6 +70,13 @@ export async function handleApi(request: Request): Promise<Response> {
         const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;
         if (idempotencyKey && idempotencyKey.length > 255)
           return json({ error: 'Idempotency-Key must be at most 255 characters' }, 400);
+        if (!(await currencies()).some((c) => c.currency === parsed.data.input.currency))
+          return json(
+            {
+              error: `Unsupported currency ${parsed.data.input.currency}; there is no exchange rate for it`,
+            },
+            400,
+          );
         await ensureSeeded();
         const res = idempotencyKey
           ? await engine().startOrderOnce({ ...parsed.data, idempotencyKey })

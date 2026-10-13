@@ -84,12 +84,19 @@ export const orderInputSchema = z.object({
 });
 export type OrderInput = z.infer<typeof orderInputSchema>;
 
+/** The currency list prices, contract prices, price rules, credit limits and reports are in. */
+export const BASE_CURRENCY = 'USD';
+
 export type Order = OrderInput & {
   id: string;
   createdAt: number;
   subtotal: number;
   tax: number;
   total: number;
+  /** Units of the order's currency per one BASE_CURRENCY, fixed when the order is priced. */
+  fxRate?: number;
+  /** `total` in BASE_CURRENCY, for credit, budgets and reporting. */
+  baseTotal?: number;
 };
 
 export const NODE_STATUSES = [

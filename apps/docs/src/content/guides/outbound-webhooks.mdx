@@ -73,7 +73,8 @@ x-orderloop-delivery: whd_ord_…_ship_1_whs_…
 - **A node that threw**: `{ order, outcome: "failed", reason, node: { id, type, error } }`.
 - **A cancel**: `{ order, outcome: "cancelled", reason }`.
 
-`order` is a summary: `id`, `type`, `title`, `customerId`, `currency`, `subtotal`, `tax`, `total`.
+`order` is a summary: `id`, `type`, `title`, `customerId`, `currency`, `subtotal`, `tax`, `total`
+(all in `currency`), `fxRate` (units of `currency` per USD) and `baseTotal` (the total in USD).
 
 ## Verifying the signature
 

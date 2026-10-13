@@ -4,6 +4,7 @@ import {
   customers,
   documents,
   flows,
+  fxRates,
   inboundEmails,
   messages,
   orders,
@@ -46,7 +47,8 @@ export async function dashboardStats() {
     .select({
       status: orders.status,
       n: sql<number>`count(*)`,
-      total: sql<number>`coalesce(sum(${orders.total}), 0)`,
+      // In the base currency, at each order's rate.
+      total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
     })
     .from(orders)
     .groupBy(orders.status);
@@ -78,6 +80,7 @@ export async function listApprovals(status = 'pending') {
       decidedBy: approvals.decidedBy,
       orderType: orders.type,
       orderTitle: orders.title,
+      currency: orders.currency,
       customerId: orders.customerId,
       customerName: customers.name,
     })
@@ -127,7 +130,11 @@ export async function backOffice() {
     db().select().from(priceRules).orderBy(priceRules.sourceId, priceRules.sku, priceRules.minQty),
     db().select().from(contractPrices).orderBy(contractPrices.customerId, contractPrices.sku),
   ]);
-  return { customers: cust, products: prods, pricing: { sources, rules, contracts } };
+  return {
+    customers: cust,
+    products: prods,
+    pricing: { sources, rules, contracts, rates: await currencies() },
+  };
 }
 
 export async function waitingOrders() {
@@ -178,4 +185,10 @@ export async function declinedOrderIds(): Promise<Set<string>> {
 /** The email intake log: every message the engine's email() entrypoint saw, newest first. */
 export async function recentInboundEmails(limit = 20) {
   return db().select().from(inboundEmails).orderBy(desc(inboundEmails.receivedAt)).limit(limit);
+}
+
+/** Currencies an order can be in: those with a rate, base first. */
+export async function currencies() {
+  const rows = await db().select().from(fxRates).orderBy(fxRates.currency);
+  return rows.sort((a, b) => Number(b.rate === 1) - Number(a.rate === 1));
 }

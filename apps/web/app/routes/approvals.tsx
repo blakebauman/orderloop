@@ -250,7 +250,9 @@ function Row({
           <span className="text-muted-foreground text-sm">
             {r.customerName ?? r.customerId ?? 'No customer'}
           </span>
-          <span className="ml-auto font-semibold tabular sm:hidden">{money(r.amount)}</span>
+          <span className="ml-auto font-semibold tabular sm:hidden">
+            {money(r.amount, r.currency ?? undefined)}
+          </span>
         </div>
         {open && ctx ? (
           <div id={reasonId}>
@@ -274,7 +276,9 @@ function Row({
         ) : null}
       </div>
       <div className="flex flex-col items-start gap-2 sm:items-end">
-        <span className="hidden font-semibold tabular sm:block">{money(r.amount)}</span>
+        <span className="hidden font-semibold tabular sm:block">
+          {money(r.amount, r.currency ?? undefined)}
+        </span>
         {open ? (
           <DecisionControls
             compact

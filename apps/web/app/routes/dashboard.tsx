@@ -184,7 +184,9 @@ export default function Dashboard() {
                             <Ago ms={d.requestedAt} />
                           </p>
                         </div>
-                        <span className="font-semibold tabular">{money(d.amount)}</span>
+                        <span className="font-semibold tabular">
+                          {money(d.amount, d.currency ?? undefined)}
+                        </span>
                         <ChevronRight
                           className="mt-0.5 size-4 shrink-0 text-muted-foreground"
                           aria-hidden="true"

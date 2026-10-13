@@ -11,6 +11,7 @@ import {
 import {
   approvals,
   createDb,
+  customers,
   nodeRuns,
   orders,
   payments,
@@ -548,9 +549,10 @@ describe('pricing chain', () => {
     customerId: string,
     lines: OrderInput['lines'],
     config: Record<string, unknown> = {},
+    currency = 'USD',
   ) => {
     const order = {
-      ...input({ type: 'b2b_order', customerId, lines }),
+      ...input({ type: 'b2b_order', customerId, lines, currency }),
       id: 'ord_pricing',
       createdAt: Date.now(),
       subtotal: 0,
@@ -571,9 +573,13 @@ describe('pricing chain', () => {
       ctx: { order, nodes: {}, vars: {}, input: {}, now: Date.now() },
       stepKey: 'price#1',
     });
-    return r.output as {
-      subtotal: number;
-      lines: { sku: string; unitPrice: number; by: string; rule: string }[];
+    return {
+      ...(r.output as {
+        subtotal: number;
+        fxRate: number;
+        lines: { sku: string; unitPrice: number; by: string; rule: string }[];
+      }),
+      order: r.order!,
     };
   };
 
@@ -600,6 +606,75 @@ describe('pricing chain', () => {
       [22.08, 'volume', 'Industrial widget, 500+'],
       [24, 'list', 'List price'],
     ]);
+  });
+
+  it('prices an order in its own currency at the stored rate', async () => {
+    // Northwind's contract is 21.50 USD; at 0.92 EUR per USD that is 19.78 EUR.
+    const eur = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }], {}, 'EUR');
+    expect(eur.fxRate).toBe(0.92);
+    expect(eur.lines[0]).toMatchObject({ unitPrice: 19.78, by: 'contract' });
+    expect(eur.order).toMatchObject({ fxRate: 0.92, subtotal: 11868, baseTotal: 12900 });
+    // A price given on the order is already in the order's currency.
+    const given = await price(
+      'cus_northwind',
+      [{ sku: 'WID-100', qty: 1, unitPrice: 20 }],
+      {},
+      'EUR',
+    );
+    expect(given.lines[0]!.unitPrice).toBe(20);
+    await expect(price('cus_northwind', [{ sku: 'WID-100', qty: 1 }], {}, 'JPY')).rejects.toThrow(
+      'No exchange rate for JPY',
+    );
+  });
+
+  it('checks credit in the base currency', async () => {
+    // 100,000 limit and 12,000 balance: 88,000 USD available.
+    await db()
+      .insert(customers)
+      .values({
+        id: 'cus_fx',
+        name: 'FX test',
+        email: 'fx@example.com',
+        tier: 'standard',
+        creditLimit: 100_000,
+        balance: 12_000,
+        terms: 'net_30',
+      })
+      .onConflictDoNothing();
+    const check = (total: number, currency: string, fxRate: number) =>
+      EXECUTORS['commerce.credit_check']!({
+        env,
+        node: {
+          id: 'credit',
+          type: 'commerce.credit_check',
+          label: 'Credit',
+          config: {},
+          position: { x: 0, y: 0 },
+        },
+        config: {},
+        ctx: {
+          order: {
+            ...input({ type: 'b2b_order', customerId: 'cus_fx', currency }),
+            id: 'ord_credit',
+            createdAt: 0,
+            subtotal: total,
+            tax: 0,
+            total,
+            fxRate,
+            baseTotal: Math.round((total / fxRate) * 100) / 100,
+          },
+          nodes: {},
+          vars: {},
+          input: {},
+          now: Date.now(),
+        },
+        stepKey: 'credit#1',
+      });
+    expect((await check(85_000, 'USD', 1)).branches).toEqual(['ok']);
+    // 85,000 GBP is 107,594.94 USD: 19,594.94 over, reported in pounds.
+    const gbp = await check(85_000, 'GBP', 0.79);
+    expect(gbp.branches).toEqual(['over_limit']);
+    expect(gbp.summary).toBe('Over limit by £15,480.00');
   });
 
   it('switches sources off per node and keeps given prices', async () => {

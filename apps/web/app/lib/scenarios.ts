@@ -128,4 +128,22 @@ export const SCENARIOS: Scenario[] = [
       meta: {},
     },
   },
+  {
+    id: 'storefront-eur',
+    label: 'Storefront order in euros',
+    blurb:
+      'The same checkout priced in EUR: USD list prices convert at the stored rate, and the invoice, refunds and webhooks carry EUR.',
+    flowId: 'tpl-storefront-order',
+    input: {
+      type: 'storefront_order',
+      currency: 'EUR',
+      customerId: 'cus_ada',
+      title: 'Web order #10517',
+      lines: [
+        { sku: 'MON-27', qty: 1 },
+        { sku: 'GSK-010', qty: 4 },
+      ],
+      meta: {},
+    },
+  },
 ];

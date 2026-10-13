@@ -1,4 +1,4 @@
-import { DEFAULT_INTAKE_MAILBOXES, type OrderState } from '@orderloop/core';
+import { BASE_CURRENCY, DEFAULT_INTAKE_MAILBOXES, type OrderState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Mail, RefreshCw, Zap } from 'lucide-react';
 import { Form, Link, useFetcher, useLoaderData, useNavigation } from 'react-router';
@@ -353,6 +353,14 @@ function Pricing({ pricing, customers }: Pick<Office, 'pricing' | 'customers'>) 
           <span className="text-muted-foreground text-xs">when nothing above matches</span>
         </li>
       </ol>
+      <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
+        Prices are in {BASE_CURRENCY}. Orders in another currency convert at{' '}
+        {pricing.rates
+          .filter((r) => r.currency !== BASE_CURRENCY)
+          .map((r) => `${r.rate} ${r.currency}`)
+          .join(', ')}{' '}
+        per {BASE_CURRENCY}, fixed when the order is priced.
+      </p>
     </Section>
   );
 }

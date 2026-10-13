@@ -1,7 +1,7 @@
 /**
  * Dashboard performance figures over a trailing window, aggregated in D1: completion rate by order
  * type, p50 and p95 duration per node type (from `node_runs`, which the OrderAgent writes as runs
- * finish), revenue per day and refund rate.
+ * finish), revenue per day and refund rate. Money is in the base currency, at each order's rate.
  */
 
 import { TERMINAL_ORDER_STATUSES } from '@orderloop/core';
@@ -44,17 +44,19 @@ export async function performance(days = 30, now = Date.now()) {
     db()
       .select({
         day: sql<string>`date(${orders.updatedAt} / 1000, 'unixepoch')`,
-        total: sql<number>`sum(${orders.total})`,
+        total: sql<number>`sum(${orders.total} / ${orders.fxRate})`,
       })
       .from(orders)
       .where(and(eq(orders.status, 'completed'), gte(orders.updatedAt, since)))
       .groupBy(sql`1`),
     db()
       .select({
-        collected: sql<number>`coalesce(sum(case when ${payments.kind} in ('capture', 'charge') then ${payments.amount} end), 0)`,
-        refunded: sql<number>`coalesce(sum(case when ${payments.kind} = 'refund' then ${payments.amount} end), 0)`,
+        collected: sql<number>`coalesce(sum(case when ${payments.kind} in ('capture', 'charge') then ${payments.amount} / coalesce(${orders.fxRate}, 1) end), 0)`,
+        refunded: sql<number>`coalesce(sum(case when ${payments.kind} = 'refund' then ${payments.amount} / coalesce(${orders.fxRate}, 1) end), 0)`,
       })
       .from(payments)
+      // Payments are in their order's currency; convert at the order's rate.
+      .leftJoin(orders, eq(orders.id, payments.orderId))
       .where(and(eq(payments.status, 'succeeded'), gte(payments.createdAt, since)))
       .get(),
   ]);

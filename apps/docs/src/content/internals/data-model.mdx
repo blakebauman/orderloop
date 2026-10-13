@@ -28,6 +28,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
 | `0008_node_runs.sql` | `node_runs`, per-node timing for the dashboard |
 | `0009_price_chain.sql` | `price_sources` and `price_rules`, the pricing chain, with demo entries |
+| `0010_fx_rates.sql` | `fx_rates` with demo rates, and `orders.fx_rate` |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -49,7 +50,7 @@ published as version 1 the first time they are needed (`ensureTemplates` in the 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint` |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_type (type, updated_at)`, and
@@ -74,6 +75,7 @@ writes embeds its step key.
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
+| `fx_rates` | Units of each `currency` per one USD, with `updated_at`. See [Currency](/reference/expressions/#currency) |
 | `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
 | `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping) |
 | `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products` in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
@@ -95,7 +97,8 @@ The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) 
 request time: completion rate by order type from `orders` (completed over finished, by
 `created_at`), p50 and p95 duration per node type from `node_runs` (nearest rank, with window
 functions), revenue per day from completed `orders`, and refund rate from `payments` (succeeded
-`refund` over succeeded `capture` and `charge`).
+`refund` over succeeded `capture` and `charge`). Money is converted to USD at each order's
+`fx_rate`.
 
 ## Webhooks
 
