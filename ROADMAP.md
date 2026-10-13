@@ -4,8 +4,10 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 
 ## Next
 
-### Roles instead of a single `APP_PASSWORD`
-Add `viewer`, `approver` and `operator` roles, so the approvals `by` field is a real identity and only approvers can decide. API tokens get a role as well. This keeps the web app's current session cookie, and `apps/web/app/lib/auth.server.ts` gains a principal with a role.
+Nothing is scheduled. Candidates:
+
+- **Sign in with an outside identity provider.** Users already carry `external_sub`; an OpenID Connect login could match people by subject and start the same session.
+- **Rate-limit sign-in.** Failed sign-ins cost a PBKDF2 derivation each but aren't throttled.
 
 ## Not planned
 

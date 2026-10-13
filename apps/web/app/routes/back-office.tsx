@@ -8,6 +8,7 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { count, humanize, money, orderRef } from '~/lib/format';
 import { backOffice, recentInboundEmails, waitingOrders } from '~/lib/orders.server';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/back-office';
 
 export const meta = () => [{ title: 'Back office · Order Loop' }];
@@ -41,7 +42,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   const { instanceId } = await engine().runReplenish();
   return { started: instanceId };
 }
@@ -50,17 +51,20 @@ export default function BackOffice() {
   const { products, customers, pricing, events, emails, mailboxes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
+  const canOperate = useCan('operator');
   return (
     <>
       <PageHeader
         title="Back office"
         subtitle="The demo inventory, customers and outside events the commerce steps work against."
         actions={
-          <Form method="post">
-            <Button type="submit" variant="outline" disabled={nav.state !== 'idle'}>
-              <RefreshCw /> {nav.state !== 'idle' ? 'Starting review…' : 'Run stock review now'}
-            </Button>
-          </Form>
+          canOperate ? (
+            <Form method="post">
+              <Button type="submit" variant="outline" disabled={nav.state !== 'idle'}>
+                <RefreshCw /> {nav.state !== 'idle' ? 'Starting review…' : 'Run stock review now'}
+              </Button>
+            </Form>
+          ) : undefined
         }
       />
       <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2">
@@ -245,6 +249,7 @@ export default function BackOffice() {
 }
 
 function EventRow({ e }: { e: { orderId: string; title: string; event: string } }) {
+  const canOperate = useCan('operator');
   const f = useFetcher<{ ok: boolean; delivered?: boolean; error?: string }>();
   return (
     <li className="flex flex-wrap items-center gap-3 px-4 py-2.5">
@@ -265,7 +270,7 @@ function EventRow({ e }: { e: { orderId: string; title: string; event: string } 
       </div>
       {f.data?.delivered ? (
         <span className="text-ok text-sm">Delivered</span>
-      ) : (
+      ) : !canOperate ? null : (
         <f.Form method="post" action={`/orders/${e.orderId}/action`}>
           <input type="hidden" name="intent" value="event" />
           <input type="hidden" name="event" value={e.event} />

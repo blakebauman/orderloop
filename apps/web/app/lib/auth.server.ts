@@ -1,19 +1,53 @@
 /**
- * Single-password access for the MVP. When APP_PASSWORD is unset (local dev) everything is open.
- * The UI uses an HttpOnly cookie holding an HMAC of the password; the REST API takes
- * `Authorization: Bearer <APP_PASSWORD>`. Put Cloudflare Access in front for real users.
+ * Who is signed in, and what they may do. Roles are in `@orderloop/core` (viewer < approver <
+ * operator).
+ *
+ * - People sign in with an email and password from D1 `users`; the `__Host-ol_session` cookie holds
+ *   a random token whose SHA-256 is a `sessions` row.
+ * - The REST API takes `Authorization: Bearer ol_live_…`, an `api_tokens` row with its own role.
+ * - `APP_PASSWORD`, when set, is a break-glass operator: sign in with the password and no email
+ *   (the older HMAC cookie), or send it as the bearer token.
+ * - With no `APP_PASSWORD` and no users (local development) everything is open, as an operator.
+ *
+ * Users carry an `external_sub` column for linking an outside identity later; sign-in through
+ * an outside provider would create the same session row.
  */
 
 import { env } from 'cloudflare:workers';
-import { redirect } from 'react-router';
+import { atLeast, type Principal, ROLE_LABELS, type Role } from '@orderloop/core';
+import { apiTokens, sessions, users } from '@orderloop/db';
+import { and, count, eq, gt, isNull } from 'drizzle-orm';
+import { data, redirect } from 'react-router';
+import {
+  API_TOKEN_PREFIX,
+  hashPassword,
+  normalizeEmail,
+  randomToken,
+  safeEqual,
+  sha256Hex,
+  verifyPassword,
+} from './credentials';
+import { db } from './env.server';
 
-const COOKIE = 'ol_session';
+const SESSION = '__Host-ol_session';
+/** The shared-password cookie: an HMAC of APP_PASSWORD. */
+const SHARED = 'ol_session';
+const SESSION_DAYS = 30;
+const TOKEN_TOUCH_MS = 5 * 60_000;
+
+const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'operator' };
+const SHARED_PRINCIPAL: Principal = {
+  kind: 'password',
+  id: 'shared-password',
+  name: 'operator',
+  role: 'operator',
+};
 
 function password(): string | undefined {
   return (env as { APP_PASSWORD?: string }).APP_PASSWORD || undefined;
 }
 
-async function token(pw: string): Promise<string> {
+async function hmac(pw: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(pw),
@@ -25,55 +59,142 @@ async function token(pw: string): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/[+/=]/g, '');
 }
 
-function cookieValue(request: Request): string | undefined {
-  const raw = request.headers.get('cookie') ?? '';
-  return raw
+function cookie(request: Request, name: string): string | undefined {
+  return (request.headers.get('cookie') ?? '')
     .split(/;\s*/)
-    .find((c) => c.startsWith(`${COOKIE}=`))
-    ?.slice(COOKIE.length + 1);
+    .find((c) => c.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
 }
 
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+// Whether any user exists decides if a deployment without APP_PASSWORD is open. It only changes
+// when the first user is added, so each isolate remembers it briefly.
+let haveUsers: { value: boolean; at: number } | null = null;
+async function anyUsers() {
+  if (haveUsers && (haveUsers.value || Date.now() - haveUsers.at < 30_000)) return haveUsers.value;
+  const row = await db().select({ n: count() }).from(users).get();
+  haveUsers = { value: (row?.n ?? 0) > 0, at: Date.now() };
+  return haveUsers.value;
+}
+export const forgetUserCount = () => {
+  haveUsers = null;
+};
+
+export async function authEnabled(): Promise<boolean> {
+  return !!password() || (await anyUsers());
 }
 
-export async function isSignedIn(request: Request): Promise<boolean> {
+/** The signed-in person (or shared-password operator) for a browser request, or null. */
+export async function principal(request: Request): Promise<Principal | null> {
+  if (!(await authEnabled())) return OPEN;
+  const token = cookie(request, SESSION);
+  if (token) {
+    const row = await db()
+      .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .where(
+        and(
+          eq(sessions.tokenHash, await sha256Hex(token)),
+          gt(sessions.expiresAt, Date.now()),
+          isNull(users.disabledAt),
+        ),
+      )
+      .get();
+    if (row) return { kind: 'user', ...row, role: row.role as Role };
+  }
   const pw = password();
-  if (!pw) return true;
-  const v = cookieValue(request);
-  return !!v && timingSafeEqual(v, await token(pw));
+  const shared = cookie(request, SHARED);
+  if (pw && shared && safeEqual(shared, await hmac(pw))) return SHARED_PRINCIPAL;
+  return null;
 }
 
-/** Loader/action guard for UI routes. */
-export async function requireUser(request: Request): Promise<void> {
-  if (await isSignedIn(request)) return;
-  const url = new URL(request.url);
-  throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
-}
-
-export async function isApiAuthorized(request: Request): Promise<boolean> {
+/** The caller of a REST request: a bearer token, else the browser session. */
+export async function apiPrincipal(request: Request): Promise<Principal | null> {
+  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  if (!bearer) return principal(request);
   const pw = password();
-  if (!pw) return true;
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
-  return timingSafeEqual(bearer, pw) || (await isSignedIn(request));
+  if (pw && safeEqual(bearer, pw)) return SHARED_PRINCIPAL;
+  if (!bearer.startsWith(API_TOKEN_PREFIX)) return null;
+  const row = await db()
+    .select()
+    .from(apiTokens)
+    .where(and(eq(apiTokens.tokenHash, await sha256Hex(bearer)), isNull(apiTokens.revokedAt)))
+    .get();
+  if (!row) return null;
+  if (!row.lastUsedAt || Date.now() - row.lastUsedAt > TOKEN_TOUCH_MS)
+    await db().update(apiTokens).set({ lastUsedAt: Date.now() }).where(eq(apiTokens.id, row.id));
+  return { kind: 'token', id: row.id, name: `token:${row.name}`, role: row.role as Role };
 }
 
-export async function signIn(given: string): Promise<string | null> {
-  const pw = password();
-  if (!pw || !timingSafeEqual(given, pw)) return null;
-  return `${COOKIE}=${await token(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
-}
-
-export const signOutCookie = `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
-export const authEnabled = () => !!password();
+export const forbidden = (min: Role) =>
+  `This needs the ${ROLE_LABELS[min]} role. Ask an operator to change your role on the Team page.`;
 
 /**
- * Who is acting, for the approval audit trail. Behind Cloudflare Access this is the signed-in
- * email; with the shared password there is no individual identity, so it stays "operator".
+ * Loader/action guard. Not signed in: redirect to sign-in. Signed in without `min`: 403. Returns
+ * the principal for audit fields and for hiding what the role can't use.
  */
-export function actor(request: Request): string {
-  return request.headers.get('cf-access-authenticated-user-email')?.trim() || 'operator';
+export async function requireUser(request: Request, min: Role = 'viewer'): Promise<Principal> {
+  const p = await principal(request);
+  if (!p) {
+    const url = new URL(request.url);
+    throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
+  }
+  if (!atLeast(p.role, min)) throw data({ ok: false, error: forbidden(min) }, { status: 403 });
+  return p;
 }
+
+const sessionCookie = (token: string) =>
+  `${SESSION}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`;
+
+// Compared against when the email is unknown, so a miss costs the same PBKDF2 work as a hit.
+let decoy: Promise<string> | null = null;
+
+/** Signs in and returns the cookie to set, or null. No email means the shared APP_PASSWORD. */
+export async function signIn(email: string, given: string): Promise<string | null> {
+  if (!email.trim()) {
+    const pw = password();
+    if (!pw || !safeEqual(given, pw)) return null;
+    return `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
+  }
+  const user = await db()
+    .select()
+    .from(users)
+    .where(eq(users.email, normalizeEmail(email)))
+    .get();
+  decoy ??= hashPassword(randomToken());
+  const ok = await verifyPassword(given, user?.passwordHash ?? (await decoy));
+  if (!user || !ok || user.disabledAt || !user.passwordHash) return null;
+  return startSession(user.id);
+}
+
+/** Creates a session for a user and returns the cookie to set. */
+export async function startSession(userId: string): Promise<string> {
+  const token = randomToken();
+  const now = Date.now();
+  await db()
+    .insert(sessions)
+    .values({
+      tokenHash: await sha256Hex(token),
+      userId,
+      createdAt: now,
+      expiresAt: now + SESSION_DAYS * 86_400_000,
+    });
+  await db().update(users).set({ lastLoginAt: now }).where(eq(users.id, userId));
+  return sessionCookie(token);
+}
+
+/** Ends the session server-side and returns cookies that clear both kinds. */
+export async function signOut(request: Request): Promise<string[]> {
+  const token = cookie(request, SESSION);
+  if (token)
+    await db()
+      .delete(sessions)
+      .where(eq(sessions.tokenHash, await sha256Hex(token)));
+  return [
+    `${SESSION}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    `${SHARED}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  ];
+}
+
+/** Who acted, for audit fields such as an approval's `by`. */
+export const actor = (p: Principal) => p.email ?? p.name;

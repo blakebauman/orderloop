@@ -5,16 +5,20 @@ import type { Route } from './+types/order-action';
 
 /** Form posts from pages without a live agent connection (approvals inbox, back office). */
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request);
   const f = await request.formData();
   const intent = String(f.get('intent'));
+  // Deciding needs approver; delivering events, restarting and cancelling need operator.
+  const me = await requireUser(
+    request,
+    intent === 'approve' || intent === 'reject' ? 'approver' : 'operator',
+  );
   try {
     if (intent === 'approve' || intent === 'reject') {
       await engine().decide(
         params.orderId,
         String(f.get('nodeId')),
         intent === 'approve' ? 'approved' : 'rejected',
-        actor(request),
+        actor(me),
         String(f.get('note') ?? '') || undefined,
       );
       return { ok: true };

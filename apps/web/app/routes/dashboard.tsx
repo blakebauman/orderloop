@@ -21,6 +21,7 @@ import {
   waitingOrders,
 } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/dashboard';
 
 export const meta = () => [{ title: 'Overview · Order Loop' }];
@@ -71,7 +72,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   const form = await request.formData();
   const sc = SCENARIOS.find((s) => s.id === form.get('scenario'));
   if (!sc) return { error: 'That demo scenario no longer exists. Reload the page.' };
@@ -84,6 +85,7 @@ export default function Dashboard() {
   const { stats, perf, recent, names, declined, decisions, moreDecisions, lanes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
+  const canOperate = useCan('operator');
   const count = (s: string[]) =>
     stats.byStatus.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
   const completedValue = stats.byStatus.find((r) => r.status === 'completed')?.total ?? 0;
@@ -284,42 +286,44 @@ export default function Dashboard() {
               )}
             </Section>
 
-            <details className="group rounded-md border bg-card">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
-                <span className="section-title">Demo scenarios</span>
-                <ChevronRight
-                  className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
-                  aria-hidden="true"
-                />
-              </summary>
-              <div className="space-y-0.5 border-t p-2">
-                {SCENARIOS.map((s) => (
-                  <Form method="post" key={s.id}>
-                    <input type="hidden" name="scenario" value={s.id} />
-                    <button
-                      type="submit"
-                      disabled={nav.state !== 'idle'}
-                      className="group/s flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
-                    >
-                      <Play
-                        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-medium text-sm">{s.label}</span>
-                        <span className="block text-muted-foreground text-xs leading-snug">
-                          {s.blurb}
+            {canOperate ? (
+              <details className="group rounded-md border bg-card">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="section-title">Demo scenarios</span>
+                  <ChevronRight
+                    className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
+                    aria-hidden="true"
+                  />
+                </summary>
+                <div className="space-y-0.5 border-t p-2">
+                  {SCENARIOS.map((s) => (
+                    <Form method="post" key={s.id}>
+                      <input type="hidden" name="scenario" value={s.id} />
+                      <button
+                        type="submit"
+                        disabled={nav.state !== 'idle'}
+                        className="group/s flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
+                      >
+                        <Play
+                          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-medium text-sm">{s.label}</span>
+                          <span className="block text-muted-foreground text-xs leading-snug">
+                            {s.blurb}
+                          </span>
                         </span>
-                      </span>
-                      <ArrowRight
-                        className="mt-0.5 size-3.5 opacity-0 transition group-hover/s:opacity-60"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </Form>
-                ))}
-              </div>
-            </details>
+                        <ArrowRight
+                          className="mt-0.5 size-3.5 opacity-0 transition group-hover/s:opacity-60"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </Form>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </aside>
         </div>
 

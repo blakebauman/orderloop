@@ -12,6 +12,8 @@ export default [
     route('flows/:flowId', 'routes/flow-editor.tsx'),
     route('approvals', 'routes/approvals.tsx'),
     route('back-office', 'routes/back-office.tsx'),
+    route('team', 'routes/team.tsx'),
+    route('account', 'routes/account.tsx'),
   ]),
   // Resource routes the editor and order page post to.
   route('flows/:flowId/action', 'routes/flow-action.ts'),

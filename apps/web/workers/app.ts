@@ -1,6 +1,7 @@
+import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent } from '../app/lib/api.server';
-import { isApiAuthorized, isSignedIn } from '../app/lib/auth.server';
+import { apiPrincipal, principal } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { openApiDocument } from '../app/lib/openapi';
 
@@ -25,20 +26,29 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/v1/')) {
-      if (!(await isApiAuthorized(request)))
-        return Response.json({ error: 'Unauthorized' }, { status: 401 });
-      return handleApi(request);
+      const caller = await apiPrincipal(request);
+      if (!caller) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      return handleApi(request, caller);
     }
 
     // The order page's live connection to its OrderAgent (Agents SDK WebSocket + RPC).
     if (url.pathname.startsWith('/agents/order-agent/')) {
-      if (!(await isSignedIn(request))) return new Response('Unauthorized', { status: 401 });
-      return engine().fetch(new Request(`https://engine${url.pathname}${url.search}`, request));
+      const caller = await principal(request);
+      if (!caller) return new Response('Unauthorized', { status: 401 });
+      // The agent checks each call against this; whatever the browser sent is replaced.
+      const headers = new Headers(request.headers);
+      headers.set(PRINCIPAL_HEADER, encodePrincipal(caller));
+      return engine().fetch(
+        new Request(
+          `https://engine${url.pathname}${url.search}`,
+          new Request(request, { headers }),
+        ),
+      );
     }
 
     // Order documents (invoices, POs, inbound POs) from R2.
     if (url.pathname.startsWith('/docs/orders/')) {
-      if (!(await isSignedIn(request))) return new Response('Unauthorized', { status: 401 });
+      if (!(await principal(request))) return new Response('Unauthorized', { status: 401 });
       const obj = await docs().get(decodeURIComponent(url.pathname.slice('/docs/'.length)));
       if (!obj) return new Response('Not found', { status: 404 });
       return new Response(obj.body, {

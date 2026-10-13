@@ -1,6 +1,9 @@
 import { redirect } from 'react-router';
-import { signOutCookie } from '~/lib/auth.server';
+import { signOut } from '~/lib/auth.server';
+import type { Route } from './+types/logout';
 
-export function loader() {
-  return redirect('/login', { headers: { 'set-cookie': signOutCookie } });
+export async function loader({ request }: Route.LoaderArgs) {
+  const headers = new Headers();
+  for (const c of await signOut(request)) headers.append('set-cookie', c);
+  return redirect('/login', { headers });
 }

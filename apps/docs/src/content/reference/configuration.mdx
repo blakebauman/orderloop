@@ -35,7 +35,7 @@ for local dev (copy `apps/web/.dev.vars.example`).
 
 | Secret | Meaning |
 |---|---|
-| `APP_PASSWORD` | When set, the dashboard requires it (an HttpOnly session cookie, 30 days) and `/api/v1` requires `Authorization: Bearer <APP_PASSWORD>`. Unset leaves both open |
+| `APP_PASSWORD` | A break-glass operator: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open; see [Team and roles](/guides/team-and-roles/) |
 | `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events`. Unset answers `503` there |
 
 Outbound webhook subscriptions each have their own secret, generated when the subscription is

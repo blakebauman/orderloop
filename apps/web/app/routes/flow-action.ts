@@ -8,7 +8,7 @@ import type { Route } from './+types/flow-action';
 
 /** JSON actions from the flow editor: save, publish, copilot, test. */
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   const body = (await request.json()) as { intent: string; flow?: unknown; prompt?: string };
   try {
     if (body.intent === 'copilot') {

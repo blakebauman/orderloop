@@ -88,8 +88,8 @@ The Workflow calls `openWait` from a node's `:open` step and `closeWait` from it
 
 ## Callable methods
 
-Methods marked `@callable()` can be called from the order page over the socket (the web app has
-already authorized it); `EngineApi` calls the same methods over RPC.
+Methods marked `@callable()` can be called from the order page over the socket; `EngineApi` calls
+the same methods over RPC.
 
 | Method | Behaviour |
 |---|---|
@@ -97,6 +97,25 @@ already authorized it); `EngineApi` calls the same methods over RPC.
 | `deliver(event, payload = {})` | Finds the event wait for `event`. If none is open, returns `{ delivered: false }`; otherwise sends `{ ...payload, event, at }` and returns `{ delivered: true, nodeId }` |
 | `cancel(reason = 'Cancelled by operator')` | See below. Returns `{ ok: false }` for an order that has already ended |
 | `chat(text)` | See below |
+
+### Roles on the socket
+
+The web app proxies the socket with the signed-in principal in `x-orderloop-principal`
+(`PRINCIPAL_HEADER`, base64 JSON from `encodePrincipal` in `packages/core/src/roles.ts`), set by the
+web Worker after removing any copy the browser sent; the engine has no public route. `onConnect`
+stores it as the connection's state. Each callable calls `authorize(min)`: on a socket call it
+throws `This needs the <Role> role.` unless the caller has at least `min`, and refuses a socket with
+no principal. Calls over RPC have no connection and are trusted, because the web app's routes
+already checked the role.
+
+| Method | Socket role |
+|---|---|
+| `chat` | `viewer` |
+| `decide` | `approver`; `by` is replaced by the caller's email (or name) |
+| `deliver`, `cancel` | `operator` |
+
+Readonly connections (`shouldConnectionBeReadonly`) aren't used: they would also block the agent's
+own state writes, such as a viewer's chat history.
 
 `deliver` returning `delivered: false` is what lets `POST /api/v1/webhooks/events` answer `409`
 until a node is waiting for the event.

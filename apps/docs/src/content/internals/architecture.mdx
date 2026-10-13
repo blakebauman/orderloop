@@ -64,12 +64,14 @@ engine source.
 | `GET /health` | `{ ok: true, service: "orderloop-web" }` |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
-| `/api/v1/*` | `isApiAuthorized` (bearer `APP_PASSWORD` or the session cookie), then `handleApi` |
-| `/agents/order-agent/*` | `isSignedIn`, then proxied to the engine's `fetch` (`routeAgentRequest`), carrying the Agents SDK WebSocket |
-| `/docs/orders/*` | `isSignedIn`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
-| everything else | React Router (UI routes guard themselves with `requireUser`) |
+| `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie), then `handleApi(request, caller)`, which checks each route's role |
+| `/agents/order-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket |
+| `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
+| everything else | React Router (UI routes guard themselves with `requireUser(request, role)`) |
 
-With `APP_PASSWORD` unset every check passes, which is the local dev default. The engine's own
+`apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
+row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
+is an open operator, which is the local dev default. See [Team and roles](/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see

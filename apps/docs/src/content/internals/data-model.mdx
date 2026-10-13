@@ -29,6 +29,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0008_node_runs.sql` | `node_runs`, per-node timing for the dashboard |
 | `0009_price_chain.sql` | `price_sources` and `price_rules`, the pricing chain, with demo entries |
 | `0010_fx_rates.sql` | `fx_rates` with demo rates, and `orders.fx_rate` |
+| `0011_users.sql` | `users`, `sessions` and `api_tokens`, for roles and sign-in |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -99,6 +100,16 @@ request time: completion rate by order type from `orders` (completed over finish
 functions), revenue per day from completed `orders`, and refund rate from `payments` (succeeded
 `refund` over succeeded `capture` and `charge`). Money is converted to USD at each order's
 `fx_rate`.
+
+## People and tokens
+
+| Table | Purpose |
+|---|---|
+| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at` |
+| `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days) |
+| `api_tokens` | `name`, `prefix` (the first 12 characters, for lists), `token_hash` (SHA-256 of the `ol_live_` token, unique), `role`, `created_by`, `last_used_at` (updated at most every 5 minutes), `revoked_at` |
+
+No secret is stored in the clear. See [Team and roles](/guides/team-and-roles/).
 
 ## Webhooks
 

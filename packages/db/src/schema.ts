@@ -311,3 +311,55 @@ export const inboundEmails = sqliteTable(
     index('inbound_emails_received').on(t.receivedAt),
   ],
 );
+
+/** People with a role; see ROLES in core. `password_hash` is PBKDF2 (`pbkdf2:<iter>:<salt>:<hash>`). */
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    role: text('role').notNull(),
+    passwordHash: text('password_hash'),
+    /** An outside identity provider's subject, once that sign-in exists. */
+    externalSub: text('external_sub'),
+    createdAt: integer('created_at').notNull(),
+    lastLoginAt: integer('last_login_at'),
+    disabledAt: integer('disabled_at'),
+  },
+  (t) => [
+    uniqueIndex('users_email').on(t.email),
+    uniqueIndex('users_external_sub').on(t.externalSub).where(sql`${t.externalSub} IS NOT NULL`),
+  ],
+);
+
+/** Signed-in sessions; the cookie holds a random token and only its SHA-256 is stored. */
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [index('sessions_user').on(t.userId)],
+);
+
+/** REST API bearer tokens (`ol_live_…`), stored as SHA-256, each with a role. */
+export const apiTokens = sqliteTable(
+  'api_tokens',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    prefix: text('prefix').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    role: text('role').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    revokedAt: integer('revoked_at'),
+  },
+  (t) => [uniqueIndex('api_tokens_hash').on(t.tokenHash)],
+);

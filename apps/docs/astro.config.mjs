@@ -89,6 +89,7 @@ export default defineConfig({
             { label: 'Email intake', slug: 'guides/email-intake' },
             { label: 'Outbound webhooks', slug: 'guides/outbound-webhooks' },
             { label: 'AI nodes and the copilot', slug: 'guides/ai' },
+            { label: 'Team and roles', slug: 'guides/team-and-roles' },
           ],
         },
         {

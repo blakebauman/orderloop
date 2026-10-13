@@ -18,6 +18,7 @@ import { PageHeader } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { listFlows, saveFlow } from '~/lib/flows.server';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/flows';
 
 export const meta = () => [{ title: 'Flows · Order Loop' }];
@@ -28,7 +29,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  await requireUser(request, 'operator');
   const f = await request.formData();
   const name = String(f.get('name') ?? '').trim() || 'Untitled flow';
   const orderType = (
@@ -83,6 +84,7 @@ const STARTS = [
 ] as const;
 
 export default function Flows() {
+  const canOperate = useCan('operator');
   const { flows } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
   const nav = useNavigation();
@@ -120,74 +122,80 @@ export default function Flows() {
           ))}
         </div>
         <aside className="min-w-0">
-          <Form method="post" className="space-y-4 rounded-md border bg-card p-4">
-            <h2 className="section-title">New flow</h2>
-            <Field label="Name">
-              <Input name="name" placeholder="e.g. Wholesale reorder" className="h-8" />
-            </Field>
-            <Field label="Order type">
-              <NativeSelect name="orderType" className="h-8 w-full" defaultValue="b2b_order">
-                {ORDER_TYPES.map((t) => (
-                  <NativeSelectOption key={t} value={t}>
-                    {ORDER_TYPE_LABELS[t]}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-            <fieldset>
-              <legend className="caption mb-1.5">Start from</legend>
-              <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border bg-[var(--rule)] text-[13px]">
-                {STARTS.map((o) => (
-                  <label
-                    key={o.id}
-                    className="cursor-pointer bg-card px-2 py-1.5 text-center text-muted-foreground has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
-                  >
-                    <input
-                      type="radio"
-                      name="start"
-                      value={o.id}
-                      checked={start === o.id}
-                      onChange={() => setStart(o.id)}
-                      className="sr-only"
-                    />
-                    {o.label}
-                  </label>
-                ))}
-              </div>
-              <p className="mt-1.5 text-muted-foreground text-xs">
-                {STARTS.find((o) => o.id === start)?.hint}
-              </p>
-            </fieldset>
-            {start === 'generate' ? (
-              <Field label="What should happen">
-                <Textarea
-                  name="prompt"
-                  rows={5}
-                  className="text-sm"
-                  placeholder="A marketplace order: validate, price and risk-score it. High risk needs approval; otherwise authorize the card, reserve stock, ship, and capture payment."
-                />
+          {canOperate ? (
+            <Form method="post" className="space-y-4 rounded-md border bg-card p-4">
+              <h2 className="section-title">New flow</h2>
+              <Field label="Name">
+                <Input name="name" placeholder="e.g. Wholesale reorder" className="h-8" />
               </Field>
-            ) : null}
-            {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
-            <input type="hidden" name="intent" value={start === 'generate' ? 'generate' : ''} />
-            <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
-            {data?.error ? (
-              <p className="text-bad text-sm" role="alert">
-                {data.error}
-              </p>
-            ) : null}
-            <Button type="submit" size="sm" disabled={busy}>
+              <Field label="Order type">
+                <NativeSelect name="orderType" className="h-8 w-full" defaultValue="b2b_order">
+                  {ORDER_TYPES.map((t) => (
+                    <NativeSelectOption key={t} value={t}>
+                      {ORDER_TYPE_LABELS[t]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <fieldset>
+                <legend className="caption mb-1.5">Start from</legend>
+                <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border bg-[var(--rule)] text-[13px]">
+                  {STARTS.map((o) => (
+                    <label
+                      key={o.id}
+                      className="cursor-pointer bg-card px-2 py-1.5 text-center text-muted-foreground has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
+                    >
+                      <input
+                        type="radio"
+                        name="start"
+                        value={o.id}
+                        checked={start === o.id}
+                        onChange={() => setStart(o.id)}
+                        className="sr-only"
+                      />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-muted-foreground text-xs">
+                  {STARTS.find((o) => o.id === start)?.hint}
+                </p>
+              </fieldset>
               {start === 'generate' ? (
-                <>
-                  <Sparkles /> {busy ? 'Drafting…' : 'Draft the flow'}
-                </>
-              ) : busy ? (
-                'Creating…'
-              ) : (
-                'Create flow'
-              )}
-            </Button>
-          </Form>
+                <Field label="What should happen">
+                  <Textarea
+                    name="prompt"
+                    rows={5}
+                    className="text-sm"
+                    placeholder="A marketplace order: validate, price and risk-score it. High risk needs approval; otherwise authorize the card, reserve stock, ship, and capture payment."
+                  />
+                </Field>
+              ) : null}
+              {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
+              <input type="hidden" name="intent" value={start === 'generate' ? 'generate' : ''} />
+              <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
+              {data?.error ? (
+                <p className="text-bad text-sm" role="alert">
+                  {data.error}
+                </p>
+              ) : null}
+              <Button type="submit" size="sm" disabled={busy}>
+                {start === 'generate' ? (
+                  <>
+                    <Sparkles /> {busy ? 'Drafting…' : 'Draft the flow'}
+                  </>
+                ) : busy ? (
+                  'Creating…'
+                ) : (
+                  'Create flow'
+                )}
+              </Button>
+            </Form>
+          ) : (
+            <p className="rounded-md border bg-card p-4 text-muted-foreground text-sm">
+              Operators create and edit flows.
+            </p>
+          )}
         </aside>
       </div>
     </>

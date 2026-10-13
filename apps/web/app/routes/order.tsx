@@ -30,6 +30,7 @@ import { engine } from '~/lib/env.server';
 import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
 import { customerNames, orderRecords } from '~/lib/orders.server';
 import { useDateTime } from '~/lib/use-date-time';
+import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/order';
 
 export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
@@ -39,7 +40,7 @@ export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
 ];
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
+  const me = await requireUser(request);
   const snapshot = await engine().snapshot(params.orderId);
   if (!snapshot) throw data('Order not found', { status: 404 });
   const [records, names] = await Promise.all([orderRecords(params.orderId), customerNames()]);
@@ -48,7 +49,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     snapshot,
     records,
     customerName: customerId ? (names[customerId] ?? null) : null,
-    actor: actor(request),
+    actor: actor(me),
+    role: me.role,
   };
 }
 
@@ -88,6 +90,7 @@ const rolledBack = (s: OrderState) =>
   !!s.rollback || Object.values(s.nodes).some((n) => n.status === 'rolled_back');
 
 export default function OrderPage() {
+  const canOperate = useCan('operator');
   const { snapshot, records, customerName, actor: by } = useLoaderData<typeof loader>();
   const [state, setState] = useState<OrderState>(snapshot);
   const [selected, setSelected] = useState<string | null>(null);
@@ -211,7 +214,7 @@ export default function OrderPage() {
               {plural(order.lines.length, 'line')} · tax {money(order.tax, order.currency)}
             </div>
           </div>
-          {!terminal ? (
+          {!terminal && canOperate ? (
             <Button
               variant="outline"
               size="sm"
@@ -523,6 +526,7 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
   const restart = useFetcher<{ ok: boolean; orderId?: string; error?: string }>();
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
+  const canOperate = useCan('operator');
   useEffect(() => {
     if (restart.state === 'idle' && restart.data?.orderId)
       navigate(`/orders/${restart.data.orderId}`);
@@ -551,11 +555,11 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
               Not now
             </Button>
           </restart.Form>
-        ) : (
+        ) : canOperate ? (
           <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
             <RotateCcw /> Start again with the same lines
           </Button>
-        )}
+        ) : null}
       </div>
       <p className="mt-2 text-muted-foreground text-xs">
         The new order runs on the flow’s current version; this one stays as it is, for the record.
@@ -587,6 +591,8 @@ function Actions({
   by: string;
   onSelect: (id: string) => void;
 }) {
+  const canApprove = useCan('approver');
+  const canOperate = useCan('operator');
   const formatTime = useDateTime();
   if (!state.waits.length) {
     if (rolledBack(state)) return null;
@@ -623,16 +629,20 @@ function Actions({
             <>
               <DecisionContext ctx={approvalContext(state, w.nodeId)} className="mt-1" />
               <div className="mt-3">
-                <DecisionControls
-                  busy={busy === 'decide'}
-                  disabled={!!busy}
-                  onDecide={(decision, note) =>
-                    void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
-                  }
-                  onFlush={(decision, note) =>
-                    sendDecision(state.orderId!, w.nodeId, decision, note)
-                  }
-                />
+                {canApprove ? (
+                  <DecisionControls
+                    busy={busy === 'decide'}
+                    disabled={!!busy}
+                    onDecide={(decision, note) =>
+                      void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
+                    }
+                    onFlush={(decision, note) =>
+                      sendDecision(state.orderId!, w.nodeId, decision, note)
+                    }
+                  />
+                ) : (
+                  <p className="text-muted-foreground text-xs">An approver decides this.</p>
+                )}
               </div>
             </>
           ) : (
@@ -645,20 +655,22 @@ function Actions({
                 </span>
                 .
               </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                disabled={!!busy}
-                onClick={() =>
-                  call('event', 'deliver', [
-                    w.event,
-                    { source: 'dashboard', amount: state.order?.total },
-                  ])
-                }
-              >
-                <Zap /> Simulate {w.event}
-              </Button>
+              {canOperate ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  disabled={!!busy}
+                  onClick={() =>
+                    call('event', 'deliver', [
+                      w.event,
+                      { source: 'dashboard', amount: state.order?.total },
+                    ])
+                  }
+                >
+                  <Zap /> Simulate {w.event}
+                </Button>
+              ) : null}
             </>
           )}
         </div>

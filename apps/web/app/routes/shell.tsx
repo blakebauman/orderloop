@@ -1,3 +1,4 @@
+import { atLeast, type Principal, ROLE_LABELS } from '@orderloop/core';
 import { approvals } from '@orderloop/db';
 import {
   DropdownMenu,
@@ -20,13 +21,13 @@ import { type ThemeChoice, useTheme } from '~/lib/theme';
 import type { Route } from './+types/shell';
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const me = await requireUser(request);
   const pending = await db()
     .select({ n: sql<number>`count(*)` })
     .from(approvals)
     .where(eq(approvals.status, 'pending'))
     .get();
-  return { pending: pending?.n ?? 0, auth: authEnabled() };
+  return { pending: pending?.n ?? 0, auth: await authEnabled(), me };
 }
 
 const NAV = [
@@ -53,7 +54,8 @@ function PendingCount({ n }: { n: number }) {
 }
 
 export default function Shell() {
-  const { pending, auth } = useLoaderData<typeof loader>();
+  const { pending, auth, me } = useLoaderData<typeof loader>();
+  const operator = atLeast(me.role, 'operator');
   const theme = useTheme();
   const ThemeIcon = THEMES.find((t) => t.value === theme.choice)?.icon ?? Sun;
   return (
@@ -107,13 +109,15 @@ export default function Shell() {
             </NavLink>
           ) : null}
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-            <Link
-              to="/orders/new"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 sm:px-3"
-            >
-              <Plus className="size-3.5" aria-hidden="true" />
-              <span className="sr-only sm:not-sr-only">New order</span>
-            </Link>
+            {operator ? (
+              <Link
+                to="/orders/new"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 sm:px-3"
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                <span className="sr-only sm:not-sr-only">New order</span>
+              </Link>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="hidden size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:grid"
@@ -124,13 +128,15 @@ export default function Shell() {
               <DropdownMenuContent align="end" className="w-44">
                 <ThemeItems value={theme.choice} onChange={theme.setChoice} />
                 {auth ? (
+                  <AccountItems me={me} />
+                ) : (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <a href="/logout">Sign out</a>
+                      <Link to="/team">Set up sign-in</Link>
                     </DropdownMenuItem>
                   </>
-                ) : null}
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
@@ -152,13 +158,15 @@ export default function Shell() {
                 <DropdownMenuSeparator />
                 <ThemeItems value={theme.choice} onChange={theme.setChoice} />
                 {auth ? (
+                  <AccountItems me={me} />
+                ) : (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <a href="/logout">Sign out</a>
+                      <Link to="/team">Set up sign-in</Link>
                     </DropdownMenuItem>
                   </>
-                ) : null}
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -189,6 +197,32 @@ function ThemeItems({
           </DropdownMenuRadioItem>
         ))}
       </DropdownMenuRadioGroup>
+    </>
+  );
+}
+
+/** Who is signed in, and where they manage their sign-in or the team. */
+function AccountItems({ me }: { me: Principal }) {
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="font-normal">
+        <span className="block truncate font-medium text-sm">{me.email ?? me.name}</span>
+        <span className="text-muted-foreground text-xs">{ROLE_LABELS[me.role]}</span>
+      </DropdownMenuLabel>
+      {me.kind === 'user' ? (
+        <DropdownMenuItem asChild>
+          <Link to="/account">Account</Link>
+        </DropdownMenuItem>
+      ) : null}
+      {atLeast(me.role, 'operator') ? (
+        <DropdownMenuItem asChild>
+          <Link to="/team">Team</Link>
+        </DropdownMenuItem>
+      ) : null}
+      <DropdownMenuItem asChild>
+        <a href="/logout">Sign out</a>
+      </DropdownMenuItem>
     </>
   );
 }
