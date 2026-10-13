@@ -37,6 +37,12 @@ something else entirely.
 
 Workflow names (`orderloop-order`, `orderloop-replenish`) must be unique in the account.
 
+## Email intake
+
+To start orders from email, enable Email Routing on the zone and route the intake addresses to
+`orderloop-engine` after the engine is deployed. Enabling it replaces the zone's MX records. The
+steps are in [Email intake](/guides/email-intake/#setting-up-email-routing).
+
 ## Settings for production
 
 - Set `TIME_SCALE` to `"1"` in `apps/engine/wrangler.jsonc`, or waits and timeouts stay compressed

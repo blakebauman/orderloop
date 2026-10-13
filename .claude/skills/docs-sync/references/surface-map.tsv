@@ -29,6 +29,9 @@
 ^apps/engine/src/connectors\.ts$	internals/architecture guides/templates	prose
 ^apps/engine/src/outbox\.ts$	guides/outbound-webhooks	prose
 ^apps/engine/src/ai\.ts$	guides/ai	prose
+^apps/engine/src/email\.ts$	guides/email-intake internals/architecture internals/data-model	prose
+^packages/core/src/intake\.ts$	guides/email-intake	prose
+^apps/web/app/routes/back-office\.tsx$	guides/email-intake	prose
 ^apps/engine/src/(orders|replenish|api|index)\.ts$	internals/architecture internals/workflow reference/rest-api	prose
 ^apps/(engine|web)/wrangler\.jsonc$	reference/configuration start/deploy internals/architecture	prose
 ^apps/web/\.dev\.vars\.example$	reference/configuration start/getting-started	prose

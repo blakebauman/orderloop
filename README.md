@@ -11,6 +11,7 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               │ flow editor, live order view, /api/v1       ├─ OrderLoop Workflow: interprets the pinned
               └─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
+inbound PO email ── Cloudflare Email Routing ── email() ────►├─ Email intake: orders@ / po@ / purchasing@ start orders
                                                             └─ Workers AI (extract, classify, risk, forecast, router,
                                                                copilot, chat), R2 (POs, invoices, inbound docs)
 ```
@@ -33,6 +34,7 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
 - **Live UI.** The Workflow reports sequenced plan snapshots to the order's OrderAgent, which ignores stale or replayed ones, and the agent syncs its state to every open order page through `useAgent`. The same socket carries actions: approve, reject, deliver event, cancel, and chat.
 - **Long-lived subscriptions** loop over billing periods, then use **continue-as-new**: they start a fresh Workflow instance with their variables carried over, so the step history never grows without bound.
 - **Mock connectors** (`apps/engine/src/connectors.ts`) cover inventory, payments, shipping, documents and the outbox, against D1 and R2. Every write is keyed by its step and every compensation is idempotent. They are where real adapters (Stripe, a WMS, carriers, an ERP) plug in. To exercise failure paths, set `meta.simulate` to one of `out_of_stock`, `payment_decline`, `charge_fail` or `three_way_mismatch`.
+- **Orders arrive by email too.** Cloudflare Email Routing delivers `orders@`, `po@` and `purchasing@` to the engine's `email()` entrypoint (`apps/engine/src/email.ts`). Mail from an authenticated customer address, company domain or allowlisted sender starts the mailbox's flow. The body and attachments (PDF and Office files through Workers AI `toMarkdown`) become the order's document for the AI extract node, and the Message-ID is the idempotency key. See the [Email intake guide](https://docs.orderloop.io/guides/email-intake/).
 - **AI never blocks an order.** Every model call uses JSON mode with a schema, has a 20-second cap, and falls back to a deterministic heuristic. Set `AI_MODE=mock` to use the heuristics only.
 
 See [ROADMAP.md](ROADMAP.md) for planned work.
@@ -106,6 +108,10 @@ X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>
 ```
 
 Signatures older than 5 minutes are rejected. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook` in `@orderloop/core` produces the header.
+
+### Email intake
+
+Send a purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send, and how to set up Email Routing for your own domain, are covered in the docs.
 
 ## Docs
 

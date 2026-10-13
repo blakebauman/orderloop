@@ -23,6 +23,8 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0002_seed.sql` | Demo customers, products and contract prices (flows are seeded by the engine from the templates) |
 | `0003_webhook_subscriptions.sql` | `webhook_subscriptions`, `webhook_deliveries` |
 | `0004_order_idempotency.sql` | `orders.idempotency_key` and its partial unique index |
+| `0005_idempotency_fingerprint.sql` | `orders.idempotency_fingerprint`: a replayed key must carry the same request |
+| `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -85,6 +87,14 @@ writes embeds its step key.
 Deliveries are indexed by `order_id` and by `(subscription_id, created_at)`. See
 [Outbound webhooks](/guides/outbound-webhooks/).
 
+## Email intake
+
+| Table | Purpose |
+|---|---|
+| `inbound_emails` | One row per message the `email()` entrypoint saw: `message_id` (unique), `mailbox`, `sender`, `subject`, `status` (`accepted`, `duplicate`, `rejected`), `reason`, `order_id`, `r2_key`, `attachments`, `received_at` |
+
+See [Email intake](/guides/email-intake/#the-intake-log).
+
 ## R2 documents
 
 `storeDocument` writes to `orders/<orderId>/<kind>/<name>` and records the same key in `documents`:
@@ -92,6 +102,7 @@ Deliveries are indexed by `order_id` and by `(subscription_id, created_at)`. See
 | Kind | Name | Written by |
 |---|---|---|
 | `inbound` | `po.txt` | `startOrder`, when the input has `documentText` and no `documentKey` |
+| `email` | `message.eml` (under `inbound/`) | `receiveEmail`, the raw message an order started from |
 | `invoice` | `<nodeId>-<run>.html` | `commerce.invoice` |
 | `po` | `<nodeId>-<run>.html` | `commerce.generate_po` |
 

@@ -3,6 +3,7 @@ import {
   customers,
   documents,
   flows,
+  inboundEmails,
   messages,
   orders,
   payments,
@@ -166,4 +167,9 @@ export async function declinedOrderIds(): Promise<Set<string>> {
       and(inArray(approvals.status, ['escalated', 'rejected']), eq(orders.status, 'cancelled')),
     );
   return new Set(rows.map((r) => r.id));
+}
+
+/** The email intake log: every message the engine's email() entrypoint saw, newest first. */
+export async function recentInboundEmails(limit = 20) {
+  return db().select().from(inboundEmails).orderBy(desc(inboundEmails.receivedAt)).limit(limit);
 }

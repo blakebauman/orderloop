@@ -16,6 +16,7 @@ browser ──► orderloop-web (apps/web, React Router on Workers)
               └── /agents/order-agent/:id ─fetch──►  ├─ OrderAgent     Durable Object, one per order
                                                     ├─ OrderLoop      Workflow, one instance per generation
                                                     ├─ Replenish      Workflow, daily cron
+inbound mail ── Email Routing ──email()────────────►├─ receiveEmail   email intake (email.ts)
                                                     └─ Workers AI, D1, R2
 ```
 
@@ -70,7 +71,9 @@ engine source.
 
 With `APP_PASSWORD` unset every check passes, which is the local dev default. The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
-`workers_dev: false` and no routes it is reachable only through the binding.
+`workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
+receives messages from Email Routing and hands them to `receiveEmail`; see
+[Email intake](/guides/email-intake/).
 
 ## Bindings
 
@@ -134,7 +137,7 @@ the `documents` table (see [Data model](/internals/data-model/#r2-documents)).
 | Live run state of one order (nodes, edges, waits, vars, timeline, chat) | Its `OrderAgent` |
 | Durable progress (memoized step results, sleeps, waits) | Its `OrderLoop` instance |
 | Order index for lists and filters (`orders` row) | D1, written by the agent's `syncIndex` |
-| Flows, versions, approvals, back office, webhook outbox | D1 |
-| Invoices, POs, inbound documents | R2 |
+| Flows, versions, approvals, back office, webhook outbox, email intake log | D1 |
+| Invoices, POs, inbound documents and raw inbound email | R2 |
 
 See [OrderLoop Workflow](/internals/workflow/) and [OrderAgent](/internals/order-agent/).
