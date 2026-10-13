@@ -3,7 +3,7 @@ title: Architecture
 description: The two Workers, the service binding between them, the packages, the bindings and the connectors.
 ---
 
-Order Loop is two Workers in one pnpm monorepo. `orderloop-web` serves the dashboard, the flow
+OrderLoop is two Workers in one pnpm monorepo. `orderloop-web` serves the dashboard, the flow
 editor and the REST API; `orderloop-engine` runs orders. The web app reaches the engine only
 through a service binding, and the engine has no public URL.
 

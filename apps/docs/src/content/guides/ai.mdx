@@ -3,7 +3,7 @@ title: AI nodes and the copilot
 description: The AI nodes, the heuristic each falls back to, the flow copilot and the order chat, and how to configure the model.
 ---
 
-Order Loop uses Workers AI in three places: the AI nodes in a flow, the copilot in the flow
+OrderLoop uses Workers AI in three places: the AI nodes in a flow, the copilot in the flow
 editor, and the chat on each order page. All three go through one function, `runJson`
 (`apps/engine/src/ai.ts`), with the same guarantees:
 

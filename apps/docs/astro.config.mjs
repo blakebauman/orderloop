@@ -1,4 +1,4 @@
-// Order Loop docs: Starlight over MDX in src/content/. Static output, deployed as a Workers
+// OrderLoop docs: Starlight over MDX in src/content/. Static output, deployed as a Workers
 // static-assets site (wrangler.jsonc). Reference pages render from @orderloop/core at build time,
 // so the node catalog, policy rules and event names can't drift from the code.
 import starlight from '@astrojs/starlight';
@@ -18,7 +18,7 @@ export default defineConfig({
         alt: '',
       },
       description:
-        'Order Loop: a durable agent loop for the commerce order lifecycle, built on Cloudflare Workers, Workflows, Durable Objects, Workers AI, D1 and R2.',
+        'OrderLoop: a durable agent loop for the commerce order lifecycle, built on Cloudflare Workers, Workflows, Durable Objects, Workers AI, D1 and R2.',
       // Prose lives at src/content/ (see content.config.ts). Without this Starlight skips its
       // Markdown transforms (asides, heading anchors) for files outside src/content/docs/.
       markdown: { processedDirs: ['./src/content'] },

@@ -35,7 +35,7 @@ import type { Route } from './+types/order';
 
 export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
   {
-    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_TYPE_LABELS[d.snapshot.order.type as OrderType] : 'Order')} ${orderRef(params.orderId)} · Order Loop`,
+    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_TYPE_LABELS[d.snapshot.order.type as OrderType] : 'Order')} ${orderRef(params.orderId)} · OrderLoop`,
   },
 ];
 

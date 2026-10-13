@@ -7,7 +7,7 @@ import { requireUser } from '~/lib/auth.server';
 import { changeOwnPassword, TeamError } from '~/lib/team.server';
 import type { Route } from './+types/account';
 
-export const meta = () => [{ title: 'Account · Order Loop' }];
+export const meta = () => [{ title: 'Account · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   return { me: await requireUser(request) };

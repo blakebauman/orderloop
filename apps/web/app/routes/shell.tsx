@@ -71,10 +71,10 @@ export default function Shell() {
           <Link
             to="/"
             className="flex shrink-0 items-center gap-2 font-semibold tracking-title text-[16px]"
-            aria-label="Order Loop overview"
+            aria-label="OrderLoop overview"
           >
             <Mark className="size-5" />
-            <span className="hidden sm:inline">Order Loop</span>
+            <span className="hidden sm:inline">OrderLoop</span>
           </Link>
           <nav aria-label="Main" className="-mb-px hidden h-full items-stretch gap-1 md:flex">
             {NAV.map(({ to, label, end, badge }) => (

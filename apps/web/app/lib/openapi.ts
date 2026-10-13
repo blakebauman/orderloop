@@ -27,7 +27,7 @@ export function openApiDocument(serverUrl: string) {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'Order Loop API',
+      title: 'OrderLoop API',
       version: '1',
       description:
         'Start orders on a published flow, resume them with events and approvals, and subscribe to signed order events.',

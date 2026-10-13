@@ -34,7 +34,7 @@ import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/flow-editor';
 
 export const meta = ({ loaderData: d }: Route.MetaArgs) => [
-  { title: `${d?.flow.name ?? 'Flow'} · Order Loop` },
+  { title: `${d?.flow.name ?? 'Flow'} · OrderLoop` },
 ];
 
 export async function loader({ request, params }: Route.LoaderArgs) {

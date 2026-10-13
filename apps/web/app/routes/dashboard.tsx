@@ -24,7 +24,7 @@ import { SCENARIOS } from '~/lib/scenarios';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/dashboard';
 
-export const meta = () => [{ title: 'Overview · Order Loop' }];
+export const meta = () => [{ title: 'Overview · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);

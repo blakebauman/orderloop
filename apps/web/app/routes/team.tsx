@@ -19,7 +19,7 @@ import {
 } from '~/lib/team.server';
 import type { Route } from './+types/team';
 
-export const meta = () => [{ title: 'Team · Order Loop' }];
+export const meta = () => [{ title: 'Team · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'operator');

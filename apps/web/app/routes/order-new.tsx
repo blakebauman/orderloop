@@ -15,7 +15,7 @@ import { backOffice, currencies, publishedFlows } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
-export const meta = () => [{ title: 'New order · Order Loop' }];
+export const meta = () => [{ title: 'New order · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request, 'operator');

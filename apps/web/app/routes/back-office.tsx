@@ -11,7 +11,7 @@ import { backOffice, recentInboundEmails, waitingOrders } from '~/lib/orders.ser
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/back-office';
 
-export const meta = () => [{ title: 'Back office · Order Loop' }];
+export const meta = () => [{ title: 'Back office · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
