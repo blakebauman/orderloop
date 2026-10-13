@@ -307,12 +307,12 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 
-  'commerce.restock': async ({ env, ctx, config }) => {
+  'commerce.restock': async ({ env, ctx, config, stepKey }) => {
     const expr = config.lines;
     const requested =
       expr === undefined || expr === null || expr === '' ? null : evaluate(expr, ctx);
     const lines = stockLines(requested, ctx.order.lines);
-    await cx.restock(env, lines);
+    await cx.restock(env, ctx.order.id, stepKey, lines);
     return {
       output: { lines },
       summary: `+${lines.reduce((s, l) => s + l.qty, 0)} units`,

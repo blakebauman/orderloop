@@ -24,6 +24,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0003_webhook_subscriptions.sql` | `webhook_subscriptions`, `webhook_deliveries` |
 | `0004_order_idempotency.sql` | `orders.idempotency_key` and its partial unique index |
 | `0005_idempotency_fingerprint.sql` | `orders.idempotency_fingerprint`: a replayed key must carry the same request |
+| `0006_stock_movements.sql` | `stock_movements`, the inventory ledger |
 | `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
@@ -46,13 +47,15 @@ published as version 1 the first time they are needed (`ensureTemplates` in the 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key` |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint` |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_type (type, updated_at)`, and
 `orders_idempotency`, unique on `idempotency_key` where it is not null. `startOrder` inserts the
 row before creating anything else, so when two requests race with the same `Idempotency-Key` the
 unique index decides which one creates the order and the other returns it as `replayed`.
+`idempotency_fingerprint` is the SHA-256 of the request; a replay with a different one is refused.
+Rows from before `0005` have none and replay without the check.
 
 `approvals.status` is `pending`, then the outcome (`approved`, `rejected`, `escalated`) or
 `cancelled`. Approvals are indexed by `(status, requested_at)`, and `approvals_wait` makes
@@ -68,13 +71,14 @@ writes embeds its step key.
 | `customers` | `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)` |
-| `reservations` | Stock holds; `status` is `held`, `released` or `consumed` (by shipping) |
+| `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping) |
+| `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products` in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
 | `payments` | Authorizations (`kind` `authorization:<method>`), captures, charges and refunds, with `status` and `ref` |
 | `shipments` | Labels and return labels; `status` is `label_created`, `return_label` or `cancelled` |
 | `documents` | Index of R2 objects per order: `kind`, `r2_key`, `content_type` |
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
 
-`reservations`, `payments`, `shipments`, `documents` and `messages` are each indexed by
+`reservations`, `stock_movements`, `payments`, `shipments`, `documents` and `messages` are each indexed by
 `order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
 
 ## Webhooks

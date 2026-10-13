@@ -73,8 +73,10 @@ Idempotency-Key: po-NW-7781
 - `vars` seeds the run's variables.
 
 **Idempotency.** With an `Idempotency-Key` header (at most 255 characters), a repeat of the key
-returns `200` and the order the first request created, even when two requests race. The key does not
-fingerprint the body: a repeat with a different body still returns the first order.
+returns `200` and the order the first request created, even when two requests race. If the first
+request failed after recording the order, the repeat finishes starting it. The key is bound to a
+SHA-256 fingerprint of the body (flow, version, input and vars, ignoring property order): a repeat
+with a different body returns `422` and starts nothing.
 
 ## List orders
 

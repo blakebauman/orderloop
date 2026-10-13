@@ -41,7 +41,7 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 | Reorder (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
 | Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
-| Storefront order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund |
+| Storefront order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund. A `return.requested` payload with `lines: [{ sku, qty }]` restocks only those lines; `amount` sets a partial refund |
 
 ### Simulating failures
 
