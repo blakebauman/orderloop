@@ -91,14 +91,11 @@ export default function Dashboard() {
       status: 'completed',
       note: money(completedValue),
     },
+    // Older policy declines were stored as cancelled; count them where they belong.
+    { label: 'Declined', n: count(['declined']) + declined.length, status: 'declined' },
     { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
     { label: 'Failed', n: count(['failed']), status: 'failed' },
-    {
-      label: 'Cancelled',
-      n: count(['cancelled']),
-      status: 'cancelled',
-      note: declined.length ? `${declined.length} declined by policy` : undefined,
-    },
+    { label: 'Cancelled', n: count(['cancelled']) - declined.length, status: 'cancelled' },
   ];
   return (
     <>
@@ -107,7 +104,7 @@ export default function Dashboard() {
         {/* The status register: one ruled line, each figure opens the matching orders. */}
         <nav
           aria-label="Orders by status"
-          className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-[var(--rule)] sm:grid-cols-3 lg:grid-cols-6"
+          className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-[var(--rule)] sm:grid-cols-4 lg:grid-cols-7"
         >
           {register.map((r) => (
             <Link

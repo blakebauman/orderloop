@@ -7,6 +7,7 @@
 
 import {
   type ChatMessage,
+  type ChatProposal,
   type EdgeState,
   EMPTY_ORDER_STATE,
   type FlowVersion,
@@ -339,7 +340,7 @@ export class OrderAgent extends Agent<Env, State> {
 
   /** Ops chat: the model answers from the order state and may act through tools. */
   @callable()
-  async chat(text: string, by = 'operator') {
+  async chat(text: string) {
     const user: ChatMessage = {
       id: newId('msg'),
       role: 'user',
@@ -348,6 +349,7 @@ export class OrderAgent extends Agent<Env, State> {
     };
     this.patch({ chat: [...this.state.chat, user] });
     const tools: ChatMessage['tools'] = [];
+    let proposal: ChatProposal | undefined;
     let reply = '';
     for (let turn = 0; turn < 4 && !reply; turn++) {
       const { value } = await runJson<{
@@ -360,7 +362,7 @@ export class OrderAgent extends Agent<Env, State> {
         [
           {
             role: 'system',
-            content: `You are the operations agent for order ${this.state.orderId}. Answer briefly from the order state. Tools: get_state {}, approve {nodeId, note?}, reject {nodeId, note?}, deliver_event {event}, cancel {reason}. Only act when the user clearly asks you to. Reply with {"action":"tool",...} to call a tool, or {"action":"reply","reply":"..."} to answer.`,
+            content: `You are the operations agent for order ${this.state.orderId}. Answer briefly from the order state. Tools: get_state {}, approve {nodeId, note?}, reject {nodeId, note?}, deliver_event {event}, cancel {reason}. approve, reject and cancel only prepare the action; a person confirms it on the order page. Only use them when the user clearly asks. Reply with {"action":"tool",...} to call a tool, or {"action":"reply","reply":"..."} to answer.`,
           },
           {
             role: 'user',
@@ -387,10 +389,14 @@ export class OrderAgent extends Agent<Env, State> {
         () => this.chatHeuristic(text, tools.length > 0),
       );
       if (value.action === 'tool' && value.tool) {
-        const result = await this.runTool(value.tool, value.args ?? {}, by).catch((e: Error) => ({
+        const result = await this.runTool(value.tool, value.args ?? {}).catch((e: Error) => ({
           error: e.message,
         }));
         tools.push({ name: value.tool, args: value.args ?? {}, result });
+        if (result && typeof result === 'object' && 'proposal' in result) {
+          proposal = result.proposal as ChatProposal;
+          reply = proposalText(proposal, this.state);
+        }
       } else {
         reply = value.reply || 'Done.';
       }
@@ -401,6 +407,7 @@ export class OrderAgent extends Agent<Env, State> {
       content: reply || 'I took the requested action.',
       at: Date.now(),
       tools,
+      ...(proposal ? { proposal } : {}),
     };
     this.patch({ chat: [...this.state.chat, answer].slice(-100) });
     return answer;
@@ -423,7 +430,7 @@ export class OrderAgent extends Agent<Env, State> {
     };
   }
 
-  private async runTool(tool: string, args: Record<string, unknown>, by: string) {
+  private async runTool(tool: string, args: Record<string, unknown>) {
     const note = typeof args.note === 'string' ? args.note : undefined;
     const nodeId =
       typeof args.nodeId === 'string'
@@ -432,19 +439,30 @@ export class OrderAgent extends Agent<Env, State> {
     switch (tool) {
       case 'get_state':
         return this.brief();
+      // Decisions and cancellations are prepared here and confirmed by a person on the order page.
       case 'approve':
-      case 'reject':
-        if (!nodeId) return { error: 'Nothing is waiting for approval' };
-        return this.decide(
+      case 'reject': {
+        if (!nodeId || !this.state.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
+          return { error: 'Nothing is waiting for approval' };
+        const proposal: ChatProposal = {
+          kind: 'decide',
           nodeId,
-          tool === 'approve' ? 'approved' : 'rejected',
-          `${by} via chat`,
-          note,
-        );
+          decision: tool === 'approve' ? 'approved' : 'rejected',
+          ...(note ? { note } : {}),
+        };
+        return { proposal };
+      }
       case 'deliver_event':
         return this.deliver(String(args.event ?? ''));
-      case 'cancel':
-        return this.cancel(String(args.reason ?? 'Cancelled via chat'));
+      case 'cancel': {
+        if (TERMINAL_ORDER_STATUSES.includes(this.state.status))
+          return { error: 'The order has already finished' };
+        const proposal: ChatProposal = {
+          kind: 'cancel',
+          reason: String(args.reason ?? 'Cancelled via chat'),
+        };
+        return { proposal };
+      }
       default:
         return { error: `Unknown tool ${tool}` };
     }
@@ -470,4 +488,12 @@ export class OrderAgent extends Agent<Env, State> {
         : `Order is ${s.status}${s.reason ? ` (${s.reason})` : ''}. Total ${s.order?.total.toFixed(2)} ${s.order?.currency}.${waiting ? ` Waiting on: ${waiting}.` : ''}`,
     };
   }
+}
+
+/** What the assistant says when it has prepared an action for a person to confirm. */
+function proposalText(p: ChatProposal, s: OrderState) {
+  if (p.kind === 'cancel')
+    return `Ready to cancel this order (“${p.reason}”). Confirm below to go ahead.`;
+  const step = s.flow?.nodes.find((n) => n.id === p.nodeId)?.label ?? p.nodeId;
+  return `Ready to ${p.decision === 'approved' ? 'approve' : 'reject'} ${step}${p.note ? ` with the note “${p.note}”` : ''}. Confirm below to send it.`;
 }

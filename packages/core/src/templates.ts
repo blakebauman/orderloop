@@ -83,7 +83,7 @@ export function purchaseRequestFlow(): Flow {
       to: 'team',
       subject: 'Purchase {{order.id}} was not approved',
     })
-    .n('rejected', 'control.end', 'Rejected', { outcome: 'cancelled', reason: 'Not approved' })
+    .n('rejected', 'control.end', 'Rejected', { outcome: 'declined', reason: 'Not approved' })
     .n('stalled', 'control.end', 'Supplier unresponsive', {
       outcome: 'failed',
       reason: 'Supplier did not respond',
@@ -180,7 +180,7 @@ export function b2bOrderFlow(): Flow {
       to: 'customer',
       subject: 'We could not accept PO {{order.id}}',
     })
-    .n('declined', 'control.end', 'Declined', { outcome: 'cancelled' })
+    .n('declined', 'control.end', 'Declined', { outcome: 'declined', reason: 'Not approved' })
     .n('backorder', 'control.end', 'Out of stock', {
       outcome: 'failed',
       reason: 'Insufficient stock; reservations released',
@@ -255,7 +255,7 @@ export function reorderFlow(): Flow {
     .n('erp', 'commerce.erp_sync', 'Post to ERP')
     .n('done', 'control.end', 'Restocked', { outcome: 'completed' })
     .n('nothing', 'control.end', 'Nothing to order', { outcome: 'completed' })
-    .n('skip', 'control.end', 'Not approved', { outcome: 'cancelled' })
+    .n('skip', 'control.end', 'Not approved', { outcome: 'declined', reason: 'Not approved' })
     .n('late', 'control.end', 'Supplier late', {
       outcome: 'failed',
       reason: 'Supplier did not deliver',
@@ -374,7 +374,7 @@ export function storefrontOrderFlow(): Flow {
         body: '{{vars.policyFailures}}',
       })
       .n('rejected', 'control.end', 'Rejected', {
-        outcome: 'cancelled',
+        outcome: 'declined',
         reason: 'Failed store policy',
       })
       .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })

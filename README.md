@@ -78,7 +78,7 @@ POST /api/v1/orders/:id/cancel               { "reason": "…" }
 
 ### Outbound webhooks
 
-Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`, `order.completed`, `order.cancelled` and `order.failed`.
+Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`, `order.completed`, `order.declined` (a policy or approval “no”), `order.cancelled` and `order.failed`.
 
 ```
 GET    /api/v1/webhook-subscriptions

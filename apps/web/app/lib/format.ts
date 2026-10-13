@@ -7,19 +7,20 @@ export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
   waiting: 'var(--wait)',
   succeeded: 'var(--ok)',
   completed: 'var(--ok)',
+  declined: 'var(--undo)',
   failed: 'var(--bad)',
   skipped: 'var(--idle)',
   cancelled: 'var(--idle)',
   rolled_back: 'var(--undo)',
 };
 
-/** Display-only statuses the UI derives (an order "declined" by policy is stored as cancelled). */
-const DERIVED_COLOR: Record<string, string> = { declined: 'var(--undo)' };
-
 export const statusColor = (s: string | undefined) =>
-  STATUS_COLOR[(s ?? 'pending') as NodeStatus] ?? DERIVED_COLOR[s ?? ''] ?? 'var(--idle)';
+  STATUS_COLOR[(s ?? 'pending') as NodeStatus] ?? 'var(--idle)';
 
-/** The status to show for an order: policy declines read "declined", not "cancelled". */
+/**
+ * The status to show for an order. Orders declined before `declined` existed were stored as
+ * cancelled; the approvals table identifies them, so they read "declined" too.
+ */
 export const orderStatus = (status: string, id: string, declined?: Set<string> | string[]) =>
   status === 'cancelled' && (Array.isArray(declined) ? declined.includes(id) : declined?.has(id))
     ? 'declined'

@@ -477,14 +477,15 @@ export const NODE_SPECS = [
     type: 'control.end',
     category: 'control',
     label: 'End',
-    description: 'Finishes the order. “failed” rolls back every compensable step.',
+    description:
+      'Finishes the order. “declined” is a policy or approval no; “failed” rolls back every compensable step.',
     icon: 'CircleStop',
     fields: [
       {
         key: 'outcome',
         label: 'Outcome',
         kind: 'select',
-        options: ['completed', 'cancelled', 'failed'],
+        options: ['completed', 'declined', 'cancelled', 'failed'],
         default: 'completed',
       },
       { key: 'reason', label: 'Reason', kind: 'text', default: '' },

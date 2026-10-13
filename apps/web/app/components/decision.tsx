@@ -56,6 +56,8 @@ export function DecisionControls({
   shortcuts,
   onPendingChange,
   onFlush,
+  only,
+  defaultNote = '',
 }: {
   onDecide: (decision: Decision, note: string) => void;
   disabled?: boolean;
@@ -71,8 +73,11 @@ export function DecisionControls({
    * left). It must survive navigation, so use `sendDecision` rather than page-bound transports.
    */
   onFlush?: (decision: Decision, note: string) => void;
+  /** Offer just this decision (e.g. confirming one the chat agent prepared). */
+  only?: Decision;
+  defaultNote?: string;
 }) {
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(defaultNote);
   const [pending, setPending] = useState<{ decision: Decision; at: number } | null>(null);
   const now = useNow(pending ? 250 : null);
   const noteId = useId();
@@ -178,21 +183,25 @@ export function DecisionControls({
         disabled={disabled}
       />
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          disabled={disabled}
-          onClick={() => setPending({ decision: 'approved', at: Date.now() })}
-        >
-          <Check /> Approve
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() => setPending({ decision: 'rejected', at: Date.now() })}
-        >
-          <X /> Reject
-        </Button>
+        {only !== 'rejected' ? (
+          <Button
+            size="sm"
+            disabled={disabled}
+            onClick={() => setPending({ decision: 'approved', at: Date.now() })}
+          >
+            <Check /> Approve
+          </Button>
+        ) : null}
+        {only !== 'approved' ? (
+          <Button
+            size="sm"
+            variant={only ? 'default' : 'outline'}
+            disabled={disabled}
+            onClick={() => setPending({ decision: 'rejected', at: Date.now() })}
+          >
+            <X /> Reject
+          </Button>
+        ) : null}
       </div>
     </div>
   );

@@ -108,6 +108,8 @@ export const ORDER_STATUSES = [
   'running',
   'waiting',
   'completed',
+  /** Ended by policy or an approval decision ("not approved"), not by a person cancelling. */
+  'declined',
   'cancelled',
   'failed',
   'rolled_back',
@@ -116,6 +118,7 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const TERMINAL_ORDER_STATUSES: OrderStatus[] = [
   'completed',
+  'declined',
   'cancelled',
   'failed',
   'rolled_back',
