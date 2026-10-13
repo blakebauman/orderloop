@@ -6,6 +6,7 @@ import {
   type OrderState,
   type StartOrderOnceInput,
   verifyWebhook,
+  withDefaults,
 } from '@orderloop/core';
 import {
   approvals,
@@ -13,6 +14,7 @@ import {
   nodeRuns,
   orders,
   payments,
+  priceSources,
   products,
   publishFlow,
   reservations,
@@ -26,6 +28,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic } from '../src/ai';
 import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
+import { EXECUTORS } from '../src/nodes';
 import { startOrder, startOrderOnce } from '../src/orders';
 
 const db = () => createDb(env.DB);
@@ -537,6 +540,95 @@ describe('address validation', () => {
     const bad = await run('PO Box 9, Springfield');
     expect([bad.status, bad.reason]).toEqual(['declined', 'invalid']);
     expect(bad.nodes.address!.summary).toMatch(/free text/);
+  });
+});
+
+describe('pricing chain', () => {
+  const price = async (
+    customerId: string,
+    lines: OrderInput['lines'],
+    config: Record<string, unknown> = {},
+  ) => {
+    const order = {
+      ...input({ type: 'b2b_order', customerId, lines }),
+      id: 'ord_pricing',
+      createdAt: Date.now(),
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+    };
+    const node = {
+      id: 'price',
+      type: 'commerce.price',
+      label: 'Price',
+      config: {},
+      position: { x: 0, y: 0 },
+    };
+    const r = await EXECUTORS['commerce.price']!({
+      env,
+      node,
+      config: withDefaults('commerce.price', config),
+      ctx: { order, nodes: {}, vars: {}, input: {}, now: Date.now() },
+      stepKey: 'price#1',
+    });
+    return r.output as {
+      subtotal: number;
+      lines: { sku: string; unitPrice: number; by: string; rule: string }[];
+    };
+  };
+
+  it('prices each line from the first source that matches, in priority order', async () => {
+    // Fabrikam is silver: the price book (priority 10) beats list price for WID-200, and its
+    // contract (priority 20) prices MTR-750.
+    const fab = await price('cus_fabrikam', [
+      { sku: 'WID-200', qty: 10 },
+      { sku: 'MTR-750', qty: 1 },
+    ]);
+    expect(fab.lines.map((l) => [l.sku, l.unitPrice, l.by])).toEqual([
+      ['WID-200', 55, 'price_book'],
+      ['MTR-750', 389, 'contract'],
+    ]);
+    // Northwind's contract stops the chain before the cheaper-looking volume tier...
+    const nw = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }]);
+    expect(nw.lines[0]).toMatchObject({ unitPrice: 21.5, by: 'contract' });
+    // ...Contoso has no contract, so 600 widgets reach the 8% volume tier.
+    const co = await price('cus_contoso', [
+      { sku: 'WID-100', qty: 600 },
+      { sku: 'WID-100', qty: 10 },
+    ]);
+    expect(co.lines.map((l) => [l.unitPrice, l.by, l.rule])).toEqual([
+      [22.08, 'volume', 'Industrial widget, 500+'],
+      [24, 'list', 'List price'],
+    ]);
+  });
+
+  it('switches sources off per node and keeps given prices', async () => {
+    const off = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }], {
+      useContracts: false,
+    });
+    expect(off.lines[0]).toMatchObject({ unitPrice: 22.08, by: 'volume' });
+    const none = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }], {
+      useContracts: false,
+      usePriceRules: false,
+    });
+    expect(none.lines[0]).toMatchObject({ unitPrice: 24, by: 'list' });
+    const given = await price('cus_northwind', [{ sku: 'WID-100', qty: 600, unitPrice: 20 }]);
+    expect(given.lines[0]).toMatchObject({ unitPrice: 20, rule: 'Given on the order' });
+  });
+
+  it('follows the sources table: reordering it changes the outcome', async () => {
+    await db().update(priceSources).set({ priority: 5 }).where(eq(priceSources.id, 'volume'));
+    try {
+      const nw = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }]);
+      // Volume runs first but doesn't stop, so the contract is still a candidate and is lower.
+      expect(nw.lines[0]).toMatchObject({ unitPrice: 21.5, by: 'contract' });
+      await db().update(priceSources).set({ active: false }).where(eq(priceSources.id, 'contract'));
+      const noContract = await price('cus_northwind', [{ sku: 'WID-100', qty: 600 }]);
+      expect(noContract.lines[0]).toMatchObject({ unitPrice: 22.08, by: 'volume' });
+    } finally {
+      await db().update(priceSources).set({ priority: 30 }).where(eq(priceSources.id, 'volume'));
+      await db().update(priceSources).set({ active: true }).where(eq(priceSources.id, 'contract'));
+    }
   });
 });
 

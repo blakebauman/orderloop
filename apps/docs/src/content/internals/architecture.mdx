@@ -24,7 +24,7 @@ inbound mail ── Email Routing ──email()───────────
 
 | Path | Role |
 |---|---|
-| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, layout, JSON Logic expressions, policy rules, address checks, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
+| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations with seed data, flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
@@ -92,7 +92,8 @@ Variables and secrets are listed in [Configuration](/reference/configuration/).
 ## Connectors
 
 `apps/engine/src/connectors.ts` holds mock commerce connectors over the D1 back office
-(`customers`, `products`, `contract_prices`, `reservations`, `stock_movements`, `payments`,
+(`customers`, `products`, `contract_prices`, `price_sources`, `price_rules`, `reservations`,
+`stock_movements`, `payments`,
 `shipments`, `messages`)
 and R2. Each function is the seam where a real adapter (Stripe, a WMS, a carrier API, an ERP)
 replaces the mock. `validateAddress` is the seam for an address provider (USPS, Loqate); the mock

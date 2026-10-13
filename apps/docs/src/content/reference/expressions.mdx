@@ -1,6 +1,6 @@
 ---
 title: Expressions and policy rules
-description: The run context, JSON Logic expressions, {{path}} text templates, the variables nodes set, and the policy check's rules.
+description: The run context, JSON Logic expressions, {{path}} text templates, the variables nodes set, the policy check's rules, ship-to addresses and the pricing chain.
 ---
 
 import Values from '../../components/Values.astro';
@@ -120,6 +120,31 @@ problem in its summary and output, including a missing or free-text ship-to.
 ```json
 { "line1": "1 Main St", "city": "Springfield", "region": "IL", "postalCode": "62701", "country": "US" }
 ```
+
+## Pricing chain
+
+[Price & quote](/reference/nodes/#commerce.price) prices each line through a chain of sources in
+`price_sources`, lowest `priority` first. The seeded chain is price books (`10`, stops), contract
+prices (`20`, stops) and volume tiers (`30`, keeps going), with list price (`products.price`) as the
+fallback. `resolvePrice` in `packages/core/src/pricing.ts`:
+
+1. For each active source in order, finds its entries that match the line and takes the lowest
+   price among them, so the deepest volume tier wins.
+2. Adds that price as a candidate. If the source has `stop_processing`, the chain ends there.
+3. Gives the line the lowest candidate, or the list price when no source matched.
+
+A matching contract price therefore wins even above list price, and with the seeded priorities a
+customer's contract is reached before a cheaper volume tier. Entries in `price_rules` (price books
+and volume tiers) match when every scope they set fits: `sku`, `customer_id`, `customer_tier`,
+`min_qty` (the line's quantity), and the `starts_at`/`ends_at` window. Each sets either a fixed
+`price` or `discount_pct` off the list price. Contract prices are the rows in `contract_prices` for
+the order's customer.
+
+The node's `useContracts` and `usePriceRules` fields drop the contract source or the price-book and
+volume sources for that node. A line with its own `unitPrice` keeps it, and purchase requests and
+reorders price at `products.cost` without the chain. The node's output lists each line's
+`unitPrice`, the source (`by`) and the entry (`rule`), and its summary counts lines per source. The
+back office shows the chain in order.
 
 ## Durations
 

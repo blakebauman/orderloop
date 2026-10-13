@@ -1,5 +1,6 @@
 import {
   approvals,
+  contractPrices,
   customers,
   documents,
   flows,
@@ -7,6 +8,8 @@ import {
   messages,
   orders,
   payments,
+  priceRules,
+  priceSources,
   products,
   shipments,
 } from '@orderloop/db';
@@ -117,11 +120,14 @@ export async function getOrderRow(orderId: string) {
 }
 
 export async function backOffice() {
-  const [cust, prods] = await Promise.all([
+  const [cust, prods, sources, rules, contracts] = await Promise.all([
     db().select().from(customers).orderBy(customers.name),
     db().select().from(products).orderBy(products.sku),
+    db().select().from(priceSources).orderBy(priceSources.priority),
+    db().select().from(priceRules).orderBy(priceRules.sourceId, priceRules.sku, priceRules.minQty),
+    db().select().from(contractPrices).orderBy(contractPrices.customerId, contractPrices.sku),
   ]);
-  return { customers: cust, products: prods };
+  return { customers: cust, products: prods, pricing: { sources, rules, contracts } };
 }
 
 export async function waitingOrders() {

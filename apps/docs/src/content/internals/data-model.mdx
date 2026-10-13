@@ -27,6 +27,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0006_stock_movements.sql` | `stock_movements`, the inventory ledger |
 | `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
 | `0008_node_runs.sql` | `node_runs`, per-node timing for the dashboard |
+| `0009_price_chain.sql` | `price_sources` and `price_rules`, the pricing chain, with demo entries |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -71,7 +72,9 @@ writes embeds its step key.
 |---|---|
 | `customers` | `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
-| `contract_prices` | Negotiated prices, primary key `(customer_id, sku)` |
+| `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
+| `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
+| `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
 | `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping) |
 | `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products` in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
 | `payments` | Authorizations (`kind` `authorization:<method>`), captures, charges and refunds, with `status` and `ref` |

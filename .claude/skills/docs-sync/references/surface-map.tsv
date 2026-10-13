@@ -14,6 +14,7 @@
 ^packages/core/src/logic\.ts$	reference/expressions	prose
 ^packages/core/src/policy\.ts$	reference/expressions	gen
 ^packages/core/src/address\.ts$	reference/expressions	prose
+^packages/core/src/pricing\.ts$	reference/expressions internals/data-model	prose
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api	gen
 ^apps/web/workers/app\.ts$	internals/architecture reference/rest-api	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api	gen
