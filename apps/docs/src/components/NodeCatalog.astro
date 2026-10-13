@@ -1,0 +1,88 @@
+---
+/*
+ * The node catalog, rendered from NODE_SPECS in @orderloop/core at build time. Labels, config
+ * fields, defaults and output branches come from the same objects the editor's palette and the
+ * engine read, so this page cannot drift. Pass `category` to render one group.
+ */
+import { CATEGORY_LABELS, NODE_SPECS, type NodeCategory, type NodeSpec } from '@orderloop/core';
+
+interface Props {
+  category: NodeCategory;
+}
+
+const { category } = Astro.props;
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const specs: readonly NodeSpec[] = NODE_SPECS.filter((s) => s.category === category);
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const outputs = (s: NodeSpec) =>
+  typeof s.outputs === 'function' ? 'One per entry in Routes (configurable)' : s.outputs.join(', ');
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const show = (v: unknown) =>
+  v === undefined ? '' : typeof v === 'string' ? (v === '' ? '""' : v) : JSON.stringify(v);
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const label = CATEGORY_LABELS[category];
+---
+
+<div class="ol-catalog" data-category={category} aria-label={label}>
+  {
+    specs.map((s) => (
+      <section class="ol-node" id={s.type}>
+        <h3>
+          <span class="ol-cat" data-cat={s.category} aria-hidden="true" />
+          {s.label}
+          <code>{s.type}</code>
+        </h3>
+        <p>{s.description}</p>
+        <ul class="ol-tags">
+          <li>
+            Outputs: {s.outputs.length === 0 ? 'none (ends the run)' : outputs(s)}
+          </li>
+          {s.rollback && <li data-tag="rollback">Rolls back on failure</li>}
+          {s.waits && <li data-tag="waits">Waits for a person or event</li>}
+          {s.loop && <li>Accepts a “next” back-edge</li>}
+          {s.retries !== undefined && <li>Default retries: {s.retries}</li>}
+        </ul>
+        {s.fields.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Kind</th>
+                <th>Default</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.fields.map((f) => (
+                <tr>
+                  <td>
+                    <code>{f.key}</code>
+                    {f.required && ' (required)'}
+                  </td>
+                  <td>{f.kind}</td>
+                  <td>{f.default !== undefined && <code>{show(f.default)}</code>}</td>
+                  <td>
+                    {f.label}
+                    {f.options && (
+                      <>
+                        {'. One of '}
+                        {f.options.map((o, i) => (
+                          <>
+                            {i > 0 && ', '}
+                            <code>{o}</code>
+                          </>
+                        ))}
+                      </>
+                    )}
+                    {f.hint && `. ${f.hint}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    ))
+  }
+</div>

@@ -1,0 +1,95 @@
+---
+title: Data model
+description: The D1 tables, the migrations that create them, and where order documents live in R2.
+---
+
+Both Workers bind the same D1 database (`orderloop`, binding `DB`) and R2 bucket
+(`orderloop-docs`, binding `DOCS`). The Drizzle schema is `packages/db/src/schema.ts`; the SQL that
+creates it is `packages/db/migrations/*.sql`.
+
+:::caution
+`schema.ts` must match the migrations column for column. To change the schema, add a new numbered
+migration and update `schema.ts` to match; never edit a migration that has been applied.
+:::
+
+D1 holds indexes and the back office. An order's live run state is not in D1: it lives in its
+[OrderAgent](/internals/order-agent/), and its durable progress in its Workflow instance.
+
+## Migrations
+
+| File | Adds |
+|---|---|
+| `0001_init.sql` | Flows, versions, the orders index, approvals and the mock back office |
+| `0002_seed.sql` | Demo customers, products and contract prices (flows are seeded by the engine from the templates) |
+| `0003_webhook_subscriptions.sql` | `webhook_subscriptions`, `webhook_deliveries` |
+| `0004_order_idempotency.sql` | `orders.idempotency_key` and its partial unique index |
+
+Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
+deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
+
+## Flows
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `order_type`, `published_version` |
+| `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at` |
+
+`publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version.
+`getFlowVersionJson` loads a given version or the latest. Orders pin `(flow_id, flow_version)` at
+start, so editing or republishing never changes a running order. The built-in templates are
+published as version 1 the first time they are needed (`ensureTemplates` in the engine,
+`ensureSeeded` in the web app).
+
+## Orders and approvals
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key` |
+| `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
+
+Indexes: `orders_status (status, updated_at)`, `orders_type (type, updated_at)`, and
+`orders_idempotency`, unique on `idempotency_key` where it is not null. `startOrder` inserts the
+row before creating anything else, so when two requests race with the same `Idempotency-Key` the
+unique index decides which one creates the order and the other returns it as `replayed`.
+
+`approvals.status` is `pending`, then the outcome (`approved`, `rejected`, `escalated`) or
+`cancelled`. Approvals are indexed by `(status, requested_at)`, and `0001_init.sql` makes
+`(order_id, event_type)` unique, so a retried `:open` step cannot insert a second row.
+
+## Back office
+
+The tables the [connectors](/internals/architecture/#connectors) read and write. Every id a step
+writes embeds its step key.
+
+| Table | Purpose |
+|---|---|
+| `customers` | `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
+| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
+| `contract_prices` | Negotiated prices, primary key `(customer_id, sku)` |
+| `reservations` | Stock holds; `status` is `held`, `released` or `consumed` (by shipping) |
+| `payments` | Authorizations (`kind` `authorization:<method>`), captures, charges and refunds, with `status` and `ref` |
+| `shipments` | Labels and return labels; `status` is `label_created`, `return_label` or `cancelled` |
+| `documents` | Index of R2 objects per order: `kind`, `r2_key`, `content_type` |
+| `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
+
+## Webhooks
+
+| Table | Purpose |
+|---|---|
+| `webhook_subscriptions` | `url`, `secret` (returned once, at creation), `events` (a JSON array; `"*"` matches all), `active` |
+| `webhook_deliveries` | The outbox: one row per event per subscription, id `whd_${orderId}_${stepKey}_${subscriptionId}`. `status` is `pending`, `delivered` or `failed`; with `attempts`, `response_status`, `last_error`, `delivered_at` |
+
+Deliveries are indexed by `order_id` and by `(subscription_id, created_at)`. See
+[Outbound webhooks](/guides/outbound-webhooks/).
+
+## R2 documents
+
+`storeDocument` writes to `orders/<orderId>/<kind>/<name>` and records the same key in `documents`:
+
+| Kind | Name | Written by |
+|---|---|---|
+| `inbound` | `po.txt` | `startOrder`, when the input has `documentText` and no `documentKey` |
+| `invoice` | `<nodeId>-<run>.html` | `commerce.invoice` |
+| `po` | `<nodeId>-<run>.html` | `commerce.generate_po` |
+
+The web app serves them at `/docs/<key>` to signed-in users only.

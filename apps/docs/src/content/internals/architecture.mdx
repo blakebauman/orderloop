@@ -1,0 +1,140 @@
+---
+title: Architecture
+description: The two Workers, the service binding between them, the packages, the bindings and the connectors.
+---
+
+Order Loop is two Workers in one pnpm monorepo. `orderloop-web` serves the dashboard, the flow
+editor and the REST API; `orderloop-engine` runs orders. The web app reaches the engine only
+through a service binding, and the engine has no public URL.
+
+```
+browser ──► orderloop-web (apps/web, React Router on Workers)
+              │  D1: flows + versions, orders index, approvals, back office
+              │  R2: order documents
+              ├── ENGINE service binding ──RPC──► orderloop-engine (apps/engine)
+              │                                     ├─ EngineApi      WorkerEntrypoint (RPC)
+              └── /agents/order-agent/:id ─fetch──►  ├─ OrderAgent     Durable Object, one per order
+                                                    ├─ OrderLoop      Workflow, one instance per generation
+                                                    ├─ Replenish      Workflow, daily cron
+                                                    └─ Workers AI, D1, R2
+```
+
+## Packages
+
+| Path | Role |
+|---|---|
+| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, layout, JSON Logic expressions, policy rules, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
+| `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations with seed data, flow persistence (`getFlowVersionJson`, `publishFlow`) |
+| `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
+| `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
+| `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, back office, `/api/v1` |
+| `apps/docs` (`@orderloop/docs`) | This site |
+
+`packages/core` is pure TypeScript so its semantics can be unit tested in Node: anything that needs
+`env` belongs in an app. The planner lives there, not in the Workflow
+(see [Planner](/internals/planner/)).
+
+## The engine contract
+
+`EngineRpc` in `packages/core/src/api.ts` is the whole surface the web app may use:
+
+| Method | What it does |
+|---|---|
+| `startOrder(input)` | Inserts the order row, initialises its `OrderAgent`, creates generation 1 of `OrderLoop`. Honours `idempotencyKey` |
+| `sendEvent(orderId, event, payload?)` | Delivers a business event to the node waiting for it; returns `{ delivered, nodeId? }` |
+| `decide(orderId, nodeId, decision, by, note?)` | Approves or rejects the approval a node waits on |
+| `cancel(orderId, reason)` | Terminates the Workflow and compensates |
+| `snapshot(orderId)` | The agent's `OrderState`, or `null` for an unknown order |
+| `copilot(req)` | Edits or creates a flow graph from a prompt |
+| `runReplenish()` | Creates a `Replenish` instance now |
+
+`EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
+`startOrder`, `copilot` and `runReplenish` forwards to the order's agent via
+`ORDER_AGENT.getByName(orderId)`. `EngineApi` trusts its caller: authorization happens in the web
+app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
+engine source.
+
+## Request routing
+
+`apps/web/workers/app.ts` routes every request before React Router sees it:
+
+| Path | Handling |
+|---|---|
+| `GET /health` | `{ ok: true, service: "orderloop-web" }` |
+| `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
+| `GET /api/v1/openapi.json` | The OpenAPI document, public |
+| `/api/v1/*` | `isApiAuthorized` (bearer `APP_PASSWORD` or the session cookie), then `handleApi` |
+| `/agents/order-agent/*` | `isSignedIn`, then proxied to the engine's `fetch` (`routeAgentRequest`), carrying the Agents SDK WebSocket |
+| `/docs/orders/*` | `isSignedIn`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
+| everything else | React Router (UI routes guard themselves with `requireUser`) |
+
+With `APP_PASSWORD` unset every check passes, which is the local dev default. The engine's own
+`fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
+`workers_dev: false` and no routes it is reachable only through the binding.
+
+## Bindings
+
+| Binding | Worker | Resource |
+|---|---|---|
+| `ORDER_AGENT` | engine | Durable Object class `OrderAgent` (SQLite, migration tag `v1`) |
+| `ORDER_LOOP` | engine | Workflow `orderloop-order`, class `OrderLoop`, `limits.steps: 10000` |
+| `REPLENISH` | engine | Workflow `orderloop-replenish`, class `Replenish`, schedule `0 6 * * *` |
+| `DB` | both | D1 `orderloop`, migrations in `packages/db/migrations` |
+| `DOCS` | both | R2 `orderloop-docs` |
+| `AI` | engine | Workers AI |
+| `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
+
+Variables and secrets are listed in [Configuration](/reference/configuration/).
+
+## Connectors
+
+`apps/engine/src/connectors.ts` holds mock commerce connectors over the D1 back office
+(`customers`, `products`, `contract_prices`, `reservations`, `payments`, `shipments`, `messages`)
+and R2. Each function is the seam where a real adapter (Stripe, a WMS, a carrier API, an ERP)
+replaces the mock.
+
+Two rules hold for every connector:
+
+- **Writes are keyed by the step that made them.** Ids embed the step key, for example
+  `res_${stepKey}_${sku}`, `pay_${orderId}_${stepKey}`, `shp_${orderId}_${stepKey}`, and inserts use
+  `onConflictDoNothing`. A retried step finds its own row instead of writing a second one. `refund`
+  returns the refund its step already made, and never refunds more than was captured or charged.
+- **Compensations are idempotent.** `releaseInventory` releases only `held` reservations,
+  `voidAuthorizations` voids only `authorized` payments, `cancelShipment` sets one shipment
+  `cancelled`. Running one twice changes nothing.
+
+The saga compensations a failed order runs are `ROLLBACKS` in `apps/engine/src/nodes.ts`; a
+cancel runs `compensateOrder`, which releases, voids and cancels open shipments in one pass. A node
+type with `rollback: true` in the catalog must have a `ROLLBACKS` entry.
+
+To exercise failure paths, set `meta.simulate` on the order input:
+
+| `meta.simulate` | Effect |
+|---|---|
+| `out_of_stock` | `reserveInventory` reports every line short |
+| `payment_decline` | `authorizePayment` records a `declined` authorization |
+| `charge_fail` | `charge` records a `failed` charge |
+| `three_way_mismatch` | `commerce.three_way_match` sees an invoice 10% over the order total |
+
+Documents go to R2 through `storeDocument` at `orders/<orderId>/<kind>/<name>` and are indexed in
+the `documents` table (see [Data model](/internals/data-model/#r2-documents)).
+
+## Scheduled replenishment
+
+`Replenish` (`apps/engine/src/replenish.ts`) runs on the `REPLENISH` binding's cron. Its
+`scan stock` step lists SKUs where `stock - reserved <= reorder_point`; if there are any, its
+`start reorder` step seeds the templates and starts one order on `tpl-reorder` (or
+`payload.flowId`) for customer `cus_internal`, with the SKUs in `meta.skus`. The reorder flow's
+`ai.forecast` node decides the quantities. `EngineRpc.runReplenish` creates an instance on demand.
+
+## Where state lives
+
+| State | Owner |
+|---|---|
+| Live run state of one order (nodes, edges, waits, vars, timeline, chat) | Its `OrderAgent` |
+| Durable progress (memoized step results, sleeps, waits) | Its `OrderLoop` instance |
+| Order index for lists and filters (`orders` row) | D1, written by the agent's `syncIndex` |
+| Flows, versions, approvals, back office, webhook outbox | D1 |
+| Invoices, POs, inbound documents | R2 |
+
+See [OrderLoop Workflow](/internals/workflow/) and [OrderAgent](/internals/order-agent/).

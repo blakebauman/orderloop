@@ -1,0 +1,156 @@
+---
+title: OrderLoop Workflow
+description: How one generic Workflow interprets a pinned flow version durably, with deterministic step names, saga rollback and continue-as-new.
+---
+
+`OrderLoop` (`apps/engine/src/workflow.ts`, Workflow `orderloop-order`, binding `ORDER_LOOP`)
+interprets every flow. One instance runs one order generation; its params are `OrderLoopParams`:
+`orderId`, `flowId`, `version`, `generation`, `order` and `vars`.
+
+## Run
+
+1. **`load-flow`** step: loads the pinned `FlowVersion` from D1 (`loadFlowVersion`). A missing
+   version throws `NonRetryableError`.
+2. Builds the plan (`initPlan`) and the [run context](/reference/expressions/): `order`, `nodes: {}`,
+   `vars` from params, `input` = `order.meta`, and `now` = the event's timestamp, not the wall
+   clock, so it replays identically.
+3. Reports a `running` snapshot to the agent.
+4. Loops: `readyNodes` → `beginNode` for each ready node (waiting node types are marked `waiting`)
+   → snapshot → run the whole batch concurrently with `Promise.all` → apply the outcomes **in graph
+   order** → snapshot. It stops when nothing is ready or an End node ran.
+5. Reports the final status. For `failed` it throws `NonRetryableError(reason)`, which fails the
+   instance and makes Workflows run the registered rollbacks. Otherwise it returns
+   `{ outcome, total }`.
+
+Applying in graph order matters: the batch runs concurrently, so completions arrive in any order,
+but the plan they produce must be the same on every replay.
+
+## Step names
+
+Every node run is one memoized step named by its key, `${nodeId}#${run}` (`beginNode`). Run counts
+make loop iterations distinct: the third pass of `charge` is `charge#3`. Some node types add
+suffixed steps around their main one:
+
+| Step | Node types | Purpose |
+|---|---|---|
+| `${key}` | executors, `control.loop`, `control.continue_as_new` | The node's effect, memoized |
+| `${key}:open` | approval, wait for event | Registers the wait with the agent (`openWait`) |
+| `${key}` (waitForEvent) | approval, wait for event | `step.waitForEvent` with the node's timeout |
+| `${key}:close` | approval, wait for event | Clears the wait (`closeWait`) with the outcome |
+| `${key}:until` | `control.wait` with `until` | Evaluates the timestamp once |
+| `${key}` (sleep) | `control.wait` | `step.sleep` or `step.sleepUntil` |
+| `${key}:emit` | nodes that emit, End, a thrown node | Outbound webhook delivery |
+
+:::caution
+Step names are durable identity. Never rename a node id, or change how keys are built, in a way
+that would change the step names of a published flow: an in-flight instance replays by name, and a
+renamed step runs again.
+:::
+
+Wait event types are derived from the key: `approval-${key}` or `event-${key}`, with characters
+outside `[a-zA-Z0-9_-]` replaced by `-` (so `mgr#1` becomes `approval-mgr-1`), truncated to 100.
+
+## Executor nodes
+
+Nodes that run inside one step are `EXECUTORS` in `apps/engine/src/nodes.ts`. The step is
+configured with:
+
+- `retries`: `{ limit, delay: '5 seconds', backoff: 'exponential' }`, where `limit` is the node's
+  `retries`, else the catalog's `retries`, else 3 (`commerce.charge` sets 0).
+- `timeout`: the node's `timeout`, else `'5 minutes'`.
+
+An executor returns a `NodeResult`: `branches`, `output`, `summary`, and optional `order` and
+`vars` patches. The interpreter applies the patches (`applyResult`) from the memoized result, so a
+replay patches the context the same way without running the executor again.
+
+Inside the step the executor sends a durable report when it starts (with an `attempt N` timeline
+entry from the second attempt on) and when it finishes.
+
+A thrown executor, once its retries are exhausted, reports the node `failed`, reports the order
+`failed`, emits `order.failed` with the node and its error, and rethrows, which fails the instance.
+
+## Interpreted nodes
+
+Waiting and control nodes are handled in `runNode` itself:
+
+- **`control.approval` / `control.wait_event`.** `:open`, then `step.waitForEvent` with
+  `TIME_SCALE`-scaled timeout (default `'7 days'` if the node has none), then `:close`. An approval
+  takes `approved` when the payload's `decision` is `approved`, otherwise `rejected`; a timeout
+  takes `escalated`. An event wait takes `received` or `timeout`, and stores the payload in
+  `vars[eventVar(event)]`, so `payment.received` lands in `vars.payment_received`.
+- **`control.wait`.** `until` is evaluated in its own step; a positive result sleeps until that
+  epoch-ms, otherwise it sleeps for the scaled `duration` (default `'1 day'`).
+- **`control.loop`.** One step decides `next = runs <= maxIterations && truthy(while)`; the
+  outcome goes to `completeLoop`.
+- **`control.end`.** Reports, emits `order.${outcome}`, and ends the run with that outcome and the
+  interpolated reason.
+- **`control.continue_as_new`.** See below.
+
+## Reports to the agent
+
+Two kinds of report go to `OrderAgent.report` (types in `apps/engine/src/agent.ts`):
+
+- **Plan snapshots** (status, plan, order, vars) are sent from outside steps, so a replay sends
+  them again. They carry a `seq` that increments per run; the agent drops any snapshot whose `seq`
+  is not newer than what it has for that generation.
+- **Detail reports** (node start, finish, summary, output, timeline entries) are sent from inside
+  steps and carry no `seq`. Timeline entries have a `key`, and the agent replaces an entry with the
+  same key instead of appending, so a retried step does not duplicate history.
+
+Report failures are logged and swallowed: the UI must never fail an order. See
+[OrderAgent](/internals/order-agent/#reports).
+
+## Rollback
+
+A node type with `rollback: true` in the catalog registers a compensation on its step from
+`ROLLBACKS`:
+
+| Node type | Compensation |
+|---|---|
+| `commerce.reserve_inventory` | `releaseInventory`: releases every held reservation |
+| `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization |
+| `commerce.ship` | `cancelShipment` for the shipment id in the step's output |
+
+Each runs with `{ retries: { limit: 3, delay: '10 seconds', backoff: 'linear' }, timeout: '2 minutes' }`
+and reports the node `rolled_back`. When the instance fails (an End node with outcome `failed`, or a
+thrown node) Workflows runs the compensations in reverse order. The agent then polls the instance
+to record the rollback outcome (see [OrderAgent](/internals/order-agent/#rollback-outcome)).
+
+Cancelling does not go through rollback: the agent terminates the instance and calls
+`compensateOrder` directly.
+
+## Outbound webhooks
+
+`emitStep` delivers one event in its own `${key}:emit` step with
+`{ retries: { limit: 5, delay: '10 seconds', backoff: 'exponential' }, timeout: '1 minute' }`. The
+step calls `emit` (`apps/engine/src/outbox.ts`), which records one `webhook_deliveries` row per
+matching subscription, keyed `whd_${orderId}_${stepKey}_${subscriptionId}`, then attempts every row
+for that key not yet `delivered`. The step throws while any are pending, so Workflows retries it;
+when retries run out the error is swallowed, the rows stay `failed`, and the order carries on.
+
+Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`; see
+[Outbound webhooks](/guides/outbound-webhooks/).
+
+## Continue as new
+
+A long-lived flow (the subscription template) would otherwise grow its step history without bound.
+`control.continue_as_new` runs one step that creates a new instance with id
+`${orderId}-g${generation + 1}` and params carrying the current `order` and `vars`, then calls
+`agent.continuedAs(id, generation)`. The current run returns `{ continuedAs }`.
+
+Generation 1's instance id is `${orderId}-g1` (set by `startOrder` in `apps/engine/src/orders.ts`).
+Each generation starts its own `seq` from zero, and the agent accepts any report from a newer
+generation.
+
+## Time scale
+
+`scaled(env, duration)` divides every wait, sleep and wait timeout by `TIME_SCALE`
+(default `"1440"`: a day becomes a minute) and never goes below one second. Step retry delays and
+timeouts are not scaled. Set `TIME_SCALE` to `"1"` for real time.
+
+## Determinism rules
+
+- Every effect happens inside a `step.do`; anything that reads time or calls a model is a step too.
+- The planner is pure, and nodes are applied in graph order after each batch.
+- `ctx.now` is the instance's start timestamp.
+- Step names never change for a published flow.

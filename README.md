@@ -43,6 +43,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 |---|---|
 | `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, copilot), live order view, approvals inbox, back office, REST API. React Router on Workers |
 | `apps/engine` (`@orderloop/engine`) | OrderAgent DO, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
+| `apps/docs` (`@orderloop/docs`) | Documentation site (Starlight), deployed as a static-assets Worker. Reference pages render from `@orderloop/core` at build time |
 | `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
 | `packages/db` (`@orderloop/db`) | D1 schema (Drizzle), migrations and seed data, flow persistence |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
@@ -103,6 +104,17 @@ X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>
 ```
 
 Signatures older than 5 minutes are rejected. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook` in `@orderloop/core` produces the header.
+
+## Docs
+
+The docs site is `apps/docs`: guides, the REST API, a node catalog generated from the catalog
+source, internals, and an OpenAPI explorer.
+
+```bash
+pnpm docs:dev        # local preview
+pnpm docs:build      # static build, then an internal link check
+pnpm docs:deploy     # build and deploy the orderloop-docs Worker
+```
 
 ## CI/CD
 

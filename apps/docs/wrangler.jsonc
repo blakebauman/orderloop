@@ -1,0 +1,12 @@
+// Static-assets Worker for the Order Loop docs. No runtime code: Astro's dist/ is served as is.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orderloop-docs",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "docs.orderloop.io", "custom_domain": true }]
+}

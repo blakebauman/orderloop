@@ -1,0 +1,111 @@
+---
+title: Expressions and policy rules
+description: The run context, JSON Logic expressions, {{path}} text templates, the variables nodes set, and the policy check's rules.
+---
+
+import Values from '../../components/Values.astro';
+
+Node configs hold data, not code. Conditions are [JSON Logic](https://jsonlogic.com) expressions and
+text fields interpolate `{{path}}` templates, so a flow is safe to store, to diff and to accept from
+the copilot. Both are evaluated by `packages/core/src/logic.ts`.
+
+## The run context
+
+Every expression and template sees one object:
+
+| Path | Contents |
+|---|---|
+| `order` | The order: `id`, `type`, `title`, `customerId`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`. Pricing and tax nodes update the totals as they run |
+| `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
+| `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
+| `input` | The order's `meta` |
+| `now` | When this Workflow run started, in epoch milliseconds |
+
+## JSON Logic
+
+Fields of kind `logic` take a JSON Logic expression: Condition's `expression`, Loop's `while`, Wait's
+`until`, Refund's `amount`, and each value in Set variables' `assign`. `{ "var": "order.total" }`
+reads a path from the context.
+
+```json
+{ "and": [
+  { ">": [{ "var": "order.total" }, 1000] },
+  { "==": [{ "var": "vars.category" }, "it_hardware"] }
+] }
+```
+
+Order Loop adds three operations:
+
+| Operation | Result |
+|---|---|
+| `{ "now": [] }` | The current time in epoch ms |
+| `{ "days": [n] }` | `n` days in ms: `{ "+": [{ "var": "now" }, { "days": [14] }] }` |
+| `{ "len": [x] }` | Length of an array or string, else `0` |
+
+A condition is true by JSON Logic's truthiness: empty arrays, `0`, `""` and `null` are false. A plain
+value (a number, `true`) is its own result, which is why Loop's default `while` is `true`.
+
+Expressions that read the clock run inside a step, so a replay sees the same value.
+
+## Text templates
+
+Text fields replace `{{path.to.value}}` with the value at that path in the run context. A missing
+value becomes an empty string and an object is written as JSON. Templates apply to Approval's
+`title`, Notify's `subject` and `body`, End's `reason`, Refund's `reason` and Generate PO's
+`supplier`.
+
+```text
+Order {{order.id}} is on its way ({{vars.tracking}})
+```
+
+## Variables nodes set
+
+| Variable | Set by |
+|---|---|
+| `policyFailures` | Policy check: the failure messages |
+| `refunded` | Refund, on `ok`: the amount refunded |
+| `invoiceKey`, `dueDate` | Generate invoice |
+| `poKey`, `supplier` | Generate PO (Demand forecast may also set `supplier`) |
+| `tracking` | Create shipment |
+| `returnTracking` | Return label |
+| `erpRef` | ERP sync |
+| `poNumber` | Extract order |
+| `risk` | Risk score: the 0–100 score |
+| configurable (`category`) | Classify: the label it chose, under its `into` field |
+| configurable (`summary`) | Summarize: the summary, under its `into` field |
+| any | Set variables: one per key in `assign` |
+
+A **Wait for event** node stores the event's payload under the event name, with each run of
+characters other than letters and digits replaced by `_`: `return.requested` becomes
+`vars.return_requested`, so a refund can use `{ "var": "vars.return_requested.amount" }`.
+
+## Policy rules
+
+The [Policy check](/reference/nodes/#commerce.policy) node's `rules` field is a list of rule
+objects, checked by `packages/core/src/policy.ts`. Every rule runs, and the node takes `fail` with
+every failure listed (in `vars.policyFailures`), so a customer hears about all of them at once. The
+rule names are <Values of="policy-rules" />.
+
+| Rule | Fields | Fails when |
+|---|---|---|
+| `min_order_amount` | `amount` | `order.total` is below `amount` |
+| `max_order_amount` | `amount` | `order.total` is above `amount` |
+| `max_qty_per_sku` | `qty` (integer) | Any SKU's quantity, summed across lines, exceeds `qty` |
+| `business_hours` | `start` (0–23), `end` (1–24), `days` (0 = Sunday … 6; default Monday–Friday), `timeZone` (default `UTC`) | The order is checked outside `[start, end)` on the listed days, in `timeZone` |
+| `no_po_box` | | `order.meta.shipTo` (a string, or an object of address lines) contains a PO box |
+| `restricted_skus` | `skus` (non-empty) | Any line's SKU is in `skus` |
+
+```json
+[
+  { "rule": "min_order_amount", "amount": 25 },
+  { "rule": "max_qty_per_sku", "qty": 500 },
+  { "rule": "business_hours", "start": 8, "end": 18, "timeZone": "America/Chicago" },
+  { "rule": "no_po_box" }
+]
+```
+
+## Durations
+
+Fields of kind `duration` are a whole number and a unit: `second`, `minute`, `hour`, `day`, `week`,
+`month` (30 days) or `year` (365 days), singular or plural: `"30 seconds"`, `"2 days"`. In the
+engine every wait and timeout is divided by `TIME_SCALE` and never drops below one second.

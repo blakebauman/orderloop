@@ -17,3 +17,4 @@ worker-configuration.d.ts.bak
 .turbo/
 .DS_Store
 .secrets/
+.astro

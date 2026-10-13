@@ -1,0 +1,52 @@
+---
+title: Configuration
+description: Variables, secrets and bindings for the engine and web Workers, and the local dev files.
+---
+
+Both Workers are configured in their `wrangler.jsonc`. After changing one, regenerate its binding
+types: `pnpm --filter @orderloop/engine types` or `pnpm --filter @orderloop/web types`.
+
+## Engine variables
+
+Set in `vars` in `apps/engine/wrangler.jsonc`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI text model for every structured AI call (JSON mode) |
+| `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
+| `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
+| `TIME_SCALE` | `1440` | Divides every wait and timeout, so `1440` turns a day into a minute. Use `"1"` in production |
+
+## Web secrets
+
+Set with `pnpm --filter @orderloop/web exec wrangler secret put <NAME>`, or in `apps/web/.dev.vars`
+for local dev (copy `apps/web/.dev.vars.example`).
+
+| Secret | Meaning |
+|---|---|
+| `APP_PASSWORD` | When set, the dashboard requires it (an HttpOnly session cookie, 30 days) and `/api/v1` requires `Authorization: Bearer <APP_PASSWORD>`. Unset leaves both open |
+| `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events`. Unset answers `503` there |
+
+Outbound webhook subscriptions each have their own secret, generated when the subscription is
+created; they are not configuration.
+
+## Bindings
+
+| Binding | Worker | Resource |
+|---|---|---|
+| `DB` | engine, web | D1 database `orderloop`; migrations in `packages/db/migrations` |
+| `DOCS` | engine, web | R2 bucket `orderloop-docs`: invoices, POs and inbound documents |
+| `ORDER_AGENT` | engine | Durable Object `OrderAgent` (SQLite-backed), one per order |
+| `ORDER_LOOP` | engine | Workflow `orderloop-order` (class `OrderLoop`), up to 10,000 steps per instance |
+| `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
+| `AI` | engine | Workers AI |
+| `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
+
+## Routes and hostnames
+
+The web Worker serves `orderloop.io` as a custom domain; change `routes` in
+`apps/web/wrangler.jsonc` for your own. The engine has no routes, no `workers.dev` URL and no preview
+URLs: only the web app's service binding reaches it. The docs Worker (`apps/docs/wrangler.jsonc`)
+serves `docs.orderloop.io`.
+
+Both app Workers answer `GET /health` with `{ ok: true, service }`.

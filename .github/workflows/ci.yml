@@ -81,3 +81,7 @@ jobs:
       - name: Smoke test
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: curl -fsS https://orderloop.io/health
+      # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
+      - name: Deploy docs
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: pnpm docs:deploy

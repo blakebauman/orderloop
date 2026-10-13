@@ -1,0 +1,43 @@
+---
+/*
+ * Light / dark only. Starlight's picker adds "auto" and, with nothing stored, re-applies the OS
+ * scheme on load, which would undo ThemeProvider.astro's light default. The storage key is
+ * Starlight's own (`starlight-theme`), so the Scalar page at /api/ reads the same choice.
+ */
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import Select from '@astrojs/starlight/components/Select.astro';
+---
+
+<starlight-theme-select>
+  <Select
+    icon="sun"
+    label={Astro.locals.t('themeSelect.accessibleLabel')}
+    options={[
+      { label: Astro.locals.t('themeSelect.light'), selected: true, value: 'light' },
+      { label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
+    ]}
+    width="5.5em"
+  />
+</starlight-theme-select>
+
+<script is:inline>
+  StarlightThemeProvider.updatePickers();
+</script>
+
+<script>
+  class StarlightThemeSelect extends HTMLElement {
+    constructor() {
+      super();
+      this.querySelector('select')?.addEventListener('change', (e) => {
+        if (!(e.currentTarget instanceof HTMLSelectElement)) return;
+        const theme = e.currentTarget.value === 'dark' ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        StarlightThemeProvider.updatePickers(theme);
+        try {
+          localStorage.setItem('starlight-theme', theme);
+        } catch {}
+      });
+    }
+  }
+  customElements.define('starlight-theme-select', StarlightThemeSelect);
+</script>

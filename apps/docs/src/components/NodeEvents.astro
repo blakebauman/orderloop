@@ -1,0 +1,43 @@
+---
+/*
+ * Which nodes emit which outbound webhook event, from NODE_EVENTS in @orderloop/core. End nodes
+ * and thrown nodes are covered in the prose: they emit from the Workflow, not from this table.
+ */
+import { NODE_EVENTS, nodeSpec } from '@orderloop/core';
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const rows = Object.entries(NODE_EVENTS).map(([type, e]) => ({
+  type,
+  label: nodeSpec(type)?.label ?? type,
+  ...e,
+}));
+---
+
+<table>
+  <thead>
+    <tr>
+      <th>Event</th>
+      <th>Sent when</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      rows.map((r) => (
+        <tr>
+          <td>
+            <code>{r.event}</code>
+          </td>
+          <td>
+            <a href={`/reference/nodes/#${r.type}`}>{r.label}</a> (<code>{r.type}</code>) finishes
+            {r.branch ? (
+              <>
+                {' on its '}
+                <code>{r.branch}</code> branch
+              </>
+            ) : null}
+          </td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
