@@ -14,39 +14,89 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
-import { Bot, Check, CircleSlash, FileText, Send, Undo2, X, Zap } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, CircleSlash, FileText, Send, Undo2, Wrench, Zap } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useLoaderData, useRevalidator } from 'react-router';
+import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Empty } from '~/components/page';
 import { StatusBadge, StatusDot } from '~/components/status';
-import { requireUser } from '~/lib/auth.server';
+import { approvalContext } from '~/lib/approvals';
+import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { ago, money } from '~/lib/format';
-import { orderRecords } from '~/lib/orders.server';
+import {
+  ago,
+  humanize,
+  money,
+  offset,
+  orderRef,
+  plainLog,
+  plural,
+  statusColor,
+} from '~/lib/format';
+import { customerNames, orderRecords } from '~/lib/orders.server';
 import type { Route } from './+types/order';
 
-export const meta = ({ params }: Route.MetaArgs) => [{ title: `${params.orderId} · Order Loop` }];
+export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
+  {
+    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_TYPE_LABELS[d.snapshot.order.type as OrderType] : 'Order')} ${orderRef(params.orderId)} · Order Loop`,
+  },
+];
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   await requireUser(request);
   const snapshot = await engine().snapshot(params.orderId);
   if (!snapshot) throw data('Order not found', { status: 404 });
-  return { snapshot, records: await orderRecords(params.orderId) };
+  const [records, names] = await Promise.all([orderRecords(params.orderId), customerNames()]);
+  const customerId = snapshot.order?.customerId;
+  return {
+    snapshot,
+    records,
+    customerName: customerId ? (names[customerId] ?? null) : null,
+    actor: actor(request),
+  };
 }
 
 type Tab = 'actions' | 'activity' | 'details' | 'chat' | 'node';
+type Records = Awaited<ReturnType<typeof orderRecords>>;
+
+/** Engine reasons arrive without a full stop; banners read as sentences. */
+const sentence = (s?: string) => (!s ? '' : /[.!?]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
+
+/** Without an engine reason, the end step the run reached says how it finished. */
+function finishedAt(s: OrderState): string | undefined {
+  const end = s.flow?.nodes
+    .filter((n) => n.type.startsWith('control.end') && s.nodes[n.id]?.status === 'succeeded')
+    .sort((a, b) => (s.nodes[b.id]?.endedAt ?? 0) - (s.nodes[a.id]?.endedAt ?? 0))[0];
+  if (!end) return undefined;
+  const path = Object.entries(s.nodes)
+    .filter(([, r]) => r.status === 'succeeded' && r.branches?.length)
+    .sort((a, b) => (b[1].endedAt ?? 0) - (a[1].endedAt ?? 0))
+    .map(([id, r]) => ({ id, branch: r.branches![0]! }))
+    .find((x) => ['escalated', 'timeout', 'rejected'].includes(x.branch));
+  const why = path
+    ? `${s.flow?.nodes.find((n) => n.id === path.id)?.label ?? path.id} ${path.branch === 'rejected' ? 'was rejected' : 'timed out'}`
+    : undefined;
+  return why ? `${why}, so the flow ended at ${end.label}` : `Ended at ${end.label}`;
+}
+
+const rolledBack = (s: OrderState) =>
+  !!s.rollback || Object.values(s.nodes).some((n) => n.status === 'rolled_back');
 
 export default function OrderPage() {
-  const { snapshot, records } = useLoaderData<typeof loader>();
+  const { snapshot, records, customerName, actor: by } = useLoaderData<typeof loader>();
   const [state, setState] = useState<OrderState>(snapshot);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>(snapshot.waits.length ? 'actions' : 'activity');
+  const [tab, setTab] = useState<Tab>(
+    snapshot.waits.length || rolledBack(snapshot) ? 'actions' : 'activity',
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const { revalidate } = useRevalidator();
   const orderId = snapshot.orderId!;
+  const tabsId = useId();
 
   const agent = useAgent<OrderState>({
     agent: 'order-agent',
@@ -63,13 +113,32 @@ export default function OrderPage() {
     revalidate();
   }, [state.updatedAt, revalidate]);
 
+  // Land on what needs attention: a new wait, or a rollback, brings the Actions tab forward.
+  const waitKey = state.waits.map((w) => w.eventType).join('|');
+  const prevWaitKey = useRef(waitKey);
+  const wasRolled = useRef(rolledBack(state));
+  useEffect(() => {
+    if (waitKey && waitKey !== prevWaitKey.current) setTab('actions');
+    prevWaitKey.current = waitKey;
+  }, [waitKey]);
+  useEffect(() => {
+    const now = rolledBack(state);
+    if (now && !wasRolled.current) setTab('actions');
+    wasRolled.current = now;
+  }, [state]);
+
   const call = async (label: string, method: string, args: unknown[]) => {
     setBusy(label);
     setError(null);
     try {
       return await agent.call(method, args);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const detail = e instanceof Error ? e.message : String(e);
+      setError(
+        /not waiting/i.test(detail)
+          ? 'That step is no longer waiting. It was decided elsewhere or escalated.'
+          : `That did not go through. ${detail}`,
+      );
     } finally {
       setBusy(null);
     }
@@ -88,67 +157,180 @@ export default function OrderPage() {
       ),
     [state.nodes],
   );
+  const select = (id: string) => {
+    setSelected(id);
+    setTab('node');
+  };
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    {
+      id: 'actions',
+      label: rolledBack(state) && !state.waits.length ? 'Rollback' : 'Actions',
+      count: state.waits.length || undefined,
+    },
+    { id: 'activity', label: 'Activity' },
+    { id: 'details', label: 'Details' },
+    { id: 'chat', label: 'Chat' },
+    { id: 'node', label: 'Node' },
+  ];
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-6 py-3">
-        <div className="min-w-0">
-          <div className="text-muted-foreground text-xs">
-            <Link to="/orders" className="hover:underline">
+    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+      <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
+        <div className="min-w-0 flex-1">
+          <div className="caption">
+            <Link to="/orders" className="hover:text-foreground hover:underline">
               Orders
             </Link>{' '}
             / {ORDER_TYPE_LABELS[order.type as OrderType]}
           </div>
-          <h1 className="flex items-center gap-2 truncate font-semibold text-lg tracking-tight">
-            {order.title || order.id}
+          <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold font-serif text-xl leading-tight">
+            <span className="min-w-0 truncate">
+              {order.title || ORDER_TYPE_LABELS[order.type as OrderType]}{' '}
+              <span className="font-mono font-normal text-base text-muted-foreground">
+                {orderRef(order.id)}
+              </span>
+            </span>
             <StatusBadge status={state.status} />
           </h1>
-          <div className="font-mono text-[11px] text-muted-foreground">
-            {order.id} · {flow.name} v{flow.version}
-            {state.generation > 1 ? ` · run ${state.generation}` : ''}
-            {order.customerId ? ` · ${order.customerId}` : ''}
-          </div>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {customerName ?? order.customerId ?? 'No customer'} · {flow.name} v{flow.version}
+            {state.generation > 1 ? ` · run ${state.generation}` : ''} ·{' '}
+            <span className="select-all font-mono">{order.id}</span>
+          </p>
         </div>
-        <div className="ml-auto flex items-center gap-4">
+        <div className="flex items-center gap-4">
           <div className="text-right">
             <div className="font-semibold text-lg tabular">
               {money(order.total, order.currency)}
             </div>
-            <div className="text-muted-foreground text-xs">
-              {order.lines.length} lines · tax {money(order.tax, order.currency)}
+            <div className="text-muted-foreground text-xs tabular">
+              {plural(order.lines.length, 'line')} · tax {money(order.tax, order.currency)}
             </div>
           </div>
           {!terminal ? (
             <Button
               variant="outline"
               size="sm"
-              disabled={!!busy}
-              onClick={() => {
-                const reason = window.prompt('Cancel this order? Reason:', 'Customer cancelled');
-                if (reason) void call('cancel', 'cancel', [reason]);
-              }}
+              disabled={!!busy || cancelling}
+              onClick={() => setCancelling(true)}
             >
-              <CircleSlash /> Cancel
+              <CircleSlash /> Cancel order
             </Button>
           ) : null}
         </div>
       </header>
 
-      {state.reason && terminal ? (
+      {cancelling && !terminal ? (
+        <CancelPanel
+          busy={busy === 'cancel'}
+          onKeep={() => setCancelling(false)}
+          onCancel={async (reason) => {
+            await call('cancel', 'cancel', [reason]);
+            setCancelling(false);
+          }}
+        />
+      ) : null}
+
+      {terminal ? (
         <div
-          className={cn(
-            'border-b px-6 py-2 text-sm',
-            state.status === 'completed' ? 'text-ok' : 'text-wait',
-          )}
+          className="flex items-start gap-2 border-b px-4 py-2 text-sm sm:px-6"
+          style={{
+            color: statusColor(state.status),
+            background: `color-mix(in oklch, ${statusColor(state.status)} 7%, transparent)`,
+          }}
         >
-          {state.status === 'rolled_back' ? <Undo2 className="mr-1.5 inline size-3.5" /> : null}
-          {state.reason}
-          {state.rollback ? ` — rollback ${state.rollback.outcome}` : ''}
+          {state.status === 'rolled_back' ? (
+            <Undo2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          ) : null}
+          <p>
+            <span className="font-medium">{humanize(state.status)}.</span>{' '}
+            {sentence(state.reason || finishedAt(state))}
+            {state.rollback
+              ? state.rollback.outcome === 'complete'
+                ? ' Every completed step that can be undone was reversed.'
+                : ' Some steps could not be reversed; see Rollback.'
+              : ''}
+          </p>
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-h-[420px] p-4">
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+        <aside className="flex max-h-[75vh] min-h-0 flex-col border-b lg:col-start-2 lg:max-h-none lg:row-start-1 lg:border-b-0 lg:border-l">
+          <div
+            role="tablist"
+            aria-label="Order panels"
+            className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
+            onKeyDown={(e) => {
+              const i = tabs.findIndex((t) => t.id === tab);
+              const next =
+                e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : undefined;
+              if (next === undefined) return;
+              e.preventDefault();
+              const t = tabs[(next + tabs.length) % tabs.length]!;
+              setTab(t.id);
+              document.getElementById(`${tabsId}-${t.id}`)?.focus();
+            }}
+          >
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                id={`${tabsId}-${t.id}`}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                aria-controls={`${tabsId}-panel`}
+                tabIndex={tab === t.id ? 0 : -1}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 py-2 font-medium text-[13px] text-muted-foreground hover:text-foreground',
+                  tab === t.id && 'border-foreground text-foreground',
+                )}
+              >
+                {t.label}
+                {t.count ? (
+                  <span className="rounded-sm bg-wait/15 px-1.5 py-px text-[11px] text-wait tabular">
+                    {t.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+          {error ? (
+            <div
+              role="alert"
+              className="flex items-start gap-3 border-b bg-bad/10 px-4 py-2 text-bad text-sm"
+            >
+              <p className="flex-1">{error}</p>
+              <button type="button" className="text-xs underline" onClick={() => setError(null)}>
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+          <div
+            id={`${tabsId}-panel`}
+            role="tabpanel"
+            aria-labelledby={`${tabsId}-${tab}`}
+            className="min-h-0 flex-1 overflow-y-auto p-4"
+          >
+            {/* Stays mounted while hidden so an open undo window survives a tab switch. */}
+            <div hidden={tab !== 'actions'}>
+              <Compensation state={state} records={records} onSelect={select} />
+              <Actions state={state} busy={busy} call={call} by={by} onSelect={select} />
+            </div>
+            {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
+            {tab === 'details' ? <Details state={state} records={records} /> : null}
+            {tab === 'chat' ? <Chat state={state} busy={busy} call={call} /> : null}
+            {tab === 'node' ? (
+              node ? (
+                <Inspector node={node} run={state.nodes[node.id]} />
+              ) : (
+                <Empty>Select a step on the graph to see its settings and last result.</Empty>
+              )
+            ) : null}
+          </div>
+        </aside>
+        <div className="h-[60vh] min-h-[360px] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:h-auto">
           <FlowCanvas
             graph={flow}
             runs={state.nodes}
@@ -161,144 +343,264 @@ export default function OrderPage() {
             }}
           />
         </div>
-
-        <aside className="flex min-h-0 flex-col border-l">
-          <nav className="flex gap-1 border-b px-3 pt-2">
-            {(['actions', 'activity', 'details', 'chat', 'node'] as Tab[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={cn(
-                  '-mb-px rounded-t-md border-b-2 border-transparent px-2.5 py-1.5 font-medium text-xs capitalize text-muted-foreground hover:text-foreground',
-                  tab === t && 'border-primary text-foreground',
-                )}
-              >
-                {t}
-                {t === 'actions' && state.waits.length ? (
-                  <span className="ml-1 rounded-full bg-wait/20 px-1.5 text-wait">
-                    {state.waits.length}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </nav>
-          {error ? (
-            <div className="border-b bg-bad/10 px-4 py-2 text-bad text-xs">{error}</div>
-          ) : null}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {tab === 'actions' ? <Actions state={state} busy={busy} call={call} /> : null}
-            {tab === 'activity' ? (
-              <Activity
-                state={state}
-                onSelect={(id) => {
-                  setSelected(id);
-                  setTab('node');
-                }}
-              />
-            ) : null}
-            {tab === 'details' ? <Details state={state} records={records} /> : null}
-            {tab === 'chat' ? <Chat state={state} busy={busy} call={call} /> : null}
-            {tab === 'node' ? (
-              node ? (
-                <Inspector node={node} run={state.nodes[node.id]} />
-              ) : (
-                <Empty>Select a node on the graph.</Empty>
-              )
-            ) : null}
-          </div>
-        </aside>
       </div>
     </div>
   );
 }
 
+function CancelPanel({
+  busy,
+  onKeep,
+  onCancel,
+}: {
+  busy: boolean;
+  onKeep: () => void;
+  onCancel: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('Customer cancelled');
+  const id = useId();
+  return (
+    <form
+      className="flex flex-wrap items-end gap-3 border-b bg-bad/[0.05] px-4 py-3 sm:px-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reason.trim()) onCancel(reason.trim());
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onKeep();
+      }}
+    >
+      <div className="min-w-0 flex-1 basis-72">
+        <p className="font-medium text-sm">Cancel this order?</p>
+        <p className="text-muted-foreground text-xs">
+          The flow stops, and completed steps that can be undone (reservations, card authorizations,
+          shipments) are reversed.
+        </p>
+        <label htmlFor={id} className="caption mt-2 block">
+          Reason, kept in the order history
+        </label>
+        <Input
+          id={id}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          className="mt-1 h-8 max-w-md"
+          autoFocus
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={onKeep}>
+          Keep order
+        </Button>
+        <Button type="submit" variant="destructive" size="sm" disabled={busy || !reason.trim()}>
+          {busy ? 'Cancelling…' : 'Cancel order'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 type Call = (label: string, method: string, args: unknown[]) => Promise<unknown>;
 
-function Actions({ state, busy, call }: { state: OrderState; busy: string | null; call: Call }) {
-  const [notes, setNotes] = useState<Record<string, string>>({});
+/** The rollback as a ledger: what failed, then each reversed step in the order it was undone. */
+function Compensation({
+  state,
+  records,
+  onSelect,
+}: {
+  state: OrderState;
+  records: Records;
+  onSelect: (id: string) => void;
+}) {
+  if (!rolledBack(state)) return null;
+  const flow = state.flow!;
+  const label = (id: string) => flow.nodes.find((n) => n.id === id)?.label ?? id;
+  const undoneAt = new Map(
+    state.timeline.filter((t) => t.kind === 'rollback' && t.nodeId).map((t) => [t.nodeId!, t.at]),
+  );
+  const reversed = Object.entries(state.nodes)
+    .filter(([, r]) => r.status === 'rolled_back')
+    .sort((a, b) => (undoneAt.get(a[0]) ?? 0) - (undoneAt.get(b[0]) ?? 0));
+  const cause = Object.entries(state.nodes).find(([, r]) => r.status === 'failed');
+  const voided = records.payments
+    .filter((p) => p.status === 'voided')
+    .reduce((s, p) => s + p.amount, 0);
+  const failed = state.rollback?.outcome === 'failed';
+
+  return (
+    <section aria-labelledby="rollback-title" className="mb-6">
+      <h2 id="rollback-title" className="section-title flex items-center gap-2">
+        <Undo2 className="size-4 text-undo" aria-hidden="true" />
+        {failed ? 'Rollback incomplete' : state.rollback ? 'Rolled back' : 'Rolling back'}
+      </h2>
+      {!cause && state.reason ? <p className="mt-1 text-sm">{sentence(state.reason)}</p> : null}
+      {cause ? (
+        <p className="mt-1 text-sm">
+          Stopped at{' '}
+          <button
+            type="button"
+            className="font-medium text-link hover:underline"
+            onClick={() => onSelect(cause[0])}
+          >
+            {label(cause[0])}
+          </button>
+          {cause[1].error ? (
+            <span className="text-muted-foreground">: {cause[1].error}</span>
+          ) : null}
+        </p>
+      ) : null}
+      <table className="mt-3 w-full text-sm">
+        <caption className="sr-only">Steps reversed, in the order they were undone</caption>
+        <thead>
+          <tr className="border-b text-left">
+            <th scope="col" className="caption pb-1.5 font-medium">
+              Step
+            </th>
+            <th scope="col" className="caption pb-1.5 font-medium">
+              Reversed
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {reversed.length ? (
+            reversed.map(([id, r]) => (
+              <tr key={id} className="align-top">
+                <td className="py-2 pr-3">
+                  <button
+                    type="button"
+                    className="text-left hover:underline"
+                    onClick={() => onSelect(id)}
+                  >
+                    {label(id)}
+                  </button>
+                </td>
+                <td className="py-2 text-muted-foreground">
+                  {/^(Released|Voided) 0 /.test(r.summary ?? '')
+                    ? 'Nothing had been done yet'
+                    : (r.summary ?? 'Reversed')}
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={2} className="py-2 text-muted-foreground">
+                Nothing had been done that needed undoing.
+              </td>
+            </tr>
+          )}
+        </tbody>
+        <tfoot>
+          <tr className="double-rule border-t">
+            <td className="pt-2 pb-1.5 font-medium">{plural(reversed.length, 'step')} reversed</td>
+            <td className="pt-2 pb-1.5 text-right font-medium tabular">
+              {voided ? `${money(voided)} released to the card` : ''}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      {failed ? (
+        <p className="mt-3 text-bad text-sm">
+          {state.rollback?.error ? `${state.rollback.error}. ` : ''}Check Payments and Shipments
+          under Details and settle what is left by hand.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function Actions({
+  state,
+  busy,
+  call,
+  by,
+  onSelect,
+}: {
+  state: OrderState;
+  busy: string | null;
+  call: Call;
+  by: string;
+  onSelect: (id: string) => void;
+}) {
   if (!state.waits.length) {
+    if (rolledBack(state)) return null;
     return (
       <Empty>
         {TERMINAL_ORDER_STATUSES.includes(state.status)
-          ? 'This order has finished.'
-          : 'Nothing is waiting on a person or an event right now.'}
+          ? 'This order has finished. Its history is under Activity.'
+          : 'Nothing is waiting on a person or an outside event. The flow is running on its own.'}
       </Empty>
     );
   }
+  const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
   return (
     <div className="space-y-3">
       {state.waits.map((w) => (
-        <div key={w.eventType} className="rounded-md border border-wait/30 bg-wait/5 p-3">
-          <div className="flex items-center gap-2 text-[11px] text-wait uppercase tracking-wide">
-            <StatusDot status="waiting" />{' '}
-            {w.kind === 'approval' ? `Approval · ${w.assignee}` : 'Waiting for event'}
+        <div key={w.eventType} className="rounded-md border border-wait/35 bg-wait/[0.06] p-3">
+          <div className="flex items-center gap-2 text-wait text-xs">
+            <StatusDot status="waiting" />
+            {w.kind === 'approval'
+              ? `Approval for ${humanize(w.assignee) || 'anyone'}`
+              : 'Waiting for an outside event'}
+            <span className="ml-auto text-muted-foreground">since {ago(w.since)}</span>
           </div>
-          <div className="mt-1 font-medium text-sm">{w.title}</div>
-          <div className="mt-0.5 text-muted-foreground text-xs">
-            since {ago(w.since)}
-            {w.deadline
-              ? ` · ${w.kind === 'approval' ? 'escalates' : 'times out'} ${new Date(w.deadline).toLocaleString()}`
-              : ''}
-          </div>
+          <button
+            type="button"
+            className="mt-1.5 text-left font-medium text-sm hover:underline"
+            onClick={() => onSelect(w.nodeId)}
+          >
+            {label(w.nodeId)}
+          </button>
           {w.kind === 'approval' ? (
             <>
-              <Input
-                placeholder="Note (optional)"
-                className="mt-3 h-8 text-xs"
-                value={notes[w.nodeId] ?? ''}
-                onChange={(e) => setNotes((n) => ({ ...n, [w.nodeId]: e.target.value }))}
-              />
-              <div className="mt-2 flex gap-2">
-                <Button
-                  size="sm"
+              <DecisionContext ctx={approvalContext(state, w.nodeId)} className="mt-1" />
+              <div className="mt-3">
+                <DecisionControls
+                  busy={busy === 'decide'}
                   disabled={!!busy}
-                  onClick={() =>
-                    call('approve', 'decide', [w.nodeId, 'approved', 'operator', notes[w.nodeId]])
+                  onDecide={(decision, note) =>
+                    void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
                   }
-                >
-                  <Check /> Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!!busy}
-                  onClick={() =>
-                    call('reject', 'decide', [w.nodeId, 'rejected', 'operator', notes[w.nodeId]])
+                  onFlush={(decision, note) =>
+                    sendDecision(state.orderId!, w.nodeId, decision, note)
                   }
-                >
-                  <X /> Reject
-                </Button>
+                />
               </div>
             </>
           ) : (
-            <Button
-              size="sm"
-              className="mt-3"
-              disabled={!!busy}
-              onClick={() =>
-                call('event', 'deliver', [
-                  w.event,
-                  { source: 'dashboard', amount: state.order?.total },
-                ])
-              }
-            >
-              <Zap /> Simulate <span className="font-mono">{w.event}</span>
-            </Button>
+            <>
+              <p className="mt-1 text-muted-foreground text-xs">
+                Resumes when <span className="font-mono text-foreground">{w.event}</span> arrives
+                {w.deadline ? `, or times out ${new Date(w.deadline).toLocaleString()}` : ''}.
+                Systems send it to{' '}
+                <span className="break-all font-mono">
+                  POST /api/v1/orders/{state.orderId}/events
+                </span>
+                .
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                disabled={!!busy}
+                onClick={() =>
+                  call('event', 'deliver', [
+                    w.event,
+                    { source: 'dashboard', amount: state.order?.total },
+                  ])
+                }
+              >
+                <Zap /> Simulate {w.event}
+              </Button>
+            </>
           )}
         </div>
       ))}
-      <p className="text-muted-foreground text-xs">
-        External systems resume these with{' '}
-        <span className="font-mono">POST /api/v1/orders/{state.orderId}/events</span>.
-      </p>
     </div>
   );
 }
 
 const KIND_TONE: Record<string, string> = {
   approval: 'text-wait',
-  event: 'text-primary',
+  event: 'text-link',
   ai: 'text-ai',
   rollback: 'text-undo',
   order: 'text-foreground',
@@ -307,24 +609,31 @@ const KIND_TONE: Record<string, string> = {
 
 function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: string) => void }) {
   const items = [...state.timeline].reverse();
+  const start = state.timeline[0]?.at ?? 0;
+  const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
+  if (!items.length) return <Empty>Nothing has happened yet.</Empty>;
   return (
     <ol className="space-y-2.5">
       {items.map((t, i) => (
-        <li key={`${t.at}-${i}`} className="flex gap-3 text-xs">
-          <span className="w-16 shrink-0 text-right text-muted-foreground tabular">
-            {new Date(t.at).toLocaleTimeString()}
-          </span>
+        <li key={`${t.at}-${i}`} className="flex gap-3 text-sm">
+          <time
+            dateTime={new Date(t.at).toISOString()}
+            title={new Date(t.at).toLocaleString()}
+            className="w-14 shrink-0 pt-px text-right text-muted-foreground text-xs tabular"
+          >
+            {offset(t.at, start)}
+          </time>
           <span className={cn('min-w-0 flex-1', KIND_TONE[t.kind])}>
             {t.nodeId ? (
               <button
                 type="button"
-                className="mr-1 font-mono text-[11px] text-primary/80 hover:underline"
+                className="mr-1.5 font-medium text-foreground hover:underline"
                 onClick={() => onSelect(t.nodeId!)}
               >
-                {t.nodeId}
+                {label(t.nodeId)}
               </button>
             ) : null}
-            {t.message}
+            {plainLog(t.nodeId ? t.message.replace(`${label(t.nodeId)}: `, '') : t.message)}
           </span>
         </li>
       ))}
@@ -332,27 +641,38 @@ function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: strin
   );
 }
 
-function Details({
-  state,
-  records,
-}: {
-  state: OrderState;
-  records: Awaited<ReturnType<typeof orderRecords>>;
-}) {
+function Details({ state, records }: { state: OrderState; records: Records }) {
   const o = state.order!;
   return (
-    <div className="space-y-5 text-sm">
+    <div className="space-y-6 text-sm">
       <section>
-        <h3 className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-          Lines
-        </h3>
+        <h3 className="section-title mb-2">Lines</h3>
         {o.lines.length ? (
-          <table className="w-full text-xs">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b text-left">
+                <th scope="col" className="caption pb-1.5 font-medium">
+                  Item
+                </th>
+                <th scope="col" className="caption pb-1.5 text-right font-medium">
+                  Qty
+                </th>
+                <th scope="col" className="caption pb-1.5 text-right font-medium">
+                  Amount
+                </th>
+              </tr>
+            </thead>
             <tbody className="divide-y">
               {o.lines.map((l) => (
                 <tr key={l.sku}>
-                  <td className="py-1.5 font-mono">{l.sku}</td>
-                  <td className="py-1.5 text-muted-foreground">{l.name}</td>
+                  <td className="py-1.5 pr-2">
+                    {l.name ?? l.sku}
+                    {l.name ? (
+                      <span className="ml-1.5 font-mono text-muted-foreground text-xs">
+                        {l.sku}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="py-1.5 text-right tabular">{l.qty}</td>
                   <td className="py-1.5 text-right tabular">
                     {l.unitPrice !== undefined ? money(l.unitPrice * l.qty, o.currency) : '—'}
@@ -360,16 +680,30 @@ function Details({
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t">
+                <td colSpan={2} className="pt-1.5 text-muted-foreground">
+                  Tax
+                </td>
+                <td className="pt-1.5 text-right tabular">{money(o.tax, o.currency)}</td>
+              </tr>
+              <tr className="double-rule">
+                <td colSpan={2} className="pt-1 pb-1 font-medium">
+                  Total
+                </td>
+                <td className="pt-1 pb-1 text-right font-semibold tabular">
+                  {money(o.total, o.currency)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         ) : (
-          <p className="text-muted-foreground text-xs">No lines yet.</p>
+          <p className="text-muted-foreground">No lines yet.</p>
         )}
       </section>
       {records.documents.length ? (
         <section>
-          <h3 className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-            Documents (R2)
-          </h3>
+          <h3 className="section-title mb-2">Documents</h3>
           <ul className="space-y-1">
             {records.documents.map((d) => (
               <li key={d.id}>
@@ -377,55 +711,60 @@ function Details({
                   href={`/docs/${d.r2Key}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-primary text-xs hover:underline"
+                  className="inline-flex items-center gap-1.5 text-link hover:underline"
                 >
-                  <FileText className="size-3.5" /> {d.kind} · {d.r2Key.split('/').pop()}
+                  <FileText className="size-3.5" aria-hidden="true" /> {humanize(d.kind)} ·{' '}
+                  {d.r2Key.split('/').pop()}
                 </a>
               </li>
             ))}
           </ul>
         </section>
       ) : null}
-      <Records
+      <Ledger
         title="Payments"
-        rows={records.payments.map((p) => `${p.kind} · ${money(p.amount)} · ${p.status}`)}
+        rows={records.payments.map((p) => [humanize(p.kind), humanize(p.status), money(p.amount)])}
       />
-      <Records
+      <Ledger
         title="Shipments"
-        rows={records.shipments.map(
-          (s) => `${s.carrier.toUpperCase()} ${s.tracking} · ${s.status}`,
-        )}
+        rows={records.shipments.map((s) => [
+          `${s.carrier.toUpperCase()} ${s.tracking}`,
+          humanize(s.status),
+          '',
+        ])}
       />
-      <Records
+      <Ledger
         title="Messages sent"
-        rows={records.messages.map((m) => `→ ${m.recipient}: ${m.subject}`)}
+        rows={records.messages.map((m) => [m.subject, m.recipient, ''])}
       />
-      <section>
-        <h3 className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-          Variables
-        </h3>
-        <pre className="overflow-auto rounded-lg bg-muted/40 p-2 font-mono text-[11px]">
+      <details className="group">
+        <summary className="caption cursor-pointer hover:text-foreground">
+          Flow variables (for debugging)
+        </summary>
+        <pre className="mt-2 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
           {JSON.stringify(state.vars, null, 2)}
         </pre>
-      </section>
+      </details>
     </div>
   );
 }
 
-function Records({ title, rows }: { title: string; rows: string[] }) {
+function Ledger({ title, rows }: { title: string; rows: [string, string, string][] }) {
   if (!rows.length) return null;
   return (
     <section>
-      <h3 className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-        {title}
-      </h3>
-      <ul className="space-y-1 text-xs">
-        {rows.map((r, i) => (
-          <li key={`${title}-${i}`} className="text-muted-foreground">
-            {r}
-          </li>
-        ))}
-      </ul>
+      <h3 className="section-title mb-2">{title}</h3>
+      <table className="w-full">
+        <tbody className="divide-y">
+          {rows.map((r, i) => (
+            <tr key={`${title}-${i}`}>
+              <td className="py-1.5 pr-2">{r[0]}</td>
+              <td className="py-1.5 pr-2 text-muted-foreground">{r[1]}</td>
+              <td className="py-1.5 text-right tabular">{r[2]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -443,39 +782,44 @@ function Chat({ state, busy, call }: { state: OrderState; busy: string | null; c
   };
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3">
+      <div className="flex-1 space-y-3" aria-live="polite">
         {state.chat.length === 0 ? (
           <Empty>
-            Ask the order’s agent anything: “why is this waiting?”, “approve it with a note”, “mark
-            payment received”.
+            Ask this order’s agent: “why is this waiting?”, “approve it with a note”, “mark payment
+            received”.
           </Empty>
         ) : null}
         {state.chat.map((m) => (
           <div key={m.id} className={cn('flex gap-2', m.role === 'user' && 'justify-end')}>
-            {m.role === 'assistant' ? <Bot className="mt-1 size-4 shrink-0 text-ai" /> : null}
+            {m.role === 'assistant' ? (
+              <Bot className="mt-1 size-4 shrink-0 text-ai" aria-label="Agent" />
+            ) : null}
             <div
               className={cn(
                 'max-w-[85%] rounded-md px-3 py-2 text-sm',
-                m.role === 'user' ? 'bg-primary/15' : 'bg-muted/50',
+                m.role === 'user' ? 'bg-link/12' : 'bg-muted/60',
               )}
             >
               <div className="whitespace-pre-wrap">{m.content}</div>
               {m.tools?.length ? (
-                <div className="mt-1.5 space-y-0.5">
+                <ul className="mt-1.5 space-y-0.5">
                   {m.tools.map((t, i) => (
-                    <div
+                    <li
                       key={`${m.id}-${i}`}
-                      className="font-mono text-[10.5px] text-muted-foreground"
+                      className="flex items-start gap-1.5 font-mono text-muted-foreground text-xs"
                     >
-                      ⚙ {t.name}({JSON.stringify(t.args)})
-                    </div>
+                      <Wrench className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0 break-all">
+                        {t.name}({JSON.stringify(t.args)})
+                      </span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               ) : null}
             </div>
           </div>
         ))}
-        {busy === 'chat' ? <div className="text-muted-foreground text-xs">Thinking…</div> : null}
+        {busy === 'chat' ? <div className="text-muted-foreground text-sm">Thinking…</div> : null}
         <div ref={end} />
       </div>
       <form
@@ -489,6 +833,7 @@ function Chat({ state, busy, call }: { state: OrderState; busy: string | null; c
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Message the order agent"
+          aria-label="Message the order agent"
           className="h-9"
         />
         <Button type="submit" size="icon" disabled={!!busy || !text.trim()} aria-label="Send">

@@ -16,7 +16,21 @@ export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
 export const statusColor = (s: string | undefined) =>
   STATUS_COLOR[(s ?? 'pending') as NodeStatus] ?? 'var(--idle)';
 
-export const statusLabel = (s: string) => s.replace(/_/g, ' ');
+/** Sentence-case status for badges: "rolled_back" → "Rolled back". */
+export const statusLabel = (s: string) => humanize(s);
+
+/** Internal identifiers to operator words: "sales_ops" → "Sales ops", "net_30" → "Net 30". */
+export function humanize(s: string | null | undefined) {
+  if (!s) return '';
+  const t = s.replace(/[_-]+/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** Whole quantities with thousands separators: 25000 → "25,000". */
+export const count = (n: number) => new Intl.NumberFormat('en-US').format(n);
+
+/** "1 line" / "3 lines". */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function money(n: number | null | undefined, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
@@ -38,4 +52,57 @@ export function ago(ms: number | null | undefined, now = Date.now()) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export const shortId = (id: string) => (id.length > 14 ? `${id.slice(0, 4)}…${id.slice(-8)}` : id);
+/** Time remaining until a deadline: "in 42m", "in 3h", or "overdue". */
+export function until(ms: number | null | undefined, now = Date.now()) {
+  if (!ms) return '';
+  const s = Math.round((ms - now) / 1000);
+  if (s <= 0) return 'overdue';
+  if (s < 120) return `in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `in ${h}h`;
+  return `in ${Math.round(h / 24)}d`;
+}
+
+/** Elapsed time since the first entry, for logs whose wall-clock times collapse under TIME_SCALE. */
+export function offset(ms: number, from: number) {
+  const s = Math.max(0, (ms - from) / 1000);
+  if (s < 60) return `+${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `+${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+}
+
+/**
+ * What an order waits on, without engine identifiers: "Approve B2B order ord_x1 for cus_contoso"
+ * reads "Approve B2B order". Same waits then group together.
+ */
+export const waitLabel = (s: string | null | undefined): string =>
+  (s ?? '')
+    .split(' · ')
+    .map((part) => cleanWait(part))
+    .filter(Boolean)
+    .join(' · ');
+
+const cleanWait = (s: string) =>
+  s
+    .replace(/^Waiting for\s+/i, '')
+    .replace(/\s+for\s+cus_[\w-]+/g, '')
+    .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+/** A short, sayable reference that tells look-alike orders apart: "ord_mv65gsxyqcs34m" → "#qcs34m". */
+export const orderRef = (id: string) => `#${id.slice(-6)}`;
+
+/**
+ * Engine log lines in operator words: drops ids ("ord_…", "cus_…") and humanizes role slugs in
+ * parentheses, e.g. "(sales_ops)" → "(Sales ops)".
+ */
+export const plainLog = (s: string) =>
+  s
+    .replace(/\s*\bfor\s+cus_[\w-]+/g, '')
+    .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')
+    .replace(/\(([a-z]+(?:_[a-z]+)+)\)/g, (_, slug: string) => `(${humanize(slug)})`)
+    .replace(/\s{2,}/g, ' ')
+    .trim();

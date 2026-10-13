@@ -18,6 +18,7 @@ import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
 import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { statusLabel } from '~/lib/format';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
 export function Field({
@@ -33,12 +34,8 @@ export function Field({
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children, inside the label
     <label className="block">
       <span className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-          {label}
-        </span>
-        {hint ? (
-          <span className="truncate text-[11px] text-muted-foreground/70">{hint}</span>
-        ) : null}
+        <span className="caption">{label}</span>
+        {hint ? <span className="truncate text-muted-foreground text-xs">{hint}</span> : null}
       </span>
       {children}
     </label>
@@ -67,7 +64,7 @@ export function Inspector({
       <div className="flex items-start gap-2.5">
         {spec ? (
           <span
-            className="grid size-8 shrink-0 place-items-center rounded-lg"
+            className="grid size-8 shrink-0 place-items-center rounded-md"
             style={{
               background: `color-mix(in oklch, ${CATEGORY_COLOR[spec.category]} 16%, transparent)`,
               color: CATEGORY_COLOR[spec.category],
@@ -129,22 +126,20 @@ export function Inspector({
       ) : null}
 
       <div>
-        <div className="mb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-          Outputs
-        </div>
+        <h3 className="section-title mb-1.5">Outputs</h3>
         <div className="flex flex-wrap gap-1">
           {nodeOutputs(node.type, config).map((o) => (
-            <span key={o} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+            <span key={o} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
               {o}
             </span>
           ))}
           {spec?.loop ? (
-            <span className="rounded bg-wait/15 px-1.5 py-0.5 font-mono text-[11px] text-wait">
-              ← next
+            <span className="rounded bg-wait/15 px-1.5 py-0.5 font-mono text-wait text-xs">
+              next (loop back)
             </span>
           ) : null}
           {spec?.rollback ? (
-            <span className="rounded bg-undo/15 px-1.5 py-0.5 text-[11px] text-undo">
+            <span className="rounded bg-undo/15 px-1.5 py-0.5 text-undo text-xs">
               compensated on failure
             </span>
           ) : null}
@@ -152,20 +147,19 @@ export function Inspector({
       </div>
 
       {run && run.status !== 'pending' ? (
-        <div className="rounded-lg border bg-muted/30 p-3">
-          <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-            Last run
-          </div>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <h3 className="section-title">Last run</h3>
           <div className="mt-1 text-sm">
-            {run.status} {run.runs > 1 ? `· ${run.runs} runs` : ''}{' '}
-            {run.branches?.length ? `→ ${run.branches.join(', ')}` : ''}
+            {statusLabel(run.status)}
+            {run.runs > 1 ? ` · ${run.runs} runs` : ''}
+            {run.branches?.length ? ` · took ${run.branches.join(', ')}` : ''}
           </div>
           {run.summary ? (
             <div className="mt-1 text-muted-foreground text-xs">{run.summary}</div>
           ) : null}
-          {run.error ? <div className="mt-1 text-bad text-xs">{run.error}</div> : null}
+          {run.error ? <div className="mt-1 text-bad text-sm">{run.error}</div> : null}
           {run.output !== undefined ? (
-            <pre className="mt-2 max-h-56 overflow-auto rounded bg-background/60 p-2 font-mono text-[11px]">
+            <pre className="mt-2 max-h-56 overflow-auto rounded bg-background/60 p-2 font-mono text-xs">
               {JSON.stringify(run.output, null, 2)}
             </pre>
           ) : null}
@@ -328,9 +322,9 @@ function JsonInput({
             setError('Not valid JSON yet');
           }
         }}
-        className="font-mono text-[11px]"
+        className="font-mono text-xs"
       />
-      {error ? <span className="mt-1 block text-[11px] text-wait">{error}</span> : null}
+      {error ? <span className="mt-1 block text-wait text-xs">{error}</span> : null}
     </Field>
   );
 }

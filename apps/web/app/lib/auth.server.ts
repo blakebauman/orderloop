@@ -69,3 +69,11 @@ export async function signIn(given: string): Promise<string | null> {
 
 export const signOutCookie = `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 export const authEnabled = () => !!password();
+
+/**
+ * Who is acting, for the approval audit trail. Behind Cloudflare Access this is the signed-in
+ * email; with the shared password there is no individual identity, so it stays "operator".
+ */
+export function actor(request: Request): string {
+  return request.headers.get('cf-access-authenticated-user-email')?.trim() || 'operator';
+}

@@ -1,10 +1,11 @@
 import { cn } from '@orderloop/ui/lib/utils';
-import { statusColor, statusLabel } from '~/lib/format';
+import { humanize, statusColor, statusLabel } from '~/lib/format';
 
 export function StatusDot({ status, className }: { status?: string; className?: string }) {
   const live = status === 'running' || status === 'waiting';
   return (
     <span
+      aria-hidden="true"
       className={cn(
         'inline-block size-2 shrink-0 rounded-full',
         live && 'motion-safe:animate-pulse',
@@ -15,16 +16,47 @@ export function StatusDot({ status, className }: { status?: string; className?: 
   );
 }
 
-/** Status as a ledger stamp: mono caps in the status colour on a faint tint. */
-export function StatusBadge({ status }: { status: string }) {
-  const color = statusColor(status);
+function Stamp({ color, label, live }: { color: string; label: string; live?: boolean }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 font-mono font-semibold text-[10.5px] uppercase tracking-wider"
-      style={{ color, background: `color-mix(in oklch, ${color} 12%, transparent)` }}
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium text-xs"
+      style={{ color, background: `color-mix(in oklch, ${color} 11%, transparent)` }}
     >
-      <StatusDot status={status} className="size-1.5" />
-      {statusLabel(status)}
+      <span
+        aria-hidden="true"
+        className={cn('size-1.5 rounded-full', live && 'motion-safe:animate-pulse')}
+        style={{ background: color }}
+      />
+      {label}
     </span>
+  );
+}
+
+/** Order or step status: a small tinted stamp in the status colour. */
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <Stamp
+      color={statusColor(status)}
+      label={statusLabel(status)}
+      live={status === 'running' || status === 'waiting'}
+    />
+  );
+}
+
+const APPROVAL_COLOR: Record<string, string> = {
+  pending: 'var(--wait)',
+  approved: 'var(--ok)',
+  rejected: 'var(--bad)',
+  escalated: 'var(--undo)',
+};
+
+/** Approval decisions have their own vocabulary; never borrow order statuses for them. */
+export function ApprovalBadge({ status }: { status: string }) {
+  return (
+    <Stamp
+      color={APPROVAL_COLOR[status] ?? 'var(--idle)'}
+      label={humanize(status)}
+      live={status === 'pending'}
+    />
   );
 }

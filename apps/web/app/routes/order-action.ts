@@ -1,5 +1,5 @@
 import { data } from 'react-router';
-import { requireUser } from '~/lib/auth.server';
+import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import type { Route } from './+types/order-action';
 
@@ -14,7 +14,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         params.orderId,
         String(f.get('nodeId')),
         intent === 'approve' ? 'approved' : 'rejected',
-        'operator',
+        actor(request),
         String(f.get('note') ?? '') || undefined,
       );
       return { ok: true };
@@ -32,10 +32,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       return { ok: true };
     }
   } catch (err) {
-    return data(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 400 },
-    );
+    return data({ ok: false, error: friendlyError(intent, err) }, { status: 400 });
   }
   return data({ ok: false, error: 'Unknown intent' }, { status: 400 });
+}
+
+/** Engine errors in operator words, keeping the engine's text as the detail. */
+function friendlyError(intent: string, err: unknown) {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (/not waiting/i.test(detail))
+    return 'This approval was already decided or has escalated. Refresh to see where the order is now.';
+  const what =
+    intent === 'event'
+      ? 'Could not deliver the event'
+      : intent === 'cancel'
+        ? 'Could not cancel the order'
+        : 'Could not record the decision';
+  return `${what}. ${detail}`;
 }

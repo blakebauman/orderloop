@@ -2,7 +2,7 @@ import { type Flow, flowGraphSchema } from '@orderloop/core';
 import { data } from 'react-router';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { parseFlow, publish, saveFlow } from '~/lib/flows.server';
+import { getFlow, parseFlow, publish, sameGraph, saveFlow } from '~/lib/flows.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/flow-action';
 
@@ -22,7 +22,15 @@ export async function action({ request, params }: Route.ActionArgs) {
     if (body.intent === 'save') return { saved: true, ...(await saveFlow(flow)) };
     if (body.intent === 'publish') return await publish(flow);
     if (body.intent === 'test') {
-      const res = await publish(flow);
+      // Test the live version when the graph is unchanged; publish only when there is something new.
+      const current = await getFlow(flow.id);
+      const unchanged =
+        !!current?.publishedVersion &&
+        !!current.publishedGraph &&
+        sameGraph(flow, current.publishedGraph);
+      const res = unchanged
+        ? { version: current.publishedVersion, errors: [], warnings: [] }
+        : await publish(flow);
       if (!res.version) return res;
       const sample = SCENARIOS.find((s) => s.input.type === flow.orderType);
       const { orderId } = await engine().startOrder({

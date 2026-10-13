@@ -32,9 +32,10 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react';
-import { LayoutGrid, Maximize2, Minimize2 } from 'lucide-react';
+import { Crosshair, LayoutGrid, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { statusColor } from '~/lib/format';
+import { useTheme } from '~/lib/theme';
 import { FlowNodeView, type FlowRfNode } from './flow-node';
 
 const nodeTypes = { flow: FlowNodeView };
@@ -72,7 +73,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
   );
 }
 
-function edgeId(c: {
+export function edgeId(c: {
   source: string;
   sourceHandle?: string | null;
   target: string;
@@ -82,7 +83,7 @@ function edgeId(c: {
 }
 
 /** Would adding source→target close a forward cycle? */
-function wouldCycle(graph: FlowGraph, source: string, target: string) {
+export function wouldCycle(graph: FlowGraph, source: string, target: string) {
   if (source === target) return true;
   const out = new Map<string, string[]>();
   for (const e of graph.edges)
@@ -112,6 +113,7 @@ function Inner({
   className,
 }: FlowCanvasProps) {
   const { fitView, screenToFlowPosition } = useReactFlow();
+  const { resolved: colorMode } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -190,33 +192,85 @@ function Inner({
     [graph.edges, edgeStates, runs],
   );
 
+  const liveIds = graph.nodes
+    .filter((n) => ['running', 'waiting'].includes(runs?.[n.id]?.status ?? ''))
+    .map((n) => n.id);
+  const liveKey = liveIds.join(',');
+  const liveKeyRef = useRef(liveKey);
+  liveKeyRef.current = liveKey;
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+
+  /** Frame the live step(s); with none, the first few columns from the trigger. */
+  const frame = useCallback(
+    (animate = false) => {
+      const g = graphRef.current;
+      const live = liveKeyRef.current ? liveKeyRef.current.split(',') : [];
+      // A finished run that went wrong is framed where it stopped.
+      const stopped = g.nodes
+        .filter((n) => ['failed', 'rolled_back'].includes(runsRef.current?.[n.id]?.status ?? ''))
+        .map((n) => n.id);
+      // A finished run is framed where it ended.
+      const ended = g.nodes
+        .filter(
+          (n) =>
+            n.type.startsWith('control.end') && runsRef.current?.[n.id]?.status === 'succeeded',
+        )
+        .map((n) => n.id);
+      const start = g.nodes.find((n) => n.type.startsWith('trigger.'));
+      const focus = live.length
+        ? live
+        : stopped.length
+          ? stopped
+          : ended.length
+            ? ended
+            : start
+              ? g.nodes.filter((n) => n.position.x <= start.position.x + 3 * 280).map((n) => n.id)
+              : [];
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      void fitView({
+        padding: 0.15,
+        // Wide flows would shrink to illegible; keep a readable floor.
+        minZoom: 0.7,
+        maxZoom: 1,
+        duration: animate && !reduce ? 300 : 0,
+        nodes: focus.length && g.nodes.length > 10 ? focus.map((id) => ({ id })) : undefined,
+      });
+    },
+    [fitView],
+  );
   // Fit when the graph first appears and whenever its shape changes (template load, copilot).
   const topo = topologyKey(graph);
   // biome-ignore lint/correctness/useExhaustiveDependencies: refit on topology only
   useEffect(() => {
-    const t = window.setTimeout(() => {
-      // Wide flows would shrink to illegible; keep a readable floor and show the start, or the
-      // step the order is on now.
-      const g = graphRef.current;
-      const live = g.nodes.filter((n) =>
-        ['running', 'waiting'].includes(runs?.[n.id]?.status ?? ''),
-      );
-      // No live step: frame the first few columns from the trigger, so the flow reads left to right.
-      const start = g.nodes.find((n) => n.type.startsWith('trigger.'));
-      const focus = live.length
-        ? live
-        : start
-          ? g.nodes.filter((n) => n.position.x <= start.position.x + 3 * 280)
-          : [];
-      void fitView({
-        padding: 0.12,
-        minZoom: 0.7,
-        maxZoom: 1,
-        nodes: focus.length && g.nodes.length > 10 ? focus.map((n) => ({ id: n.id })) : undefined,
-      });
-    }, 30);
+    const t = window.setTimeout(() => frame(), 30);
     return () => window.clearTimeout(t);
-  }, [topo, fitView]);
+  }, [topo, frame]);
+
+  // Follow the run: when a different step becomes live, bring it into view.
+  const firstLive = useRef(true);
+  useEffect(() => {
+    if (firstLive.current) {
+      firstLive.current = false;
+      return;
+    }
+    if (!liveKey || editable) return;
+    const t = window.setTimeout(() => frame(true), 60);
+    return () => window.clearTimeout(t);
+  }, [liveKey, editable, frame]);
+
+  // F toggles the expanded view, Escape leaves it. Ignored while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'f' || e.key === 'F') setExpanded((v) => !v);
+      else if (e.key === 'Escape') setExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowRfNode>[]) => {
@@ -293,7 +347,7 @@ function Inner({
   };
 
   return (
-    <div className={cn(surface, expanded && 'fixed inset-3 z-50 h-auto', className)}>
+    <div className={cn(surface, expanded && 'fixed inset-3 z-50 h-auto w-auto', className)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -315,7 +369,7 @@ function Inner({
         deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
         minZoom={0.2}
         maxZoom={1.6}
-        colorMode="system"
+        colorMode={colorMode}
       >
         <Background
           variant={BackgroundVariant.Dots}
@@ -335,16 +389,22 @@ function Inner({
           />
         ) : null}
         <Panel position="top-right" className="flex gap-1.5">
+          {!editable && liveIds.length ? (
+            <button type="button" className={toolbarButton} onClick={() => frame(true)}>
+              <Crosshair className="size-3.5" aria-hidden="true" /> Live step
+            </button>
+          ) : null}
           {editable ? (
-            <button type="button" className={toolbarButton} onClick={tidy} title="Re-layout">
-              <LayoutGrid className="size-3.5" /> Tidy
+            <button type="button" className={toolbarButton} onClick={tidy}>
+              <LayoutGrid className="size-3.5" aria-hidden="true" /> Tidy layout
             </button>
           ) : null}
           <button
             type="button"
             className={toolbarButton}
             onClick={() => setExpanded((v) => !v)}
-            title="Expand (F)"
+            aria-label={expanded ? 'Collapse canvas (Esc)' : 'Expand canvas (F)'}
+            title={expanded ? 'Collapse (Esc)' : 'Expand (F)'}
           >
             {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </button>
