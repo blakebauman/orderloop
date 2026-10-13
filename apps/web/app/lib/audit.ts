@@ -21,6 +21,7 @@ export const AUDIT_ACTIONS = {
   'token.revoked': 'Revoked an API token',
   'api.bearer_failed': 'API: wrong shared password',
   'api.bearer_throttled': 'API refused: too many wrong shared passwords',
+  'api.token_expired': 'API refused: expired token',
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

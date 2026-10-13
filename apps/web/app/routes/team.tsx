@@ -17,13 +17,16 @@ import {
   setRole,
   TeamError,
 } from '~/lib/team.server';
+import { DEFAULT_LIFETIME, TOKEN_LIFETIMES, type TokenState, tokenState } from '~/lib/tokens';
+import { useDateTime } from '~/lib/use-date-time';
 import type { Route } from './+types/team';
 
 export const meta = () => [{ title: 'Team · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'operator');
-  return { ...(await listTeam()), me };
+  // One clock for the page, so the server and the hydrating browser agree on each token's state.
+  return { ...(await listTeam()), me, now: Date.now() };
 }
 
 /** One-time secrets come back from the action and are shown once, never stored in the clear. */
@@ -68,7 +71,11 @@ export async function action({ request }: Route.ActionArgs) {
         await setDisabled(request, me, str('id'), str('intent') === 'disable');
         return { ok: true };
       case 'add-token': {
-        const r = await createToken(request, me, { name: str('name'), role: str('role') });
+        const r = await createToken(request, me, {
+          name: str('name'),
+          role: str('role'),
+          lifetime: str('lifetime'),
+        });
         return { secret: { label: `API token “${r.name}”`, value: r.token } as Secret };
       }
       case 'revoke':
@@ -95,7 +102,7 @@ function RoleSelect({ name = 'role', value }: { name?: string; value?: string })
 }
 
 export default function Team() {
-  const { people, tokens, me } = useLoaderData<typeof loader>();
+  const { people, tokens, me, now } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
@@ -241,7 +248,7 @@ export default function Team() {
                 {tokens.map((t) => (
                   <li
                     key={t.id}
-                    className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 ${t.revokedAt ? 'text-muted-foreground' : ''}`}
+                    className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 ${tokenState(t, now) === 'revoked' || tokenState(t, now) === 'expired' ? 'text-muted-foreground' : ''}`}
                   >
                     <span className="font-medium">{t.name}</span>
                     <code className="font-mono text-muted-foreground text-xs">{t.prefix}…</code>
@@ -257,6 +264,7 @@ export default function Team() {
                       )}
                       {t.revokedAt ? ' · revoked' : ''}
                     </span>
+                    <TokenExpiry state={tokenState(t, now)} expiresAt={t.expiresAt} />
                     {t.revokedAt ? null : (
                       <fetcher.Form method="post" className="ml-auto">
                         <input type="hidden" name="intent" value="revoke" />
@@ -274,7 +282,7 @@ export default function Team() {
             )}
             <fetcher.Form
               method="post"
-              className="grid gap-2 border-t p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"
+              className="grid gap-2 border-t p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
             >
               <input type="hidden" name="intent" value="add-token" />
               <Input
@@ -284,6 +292,18 @@ export default function Team() {
                 aria-label="Token name"
               />
               <RoleSelect value="operator" />
+              <NativeSelect
+                name="lifetime"
+                defaultValue={DEFAULT_LIFETIME}
+                className="h-8"
+                aria-label="Expires after"
+              >
+                {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
+                  <NativeSelectOption key={k} value={k}>
+                    {label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
               <Button type="submit" disabled={busy}>
                 Create token
               </Button>
@@ -334,5 +354,22 @@ function FirstOperator({ error }: { error: string | null }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** When a token stops working, flagged once it is close. */
+function TokenExpiry({ state, expiresAt }: { state: TokenState; expiresAt: number | null }) {
+  const formatTime = useDateTime();
+  if (state === 'revoked') return null;
+  if (expiresAt === null)
+    return <span className="text-muted-foreground text-xs">never expires</span>;
+  if (state === 'expired')
+    return <span className="font-medium text-bad text-xs">expired {formatTime(expiresAt)}</span>;
+  return (
+    <span
+      className={`text-xs ${state === 'expiring' ? 'font-medium text-wait' : 'text-muted-foreground'}`}
+    >
+      expires {formatTime(expiresAt)}
+    </span>
   );
 }

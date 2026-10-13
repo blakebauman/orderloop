@@ -36,6 +36,7 @@ const SESSION = '__Host-ol_session';
 const SHARED = 'ol_session';
 const SESSION_DAYS = 30;
 const TOKEN_TOUCH_MS = 5 * 60_000;
+const EXPIRED_AUDIT_MS = 60 * 60_000;
 
 const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'operator' };
 const SHARED_PRINCIPAL: Principal = {
@@ -181,9 +182,30 @@ export async function apiPrincipal(request: Request): Promise<Principal | null> 
     .where(and(eq(apiTokens.tokenHash, await sha256Hex(bearer)), isNull(apiTokens.revokedAt)))
     .get();
   if (!row) return null;
-  if (!row.lastUsedAt || Date.now() - row.lastUsedAt > TOKEN_TOUCH_MS)
-    await db().update(apiTokens).set({ lastUsedAt: Date.now() }).where(eq(apiTokens.id, row.id));
+  const now = Date.now();
+  if (row.expiresAt !== null && row.expiresAt <= now) {
+    // An integration retrying with an expired token is recorded at most hourly.
+    if (!row.lastUsedAt || now - row.lastUsedAt > EXPIRED_AUDIT_MS) {
+      await db().update(apiTokens).set({ lastUsedAt: now }).where(eq(apiTokens.id, row.id));
+      await audit(request, 'api.token_expired', {
+        target: row.name,
+        detail: { prefix: row.prefix, expiredAt: row.expiresAt },
+      });
+    }
+    throw new TokenExpired(row.expiresAt);
+  }
+  if (!row.lastUsedAt || now - row.lastUsedAt > TOKEN_TOUCH_MS)
+    await db().update(apiTokens).set({ lastUsedAt: now }).where(eq(apiTokens.id, row.id));
   return { kind: 'token', id: row.id, name: `token:${row.name}`, role: row.role as Role };
+}
+
+/** Thrown for a known API token past its expiry, so the caller hears why it stopped working. */
+export class TokenExpired extends Error {
+  constructor(readonly expiredAt: number) {
+    super(
+      `This API token expired on ${new Date(expiredAt).toISOString().slice(0, 10)}. An operator can create a new one on the Team page.`,
+    );
+  }
 }
 
 export const forbidden = (min: Role) =>
