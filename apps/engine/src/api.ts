@@ -10,10 +10,11 @@ import type {
   EngineRpc,
   OrderState,
   StartOrderInput,
+  StartOrderOnceInput,
 } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { copilot } from './ai';
-import { startOrder } from './orders';
+import { startOrder, startOrderOnce } from './orders';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   /** The web app proxies the order page's OrderAgent WebSocket (`/agents/order-agent/:id`) here. */
@@ -31,6 +32,10 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   startOrder(input: StartOrderInput) {
     return startOrder(this.env, input);
+  }
+
+  startOrderOnce(input: StartOrderOnceInput) {
+    return startOrderOnce(this.env, input);
   }
 
   async sendEvent(orderId: string, event: string, payload?: Record<string, unknown>) {

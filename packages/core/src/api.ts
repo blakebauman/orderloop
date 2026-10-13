@@ -91,11 +91,33 @@ export type StartOrderInput = {
   version?: number;
   input: OrderInput;
   vars?: Record<string, unknown>;
-  /** A repeat of the same key returns the order it already created instead of a new one. */
-  idempotencyKey?: string;
 };
 
 export type StartOrderResult = { orderId: string; replayed?: boolean };
+
+/** A repeat of the same key and request returns the order it already created. */
+export type StartOrderOnceInput = StartOrderInput & { idempotencyKey: string };
+
+export type StartOrderOnceResult =
+  | StartOrderResult
+  /** The key already started an order from a different request. */
+  | { mismatch: true };
+
+/**
+ * SHA-256 of what an order start asked for, with object keys sorted so property order doesn't
+ * matter. A replayed idempotency key must carry the same fingerprint.
+ */
+export async function startFingerprint(req: StartOrderInput): Promise<string> {
+  const canonical = JSON.stringify(
+    { flowId: req.flowId, version: req.version ?? null, input: req.input, vars: req.vars ?? {} },
+    (_key, value: unknown) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+        : value,
+  );
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 export type CopilotRequest = {
   prompt: string;
@@ -114,6 +136,8 @@ export type CopilotResult = {
 
 export interface EngineRpc {
   startOrder(input: StartOrderInput): Promise<StartOrderResult>;
+  /** Starts an order at most once per idempotency key. */
+  startOrderOnce(input: StartOrderOnceInput): Promise<StartOrderOnceResult>;
   /** Delivers a business event (e.g. "payment.received") to whichever node waits for it. */
   sendEvent(
     orderId: string,

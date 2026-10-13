@@ -55,7 +55,8 @@ export function openApiDocument(serverUrl: string) {
               name: 'Idempotency-Key',
               in: 'header',
               schema: { type: 'string', maxLength: 255 },
-              description: 'A repeat with the same key returns 200 and the order it created.',
+              description:
+                'A repeat with the same key and body returns 200 and the order it created; a different body under the same key returns 422.',
             },
           ],
           requestBody: body(startSchema),
@@ -64,6 +65,10 @@ export function openApiDocument(serverUrl: string) {
             '200': ok(
               'Replayed: the key already created this order',
               '#/components/schemas/StartOrderResult',
+            ),
+            '422': ok(
+              'The Idempotency-Key was already used with a different request',
+              '#/components/schemas/Error',
             ),
             ...errors,
           },

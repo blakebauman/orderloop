@@ -4,7 +4,10 @@ import {
   type Order,
   orderInputSchema,
   type StartOrderInput,
+  type StartOrderOnceInput,
+  type StartOrderOnceResult,
   type StartOrderResult,
+  startFingerprint,
 } from '@orderloop/core';
 import { createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -12,15 +15,25 @@ import { storeDocument } from './connectors';
 import { loadFlowVersion } from './flows';
 import type { OrderLoopParams } from './workflow';
 
-/**
- * Creates the order row, initialises its OrderAgent and starts generation 1 of its Workflow.
- * With an idempotency key the row is inserted first, so the unique index decides which of two
- * concurrent requests creates the order; the other gets the existing order back. Every step after
- * the insert is safe to repeat, so a replay of an order whose start failed part-way finishes it.
- */
+/** Creates the order row, initialises its OrderAgent and starts generation 1 of its Workflow. */
 export async function startOrder(env: Env, req: StartOrderInput): Promise<StartOrderResult> {
+  // Without a key there is nothing to replay, so there is never a mismatch.
+  return (await start(env, req)) as StartOrderResult;
+}
+
+/**
+ * Starts an order at most once per idempotency key. The row is inserted first, so the unique index
+ * decides which of two concurrent requests creates the order; the other gets the existing order
+ * back. Every step after the insert is safe to repeat, so a replay of an order whose start failed
+ * part-way finishes it. A replay must match the original request's fingerprint, or it is refused.
+ */
+export function startOrderOnce(env: Env, req: StartOrderOnceInput): Promise<StartOrderOnceResult> {
+  return start(env, req, req.idempotencyKey);
+}
+
+async function start(env: Env, req: StartOrderInput, key?: string): Promise<StartOrderOnceResult> {
   const db = createDb(env.DB);
-  const key = req.idempotencyKey;
+  const fingerprint = key ? await startFingerprint(req) : null;
   const existing = async () =>
     key
       ? await db
@@ -31,12 +44,16 @@ export async function startOrder(env: Env, req: StartOrderInput): Promise<StartO
             flowVersion: orders.flowVersion,
             instanceId: orders.instanceId,
             createdAt: orders.createdAt,
+            fingerprint: orders.idempotencyFingerprint,
           })
           .from(orders)
           .where(eq(orders.idempotencyKey, key))
           .get()
       : undefined;
-  const replay = async (row: NonNullable<Awaited<ReturnType<typeof existing>>>) => {
+  const replay = async (
+    row: NonNullable<Awaited<ReturnType<typeof existing>>>,
+  ): Promise<StartOrderOnceResult> => {
+    if (row.fingerprint && row.fingerprint !== fingerprint) return { mismatch: true };
     // Still queued with no Workflow: the first request failed after the insert.
     if (
       row.status === 'queued' &&
@@ -72,6 +89,7 @@ export async function startOrder(env: Env, req: StartOrderInput): Promise<StartO
       createdAt: now,
       updatedAt: now,
       idempotencyKey: key ?? null,
+      idempotencyFingerprint: fingerprint,
     });
   } catch (err) {
     const raced = await existing();

@@ -53,6 +53,7 @@ export const orders = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     idempotencyKey: text('idempotency_key'),
+    idempotencyFingerprint: text('idempotency_fingerprint'),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),

@@ -3,7 +3,8 @@
  *
  *   GET  /api/v1/flows
  *   POST /api/v1/orders                         { flowId, version?, input: OrderInput, vars? }
- *                                               Idempotency-Key header: a repeat returns 200 + the same order
+ *                                               Idempotency-Key header: a repeat returns 200 + the same order,
+ *                                               422 if the body differs
  *   GET  /api/v1/orders?type=&status=&q=
  *   GET  /api/v1/orders/:id                     live state from the order's agent
  *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (webhooks)
@@ -70,7 +71,11 @@ export async function handleApi(request: Request): Promise<Response> {
         if (idempotencyKey && idempotencyKey.length > 255)
           return json({ error: 'Idempotency-Key must be at most 255 characters' }, 400);
         await ensureSeeded();
-        const res = await engine().startOrder({ ...parsed.data, idempotencyKey });
+        const res = idempotencyKey
+          ? await engine().startOrderOnce({ ...parsed.data, idempotencyKey })
+          : await engine().startOrder(parsed.data);
+        if ('mismatch' in res)
+          return json({ error: 'Idempotency-Key was already used with a different request' }, 422);
         return json(res, res.replayed ? 200 : 201);
       }
     }
