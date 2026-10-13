@@ -7,7 +7,6 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 Nothing is scheduled. Candidates:
 
 - **Sign in with an outside identity provider.** Users already carry `external_sub`; an OpenID Connect login could match people by subject and start the same session.
-- **Rate-limit sign-in.** Failed sign-ins cost a PBKDF2 derivation each but aren't throttled.
 
 ## Not planned
 

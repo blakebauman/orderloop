@@ -1,7 +1,7 @@
 import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent } from '../app/lib/api.server';
-import { apiPrincipal, principal } from '../app/lib/auth.server';
+import { apiPrincipal, principal, Throttled } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { openApiDocument } from '../app/lib/openapi';
 
@@ -26,7 +26,16 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/v1/')) {
-      const caller = await apiPrincipal(request);
+      let caller: Awaited<ReturnType<typeof apiPrincipal>>;
+      try {
+        caller = await apiPrincipal(request);
+      } catch (err) {
+        if (!(err instanceof Throttled)) throw err;
+        return Response.json(
+          { error: err.message },
+          { status: 429, headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) } },
+        );
+      }
       if (!caller) return Response.json({ error: 'Unauthorized' }, { status: 401 });
       return handleApi(request, caller);
     }

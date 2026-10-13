@@ -96,6 +96,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 |---|---|
 | `openapi.test.ts` | The OpenAPI document serialises, request bodies come from the zod schemas, every outbound event is listed, signed inbound events are unauthenticated; subscription URLs require https except on localhost and default to every event |
 | `credentials.test.ts` | PBKDF2 hashes verify only the right password and use a fresh salt; malformed or out-of-range hashes fail; `ol_live_` tokens are stored as SHA-256 with a 12-character prefix; generated passwords, email normalisation, `safeEqual`; the password policy |
+| `throttle.test.ts` | Sign-in keys (email and address, address, email; the workspace password as one email); a key blocks at its limit until its window ends, old windows don't count, each kind has its own limit and the longest wait wins; waits round up to whole minutes |
 | `approvals.test.ts` | Approval context for a credit check: the order in its own currency with its USD equivalent, and limits, balances and the shortfall in USD |
 | `proposal.test.ts` | The chat proposal card offers only the proposed decision, prefilled, sends nothing on render, and has nothing to confirm once the step stopped waiting or the order ended |
 | `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its order type; money, relative time, UTC date and duration formatting; status-to-token mapping |
