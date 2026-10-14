@@ -68,7 +68,7 @@ pnpm test               # core planner tests, engine Workflow e2e (workerd), web
 pnpm lint && pnpm check-types
 ```
 
-Open the dashboard and run one of the scenarios. `TIME_SCALE` (default `1440`) compresses waits, so a day becomes a minute. Workers AI always calls your Cloudflare account, even in local dev; if the call fails or times out, the node uses its heuristic.
+Open the dashboard and run one of the scenarios. In dev, `TIME_SCALE` is `1440` (set in `apps/web/vite.config.ts`), so a day becomes a minute; deployed, waits run in real time. Workers AI always calls your Cloudflare account, even in local dev; if the call fails or times out, the node uses its heuristic.
 
 ## REST API
 
@@ -168,4 +168,4 @@ pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
-Set `TIME_SCALE` to `"1"` in `apps/engine/wrangler.jsonc` for real-time waits. You can also set `AI_GATEWAY_ID` to route AI calls through AI Gateway.
+Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wrangler.jsonc`). You can also set `AI_GATEWAY_ID` to route AI calls through AI Gateway.

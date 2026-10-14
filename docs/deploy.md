@@ -87,8 +87,8 @@ verifies, looks up the customer and starts the order.
 
 ## Settings for production
 
-- Set `TIME_SCALE` to `"1"` in `apps/engine/wrangler.jsonc`, or waits and timeouts stay compressed
-  (the default `"1440"` turns a day into a minute).
+- `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses
+  waits; don't raise it on a deployment that real orders use.
 - Set `AI_GATEWAY_ID` to route model calls through AI Gateway for caching, rate limits and logs.
 - After the first deploy, sign in with no email and `APP_PASSWORD` (users see it as "the workspace
   password"), open **Team** and add people with their roles, and create API tokens for other

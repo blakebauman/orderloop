@@ -11,8 +11,15 @@ export default defineConfig({
     cloudflare({
       viteEnvironment: { name: 'ssr' },
       // In dev, run the engine Worker in the same session so the ENGINE service binding, its
-      // OrderAgent Durable Objects and Workflows all work locally. It deploys on its own.
-      auxiliaryWorkers: [{ configPath: '../engine/wrangler.jsonc', devOnly: true }],
+      // OrderAgent Durable Objects and Workflows all work locally. It deploys on its own. Dev
+      // compresses waits so scenarios finish in minutes; production runs in real time.
+      auxiliaryWorkers: [
+        {
+          configPath: '../engine/wrangler.jsonc',
+          config: { vars: { TIME_SCALE: '1440' } },
+          devOnly: true,
+        },
+      ],
     }),
     tailwindcss(),
     reactRouter(),
