@@ -30,6 +30,8 @@ The flow id is a slug of the name plus a short suffix. A new flow is a draft unt
   the branch it belongs to. A `control.loop` node has a second input, `next`, for its back-edge.
 - **Inspector.** The selected node's label and config fields, generated from the node's catalog
   entry, plus its per-node `retries` and `timeout`. Validation messages appear beside the field.
+  While the assistant panel is open, the inspector folds away to give the canvas room, and comes
+  back when you select a node.
 - **Ask.** Opens the [assistant](/guides/assistant/) about this flow, with the graph on screen
   (unsaved changes included) as context. A change it proposes ("add a fraud check after credit")
   comes back to the editor as a proposal that shows what it adds, removes, edits and rewires;
