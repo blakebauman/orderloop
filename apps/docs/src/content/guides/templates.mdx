@@ -26,7 +26,7 @@ running keep the version they pinned.
 
 ## Scenarios
 
-The dashboard's **Demo scenarios** start an order on a built-in flow with a canned input. Each
+In workspaces with the demo data loaded, the dashboard's **Demo scenarios** start an order on a built-in flow with a canned input. Each
 exercises a different path:
 
 | Scenario | Flow | Path |
@@ -39,7 +39,7 @@ exercises a different path:
 | Reorder (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
 | Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
-| Storefront order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices convert at the stored rate, and the order, capture and webhooks are in euros |
+| Storefront order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices convert at the workspace's stored `EUR` rate, and the order, capture and webhooks are in euros |
 | Marketplace order, two sellers | `tpl-marketplace-order` | `HP-200` from a seller that auto-accepts and `KET-01` from one that is asked: the order waits for Kettle & Co, then ships what was accepted and schedules each seller's payout net of commission. See [Marketplace](/guides/marketplace/) |
 | Buy online, pick up in store | `tpl-omnichannel-order` | A monitor held at the SoHo store with a pickup code; the order waits for `pickup.collected`, then hands it over and captures payment |
 | Ship from store, with an e-book | `tpl-omnichannel-order` | The warehouse has no tees, so they ship from the SoHo store, the nearest to the New York ship-to (which carries coordinates); the e-book is delivered as a code, and payment is captured once both parts are done |

@@ -41,7 +41,8 @@ The flow id is a slug of the name plus a short suffix. A new flow is a draft unt
 asks for confirmation, then publishes the next version. **Test run** publishes too when the graph
 differs from the published version, then starts a sample order on it: the input of the first
 [dashboard scenario](/guides/templates/#scenarios) that uses this flow, else the first one for its
-model, else an empty `manual` order.
+model, else an empty `manual` order. A workspace without the demo data has no scenarios, so the
+test run starts an empty order.
 
 The built-in templates publish themselves again when they change, replacing edits made to them
 here (see [Seeding](/guides/templates/#seeding)). To customise one, make your own flow from it.

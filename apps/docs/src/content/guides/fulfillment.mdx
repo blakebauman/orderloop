@@ -117,7 +117,7 @@ store`) and `vars.fulfillmentLocation` is the same names joined. Then:
   (`[{ shipmentId, tracking, locationId }]`), `vars.tracking` is every tracking number joined with
   `, `, and the summary reads `2 UPS shipments: …`. Its rollback cancels all of them.
 
-The **Ship from store, with an e-book** scenario ships to New York with coordinates, so the tees,
+In workspaces with the demo data loaded, the **Ship from store, with an e-book** scenario ships to New York with coordinates, so the tees,
 missing from the warehouse, ship from the nearest store, SoHo. **Split shipment, nearest store** sends
 eight monitors and three tees to San Francisco: the monitors ship from the warehouse and the tees from
 the Mission store.

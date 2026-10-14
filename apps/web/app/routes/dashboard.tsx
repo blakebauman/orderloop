@@ -17,6 +17,7 @@ import {
   dashboardStats,
   declinedCount,
   declinedOrderIds,
+  demoAvailable,
   listApprovals,
   listOrders,
   waitingOrders,
@@ -30,13 +31,14 @@ export const meta = () => [{ title: 'Overview · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   await ensureSeeded();
-  const [stats, recent, approvals, waiting, declinedTotal, perf] = await Promise.all([
+  const [stats, recent, approvals, waiting, declinedTotal, perf, demo] = await Promise.all([
     dashboardStats(),
     listOrders({ sort: 'updated' }, 10),
     listApprovals('pending'),
     waitingOrders(),
     declinedCount(),
     performance(),
+    demoAvailable(),
   ]);
   const [names, declinedSet] = await Promise.all([
     customerNames([...recent, ...waiting].map((o) => o.customerId)),
@@ -70,6 +72,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     names,
     declined,
     declinedTotal,
+    demo,
     decisions,
     moreDecisions: Math.max(0, approvals.length - top.length),
     lanes: [...lanes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
@@ -80,15 +83,26 @@ export async function action({ request }: Route.ActionArgs) {
   await requireUser(request, 'operator');
   const form = await request.formData();
   const sc = SCENARIOS.find((s) => s.id === form.get('scenario'));
-  if (!sc) return { error: 'That demo scenario no longer exists. Reload the page.' };
+  if (!sc || !(await demoAvailable()))
+    return { error: 'That demo scenario no longer exists. Reload the page.' };
   await ensureSeeded();
   const { orderId } = await engine().startOrder({ flowId: sc.flowId, input: sc.input });
   return redirect(`/orders/${orderId}`);
 }
 
 export default function Dashboard() {
-  const { stats, perf, recent, names, declined, declinedTotal, decisions, moreDecisions, lanes } =
-    useLoaderData<typeof loader>();
+  const {
+    stats,
+    perf,
+    recent,
+    names,
+    declined,
+    declinedTotal,
+    decisions,
+    moreDecisions,
+    lanes,
+    demo,
+  } = useLoaderData<typeof loader>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
   const count = (s: string[]) =>
@@ -349,7 +363,7 @@ export default function Dashboard() {
               )}
             </Section>
 
-            {canOperate ? (
+            {canOperate && demo ? (
               <details className="group rounded-md border bg-card">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
                   <span className="section-title">Demo scenarios</span>

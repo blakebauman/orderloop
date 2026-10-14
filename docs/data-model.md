@@ -19,15 +19,15 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | File | Adds |
 |---|---|
 | `0001_init.sql` | Flows, versions, the orders index, approvals and the mock back office |
-| `0002_seed.sql` | Demo customers, products and contract prices (flows are seeded by the engine from the templates) |
+| `0002_seed.sql` | Demo customers, products and contract prices (removed by `0027`; flows are seeded by the engine from the templates) |
 | `0003_webhook_subscriptions.sql` | `webhook_subscriptions`, `webhook_deliveries` |
 | `0004_order_idempotency.sql` | `orders.idempotency_key` and its partial unique index |
 | `0005_idempotency_fingerprint.sql` | `orders.idempotency_fingerprint`: a replayed key must carry the same request |
 | `0006_stock_movements.sql` | `stock_movements`, the inventory ledger |
 | `0007_inbound_emails.sql` | `inbound_emails`, the email intake log |
 | `0008_node_runs.sql` | `node_runs`, per-node timing for the dashboard |
-| `0009_price_chain.sql` | `price_sources` and `price_rules`, the pricing chain, with demo entries |
-| `0010_fx_rates.sql` | `fx_rates` with demo rates, and `orders.fx_rate` |
+| `0009_price_chain.sql` | `price_sources` and `price_rules`, the pricing chain, with demo entries (the rules removed by `0027`) |
+| `0010_fx_rates.sql` | `fx_rates` with demo rates (EUR, GBP and CAD removed by `0027`), and `orders.fx_rate` |
 | `0011_users.sql` | `users`, `sessions` and `api_tokens`, for roles and sign-in |
 | `0012_auth_failures.sql` | `auth_failures`, counts for throttling failed sign-ins |
 | `0013_audit_events.sql` | `audit_events`, the security audit log |
@@ -44,9 +44,18 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0024_password_change_due.sql` | `users.password_change_due`, set while a person is on a temporary password |
 | `0025_webhook_receipts.sql` | `webhook_receipts`, signatures of delivered signed events, for replay protection |
 | `0026_query_indexes.sql` | Indexes: `orders(created_at)`, `orders(updated_at)`, `node_runs(ended_at)`, `payments(status, created_at)`, `customers(lower(email))`, `sessions(expires_at)`, `webhook_deliveries(created_at)` |
+| `0027_remove_demo_data.sql` | Data only. Removes the demo data the migrations above seeded (demo customers except `cus_internal`, the catalog, sellers, stores and their stock, contract prices, price rules, and the EUR, GBP and CAD rates) and every order placed against a demo customer or SKU, with its approvals, documents, payments, node runs and other rows. Keeps `cus_internal`, the three `price_sources` and the `USD` rate |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
+
+### Demo data
+
+Migrations carry no demo data from `0027` on, so a fresh or production database has none: only `cus_internal`,
+the price sources and the `USD` rate. The demo data lives in `packages/db/seed/0001_demo.sql` (`INSERT OR IGNORE`).
+`pnpm db:seed:local` loads it into the local D1 after `pnpm db:migrate:local`, and the engine tests load it after
+the migrations. Without it only `USD` orders are accepted; any other currency gets the `400` unsupported-currency
+error until its rate is added to `fx_rates`.
 
 ## Flows
 
@@ -96,7 +105,7 @@ writes embeds its step key.
 | `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](https://docs.orderloop.io/reference/expressions/#pricing-chain) |
-| `fx_rates` | Units of each `currency` per one USD (`BASE_CURRENCY` in `@orderloop/core`), with `updated_at`. Seeded with demo rates: EUR 0.92, GBP 0.79, CAD 1.37. No UI edits them yet. See [Currency](https://docs.orderloop.io/reference/expressions/#currency) |
+| `fx_rates` | Units of each `currency` per one USD (`BASE_CURRENCY` in `@orderloop/core`), with `updated_at`. `USD` is the only row in a migrated database; the demo seed adds EUR 0.92, GBP 0.79 and CAD 1.37. No UI edits them yet (the back office lists them), so add a rate with SQL. See [Currency](https://docs.orderloop.io/reference/expressions/#currency) |
 | `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
 | `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `latitude` and `longitude` (nullable; for shipping from the nearest store), `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` and `loc_mission`, both pickup and ships. See [Fulfillment](https://docs.orderloop.io/guides/fulfillment/) |
 | `location_stock` | A store's stock per SKU, primary key `(location_id, sku)`: `stock` and `reserved` |

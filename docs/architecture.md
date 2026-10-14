@@ -26,7 +26,7 @@ inbound mail ── Email Routing ──email()───────────
 | Path | Role |
 |---|---|
 | `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
-| `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations with seed data, flow persistence (`getFlowVersionJson`, `publishFlow`) |
+| `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, back office, `/api/v1` |
@@ -289,7 +289,7 @@ flow: a new template as version 1, a changed one as the next version. It runs:
 
 A template that matches any earlier published version is left alone, so code still running from
 before a change can't roll a newer version back, and seeding twice publishes once. The dashboard's
-demo scenarios are `SCENARIOS` in `apps/web/app/lib/scenarios.ts`; the docs page
+demo scenarios are `SCENARIOS` in `apps/web/app/lib/scenarios.ts`, shown only where `demoAvailable()` finds their customers and SKUs (the demo data in `packages/db/seed`, never in production); the docs page
 [Built-in flows](https://docs.orderloop.io/guides/templates/) describes them.
 
 See [OrderLoop Workflow](workflow.md) and [OrderAgent](order-agent.md).

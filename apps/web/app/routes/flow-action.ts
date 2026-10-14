@@ -3,6 +3,7 @@ import { requireUser } from '~/lib/auth.server';
 import { BodyTooLarge, readText } from '~/lib/body';
 import { engine } from '~/lib/env.server';
 import { getFlow, parseFlow, publish, sameGraph, saveFlow } from '~/lib/flows.server';
+import { demoAvailable } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/flow-action';
 
@@ -31,9 +32,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         ? { version: current.publishedVersion, errors: [], warnings: [] }
         : await publish(flow);
       if (!res.version) return res;
-      const sample =
-        SCENARIOS.find((s) => s.flowId === flow.id) ??
-        SCENARIOS.find((s) => s.input.model === flow.model);
+      // A demo scenario's input when the demo data is loaded; otherwise an empty order.
+      const sample = (await demoAvailable())
+        ? (SCENARIOS.find((s) => s.flowId === flow.id) ??
+          SCENARIOS.find((s) => s.input.model === flow.model))
+        : undefined;
       const { orderId } = await engine().startOrder({
         flowId: flow.id,
         version: res.version,

@@ -22,8 +22,8 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { humanize } from '~/lib/format';
-import { backOffice, currencies, publishedFlows } from '~/lib/orders.server';
-import { SCENARIOS } from '~/lib/scenarios';
+import { backOffice, currencies, demoAvailable, publishedFlows } from '~/lib/orders.server';
+import { BLANK_SCENARIO, SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
 export const meta = () => [{ title: 'New order · OrderLoop' }];
@@ -31,9 +31,14 @@ export const meta = () => [{ title: 'New order · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request, 'operator');
   await ensureSeeded();
-  const [flows, office] = await Promise.all([publishedFlows(), backOffice()]);
+  const [flows, office, demo] = await Promise.all([
+    publishedFlows(),
+    backOffice(),
+    demoAvailable(),
+  ]);
   return {
     flows,
+    demo,
     customers: office.customers,
     products: office.products,
     stores: office.stores.map(({ id, name }) => ({ id, name })),
@@ -116,14 +121,24 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function NewOrder() {
-  const { flows, customers, products, stores, currencies: codes } = useLoaderData<typeof loader>();
+  const {
+    flows,
+    customers,
+    products,
+    stores,
+    currencies: codes,
+    demo,
+  } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
   const nav = useNavigation();
-  const [preset, setPreset] = useState(SCENARIOS[0]!);
+  // The demo presets need the demo customers and SKUs; without them the form starts empty.
+  const presets = demo ? SCENARIOS : [];
+  const first = presets[0] ?? { ...BLANK_SCENARIO, flowId: flows[0]?.id ?? '' };
+  const [preset, setPreset] = useState(first);
   const [key, setKey] = useState(0);
-  const [lines, setLines] = useState(() => linesText(SCENARIOS[0]!));
+  const [lines, setLines] = useState(() => linesText(first));
   const pick = (id: string) => {
-    const s = SCENARIOS.find((x) => x.id === id);
+    const s = presets.find((x) => x.id === id);
     if (s) {
       setPreset(s);
       setLines(linesText(s));
@@ -137,7 +152,11 @@ export default function NewOrder() {
     <>
       <PageHeader
         title="New order"
-        subtitle="Start an order on a published flow. A preset fills the form with a demo scenario."
+        subtitle={
+          demo
+            ? 'Start an order on a published flow. A preset fills the form with a demo scenario.'
+            : 'Start an order on a published flow.'
+        }
       />
       <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Form method="post" key={key} className="min-w-0 space-y-4 rounded-md border bg-card p-5">
@@ -323,22 +342,24 @@ export default function NewOrder() {
           </Button>
         </Form>
         <aside className="min-w-0 space-y-4">
-          <div className="rounded-md border bg-card p-4">
-            <h2 className="section-title mb-2">Demo presets</h2>
-            <div className="space-y-0.5">
-              {SCENARIOS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  aria-pressed={preset.id === s.id}
-                  onClick={() => pick(s.id)}
-                  className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:font-medium"
-                >
-                  {s.label}
-                </button>
-              ))}
+          {presets.length ? (
+            <div className="rounded-md border bg-card p-4">
+              <h2 className="section-title mb-2">Demo presets</h2>
+              <div className="space-y-0.5">
+                {presets.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-pressed={preset.id === s.id}
+                    onClick={() => pick(s.id)}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:font-medium"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="rounded-md border bg-card p-4">
             <h2 className="section-title">Catalog</h2>
             <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
