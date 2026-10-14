@@ -251,7 +251,8 @@ does for [MCP](/reference/mcp/#who-did-it). A caller using an API token acts as 
 
 - **Role cap and live checks.** As for MCP: a grant is never higher than its approver's role, the
   web Worker re-reads the person on every request, and the role is the lower of granted and
-  current. A person whose two-factor setup is due gets `403`.
+  current. A person whose two-factor setup is due, or who is still on a temporary password, gets
+  `403`.
 - **Credentials stay in the web Worker.** It resolves the caller and forwards to the engine with
   the `x-orderloop-principal` header, removing `Authorization` and cookies. The engine has no public
   route and answers `401` without the header.

@@ -36,7 +36,8 @@ vi.mock('~/lib/auth.server', () => ({
   grantPrincipal,
   Throttled,
   TokenExpired,
-  TWO_FACTOR_DUE: 'Two-factor due',
+  setupDue: (c: { twoFactorDue?: true; passwordChangeDue?: true }) =>
+    c.passwordChangeDue ? 'Password change due' : c.twoFactorDue ? 'Two-factor due' : null,
 }));
 
 const { isOAuthPath, oauthApi, oauthFetch } = await import('~/lib/oauth.server');
@@ -103,6 +104,16 @@ describe('MCP and A2A on the web Worker', () => {
     expect(new URL(forwarded.url).pathname).toBe('/mcp');
     expect(forwarded.headers.get('authorization')).toBeNull();
     expect(decodePrincipal(forwarded.headers.get(PRINCIPAL_HEADER))).toMatchObject(token);
+  });
+
+  it('refuses a caller who must choose their own password or set up two-factor first', async () => {
+    apiPrincipal.mockResolvedValueOnce({ ...token, passwordChangeDue: true });
+    const res = await mcp({ authorization: 'Bearer ol_live_abc' });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Password change due' });
+    apiPrincipal.mockResolvedValueOnce({ ...token, twoFactorDue: true });
+    expect((await mcp({ authorization: 'Bearer ol_live_abc' })).status).toBe(403);
+    expect(engineFetch).not.toHaveBeenCalled();
   });
 
   it('refuses an unknown token', async () => {

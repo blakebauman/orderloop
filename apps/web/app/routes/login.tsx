@@ -1,11 +1,22 @@
 import { env } from 'cloudflare:workers';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { data, Form, redirect, useActionData, useLoaderData } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import {
+  data,
+  Form,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useSearchParams,
+} from 'react-router';
 import { Mark } from '~/components/mark';
 import { authEnabled, principal, type SignInResult, signIn, Throttled } from '~/lib/auth.server';
 import { nextPath } from '~/lib/next-path';
 import type { Route } from './+types/login';
+
+export const meta = () => [{ title: 'Sign in · OrderLoop' }];
 
 /** Lets a throttled sign-in's Retry-After reach the response. */
 export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
@@ -24,7 +35,9 @@ export async function action({ request }: Route.ActionArgs) {
   } catch (err) {
     if (!(err instanceof Throttled)) throw err;
     return data(
-      { error: err.message },
+      {
+        error: `${err.message}${email.trim() ? ' If you’ve forgotten your password, ask an operator to reset it.' : ''}`,
+      },
       { status: 429, headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) } },
     );
   }
@@ -42,50 +55,110 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Login() {
   const { sharedPassword } = useLoaderData<typeof loader>();
-  const data = useActionData<typeof action>();
+  const result = useActionData<typeof action>();
+  const [params] = useSearchParams();
+  const busy = useNavigation().state === 'submitting';
+  // The workspace password is its own way in, chosen on purpose rather than by leaving the email
+  // empty. The server still reads an empty email as the workspace password.
+  const [workspace, setWorkspace] = useState(false);
+  const password = useRef<HTMLInputElement>(null);
+  const error = result?.error;
+  // After a refusal, the password is ready to retype.
+  useEffect(() => {
+    if (error) password.current?.select();
+  }, [error]);
+  // Switching modes puts the cursor where typing goes next.
+  const switched = useRef(false);
+  useEffect(() => {
+    if (switched.current) (workspace ? password : email).current?.focus();
+  }, [workspace]);
+  const email = useRef<HTMLInputElement>(null);
+  const connecting = params.get('next')?.startsWith('/oauth/authorize');
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4">
       <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">OrderLoop</h1>
-        <p className="mt-1 text-muted-foreground text-sm">Sign in with your work email.</p>
-        <label className="mt-5 block text-sm" htmlFor="email">
-          Email
+        <p className="mt-1 text-muted-foreground text-sm">
+          {connecting
+            ? 'Sign in to connect an app to OrderLoop.'
+            : workspace
+              ? 'Sign in with the workspace password.'
+              : 'Sign in with your work email.'}
+        </p>
+        {workspace ? (
+          <input type="hidden" name="email" value="" />
+        ) : (
+          <>
+            <label className="mt-5 block text-sm" htmlFor="email">
+              Email
+            </label>
+            <Input
+              ref={email}
+              id="email"
+              name="email"
+              type="email"
+              required
+              autoFocus
+              autoComplete="username"
+              className="mt-1"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'sign-in-error' : undefined}
+            />
+          </>
+        )}
+        <label
+          className={workspace ? 'mt-5 block text-sm' : 'mt-3 block text-sm'}
+          htmlFor="password"
+        >
+          {workspace ? 'Workspace password' : 'Password'}
         </label>
         <Input
-          id="email"
-          name="email"
-          type="email"
-          autoFocus
-          autoComplete="username"
-          className="mt-1"
-          aria-invalid={data?.error ? true : undefined}
-        />
-        <label className="mt-3 block text-sm" htmlFor="password">
-          Password
-        </label>
-        <Input
+          ref={password}
           id="password"
           name="password"
           type="password"
           required
+          autoFocus={workspace}
           autoComplete="current-password"
           className="mt-1"
-          aria-invalid={data?.error ? true : undefined}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={
+            [workspace ? 'workspace-hint' : '', error ? 'sign-in-error' : '']
+              .filter(Boolean)
+              .join(' ') || undefined
+          }
         />
-        {data?.error ? (
-          <p className="mt-2 text-destructive text-sm" role="alert">
-            {data.error}
+        {workspace ? (
+          <p id="workspace-hint" className="mt-1.5 text-muted-foreground text-xs">
+            Signs you in as an operator, without an account of your own.
           </p>
         ) : null}
-        <Button type="submit" className="mt-4 w-full">
-          Sign in
+        {error ? (
+          <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <Button type="submit" className="mt-4 w-full" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
         </Button>
-        {sharedPassword ? (
-          <p className="mt-3 text-muted-foreground text-xs">
-            Leave the email empty to sign in with the workspace password as an operator.
-          </p>
-        ) : null}
+        <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
+          {workspace ? null : (
+            <p>Forgot your password? Ask an operator to reset it on the Team page.</p>
+          )}
+          {sharedPassword ? (
+            <button
+              type="button"
+              className="text-link hover:underline"
+              onClick={() => {
+                switched.current = true;
+                setWorkspace((w) => !w);
+              }}
+            >
+              {workspace ? 'Sign in with your email instead' : 'Use the workspace password instead'}
+            </button>
+          ) : null}
+        </div>
       </Form>
     </main>
   );

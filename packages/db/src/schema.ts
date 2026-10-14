@@ -453,6 +453,8 @@ export const users = sqliteTable(
     totpEnabledAt: integer('totp_enabled_at'),
     /** The last 30-second step a code was accepted for; older or equal steps are refused. */
     totpLastStep: integer('totp_last_step'),
+    /** The password was set by an operator (first or reset); the person must choose their own. */
+    passwordChangeDue: integer('password_change_due', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [
     uniqueIndex('users_email').on(t.email),

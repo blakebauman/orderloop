@@ -1,9 +1,13 @@
 import { isRole, ROLE_LABELS } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { data, Form, useActionData, useFetcher, useLoaderData } from 'react-router';
+import { cn } from '@orderloop/ui/lib/utils';
+import { Download } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { data, Form, useActionData, useFetcher, useLoaderData, useNavigation } from 'react-router';
 import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
+import { CopyButton } from '~/components/copy-button';
 import { PageHeader, Section } from '~/components/page';
 import { audit } from '~/lib/audit.server';
 import { requireUser, sessionId } from '~/lib/auth.server';
@@ -37,6 +41,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const apps = grants.items.map((g) => ({
     id: g.id,
     name: String(g.metadata?.app ?? g.clientId),
+    // Recorded when the app connected; older grants have neither.
+    channel: typeof g.metadata?.channel === 'string' ? g.metadata.channel : null,
+    host: typeof g.metadata?.host === 'string' ? g.metadata.host : null,
     role: g.scope.find(isRole) ?? 'viewer',
     createdAt: g.createdAt * 1000,
   }));
@@ -112,6 +119,14 @@ export default function Account() {
   const end = useFetcher<typeof action>();
   const formatTime = useDateTime();
   const others = sessions.filter((x) => !x.current).length;
+  const passwordError = result && 'error' in result ? result.error : null;
+  const changing = useNavigation().state === 'submitting';
+  const passwordForm = useRef<HTMLFormElement>(null);
+  const changed = result && 'ok' in result;
+  // Neither password stays on screen after a change.
+  useEffect(() => {
+    if (changed) passwordForm.current?.reset();
+  }, [changed, result]);
   return (
     <>
       <PageHeader
@@ -126,21 +141,35 @@ export default function Account() {
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="max-w-[560px]">
+          {/* Not alerts: they are there when the page loads, so they're read in order. */}
+          {me.passwordChangeDue ? (
+            <p className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
+              <span className="font-medium">Choose your own password to continue.</span> You signed
+              in with a temporary password an operator gave you; the rest of OrderLoop opens once
+              you replace it.
+            </p>
+          ) : null}
           {me.twoFactorDue ? (
-            <p
-              role="alert"
-              className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm"
-            >
+            <p className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Set up two-factor sign-in to continue.</span> Your role
               needs it in this workspace; the rest of OrderLoop opens once it is on.
             </p>
           ) : null}
           <Section title="Password">
             {me.kind === 'user' ? (
-              <Form method="post" className="space-y-3">
+              <Form method="post" className="space-y-3" ref={passwordForm}>
                 <input type="hidden" name="intent" value="password" />
+                {/* Lets a password manager save the new password against this account. */}
+                <input
+                  type="email"
+                  name="username"
+                  autoComplete="username"
+                  value={me.email ?? ''}
+                  readOnly
+                  hidden
+                />
                 <label className="block text-sm" htmlFor="current">
-                  Current password
+                  {me.passwordChangeDue ? 'Temporary password' : 'Current password'}
                 </label>
                 <Input
                   id="current"
@@ -148,6 +177,9 @@ export default function Account() {
                   type="password"
                   required
                   autoComplete="current-password"
+                  autoFocus={me.passwordChangeDue}
+                  aria-invalid={passwordError ? true : undefined}
+                  aria-describedby={passwordError ? 'password-error' : undefined}
                 />
                 <label className="block text-sm" htmlFor="next">
                   New password
@@ -159,13 +191,14 @@ export default function Account() {
                   required
                   minLength={10}
                   autoComplete="new-password"
+                  aria-describedby={`password-hint${passwordError ? ' password-error' : ''}`}
                 />
-                <p className="text-muted-foreground text-xs">
+                <p id="password-hint" className="text-muted-foreground text-xs">
                   At least 10 characters, not a common password and not your email address.
                 </p>
-                {result && 'error' in result ? (
-                  <p role="alert" className="text-destructive text-sm">
-                    {result.error}
+                {passwordError ? (
+                  <p id="password-error" role="alert" className="text-destructive text-sm">
+                    {passwordError}
                   </p>
                 ) : null}
                 {result && 'ok' in result ? (
@@ -173,7 +206,13 @@ export default function Account() {
                     Password changed. Your other sessions were signed out.
                   </p>
                 ) : null}
-                <Button type="submit">Change password</Button>
+                <Button type="submit" disabled={changing}>
+                  {changing
+                    ? 'Changing…'
+                    : me.passwordChangeDue
+                      ? 'Set my password'
+                      : 'Change password'}
+                </Button>
               </Form>
             ) : (
               <p className="text-muted-foreground text-sm">
@@ -207,7 +246,7 @@ export default function Account() {
                       <div>
                         {x.device}
                         {x.current ? (
-                          <span className="ml-1.5 text-ok text-xs">this browser</span>
+                          <span className="ml-1.5 font-medium text-xs">· this browser</span>
                         ) : null}
                       </div>
                       <div className="text-muted-foreground text-xs">
@@ -253,16 +292,15 @@ export default function Account() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate">{a.name}</div>
                       <div className="text-muted-foreground text-xs">
-                        {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
+                        {a.channel
+                          ? `${a.channel === 'A2A' ? 'Agent (A2A)' : 'AI client (MCP)'} · `
+                          : ''}
+                        {a.host ? <span className="font-mono">{a.host}</span> : null}
+                        {a.host ? ' · ' : ''}
+                        acts as {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
                       </div>
                     </div>
-                    <end.Form method="post">
-                      <input type="hidden" name="intent" value="disconnect-app" />
-                      <input type="hidden" name="ref" value={a.id} />
-                      <Button size="sm" variant="ghost" disabled={end.state !== 'idle'}>
-                        Disconnect
-                      </Button>
-                    </end.Form>
+                    <Disconnect app={a.name} id={a.id} end={end} />
                   </li>
                 ))}
               </ul>
@@ -288,73 +326,183 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
   const error = d && 'error' in d ? d.error : null;
   const setup = d && 'setup' in d ? d.setup : null;
   const codes = d && 'recoveryCodes' in d ? d.recoveryCodes : null;
-  const errorLine = error ? (
-    <p role="alert" className="text-destructive text-sm">
-      {error}
-    </p>
-  ) : null;
-  return (
-    <Section title="Two-factor sign-in" className="mt-6">
-      {codes ? (
-        <div role="status" className="mb-4 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
-          <p className="font-medium">Your recovery codes</p>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            Keep them somewhere safe, apart from your phone. Each one signs you in once if you can’t
-            use your authenticator app. They are shown once; any older codes no longer work.
+  // Which form the last error belongs to, so it shows beside that form.
+  const [lastIntent, setLastIntent] = useState<string | null>(null);
+  const [savedCodes, setSavedCodes] = useState<string | null>(null);
+  const [cancelledSetup, setCancelledSetup] = useState<string | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const codesKey = codes?.join(',') ?? null;
+  const showCodes = codes && savedCodes !== codesKey;
+  const showSetup = setup && cancelledSetup !== setup.secret && !status.enabledAt;
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // A new step takes focus, so nobody is left at the top of the page.
+  useEffect(() => {
+    if (showCodes || showSetup) headingRef.current?.focus();
+  }, [showCodes, showSetup]);
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    const intent = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value');
+    setLastIntent(intent ?? new FormData(e.currentTarget).get('intent')?.toString() ?? null);
+  };
+  const errorFor = (intent: string) =>
+    error && lastIntent === intent ? (
+      <p id={`${intent}-error`} role="alert" className="text-destructive text-sm">
+        {error}
+      </p>
+    ) : null;
+
+  if (showCodes) {
+    const text = codes.join('\n');
+    return (
+      <Section title="Two-factor sign-in" className="mt-6">
+        <div className="space-y-3">
+          <h3 ref={headingRef} tabIndex={-1} className="font-medium text-sm outline-none">
+            {status.enabledAt && lastIntent === 'two-factor-codes'
+              ? 'New recovery codes'
+              : 'Two-factor sign-in is on. Save your recovery codes.'}
+          </h3>
+          <p className="text-muted-foreground text-sm">
+            Each one signs you in once if you can’t use your authenticator app. Keep them apart from
+            your phone. They are shown only now; any older codes no longer work.
           </p>
-          <ul className="mt-2 grid select-all grid-cols-2 gap-x-6 gap-y-0.5 rounded-sm bg-card px-3 py-2 font-mono text-sm">
+          <ul
+            aria-label="Recovery codes"
+            className="grid select-all grid-cols-2 gap-x-6 gap-y-0.5 rounded-sm border bg-card px-3 py-2 font-mono text-sm"
+          >
             {codes.map((c) => (
               <li key={c}>{c}</li>
             ))}
           </ul>
+          <div className="flex flex-wrap gap-2">
+            <CopyButton text={text} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const url = URL.createObjectURL(new Blob([`${text}\n`], { type: 'text/plain' }));
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'orderloop-recovery-codes.txt';
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download /> Download
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setSavedCodes(codesKey)}
+            >
+              I’ve saved them
+            </Button>
+          </div>
         </div>
-      ) : null}
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Two-factor sign-in" className="mt-6">
       {status.enabledAt ? (
-        <tf.Form method="post" className="space-y-3">
+        <div className="space-y-5">
           <p className="text-sm">
             <span className="font-medium text-ok">On</span>{' '}
             <span className="text-muted-foreground">
               since {formatTime(status.enabledAt)}. After your password, sign-in asks for a code
-              from your authenticator app. {status.recoveryLeft} of 10 recovery codes left.
+              from your authenticator app.
+            </span>{' '}
+            <span
+              className={cn(
+                status.recoveryLeft <= 3 ? 'font-medium text-wait' : 'text-muted-foreground',
+              )}
+            >
+              {status.recoveryLeft} of 10 recovery codes left
+              {status.recoveryLeft <= 3 ? '; make new ones soon.' : '.'}
             </span>
           </p>
-          <label className="block text-sm" htmlFor="tf-password">
-            Password
-          </label>
-          <Input
-            id="tf-password"
-            name="password"
-            type="password"
-            required
-            autoComplete="current-password"
-          />
-          {errorLine}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="submit"
-              name="intent"
-              value="two-factor-codes"
-              variant="outline"
-              disabled={busy}
-            >
-              New recovery codes
+          <tf.Form method="post" className="space-y-2" onSubmit={submit}>
+            <input type="hidden" name="intent" value="two-factor-codes" />
+            <h3 className="font-medium text-sm">New recovery codes</h3>
+            <p className="text-muted-foreground text-xs">
+              Replaces your codes; the old ones stop working.
+            </p>
+            <label className="block text-sm" htmlFor="tf-codes-password">
+              Your password
+            </label>
+            <Input
+              id="tf-codes-password"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              aria-describedby={errorFor('two-factor-codes') ? 'two-factor-codes-error' : undefined}
+            />
+            {errorFor('two-factor-codes')}
+            <Button type="submit" variant="outline" size="sm" disabled={busy}>
+              Make new codes
             </Button>
-            <Button
-              type="submit"
-              name="intent"
-              value="two-factor-disable"
-              variant="ghost"
-              disabled={busy}
-            >
-              Turn off
-            </Button>
-          </div>
-        </tf.Form>
-      ) : setup ? (
-        <tf.Form method="post" className="space-y-3">
+          </tf.Form>
+          <tf.Form method="post" className="space-y-2 border-t pt-4" onSubmit={submit}>
+            <input type="hidden" name="intent" value="two-factor-disable" />
+            <h3 className="font-medium text-sm">Turn off two-factor sign-in</h3>
+            {confirmOff ? (
+              <>
+                <p className="text-sm">
+                  Sign-in will need only your password. If your role requires two-factor sign-in,
+                  you’ll be asked to set it up again.
+                </p>
+                <label className="block text-sm" htmlFor="tf-off-password">
+                  Your password
+                </label>
+                <Input
+                  id="tf-off-password"
+                  name="password"
+                  type="password"
+                  required
+                  autoFocus
+                  autoComplete="current-password"
+                  aria-describedby={
+                    errorFor('two-factor-disable') ? 'two-factor-disable-error' : undefined
+                  }
+                />
+                {errorFor('two-factor-disable')}
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" variant="destructive" size="sm" disabled={busy}>
+                    Turn off
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmOff(false)}
+                  >
+                    Keep it on
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-bad hover:text-bad"
+                onClick={() => setConfirmOff(true)}
+              >
+                Turn off…
+              </Button>
+            )}
+          </tf.Form>
+        </div>
+      ) : showSetup ? (
+        <tf.Form method="post" className="space-y-3" onSubmit={submit}>
           <input type="hidden" name="intent" value="two-factor-enable" />
           <input type="hidden" name="secret" value={setup.secret} />
           <input type="hidden" name="uri" value={setup.uri} />
+          <h3 ref={headingRef} tabIndex={-1} className="font-medium text-sm outline-none">
+            Set up your authenticator app
+          </h3>
           <p className="text-sm">
             Scan this with an authenticator app (1Password, Google Authenticator, Authy and others),
             then enter the code it shows.
@@ -378,6 +526,10 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
             inputMode="numeric"
             autoComplete="one-time-code"
             className="font-mono"
+            aria-invalid={
+              error && lastIntent === 'two-factor-enable' && /code/i.test(error) ? true : undefined
+            }
+            aria-describedby={errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined}
           />
           <label className="block text-sm" htmlFor="tf-password">
             Your password
@@ -388,26 +540,69 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
             type="password"
             required
             autoComplete="current-password"
+            aria-invalid={
+              error && lastIntent === 'two-factor-enable' && /password/i.test(error)
+                ? true
+                : undefined
+            }
+            aria-describedby={errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined}
           />
-          {errorLine}
-          <Button type="submit" disabled={busy}>
-            Turn on
-          </Button>
+          {errorFor('two-factor-enable')}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Turning on…' : 'Turn on'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setCancelledSetup(setup.secret)}>
+              Cancel
+            </Button>
+          </div>
         </tf.Form>
       ) : (
-        <tf.Form method="post" className="space-y-3">
+        <tf.Form method="post" className="space-y-3" onSubmit={submit}>
           <input type="hidden" name="intent" value="two-factor-start" />
           <p className="text-muted-foreground text-sm">
             Off. With it on, signing in also needs a 6-digit code from an app on your phone, so a
             leaked password alone can’t get in.
           </p>
-          {errorLine}
+          {errorFor('two-factor-start')}
           <Button type="submit" variant="outline" disabled={busy}>
             Set up two-factor sign-in
           </Button>
         </tf.Form>
       )}
     </Section>
+  );
+}
+
+/** Disconnecting an app ends its access at once; confirm in place first. */
+function Disconnect({
+  app,
+  id,
+  end,
+}: {
+  app: string;
+  id: string;
+  end: ReturnType<typeof useFetcher<typeof action>>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming)
+    return (
+      <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+        Disconnect
+      </Button>
+    );
+  return (
+    <end.Form method="post" className="flex flex-wrap items-center justify-end gap-2">
+      <input type="hidden" name="intent" value="disconnect-app" />
+      <input type="hidden" name="ref" value={id} />
+      <span className="text-xs">Disconnect {app}? It loses access now.</span>
+      <Button size="sm" variant="destructive" disabled={end.state !== 'idle'} autoFocus>
+        Disconnect
+      </Button>
+      <Button size="sm" variant="ghost" type="button" onClick={() => setConfirming(false)}>
+        Keep
+      </Button>
+    </end.Form>
   );
 }
 

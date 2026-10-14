@@ -33,9 +33,9 @@ import {
   type Caller,
   type GrantProps,
   grantPrincipal,
+  setupDue,
   Throttled,
   TokenExpired,
-  TWO_FACTOR_DUE,
 } from './auth.server';
 import { engine } from './env.server';
 
@@ -177,8 +177,9 @@ async function forward(request: Request, path: Endpoint, props: Props): Promise<
       { error: 'This connection has ended. Connect the app again.' },
       { status: 401, headers: { 'www-authenticate': 'Bearer error="invalid_token"' } },
     );
-  if (caller.twoFactorDue) return Response.json({ error: TWO_FACTOR_DUE }, { status: 403 });
-  const { twoFactorDue: _due, ...principal } = caller;
+  const due = setupDue(caller);
+  if (due) return Response.json({ error: due }, { status: 403 });
+  const { twoFactorDue: _due, passwordChangeDue: _pw, ...principal } = caller;
   const headers = new Headers(request.headers);
   // The engine trusts the principal header; the client's credential stays here.
   headers.delete('authorization');

@@ -17,9 +17,9 @@ import {
   apiPrincipal,
   principal,
   sessionId,
+  setupDue,
   Throttled,
   TokenExpired,
-  TWO_FACTOR_DUE,
 } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
@@ -86,7 +86,8 @@ export default {
         );
       }
       if (!caller) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-      if (caller.twoFactorDue) return Response.json({ error: TWO_FACTOR_DUE }, { status: 403 });
+      const due = setupDue(caller);
+      if (due) return Response.json({ error: due }, { status: 403 });
       return handleApi(request, caller);
     }
 
@@ -97,7 +98,8 @@ export default {
     if (order || assistant) {
       const caller = await principal(request);
       if (!caller) return new Response('Unauthorized', { status: 401 });
-      if (caller.twoFactorDue) return new Response(TWO_FACTOR_DUE, { status: 403 });
+      const due = setupDue(caller);
+      if (due) return new Response(due, { status: 403 });
       // The agent checks each call against this; whatever the browser sent is replaced. A
       // person's session id lets it notice a sign-out, a disable or a role change mid-page.
       const headers = new Headers(request.headers);
@@ -123,7 +125,8 @@ export default {
     if (url.pathname.startsWith('/docs/orders/')) {
       const caller = await principal(request);
       if (!caller) return new Response('Unauthorized', { status: 401 });
-      if (caller.twoFactorDue) return new Response(TWO_FACTOR_DUE, { status: 403 });
+      const due = setupDue(caller);
+      if (due) return new Response(due, { status: 403 });
       const obj = await docs().get(decodeURIComponent(url.pathname.slice('/docs/'.length)));
       if (!obj) return new Response('Not found', { status: 404 });
       return new Response(obj.body, {

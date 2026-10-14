@@ -55,8 +55,20 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
   if (isRouteErrorResponse(error)) {
-    title = error.status === 404 ? 'Not found' : `Error ${error.status}`;
-    details = error.status === 404 ? 'That page does not exist.' : error.statusText || details;
+    // Loaders refuse with `{ error }` in operator words (a role that's too low, say); show that
+    // rather than the HTTP reason phrase.
+    const said =
+      error.data && typeof error.data === 'object' && typeof error.data.error === 'string'
+        ? (error.data.error as string)
+        : null;
+    title =
+      error.status === 404
+        ? 'Not found'
+        : error.status === 403
+          ? 'Not with your role'
+          : `Error ${error.status}`;
+    details =
+      error.status === 404 ? 'That page does not exist.' : said || error.statusText || details;
   } else if (import.meta.env.DEV && error instanceof Error) {
     details = error.message;
     stack = error.stack;
