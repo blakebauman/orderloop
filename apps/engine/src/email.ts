@@ -17,7 +17,6 @@ import {
   htmlToText,
   type IntakeAttachment,
   MAX_INTAKE_BYTES,
-  type OrderType,
   parseMailboxes,
   resolveSender,
   splitAddress,
@@ -94,7 +93,8 @@ export async function receiveEmail(
     flowId,
     idempotencyKey: `email:${messageId}`,
     input: {
-      type: flow.orderType as OrderType,
+      model: flow.model,
+      channel: 'email',
       title: subject || `Email from ${message.from}`,
       customerId: sender.customerId,
       currency: 'USD',
@@ -152,7 +152,7 @@ export async function receiveEmail(
           ? subject
           : `Re: ${subject || 'your order'}`,
         text: [
-          `Thanks, we received your ${flow.orderType === 'purchase_request' ? 'request' : 'purchase order'}.`,
+          `Thanks, we received your ${flow.model === 'procurement' ? 'request' : 'order'}.`,
           '',
           `Reference: ${result.orderId}`,
           `It is now being processed${attachments.length ? ` (${attachments.length} attachment${attachments.length === 1 ? '' : 's'} read)` : ''}. We will email you if we need anything else.`,

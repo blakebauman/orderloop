@@ -17,7 +17,8 @@ export const SCENARIOS: Scenario[] = [
       'AI extracts lines from an email, contract pricing, agent auto-approves, ships, waits for payment.',
     flowId: 'tpl-b2b-order',
     input: {
-      type: 'b2b_order',
+      model: 'b2b',
+      channel: 'email',
       currency: 'USD',
       lines: [],
       meta: {},
@@ -31,7 +32,8 @@ export const SCENARIOS: Scenario[] = [
     blurb: 'Contoso is near its limit: credit check fails over to a human approval.',
     flowId: 'tpl-b2b-order',
     input: {
-      type: 'b2b_order',
+      model: 'b2b',
+      channel: 'api',
       currency: 'USD',
       customerId: 'cus_contoso',
       title: 'PO CT-2209',
@@ -46,7 +48,8 @@ export const SCENARIOS: Scenario[] = [
       'Reservation comes up short; the order fails and Workflows rolls back compensable steps.',
     flowId: 'tpl-b2b-order',
     input: {
-      type: 'b2b_order',
+      model: 'b2b',
+      channel: 'api',
       currency: 'USD',
       customerId: 'cus_fabrikam',
       lines: [{ sku: 'MTR-750', qty: 4 }],
@@ -60,7 +63,8 @@ export const SCENARIOS: Scenario[] = [
       'Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match.',
     flowId: 'tpl-purchase-request',
     input: {
-      type: 'purchase_request',
+      model: 'procurement',
+      channel: 'manual',
       currency: 'USD',
       customerId: 'cus_internal',
       title: 'Laptops for the new support team',
@@ -77,7 +81,8 @@ export const SCENARIOS: Scenario[] = [
     blurb: 'Forecast finds SKUs below their reorder point and drafts a replenishment PO.',
     flowId: 'tpl-reorder',
     input: {
-      type: 'reorder',
+      model: 'replenishment',
+      channel: 'schedule',
       currency: 'USD',
       customerId: 'cus_internal',
       title: 'Manual stock review',
@@ -91,7 +96,8 @@ export const SCENARIOS: Scenario[] = [
     blurb: 'Coffee box: authorize, then a monthly loop of wait → charge → ship (time-compressed).',
     flowId: 'tpl-subscription',
     input: {
-      type: 'subscription',
+      model: 'subscription',
+      channel: 'web',
       currency: 'USD',
       customerId: 'cus_ada',
       title: 'Monthly coffee box',
@@ -105,7 +111,8 @@ export const SCENARIOS: Scenario[] = [
     blurb: 'Renewal and its retry both fail: the subscription pauses.',
     flowId: 'tpl-subscription',
     input: {
-      type: 'subscription',
+      model: 'subscription',
+      channel: 'web',
       currency: 'USD',
       customerId: 'cus_ada',
       title: 'Coffee box (expired card)',
@@ -120,7 +127,8 @@ export const SCENARIOS: Scenario[] = [
       'Card checkout ships and captures, then the customer returns it: RMA label, restock, refund.',
     flowId: 'tpl-storefront-order',
     input: {
-      type: 'storefront_order',
+      model: 'b2c',
+      channel: 'web',
       currency: 'USD',
       customerId: 'cus_ada',
       title: 'Web order #10482',
@@ -135,7 +143,8 @@ export const SCENARIOS: Scenario[] = [
       'The same checkout priced in EUR: USD list prices convert at the stored rate, and the invoice, refunds and webhooks carry EUR.',
     flowId: 'tpl-storefront-order',
     input: {
-      type: 'storefront_order',
+      model: 'b2c',
+      channel: 'web',
       currency: 'EUR',
       customerId: 'cus_ada',
       title: 'Web order #10517',

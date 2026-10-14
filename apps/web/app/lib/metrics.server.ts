@@ -18,13 +18,13 @@ export async function performance(days = 30, now = Date.now()) {
   const [completion, nodes, revenue, paid] = await Promise.all([
     db()
       .select({
-        type: orders.type,
+        model: orders.model,
         finished: sql<number>`count(*)`,
         completed: sql<number>`sum(${orders.status} = 'completed')`,
       })
       .from(orders)
       .where(and(gte(orders.createdAt, since), inArray(orders.status, TERMINAL_ORDER_STATUSES)))
-      .groupBy(orders.type)
+      .groupBy(orders.model)
       .orderBy(sql`count(*) desc`),
     // Nearest-rank percentiles: the row at ceil(p × n) in each node type's sorted durations.
     db().all<{ type: string; n: number; p50: number; p95: number }>(sql`

@@ -83,6 +83,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { label: 'Building flows', slug: 'guides/building-flows' },
+            { label: 'Commerce models', slug: 'guides/commerce-models' },
             { label: 'Built-in flows', slug: 'guides/templates' },
             { label: 'Approvals and events', slug: 'guides/approvals-and-events' },
             { label: 'Email intake', slug: 'guides/email-intake' },

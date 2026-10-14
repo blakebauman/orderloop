@@ -7,9 +7,9 @@
 #      prose around it), else "prose"
 # Keep rows narrow: a row that matches everything nags on every edit and gets ignored.
 ^packages/core/src/catalog\.ts$	reference/nodes guides/building-flows guides/ai	gen
-^packages/core/src/templates\.ts$	guides/templates start/getting-started index	gen
+^packages/core/src/templates\.ts$	guides/templates guides/commerce-models start/getting-started index	gen
 ^packages/core/src/graph\.ts$	internals/planner guides/building-flows start/concepts	prose
-^packages/core/src/types\.ts$	start/concepts reference/rest-api reference/expressions	gen
+^packages/core/src/types\.ts$	start/concepts guides/commerce-models reference/rest-api reference/expressions	gen
 ^packages/core/src/api\.ts$	reference/rest-api internals/architecture internals/order-agent	prose
 ^packages/core/src/logic\.ts$	reference/expressions	prose
 ^packages/core/src/policy\.ts$	reference/expressions	gen

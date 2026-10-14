@@ -10,7 +10,8 @@ import type {
   FlowVersion,
   NodeStatus,
   Order,
-  OrderInput,
+  OrderInputDraft,
+  OrderModel,
   OrderStatus,
   PendingWait,
   TimelineEntry,
@@ -69,7 +70,7 @@ export type StartOrderInput = {
   flowId: string;
   /** Published version to run; defaults to the latest. */
   version?: number;
-  input: OrderInput;
+  input: OrderInputDraft;
   vars?: Record<string, unknown>;
 };
 
@@ -103,7 +104,7 @@ export type CopilotRequest = {
   prompt: string;
   /** The graph being edited; omitted to create a new flow. */
   graph?: FlowGraph;
-  orderType?: string;
+  model?: OrderModel;
 };
 
 export type CopilotResult = {

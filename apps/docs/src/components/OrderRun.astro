@@ -15,7 +15,7 @@ import {
   type NodeStatus,
   nodeOutputs,
   nodeSpec,
-  ORDER_TYPE_LABELS,
+  ORDER_MODEL_LABELS,
   TEMPLATES,
 } from '@orderloop/core';
 import run from '../data/sample-run.json';
@@ -24,7 +24,7 @@ import NodeIcon from './NodeIcon.astro';
 
 type RunNode = { status: NodeStatus; summary?: string; branches?: string[] };
 
-const flow = TEMPLATES.b2b_order();
+const flow = TEMPLATES['tpl-b2b-order']();
 const nodes = run.nodes as Record<string, RunNode>;
 const reached = flow.nodes.filter((n) => {
   const s = nodes[n.id]?.status;
@@ -78,12 +78,12 @@ const totals = [
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const waiting = steps.find((s) => s.live);
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
-const orderType = ORDER_TYPE_LABELS[flow.orderType];
+const model = ORDER_MODEL_LABELS[flow.model];
 ---
 
 <figure class="ol-run not-content" aria-labelledby="ol-run-title">
   <div class="ol-run-head">
-    <h2 id="ol-run-title">One {orderType}, as the engine ran it</h2>
+    <h2 id="ol-run-title">One {model} order, as the engine ran it</h2>
     {
       waiting && (
         <span class="ol-stamp" style={`--c: ${waiting.status.color}`}>

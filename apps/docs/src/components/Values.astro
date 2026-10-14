@@ -4,9 +4,11 @@
  * Renders inline code separated by commas, or a bulleted list with `list`.
  */
 import {
+  FULFILLMENT_METHODS,
   NODE_STATUSES,
+  ORDER_CHANNELS,
+  ORDER_MODELS,
   ORDER_STATUSES,
-  ORDER_TYPES,
   OUTBOUND_EVENTS,
   POLICY_RULES,
   TERMINAL_ORDER_STATUSES,
@@ -16,7 +18,9 @@ const SOURCES = {
   'node-statuses': NODE_STATUSES,
   'order-statuses': ORDER_STATUSES,
   'terminal-order-statuses': TERMINAL_ORDER_STATUSES,
-  'order-types': ORDER_TYPES,
+  'order-models': ORDER_MODELS,
+  'order-channels': ORDER_CHANNELS,
+  'fulfillment-methods': FULFILLMENT_METHODS,
   'outbound-events': OUTBOUND_EVENTS,
   'policy-rules': POLICY_RULES,
 } as const;

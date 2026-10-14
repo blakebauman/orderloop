@@ -3,9 +3,11 @@ import {
   type Flow,
   type FlowGraph,
   type FlowNode,
-  ORDER_TYPE_LABELS,
-  ORDER_TYPES,
-  type OrderType,
+  ORDER_CHANNEL_LABELS,
+  ORDER_CHANNELS,
+  ORDER_MODEL_LABELS,
+  ORDER_MODELS,
+  type OrderModel,
   validateGraph,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
@@ -304,17 +306,41 @@ export default function FlowEditor() {
               aria-label="Flow name"
             />
             <NativeSelect
-              value={flow.orderType}
-              onChange={(e) => setFlow({ ...flow, orderType: e.target.value as OrderType })}
+              value={flow.model}
+              onChange={(e) => setFlow({ ...flow, model: e.target.value as OrderModel })}
               className="h-8 text-sm"
-              aria-label="Order type"
+              aria-label="Commerce model"
             >
-              {ORDER_TYPES.map((t) => (
-                <NativeSelectOption key={t} value={t}>
-                  {ORDER_TYPE_LABELS[t]}
+              {ORDER_MODELS.map((m) => (
+                <NativeSelectOption key={m} value={m}>
+                  {ORDER_MODEL_LABELS[m]}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+            <fieldset className="flex flex-wrap items-center gap-1 text-xs">
+              <legend className="sr-only">Channels</legend>
+              {ORDER_CHANNELS.map((c) => (
+                <label
+                  key={c}
+                  className="cursor-pointer rounded-sm border px-1.5 py-0.5 text-muted-foreground has-[:checked]:border-primary has-[:checked]:text-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={flow.channels.includes(c)}
+                    onChange={(e) =>
+                      setFlow({
+                        ...flow,
+                        channels: e.target.checked
+                          ? ORDER_CHANNELS.filter((x) => x === c || flow.channels.includes(x))
+                          : flow.channels.filter((x) => x !== c),
+                      })
+                    }
+                  />
+                  {ORDER_CHANNEL_LABELS[c]}
+                </label>
+              ))}
+            </fieldset>
             <span className="text-muted-foreground text-xs">
               {published
                 ? `Published v${published}${unpublished ? ' · changes not published' : ''}`
@@ -465,8 +491,8 @@ export default function FlowEditor() {
               {publishedGraph
                 ? `${changes.summary} since v${published}. `
                 : 'This is the first version. '}
-              New {ORDER_TYPE_LABELS[flow.orderType]} orders will run it; orders already running
-              keep their version.
+              New {ORDER_MODEL_LABELS[flow.model]} orders will run it; orders already running keep
+              their version.
             </span>
           </p>
           {/* Focus lands on the safe choice; publishing takes a deliberate click or Tab. */}
@@ -494,8 +520,8 @@ export default function FlowEditor() {
       {tpl && !tplHidden && !proposal ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-2 text-sm">
           <p className="min-w-0 flex-1">
-            The built-in {ORDER_TYPE_LABELS[flow.orderType]} template has changed since this flow
-            was set up.
+            The built-in {ORDER_MODEL_LABELS[flow.model]} template has changed since this flow was
+            set up.
           </p>
           <Button size="sm" variant="outline" onClick={reviewTemplate}>
             Review the update

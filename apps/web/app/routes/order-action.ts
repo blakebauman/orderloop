@@ -40,7 +40,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       const { orderId } = await engine().startOrder({
         flowId: prev.flow.id,
         input: {
-          type: prev.order.type,
+          model: prev.order.model,
+          channel: prev.order.channel,
+          contact: prev.order.contact,
+          fulfillment: prev.order.fulfillment,
           title: prev.order.title,
           customerId: prev.order.customerId,
           currency: prev.order.currency,

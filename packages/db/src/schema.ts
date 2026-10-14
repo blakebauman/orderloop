@@ -15,7 +15,9 @@ export const flows = sqliteTable('flows', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
-  orderType: text('order_type').notNull(),
+  model: text('model').notNull(),
+  /** JSON array of the channels the flow is meant for. */
+  channels: text('channels').notNull().default('[]'),
   graphJson: text('graph_json').notNull(),
   publishedVersion: integer('published_version'),
   createdAt: integer('created_at').notNull(),
@@ -39,7 +41,12 @@ export const orders = sqliteTable(
   'orders',
   {
     id: text('id').primaryKey(),
-    type: text('type').notNull(),
+    model: text('model').notNull(),
+    channel: text('channel').notNull().default('api'),
+    /** The order's id in the channel it came from. */
+    externalId: text('external_id'),
+    /** A guest buyer's email, so orders without a customer can be found. */
+    contactEmail: text('contact_email'),
     status: text('status').notNull(),
     title: text('title').notNull().default(''),
     flowId: text('flow_id').notNull(),
@@ -58,7 +65,10 @@ export const orders = sqliteTable(
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),
-    index('orders_type').on(t.type, t.updatedAt),
+    index('orders_model').on(t.model, t.updatedAt),
+    index('orders_channel_external')
+      .on(t.channel, t.externalId)
+      .where(sql`${t.externalId} IS NOT NULL`),
     uniqueIndex('orders_idempotency')
       .on(t.idempotencyKey)
       .where(sql`${t.idempotencyKey} IS NOT NULL`),
@@ -92,6 +102,8 @@ export const customers = sqliteTable('customers', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
+  /** business | consumer | internal. Only business customers buy on account. */
+  kind: text('kind').notNull().default('business'),
   tier: text('tier').notNull().default('standard'),
   creditLimit: real('credit_limit').notNull().default(0),
   balance: real('balance').notNull().default(0),
@@ -142,7 +154,7 @@ export const nodeRuns = sqliteTable(
     nodeId: text('node_id').notNull(),
     run: integer('run').notNull(),
     nodeType: text('node_type').notNull(),
-    orderType: text('order_type').notNull(),
+    model: text('model').notNull(),
     status: text('status').notNull(),
     startedAt: integer('started_at').notNull(),
     endedAt: integer('ended_at').notNull(),

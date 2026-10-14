@@ -26,7 +26,7 @@ breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine sui
 
 | File | Covers |
 |---|---|
-| `graph.test.ts` | Every template validates; the planner's paths (the cheap purchase request skipping approvals, a rejection reaching its end through a join, the dunning loop to its limit and its early exit, subscription periods with distinct step runs then continue-as-new, a failed retry stopping a subscription, `isSettled`); `validateGraph` (forward cycles, unknown outputs, disconnected nodes, a second trigger, back-edges from outside the body, node config) |
+| `graph.test.ts` | Every template validates; the planner's paths (the cheap procurement request skipping approvals, a rejection reaching its end through a join, the dunning loop to its limit and its early exit, subscription periods with distinct step runs then continue-as-new, a failed retry stopping a subscription, `isSettled`); `validateGraph` (forward cycles, unknown outputs, disconnected nodes, a second trigger, back-edges from outside the body, node config) |
 | `address.test.ts` | `checkAddress`: clean addresses pass unchanged; whitespace, country aliases, region names and US, CA and GB postcodes are corrected; unknown fields are dropped; missing fields, unknown regions and countries, bad postcodes and free-text ship-tos are rejected with every issue listed |
 | `api.test.ts` | `startFingerprint`: property order is ignored, while version, vars, values and line order change it |
 | `lines.test.ts` | `stockLines`: no list restocks every line merged per SKU; listed lines are capped at the ordered quantity; unknown SKUs, bad quantities and non-lists are ignored |
@@ -45,7 +45,7 @@ the order they ran.
 
 ```ts
 it('skips the approval for a small order', () => {
-  const { ran, ended } = simulate(tpl('purchase_request'), (id) =>
+  const { ran, ended } = simulate(tpl('tpl-purchase-request'), (id) =>
     id === 'needs_mgr' ? ['false'] : undefined,
   );
   expect(ran).not.toContain('mgr');
@@ -103,7 +103,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `tokens.test.ts` | API token lifetimes: 30 days, 1 year and never; token state active, expiring within 14 days, expired at its expiry time, revoked first |
 | `sessions.test.ts` | `describeAgent` names browser and system (Chrome, Edge, Safari on iOS, Firefox on Linux, curl, unknown); `sessionRef` |
 | `approvals.test.ts` | Approval context for a credit check: the order in its own currency with its USD equivalent, and limits, balances and the shortfall in USD |
-| `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its order type; money, relative time, UTC date and duration formatting; status-to-token mapping |
+| `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its model; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
 ## What isn't covered
 

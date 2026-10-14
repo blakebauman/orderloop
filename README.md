@@ -1,6 +1,6 @@
 # Order Loop
 
-An agent loop for commerce. Every order is a durable loop that runs from intake to its outcome: purchase requests, B2B orders, reorders and subscriptions. Each loop is defined as a flow graph you draw in React Flow, and it runs entirely on Cloudflare: Workers, Workflows, Durable Objects (the Agents SDK), Workers AI, D1 and R2.
+An agent loop for commerce. Every order is a durable loop that runs from intake to its outcome: B2B, retail and direct-to-consumer, marketplace, subscription, procurement and replenishment orders, from any channel. Each loop is defined as a flow graph you draw in React Flow, and it runs entirely on Cloudflare: Workers, Workflows, Durable Objects (the Agents SDK), Workers AI, D1 and R2.
 
 ## How it works
 
@@ -73,11 +73,11 @@ Authenticate with `Authorization: Bearer ol_live_…`, an API token an operator 
 ```
 GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)
 GET  /api/v1/flows
-POST /api/v1/orders                          { "flowId": "tpl-b2b-order", "input": { "type": "b2b_order", "customerId": "cus_northwind", "lines": [{ "sku": "WID-100", "qty": 50 }] } }
+POST /api/v1/orders                          { "flowId": "tpl-storefront-order", "input": { "model": "b2c", "channel": "web", "customerId": "cus_ada", "lines": [{ "sku": "MON-27", "qty": 1 }] } }
                                              Idempotency-Key header: a repeat returns 200 and the same order,
                                              finishing the start if the first request failed part-way;
                                              the same key with a different body returns 422
-GET  /api/v1/orders?type=&status=&q=
+GET  /api/v1/orders?model=&channel=&status=&q=
 GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
 POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "by": "…", "note": "…" }

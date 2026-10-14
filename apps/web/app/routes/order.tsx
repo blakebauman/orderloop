@@ -6,9 +6,9 @@
  */
 
 import {
-  ORDER_TYPE_LABELS,
+  ORDER_MODEL_LABELS,
+  type OrderModel,
   type OrderState,
-  type OrderType,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
@@ -36,7 +36,7 @@ import type { Route } from './+types/order';
 
 export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
   {
-    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_TYPE_LABELS[d.snapshot.order.type as OrderType] : 'Order')} ${orderRef(params.orderId)} · OrderLoop`,
+    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_MODEL_LABELS[d.snapshot.order.model as OrderModel] : 'Order')} ${orderRef(params.orderId)} · OrderLoop`,
   },
 ];
 
@@ -194,11 +194,11 @@ export default function OrderPage() {
             <Link to="/orders" className="hover:text-foreground hover:underline">
               Orders
             </Link>{' '}
-            / {ORDER_TYPE_LABELS[order.type as OrderType]}
+            / {ORDER_MODEL_LABELS[order.model as OrderModel]}
           </div>
           <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
             <span className="min-w-0 truncate">
-              {order.title || ORDER_TYPE_LABELS[order.type as OrderType]}{' '}
+              {order.title || ORDER_MODEL_LABELS[order.model as OrderModel]}{' '}
               <span className="font-mono font-normal text-base text-muted-foreground">
                 {orderRef(order.id)}
               </span>

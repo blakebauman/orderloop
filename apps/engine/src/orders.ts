@@ -76,7 +76,10 @@ async function start(env: Env, req: StartOrderInput, key?: string): Promise<Star
   try {
     await db.insert(orders).values({
       id: orderId,
-      type: input.type,
+      model: input.model,
+      channel: input.channel,
+      externalId: input.externalId ?? null,
+      contactEmail: input.contact?.email ?? null,
       status: 'queued',
       title: input.title ?? '',
       flowId: flow.id,

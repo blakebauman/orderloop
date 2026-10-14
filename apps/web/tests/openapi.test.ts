@@ -11,7 +11,8 @@ describe('OpenAPI document', () => {
     expect(json.openapi).toBe('3.1.0');
     const start = json.paths['/api/v1/orders'].post.requestBody.content['application/json'].schema;
     expect(start.required).toEqual(expect.arrayContaining(['flowId', 'input']));
-    expect(start.properties.input.properties.type.enum).toContain('storefront_order');
+    expect(start.properties.input.properties.model.enum).toContain('marketplace');
+    expect(start.properties.input.properties.channel.enum).toContain('pos');
     type Op = { requestBody?: { content: Record<string, { schema: unknown }> } };
     for (const [path, item] of Object.entries(json.paths) as [string, Record<string, Op>][])
       for (const op of Object.values(item))

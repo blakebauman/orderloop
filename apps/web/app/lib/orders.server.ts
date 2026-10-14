@@ -18,7 +18,8 @@ import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db } from './env.server';
 
 export type OrderFilters = {
-  type?: string;
+  model?: string;
+  channel?: string;
   status?: string;
   q?: string;
   /** Newest first by default; "updated" and "total" sort descending too. */
@@ -27,13 +28,16 @@ export type OrderFilters = {
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
   const where = and(
-    f.type ? eq(orders.type, f.type) : undefined,
+    f.model ? eq(orders.model, f.model) : undefined,
+    f.channel ? eq(orders.channel, f.channel) : undefined,
     f.status ? eq(orders.status, f.status) : undefined,
     f.q
       ? or(
           like(orders.id, `%${f.q}%`),
           like(orders.title, `%${f.q}%`),
           like(orders.customerId, `%${f.q}%`),
+          like(orders.contactEmail, `%${f.q}%`),
+          like(orders.externalId, `%${f.q}%`),
         )
       : undefined,
   );
@@ -52,16 +56,16 @@ export async function dashboardStats() {
     })
     .from(orders)
     .groupBy(orders.status);
-  const byType = await db()
-    .select({ type: orders.type, n: sql<number>`count(*)` })
+  const byModel = await db()
+    .select({ model: orders.model, n: sql<number>`count(*)` })
     .from(orders)
-    .groupBy(orders.type);
+    .groupBy(orders.model);
   const pending = await db()
     .select({ n: sql<number>`count(*)` })
     .from(approvals)
     .where(eq(approvals.status, 'pending'))
     .get();
-  return { byStatus, byType, pendingApprovals: pending?.n ?? 0 };
+  return { byStatus, byModel, pendingApprovals: pending?.n ?? 0 };
 }
 
 export async function listApprovals(status = 'pending') {
@@ -78,7 +82,7 @@ export async function listApprovals(status = 'pending') {
       requestedAt: approvals.requestedAt,
       decidedAt: approvals.decidedAt,
       decidedBy: approvals.decidedBy,
-      orderType: orders.type,
+      orderModel: orders.model,
       orderTitle: orders.title,
       currency: orders.currency,
       customerId: orders.customerId,
@@ -153,7 +157,7 @@ export async function publishedFlows() {
     .select({
       id: flows.id,
       name: flows.name,
-      orderType: flows.orderType,
+      model: flows.model,
       version: flows.publishedVersion,
     })
     .from(flows)

@@ -16,6 +16,7 @@ import {
   type FlowNode,
   fromBase,
   interpolate,
+  isBuySide,
   money,
   type Order,
   type OrderLine,
@@ -114,8 +115,9 @@ export const EXECUTORS: Record<string, Exec> = {
         )
       ).map((p) => [p.sku, p]),
     );
-    // Replenishment and procurement buy at cost; selling flows run the pricing chain.
-    const buying = ctx.order.type === 'reorder' || ctx.order.type === 'purchase_request';
+    // Buy-side models price at cost and sell-side models run the pricing chain, unless the node says otherwise.
+    const buying =
+      config.basis === 'cost' || (config.basis === 'auto' && isBuySide(ctx.order.model));
     // Base-currency prices convert at the order's rate, fixed here for the life of the order.
     const fx = await cx.fxRate(env, ctx.order.currency);
     if (fx === null) throw new NonRetryableError(`No exchange rate for ${ctx.order.currency}`);

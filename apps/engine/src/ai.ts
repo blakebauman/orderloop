@@ -10,8 +10,10 @@ import {
   type CopilotResult,
   type FlowGraph,
   flowGraphSchema,
+  isBuySide,
   NODE_SPECS,
   nodeOutputs,
+  ORDER_MODEL_LABELS,
   type Order,
   type OrderLine,
   validateGraph,
@@ -69,7 +71,8 @@ export async function runJson<T>(
 const brief = (order: Order) =>
   JSON.stringify({
     id: order.id,
-    type: order.type,
+    model: order.model,
+    channel: order.channel,
     customerId: order.customerId,
     title: order.title,
     lines: order.lines,
@@ -332,7 +335,7 @@ export async function summarize(env: Env, context: Record<string, unknown>) {
     () => {
       const o = context.order as Order;
       return {
-        summary: `${o.type} ${o.id}: ${o.lines.length} lines, total ${o.total.toFixed(2)} ${o.currency}.`,
+        summary: `${ORDER_MODEL_LABELS[o.model]} order ${o.id}: ${o.lines.length} lines, total ${o.total.toFixed(2)} ${o.currency}.`,
       };
     },
   );
@@ -363,7 +366,8 @@ Rules: exactly one trigger node. Edges: {id, source, target, sourceHandle}. sour
         role: 'user',
         content: JSON.stringify({
           request: req.prompt,
-          orderType: req.orderType,
+          model: req.model,
+          side: req.model ? (isBuySide(req.model) ? 'buy (priced at cost)' : 'sell') : undefined,
           current: req.graph ?? null,
         }),
       },

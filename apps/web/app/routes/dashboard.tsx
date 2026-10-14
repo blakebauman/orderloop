@@ -1,4 +1,4 @@
-import { ORDER_TYPE_LABELS, type OrderState, type OrderType } from '@orderloop/core';
+import { ORDER_MODEL_LABELS, type OrderModel, type OrderState } from '@orderloop/core';
 import { ArrowRight, ChevronRight, Play } from 'lucide-react';
 import { Form, Link, redirect, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -171,7 +171,9 @@ export default function Dashboard() {
                           <div className="flex flex-wrap items-baseline gap-x-2">
                             <span className="font-medium">
                               {d.orderTitle ||
-                                (d.orderType ? ORDER_TYPE_LABELS[d.orderType as OrderType] : '')}
+                                (d.orderModel
+                                  ? ORDER_MODEL_LABELS[d.orderModel as OrderModel]
+                                  : '')}
                             </span>
                             <span className="font-mono font-normal text-muted-foreground text-xs">
                               {orderRef(d.orderId)}
@@ -231,14 +233,14 @@ export default function Dashboard() {
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-sm">
-                            {o.title || ORDER_TYPE_LABELS[o.type as OrderType]}{' '}
+                            {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
                             <span className="font-mono font-normal text-muted-foreground text-xs">
                               {orderRef(o.id)}
                             </span>
                           </span>
                           <span className="block truncate text-muted-foreground text-xs">
                             {(o.customerId && names[o.customerId]) || o.customerId || 'No customer'}{' '}
-                            · {ORDER_TYPE_LABELS[o.type as OrderType]}
+                            · {ORDER_MODEL_LABELS[o.model as OrderModel]}
                             {o.waitingOn ? ` · waiting on ${waitLabel(o.waitingOn)}` : ''}
                           </span>
                         </span>

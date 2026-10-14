@@ -10,7 +10,7 @@ describe('demo scenarios', () => {
     it(`${s.id} targets a valid seeded flow of its order type`, () => {
       const flow = templates.find((t) => t.id === s.flowId);
       expect(flow, `no template ${s.flowId}`).toBeDefined();
-      expect(flow!.orderType).toBe(s.input.type);
+      expect(flow!.model).toBe(s.input.model);
       expect(validateGraph(flow!).errors).toEqual([]);
       expect(orderInputSchema.safeParse(s.input).success).toBe(true);
     });

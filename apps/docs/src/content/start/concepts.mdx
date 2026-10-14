@@ -12,8 +12,8 @@ A **flow** is a directed graph of nodes and edges, stored as JSON. Each node has
 connects one **output** of its source node to a target node. The [node catalog](/reference/nodes/)
 lists every type with its fields and outputs.
 
-Each flow belongs to an order type: <Values of="order-types" />. Every order type has a
-[built-in flow](/guides/templates/), and you can add your own.
+Each flow belongs to a [commerce model](/guides/commerce-models/): <Values of="order-models" />, and lists
+the channels it is meant for. Every model has a [built-in flow](/guides/templates/), and you can add your own.
 
 ## Draft and published versions
 
@@ -23,8 +23,8 @@ API request names one), so editing or republishing a flow never changes an order
 
 ## Order
 
-An **order** is one run of a published flow: an input (type, customer, currency, lines, an optional
-inbound document, free-form `meta`) plus the totals the flow computes. Its status is one of
+An **order** is one run of a published flow: an input (model, channel, customer or contact, currency, lines, an optional
+fulfillment, an optional inbound document, free-form `meta`) plus the totals the flow computes. Its status is one of
 <Values of="order-statuses" />. The last five are terminal.
 
 `declined` means a policy check or an approval said no. `cancelled` means a person or an API call

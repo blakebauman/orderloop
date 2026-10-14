@@ -49,8 +49,8 @@ import Values from '../../components/Values.astro';
 Order statuses: <Values of="order-statuses" />.
 ```
 
-`Values` takes `node-statuses`, `order-statuses`, `terminal-order-statuses`, `order-types`,
-`outbound-events` or `policy-rules` (add a source in `Values.astro` when you need another).
+`Values` takes `node-statuses`, `order-statuses`, `terminal-order-statuses`, `order-models`,
+`order-channels`, `fulfillment-methods`, `outbound-events` or `policy-rules` (add a source in `Values.astro` when you need another).
 `NodeCatalog`, `Templates` and `NodeEvents` render the catalog, the built-in flows and the
 node-event table. A new component reads `@orderloop/core` only; the docs never import engine
 source. The one exception is `src/pages/openapi.json.ts`, which builds the OpenAPI document from

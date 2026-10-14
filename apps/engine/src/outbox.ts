@@ -108,7 +108,9 @@ function parseEvents(json: string): string[] {
 export function orderSummary(o: Order) {
   return {
     id: o.id,
-    type: o.type,
+    model: o.model,
+    channel: o.channel,
+    externalId: o.externalId ?? null,
     title: o.title ?? null,
     customerId: o.customerId ?? null,
     currency: o.currency,

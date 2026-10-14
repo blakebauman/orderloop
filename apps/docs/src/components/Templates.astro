@@ -4,7 +4,7 @@
  * publishes as version 1 of each flow. Each node links to its catalog entry.
  */
 // biome-ignore lint/correctness/noUnusedImports: used in the markup
-import { nodeSpec, ORDER_TYPE_LABELS, TEMPLATES } from '@orderloop/core';
+import { nodeSpec, ORDER_CHANNEL_LABELS, ORDER_MODEL_LABELS, TEMPLATES } from '@orderloop/core';
 // biome-ignore lint/correctness/noUnusedImports: rendered below
 import NodeIcon from './NodeIcon.astro';
 
@@ -22,8 +22,12 @@ const flows = Object.values(TEMPLATES).map((t) => t());
       <p>{f.description}</p>
       <ul class="ol-node-facts">
         <li>
-          <span class="ol-fact-label">Order type</span>
-          {ORDER_TYPE_LABELS[f.orderType]}
+          <span class="ol-fact-label">Model</span>
+          {ORDER_MODEL_LABELS[f.model]}
+        </li>
+        <li>
+          <span class="ol-fact-label">Channels</span>
+          {f.channels.map((c) => ORDER_CHANNEL_LABELS[c]).join(', ')}
         </li>
         <li>
           <span class="ol-fact-label">Nodes</span>
