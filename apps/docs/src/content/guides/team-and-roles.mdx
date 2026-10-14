@@ -37,7 +37,7 @@ Operators manage people and tokens at `/team`:
 - **Role:** change and save. You can't lower your own role.
 - **Reset password:** after you confirm, gives the person a new temporary password and signs them
   out everywhere.
-- **Disable / Enable:** a disabled person can't sign in, and their sessions end. You can't disable yourself.
+- **Disable / Enable:** after you confirm, a disabled person can't sign in, and their sessions end. You can't disable yourself.
 - **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
@@ -139,7 +139,9 @@ decide approvals but not start orders. Approval decisions made with a token are 
 ## Connected apps
 
 MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
-you sign in (two-factor included) and choose a role. You can grant your own role or a lower one,
+you sign in (two-factor included) and choose a role. Connecting needs your own account: the
+workspace password belongs to no one, so it can't stand behind an app, and the consent page asks
+whoever is signed in with it to sign in as themselves. You can grant your own role or a lower one,
 never a higher one. **Account** lists **Connected apps**, each with whether it is an AI client
 (MCP) or an agent (A2A), the address its access goes to, its role and when it connected;
 **Disconnect** ends it after a confirmation. Every request from a connected app re-reads you: if you are

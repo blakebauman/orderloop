@@ -1,5 +1,5 @@
 import { atLeast, type Principal, ROLE_LABELS } from '@orderloop/core';
-import { approvals } from '@orderloop/db';
+import { approvals, users } from '@orderloop/db';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
 import { cn } from '@orderloop/ui/lib/utils';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun, UserRound } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLoaderData } from 'react-router';
@@ -32,7 +32,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(approvals)
     .where(eq(approvals.status, 'pending'))
     .get();
-  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true };
+  // Who to ask when a page needs a higher role: up to three active operators.
+  const operators = atLeast(me.role, 'operator')
+    ? []
+    : await db()
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(and(eq(users.role, 'operator'), isNull(users.disabledAt)))
+        .orderBy(users.name)
+        .limit(3);
+  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true, operators };
 }
 
 const NAV = [

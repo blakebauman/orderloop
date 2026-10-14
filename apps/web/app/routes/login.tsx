@@ -14,6 +14,7 @@ import {
 import { Mark } from '~/components/mark';
 import { authEnabled, principal, type SignInResult, signIn, Throttled } from '~/lib/auth.server';
 import { nextPath } from '~/lib/next-path';
+import { oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/login';
 
 export const meta = () => [{ title: 'Sign in · OrderLoop' }];
@@ -23,7 +24,14 @@ export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeade
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await authEnabled()) || (await principal(request))) throw redirect(nextPath(request));
-  return { sharedPassword: !!(env as { APP_PASSWORD?: string }).APP_PASSWORD };
+  // Arriving from a consent link: name the app that is waiting (its own, unverified, name).
+  const next = nextPath(request);
+  let app: string | null = null;
+  if (next.startsWith('/oauth/authorize')) {
+    const clientId = new URL(next, request.url).searchParams.get('client_id');
+    if (clientId) app = (await oauthApi(request).lookupClient(clientId))?.clientName ?? null;
+  }
+  return { sharedPassword: !!(env as { APP_PASSWORD?: string }).APP_PASSWORD, app };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -54,7 +62,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Login() {
-  const { sharedPassword } = useLoaderData<typeof loader>();
+  const { sharedPassword, app } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const busy = useNavigation().state === 'submitting';
@@ -62,7 +70,9 @@ export default function Login() {
   // empty. The server still reads an empty email as the workspace password.
   const [workspace, setWorkspace] = useState(false);
   const password = useRef<HTMLInputElement>(null);
-  const error = result?.error;
+  // A refusal belongs to the way it was made: switching modes clears it.
+  const [cleared, setCleared] = useState<typeof result>(undefined);
+  const error = result && result !== cleared ? result.error : undefined;
   // After a refusal, the password is ready to retype.
   useEffect(() => {
     if (error) password.current?.select();
@@ -75,13 +85,22 @@ export default function Login() {
   const email = useRef<HTMLInputElement>(null);
   const connecting = params.get('next')?.startsWith('/oauth/authorize');
   return (
-    <main className="grid min-h-dvh place-items-center bg-background px-4">
-      <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
+    // Anchored near the top rather than centred, so the card doesn't jump when the email field
+    // comes and goes.
+    <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
+      <Form method="post" className="h-fit w-full max-w-sm rounded-md border bg-card p-6">
+        {params.get('signed-out') && !error ? (
+          <p role="status" className="mb-4 text-muted-foreground text-sm">
+            You’ve signed out.
+          </p>
+        ) : null}
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">OrderLoop</h1>
         <p className="mt-1 text-muted-foreground text-sm">
           {connecting
-            ? 'Sign in to connect an app to OrderLoop.'
+            ? app
+              ? `Sign in to connect “${app}” to OrderLoop.`
+              : 'Sign in to connect an app to OrderLoop.'
             : workspace
               ? 'Sign in with the workspace password.'
               : 'Sign in with your work email.'}
@@ -114,6 +133,8 @@ export default function Login() {
           {workspace ? 'Workspace password' : 'Password'}
         </label>
         <Input
+          // A new field per mode, so a personal password never carries into the workspace one.
+          key={workspace ? 'workspace' : 'own'}
           ref={password}
           id="password"
           name="password"
@@ -149,9 +170,10 @@ export default function Login() {
           {sharedPassword ? (
             <button
               type="button"
-              className="text-link hover:underline"
+              className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
               onClick={() => {
                 switched.current = true;
+                setCleared(result);
                 setWorkspace((w) => !w);
               }}
             >

@@ -7,17 +7,20 @@ export default [
   // The consent page MCP clients send people to (lib/oauth.server.ts).
   route('oauth/authorize', 'routes/oauth-authorize.tsx'),
   layout('routes/shell.tsx', [
-    index('routes/dashboard.tsx'),
-    route('orders', 'routes/orders.tsx'),
-    route('orders/new', 'routes/order-new.tsx'),
-    route('orders/:orderId', 'routes/order.tsx'),
-    route('flows', 'routes/flows.tsx'),
-    route('flows/:flowId', 'routes/flow-editor.tsx'),
-    route('approvals', 'routes/approvals.tsx'),
-    route('back-office', 'routes/back-office.tsx'),
-    route('team', 'routes/team.tsx'),
-    route('audit', 'routes/audit.tsx'),
-    route('account', 'routes/account.tsx'),
+    // An error boundary inside the shell, so a refused or missing page keeps the app around it.
+    layout('routes/in-app.tsx', [
+      index('routes/dashboard.tsx'),
+      route('orders', 'routes/orders.tsx'),
+      route('orders/new', 'routes/order-new.tsx'),
+      route('orders/:orderId', 'routes/order.tsx'),
+      route('flows', 'routes/flows.tsx'),
+      route('flows/:flowId', 'routes/flow-editor.tsx'),
+      route('approvals', 'routes/approvals.tsx'),
+      route('back-office', 'routes/back-office.tsx'),
+      route('team', 'routes/team.tsx'),
+      route('audit', 'routes/audit.tsx'),
+      route('account', 'routes/account.tsx'),
+    ]),
   ]),
   // Resource routes the editor and order page post to.
   route('flows/:flowId/action', 'routes/flow-action.ts'),

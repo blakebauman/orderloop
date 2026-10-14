@@ -67,9 +67,14 @@ export async function action({ request }: Route.ActionArgs) {
     switch (str('intent')) {
       case 'end-session':
         await endOwnSession(request, me, String(f.get('ref') ?? ''), current);
-        return { ended: 1 };
-      case 'end-others':
-        return { ended: await endOtherSessions(request, me, current) };
+        return { ended: 1, said: 'Signed out of that session.' };
+      case 'end-others': {
+        const n = await endOtherSessions(request, me, current);
+        return {
+          ended: n,
+          said: n === 1 ? 'Signed out of 1 other session.' : `Signed out of ${n} other sessions.`,
+        };
+      }
       case 'disconnect-app': {
         const oauth = oauthApi(request);
         const grant = (await oauth.listUserGrants(me.id)).items.find((g) => g.id === str('ref'));
@@ -79,7 +84,10 @@ export async function action({ request }: Route.ActionArgs) {
           actor: me,
           target: String(grant.metadata?.app ?? grant.clientId),
         });
-        return { disconnected: 1 };
+        return {
+          disconnected: 1,
+          said: `${String(grant.metadata?.app ?? grant.clientId)} is disconnected.`,
+        };
       }
       case 'two-factor-start':
         if (me.kind !== 'user')
@@ -113,8 +121,9 @@ export async function action({ request }: Route.ActionArgs) {
       String(f.get('next') ?? ''),
     );
     // A new password signs out everywhere else, in case the old one leaked.
-    await endOtherSessions(request, me, current);
-    return { ok: true as const };
+    const ended = await endOtherSessions(request, me, current);
+    // Replacing a temporary password is the first real sign-in: it gets a welcome, not a notice.
+    return { ok: true as const, welcome: !!me.passwordChangeDue, ended };
   } catch (err) {
     if (err instanceof TeamError) return data({ error: err.message }, { status: 400 });
     throw err;
@@ -128,6 +137,16 @@ export default function Account() {
   const formatTime = useDateTime();
   const others = sessions.filter((x) => !x.current).length;
   const passwordError = result && 'error' in result ? result.error : null;
+  const welcomeLink = useRef<HTMLAnchorElement>(null);
+  const welcomed = !!(result && 'ok' in result && result.welcome);
+  useEffect(() => {
+    if (welcomed) welcomeLink.current?.focus();
+  }, [welcomed]);
+  const appsSaid = useRef<HTMLParagraphElement>(null);
+  // After a disconnect the row is gone; focus lands on what happened instead of the page top.
+  useEffect(() => {
+    if (end.data && 'disconnected' in end.data) appsSaid.current?.focus();
+  }, [end.data]);
   const changing = useNavigation().state === 'submitting';
   const passwordForm = useRef<HTMLFormElement>(null);
   const changed = result && 'ok' in result;
@@ -163,6 +182,20 @@ export default function Account() {
               needs it in this workspace; the rest of OrderLoop opens once it is on.
             </p>
           ) : null}
+          {result && 'ok' in result && result.welcome ? (
+            <div role="status" className="mb-6 rounded-md border bg-card p-4">
+              <p className="font-medium">Your password is set. OrderLoop is open.</p>
+              <p className="mt-1 text-muted-foreground text-sm">
+                You’re {/^[aeiou]/i.test(ROLE_LABELS[me.role]) ? 'an' : 'a'} {ROLE_LABELS[me.role]}.
+                Two-factor sign-in, where you’re signed in and connected apps are below.
+              </p>
+              <Button asChild size="sm" className="mt-3">
+                <Link to="/" ref={welcomeLink}>
+                  Go to the overview
+                </Link>
+              </Button>
+            </div>
+          ) : null}
           <Section title="Password">
             {me.kind === 'user' ? (
               <Form method="post" className="space-y-3" ref={passwordForm}>
@@ -177,7 +210,9 @@ export default function Account() {
                   hidden
                 />
                 <label className="block text-sm" htmlFor="current">
-                  {me.passwordChangeDue ? 'Temporary password' : 'Current password'}
+                  {me.passwordChangeDue
+                    ? 'The temporary password you just used'
+                    : 'Current password'}
                 </label>
                 <Input
                   id="current"
@@ -209,9 +244,12 @@ export default function Account() {
                     {passwordError}
                   </p>
                 ) : null}
-                {result && 'ok' in result ? (
-                  <p role="status" className="text-ok text-sm">
-                    Password changed. Your other sessions were signed out.
+                {result && 'ok' in result && !result.welcome ? (
+                  <p role="status" className="text-sm">
+                    Password changed.
+                    {result.ended
+                      ? ` ${result.ended === 1 ? 'Your other session was' : 'Your other sessions were'} signed out.`
+                      : ''}
                   </p>
                 ) : null}
                 <Button type="submit" disabled={changing}>
@@ -239,8 +277,10 @@ export default function Account() {
               </p>
             )}
           </Section>
-          {twoFactor ? <TwoFactor status={twoFactor} /> : null}
-          {me.kind === 'user' ? (
+          {twoFactor && (!me.passwordChangeDue || me.twoFactorDue) ? (
+            <TwoFactor status={twoFactor} />
+          ) : null}
+          {me.kind === 'user' && !me.passwordChangeDue ? (
             <Section
               title="Where you're signed in"
               className="mt-6"
@@ -299,36 +339,56 @@ export default function Account() {
                   {end.data.error}
                 </p>
               ) : null}
+              {end.data && 'ended' in end.data ? (
+                <p role="status" className="border-t px-4 py-2.5 text-sm">
+                  {end.data.said}
+                </p>
+              ) : null}
             </Section>
           ) : null}
-          <Section title="Connected apps" className="mt-6" flush>
-            {apps.length ? (
-              <ul className="divide-y text-sm">
-                {apps.map((a) => (
-                  <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate">{a.name}</div>
-                      <div className="text-muted-foreground text-xs">
-                        {a.channel
-                          ? `${a.channel === 'A2A' ? 'Agent (A2A)' : 'AI client (MCP)'} · `
-                          : ''}
-                        {a.host ? <span className="font-mono">{a.host}</span> : null}
-                        {a.host ? ' · ' : ''}
-                        acts as {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
+          {me.passwordChangeDue ? null : (
+            <Section title="Connected apps" className="mt-6" flush>
+              {apps.length ? (
+                <ul className="divide-y text-sm">
+                  {apps.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate">{a.name}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {a.channel
+                            ? `${a.channel === 'A2A' ? 'Agent (A2A)' : 'AI client (MCP)'} · `
+                            : ''}
+                          {a.host ? <span className="font-mono">{a.host}</span> : null}
+                          {a.host ? ' · ' : ''}
+                          acts as {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
+                        </div>
                       </div>
-                    </div>
-                    <Disconnect app={a.name} id={a.id} end={end} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-4 py-2.5 text-muted-foreground text-sm">
-                No apps are connected. MCP clients such as Claude connect at{' '}
-                <code className="font-mono">/mcp</code>, and A2A agents at{' '}
-                <code className="font-mono">/a2a</code>; each asks you here to approve it.
-              </p>
-            )}
-          </Section>
+                      <Disconnect app={a.name} id={a.id} end={end} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-4 py-2.5 text-muted-foreground text-sm">
+                  No apps are connected. MCP clients such as Claude connect at{' '}
+                  <code className="font-mono">/mcp</code>, and A2A agents at{' '}
+                  <code className="font-mono">/a2a</code>; each asks you here to approve it.
+                </p>
+              )}
+              {end.data && 'disconnected' in end.data ? (
+                <p
+                  ref={appsSaid}
+                  tabIndex={-1}
+                  role="status"
+                  className="border-t px-4 py-2.5 text-sm outline-none"
+                >
+                  {end.data.said}
+                </p>
+              ) : null}
+            </Section>
+          )}
         </div>
       </div>
     </>
@@ -356,6 +416,22 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
   useEffect(() => {
     if (showCodes || showSetup) headingRef.current?.focus();
   }, [showCodes, showSetup]);
+  const statusLine = useRef<HTMLParagraphElement>(null);
+  const turnOff = useRef<HTMLButtonElement>(null);
+  const codeField = useRef<HTMLInputElement>(null);
+  const saved = useRef(false);
+  // Leaving the codes step lands on the status it leads to, not the top of the page.
+  useEffect(() => {
+    if (!showCodes && saved.current) {
+      saved.current = false;
+      statusLine.current?.focus();
+    }
+  }, [showCodes]);
+  // A refused setup code is ready to retype.
+  useEffect(() => {
+    if (error && lastIntent === 'two-factor-enable' && /code/i.test(error))
+      codeField.current?.select();
+  }, [error, lastIntent]);
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     const intent = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value');
     setLastIntent(intent ?? new FormData(e.currentTarget).get('intent')?.toString() ?? null);
@@ -379,7 +455,8 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
           </h3>
           <p className="text-muted-foreground text-sm">
             Each one signs you in once if you can’t use your authenticator app. Keep them apart from
-            your phone. They are shown only now; any older codes no longer work.
+            your phone. They are shown only now
+            {lastIntent === 'two-factor-codes' ? '; your older codes no longer work.' : '.'}
           </p>
           <ul
             aria-label="Recovery codes"
@@ -410,7 +487,10 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
               type="button"
               size="sm"
               className="ml-auto"
-              onClick={() => setSavedCodes(codesKey)}
+              onClick={() => {
+                setSavedCodes(codesKey);
+                saved.current = true;
+              }}
             >
               I’ve saved them
             </Button>
@@ -424,8 +504,9 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
     <Section title="Two-factor sign-in" className="mt-6">
       {status.enabledAt ? (
         <div className="space-y-5">
-          <p className="text-sm">
-            <span className="font-medium text-ok">On</span>{' '}
+          {/* A state, not a success: ink, not green. */}
+          <p ref={statusLine} tabIndex={-1} className="text-sm outline-none">
+            <span className="font-medium">On</span>{' '}
             <span className="text-muted-foreground">
               since {formatTime(status.enabledAt)}. After your password, sign-in asks for a code
               from your authenticator app.
@@ -446,7 +527,7 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
               Replaces your codes; the old ones stop working.
             </p>
             <label className="block text-sm" htmlFor="tf-codes-password">
-              Your password
+              Your password, to make new codes
             </label>
             <Input
               id="tf-codes-password"
@@ -471,7 +552,7 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
                   you’ll be asked to set it up again.
                 </p>
                 <label className="block text-sm" htmlFor="tf-off-password">
-                  Your password
+                  Your password, to turn it off
                 </label>
                 <Input
                   id="tf-off-password"
@@ -493,7 +574,10 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setConfirmOff(false)}
+                    onClick={() => {
+                      setConfirmOff(false);
+                      requestAnimationFrame(() => turnOff.current?.focus());
+                    }}
                   >
                     Keep it on
                   </Button>
@@ -505,6 +589,7 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
                 variant="ghost"
                 size="sm"
                 className="text-bad hover:text-bad"
+                ref={turnOff}
                 onClick={() => setConfirmOff(true)}
               >
                 Turn off…
@@ -537,6 +622,7 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
             Code from the app
           </label>
           <Input
+            ref={codeField}
             id="tf-code"
             name="code"
             required
@@ -602,24 +688,41 @@ function Disconnect({
   end: ReturnType<typeof useFetcher<typeof action>>;
 }) {
   const [confirming, setConfirming] = useState(false);
-  if (!confirming)
-    return (
-      <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
-        Disconnect
-      </Button>
-    );
+  const trigger = useRef<HTMLButtonElement>(null);
+  const keep = () => {
+    setConfirming(false);
+    // Back to where the person was.
+    requestAnimationFrame(() => trigger.current?.focus());
+  };
   return (
-    <end.Form method="post" className="flex flex-wrap items-center justify-end gap-2">
-      <input type="hidden" name="intent" value="disconnect-app" />
-      <input type="hidden" name="ref" value={id} />
-      <span className="text-xs">Disconnect {app}? It loses access now.</span>
-      <Button size="sm" variant="destructive" disabled={end.state !== 'idle'} autoFocus>
+    <>
+      <Button
+        ref={trigger}
+        size="sm"
+        variant="ghost"
+        aria-expanded={confirming}
+        onClick={() => setConfirming(true)}
+      >
         Disconnect
       </Button>
-      <Button size="sm" variant="ghost" type="button" onClick={() => setConfirming(false)}>
-        Keep
-      </Button>
-    </end.Form>
+      {/* Its own line under the row, so the app it names stays readable beside the question. */}
+      {confirming ? (
+        <end.Form
+          method="post"
+          className="flex basis-full flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2"
+        >
+          <input type="hidden" name="intent" value="disconnect-app" />
+          <input type="hidden" name="ref" value={id} />
+          <span className="mr-auto text-sm">Disconnect {app}? It loses access now.</span>
+          <Button size="sm" variant="ghost" type="button" onClick={keep} autoFocus>
+            Keep
+          </Button>
+          <Button size="sm" variant="destructive" disabled={end.state !== 'idle'}>
+            Disconnect
+          </Button>
+        </end.Form>
+      ) : null}
+    </>
   );
 }
 

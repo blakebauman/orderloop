@@ -13,14 +13,29 @@ import {
 import { atLeast, isRole, ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { useState } from 'react';
-import { data, Form, Link, useLoaderData, useLocation } from 'react-router';
+import { data, Form, Link, useActionData, useLoaderData, useLocation } from 'react-router';
 import { Mark } from '~/components/mark';
 import { audit } from '~/lib/audit.server';
 import { type GrantProps, requireUser } from '~/lib/auth.server';
 import { channelOf, oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/oauth-authorize';
 
-export const meta = () => [{ title: 'Connect an app · OrderLoop' }];
+export const meta = ({ loaderData: d }: Route.MetaArgs) => [
+  {
+    title:
+      d && 'error' in d
+        ? 'Can’t connect this app · OrderLoop'
+        : d && 'personal' in d
+          ? 'Use your own account · OrderLoop'
+          : 'Connect an app · OrderLoop',
+  },
+];
+
+/**
+ * The workspace password belongs to no one, so it can't stand behind a lasting grant: an app's
+ * actions must trace to a person. (Open local development has no accounts at all and keeps working.)
+ */
+const SHARED_REFUSED = 'Sign in with your own account to connect an app.';
 
 /** The consent cookie and anti-framing headers from the loader, and the redirect's cookies. */
 export const headers: Route.HeadersFunction = ({ loaderHeaders, actionHeaders }) => {
@@ -78,6 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const authRequest = await oauth.parseAuthRequest(request);
     // First: a failed lookup leaves nothing behind.
     const details = await oauth.describeConsent(authRequest);
+    if (me.kind === 'password') return { personal: true as const, app: details.clientName };
     const consent = await oauth.beginConsent(authRequest);
     const roles = ROLES.filter((r) => atLeast(me.role, r));
     return data(
@@ -103,6 +119,8 @@ export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const handle = String(form.get('handle') ?? '');
   try {
+    if (me.kind === 'password' && form.get('decision') === 'approve')
+      return data({ error: SHARED_REFUSED }, { status: 403 });
     if (form.get('decision') !== 'approve') {
       const denied = await oauth.denyConsent(request, handle);
       return new Response(null, { status: 302, headers: denied.headers });
@@ -121,7 +139,8 @@ export async function action({ request }: Route.ActionArgs) {
       metadata: {
         app,
         channel: channelOf(approved.request.resource),
-        host: new URL(approved.request.redirectUri).host,
+        // The host the consent page named (no port), so both pages show the same address.
+        host: new URL(approved.request.redirectUri).hostname,
       },
       scope: [role],
       props,
@@ -140,11 +159,31 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function OAuthAuthorize() {
   const d = useLoaderData<typeof loader>();
+  const here = useLocation();
+  // Signing out returns here, so the person signs in as themselves and sees this request again.
+  const switchAccount = `/logout?next=${encodeURIComponent(here.pathname + here.search)}`;
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4">
       <div className="w-full max-w-md rounded-md border bg-card p-6">
         <Mark className="size-7" />
-        {'error' in d ? (
+        {'personal' in d ? (
+          <>
+            <h1 className="mt-4 text-balance font-semibold tracking-title text-2xl">
+              Use your own account to connect an app
+            </h1>
+            <p className="mt-2 text-sm">
+              You’re signed in with the workspace password, which belongs to no one. An app acts for
+              a person, so OrderLoop can’t connect “{d.app}” to it.
+            </p>
+            <p className="mt-2 text-muted-foreground text-sm">
+              Sign in with your own account and this request comes back. No account yet? An operator
+              can add you on the Team page.
+            </p>
+            <Button asChild className="mt-5">
+              <a href={switchAccount}>Sign in with your account</a>
+            </Button>
+          </>
+        ) : 'error' in d ? (
           <>
             <h1 className="mt-4 font-semibold tracking-title text-2xl">Can’t connect this app</h1>
             <p className="mt-2 text-sm">{d.error}</p>
@@ -159,7 +198,7 @@ export default function OAuthAuthorize() {
             </Link>
           </>
         ) : (
-          <Consent {...d} />
+          <Consent {...d} switchAccount={switchAccount} />
         )}
       </div>
     </main>
@@ -172,16 +211,18 @@ function Consent({
   roles,
   who,
   channel,
+  switchAccount,
 }: {
   details: ConsentDescription;
   handle: string;
   roles: Role[];
   who: string;
   channel: string;
+  switchAccount: string;
 }) {
   // React escapes every string below; all of them may come from the client.
-  const [sending, setSending] = useState(false);
-  const here = useLocation();
+  const [sending, setSending] = useState<string | null>(null);
+  const refused = useActionData<typeof action>();
   const kind = channel === 'A2A' ? 'an agent (A2A)' : 'an AI client (MCP)';
   return (
     <Form
@@ -191,13 +232,21 @@ function Consent({
         // One decision per page. The buttons stay enabled: a disabled submitter would drop its
         // `decision` from the form, turning Connect into Cancel.
         if (sending) e.preventDefault();
-        else setSending(true);
+        else
+          setSending((e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') ?? 'approve');
       }}
     >
       <input type="hidden" name="handle" value={handle} />
+      {/* The name is the app's own claim; without a known publisher, say so beside it. */}
       <h1 className="mt-4 text-balance font-semibold tracking-title text-2xl">
-        Connect {details.clientName} to OrderLoop?
+        Connect {details.clientDomain ? details.clientName : `“${details.clientName}”`} to
+        OrderLoop?
       </h1>
+      {details.clientDomain ? null : (
+        <span className="mt-1.5 inline-block rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
+          Unverified name
+        </span>
+      )}
       <p className="mt-2 text-sm">
         {details.clientDomain ? (
           <>
@@ -211,10 +260,7 @@ function Consent({
       </p>
       <p className="mt-2 text-muted-foreground text-xs">
         Not {who}?{' '}
-        <a
-          href={`/logout?next=${encodeURIComponent(here.pathname + here.search)}`}
-          className="text-link hover:underline"
-        >
+        <a href={switchAccount} className="text-link hover:underline">
           Use a different account
         </a>
       </p>
@@ -230,7 +276,10 @@ function Consent({
         </legend>
         <div className="mt-2 space-y-2">
           {roles.map((r, i) => (
-            <label key={r} className="flex items-start gap-2.5 rounded-md border p-3 text-sm">
+            <label
+              key={r}
+              className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary"
+            >
               <input
                 type="radio"
                 name="role"
@@ -251,18 +300,28 @@ function Consent({
         on your Account page, and never more than your own role: lower your role, and the app’s
         drops with it.
       </p>
+      {refused && 'error' in refused ? (
+        <p role="alert" className="mt-3 text-destructive text-sm">
+          {refused.error}
+        </p>
+      ) : null}
       <div className="mt-5 flex gap-2">
-        <Button type="submit" name="decision" value="approve" aria-disabled={sending || undefined}>
-          {sending ? 'Connecting…' : 'Connect'}
+        <Button
+          type="submit"
+          name="decision"
+          value="approve"
+          aria-disabled={!!sending || undefined}
+        >
+          {sending === 'approve' ? 'Connecting…' : 'Connect'}
         </Button>
         <Button
           type="submit"
           name="decision"
           value="deny"
           variant="outline"
-          aria-disabled={sending || undefined}
+          aria-disabled={!!sending || undefined}
         >
-          Cancel
+          {sending === 'deny' ? 'Cancelling…' : 'Cancel'}
         </Button>
       </div>
     </Form>
