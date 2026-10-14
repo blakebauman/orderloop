@@ -281,12 +281,14 @@ drops the status and becomes a palette card: icon, label, type, tags, outputs, f
 
 ### The run figure (`OrderRun.astro`, home)
 
-The docs' signature: one real B2B order drawn as the canvas draws it, on the editor's dotted sheet
-(dots 20px apart, 1.2px, `sheet-grid` on `sheet`). Twelve reached nodes, joined by ink edges; a
-"Waiting on payment.received" stamp in the panel header; subtotal, tax and total with the app's
-accounting double rule under the total; a caption saying where the run came from and how many
-nodes it skipped. The data is `src/data/sample-run.json`, captured from the engine;
-`apps/engine/tests/docs-sample-run.test.ts` fails when the engine would now run it differently.
+The docs' signature: real orders drawn as the canvas draws them, on the editor's dotted sheet
+(dots 20px apart, 1.2px, `sheet-grid` on `sheet`), one per tab: a direct-to-consumer pickup in
+store first, then a B2B purchase order by email, so no one commerce model reads as the product.
+Each shows its reached nodes joined by ink edges; a "Waiting on …" stamp in the panel header;
+subtotal, tax and total with the app's accounting double rule under the total; a caption saying
+where the run came from and how many nodes it skipped. The data is `src/data/runs/*.json`,
+captured from the engine; `apps/engine/tests/docs-sample-run.test.ts` replays each file and fails
+when the engine would now run it differently.
 
 ### Code blocks
 

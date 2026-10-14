@@ -82,9 +82,11 @@ export const EXECUTORS: Record<string, Exec> = {
   'trigger.webhook': async ({ ctx, config }) => {
     const { channel, externalId } = ctx.order;
     const source = str(ctx.order.meta?.source, str(config.source, ''));
+    // The source adds nothing when it only repeats the channel ("web" on a web order).
+    const named = source && source !== channel ? ` (${source})` : '';
     return {
       output: { channel, externalId: externalId ?? null, source },
-      summary: `${ORDER_CHANNEL_LABELS[channel]}${externalId ? ` · ${externalId}` : ''}${source ? ` (${source})` : ''}`,
+      summary: `${ORDER_CHANNEL_LABELS[channel]}${externalId ? ` · ${externalId}` : ''}${named}`,
     };
   },
   'trigger.schedule': passthrough,
@@ -240,7 +242,9 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       branches: [short ? 'backorder' : 'ok'],
       output: r,
-      summary: short ? `Short: ${r.short.join(', ')}` : `Reserved ${r.reservationIds.length} lines`,
+      summary: short
+        ? `Short: ${r.short.join(', ')}`
+        : `Reserved ${lineCount(r.reservationIds.length)}`,
     };
   },
 
@@ -412,7 +416,8 @@ export const EXECUTORS: Record<string, Exec> = {
       | 'carry_out'
       | 'digital';
     const r = await cx.routeFulfillment(env, ctx.order, method === 'digital' ? 'ship' : method);
-    const where = r.locationName ? ` from ${r.locationName}` : '';
+    const at = (b: string) =>
+      !r.locationName ? '' : b === 'ship' ? ` from ${r.locationName}` : ` at ${r.locationName}`;
     return {
       branches: r.branches,
       output: r,
@@ -434,7 +439,7 @@ export const EXECUTORS: Record<string, Exec> = {
               .map((b) =>
                 b === 'digital'
                   ? 'digital'
-                  : `${FULFILLMENT_METHOD_LABELS[b as FulfillmentMethod]}${where}`,
+                  : `${b === 'pickup' ? 'Pick up' : FULFILLMENT_METHOD_LABELS[b as FulfillmentMethod]}${at(b)}`,
               )
               .join(' + '),
     };

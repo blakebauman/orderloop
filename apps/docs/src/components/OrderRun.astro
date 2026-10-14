@@ -7,7 +7,7 @@
  * editor's dotted sheet.
  *
  * The run is data, not a mock. Node labels, types, outputs and icons come from the built-in flow
- * in @orderloop/core; statuses, branches and summaries come from src/data/sample-run.json, captured
+ * in @orderloop/core; statuses, branches and summaries come from a file in src/data/runs, captured
  * from the engine (apps/engine/tests/docs-sample-run.test.ts checks it still matches). Only the
  * nodes the order reached are drawn; the rest were skipped, and the caption counts them.
  */
@@ -18,13 +18,25 @@ import {
   ORDER_MODEL_LABELS,
   TEMPLATES,
 } from '@orderloop/core';
-import run from '../data/sample-run.json';
 // biome-ignore lint/correctness/noUnusedImports: rendered below
 import NodeIcon from './NodeIcon.astro';
 
 type RunNode = { status: NodeStatus; summary?: string; branches?: string[] };
 
-const flow = TEMPLATES['tpl-b2b-order']();
+interface Props {
+  /** A file from src/data/runs. The slot is the caption's account of where the run came from. */
+  run: {
+    flowId: string;
+    order: { customerId?: string; subtotal: number; tax: number; total: number };
+    waits: { nodeId: string; event?: string; title?: string }[];
+    nodes: Record<string, unknown>;
+  };
+}
+
+const { run } = Astro.props;
+const flow = Object.values(TEMPLATES)
+  .map((t) => t())
+  .find((f) => f.id === run.flowId)!;
 const nodes = run.nodes as Record<string, RunNode>;
 const reached = flow.nodes.filter((n) => {
   const s = nodes[n.id]?.status;
@@ -78,12 +90,14 @@ const totals = [
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const waiting = steps.find((s) => s.live);
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
-const model = ORDER_MODEL_LABELS[flow.model];
+const label = ORDER_MODEL_LABELS[flow.model];
+// "B2B" stays as it is; "Direct to consumer" reads "direct to consumer" mid-sentence.
+const model = /^[A-Z0-9]+$/.test(label.split(' ')[0]!) ? label : label.toLowerCase();
 ---
 
-<figure class="ol-run not-content" aria-labelledby="ol-run-title">
+<figure class="ol-run not-content" aria-labelledby={`ol-run-${flow.id}`}>
   <div class="ol-run-head">
-    <h2 id="ol-run-title">One {model} order, as the engine ran it</h2>
+    <h2 id={`ol-run-${flow.id}`}>One {model} order, as the engine ran it</h2>
     {
       waiting && (
         <span class="ol-stamp" style={`--c: ${waiting.status.color}`}>
@@ -138,11 +152,8 @@ const model = ORDER_MODEL_LABELS[flow.model];
       }
     </dl>
     <figcaption>
-      <a href="/guides/templates/#tpl-b2b-order"><code>{flow.id}</code></a> run by the engine in
-      workerd on the dashboard's “B2B PO by email” scenario, with <code>AI_MODE=mock</code> (hence
-      “heuristic” on the extract step, which found <code>{run.order.customerId}</code> from the
-      email's <code>From:</code> line). {skipped} other nodes were skipped: the branches this order
-      didn't take.
+      <a href={`/guides/templates/#${flow.id}`}><code>{flow.id}</code></a> run by the engine in
+      workerd <slot />. {skipped} other nodes were skipped: the branches this order didn't take.
     </figcaption>
   </div>
 </figure>

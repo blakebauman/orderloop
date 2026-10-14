@@ -21,7 +21,7 @@ a page has to be added or moved, and **`docs-audit`** when asked to sweep a whol
 
 - `apps/docs/src/content/**`, `apps/docs/astro.config.mjs` (the sidebar), `apps/docs/src/components/`
   (only to expose more values from `@orderloop/core`), `apps/docs/src/styles/brand.css`,
-  `apps/docs/DESIGN.md` and `apps/docs/src/data/sample-run.json`.
+  `apps/docs/DESIGN.md` and `apps/docs/src/data/runs/*.json`.
 - `packages/design/src/tokens.ts`, only to mirror a token change already made in
   `apps/web/app/app.css`, followed by `pnpm sync:theme`. Never edit the generated `theme.css`.
 - `README.md`, `ROADMAP.md`, and `CLAUDE.md` where they describe the same behaviour.

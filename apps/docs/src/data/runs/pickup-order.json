@@ -1,0 +1,126 @@
+{
+  "$comment": "One real run of tpl-omnichannel-order: the engine in workerd (AI_MODE=mock) on its input below (the dashboard's \"Buy online, pick up in store\" scenario), stopped while the customer has yet to collect. Drawn by apps/docs/src/components/OrderRun.astro; apps/engine/tests/docs-sample-run.test.ts replays it.",
+  "flowId": "tpl-omnichannel-order",
+  "input": {
+    "model": "d2c",
+    "channel": "web",
+    "currency": "USD",
+    "customerId": "cus_ada",
+    "title": "Web order #10655 (pickup)",
+    "fulfillment": {
+      "method": "pickup",
+      "locationId": "loc_soho"
+    },
+    "lines": [
+      {
+        "sku": "MON-27",
+        "qty": 1
+      }
+    ],
+    "meta": {}
+  },
+  "status": "waiting",
+  "order": {
+    "customerId": "cus_ada",
+    "subtotal": 349,
+    "tax": 27.92,
+    "total": 376.92
+  },
+  "waits": [
+    {
+      "nodeId": "collect",
+      "kind": "event",
+      "event": "pickup.collected",
+      "title": "Waiting for pickup.collected"
+    }
+  ],
+  "nodes": {
+    "checkout": {
+      "status": "succeeded",
+      "summary": "Web",
+      "branches": ["out"]
+    },
+    "validate": {
+      "status": "succeeded",
+      "summary": "1 line · Ada Lovelace",
+      "branches": ["out"]
+    },
+    "price": {
+      "status": "succeeded",
+      "summary": "Subtotal $349.00",
+      "branches": ["out"]
+    },
+    "tax": {
+      "status": "succeeded",
+      "summary": "Tax $27.92 · total $376.92",
+      "branches": ["out"]
+    },
+    "authorize": {
+      "status": "succeeded",
+      "summary": "Authorized $376.92",
+      "branches": ["ok"]
+    },
+    "route": {
+      "status": "succeeded",
+      "summary": "Pick up at SoHo store",
+      "branches": ["pickup"]
+    },
+    "reserve_ship": {
+      "status": "skipped"
+    },
+    "ship": {
+      "status": "skipped"
+    },
+    "shipped": {
+      "status": "skipped"
+    },
+    "reserve_pickup": {
+      "status": "succeeded",
+      "summary": "Reserved 1 line",
+      "branches": ["ok"]
+    },
+    "ready": {
+      "status": "succeeded",
+      "summary": "Pickup code QGFZU3",
+      "branches": ["out"]
+    },
+    "ready_note": {
+      "status": "succeeded",
+      "summary": "→ ada@example.com: Order ord_mv7h3haa8hcwu9 is ready at SoHo store",
+      "branches": ["out"]
+    },
+    "collect": {
+      "status": "waiting"
+    },
+    "handover": {
+      "status": "pending"
+    },
+    "deliver": {
+      "status": "skipped"
+    },
+    "delivered": {
+      "status": "skipped"
+    },
+    "capture": {
+      "status": "pending"
+    },
+    "done": {
+      "status": "pending"
+    },
+    "declined": {
+      "status": "skipped"
+    },
+    "unavailable": {
+      "status": "skipped"
+    },
+    "short": {
+      "status": "skipped"
+    },
+    "uncollected": {
+      "status": "pending"
+    },
+    "uncaptured": {
+      "status": "pending"
+    }
+  }
+}

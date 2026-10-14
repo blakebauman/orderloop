@@ -5,8 +5,8 @@ template: splash
 hero:
   title: Every order is a loop that runs to its outcome.
   tagline: >-
-    Draw a flow from catalog nodes: pricing, credit, approvals, payments, shipping, AI triage. OrderLoop
-    runs each order through it as a durable Workflow with its own live agent, on Workers, Workflows,
+    Draw a flow from catalog nodes: pricing, payments, approvals, shipping, store pickup, digital
+    delivery, marketplace sellers, AI triage. OrderLoop runs each order, from any channel, through it as a durable Workflow with its own live agent, on Workers, Workflows,
     Durable Objects, Workers AI, D1 and R2.
   actions:
     - text: Run it locally
@@ -20,10 +20,26 @@ hero:
       variant: minimal
 ---
 
-import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard, TabItem, Tabs } from '@astrojs/starlight/components';
 import OrderRun from '../components/OrderRun.astro';
+import b2bRun from '../data/runs/b2b-order.json';
+import pickupRun from '../data/runs/pickup-order.json';
 
-<OrderRun />
+<Tabs>
+  <TabItem label="Pick up in store">
+    <OrderRun run={pickupRun}>
+      on the dashboard's “Buy online, pick up in store” scenario: a direct-to-consumer web order held
+      at the SoHo store, waiting for the customer to collect it
+    </OrderRun>
+  </TabItem>
+  <TabItem label="Purchase order by email">
+    <OrderRun run={b2bRun}>
+      on the dashboard's “B2B PO by email” scenario, with <code>AI_MODE=mock</code> (hence
+      “heuristic” on the extract step, which found <code>cus_northwind</code> from the email's{' '}
+      <code>From:</code> line)
+    </OrderRun>
+  </TabItem>
+</Tabs>
 
 ## What it runs
 
