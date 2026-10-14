@@ -169,7 +169,7 @@ export default function OrderPage() {
     setTab('node');
   };
   const assistant = useAssistant();
-  const title = order.title || ORDER_TYPE_LABELS[order.type as OrderType];
+  const title = order.title || ORDER_MODEL_LABELS[order.model as OrderModel];
   usePageContext(
     () => ({ kind: 'order', id: orderId, label: `${title} ${orderRef(orderId)}` }),
     [orderId, title],

@@ -202,7 +202,7 @@ export default function FlowEditor() {
       id: flowRef.current.id,
       label: flowRef.current.name,
       graph: { nodes: flowRef.current.nodes, edges: flowRef.current.edges },
-      orderType: flowRef.current.orderType,
+      model: flowRef.current.model,
     }),
     [flow.id, flow.name],
   );

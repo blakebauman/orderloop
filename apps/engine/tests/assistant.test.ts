@@ -49,7 +49,8 @@ async function waitingOrder() {
     await m.disableRetryDelays();
   });
   const input: OrderInput = {
-    type: 'b2b_order',
+    model: 'b2b',
+    channel: 'api',
     currency: 'USD',
     customerId: 'cus_contoso',
     lines: [{ sku: 'WID-200', qty: 100 }],
