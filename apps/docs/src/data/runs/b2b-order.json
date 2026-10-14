@@ -121,6 +121,12 @@
     "declined": {
       "status": "skipped"
     },
+    "expire": {
+      "status": "skipped"
+    },
+    "expired": {
+      "status": "skipped"
+    },
     "backorder": {
       "status": "skipped"
     }

@@ -84,6 +84,14 @@ export function purchaseRequestFlow(): Flow {
       subject: 'Purchase {{order.id}} was not approved',
     })
     .n('rejected', 'control.end', 'Rejected', { outcome: 'declined', reason: 'Not approved' })
+    .n('expire_note', 'commerce.notify', 'Tell requester', {
+      to: 'team',
+      subject: 'Purchase {{order.id}} expired without a decision',
+    })
+    .n('expired', 'control.end', 'No decision', {
+      outcome: 'declined',
+      reason: 'No approval decision in time',
+    })
     .n('stalled', 'control.end', 'Supplier unresponsive', {
       outcome: 'failed',
       reason: 'Supplier did not respond',
@@ -102,8 +110,9 @@ export function purchaseRequestFlow(): Flow {
     .e('needs_fin.false', 'po')
     .e('fin.approved', 'po')
     .e('fin.rejected', 'reject_note')
-    .e('fin.escalated', 'reject_note')
+    .e('fin.escalated', 'expire_note')
     .e('reject_note', 'rejected')
+    .e('expire_note', 'expired')
     .e('po', 'send')
     .e('send', 'ack')
     .e('ack.received', 'goods')
@@ -114,7 +123,7 @@ export function purchaseRequestFlow(): Flow {
     .e('match.mismatch', 'mismatch')
     .e('mismatch.approved', 'pay')
     .e('mismatch.rejected', 'reject_note')
-    .e('mismatch.escalated', 'reject_note')
+    .e('mismatch.escalated', 'expire_note')
     .e('pay', 'erp')
     .e('erp', 'done')
     .build({
@@ -203,6 +212,14 @@ export function b2bOrderFlow(): Flow {
       subject: 'We could not accept PO {{order.id}}',
     })
     .n('declined', 'control.end', 'Declined', { outcome: 'declined', reason: 'Not approved' })
+    .n('expire', 'commerce.notify', 'Decline order', {
+      to: 'customer',
+      subject: 'We could not accept PO {{order.id}}',
+    })
+    .n('expired', 'control.end', 'No decision', {
+      outcome: 'declined',
+      reason: 'No approval decision in time',
+    })
     .n('backorder', 'control.end', 'Out of stock', {
       outcome: 'failed',
       reason: 'Insufficient stock; reservations released',
@@ -225,8 +242,9 @@ export function b2bOrderFlow(): Flow {
     .e('reply.timeout', 'decline')
     .e('approval.approved', 'reserve')
     .e('approval.rejected', 'decline')
-    .e('approval.escalated', 'decline')
+    .e('approval.escalated', 'expire')
     .e('decline', 'declined')
+    .e('expire', 'expired')
     .e('reserve.ok', 'invoice')
     .e('reserve.backorder', 'backorder')
     .e('invoice', 'ship')
