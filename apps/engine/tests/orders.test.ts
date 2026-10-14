@@ -613,7 +613,12 @@ describe('marketplace order', () => {
     expect(done.status).toBe('failed');
     expect(done.nodes.no_sellers!.status).toBe('succeeded');
     expect(await parts(orderId)).toEqual({ sel_kettle: 'rejected' });
-    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    // The void is a rollback: Workflows runs it after the run fails, so it can land after the
+    // `failed` report `settled` waits for.
+    const pays = await until(async () => {
+      const rows = await db().select().from(payments).where(eq(payments.orderId, orderId));
+      return rows.length > 0 && rows.every((p) => p.status === 'voided') && rows;
+    }, 'the void');
     expect(pays.map((p) => p.status)).toEqual(['voided']);
   });
 
@@ -631,6 +636,8 @@ describe('marketplace order', () => {
     });
     const done = await settled(orderId);
     expect(done.status).toBe('failed');
+    // Cancelling the seller order is a rollback too, so it can land after the `failed` report.
+    await until(async () => (await parts(orderId)).sel_brightside === 'cancelled', 'the cancel');
     expect(await parts(orderId)).toEqual({ sel_brightside: 'cancelled' });
   });
 });
