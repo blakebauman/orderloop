@@ -62,24 +62,26 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
 }
 
 export async function dashboardStats() {
-  const byStatus = await db()
-    .select({
-      status: orders.status,
-      n: sql<number>`count(*)`,
-      // In the base currency, at each order's rate.
-      total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
-    })
-    .from(orders)
-    .groupBy(orders.status);
-  const byModel = await db()
-    .select({ model: orders.model, n: sql<number>`count(*)` })
-    .from(orders)
-    .groupBy(orders.model);
-  const pending = await db()
-    .select({ n: sql<number>`count(*)` })
-    .from(approvals)
-    .where(eq(approvals.status, 'pending'))
-    .get();
+  const [byStatus, byModel, pending] = await Promise.all([
+    db()
+      .select({
+        status: orders.status,
+        n: sql<number>`count(*)`,
+        // In the base currency, at each order's rate.
+        total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
+      })
+      .from(orders)
+      .groupBy(orders.status),
+    db()
+      .select({ model: orders.model, n: sql<number>`count(*)` })
+      .from(orders)
+      .groupBy(orders.model),
+    db()
+      .select({ n: sql<number>`count(*)` })
+      .from(approvals)
+      .where(eq(approvals.status, 'pending'))
+      .get(),
+  ]);
   return { byStatus, byModel, pendingApprovals: pending?.n ?? 0 };
 }
 

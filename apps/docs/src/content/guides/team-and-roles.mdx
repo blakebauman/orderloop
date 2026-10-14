@@ -203,7 +203,7 @@ strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, a `Permissions-Policy
 camera, microphone, geolocation and payment, and, over HTTPS only, `Strict-Transport-Security:
 max-age=31536000; includeSubDomains`. HTML pages also get a `Content-Security-Policy`, set in
 `app/entry.server.tsx` with a fresh nonce per response: scripts run only from the app's own origin
-or with that nonce, `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`. It is
+or with that nonce, `style-src` and `font-src` limited to the app's own origin (IBM Plex is self-hosted, so no font CDN is allowed), `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`. It is
 not sent by the Vite dev server, whose inline scripts carry no nonce, so it applies to production builds.
 
 ## Outside identity providers

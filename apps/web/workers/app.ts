@@ -28,6 +28,9 @@ import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 
+/** The OpenAPI document only changes with a deploy: build it once per isolate and origin. */
+const openApiDocs = new Map<string, string>();
+
 const requestHandler = createRequestHandler(
   () => import('virtual:react-router/server-build'),
   import.meta.env.MODE,
@@ -80,7 +83,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   // The API description is public, like any published spec.
   if (url.pathname === '/api/v1/openapi.json' && request.method === 'GET') {
-    return Response.json(openApiDocument(url.origin));
+    let doc = openApiDocs.get(url.origin);
+    if (!doc) {
+      doc = JSON.stringify(openApiDocument(url.origin));
+      openApiDocs.set(url.origin, doc);
+    }
+    return new Response(doc, {
+      headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' },
+    });
   }
 
   if (url.pathname.startsWith('/api/v1/')) {

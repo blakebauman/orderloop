@@ -76,6 +76,9 @@ import {
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
+/** Purchase orders of one X12 interchange started at the same time. */
+const EDI_CONCURRENCY = 4;
+
 /** The most orders one page of GET /api/v1/orders returns. */
 const MAX_PAGE = 200;
 
@@ -340,8 +343,11 @@ type InboundOutcome = { status: number; body: Record<string, unknown> };
  * Starts an inbound order, however it arrived (the signed endpoint or a channel adapter): checks
  * the currency, routes it, and starts it once per channel and external id.
  */
-async function startInbound(o: InboundOrder): Promise<InboundOutcome> {
-  if (!(await currencies()).some((c) => c.currency === o.currency))
+async function startInbound(
+  o: InboundOrder,
+  known?: Awaited<ReturnType<typeof currencies>>,
+): Promise<InboundOutcome> {
+  if (!(known ?? (await currencies())).some((c) => c.currency === o.currency))
     return {
       status: 400,
       body: { error: `Unsupported currency ${o.currency}; there is no exchange rate for it` },
@@ -418,25 +424,24 @@ async function handleEdi850(text: string): Promise<Response> {
   const customerId = parseEdiPartners((env as { EDI_PARTNERS?: string }).EDI_PARTNERS)[sender];
   if (!customerId)
     return json({ error: `${sender || 'The sender'} is not a configured trading partner` }, 403);
-  const results = [];
-  for (const tx of transactions) {
+  const known = await currencies();
+  const one = async (tx: (typeof transactions)[number]) => {
     const mapped = x12850ToInbound(tx, { sender, customerId });
-    if (!mapped.ok) {
-      results.push({ control: tx.control, status: 400, error: mapped.error });
-      continue;
-    }
+    if (!mapped.ok) return { control: tx.control, status: 400, error: mapped.error };
     const valid = inboundOrderSchema.safeParse(mapped.order);
-    if (!valid.success) {
-      results.push({ control: tx.control, status: 400, error: valid.error.issues[0]?.message });
-      continue;
-    }
-    const r = await startInbound(valid.data);
-    results.push({
+    if (!valid.success)
+      return { control: tx.control, status: 400, error: valid.error.issues[0]?.message };
+    const r = await startInbound(valid.data, known);
+    return {
       control: tx.control,
       poNumber: (mapped.order.meta.edi as { poNumber: string }).poNumber,
       status: r.status,
       ...r.body,
-    });
-  }
+    };
+  };
+  // A few purchase orders at a time, results in interchange order.
+  const results: Awaited<ReturnType<typeof one>>[] = [];
+  for (let i = 0; i < transactions.length; i += EDI_CONCURRENCY)
+    results.push(...(await Promise.all(transactions.slice(i, i + EDI_CONCURRENCY).map(one))));
   return json({ sender, results });
 }

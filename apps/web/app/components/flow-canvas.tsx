@@ -100,6 +100,18 @@ export function wouldCycle(graph: FlowGraph, source: string, target: string) {
   return false;
 }
 
+/** Whether a node from new props shows exactly what the node on the canvas already shows. */
+function sameNode(a: FlowRfNode, b: FlowRfNode) {
+  return (
+    a.selected === b.selected &&
+    a.draggable === b.draggable &&
+    a.ariaLabel === b.ariaLabel &&
+    a.position.x === b.position.x &&
+    a.position.y === b.position.y &&
+    JSON.stringify(a.data) === JSON.stringify(b.data)
+  );
+}
+
 function Inner({
   graph,
   editable = false,
@@ -147,7 +159,11 @@ function Inner({
       const old = new Map(prev.map((n) => [n.id, n]));
       return fromProps.map((n) => {
         const o = old.get(n.id);
-        return o ? { ...o, ...n, measured: o.measured, width: o.width, height: o.height } : n;
+        if (!o) return n;
+        // Live updates arrive as fresh objects for every step; keep the old node when nothing it
+        // shows changed, so the memoised card for an untouched step doesn't render again.
+        if (sameNode(o, n)) return o;
+        return { ...o, ...n, measured: o.measured, width: o.width, height: o.height };
       });
     });
   }, [fromProps]);

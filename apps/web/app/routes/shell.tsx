@@ -13,9 +13,14 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun, UserRound } from 'lucide-react';
-import { useEffect } from 'react';
-import { Link, NavLink, Outlet, useLoaderData } from 'react-router';
-import { AssistantPanel } from '~/components/assistant/panel';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import {
+  Link,
+  NavLink,
+  Outlet,
+  type ShouldRevalidateFunctionArgs,
+  useLoaderData,
+} from 'react-router';
 import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
@@ -42,6 +47,59 @@ export async function loader({ request }: Route.LoaderArgs) {
         .orderBy(users.name)
         .limit(3);
   return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true, operators };
+}
+
+/**
+ * The assistant (with its markdown renderer) is a large chunk most page views never use: it loads
+ * on first open, and is fetched ahead while the browser is idle so opening it stays instant.
+ */
+const loadPanel = () => import('~/components/assistant/panel');
+const AssistantPanel = lazy(() => loadPanel().then((m) => ({ default: m.AssistantPanel })));
+
+/** Mounts the assistant panel once it has been opened, and preloads it when the page is idle. */
+function LazyAssistantPanel() {
+  const { open } = useAssistant();
+  const [wanted, setWanted] = useState(open);
+  useEffect(() => {
+    if (open) setWanted(true);
+  }, [open]);
+  useEffect(() => {
+    const preload = () => void loadPanel();
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(preload, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(preload, 2000);
+    return () => clearTimeout(t);
+  }, []);
+  return wanted ? (
+    <Suspense fallback={null}>
+      <AssistantPanel />
+    </Suspense>
+  ) : null;
+}
+
+/** The shell refreshes on a page's own `revalidate()` (live pages) at most this often. */
+const BACKGROUND_REFRESH_MS = 15_000;
+let lastBackgroundRefresh = 0;
+
+/**
+ * Navigations and form posts refresh the shell as usual. A page revalidating itself as its live
+ * data moves (the order page does, every second or two) only refreshes the shell's badge now and
+ * then, rather than re-reading the session and approvals on every push.
+ */
+export function shouldRevalidate({
+  currentUrl,
+  nextUrl,
+  formMethod,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  const background = !formMethod && currentUrl.href === nextUrl.href;
+  if (!background) return defaultShouldRevalidate;
+  const now = Date.now();
+  if (now - lastBackgroundRefresh < BACKGROUND_REFRESH_MS) return false;
+  lastBackgroundRefresh = now;
+  return defaultShouldRevalidate;
 }
 
 const NAV = [
@@ -232,7 +290,7 @@ function ShellFrame() {
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 outline-none">
           <Outlet />
         </main>
-        {showNav ? <AssistantPanel /> : null}
+        {showNav ? <LazyAssistantPanel /> : null}
       </div>
     </div>
   );

@@ -10,15 +10,15 @@ export function newNonce(): string {
 
 /**
  * The Content-Security-Policy for an HTML page. Scripts run only from this origin or with the
- * response's nonce (the theme script and React Router's inline scripts); styles and fonts also
- * come from Google Fonts. Pages can't be framed, and forms post only here.
+ * response's nonce (the theme script and React Router's inline scripts); styles and fonts come
+ * from this origin. Pages can't be framed, and forms post only here.
  */
 export function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}'`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: blob:",
     "connect-src 'self'",
     "object-src 'none'",

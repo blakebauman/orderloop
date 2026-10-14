@@ -8,17 +8,19 @@ import {
   ScrollRestoration,
 } from 'react-router';
 import type { Route } from './+types/root';
+// IBM Plex, served from this origin (no render-blocking third-party stylesheet). Each file's
+// unicode-range means a browser fetches only the subsets a page uses.
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import './app.css';
 import { NonceContext } from './lib/csp';
 
 export const links: Route.LinksFunction = () => [
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
-  { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-  { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
-  {
-    rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
-  },
 ];
 
 export const meta: Route.MetaFunction = () => [{ title: 'OrderLoop' }];

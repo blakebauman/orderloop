@@ -82,28 +82,34 @@ export class OrderAgent extends Agent<Env, State> {
     return createDb(this.env.DB);
   }
 
+  /** What the D1 index row last got from this object, so an unchanged report writes nothing. */
+  private indexed: string | null = null;
+
   private async syncIndex() {
     const s = this.state;
     if (!s.orderId || !s.order) return;
+    const row = {
+      status: s.status,
+      total: s.order.total,
+      fxRate: s.order.fxRate ?? 1,
+      customerId: s.order.customerId ?? null,
+      title: s.order.title ?? '',
+      instanceId: s.instanceId,
+      generation: s.generation,
+      waitingOn: s.waits.map((w) => w.title).join(' · ') || null,
+      waitingAt:
+        s.waits
+          .map((w) => s.flow?.nodes.find((n) => n.id === w.nodeId)?.label ?? w.nodeId)
+          .join(' · ') || null,
+      waitingSince: s.waits.length ? Math.min(...s.waits.map((w) => w.since)) : null,
+    };
+    const key = JSON.stringify(row);
+    if (key === this.indexed) return;
     await this.db()
       .update(orders)
-      .set({
-        status: s.status,
-        total: s.order.total,
-        fxRate: s.order.fxRate ?? 1,
-        customerId: s.order.customerId ?? null,
-        title: s.order.title ?? '',
-        instanceId: s.instanceId,
-        generation: s.generation,
-        waitingOn: s.waits.map((w) => w.title).join(' · ') || null,
-        waitingAt:
-          s.waits
-            .map((w) => s.flow?.nodes.find((n) => n.id === w.nodeId)?.label ?? w.nodeId)
-            .join(' · ') || null,
-        waitingSince: s.waits.length ? Math.min(...s.waits.map((w) => w.since)) : null,
-        updatedAt: Date.now(),
-      })
+      .set({ ...row, updatedAt: Date.now() })
       .where(eq(orders.id, s.orderId));
+    this.indexed = key;
   }
 
   // ── Called by EngineApi and the Workflow ───────────────────────────────────

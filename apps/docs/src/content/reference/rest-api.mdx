@@ -6,7 +6,7 @@ description: The /api/v1 routes for flows, orders, events, approvals and webhook
 import Values from '../../components/Values.astro';
 
 The REST API is served by the web Worker under `/api/v1`. Its OpenAPI 3.1 document is public at
-`GET /api/v1/openapi.json`; the [OpenAPI explorer](/api/) renders the same document, built from the
+`GET /api/v1/openapi.json` (sent with `Cache-Control: public, max-age=300`); the [OpenAPI explorer](/api/) renders the same document, built from the
 web app's source. Request bodies in that document are generated from the zod schemas the handlers
 validate with (`apps/web/app/lib/api-schemas.ts`), so they can't drift. Response bodies are
 described here.

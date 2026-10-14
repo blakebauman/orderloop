@@ -463,14 +463,19 @@ export async function routeFulfillment(
   const stores = await db(env).select().from(locations).orderBy(locations.id);
   if (method === 'ship') {
     // Central stock first, then the shipping stores nearest the customer.
-    const sources: StockSource[] = [
-      { id: null, name: 'Warehouse', free: await available(env, skus) },
-    ];
-    for (const store of rankStores(
+    const ranked = rankStores(
       stores.filter((s) => s.ships),
       shipToPoint(order),
-    ))
-      sources.push({ id: store.id, name: store.name, free: await available(env, skus, store.id) });
+    );
+    // One read per source, all at once; the ranking order is kept.
+    const [central, ...perStore] = await Promise.all([
+      available(env, skus),
+      ...ranked.map((store) => available(env, skus, store.id)),
+    ]);
+    const sources: StockSource[] = [
+      { id: null, name: 'Warehouse', free: central! },
+      ...ranked.map((store, i) => ({ id: store.id, name: store.name, free: perStore[i]! })),
+    ];
     const a = allocateLines(
       lines.map(([index, l]) => ({ index, sku: l.sku, qty: l.qty })),
       sources,
@@ -573,25 +578,29 @@ export async function handOver(env: Env, order: Order, stepKey: string) {
 export async function issueEntitlements(env: Env, order: Order, stepKey: string) {
   const { bySku } = await stockedLines(env, order);
   const now = Date.now();
-  const out = [];
+  const rows = [];
   for (const [i, l] of order.lines.entries()) {
     if (bySku.get(l.sku)?.kind !== 'digital') continue;
     for (let n = 0; n < l.qty; n++) {
       const id = `ent_${order.id}_${stepKey}_${i}_${n}`.replace(/[^\w-]/g, '_');
       const h = Math.abs(hash(id)).toString(36).toUpperCase().padStart(8, '0');
-      const row = {
+      rows.push({
         id,
         orderId: order.id,
         sku: l.sku,
         code: `${l.sku}-${h.slice(0, 4)}-${h.slice(4, 8)}`,
         status: 'issued',
         createdAt: now,
-      };
-      await db(env).insert(entitlements).values(row).onConflictDoNothing();
-      out.push({ sku: row.sku, code: row.code });
+      });
     }
   }
-  return out;
+  // Multi-row inserts in one batch (D1 binds at most 100 values per statement: 6 per row).
+  const d = db(env);
+  const inserts = chunk(rows, 16).map((part) =>
+    d.insert(entitlements).values(part).onConflictDoNothing(),
+  );
+  if (inserts.length) await d.batch([inserts[0]!, ...inserts.slice(1)]);
+  return rows.map((r) => ({ sku: r.sku, code: r.code }));
 }
 
 /** Compensation: revokes the order's digital goods. Idempotent. */
@@ -605,8 +614,17 @@ export async function revokeEntitlements(env: Env, orderId: string) {
 }
 
 export async function lowStock(env: Env) {
-  const all = await getProducts(env);
-  return all.filter((p) => p.stock - p.reserved <= p.reorderPoint);
+  return db(env)
+    .select()
+    .from(products)
+    .where(sql`${products.stock} - ${products.reserved} <= ${products.reorderPoint}`);
+}
+
+/** `items` in runs of at most `size`. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 // ── Addresses ──────────────────────────────────────────────────────────────
@@ -873,10 +891,10 @@ export async function splitBySeller(env: Env, order: Order) {
   if (missing.length)
     return { ok: false, error: `Unknown or inactive seller: ${missing.join(', ')}` } as const;
   const now = Date.now();
-  for (const [sellerId, lines] of groups) {
+  const [first, ...rest] = [...groups].map(([sellerId, lines]) => {
     const seller = known.get(sellerId);
     const accepted = sellerId === FIRST_PARTY || !!seller?.autoAccept;
-    await d
+    return d
       .insert(sellerOrders)
       .values({
         id: `so_${order.id}_${sellerId}`,
@@ -889,7 +907,8 @@ export async function splitBySeller(env: Env, order: Order) {
         decidedAt: accepted ? now : null,
       })
       .onConflictDoNothing();
-  }
+  });
+  if (first) await d.batch([first, ...rest]);
   return { ok: true, parts: await sellerParts(env, order.id) } as const;
 }
 
@@ -972,12 +991,15 @@ export async function sellerContacts(env: Env, orderId: string) {
  */
 export async function schedulePayouts(env: Env, order: Order, stepKey: string) {
   const d = db(env);
-  const parts = await d
-    .select({ part: sellerOrders, pct: sellers.commissionPct })
-    .from(sellerOrders)
-    .innerJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
-    .where(and(eq(sellerOrders.orderId, order.id), eq(sellerOrders.status, 'accepted')));
-  const refunds = (await d.select().from(payments).where(eq(payments.orderId, order.id)))
+  const [parts, paid] = await Promise.all([
+    d
+      .select({ part: sellerOrders, pct: sellers.commissionPct })
+      .from(sellerOrders)
+      .innerJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
+      .where(and(eq(sellerOrders.orderId, order.id), eq(sellerOrders.status, 'accepted'))),
+    d.select().from(payments).where(eq(payments.orderId, order.id)),
+  ]);
+  const refunds = paid
     .filter((p) => p.kind === 'refund' && p.status === 'succeeded')
     .reduce((s, p) => s + p.amount, 0);
   const now = Date.now();
@@ -997,9 +1019,10 @@ export async function schedulePayouts(env: Env, order: Order, stepKey: string) {
       status: 'scheduled',
       createdAt: now,
     };
-    await d.insert(payouts).values(row).onConflictDoNothing();
     out.push(row);
   }
+  const [first, ...rest] = out.map((row) => d.insert(payouts).values(row).onConflictDoNothing());
+  if (first) await d.batch([first, ...rest]);
   return out;
 }
 

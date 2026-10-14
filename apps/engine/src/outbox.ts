@@ -36,9 +36,9 @@ export async function emit(
   const secrets = new Map(subs.map((s) => [s.id, s]));
   const ids = subs.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
   const now = Date.now();
-  for (const [i, s] of subs.entries()) {
+  const [first, ...rest] = subs.map((s, i) => {
     const payload: OutboundPayload = { id: ids[i]!, event, occurredAt: now, orderId, data };
-    await d
+    return d
       .insert(webhookDeliveries)
       .values({
         id: ids[i]!,
@@ -49,29 +49,39 @@ export async function emit(
         createdAt: now,
       })
       .onConflictDoNothing();
-  }
+  });
+  await d.batch([first!, ...rest]);
 
   const open = await d
     .select()
     .from(webhookDeliveries)
     .where(and(inArray(webhookDeliveries.id, ids), ne(webhookDeliveries.status, 'delivered')));
-  let pending = 0;
-  for (const row of open) {
-    const sub = secrets.get(row.subscriptionId);
-    if (!sub) continue;
-    const res = await send(sub.url, sub.secret, row.id, row.event, row.payload);
-    await d
-      .update(webhookDeliveries)
-      .set({
-        status: res.ok ? 'delivered' : 'failed',
-        attempts: sql`${webhookDeliveries.attempts} + 1`,
-        responseStatus: res.status,
-        lastError: res.error,
-        deliveredAt: res.ok ? Date.now() : null,
-      })
-      .where(eq(webhookDeliveries.id, row.id));
-    if (!res.ok) pending++;
+  // Every subscriber at once: one slow receiver must not use up the step's time for the rest.
+  const sent = await Promise.all(
+    open.map(async (row) => {
+      const sub = secrets.get(row.subscriptionId);
+      if (!sub) return null;
+      const res = await send(sub.url, sub.secret, row.id, row.event, row.payload);
+      return { row, res };
+    }),
+  );
+  const done = sent.filter((x) => x !== null);
+  if (done.length) {
+    const [u, ...us] = done.map(({ row, res }) =>
+      d
+        .update(webhookDeliveries)
+        .set({
+          status: res.ok ? 'delivered' : 'failed',
+          attempts: sql`${webhookDeliveries.attempts} + 1`,
+          responseStatus: res.status,
+          lastError: res.error,
+          deliveredAt: res.ok ? Date.now() : null,
+        })
+        .where(eq(webhookDeliveries.id, row.id)),
+    );
+    await d.batch([u!, ...us]);
   }
+  const pending = done.filter(({ res }) => !res.ok).length;
   return { delivered: ids.length - pending, pending };
 }
 
