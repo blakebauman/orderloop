@@ -127,6 +127,12 @@
     "expired": {
       "status": "skipped"
     },
+    "unanswered": {
+      "status": "skipped"
+    },
+    "no_reply": {
+      "status": "skipped"
+    },
     "backorder": {
       "status": "skipped"
     }

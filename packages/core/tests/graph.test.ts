@@ -96,6 +96,23 @@ describe('planner', () => {
     expect(state.nodes.reject_note!.status).toBe('succeeded');
   });
 
+  it('ends a B2B order the customer never clarifies on its own reason, not a rejection', () => {
+    const flow = tpl('tpl-b2b-order');
+    const { ran, ended, state } = simulate(flow, (id) => {
+      if (id === 'assess') return ['no'];
+      if (id === 'router') return ['ask_customer'];
+      if (id === 'reply') return ['timeout'];
+    });
+    expect(ended).toBe('no_reply');
+    expect(ran).toEqual(expect.arrayContaining(['clarify', 'unanswered']));
+    expect(state.nodes.approval!.status).toBe('skipped');
+    expect(state.nodes.declined!.status).toBe('skipped');
+    expect(flow.nodes.find((n) => n.id === 'no_reply')!.config).toMatchObject({
+      outcome: 'declined',
+      reason: 'Customer did not reply in time',
+    });
+  });
+
   it('runs the dunning loop to its limit, then exits through "done"', () => {
     const flow = tpl('tpl-b2b-order');
     const { ran, ended } = simulate(flow, (id) => {
