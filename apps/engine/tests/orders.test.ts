@@ -606,6 +606,7 @@ describe('storefront order', () => {
       customerId: 'cus_northwind',
       title: 'PO NW-9001',
     });
+    expect(waiting.nodes.po_in!.summary).toBe('EDI · NORTHWIND:NW-9001');
     expect(waiting.nodes.extract!.summary).toBe('No document; using order as given');
     expect(waiting.order!.lines).toEqual([
       expect.objectContaining({ sku: 'WID-100', qty: 10, unitPrice: 21.5 }),
