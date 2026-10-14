@@ -240,6 +240,9 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
 These aren't part of `/api/v1`.
 
 - `GET /health` answers `{ ok: true, service: "orderloop-web" }`, with no authentication.
+- `GET /health/deep` also checks the database, document storage and the engine, with no
+  authentication. It answers `{ ok, service, checks }`, where each check is `"ok"` or `"fail"`, and
+  `503` when any check fails.
 - `/mcp`, `/a2a`, `/oauth/*` (except the `/oauth/authorize` consent page) and `/.well-known/oauth-*`
   are the [MCP server](/reference/mcp/), the [A2A endpoint](/reference/a2a/) and their OAuth
   endpoints.

@@ -107,10 +107,10 @@ API's equivalent is the password as a bearer token.
 
 A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an operator, which is
 the local development default. Open mode runs only on `localhost`, `127.0.0.1`, `[::1]` and
-`*.localhost`; any other host answers every request except `/health` with `503` and the text
-"Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first operator on
-the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`, `isLocalHost` in
-`apps/web/app/lib/origin.ts`). To turn sign-in on locally, open **Set up sign-in** in the account
+`*.localhost`; any other host answers every request except `/health` and `/health/deep` with `503`
+and the text "Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the
+first operator on the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`,
+`isLocalHost` in `apps/web/app/lib/origin.ts`). To turn sign-in on locally, open **Set up sign-in** in the account
 menu (the Team page) and create an operator account with a password you choose; from then on
 everyone signs in. Without `APP_PASSWORD`, the last active operator can't be demoted or disabled.
 
@@ -120,10 +120,12 @@ All settings are listed in [Configuration](configuration.md).
 
 Production deploys from CI: merging to `main` is the release. `.github/workflows/ci.yml` runs lint,
 type-check, build, tests and `pnpm audit --prod --audit-level high` on every push and pull request.
-On `main` it then migrates D1, deploys the engine, deploys the web app, smoke-tests `/health` and
-`/login` and deploys these docs, in that order, so a change never reaches production before its
-migration. If the smoke test fails, the job runs `wrangler rollback` for the web app and the engine
-(D1 is not rolled back, which is why migrations only add).
+On `main` it then records a D1 Time Travel bookmark, migrates D1, deploys the engine, deploys the
+web app, smoke-tests `/health`, `/health/deep` and `/login` and deploys these docs, in that order,
+so a change never reaches production before its migration. If anything fails once the engine has
+deployed (the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that
+deployed. D1 is not rolled back, which is why migrations only add; see
+[Restoring D1](#restoring-d1).
 
 The deploy job runs in the `production` GitHub environment (add a required reviewer there to gate
 releases) and needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository
@@ -136,6 +138,22 @@ because the Cloudflare API occasionally fails a request outright (codes `7403`, 
 step is safe to repeat. If the job still fails, re-run its failed jobs in GitHub Actions rather
 than deploying from a laptop. The manual commands under [First deploy](#first-deploy) are for
 setting up a new account.
+
+### Restoring D1
+
+Before it migrates, the deploy job records the database's current Time Travel bookmark in the run's
+summary (and as a notice annotation). To put D1 back to the moment before a deploy, for example
+after a migration that corrupted rows, restore to that bookmark:
+
+```bash
+pnpm --filter @orderloop/web exec wrangler d1 time-travel restore orderloop --bookmark=<bookmark>
+```
+
+A restore replaces the whole database, so every write since the bookmark is lost: orders started,
+approvals decided and audit events after that point. Roll the Workers back first if the deployed
+code needs the newer schema. Time Travel keeps 30 days; for any other point in that window,
+`wrangler d1 time-travel info orderloop --timestamp=<RFC3339>` finds its bookmark. Durable Object
+state (live order state, assistant conversations) is not part of D1 and isn't restored.
 
 ## The docs site
 

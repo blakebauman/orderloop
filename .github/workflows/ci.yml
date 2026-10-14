@@ -105,6 +105,14 @@ jobs:
           SH
           chmod +x "$HOME/.local/bin/retry"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
+      # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
+      - name: Record D1 bookmark
+        run: |
+          retry bash -c 'pnpm --filter @orderloop/web exec wrangler d1 time-travel info orderloop --json > "$RUNNER_TEMP/d1-bookmark.json"'
+          bookmark=$(jq -er .bookmark "$RUNNER_TEMP/d1-bookmark.json")
+          echo "D1 bookmark before ${GITHUB_SHA::7}: \`$bookmark\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::D1 bookmark before this deploy: $bookmark"
       # Migrations run before the new code, and old code runs against the new schema until the
       # Workers below are live: a migration must be additive (expand), and a destructive one
       # (contract) ships in a later change, once no deployed code needs what it removes.
@@ -121,15 +129,21 @@ jobs:
         id: smoke
         run: |
           curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health
+          # D1, R2 and the engine (over the service binding) all answer.
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health/deep
           # The app itself, not just the health route: the sign-in page renders.
           curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /dev/null https://orderloop.io/login
-      # A failed smoke test puts both Workers back on their previous versions. D1 migrations are
-      # not rolled back, which is why they must be additive.
-      - name: Roll back on a failed smoke test
-        if: failure() && steps.smoke.outcome == 'failure'
+      # Any failure once the engine has shipped puts each Worker that deployed back on its
+      # previous version, so production never runs a new engine behind an old web app (or the
+      # reverse). D1 migrations are not rolled back, which is why they must be additive.
+      - name: Roll back on a failed deploy
+        if: failure() && steps.engine.outcome == 'success'
         run: |
-          retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "Smoke test failed for ${GITHUB_SHA::7}"
-          retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "Smoke test failed for ${GITHUB_SHA::7}"
+          msg="Deploy failed for ${GITHUB_SHA::7}"
+          if [ "${{ steps.web.outcome }}" = "success" ]; then
+            retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "$msg"
+          fi
+          retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg"
       # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
       - name: Deploy docs
         run: retry pnpm docs:deploy

@@ -10,6 +10,7 @@ import {
   type EngineRpc,
   type OrderState,
   parseMailboxes,
+  runHealthChecks,
   type StartOrderInput,
   type StartOrderOnceInput,
 } from '@orderloop/core';
@@ -89,5 +90,12 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async runReplenish() {
     const instance = await this.env.REPLENISH.create({ params: {} });
     return { instanceId: instance.id };
+  }
+
+  health() {
+    return runHealthChecks('orderloop-engine', {
+      db: () => this.env.DB.prepare('select 1').first(),
+      docs: () => this.env.DOCS.head('health'),
+    });
   }
 }
