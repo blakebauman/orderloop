@@ -1,0 +1,32 @@
+---
+/**
+ * One row per commerce model: its label, which side it prices on, the flow it starts from
+ * and the other built-in flows for it. Rendered from `@orderloop/core`.
+ */
+// biome-ignore lint/correctness/noUnusedImports: rendered below
+import {
+  DEFAULT_TEMPLATE,
+  isBuySide,
+  ORDER_MODEL_LABELS,
+  ORDER_MODELS,
+  templatesFor,
+} from '@orderloop/core';
+---
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>Pricing</th><th>Starts from</th><th>Built-in flows</th></tr>
+  </thead>
+  <tbody>
+    {
+      ORDER_MODELS.map((m) => (
+        <tr>
+          <td><code>{m}</code> ({ORDER_MODEL_LABELS[m]})</td>
+          <td>{isBuySide(m) ? 'Buy-side, at cost' : 'Sell-side, price chain'}</td>
+          <td><code>{DEFAULT_TEMPLATE[m]}</code></td>
+          <td>{templatesFor(m).map((f) => f.id).join(', ') || 'None'}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

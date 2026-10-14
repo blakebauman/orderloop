@@ -18,9 +18,11 @@ import {
   type FlowProposal,
   flowGraphSchema,
   graphDiff,
-  ORDER_TYPE_LABELS,
+  ORDER_MODEL_LABELS,
+  ORDER_MODELS,
+  type OrderChannel,
+  type OrderModel,
   type OrderState,
-  type OrderType,
   type Principal,
   ROLE_LABELS,
   TERMINAL_ORDER_STATUSES,
@@ -130,7 +132,8 @@ export async function attention(env: Env): Promise<Attention> {
 
 export type FindOrders = {
   status?: string;
-  type?: string;
+  model?: string;
+  channel?: string;
   customer?: string;
   q?: string;
   minTotal?: number;
@@ -146,7 +149,8 @@ export async function findOrders(env: Env, f: FindOrders) {
   const base = sql<number>`(${orders.total} / ${orders.fxRate})`;
   const where = and(
     f.status ? eq(orders.status, f.status) : undefined,
-    f.type ? eq(orders.type, f.type) : undefined,
+    f.model ? eq(orders.model, f.model) : undefined,
+    f.channel ? eq(orders.channel, f.channel) : undefined,
     f.customer
       ? or(like(customers.name, `%${f.customer}%`), eq(orders.customerId, f.customer))
       : undefined,
@@ -173,7 +177,8 @@ export async function findOrders(env: Env, f: FindOrders) {
       .select({
         id: orders.id,
         title: orders.title,
-        type: orders.type,
+        model: orders.model,
+        channel: orders.channel,
         status: orders.status,
         customer: customers.name,
         total: orders.total,
@@ -259,8 +264,9 @@ export async function getOrder(env: Env, ref: string) {
     id,
     ref: orderRef(id),
     href: `/orders/${id}`,
-    title: o.title || ORDER_TYPE_LABELS[o.type as OrderType],
-    type: o.type,
+    title: o.title || ORDER_MODEL_LABELS[o.model as OrderModel],
+    model: o.model,
+    channel: o.channel,
     status: s.status,
     reason: s.reason,
     customer: customer?.name ?? o.customerId ?? null,
@@ -323,7 +329,8 @@ export async function listFlows(env: Env) {
     .select({
       id: flows.id,
       name: flows.name,
-      orderType: flows.orderType,
+      model: flows.model,
+      channels: flows.channels,
       publishedVersion: flows.publishedVersion,
       updatedAt: flows.updatedAt,
     })
@@ -340,7 +347,8 @@ async function loadFlow(env: Env, flowId: string) {
     id: row.id,
     name: row.name,
     description: row.description,
-    orderType: row.orderType as OrderType,
+    model: row.model as OrderModel,
+    channels: JSON.parse(row.channels) as OrderChannel[],
     ...graph,
   };
   return { row, flow };
@@ -352,7 +360,8 @@ export async function getFlow(env: Env, flowId: string) {
   return {
     id: row.id,
     name: row.name,
-    orderType: row.orderType,
+    model: row.model,
+    channels: flow.channels,
     publishedVersion: row.publishedVersion,
     href: `/flows/${row.id}`,
     steps: flow.nodes.map((n) => ({ id: n.id, type: n.type, label: n.label })),
@@ -372,14 +381,14 @@ export async function proposeFlowChange(
   env: Env,
   flowId: string,
   instruction: string,
-  onScreen?: { graph?: FlowGraph; orderType?: string },
+  onScreen?: { graph?: FlowGraph; model?: string },
 ): Promise<FlowProposal> {
   const { flow } = await loadFlow(env, flowId);
   const start = onScreen?.graph ?? { nodes: flow.nodes, edges: flow.edges };
   const res = await copilot(env, {
     prompt: instruction,
     graph: start,
-    orderType: onScreen?.orderType ?? flow.orderType,
+    model: ORDER_MODELS.find((m) => m === onScreen?.model) ?? flow.model,
   });
   return {
     flowId,
@@ -445,7 +454,7 @@ export async function previewAction<T extends ActionTool>(
           title: `${verb} ${orderRef(id)}${w ? ` · ${label(s, w.nodeId)}` : ''}`,
           href: `/orders/${id}`,
           consequences: [
-            `${o.title || ORDER_TYPE_LABELS[o.type as OrderType]} · ${money(o.total, o.currency)}`,
+            `${o.title || ORDER_MODEL_LABELS[o.model as OrderModel]} · ${money(o.total, o.currency)}`,
             next ? `The order goes on to ${next}` : 'The order continues from this approval',
             i.note ? `Note: “${i.note}”` : 'No note',
           ],
@@ -495,7 +504,7 @@ export async function previewAction<T extends ActionTool>(
           title: `Cancel ${orderRef(id)}`,
           href: `/orders/${id}`,
           consequences: [
-            `${o.title || ORDER_TYPE_LABELS[o.type as OrderType]} · ${money(o.total, o.currency)}`,
+            `${o.title || ORDER_MODEL_LABELS[o.model as OrderModel]} · ${money(o.total, o.currency)}`,
             ...undo,
             ...(s.waits.some((w) => w.kind === 'approval') ? ['Closes its open approvals'] : []),
             'Sends order.cancelled to webhook subscribers',
@@ -526,7 +535,7 @@ export async function previewAction<T extends ActionTool>(
             live
               ? `${diff ?? 'No changes'} since v${row.publishedVersion}`
               : 'This is the first version',
-            `New ${ORDER_TYPE_LABELS[flow.orderType]} orders run it; orders already running keep their version`,
+            `New ${ORDER_MODEL_LABELS[flow.model]} orders run it; orders already running keep their version`,
             'Publishes the saved draft. Unsaved changes in an open editor are not included',
           ],
           blocked:

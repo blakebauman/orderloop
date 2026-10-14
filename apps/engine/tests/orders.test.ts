@@ -75,7 +75,8 @@ const settled = (id: string) =>
     'a terminal status',
   );
 
-const input = (o: Partial<OrderInput> & Pick<OrderInput, 'type'>): OrderInput => ({
+const input = (o: Partial<OrderInput> & Pick<OrderInput, 'model'>): OrderInput => ({
+  channel: 'api',
   currency: 'USD',
   lines: [],
   meta: {},
@@ -116,7 +117,7 @@ describe('B2B order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         documentText:
           'From: Northwind Traders\nSubject: PO #NW-7781\n\nHi team, please ship 120 x WID-100 (industrial widgets), 40 x GSK-010 gasket kits and 8 x WID-200.\nDeliver to dock 4. Thanks, Priya — Purchasing',
       }),
@@ -138,7 +139,7 @@ describe('B2B order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         customerId: 'cus_northwind',
         documentText:
           'From: Northwind Traders\nPO #NW-7781\nPlease send 50 x WID-100 and 20 x GSK-010.',
@@ -179,7 +180,7 @@ describe('B2B order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         customerId: 'cus_contoso',
         lines: [{ sku: 'WID-200', qty: 100 }],
       }),
@@ -206,7 +207,7 @@ describe('B2B order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         customerId: 'cus_fabrikam',
         lines: [{ sku: 'BRG-608', qty: 100 }],
       }),
@@ -230,7 +231,7 @@ describe('B2B order', () => {
     const late = rows.find((r) => r.nodeId === 'paid_late')!;
     expect(late).toMatchObject({
       nodeType: 'control.wait_event',
-      orderType: 'b2b_order',
+      model: 'b2b',
       status: 'succeeded',
     });
     expect(rows.every((r) => r.durationMs >= 0 && r.durationMs === r.endedAt - r.startedAt)).toBe(
@@ -243,7 +244,7 @@ describe('B2B order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         customerId: 'cus_northwind',
         lines: [{ sku: 'WID-100', qty: 10 }],
         meta: { simulate: 'out_of_stock' },
@@ -262,7 +263,7 @@ describe('cancel', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-purchase-request',
       input: input({
-        type: 'purchase_request',
+        model: 'procurement',
         customerId: 'cus_internal',
         title: 'Laptops',
         lines: [{ sku: 'LAP-14', qty: 8 }],
@@ -289,7 +290,7 @@ describe('subscription', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-subscription',
       input: input({
-        type: 'subscription',
+        model: 'subscription',
         customerId: 'cus_ada',
         lines: [{ sku: 'SUB-BOX', qty: 1 }],
         meta: { simulate: 'charge_fail' },
@@ -309,7 +310,7 @@ describe('reorder', () => {
     await introspect();
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-reorder',
-      input: input({ type: 'reorder', customerId: 'cus_internal' }),
+      input: input({ model: 'replenishment', customerId: 'cus_internal' }),
     });
     const s = await waitingOn(
       orderId,
@@ -341,7 +342,7 @@ describe('storefront order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'MON-27', qty: 2 }],
       }),
@@ -381,7 +382,7 @@ describe('storefront order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [
           { sku: 'MON-27', qty: 2 },
@@ -418,7 +419,7 @@ describe('storefront order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 12 }],
         meta: { shipTo: 'PO Box 42, Springfield' },
@@ -440,7 +441,7 @@ describe('storefront order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 3 }],
       }),
@@ -456,7 +457,7 @@ describe('storefront order', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 4 }],
       }),
@@ -498,7 +499,8 @@ describe('address validation', () => {
       id: 'test-address',
       name: 'Address check',
       description: '',
-      orderType: 'storefront_order',
+      model: 'b2c',
+      channels: [],
       nodes: [
         node('start', 'trigger.manual'),
         node('address', 'commerce.address_validate'),
@@ -519,7 +521,7 @@ describe('address validation', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'test-address',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 1 }],
         meta: { shipTo },
@@ -564,7 +566,7 @@ describe('pricing chain', () => {
     currency = 'USD',
   ) => {
     const order = {
-      ...input({ type: 'b2b_order', customerId, lines, currency }),
+      ...input({ model: 'b2b', customerId, lines, currency }),
       id: 'ord_pricing',
       createdAt: Date.now(),
       subtotal: 0,
@@ -666,7 +668,7 @@ describe('pricing chain', () => {
         config: {},
         ctx: {
           order: {
-            ...input({ type: 'b2b_order', customerId: 'cus_fx', currency }),
+            ...input({ model: 'b2b', customerId: 'cus_fx', currency }),
             id: 'ord_credit',
             createdAt: 0,
             subtotal: total,
@@ -771,7 +773,7 @@ describe('agent socket roles', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-purchase-request',
       input: input({
-        type: 'purchase_request',
+        model: 'procurement',
         customerId: 'cus_internal',
         title: 'Laptops',
         lines: [{ sku: 'LAP-14', qty: 8 }],
@@ -813,7 +815,7 @@ describe('agent socket roles', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-purchase-request',
       input: input({
-        type: 'purchase_request',
+        model: 'procurement',
         customerId: 'cus_internal',
         title: 'Monitors',
         lines: [{ sku: 'LAP-14', qty: 8 }],
@@ -857,7 +859,7 @@ describe('agent socket roles', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-purchase-request',
       input: input({
-        type: 'purchase_request',
+        model: 'procurement',
         customerId: 'cus_internal',
         title: 'Chairs',
         lines: [{ sku: 'LAP-14', qty: 8 }],
@@ -896,7 +898,7 @@ describe('inventory', () => {
   const product = async (sku: string) =>
     (await db().select().from(products).where(eq(products.sku, sku)).get())!;
   const order = (id: string, lines: OrderInput['lines']) => ({
-    ...input({ type: 'storefront_order', customerId: 'cus_ada' }),
+    ...input({ model: 'b2c', customerId: 'cus_ada' }),
     id,
     createdAt: Date.now(),
     subtotal: 0,
@@ -985,7 +987,7 @@ describe('idempotency', () => {
       flowId: 'tpl-storefront-order',
       idempotencyKey: 'checkout-7f3a',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
@@ -1009,7 +1011,7 @@ describe('idempotency', () => {
       flowId: 'tpl-storefront-order',
       idempotencyKey: 'checkout-9d2e',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
@@ -1044,7 +1046,7 @@ describe('idempotency', () => {
       .insert(orders)
       .values({
         id: orderId,
-        type: 'storefront_order',
+        model: 'b2c',
         status: 'queued',
         title: '',
         flowId: 'tpl-storefront-order',
@@ -1062,7 +1064,7 @@ describe('idempotency', () => {
       flowId: 'tpl-storefront-order',
       idempotencyKey: 'checkout-half',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
@@ -1114,7 +1116,7 @@ describe('outbound webhooks', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
@@ -1153,7 +1155,7 @@ describe('outbound webhooks', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-storefront-order',
       input: input({
-        type: 'storefront_order',
+        model: 'b2c',
         customerId: 'cus_ada',
         lines: [{ sku: 'GSK-010', qty: 5 }],
       }),
@@ -1183,7 +1185,7 @@ describe('outbound webhooks', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-purchase-request',
       input: input({
-        type: 'purchase_request',
+        model: 'procurement',
         customerId: 'cus_internal',
         title: 'Laptops',
         lines: [{ sku: 'LAP-14', qty: 8 }],
@@ -1199,7 +1201,7 @@ describe('outbound webhooks', () => {
     expect(cancelled.data).toMatchObject({
       outcome: 'cancelled',
       reason: 'Duplicate request',
-      order: { id: orderId, type: 'purchase_request' },
+      order: { id: orderId, model: 'procurement' },
     });
     // A repeat cancel is a no-op and sends nothing more.
     await agent(orderId).cancel('again');
@@ -1217,7 +1219,7 @@ describe('outbound webhooks', () => {
     const { orderId } = await startOrder(env, {
       flowId: 'tpl-b2b-order',
       input: input({
-        type: 'b2b_order',
+        model: 'b2b',
         customerId: 'cus_northwind',
         lines: [{ sku: 'NOPE-404', qty: 1 }],
       }),
@@ -1241,7 +1243,7 @@ describe('outbound webhooks', () => {
 describe('copilot (offline)', () => {
   it('inserts a node after another and keeps the graph valid', async () => {
     const { TEMPLATES, validateGraph } = await import('@orderloop/core');
-    const flow = TEMPLATES.b2b_order();
+    const flow = TEMPLATES['tpl-b2b-order']();
     const { graph } = copilotHeuristic({
       prompt: 'add a fraud risk score after credit',
       graph: flow,

@@ -5,21 +5,67 @@
 
 import { z } from 'zod';
 
-export const ORDER_TYPES = [
-  'purchase_request',
-  'b2b_order',
-  'reorder',
+/** The commerce model an order belongs to. Buy-side models are orders the business places. */
+export const ORDER_MODELS = [
+  'b2b',
+  'b2c',
+  'd2c',
+  'marketplace',
   'subscription',
-  'storefront_order',
+  'procurement',
+  'replenishment',
 ] as const;
-export type OrderType = (typeof ORDER_TYPES)[number];
+export type OrderModel = (typeof ORDER_MODELS)[number];
 
-export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
-  purchase_request: 'Purchase request',
-  b2b_order: 'B2B order',
-  reorder: 'Reorder',
+export const ORDER_MODEL_LABELS: Record<OrderModel, string> = {
+  b2b: 'B2B',
+  b2c: 'B2C retail',
+  d2c: 'Direct to consumer',
+  marketplace: 'Marketplace',
   subscription: 'Subscription',
-  storefront_order: 'Storefront order',
+  procurement: 'Procurement',
+  replenishment: 'Replenishment',
+};
+
+export const BUY_SIDE_MODELS: readonly OrderModel[] = ['procurement', 'replenishment'];
+
+/** Buy-side orders are priced at cost; sell-side orders run the price chain. */
+export function isBuySide(model: OrderModel): boolean {
+  return BUY_SIDE_MODELS.includes(model);
+}
+
+/** Where an order came in. */
+export const ORDER_CHANNELS = [
+  'web',
+  'mobile',
+  'pos',
+  'marketplace',
+  'email',
+  'api',
+  'manual',
+  'schedule',
+] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
+export const ORDER_CHANNEL_LABELS: Record<OrderChannel, string> = {
+  web: 'Web',
+  mobile: 'Mobile app',
+  pos: 'Point of sale',
+  marketplace: 'Marketplace',
+  email: 'Email',
+  api: 'API',
+  manual: 'Dashboard',
+  schedule: 'Schedule',
+};
+
+export const FULFILLMENT_METHODS = ['ship', 'pickup', 'carry_out', 'digital'] as const;
+export type FulfillmentMethod = (typeof FULFILLMENT_METHODS)[number];
+
+export const FULFILLMENT_METHOD_LABELS: Record<FulfillmentMethod, string> = {
+  ship: 'Ship',
+  pickup: 'Pick up in store',
+  carry_out: 'Carry out',
+  digital: 'Digital delivery',
 };
 
 export const flowNodeSchema = z.object({
@@ -56,7 +102,9 @@ export type Flow = FlowGraph & {
   id: string;
   name: string;
   description: string;
-  orderType: OrderType;
+  model: OrderModel;
+  /** Channels this flow is meant for. Inbound routing and the UI use it; it does not restrict runs. */
+  channels: OrderChannel[];
 };
 
 /** A published, immutable flow snapshot. Orders pin one so later edits never change them. */
@@ -67,22 +115,46 @@ export const orderLineSchema = z.object({
   name: z.string().optional(),
   qty: z.number().positive(),
   unitPrice: z.number().nonnegative().optional(),
+  /** Marketplace seller for this line; otherwise the product's seller, or first party. */
+  sellerId: z.string().optional(),
 });
 export type OrderLine = z.infer<typeof orderLineSchema>;
 
+/** How to reach a buyer who has no customer account (guest checkout, POS receipt). */
+export const contactSchema = z.object({
+  email: z.string().email(),
+  name: z.string().max(120).optional(),
+  phone: z.string().max(40).optional(),
+});
+export type Contact = z.infer<typeof contactSchema>;
+
+export const fulfillmentSchema = z.object({
+  method: z.enum(FULFILLMENT_METHODS),
+  /** Store or warehouse to fulfil from, e.g. the pickup store or the till's store. */
+  locationId: z.string().optional(),
+});
+export type Fulfillment = z.infer<typeof fulfillmentSchema>;
+
 export const orderInputSchema = z.object({
-  type: z.enum(ORDER_TYPES),
+  model: z.enum(ORDER_MODELS),
+  channel: z.enum(ORDER_CHANNELS).default('api'),
+  /** The order's id in the channel it came from (storefront, marketplace, POS). */
+  externalId: z.string().max(200).optional(),
   title: z.string().max(140).optional(),
   customerId: z.string().optional(),
   currency: z.string().length(3).default('USD'),
   lines: z.array(orderLineSchema).default([]),
-  /** Free-form inbound document text (email body, PO) for the AI extract node. */
+  contact: contactSchema.optional(),
+  fulfillment: fulfillmentSchema.optional(),
+  /** Free-form inbound document text (an email, order form or PO) for the AI extract node. */
   documentText: z.string().max(50_000).optional(),
   /** R2 key of an uploaded document. */
   documentKey: z.string().optional(),
   meta: z.record(z.string(), z.unknown()).default({}),
 });
 export type OrderInput = z.infer<typeof orderInputSchema>;
+/** What callers send: `channel`, `currency`, `lines` and `meta` have defaults. */
+export type OrderInputDraft = z.input<typeof orderInputSchema>;
 
 /** The currency list prices, contract prices, price rules, credit limits and reports are in. */
 export const BASE_CURRENCY = 'USD';

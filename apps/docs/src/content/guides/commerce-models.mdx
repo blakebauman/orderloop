@@ -1,0 +1,69 @@
+---
+title: Commerce models and channels
+description: The models an order can belong to, the channels it can arrive on, buy-side and sell-side pricing, and the optional contact, fulfillment and external id fields.
+---
+
+import Values from '../../components/Values.astro';
+import ModelTable from '../../components/ModelTable.astro';
+
+An order has a **model** (what kind of commerce it is) and a **channel** (where it came in). Both
+are part of the order input and both are checked when the order starts. The model also decides which
+[flow](/guides/templates/) a new flow starts from and how lines are priced.
+
+## Models
+
+Models: <Values of="order-models" />.
+
+<ModelTable />
+
+`input.model` is required. A flow has one `model` and a list of `channels` it is meant for. Inbound
+routing and the UI use the channels; they do not restrict which orders run on the flow.
+
+## Channels
+
+Channels: <Values of="order-channels" />. `input.channel` defaults to `api`. The dashboard starts
+orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the Replenish Workflow as
+`schedule`. `GET /api/v1/orders` filters on `model` and `channel`
+(see [REST API](/reference/rest-api/#list-orders)).
+
+## Pricing
+
+Procurement and replenishment orders are **buy-side**: the business is the buyer, so lines price at
+the product's cost. Every other model is **sell-side** and runs the
+[pricing chain](/reference/expressions/#pricing-chain) (price book, contract, volume, list).
+
+The [Price](/reference/nodes/#commerce.price) node's `basis` field makes that explicit:
+
+| `basis` | Lines are priced |
+|---|---|
+| `auto` (default) | At cost for buy-side models, through the chain otherwise |
+| `chain` | Through the pricing chain, whatever the model |
+| `cost` | At `products.cost` |
+
+A line with its own `unitPrice` keeps it under every basis.
+
+## Order fields
+
+Besides `customerId`, `currency`, `lines` and `meta`, the input takes:
+
+| Field | Meaning |
+|---|---|
+| `externalId` | The order's id in its channel (storefront, marketplace, POS). Searchable with `q` |
+| `contact` | `{ email, name?, phone? }` for a buyer without a customer account, such as guest checkout or a POS receipt. `email` is searchable with `q` |
+| `fulfillment` | `{ method, locationId? }`. `method` is one of <Values of="fulfillment-methods" />; `locationId` is the store or warehouse to fulfil from |
+| `lines[].sellerId` | The marketplace seller for a line; otherwise the product's seller, or first party |
+
+All of these are on the run context's `order` (see [Expressions](/reference/expressions/#the-run-context)),
+so a condition can branch on `order.model`, `order.channel` or `order.fulfillment.method`. The
+`orders` index stores `model`, `channel`, `external_id` and `contact_email`
+([data model](/internals/data-model/)), and the [outbound webhook](/guides/outbound-webhooks/) order
+summary carries `model`, `channel` and `externalId`.
+
+Customers have a `kind`: `business`, `consumer` or `internal`.
+
+## Starting a flow for a model
+
+**New flow** on `/flows` takes a model. With the Template start it copies that model's default flow
+from the table above into a new flow of its own, so editing the copy never changes the built-in one
+(see [Building flows](/guides/building-flows/#creating-a-flow)). `marketplace`, `b2c` and `d2c` start
+from the same retail flow today.

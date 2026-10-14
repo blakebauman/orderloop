@@ -1,4 +1,12 @@
-import { ORDER_STATUSES, ORDER_TYPE_LABELS, ORDER_TYPES, type OrderType } from '@orderloop/core';
+import {
+  ORDER_CHANNEL_LABELS,
+  ORDER_CHANNELS,
+  ORDER_MODEL_LABELS,
+  ORDER_MODELS,
+  ORDER_STATUSES,
+  type OrderChannel,
+  type OrderModel,
+} from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
@@ -21,7 +29,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const sort = (['updated', 'total'] as const).find((s) => s === q.get('sort')) ?? 'created';
   const [orders, names] = await Promise.all([
     listOrders({
-      type: q.get('type') || undefined,
+      model: q.get('model') || undefined,
+      channel: q.get('channel') || undefined,
       status: q.get('status') || undefined,
       q: q.get('q') || undefined,
       sort,
@@ -35,7 +44,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 export default function Orders() {
   const { orders, names, sort, declined } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
-  const filtered = !!(params.get('type') || params.get('status') || params.get('q'));
+  const filtered = !!(
+    params.get('model') ||
+    params.get('channel') ||
+    params.get('status') ||
+    params.get('q')
+  );
   const sortLink = (key: 'updated' | 'total') => {
     const next = new URLSearchParams(params);
     if (sort === key) next.delete('sort');
@@ -66,15 +80,28 @@ export default function Orders() {
             <input type="hidden" name="sort" value={params.get('sort') ?? ''} />
           ) : null}
           <NativeSelect
-            name="type"
-            defaultValue={params.get('type') ?? ''}
+            name="model"
+            defaultValue={params.get('model') ?? ''}
             className="h-8 w-full sm:w-44"
-            aria-label="Order type"
+            aria-label="Commerce model"
           >
-            <NativeSelectOption value="">All types</NativeSelectOption>
-            {ORDER_TYPES.map((t) => (
-              <NativeSelectOption key={t} value={t}>
-                {ORDER_TYPE_LABELS[t]}
+            <NativeSelectOption value="">All models</NativeSelectOption>
+            {ORDER_MODELS.map((m) => (
+              <NativeSelectOption key={m} value={m}>
+                {ORDER_MODEL_LABELS[m]}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <NativeSelect
+            name="channel"
+            defaultValue={params.get('channel') ?? ''}
+            className="h-8 w-full sm:w-40"
+            aria-label="Channel"
+          >
+            <NativeSelectOption value="">All channels</NativeSelectOption>
+            {ORDER_CHANNELS.map((c) => (
+              <NativeSelectOption key={c} value={c}>
+                {ORDER_CHANNEL_LABELS[c]}
               </NativeSelectOption>
             ))}
           </NativeSelect>
@@ -138,13 +165,15 @@ export default function Orders() {
                   >
                     <td className="min-w-0 md:px-3 md:py-2">
                       <Link to={`/orders/${o.id}`} className="font-medium hover:underline">
-                        {o.title || ORDER_TYPE_LABELS[o.type as OrderType]}
+                        {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}
                       </Link>{' '}
                       <span className="font-mono font-normal text-muted-foreground text-xs">
                         {orderRef(o.id)}
                       </span>
                       <div className="truncate text-muted-foreground text-xs">
-                        {ORDER_TYPE_LABELS[o.type as OrderType]} · started <Ago ms={o.createdAt} />
+                        {ORDER_MODEL_LABELS[o.model as OrderModel]} ·{' '}
+                        {ORDER_CHANNEL_LABELS[o.channel as OrderChannel] ?? o.channel} · started{' '}
+                        <Ago ms={o.createdAt} />
                         {o.generation > 1 ? ` · run ${o.generation}` : ''}
                         <span className="md:hidden">
                           {' '}

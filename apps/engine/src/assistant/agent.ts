@@ -17,8 +17,9 @@ import {
   atLeast,
   decodePrincipal,
   flowGraphSchema,
+  ORDER_CHANNELS,
+  ORDER_MODELS,
   ORDER_STATUSES,
-  ORDER_TYPES,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
@@ -159,7 +160,8 @@ export class AssistantAgent extends AIChatAgent<Env> {
           'Search orders. Totals compare in USD. Returns the count and total of all matches plus up to `limit` rows.',
         inputSchema: z.object({
           status: z.enum(ORDER_STATUSES).optional(),
-          type: z.enum(ORDER_TYPES).optional(),
+          model: z.enum(ORDER_MODELS).optional(),
+          channel: z.enum(ORDER_CHANNELS).optional(),
           customer: z.string().optional().describe('Customer name or id'),
           q: z.string().optional().describe('Free text over id, title and customer'),
           minTotal: z.number().optional(),
@@ -285,7 +287,7 @@ export function readContext(raw: unknown): AssistantContext {
       id: c.id,
       label: String(c.label ?? c.id).slice(0, 120),
       ...(graph.success ? { graph: graph.data } : {}),
-      ...(typeof c.orderType === 'string' ? { orderType: c.orderType } : {}),
+      ...(typeof c.model === 'string' ? { model: c.model } : {}),
     };
   }
   return { kind: 'workspace' };

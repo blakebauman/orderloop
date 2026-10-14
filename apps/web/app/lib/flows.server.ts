@@ -2,8 +2,10 @@ import {
   type Flow,
   type FlowGraph,
   flowGraphSchema,
-  ORDER_TYPES,
-  type OrderType,
+  ORDER_CHANNELS,
+  ORDER_MODELS,
+  type OrderChannel,
+  type OrderModel,
   TEMPLATES,
   validateGraph,
 } from '@orderloop/core';
@@ -37,16 +39,22 @@ export async function listFlows() {
       id: flows.id,
       name: flows.name,
       description: flows.description,
-      orderType: flows.orderType,
+      model: flows.model,
+      channels: flows.channels,
       publishedVersion: flows.publishedVersion,
       updatedAt: flows.updatedAt,
       graphJson: flows.graphJson,
     })
     .from(flows)
     .orderBy(desc(flows.updatedAt));
-  return rows.map(({ graphJson, ...r }) => {
+  return rows.map(({ graphJson, channels, ...r }) => {
     const g = JSON.parse(graphJson) as FlowGraph;
-    return { ...r, nodeCount: g.nodes.length };
+    return {
+      ...r,
+      model: r.model as OrderModel,
+      channels: JSON.parse(channels) as OrderChannel[],
+      nodeCount: g.nodes.length,
+    };
   });
 }
 
@@ -65,7 +73,8 @@ export async function getFlow(id: string) {
     id: row.id,
     name: row.name,
     description: row.description,
-    orderType: row.orderType as OrderType,
+    model: row.model as OrderModel,
+    channels: JSON.parse(row.channels) as OrderChannel[],
     ...graph,
   };
   const dirty =
@@ -88,9 +97,10 @@ export async function getFlow(id: string) {
 export function parseFlow(input: unknown): Flow {
   const o = input as Record<string, unknown>;
   const graph = flowGraphSchema.parse({ nodes: o.nodes, edges: o.edges });
-  const orderType = ORDER_TYPES.includes(o.orderType as OrderType)
-    ? (o.orderType as OrderType)
-    : 'b2b_order';
+  const model = ORDER_MODELS.includes(o.model as OrderModel) ? (o.model as OrderModel) : 'b2c';
+  const channels = Array.isArray(o.channels)
+    ? ORDER_CHANNELS.filter((c) => (o.channels as unknown[]).includes(c))
+    : [];
   return {
     id:
       String(o.id ?? '')
@@ -98,7 +108,8 @@ export function parseFlow(input: unknown): Flow {
         .slice(0, 60) || `flow-${Date.now().toString(36)}`,
     name: String(o.name ?? 'Untitled flow').slice(0, 80),
     description: String(o.description ?? '').slice(0, 500),
-    orderType,
+    model,
+    channels,
     ...graph,
   };
 }

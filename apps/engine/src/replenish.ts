@@ -21,7 +21,8 @@ export class Replenish extends WorkflowEntrypoint<Env, { flowId?: string }> {
       return startOrder(this.env, {
         flowId: event.payload?.flowId ?? REORDER_FLOW_ID,
         input: {
-          type: 'reorder',
+          model: 'replenishment',
+          channel: 'schedule',
           title: `Replenish ${low.join(', ')}`,
           currency: 'USD',
           lines: [],

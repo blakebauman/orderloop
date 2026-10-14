@@ -9,7 +9,8 @@ import {
 
 const order = (o: Partial<Order> = {}): Order => ({
   id: 'ord_1',
-  type: 'storefront_order',
+  model: 'b2c',
+  channel: 'web',
   currency: 'USD',
   lines: [{ sku: 'MON-27', qty: 2, unitPrice: 349 }],
   meta: {},

@@ -1,4 +1,12 @@
-import { BASE_CURRENCY, ORDER_TYPE_LABELS, type OrderLine, type OrderType } from '@orderloop/core';
+import {
+  BASE_CURRENCY,
+  ORDER_CHANNEL_LABELS,
+  ORDER_CHANNELS,
+  ORDER_MODEL_LABELS,
+  type OrderChannel,
+  type OrderLine,
+  type OrderModel,
+} from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
@@ -44,6 +52,9 @@ function parseLines(text: string): { lines: OrderLine[]; unreadable: string[] } 
   return { lines, unreadable };
 }
 
+const channelOf = (v: FormDataEntryValue | null): OrderChannel =>
+  ORDER_CHANNELS.find((c) => c === v) ?? 'manual';
+
 export async function action({ request }: Route.ActionArgs) {
   await requireUser(request, 'operator');
   const f = await request.formData();
@@ -67,7 +78,8 @@ export async function action({ request }: Route.ActionArgs) {
     const { orderId } = await engine().startOrder({
       flowId,
       input: {
-        type: flow.orderType as OrderType,
+        model: flow.model as OrderModel,
+        channel: channelOf(f.get('channel')),
         title: String(f.get('title') ?? '') || undefined,
         customerId: String(f.get('customerId') ?? '') || undefined,
         currency,
@@ -115,9 +127,9 @@ export default function NewOrder() {
               <NativeSelect name="flowId" defaultValue={preset.flowId} className="h-9 w-full">
                 {flows.map((fl) => (
                   <NativeSelectOption key={fl.id} value={fl.id}>
-                    {fl.name === ORDER_TYPE_LABELS[fl.orderType as OrderType]
+                    {fl.name === ORDER_MODEL_LABELS[fl.model as OrderModel]
                       ? fl.name
-                      : `${fl.name} (${ORDER_TYPE_LABELS[fl.orderType as OrderType]})`}{' '}
+                      : `${fl.name} (${ORDER_MODEL_LABELS[fl.model as OrderModel]})`}{' '}
                     · v{fl.version}
                   </NativeSelectOption>
                 ))}
@@ -137,13 +149,26 @@ export default function NewOrder() {
                 ))}
               </NativeSelect>
             </Field>
+            <Field label="Channel" hint="Where the order came in">
+              <NativeSelect
+                name="channel"
+                defaultValue={preset.input.channel ?? 'manual'}
+                className="h-9 w-full"
+              >
+                {ORDER_CHANNELS.map((c) => (
+                  <NativeSelectOption key={c} value={c}>
+                    {ORDER_CHANNEL_LABELS[c]}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
           </div>
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
             <Field label="Title" hint="Optional">
               <Input
                 name="title"
                 defaultValue={preset.input.title ?? ''}
-                placeholder="e.g. PO CT-2209"
+                placeholder="e.g. Spring restock"
               />
             </Field>
             <Field label="Currency" hint={`Prices convert from ${BASE_CURRENCY}`}>

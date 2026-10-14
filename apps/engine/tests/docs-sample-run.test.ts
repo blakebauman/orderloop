@@ -36,7 +36,7 @@ it('still runs the B2B order drawn on the docs home page', async () => {
   const { orderId } = await startOrder(env, {
     flowId: sample.flowId,
     input: {
-      type: 'b2b_order',
+      model: 'b2b',
       currency: 'USD',
       lines: [],
       meta: {},

@@ -1,4 +1,4 @@
-import { ORDER_TYPE_LABELS, type OrderState, type OrderType } from '@orderloop/core';
+import { ORDER_MODEL_LABELS, type OrderModel, type OrderState } from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -229,7 +229,7 @@ function Row({
   const decided = fetcher.data?.ok;
   const open = r.status === 'pending' && !decided && !gone;
   const orderName =
-    r.orderTitle || (r.orderType ? ORDER_TYPE_LABELS[r.orderType as OrderType] : '');
+    r.orderTitle || (r.orderModel ? ORDER_MODEL_LABELS[r.orderModel as OrderModel] : '');
   return (
     <li
       ref={ref}

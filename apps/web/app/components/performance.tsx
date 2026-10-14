@@ -1,4 +1,4 @@
-import { nodeSpec, ORDER_TYPE_LABELS, type OrderType } from '@orderloop/core';
+import { nodeSpec, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Empty, Section } from '~/components/page';
 import { duration, money } from '~/lib/format';
 import type { Performance as Figures } from '~/lib/metrics.server';
@@ -13,16 +13,16 @@ export function Performance({ p }: { p: Figures }) {
   return (
     <Section title={`Last ${p.days} days`} flush>
       <div className="grid gap-px bg-[var(--rule)] md:grid-cols-2 xl:grid-cols-4">
-        <Panel title="Completion by order type">
+        <Panel title="Completion by commerce model">
           {p.completion.length ? (
             <ul className="space-y-2">
               {p.completion.map((c) => {
                 const rate = c.finished ? c.completed / c.finished : 0;
                 return (
-                  <li key={c.type}>
+                  <li key={c.model}>
                     <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate">
-                        {ORDER_TYPE_LABELS[c.type as OrderType] ?? c.type}
+                        {ORDER_MODEL_LABELS[c.model as OrderModel] ?? c.model}
                       </span>
                       <span className="font-medium tabular">{pct(rate)}</span>
                     </div>

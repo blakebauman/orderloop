@@ -85,7 +85,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         const q = url.searchParams;
         return json({
           orders: await listOrders({
-            type: q.get('type') ?? undefined,
+            model: q.get('model') ?? undefined,
+            channel: q.get('channel') ?? undefined,
             status: q.get('status') ?? undefined,
             q: q.get('q') ?? undefined,
           }),

@@ -44,7 +44,7 @@ deploying code that needs them. The engine's tests apply the same directory to t
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `order_type`, `published_version` |
+| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `model`, `channels` (JSON array), `published_version` |
 | `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at` |
 
 `publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version.
@@ -57,7 +57,7 @@ published as version 1 the first time they are needed (`ensureTemplates` in the 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `type`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_type (type, updated_at)`, and
@@ -78,7 +78,7 @@ writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
-| `customers` | `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
+| `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
@@ -98,10 +98,10 @@ writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
-| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `order_type`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` |
+| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` |
 
 The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at
-request time: completion rate by order type from `orders` (completed over finished, by
+request time: completion rate by model from `orders` (completed over finished, by
 `created_at`), p50 and p95 duration per node type from `node_runs` (nearest rank, with window
 functions), revenue per day from completed `orders`, and refund rate from `payments` (succeeded
 `refund` over succeeded `capture` and `charge`). Money is converted to USD at each order's

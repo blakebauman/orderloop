@@ -212,7 +212,7 @@ export class OrderAgent extends Agent<Env, State> {
         nodeId,
         run: Math.max(1, run.runs),
         nodeType: type,
-        orderType: s.order.type,
+        model: s.order.model,
         status: run.status === 'failed' ? 'failed' : 'succeeded',
         startedAt: run.startedAt,
         endedAt: run.endedAt,

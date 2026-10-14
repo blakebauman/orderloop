@@ -17,7 +17,7 @@ export type AssistantContext =
       label: string;
       /** The editor's graph, unsaved changes included, so a proposal builds on what is on screen. */
       graph?: FlowGraph;
-      orderType?: string;
+      model?: string;
     };
 
 /** What is waiting on a person, for the line at the top of the panel. */

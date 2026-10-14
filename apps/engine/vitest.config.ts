@@ -14,6 +14,8 @@ export default defineConfig(async () => {
         remoteBindings: false,
         miniflare: {
           bindings: { TEST_MIGRATIONS: migrations, AI_MODE: 'mock', TIME_SCALE: '1' },
+          // A second, empty database for testing migrations against rows in an older shape.
+          d1Databases: { MIGRATION_DB: 'migration-test' },
         },
       }),
     ],

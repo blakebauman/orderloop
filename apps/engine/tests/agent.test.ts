@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 const flow = { ...b2bOrderFlow(), version: 1, publishedAt: 0 };
 const order: Order = {
   id: 'ord_agent_test',
-  type: 'b2b_order',
+  model: 'b2b',
+  channel: 'api',
   currency: 'USD',
   lines: [],
   meta: {},

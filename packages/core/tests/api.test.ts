@@ -3,7 +3,8 @@ import { type StartOrderInput, startFingerprint } from '../src/api';
 import type { OrderInput } from '../src/types';
 
 const input: OrderInput = {
-  type: 'b2b_order',
+  model: 'b2b',
+  channel: 'api',
   currency: 'USD',
   lines: [{ sku: 'WID-100', qty: 50 }],
   meta: { po: 'PO-1' },
@@ -23,7 +24,8 @@ describe('startFingerprint', () => {
         meta: { po: 'PO-1' },
         lines: [{ qty: 50, sku: 'WID-100' }],
         currency: 'USD',
-        type: 'b2b_order',
+        channel: 'api',
+        model: 'b2b',
       } as OrderInput,
       flowId: 'tpl-b2b-order',
     };

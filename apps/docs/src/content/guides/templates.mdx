@@ -1,11 +1,11 @@
 ---
 title: Built-in flows
-description: The flow seeded for each order type, how seeding works, and the dashboard scenarios that exercise them.
+description: The flow seeded for each commerce model, how seeding works, and the dashboard scenarios that exercise them.
 ---
 
 import Templates from '../../components/Templates.astro';
 
-OrderLoop seeds one flow per order type. Each is an ordinary flow: open it in the editor,
+OrderLoop seeds at least one flow per [commerce model](/guides/commerce-models/). Each is an ordinary flow: open it in the editor,
 change it and publish a new version. The list below is rendered from `TEMPLATES` in
 `packages/core/src/templates.ts`, the same builders the seed publishes.
 
@@ -17,7 +17,7 @@ as version 1. It runs:
 - in the web app, through `ensureSeeded()`, the first time a worker isolate lists or loads flows
   (the dashboard, `/flows`, a flow page, `GET /api/v1/flows`) or starts an order with
   `POST /api/v1/orders`;
-- in the engine, through `ensureTemplates()`, before the Replenish Workflow starts a reorder.
+- in the engine, through `ensureTemplates()`, before the Replenish Workflow starts a replenishment order.
 
 Seeding never overwrites a flow that exists, so your edits survive. When a template changes in
 the code, the editor of a template-based flow offers the new graph as a proposal to review
@@ -37,12 +37,12 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 | B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the agent router auto-approves, ships, waits for payment |
 | B2B over credit limit | `tpl-b2b-order` | `cus_contoso` is near its limit, so the credit check routes to a person |
 | B2B out of stock | `tpl-b2b-order` | `meta.simulate: "out_of_stock"`: the reservation comes up short and the order fails and rolls back |
-| Purchase request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |
-| Reorder (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
+| Procurement request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |
+| Replenishment (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
 | Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
-| Storefront order in euros | `tpl-storefront-order` | The storefront checkout in `EUR`: USD prices convert at the stored rate, and the order, capture and webhooks are in euros |
-| Storefront order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund. A `return.requested` payload with `lines: [{ sku, qty }]` restocks only those lines; `amount` sets a partial refund |
+| Retail order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices convert at the stored rate, and the order, capture and webhooks are in euros |
+| Retail order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund. A `return.requested` payload with `lines: [{ sku, qty }]` restocks only those lines; `amount` sets a partial refund |
 
 ### Simulating failures
 

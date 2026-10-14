@@ -20,7 +20,7 @@ The local part of the recipient picks the flow. Defaults (`DEFAULT_INTAKE_MAILBO
 
 Override them with the engine variable `INTAKE_MAILBOXES`, a JSON object of local part to flow id,
 for example `{"orders":"tpl-b2b-order","wholesale":"my-wholesale-flow"}`. Matching ignores case and a
-`+tag` (`orders+acme@` is `orders@`). The order type comes from the flow, and the flow's latest
+`+tag` (`orders+acme@` is `orders@`). The order's `model` comes from the flow, its `channel` is `email`, and the flow's latest
 published version runs.
 
 ## Who may send

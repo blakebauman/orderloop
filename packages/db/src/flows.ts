@@ -11,7 +11,8 @@ export type StoredFlow = {
   id: string;
   name: string;
   description: string;
-  orderType: string;
+  model: string;
+  channels: string[];
   nodes: unknown[];
   edges: unknown[];
 };
@@ -69,7 +70,8 @@ export async function saveDraft(db: Db, flow: StoredFlow, now = Date.now()) {
       id: flow.id,
       name: flow.name,
       description: flow.description,
-      orderType: flow.orderType,
+      model: flow.model,
+      channels: JSON.stringify(flow.channels),
       graphJson,
       createdAt: now,
       updatedAt: now,
@@ -79,7 +81,8 @@ export async function saveDraft(db: Db, flow: StoredFlow, now = Date.now()) {
       set: {
         name: flow.name,
         description: flow.description,
-        orderType: flow.orderType,
+        model: flow.model,
+        channels: JSON.stringify(flow.channels),
         graphJson,
         updatedAt: now,
       },

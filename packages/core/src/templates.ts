@@ -1,11 +1,11 @@
 /**
- * Seeded flows, one per order type. Each is a normal editable flow; the seed publishes version 1.
+ * Seeded flows, at least one per commerce model. Each is a normal editable flow; the seed publishes version 1.
  */
 
 import { withDefaults } from './catalog';
 import { LOOP_INPUT } from './graph';
 import { autoLayout } from './layout';
-import type { Flow, FlowEdge, FlowNode, OrderType } from './types';
+import type { Flow, FlowEdge, FlowNode, OrderModel } from './types';
 
 class Builder {
   nodes: FlowNode[] = [];
@@ -122,7 +122,8 @@ export function purchaseRequestFlow(): Flow {
       name: 'Purchase request',
       description:
         'Internal procurement: AI spend classification, budget check, tiered approvals, PO, supplier acknowledgement, goods receipt, 3-way match and payment.',
-      orderType: 'purchase_request',
+      model: 'procurement',
+      channels: ['manual', 'email', 'api'],
     });
 }
 
@@ -222,7 +223,8 @@ export function b2bOrderFlow(): Flow {
       name: 'B2B order',
       description:
         'Inbound PO by email: AI extraction, contract pricing, credit check, an agent that triages to auto-approve / approval / clarify, stock reservation, net-30 invoice, shipment and a dunning loop.',
-      orderType: 'b2b_order',
+      model: 'b2b',
+      channels: ['email', 'api', 'manual'],
     });
 }
 
@@ -285,7 +287,8 @@ export function reorderFlow(): Flow {
       name: 'Reorder',
       description:
         'Scheduled replenishment: AI demand forecast for SKUs at their reorder point, PO generation, approval above $10k, supplier acknowledgement, receipt and restock.',
-      orderType: 'reorder',
+      model: 'replenishment',
+      channels: ['schedule', 'manual'],
     });
 }
 
@@ -351,7 +354,8 @@ export function subscriptionFlow(): Flow {
         name: 'Subscription',
         description:
           'Recurring box subscription: authorize, then a billing-period loop (wait → charge → ship) with a dunning retry, continuing as a new run after 12 cycles.',
-        orderType: 'subscription',
+        model: 'subscription',
+        channels: ['web', 'mobile', 'api'],
       })
   );
 }
@@ -463,15 +467,35 @@ export function storefrontOrderFlow(): Flow {
         name: 'Storefront order',
         description:
           'Card checkout: store policy, authorize, reserve, ship and capture, then a 30-day return window: RMA label, goods received, restock and a full or partial refund.',
-        orderType: 'storefront_order',
+        model: 'b2c',
+        channels: ['web', 'mobile', 'api'],
       })
   );
 }
 
-export const TEMPLATES: Record<OrderType, () => Flow> = {
-  purchase_request: purchaseRequestFlow,
-  b2b_order: b2bOrderFlow,
-  reorder: reorderFlow,
-  subscription: subscriptionFlow,
-  storefront_order: storefrontOrderFlow,
+export const TEMPLATES = {
+  'tpl-purchase-request': purchaseRequestFlow,
+  'tpl-b2b-order': b2bOrderFlow,
+  'tpl-reorder': reorderFlow,
+  'tpl-subscription': subscriptionFlow,
+  'tpl-storefront-order': storefrontOrderFlow,
+} satisfies Record<string, () => Flow>;
+export type TemplateId = keyof typeof TEMPLATES;
+
+/** The template a new flow for each model starts from. */
+export const DEFAULT_TEMPLATE: Record<OrderModel, TemplateId> = {
+  b2b: 'tpl-b2b-order',
+  b2c: 'tpl-storefront-order',
+  d2c: 'tpl-storefront-order',
+  marketplace: 'tpl-storefront-order',
+  subscription: 'tpl-subscription',
+  procurement: 'tpl-purchase-request',
+  replenishment: 'tpl-reorder',
 };
+
+/** Every seeded template for a model. */
+export function templatesFor(model: OrderModel): Flow[] {
+  return Object.values(TEMPLATES)
+    .map((t) => t())
+    .filter((f) => f.model === model);
+}

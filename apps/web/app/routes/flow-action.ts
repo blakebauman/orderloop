@@ -24,11 +24,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         ? { version: current.publishedVersion, errors: [], warnings: [] }
         : await publish(flow);
       if (!res.version) return res;
-      const sample = SCENARIOS.find((s) => s.input.type === flow.orderType);
+      const sample =
+        SCENARIOS.find((s) => s.flowId === flow.id) ??
+        SCENARIOS.find((s) => s.input.model === flow.model);
       const { orderId } = await engine().startOrder({
         flowId: flow.id,
         version: res.version,
-        input: sample?.input ?? { type: flow.orderType, currency: 'USD', lines: [], meta: {} },
+        input: sample?.input ?? { model: flow.model, channel: 'manual' },
       });
       return { ...res, orderId };
     }

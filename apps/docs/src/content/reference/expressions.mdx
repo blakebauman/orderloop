@@ -15,7 +15,7 @@ Every expression and template sees one object:
 
 | Path | Contents |
 |---|---|
-| `order` | The order: `id`, `type`, `title`, `customerId`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
+| `order` | The order: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `contact`, `fulfillment`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
 | `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
 | `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
 | `input` | The order's `meta` |
@@ -141,8 +141,9 @@ and volume tiers) match when every scope they set fits: `sku`, `customer_id`, `c
 the order's customer.
 
 The node's `useContracts` and `usePriceRules` fields drop the contract source or the price-book and
-volume sources for that node. A line with its own `unitPrice` keeps it, and purchase requests and
-reorders price at `products.cost` without the chain. The node's output lists each line's
+volume sources for that node. A line with its own `unitPrice` keeps it. The node's `basis` field picks the source: `auto` prices buy-side
+models (procurement, replenishment) at `products.cost` without the chain and every other model through it,
+`chain` and `cost` force one or the other (see [Commerce models](/guides/commerce-models/#pricing)). The node's output lists each line's
 `unitPrice`, the source (`by`) and the entry (`rule`), and its summary counts lines per source. The
 back office shows the chain in order.
 

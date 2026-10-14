@@ -1,13 +1,22 @@
 import {
   autoLayout,
-  ORDER_TYPE_LABELS,
-  ORDER_TYPES,
-  type OrderType,
+  BUY_SIDE_MODELS,
+  DEFAULT_TEMPLATE,
+  type Flow,
+  ORDER_CHANNEL_LABELS,
+  ORDER_MODEL_LABELS,
+  ORDER_MODELS,
+  type OrderChannel,
+  type OrderModel,
   TEMPLATES,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import {
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+} from '@orderloop/ui/native-select';
 import { Textarea } from '@orderloop/ui/textarea';
 import { GitBranch, Sparkles } from 'lucide-react';
 import { useState } from 'react';
@@ -32,9 +41,7 @@ export async function action({ request }: Route.ActionArgs) {
   await requireUser(request, 'operator');
   const f = await request.formData();
   const name = String(f.get('name') ?? '').trim() || 'Untitled flow';
-  const orderType = (
-    ORDER_TYPES.includes(f.get('orderType') as OrderType) ? f.get('orderType') : 'b2b_order'
-  ) as OrderType;
+  const model = ORDER_MODELS.find((m) => m === f.get('model')) ?? 'b2c';
   const id = `${
     name
       .toLowerCase()
@@ -42,23 +49,22 @@ export async function action({ request }: Route.ActionArgs) {
       .replace(/^-|-$/g, '')
       .slice(0, 40) || 'flow'
   }-${Date.now().toString(36).slice(-4)}`;
-  let graph = {
-    nodes: [] as ReturnType<(typeof TEMPLATES)[OrderType]>['nodes'],
-    edges: [] as ReturnType<(typeof TEMPLATES)[OrderType]>['edges'],
-  };
+  let graph: Pick<Flow, 'nodes' | 'edges'> = { nodes: [], edges: [] };
   let description = '';
+  let channels: OrderChannel[] = [];
   if (f.get('intent') === 'generate') {
     const prompt = String(f.get('prompt') ?? '').trim();
     if (!prompt) return { error: 'Describe the steps you want, then draft again.' };
-    const res = await engine().copilot({ prompt, orderType });
+    const res = await engine().copilot({ prompt, model });
     if (!res.graph.nodes.length)
       return { error: `The copilot could not draft that. ${res.explanation}` };
     graph = autoLayout(res.graph);
     description = prompt.slice(0, 300);
   } else if (f.get('from') === 'template') {
-    const t = TEMPLATES[orderType]();
+    const t = TEMPLATES[DEFAULT_TEMPLATE[model]]();
     graph = { nodes: t.nodes, edges: t.edges };
     description = t.description;
+    channels = t.channels;
   } else {
     graph = {
       nodes: [
@@ -73,7 +79,7 @@ export async function action({ request }: Route.ActionArgs) {
       edges: [],
     };
   }
-  await saveFlow({ id, name, description, orderType, ...graph });
+  await saveFlow({ id, name, description, model, channels, ...graph });
   return redirect(`/flows/${id}`);
 }
 
@@ -115,8 +121,11 @@ export default function Flows() {
                 {f.description || 'No description yet.'}
               </p>
               <div className="mt-3 text-muted-foreground text-xs">
-                {ORDER_TYPE_LABELS[f.orderType as OrderType]} · {f.nodeCount} nodes · edited{' '}
-                <Ago ms={f.updatedAt} />
+                {ORDER_MODEL_LABELS[f.model]}
+                {f.channels.length
+                  ? ` (${f.channels.map((c) => ORDER_CHANNEL_LABELS[c]).join(', ')})`
+                  : ''}{' '}
+                · {f.nodeCount} nodes · edited <Ago ms={f.updatedAt} />
               </div>
             </Link>
           ))}
@@ -126,14 +135,23 @@ export default function Flows() {
             <Form method="post" className="space-y-4 rounded-md border bg-card p-4">
               <h2 className="section-title">New flow</h2>
               <Field label="Name">
-                <Input name="name" placeholder="e.g. Wholesale reorder" className="h-8" />
+                <Input name="name" placeholder="e.g. Weekend flash sale" className="h-8" />
               </Field>
-              <Field label="Order type">
-                <NativeSelect name="orderType" className="h-8 w-full" defaultValue="b2b_order">
-                  {ORDER_TYPES.map((t) => (
-                    <NativeSelectOption key={t} value={t}>
-                      {ORDER_TYPE_LABELS[t]}
-                    </NativeSelectOption>
+              <Field label="Commerce model">
+                <NativeSelect name="model" className="h-8 w-full" defaultValue="b2c">
+                  {(
+                    [
+                      ['Selling', ORDER_MODELS.filter((m) => !BUY_SIDE_MODELS.includes(m))],
+                      ['Buying', BUY_SIDE_MODELS],
+                    ] as const
+                  ).map(([group, models]) => (
+                    <NativeSelectOptGroup key={group} label={group}>
+                      {models.map((m: OrderModel) => (
+                        <NativeSelectOption key={m} value={m}>
+                          {ORDER_MODEL_LABELS[m]}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelectOptGroup>
                   ))}
                 </NativeSelect>
               </Field>

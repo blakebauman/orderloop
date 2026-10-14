@@ -108,7 +108,7 @@ describe('email intake', () => {
     expect(s.order).toMatchObject({
       customerId: 'cus_northwind',
       title: 'PO NW-4411',
-      type: 'b2b_order',
+      model: 'b2b',
     });
     expect(s.order!.documentText).toContain('--- Attachment: po.csv ---');
     expect(s.order!.meta).toMatchObject({
@@ -201,7 +201,7 @@ describe('email intake', () => {
     } as Env);
     expect(out).toMatchObject({ status: 'accepted' });
     const s = await state((out as { orderId: string }).orderId);
-    expect(s.order).toMatchObject({ type: 'purchase_request', customerId: undefined });
+    expect(s.order).toMatchObject({ model: 'procurement', customerId: undefined });
     expect(s.order!.meta).toMatchObject({ senderMatch: 'allowlist' });
   });
 });

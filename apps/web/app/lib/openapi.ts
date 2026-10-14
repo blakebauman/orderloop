@@ -3,7 +3,7 @@
  * generated from the same zod schemas the handlers validate with, so they can't drift.
  */
 
-import { ORDER_STATUSES, ORDER_TYPES, OUTBOUND_EVENTS } from '@orderloop/core';
+import { ORDER_CHANNELS, ORDER_MODELS, ORDER_STATUSES, OUTBOUND_EVENTS } from '@orderloop/core';
 import { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
 
@@ -44,7 +44,8 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: 'List orders',
           parameters: [
-            { name: 'type', in: 'query', schema: { type: 'string', enum: [...ORDER_TYPES] } },
+            { name: 'model', in: 'query', schema: { type: 'string', enum: [...ORDER_MODELS] } },
+            { name: 'channel', in: 'query', schema: { type: 'string', enum: [...ORDER_CHANNELS] } },
             { name: 'status', in: 'query', schema: { type: 'string', enum: [...ORDER_STATUSES] } },
             { name: 'q', in: 'query', schema: { type: 'string' } },
           ],

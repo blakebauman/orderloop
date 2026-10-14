@@ -7,7 +7,8 @@ const state = (currency: string, total: number, fxRate: number): OrderState => (
   orderId: 'ord_fx',
   order: {
     id: 'ord_fx',
-    type: 'b2b_order',
+    model: 'b2b',
+    channel: 'api',
     customerId: 'cus_fx',
     currency,
     lines: [],
@@ -23,7 +24,8 @@ const state = (currency: string, total: number, fxRate: number): OrderState => (
     id: 'f',
     name: 'f',
     description: '',
-    orderType: 'b2b_order',
+    model: 'b2b',
+    channels: [],
     version: 1,
     publishedAt: 0,
     nodes: [

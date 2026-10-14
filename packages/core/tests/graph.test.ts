@@ -61,7 +61,7 @@ describe('templates', () => {
 
 describe('planner', () => {
   it('runs the cheap purchase-request path and skips approvals', () => {
-    const flow = tpl('purchase_request');
+    const flow = tpl('tpl-purchase-request');
     const { ran, state, ended } = simulate(flow, (id) =>
       id === 'needs_mgr' ? ['false'] : undefined,
     );
@@ -86,7 +86,7 @@ describe('planner', () => {
   });
 
   it('routes a rejection to the rejected end through a join', () => {
-    const flow = tpl('purchase_request');
+    const flow = tpl('tpl-purchase-request');
     const { ended, state } = simulate(flow, (id) => {
       if (id === 'needs_mgr') return ['true'];
       if (id === 'mgr') return ['rejected'];
@@ -97,7 +97,7 @@ describe('planner', () => {
   });
 
   it('runs the dunning loop to its limit, then exits through "done"', () => {
-    const flow = tpl('b2b_order');
+    const flow = tpl('tpl-b2b-order');
     const { ran, ended } = simulate(flow, (id) => {
       if (id === 'paid' || id === 'paid_late') return ['timeout'];
     });
@@ -107,7 +107,7 @@ describe('planner', () => {
   });
 
   it('leaves the dunning loop early when payment arrives', () => {
-    const flow = tpl('b2b_order');
+    const flow = tpl('tpl-b2b-order');
     const { ran, ended } = simulate(flow, (id, run) => {
       if (id === 'paid') return ['timeout'];
       if (id === 'paid_late') return run === 2 ? ['received'] : ['timeout'];
@@ -117,7 +117,7 @@ describe('planner', () => {
   });
 
   it('runs subscription periods with distinct step runs, then continues as new', () => {
-    const flow = tpl('subscription');
+    const flow = tpl('tpl-subscription');
     const { ran, state, ended } = simulate(flow, (id, run) => {
       if (id === 'periods') return run <= 12;
       if (id === 'charge') return run === 3 ? ['failed'] : ['ok'];
@@ -130,7 +130,7 @@ describe('planner', () => {
   });
 
   it('stops a subscription when the retry also fails', () => {
-    const flow = tpl('subscription');
+    const flow = tpl('tpl-subscription');
     const { ended, state } = simulate(flow, (id) => {
       if (id === 'charge' || id === 'retry') return ['failed'];
     });
@@ -139,7 +139,7 @@ describe('planner', () => {
   });
 
   it('is settled once nothing can run', () => {
-    const flow = tpl('reorder');
+    const flow = tpl('tpl-reorder');
     const { state } = simulate(flow, (id) => (id === 'any' ? ['false'] : undefined));
     expect(isSettled(flow, state)).toBe(true);
   });
@@ -192,7 +192,7 @@ describe('validateGraph', () => {
   });
 
   it('rejects a back-edge from outside the loop body', () => {
-    const g = tpl('b2b_order');
+    const g = tpl('tpl-b2b-order');
     g.edges.push({ id: 'bad', source: 'erp', target: 'dunning', targetHandle: 'next' });
     expect(validateGraph(g).errors.some((e) => e.message.includes('inside that loop'))).toBe(true);
   });
