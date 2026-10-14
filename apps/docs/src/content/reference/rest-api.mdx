@@ -210,8 +210,10 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
 These aren't part of `/api/v1`.
 
 - `GET /health` answers `{ ok: true, service: "orderloop-web" }`, with no authentication.
-- `/mcp`, `/oauth/*` (except the `/oauth/authorize` consent page) and `/.well-known/oauth-*` are the
-  [MCP server](/reference/mcp/) and its OAuth endpoints.
+- `/mcp`, `/a2a`, `/oauth/*` (except the `/oauth/authorize` consent page) and `/.well-known/oauth-*`
+  are the [MCP server](/reference/mcp/), the [A2A endpoint](/reference/a2a/) and their OAuth
+  endpoints.
+- `GET /.well-known/agent-card.json` is the A2A Agent Card, public and cached for five minutes.
 - `/agents/order-agent/:id` and `/agents/assistant-agent/:name` are the dashboard's live sockets,
   proxied to the engine for a signed-in person. They are not a public API; the assistant route always
   reaches the caller's own assistant.

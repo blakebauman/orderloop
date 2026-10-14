@@ -13,12 +13,15 @@
     "bindings": [
       { "name": "ORDER_AGENT", "class_name": "OrderAgent" },
       // The workspace assistant: one per person, holding their conversation.
-      { "name": "ASSISTANT_AGENT", "class_name": "AssistantAgent" }
+      { "name": "ASSISTANT_AGENT", "class_name": "AssistantAgent" },
+      // A2A tasks: one per caller (an API token, or a person through an OAuth grant).
+      { "name": "A2A_AGENT", "class_name": "A2AAgent" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["OrderAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] }
+    { "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["A2AAgent"] }
   ],
   "workflows": [
     {

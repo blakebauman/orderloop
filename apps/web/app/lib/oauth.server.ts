@@ -1,26 +1,33 @@
 /**
- * MCP on the public origin (`/mcp`). @cloudflare/workers-oauth-provider is the authorization
- * server for MCP clients: discovery (`/.well-known/oauth-*`), client registration
- * (`/oauth/register`, or a Client ID Metadata Document), tokens (`/oauth/token`) and grants in
- * `OAUTH_KV`. The consent page is ours (routes/oauth-authorize.tsx): a signed-in person approves a
- * client with a role no higher than their own, and can disconnect it from their Account page.
+ * MCP (`/mcp`) and A2A (`/a2a`) on the public origin. @cloudflare/workers-oauth-provider is the
+ * authorization server for both: discovery (`/.well-known/oauth-authorization-server`), client
+ * registration (`/oauth/register`, or a Client ID Metadata Document), tokens (`/oauth/token`) and
+ * grants in `OAUTH_KV`. Each endpoint is its own protected resource, so a token is issued for one
+ * of them (RFC 8707) and publishes its metadata at `/.well-known/oauth-protected-resource/<path>`.
+ * The consent page is ours (routes/oauth-authorize.tsx): a signed-in person approves a client with
+ * a role no higher than their own, and can disconnect it from their Account page.
  *
- * `/mcp` also takes the REST API's credentials as a bearer token (`ol_live_…` API tokens, or the
- * shared APP_PASSWORD), so clients configured with a header (Claude Code, Cursor) work without
- * the browser flow. Either way the caller is resolved here, as they are now, and the request is
- * forwarded to the engine (apps/engine/src/mcp.ts) with the principal header, like the agent
- * sockets.
+ * Both endpoints also take the REST API's credentials as a bearer token (`ol_live_…` API tokens,
+ * or the shared APP_PASSWORD), so clients configured with a header (Claude Code, Cursor, an A2A
+ * client) work without the browser flow. Either way the caller is resolved here, as they are now,
+ * and the request is forwarded to the engine (apps/engine/src/mcp.ts, apps/engine/src/a2a/) with
+ * the principal header, like the agent sockets.
  */
 
 import { env } from 'cloudflare:workers';
 import {
-  ExternalTokenError,
-  getOAuthApi,
+  OAuthAuthorizationServer,
+  OAuthError,
   type OAuthHelpers,
-  OAuthProvider,
-  type OAuthProviderOptions,
+  OAuthResourceServer,
 } from '@cloudflare/workers-oauth-provider';
-import { encodePrincipal, PRINCIPAL_HEADER, type Principal, ROLES } from '@orderloop/core';
+import {
+  A2A_PATH,
+  encodePrincipal,
+  PRINCIPAL_HEADER,
+  type Principal,
+  ROLES,
+} from '@orderloop/core';
 import {
   apiPrincipal,
   type Caller,
@@ -35,24 +42,34 @@ import { engine } from './env.server';
 export const MCP_PATH = '/mcp';
 export const AUTHORIZE_PATH = '/oauth/authorize';
 
-/** What `/mcp` hands the forwarder: a caller resolved from an API token, or an OAuth grant. */
-type McpProps = { principal: Caller } | GrantProps;
+/** The protected endpoints, each its own OAuth resource. */
+const ENDPOINTS = { [MCP_PATH]: 'OrderLoop MCP', [A2A_PATH]: 'OrderLoop A2A' } as const;
+type Endpoint = keyof typeof ENDPOINTS;
+const isEndpoint = (pathname: string): pathname is Endpoint => pathname in ENDPOINTS;
 
-const resource = (origin: string) => `${origin}${MCP_PATH}`;
+/** What an endpoint hands the forwarder: a caller resolved from an API token, or an OAuth grant. */
+type Props = { principal: Caller } | GrantProps;
 
-/** Paths the OAuth provider answers; everything else goes straight to the app. */
+const resource = (origin: string, path: Endpoint) => `${origin}${path}`;
+
+/** Paths the OAuth roles answer; everything else goes straight to the app. */
 export const isOAuthPath = (pathname: string) =>
-  pathname === MCP_PATH ||
+  isEndpoint(pathname) ||
   pathname.startsWith('/.well-known/oauth-') ||
   (pathname.startsWith('/oauth/') && pathname !== AUTHORIZE_PATH);
 
-function options(origin: string): OAuthProviderOptions<Env> {
-  return {
-    apiRoute: MCP_PATH,
-    apiHandler: { fetch: (request, _env, ctx) => forward(request, ctx.props as McpProps) },
-    // Never reached: only OAuth paths are sent to the provider (workers/app.ts), and the consent
-    // page is a route of the app.
-    defaultHandler: { fetch: () => new Response('Not found', { status: 404 }) },
+/** The channel an authorization request is for, as the audit trail names it. */
+export const channelOf = (resourceUrl: string | undefined) =>
+  resourceUrl && new URL(resourceUrl).pathname === A2A_PATH ? 'A2A' : 'MCP';
+
+function authorizationServer(origin: string) {
+  return new OAuthAuthorizationServer<Env>({
+    issuer: origin,
+    resources: Object.keys(ENDPOINTS).map((p) => resource(origin, p as Endpoint)),
+    // MCP connected before A2A existed: grants from then, and clients that name no resource, are
+    // for MCP. A2A clients name theirs.
+    defaultResource: resource(origin, MCP_PATH),
+    legacyGrantResource: resource(origin, MCP_PATH),
     authorizeEndpoint: AUTHORIZE_PATH,
     tokenEndpoint: '/oauth/token',
     clientRegistrationEndpoint: '/oauth/register',
@@ -61,44 +78,83 @@ function options(origin: string): OAuthProviderOptions<Env> {
     accessTokenTTL: 3600,
     refreshTokenTTL: 30 * 86_400,
     clientIdMetadataDocumentEnabled: true,
-    resourceMetadata: { resource: resource(origin), resource_name: 'OrderLoop' },
-    resolveExternalToken: async ({ request }) => {
+  });
+}
+
+/** Tokens this authorization server issued look like `<user>:<grant>:<secret>`. */
+const issuedToken = (token: string) => token.split(':').length === 3;
+
+function resourceServer(origin: string, as: OAuthAuthorizationServer<Env>, path: Endpoint) {
+  return new OAuthResourceServer<Env, Props>({
+    resourceMetadata: {
+      resource: resource(origin, path),
+      authorization_servers: [origin],
+      resource_name: ENDPOINTS[path],
+    },
+    validateToken: (env, request) => async (res, token) => {
+      if (issuedToken(token)) return as.validateToken<Props>(res, token, env);
       let caller: Caller | null;
       try {
         caller = await apiPrincipal(request);
       } catch (err) {
         if (err instanceof TokenExpired)
-          throw new ExternalTokenError('invalid_token', {
-            description: err.message,
-            statusCode: 401,
-          });
+          throw new OAuthError('invalid_token', { description: err.message, statusCode: 401 });
         if (!(err instanceof Throttled)) throw err;
-        throw new ExternalTokenError('temporarily_unavailable', {
+        throw new OAuthError('temporarily_unavailable', {
           description: err.message,
           statusCode: 429,
           headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) },
         });
       }
-      return caller ? { props: { principal: caller }, audience: resource(origin) } : null;
+      return caller ? { props: { principal: caller }, audience: res } : null;
     },
-  };
+    handler: { fetch: (request, _env, ctx) => forward(request, path, ctx.props) },
+  });
 }
 
-// One provider per origin (orderloop.io, or localhost in development), made once per isolate.
-const providers = new Map<string, OAuthProvider<Env>>();
+type Roles = {
+  as: OAuthAuthorizationServer<Env>;
+  endpoints: Record<Endpoint, OAuthResourceServer<Env, Props>>;
+};
 
-export function oauthProvider(origin: string): OAuthProvider<Env> {
-  let p = providers.get(origin);
-  if (!p) {
-    p = new OAuthProvider(options(origin));
-    providers.set(origin, p);
+// One set per origin (orderloop.io, or localhost in development), made once per isolate.
+const roles = new Map<string, Roles>();
+
+function rolesFor(origin: string): Roles {
+  let r = roles.get(origin);
+  if (!r) {
+    const as = authorizationServer(origin);
+    r = {
+      as,
+      endpoints: {
+        [MCP_PATH]: resourceServer(origin, as, MCP_PATH),
+        [A2A_PATH]: resourceServer(origin, as, A2A_PATH),
+      },
+    };
+    roles.set(origin, r);
   }
-  return p;
+  return r;
 }
 
-/** The provider's helpers, for the consent page and the Account page. */
+const PROTECTED_RESOURCE = '/.well-known/oauth-protected-resource';
+
+/**
+ * Serves an OAuth path (see `isOAuthPath`): an endpoint or its resource metadata goes to that
+ * resource server, everything else (discovery, registration, tokens) to the authorization server.
+ */
+export function oauthFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  const { as, endpoints } = rolesFor(url.origin);
+  const path = url.pathname.startsWith(`${PROTECTED_RESOURCE}/`)
+    ? url.pathname.slice(PROTECTED_RESOURCE.length)
+    : url.pathname;
+  if (isEndpoint(path)) return endpoints[path].fetch(request, env, ctx);
+  return as.fetch(request, env, ctx);
+}
+
+/** The authorization server's helpers, for the consent page and the Account page. */
 export function oauthApi(request: Request): OAuthHelpers {
-  return getOAuthApi(options(new URL(request.url).origin), env);
+  return rolesFor(new URL(request.url).origin).as.getOAuthApi(env);
 }
 
 /** A browser Origin, when there is one, must at least be a real web origin. */
@@ -113,7 +169,7 @@ function badOrigin(request: Request) {
   }
 }
 
-async function forward(request: Request, props: McpProps): Promise<Response> {
+async function forward(request: Request, path: Endpoint, props: Props): Promise<Response> {
   if (badOrigin(request)) return Response.json({ error: 'Origin refused' }, { status: 403 });
   const caller = 'principal' in props ? props.principal : await grantPrincipal(props);
   if (!caller)
@@ -128,7 +184,5 @@ async function forward(request: Request, props: McpProps): Promise<Response> {
   headers.delete('authorization');
   headers.delete('cookie');
   headers.set(PRINCIPAL_HEADER, encodePrincipal(principal satisfies Principal));
-  return engine().fetch(
-    new Request(`https://engine${MCP_PATH}`, new Request(request, { headers })),
-  );
+  return engine().fetch(new Request(`https://engine${path}`, new Request(request, { headers })));
 }

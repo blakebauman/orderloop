@@ -109,7 +109,8 @@ credit check"), not open questions. See [AI nodes and the assistant](/guides/ai/
 The same tools are served to MCP clients such as Claude, Claude Code and Cursor at `/mcp`, with the
 same roles. There is no confirm card: the client asks, using each tool's annotations, and the
 engine still re-checks the role and the state before it acts. Writes are recorded as
-`<email> via MCP`. See [MCP server](/reference/mcp/).
+`<email> via MCP`. See [MCP server](/reference/mcp/). Other agents reach the same tools over the
+Agent2Agent protocol at `/a2a`, as skills; see [A2A endpoint](/reference/a2a/).
 
 ## Privacy
 

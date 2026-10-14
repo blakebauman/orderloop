@@ -1,5 +1,5 @@
 /**
- * The consent page for MCP clients (see lib/oauth.server.ts). The person signs in as usual
+ * The consent page for MCP and A2A clients (see lib/oauth.server.ts). The person signs in as usual
  * (two-factor included), sees which app is asking and where its access will be sent, and grants
  * it a role no higher than their own. The provider's consent helpers bind the form to this
  * browser, make it single-use and forbid framing.
@@ -16,7 +16,7 @@ import { data, Form, useLoaderData } from 'react-router';
 import { Mark } from '~/components/mark';
 import { audit } from '~/lib/audit.server';
 import { type GrantProps, requireUser } from '~/lib/auth.server';
-import { oauthApi } from '~/lib/oauth.server';
+import { channelOf, oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/oauth-authorize';
 
 export const meta = () => [{ title: 'Connect an app · OrderLoop' }];
@@ -60,7 +60,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     const consent = await oauth.beginConsent(authRequest);
     const roles = ROLES.filter((r) => atLeast(me.role, r));
     return data(
-      { details, handle: consent.handle, roles, who: me.email ?? me.name },
+      {
+        details,
+        handle: consent.handle,
+        roles,
+        who: me.email ?? me.name,
+        channel: channelOf(authRequest.resource),
+      },
       {
         headers: consent.headers,
       },
@@ -135,11 +141,13 @@ function Consent({
   handle,
   roles,
   who,
+  channel,
 }: {
   details: ConsentDescription;
   handle: string;
   roles: Role[];
   who: string;
+  channel: string;
 }) {
   // React escapes every string below; all of them may come from the client.
   return (
@@ -188,7 +196,8 @@ function Consent({
         </div>
       </fieldset>
       <p className="mt-3 text-muted-foreground text-xs">
-        Orders show what it does as “{who} via MCP”. Disconnect it any time from your Account page.
+        Orders show what it does as “{who} via {channel}”. Disconnect it any time from your Account
+        page.
       </p>
       <div className="mt-5 flex gap-2">
         <Button type="submit" name="decision" value="approve">

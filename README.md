@@ -11,7 +11,8 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               │ flow editor, live order view, /api/v1       ├─ OrderLoop Workflow: interprets the pinned
               ├─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
               ├─ /agents/assistant-agent/* WebSocket ──────►├─ AssistantAgent DO (one per person): the workspace assistant
-              └─ /mcp (OAuth, MCP clients) ────────────────►│    its tools, served to MCP clients
+              ├─ /mcp (OAuth, MCP clients) ────────────────►│    its tools, served to MCP clients
+              └─ /a2a (OAuth, A2A agents) ─────────────────►├─ A2AAgent DO (one per caller): A2A tasks that follow orders
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
 storefront, marketplace, POS ── POST /api/v1/webhooks/orders (signed, on apps/web)
 inbound order email ── Cloudflare Email Routing ── email() ─►├─ Email intake: orders@ / po@ / purchasing@ start orders

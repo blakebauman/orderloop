@@ -58,11 +58,12 @@ created; they are not configuration.
 | `DOCS` | engine, web | R2 bucket `orderloop-docs`: invoices, POs and inbound documents |
 | `ORDER_AGENT` | engine | Durable Object `OrderAgent` (SQLite-backed), one per order |
 | `ASSISTANT_AGENT` | engine | Durable Object `AssistantAgent` (SQLite-backed, migration `v2`), one per person |
+| `A2A_AGENT` | engine | Durable Object `A2AAgent` (SQLite-backed, migration `v3`), one per [A2A](/reference/a2a/) caller |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order` (class `OrderLoop`), up to 10,000 steps per instance |
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
-| `OAUTH_KV` | web | KV namespace for [MCP](/reference/mcp/) OAuth clients, grants and tokens (tokens hashed, grant data encrypted). `wrangler.jsonc` gives no id; the namespace is provisioned on deploy |
+| `OAUTH_KV` | web | KV namespace for [MCP](/reference/mcp/) and [A2A](/reference/a2a/) OAuth clients, grants and tokens (tokens hashed, grant data encrypted). `wrangler.jsonc` gives no id; the namespace is provisioned on deploy |
 
 The web Worker's compatibility flags are `nodejs_compat` and `global_fetch_strictly_public`. The
 second keeps fetches of an MCP client's Client ID Metadata Document (an https `client_id`) to the

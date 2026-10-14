@@ -1,4 +1,4 @@
-import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
+import { AGENT_CARD_PATH, agentCard, encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import { handleApi, handleSignedEvent, handleSignedOrder } from '../app/lib/api.server';
 import {
@@ -10,7 +10,7 @@ import {
   TWO_FACTOR_DUE,
 } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
-import { isOAuthPath, oauthProvider } from '../app/lib/oauth.server';
+import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 
@@ -24,9 +24,16 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
 
-    // MCP and its OAuth endpoints (discovery, registration, tokens). The consent page itself,
-    // /oauth/authorize, is a page of the app below.
-    if (isOAuthPath(url.pathname)) return oauthProvider(url.origin).fetch(request, env, ctx);
+    // A2A discovery: the Agent Card is public, like the OpenAPI document.
+    if (url.pathname === AGENT_CARD_PATH && request.method === 'GET') {
+      return Response.json(agentCard(url.origin), {
+        headers: { 'cache-control': 'public, max-age=300' },
+      });
+    }
+
+    // MCP, A2A and their OAuth endpoints (discovery, registration, tokens). The consent page
+    // itself, /oauth/authorize, is a page of the app below.
+    if (isOAuthPath(url.pathname)) return oauthFetch(request, env, ctx);
 
     // Signed webhooks authenticate by HMAC, not by the admin password.
     if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
