@@ -156,13 +156,13 @@ pnpm docs:deploy     # build and deploy the orderloop-docs Worker
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs lint, type-check, build, tests and a dependency audit on every push and PR. Production deploys from CI: on `main` it migrates D1, then deploys the engine, the web app and the docs, retrying each step on transient Cloudflare API errors, and rolls both Workers back if the smoke test fails. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets (in the `production` environment or the repository) and fails without them. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
+`.github/workflows/ci.yml` runs lint, type-check, build, tests, the fleet tests and a dependency audit on every push and PR. Production deploys from CI: each customer has a dedicated deployment listed in `deployments/` (at `<id>.orderloop.app`; OrderLoop's own is `orderloop.app`), and on `main` CI deploys them ring by ring (staging, internal, canary, general). For each one it records a D1 restore point, migrates D1, deploys the engine and the web app, smoke-tests `/health/deep`, and rolls back any Worker it deployed if a later step fails; see [docs/operations.md](docs/operations.md). Each deployment's job runs in its GitHub environment, which holds its secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
 
 ## Deploy
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh                         # D1 + R2
+./scripts/provision.sh orderloop               # D1, R2, AI Gateway, GitHub environment
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
 pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
@@ -170,3 +170,7 @@ pnpm run deploy                                # engine first (web binds to it),
 ```
 
 Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wrangler.jsonc`). Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`), which logs them and rate-limits them; create a gateway with that id in a new account before deploying, or set the var to `""` to call Workers AI directly.
+
+## Security
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
