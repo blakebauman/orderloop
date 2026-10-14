@@ -88,4 +88,8 @@ URLs: only the web app's service binding reaches it, plus Email Routing rules th
 (see [Email intake](deploy.md#email-intake)). The docs Worker (`apps/docs/wrangler.jsonc`)
 serves `docs.orderloop.io`.
 
-Both app Workers answer `GET /health` with `{ ok: true, service }`.
+Both app Workers answer `GET /health` with `{ ok: true, service }`. The web app's
+`GET /health/deep` also checks D1, R2 and the engine (see
+[Request routing](architecture.md#request-routing)). The web app sets `workers_dev` and
+`preview_urls` to `false` too, so `orderloop.io` is its only address and the zone's rules apply to
+every request.

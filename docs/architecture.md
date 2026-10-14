@@ -65,6 +65,7 @@ engine source.
 | Path | Handling |
 |---|---|
 | `GET /health` | `{ ok: true, service: "orderloop-web" }` |
+| `GET /health/deep` | `runHealthChecks` over this Worker's D1 and R2 and `EngineRpc.health()` (the engine's D1 and R2): `{ ok, service, checks: { db, docs, engine } }`, each `"ok"` or `"fail"`, with `503` when any fails. The deploy smoke test calls it |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
 | `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.io/guides/inbound-orders/) |
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.io/guides/channel-adapters/) |

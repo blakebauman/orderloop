@@ -5,6 +5,7 @@ import {
   isLegacyA2AVersion,
   legacyAgentCard,
   PRINCIPAL_HEADER,
+  runHealthChecks,
 } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import {
@@ -28,6 +29,25 @@ import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 
+/**
+ * The deploy smoke test's check: this Worker's D1 and R2, and the engine's (over the service
+ * binding, so a broken engine deploy fails it too). 503 when anything is down.
+ */
+async function deepHealth(env: Env): Promise<Response> {
+  const report = await runHealthChecks('orderloop-web', {
+    db: () => env.DB.prepare('select 1').first(),
+    docs: () => env.DOCS.head('health'),
+    engine: async () => {
+      const r = await engine().health();
+      if (!r.ok) throw new Error('engine unhealthy');
+    },
+  });
+  return Response.json(report, {
+    status: report.ok ? 200 : 503,
+    headers: { 'cache-control': 'no-store' },
+  });
+}
+
 /** The OpenAPI document only changes with a deploy: build it once per isolate and origin. */
 const openApiDocs = new Map<string, string>();
 
@@ -45,6 +65,7 @@ export default {
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
+  if (url.pathname === '/health/deep') return deepHealth(env);
 
   // Open mode (no APP_PASSWORD, no people) makes everyone an operator: local development only.
   const unset = await openModeRefused(url);

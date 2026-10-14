@@ -5,6 +5,7 @@
  */
 
 import type { EdgeState, GraphIssue } from './graph';
+import type { HealthReport } from './health';
 import type {
   FlowGraph,
   FlowVersion,
@@ -168,4 +169,6 @@ export interface EngineRpc {
   intakeMailboxes(): Promise<Record<string, string>>;
   /** Runs the stock review now (normally a daily cron on the Replenish Workflow). */
   runReplenish(): Promise<{ instanceId: string }>;
+  /** Deep health: the engine's own D1 and R2 bindings answer. */
+  health(): Promise<HealthReport>;
 }
