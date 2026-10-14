@@ -107,22 +107,22 @@ Each delivery is signed with the subscription's secret in the same `X-OrderLoop-
 
 ### Signed webhooks
 
-External systems start and resume orders without the admin password by signing the raw body with `WEBHOOK_SECRET`:
+External systems start and resume orders without a token by signing the raw body with their integration's secret. An operator creates one integration per system with `POST /api/v1/integrations` (`{ name, events, startOrders, flows, channel }`), which returns its id and secret once; the scope limits what its signatures can do. `POST /api/v1/integrations/:id/rotate` issues a new secret and keeps the old one working for 24 hours.
 
 ```
 POST /api/v1/webhooks/events
-X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<raw body>")>
+X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
 
 { "orderId": "ord_…", "event": "payment.received", "payload": { "amount": 3106.78 } }
 ```
 
-Signatures older than 5 minutes are rejected. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook` in `@orderloop/core` produces the header.
+Signatures older than 5 minutes are rejected, and a request outside the integration's scope gets `403`. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook(secret, body, undefined, integrationId)` in `@orderloop/core` produces the header.
 
 Storefronts, marketplaces, POS systems and other channels start orders the same way:
 
 ```
 POST /api/v1/webhooks/orders
-X-OrderLoop-Signature: t=…,v1=…
+X-OrderLoop-Signature: t=…,k=…,v1=…
 
 { "model": "b2c", "channel": "web", "externalId": "shop-1001", "contact": { "email": "sam@example.com" },
   "lines": [{ "sku": "MON-27", "qty": 1 }], "shipTo": { "line1": "1 Main St", "city": "Austin", "postalCode": "78701", "country": "US" } }
@@ -165,7 +165,6 @@ pnpm exec wrangler login
 ./scripts/provision.sh                         # D1 + R2
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
-pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 

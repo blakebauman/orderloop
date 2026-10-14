@@ -1,8 +1,10 @@
 /**
- * Signed inbound webhooks. External systems (payment providers, a WMS, suppliers) resume orders
- * by POSTing an event signed with the shared WEBHOOK_SECRET instead of holding the admin password.
+ * Signed webhooks. External systems (payment providers, a WMS, storefronts) resume and start
+ * orders by POSTing a body signed with their integration's secret instead of holding a token;
+ * `k` names the integration, so OrderLoop knows which secret to check and what it may do (see
+ * ./integrations.ts). Outbound deliveries use the same scheme without `k`.
  *
- *   X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of `${t}.${rawBody}`>
+ *   X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256 of `${t}.${rawBody}`>
  *
  * The timestamp is part of the signed payload and must be within `toleranceSec` of now, so a
  * captured request can't be replayed later.
@@ -53,34 +55,46 @@ export async function signWebhook(
   secret: string,
   rawBody: string,
   nowSec = Math.floor(Date.now() / 1000),
+  keyId?: string,
 ) {
-  return `t=${nowSec},v1=${await hmacHex(secret, `${nowSec}.${rawBody}`)}`;
+  const k = keyId ? `,k=${keyId}` : '';
+  return `t=${nowSec}${k},v1=${await hmacHex(secret, `${nowSec}.${rawBody}`)}`;
 }
 
-export type VerifyResult = { ok: true } | { ok: false; reason: string };
-
-export async function verifyWebhook(
-  secret: string,
-  rawBody: string,
-  header: string | null,
-  { toleranceSec = 300, nowSec = Math.floor(Date.now() / 1000) } = {},
-): Promise<VerifyResult> {
-  if (!header) return { ok: false, reason: 'Missing signature header' };
-  const parts = new Map(
+function headerParts(header: string): Map<string, string> {
+  return new Map(
     header.split(',').map((p) => {
       const i = p.indexOf('=');
       return [p.slice(0, i).trim(), p.slice(i + 1).trim()] as const;
     }),
   );
+}
+
+/** The integration a signature names (`k=`), if any. */
+export const signatureKeyId = (header: string | null): string | undefined =>
+  header ? headerParts(header).get('k') || undefined : undefined;
+
+export type VerifyResult = { ok: true } | { ok: false; reason: string };
+
+/** Checks a signature against `secret`, or against each of several (a key being rotated). */
+export async function verifyWebhook(
+  secret: string | readonly string[],
+  rawBody: string,
+  header: string | null,
+  { toleranceSec = 300, nowSec = Math.floor(Date.now() / 1000) } = {},
+): Promise<VerifyResult> {
+  if (!header) return { ok: false, reason: 'Missing signature header' };
+  const parts = headerParts(header);
   const t = Number(parts.get('t'));
   const v1 = parts.get('v1');
   if (!Number.isFinite(t) || !v1) return { ok: false, reason: 'Malformed signature header' };
   if (Math.abs(nowSec - t) > toleranceSec)
     return { ok: false, reason: 'Signature timestamp outside tolerance' };
-  const expected = await hmacHex(secret, `${t}.${rawBody}`);
-  return timingSafeEqual(expected, v1.toLowerCase())
-    ? { ok: true }
-    : { ok: false, reason: 'Signature mismatch' };
+  const given = v1.toLowerCase();
+  for (const s of typeof secret === 'string' ? [secret] : secret) {
+    if (timingSafeEqual(await hmacHex(s, `${t}.${rawBody}`), given)) return { ok: true };
+  }
+  return { ok: false, reason: 'Signature mismatch' };
 }
 
 // ── Outbound ───────────────────────────────────────────────────────────────

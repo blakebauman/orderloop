@@ -9,6 +9,7 @@ export * from './channels/x12';
 export * from './fulfillment';
 export * from './graph';
 export * from './health';
+export * from './integrations';
 export * from './json-schema';
 export * from './layout';
 export * from './lines';

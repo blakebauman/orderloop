@@ -55,8 +55,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, logs kept, no cache, authentication on), and the GitHub environment.
-   It writes `d1Id` into the registry file and sets the environment's `APP_PASSWORD` and
-   `WEBHOOK_SECRET`. New values are generated and saved in `.secrets/<id>/` (gitignored); a secret
+   It writes `d1Id` into the registry file and sets the environment's `APP_PASSWORD`. New values are generated and saved in `.secrets/<id>/` (gitignored); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to

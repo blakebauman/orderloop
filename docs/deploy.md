@@ -18,7 +18,6 @@ pnpm exec wrangler login
 ./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
-pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
@@ -134,7 +133,7 @@ back, which is why migrations only add; see [Restoring D1](#restoring-d1).
 Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
-them it fails rather than skipping. The environment's `APP_PASSWORD`, `WEBHOOK_SECRET`,
+them it fails rather than skipping. The environment's `APP_PASSWORD`,
 `SHOPIFY_WEBHOOK_SECRET` and `INTAKE_ALLOWLIST`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.

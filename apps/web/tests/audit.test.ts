@@ -54,7 +54,14 @@ suite('audit vocabulary', () => {
   it('puts every action in a filter group', () => {
     for (const action of Object.keys(AUDIT_ACTIONS))
       expect(isAuditGroup(action.slice(0, action.indexOf('.')))).toBe(true);
-    expect(Object.keys(AUDIT_GROUPS)).toEqual(['auth', 'team', 'token', 'api', 'oauth']);
+    expect(Object.keys(AUDIT_GROUPS)).toEqual([
+      'auth',
+      'team',
+      'token',
+      'api',
+      'oauth',
+      'integration',
+    ]);
     expect(isAuditGroup('orders')).toBe(false);
   });
 });

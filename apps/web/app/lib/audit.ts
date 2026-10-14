@@ -35,6 +35,9 @@ export const AUDIT_ACTIONS = {
   'api.token_expired': 'API refused: expired token',
   'oauth.app_connected': 'Connected an app over MCP',
   'oauth.app_disconnected': 'Disconnected an app',
+  'integration.created': 'Created an integration key',
+  'integration.rotated': 'Rotated an integration key',
+  'integration.revoked': 'Revoked an integration key',
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -46,6 +49,7 @@ export const AUDIT_GROUPS = {
   token: 'API tokens',
   api: 'API access',
   oauth: 'Connected apps',
+  integration: 'Integrations',
 } as const;
 
 export type AuditGroup = keyof typeof AUDIT_GROUPS;

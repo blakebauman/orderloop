@@ -16,6 +16,7 @@ import {
   cancelInput,
   decisionInput,
   eventSchema,
+  integrationInput,
   orderEventInput,
   subscriptionInput,
 } from './api-schemas';
@@ -153,7 +154,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Signed inbound event (no bearer token)',
           description:
-            'Sign the raw body: `X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<body>")>`. Signatures older than 5 minutes are rejected.',
+            "Sign the raw body with your integration's secret: `X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256(secret, \"<t>.<body>\")>`. Signatures older than 5 minutes are rejected. `403` when the integration's scope doesn't allow the request.",
           security: [],
           parameters: [
             {
@@ -301,6 +302,36 @@ export function openApiDocument(serverUrl: string) {
           summary: 'Recent deliveries, newest first',
           parameters: [orderId],
           responses: { '200': ok('Deliveries'), ...errors },
+        },
+      },
+      '/api/v1/integrations': {
+        get: {
+          summary: 'List integrations (signing keys for external systems)',
+          responses: { '200': ok('Integrations, without their secrets'), ...errors },
+        },
+        post: {
+          summary: 'Create an integration',
+          description:
+            'The scope says what its signed webhooks may do: `events` it may deliver, whether it may `startOrders`, the `flows` an order may name and the one `channel` it may reach. The response carries the signing secret. It is shown only once.',
+          requestBody: body(integrationInput),
+          responses: { '201': ok('{ integration, secret }'), ...errors },
+        },
+      },
+      '/api/v1/integrations/{id}/rotate': {
+        post: {
+          summary: 'Rotate an integration secret',
+          description:
+            'Returns a new secret, shown once. The previous secret keeps working for 24 hours, so the sender can switch without a gap.',
+          parameters: [orderId],
+          responses: { '200': ok('{ integration, secret }'), ...errors },
+        },
+      },
+      '/api/v1/integrations/{id}': {
+        delete: {
+          summary: 'Revoke an integration',
+          description: 'Both its secrets stop working at once.',
+          parameters: [orderId],
+          responses: { '200': ok('Revoked'), ...errors },
         },
       },
     },

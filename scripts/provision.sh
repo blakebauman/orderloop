@@ -61,16 +61,14 @@ fi
 existing=$(gh secret list --env "$ENVIRONMENT" --json name -q '.[].name')
 mkdir -p ".secrets/$id"
 chmod 700 ".secrets/$id"
-for name in APP_PASSWORD WEBHOOK_SECRET; do
-  if grep -qx "$name" <<<"$existing"; then
-    echo "$ENVIRONMENT already has $name"
-    continue
-  fi
-  file=".secrets/$id/$(tr '[:upper:]_' '[:lower:]-' <<<"$name")"
+file=".secrets/$id/app-password"
+if grep -qx APP_PASSWORD <<<"$existing"; then
+  echo "$ENVIRONMENT already has APP_PASSWORD"
+else
   [ -s "$file" ] || (umask 077 && openssl rand -base64 32 | tr -d '\n' >"$file")
-  gh secret set "$name" --env "$ENVIRONMENT" <"$file"
-  echo "Set $name on $ENVIRONMENT (value in $file)"
-done
+  gh secret set APP_PASSWORD --env "$ENVIRONMENT" <"$file"
+  echo "Set APP_PASSWORD on $ENVIRONMENT (value in $file)"
+fi
 
 echo
 echo "Next: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to $ENVIRONMENT if they aren't"

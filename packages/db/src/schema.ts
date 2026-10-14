@@ -424,6 +424,29 @@ export const webhookDeliveries = sqliteTable(
   ],
 );
 
+/**
+ * External systems that sign webhooks, each with its own secret and scope (`IntegrationScope` in
+ * @orderloop/core). A rotated-out secret keeps working until `previous_expires_at`. Revoking keeps
+ * the row, so the audit log's references still resolve.
+ */
+export const integrations = sqliteTable('integrations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  secret: text('secret').notNull(),
+  previousSecret: text('previous_secret'),
+  previousExpiresAt: integer('previous_expires_at'),
+  /** JSON array of event names; "*" matches every event. */
+  events: text('events').notNull().default('[]'),
+  startOrders: integer('start_orders', { mode: 'boolean' }).notNull().default(false),
+  /** JSON array of flow ids an order may name; "*" matches every flow. */
+  flows: text('flows').notNull().default('[]'),
+  channel: text('channel'),
+  createdAt: integer('created_at').notNull(),
+  createdBy: text('created_by'),
+  lastUsedAt: integer('last_used_at'),
+  revokedAt: integer('revoked_at'),
+});
+
 export const inboundEmails = sqliteTable(
   'inbound_emails',
   {

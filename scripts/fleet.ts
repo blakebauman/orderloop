@@ -51,7 +51,7 @@ type Ring = (typeof RINGS)[number];
 
 /** Each app's secrets, read from the deploy job's environment (a GitHub environment's secrets). */
 const SECRETS = {
-  web: ['APP_PASSWORD', 'WEBHOOK_SECRET', 'SHOPIFY_WEBHOOK_SECRET'],
+  web: ['APP_PASSWORD', 'SHOPIFY_WEBHOOK_SECRET'],
   engine: ['INTAKE_ALLOWLIST'],
 } as const;
 

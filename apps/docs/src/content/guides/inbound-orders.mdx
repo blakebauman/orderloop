@@ -6,8 +6,8 @@ description: Start orders from a storefront, marketplace, POS or other channel w
 import Values from '../../components/Values.astro';
 
 Systems that take orders elsewhere (a storefront checkout, a marketplace, a till) start them with
-`POST /api/v1/webhooks/orders`. The request is signed with the workspace's signing secret (your
-OrderLoop administrator provides it) instead of carrying a token. The order starts on a published
+`POST /api/v1/webhooks/orders`. The request is signed with an [integration's](/reference/rest-api/#integrations) key instead of
+carrying a token. The order starts on a published
 flow and shows up in the dashboard under its channel, with the sender's id as its external id.
 Shopify and EDI X12 850 senders can post their native payloads instead; see
 [Channel adapters](/guides/channel-adapters/), which share this page's routing and idempotency.
@@ -50,8 +50,8 @@ The [Webhook trigger](/reference/nodes/#trigger.webhook) summarises the order as
 ## Signing
 
 Sign the raw body exactly as for [signed events](/guides/approvals-and-events/#signed-events):
-`X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`,
-with a timestamp within five minutes. Sign the bytes you send; re-serialising the JSON afterwards
+`X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`,
+with a timestamp within five minutes. `k` is the `id` of the integration whose secret signs the request. Sign the bytes you send; re-serialising the JSON afterwards
 breaks the signature.
 
 ```bash
@@ -59,7 +59,7 @@ BODY='{"model":"b2c","channel":"web","externalId":"SHOP-10442","lines":[{"sku":"
 T=$(date +%s)
 SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$ORDERLOOP_SIGNING_SECRET" -hex | sed 's/^.* //')
 curl -X POST https://orderloop.app/api/v1/webhooks/orders \
-  -H "X-OrderLoop-Signature: t=$T,v1=$SIG" -H 'content-type: application/json' \
+  -H "X-OrderLoop-Signature: t=$T,k=$ORDERLOOP_INTEGRATION_ID,v1=$SIG" -H 'content-type: application/json' \
   -d "$BODY"
 ```
 
@@ -74,14 +74,23 @@ const body = JSON.stringify({
   externalId: 'SHOP-10442',
   lines: [{ sku: 'MON-27', qty: 1 }],
 });
+// integrationId and secret come from creating the integration.
 const t = Math.floor(Date.now() / 1000);
 const v1 = createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
 const res = await fetch('https://orderloop.app/api/v1/webhooks/orders', {
   method: 'POST',
-  headers: { 'content-type': 'application/json', 'x-orderloop-signature': `t=${t},v1=${v1}` },
+  headers: { 'content-type': 'application/json', 'x-orderloop-signature': `t=${t},k=${integrationId},v1=${v1}` },
   body,
 });
 ```
+
+## What an integration may start
+
+An operator creates one integration per sending system and scopes it
+([Integrations](/reference/rest-api/#integrations)). To start orders it needs `startOrders: true`.
+If it is bound to a `channel`, every order it posts must be on that channel. If the body names a
+`flowId`, that flow must be in the integration's `flows` (or `flows` is `["*"]`); a body without
+`flowId` is routed as below whatever `flows` says. Anything outside the scope is a `403`.
 
 ## Routing
 
@@ -126,10 +135,10 @@ pair with different contents returns `422` and starts nothing. To change an acce
 | `201` | Started: `{ orderId, flowId }` |
 | `200` | A replay of an order already started: `{ orderId, replayed: true }` |
 | `400` | Body is not JSON, is not a valid order (with `issues`), or uses a currency with no exchange rate |
-| `401` | Missing, malformed, stale or wrong signature |
+| `401` | Missing, malformed, stale or wrong signature; no `k=`; an unknown or revoked integration |
+| `403` | The integration may not start orders, is bound to another channel, or may not choose that `flowId` |
 | `409` | A new order's flow has no published version |
 | `422` | The same `channel` and `externalId` already arrived with different contents |
 | `500` | Engine error |
-| `503` | The workspace hasn't enabled signed webhooks (no signing secret is set) |
 
 Errors are `{ "error": "…" }`. Treat `201` and `200` as accepted; retry on `5xx` with the same body.
