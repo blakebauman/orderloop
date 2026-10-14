@@ -95,7 +95,10 @@ export function openApiDocument(serverUrl: string) {
           summary: 'Deliver a business event to the node waiting for it',
           parameters: [orderId],
           requestBody: body(eventSchema.omit({ orderId: true })),
-          responses: { '200': ok('{ delivered, nodeId? }'), ...errors },
+          responses: {
+            '200': ok('{ delivered, nodeId? }; delivered is false when nothing is waiting for it'),
+            ...errors,
+          },
         },
       },
       '/api/v1/orders/{id}/approvals/{nodeId}': {
@@ -112,7 +115,11 @@ export function openApiDocument(serverUrl: string) {
               note: z.string().optional(),
             }),
           ),
-          responses: { '200': ok('Recorded'), ...errors },
+          responses: {
+            '200': ok('Recorded'),
+            '409': ok('That node is not waiting for an approval', '#/components/schemas/Error'),
+            ...errors,
+          },
         },
       },
       '/api/v1/orders/{id}/cancel': {
@@ -120,7 +127,11 @@ export function openApiDocument(serverUrl: string) {
           summary: 'Cancel an order and release everything it holds',
           parameters: [orderId],
           requestBody: body(z.object({ reason: z.string().optional() })),
-          responses: { '200': ok('Cancelled'), ...errors },
+          responses: {
+            '200': ok('Cancelled'),
+            '409': ok('The order has already finished', '#/components/schemas/Error'),
+            ...errors,
+          },
         },
       },
       '/api/v1/webhooks/events': {
@@ -238,7 +249,11 @@ export function openApiDocument(serverUrl: string) {
     ),
     components: {
       securitySchemes: {
-        bearer: { type: 'http', scheme: 'bearer', description: 'APP_PASSWORD' },
+        bearer: {
+          type: 'http',
+          scheme: 'bearer',
+          description: 'An API token (`ol_live_…`, created on the Team page) or APP_PASSWORD',
+        },
       },
       schemas: {
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },

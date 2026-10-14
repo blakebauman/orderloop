@@ -6,13 +6,13 @@
  *   POST /api/v1/orders                         { flowId, version?, input: OrderInput, vars? }
  *                                               Idempotency-Key header: a repeat returns 200 + the same order,
  *                                               422 if the body differs
- *   GET  /api/v1/orders?type=&status=&q=
+ *   GET  /api/v1/orders?model=&channel=&status=&q=
  *   GET  /api/v1/orders/:id                     live state from the order's agent
- *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (webhooks)
- *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }
- *   POST /api/v1/orders/:id/cancel              { reason? }
+ *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (404 unknown order)
+ *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }  (409 not waiting)
+ *   POST /api/v1/orders/:id/cancel              { reason? }  (409 already finished)
  *
- *   GET    /api/v1/audit-events                 ?type=auth|team|token|api&before=<ms>&limit=  (operator)
+ *   GET    /api/v1/audit-events                 ?type=auth|team|token|api|oauth&before=<ms>&limit=  (operator)
  *
  *   GET    /api/v1/webhook-subscriptions
  *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
@@ -133,7 +133,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (denied) return denied;
       const b = (await body()) as { event?: string; payload?: Record<string, unknown> };
       if (!b.event) return json({ error: '`event` is required' }, 400);
-      return json(await engine().sendEvent(orderId, b.event, b.payload ?? {}));
+      const res = await engine().sendEvent(orderId, b.event, b.payload ?? {});
+      return res.notFound ? json({ error: 'Not found' }, 404) : json(res);
     }
     if (parts[2] === 'approvals' && parts[3] && request.method === 'POST') {
       const denied = need('approver');
@@ -143,15 +144,21 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         return json({ error: '`decision` must be approved or rejected' }, 400);
       // A person or a named token decides; only the shared password may name someone else.
       const by = caller.kind === 'password' ? (b.by ?? 'api') : actor(caller);
-      await engine().decide(orderId, parts[3], b.decision, by, b.note);
-      return json({ ok: true });
+      const res = await engine().decide(orderId, parts[3], b.decision, by, b.note);
+      if (res.ok) return json(res);
+      return res.reason === 'not_found'
+        ? json({ error: 'Not found' }, 404)
+        : json({ error: `${parts[3]} is not waiting for an approval` }, 409);
     }
     if (parts[2] === 'cancel' && request.method === 'POST') {
       const denied = need('operator');
       if (denied) return denied;
       const b = (await body()) as { reason?: string };
-      await engine().cancel(orderId, b.reason ?? 'Cancelled via API');
-      return json({ ok: true });
+      const res = await engine().cancel(orderId, b.reason ?? 'Cancelled via API');
+      if (res.ok) return json(res);
+      return res.reason === 'not_found'
+        ? json({ error: 'Not found' }, 404)
+        : json({ error: 'The order has already finished' }, 409);
     }
     return json({ error: 'Not found' }, 404);
   } catch (err) {
@@ -205,6 +212,7 @@ export async function handleSignedEvent(request: Request): Promise<Response> {
   }
   try {
     const res = await engine().sendEvent(parsed.orderId, parsed.event, parsed.payload ?? {});
+    if (res.notFound) return json({ error: 'Not found' }, 404);
     return json(res, res.delivered ? 200 : 409);
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);

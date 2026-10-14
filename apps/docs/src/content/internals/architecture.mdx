@@ -44,15 +44,16 @@ inbound mail ── Email Routing ──email()───────────
 |---|---|
 | `startOrder(input)` | Inserts the order row, initialises its `OrderAgent`, creates generation 1 of `OrderLoop`. Honours `idempotencyKey` |
 | `startOrderOnce(input)` | Starts an order at most once per idempotency key (`POST /api/v1/orders` with an `Idempotency-Key`, signed inbound orders and email intake use it); a replay returns the existing order, or `{ mismatch: true }` for a different request |
-| `sendEvent(orderId, event, payload?)` | Delivers a business event to the node waiting for it; returns `{ delivered, nodeId? }` |
-| `decide(orderId, nodeId, decision, by, note?)` | Approves or rejects the approval a node waits on |
-| `cancel(orderId, reason)` | Terminates the Workflow and compensates |
+| `sendEvent(orderId, event, payload?)` | Delivers a business event to the node waiting for it; returns `{ delivered, nodeId? }`, with `notFound` for an unknown order |
+| `decide(orderId, nodeId, decision, by, note?)` | Approves or rejects the approval a node waits on; returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `not_waiting`) |
+| `cancel(orderId, reason)` | Terminates the Workflow and compensates; returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `finished`) |
 | `snapshot(orderId)` | The agent's `OrderState`, or `null` for an unknown order |
 | `copilot(req)` | Edits or creates a flow graph from a prompt |
+| `intakeMailboxes()` | The email intake mailboxes (local part → flow id) from the engine's `INTAKE_MAILBOXES`, for the back office |
 | `runReplenish()` | Creates a `Replenish` instance now |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `startOrderOnce`, `copilot` and `runReplenish` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes` and `runReplenish` forwards to the order's agent via
 `ORDER_AGENT.getByName(orderId)`. `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
