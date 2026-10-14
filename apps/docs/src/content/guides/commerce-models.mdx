@@ -23,7 +23,8 @@ routing and the UI use the channels; they do not restrict which orders run on th
 
 Channels: <Values of="order-channels" />. `input.channel` defaults to `api`. The dashboard starts
 orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the Replenish Workflow as
-`schedule`. `GET /api/v1/orders` filters on `model` and `channel`
+`schedule`. Storefronts, marketplaces and POS systems send orders with a signed webhook; see
+[Inbound orders](/guides/inbound-orders/). `GET /api/v1/orders` filters on `model` and `channel`
 (see [REST API](/reference/rest-api/#list-orders)).
 
 ## Pricing

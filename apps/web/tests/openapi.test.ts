@@ -23,6 +23,7 @@ describe('OpenAPI document', () => {
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);
+    expect(doc.paths['/api/v1/webhooks/orders'].post.security).toEqual([]);
   });
 });
 

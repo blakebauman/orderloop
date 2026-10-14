@@ -102,7 +102,7 @@ Each delivery is signed with the subscription's secret in the same `X-OrderLoop-
 
 ### Signed webhooks
 
-External systems resume orders without the admin password by signing the raw body with `WEBHOOK_SECRET`:
+External systems start and resume orders without the admin password by signing the raw body with `WEBHOOK_SECRET`:
 
 ```
 POST /api/v1/webhooks/events
@@ -112,6 +112,18 @@ X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>
 ```
 
 Signatures older than 5 minutes are rejected. The response is `200 { delivered: true }`, or `409` when no node is waiting for that event yet, so the sender's retry policy can deliver it later. `signWebhook` in `@orderloop/core` produces the header.
+
+Storefronts, marketplaces, POS systems and other channels start orders the same way:
+
+```
+POST /api/v1/webhooks/orders
+X-OrderLoop-Signature: t=…,v1=…
+
+{ "model": "b2c", "channel": "web", "externalId": "shop-1001", "contact": { "email": "sam@example.com" },
+  "lines": [{ "sku": "MON-27", "qty": 1 }], "shipTo": { "line1": "1 Main St", "city": "Austin", "postalCode": "78701", "country": "US" } }
+```
+
+The flow is `flowId` when given, else the `ORDER_ROUTES` entry for `model:channel` or `model:*` (a JSON var on the web Worker), else the model's default template. The channel and `externalId` identify the order: a repeat returns `200` and the same order, the same pair with a different body returns `422`, and a new order returns `201 { orderId, flowId }`.
 
 ### Email intake
 

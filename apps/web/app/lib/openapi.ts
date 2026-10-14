@@ -3,7 +3,13 @@
  * generated from the same zod schemas the handlers validate with, so they can't drift.
  */
 
-import { ORDER_CHANNELS, ORDER_MODELS, ORDER_STATUSES, OUTBOUND_EVENTS } from '@orderloop/core';
+import {
+  inboundOrderSchema,
+  ORDER_CHANNELS,
+  ORDER_MODELS,
+  ORDER_STATUSES,
+  OUTBOUND_EVENTS,
+} from '@orderloop/core';
 import { z } from 'zod';
 import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
 
@@ -135,6 +141,30 @@ export function openApiDocument(serverUrl: string) {
           responses: {
             '200': ok('Delivered'),
             '409': ok('No node is waiting for this event yet; retry later'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/webhooks/orders': {
+        post: {
+          summary: 'Signed inbound order (no bearer token)',
+          description:
+            'Starts an order from a storefront, marketplace, POS or other channel, signed like `/api/v1/webhooks/events`. The flow is `flowId`, else the `ORDER_ROUTES` entry for `model:channel` or `model:*`, else the model’s default template. Channel and `externalId` identify the order: a repeat returns it, and the same pair with a different body is refused.',
+          security: [],
+          parameters: [
+            {
+              name: 'X-OrderLoop-Signature',
+              in: 'header',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: body(inboundOrderSchema),
+          responses: {
+            '200': ok('Already received; the existing order'),
+            '201': ok('Order started'),
+            '409': ok('The routed flow is not published'),
+            '422': ok('This channel and externalId were already received with different contents'),
             ...errors,
           },
         },

@@ -17,8 +17,13 @@
   ],
   // Same bucket as the engine: the web app serves invoices, POs and inbound documents from it.
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
-  "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }]
+  "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }],
+  "vars": {
+    // Inbound orders: JSON from "model:channel" or "model:*" to a flow id. Anything not routed
+    // starts the model's default template.
+    "ORDER_ROUTES": ""
+  }
   // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
   // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). WEBHOOK_SECRET — enables
-  // signed events at POST /api/v1/webhooks/events.
+  // signed events at POST /api/v1/webhooks/events and signed orders at POST /api/v1/webhooks/orders.
 }

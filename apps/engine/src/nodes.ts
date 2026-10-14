@@ -18,6 +18,7 @@ import {
   interpolate,
   isBuySide,
   money,
+  ORDER_CHANNEL_LABELS,
   type Order,
   type OrderLine,
   type PricedBy,
@@ -76,7 +77,14 @@ const passthrough: Exec = async () => ({ summary: 'Started' });
 
 export const EXECUTORS: Record<string, Exec> = {
   'trigger.manual': passthrough,
-  'trigger.webhook': passthrough,
+  'trigger.webhook': async ({ ctx, config }) => {
+    const { channel, externalId } = ctx.order;
+    const source = str(ctx.order.meta?.source, str(config.source, ''));
+    return {
+      output: { channel, externalId: externalId ?? null, source },
+      summary: `${ORDER_CHANNEL_LABELS[channel]}${externalId ? ` · ${externalId}` : ''}${source ? ` (${source})` : ''}`,
+    };
+  },
   'trigger.schedule': passthrough,
   'trigger.inventory_threshold': passthrough,
   'trigger.email_po': async ({ ctx }) => ({

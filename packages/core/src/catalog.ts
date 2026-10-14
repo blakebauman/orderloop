@@ -78,7 +78,8 @@ export const NODE_SPECS = [
     type: 'trigger.webhook',
     category: 'trigger',
     label: 'Webhook',
-    description: 'Started by an inbound webhook (storefront checkout, marketplace order).',
+    description:
+      'Started by a signed inbound order (POST /api/v1/webhooks/orders) from a storefront, marketplace, POS or other channel.',
     icon: 'Webhook',
     fields: [{ key: 'source', label: 'Source', kind: 'text', default: 'storefront' }],
     outputs: OUT,
