@@ -91,7 +91,7 @@ verifies, looks up the customer and starts the order.
 
 - `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses
   waits; don't raise it on a deployment that real orders use.
-- Set `AI_GATEWAY_ID` to route model calls through AI Gateway for caching, rate limits and logs.
+- Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`): logs kept up to 100,000 entries (oldest deleted first), no caching, authentication on, 120 requests a minute (sliding). It is created once per account, in the dashboard (**AI** > **AI Gateway**) or with the AI Gateway API; change its limits there.
 - After the first deploy, sign in with no email and `APP_PASSWORD` (users see it as "the workspace
   password"), open **Team** and add people with their roles, and create API tokens for other
   systems. `APP_PASSWORD` stays as a break-glass operator sign-in. See
