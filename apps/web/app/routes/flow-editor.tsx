@@ -193,6 +193,7 @@ export default function FlowEditor() {
   // The assistant drafts changes against the graph on screen, unsaved edits included, and hands
   // its proposal back here, where applying it is one undoable edit.
   const assistant = useAssistant();
+  const inspectorCollapsed = assistant.open && !node;
   usePageContext(
     () => ({
       kind: 'flow',
@@ -530,7 +531,15 @@ export default function FlowEditor() {
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[220px_minmax(0,1fr)_340px]">
+      {/* With the assistant open, the inspector gives the canvas its width until a node is picked. */}
+      <div
+        className={cn(
+          'grid min-h-0 flex-1',
+          inspectorCollapsed
+            ? 'lg:grid-cols-[220px_minmax(0,1fr)]'
+            : 'lg:grid-cols-[220px_minmax(0,1fr)_340px]',
+        )}
+      >
         <aside className="hidden min-h-0 border-r p-3 lg:block">
           <Palette onPick={(t) => addNode(t)} />
         </aside>
@@ -545,7 +554,12 @@ export default function FlowEditor() {
             onAddNode={(t, p) => addNode(t, p)}
           />
         </div>
-        <aside className="min-h-0 overflow-y-auto border-t p-4 lg:border-t-0 lg:border-l">
+        <aside
+          className={cn(
+            'min-h-0 overflow-y-auto border-t p-4 lg:border-t-0 lg:border-l',
+            inspectorCollapsed && 'lg:hidden',
+          )}
+        >
           {node ? (
             <div className="space-y-6">
               <Inspector node={node} onChange={updateNode} onDelete={() => deleteNode(node.id)} />
