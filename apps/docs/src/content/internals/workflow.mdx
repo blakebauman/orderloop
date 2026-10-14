@@ -109,6 +109,8 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 |---|---|
 | `commerce.reserve_inventory` | `releaseInventory`: releases every held reservation |
 | `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization |
+| `commerce.split_by_seller` | `cancelSellerOrders`: cancels every pending or accepted seller order |
+| `commerce.payout` | `reversePayouts`: reverses every scheduled payout |
 | `commerce.ship` | `cancelShipment` for the shipment id in the step's output |
 
 Each runs with `{ retries: { limit: 3, delay: '10 seconds', backoff: 'linear' }, timeout: '2 minutes' }`

@@ -72,6 +72,9 @@ Order {{order.id}} is on its way ({{vars.tracking}})
 | `erpRef` | ERP sync |
 | `poNumber` | Extract order |
 | `risk` | Risk score: the 0–100 score |
+| `sellers`, `pendingSellers` | Split by seller: all seller ids, and those still to answer (Seller response also resets `pendingSellers`) |
+| `rejectedSellers` | Seller response, on `partial`: the sellers that rejected |
+| `commission`, `payouts` | Seller payouts: total commission, and `[{ sellerId, net }]` |
 | configurable (`category`) | Classify: the label it chose, under its `into` field |
 | configurable (`summary`) | Summarize: the summary, under its `into` field |
 | any | Set variables: one per key in `assign` |

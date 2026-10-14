@@ -120,7 +120,56 @@ export const products = sqliteTable('products', {
   reorderPoint: integer('reorder_point').notNull().default(0),
   reorderQty: integer('reorder_qty').notNull().default(0),
   supplier: text('supplier').notNull().default(''),
+  /** Marketplace seller; null when the operator sells it. */
+  sellerId: text('seller_id'),
 });
+
+export const sellers = sqliteTable('sellers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  commissionPct: real('commission_pct').notNull().default(0.15),
+  autoAccept: integer('auto_accept', { mode: 'boolean' }).notNull().default(false),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+});
+
+/** The part of an order one seller fulfils. Status: pending | accepted | rejected | cancelled. */
+export const sellerOrders = sqliteTable(
+  'seller_orders',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    sellerId: text('seller_id').notNull(),
+    status: text('status').notNull(),
+    /** JSON array of the order lines this seller fulfils. */
+    lines: text('lines').notNull(),
+    subtotal: real('subtotal').notNull(),
+    reason: text('reason'),
+    createdAt: integer('created_at').notNull(),
+    decidedAt: integer('decided_at'),
+  },
+  (t) => [index('seller_orders_order').on(t.orderId)],
+);
+
+/** Money owed to a seller for an order. Status: scheduled | reversed | paid. */
+export const payouts = sqliteTable(
+  'payouts',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    sellerId: text('seller_id').notNull(),
+    gross: real('gross').notNull(),
+    commission: real('commission').notNull(),
+    refunded: real('refunded').notNull().default(0),
+    net: real('net').notNull(),
+    status: text('status').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    index('payouts_order').on(t.orderId),
+    index('payouts_seller').on(t.sellerId, t.createdAt),
+  ],
+);
 
 export const contractPrices = sqliteTable(
   'contract_prices',

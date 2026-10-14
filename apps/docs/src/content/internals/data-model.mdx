@@ -79,7 +79,10 @@ writes embeds its step key.
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order), payment `terms` |
-| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
+| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it) |
+| `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](/guides/marketplace/) |
+| `seller_orders` | One row per order and seller, id `so_${orderId}_${sellerId}` (first party is `first_party`): `status` (`pending`, `accepted`, `rejected` or `cancelled`), `lines` (JSON), `subtotal`, `reason`, `decided_at` |
+| `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
 | `fx_rates` | Units of each `currency` per one USD, with `updated_at`. See [Currency](/reference/expressions/#currency) |
@@ -91,7 +94,7 @@ writes embeds its step key.
 | `documents` | Index of R2 objects per order: `kind`, `r2_key`, `content_type` |
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
 
-`reservations`, `stock_movements`, `payments`, `shipments`, `documents` and `messages` are each indexed by
+`reservations`, `stock_movements`, `payments`, `shipments`, `documents`, `messages`, `seller_orders` and `payouts` are each indexed by
 `order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
 
 ## Metrics

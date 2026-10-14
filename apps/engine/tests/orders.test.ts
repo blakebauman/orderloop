@@ -20,10 +20,12 @@ import {
   nodeRuns,
   orders,
   payments,
+  payouts,
   priceSources,
   products,
   publishFlow,
   reservations,
+  sellerOrders,
   sessions,
   shipments,
   stockMovements,
@@ -526,6 +528,110 @@ describe('storefront order', () => {
       await db().select().from(payments).where(eq(payments.orderId, orderId))
     ).filter((p) => p.kind === 'refund');
     expect(refunds).toHaveLength(2);
+  });
+});
+
+describe('marketplace order', () => {
+  const lines = [
+    { sku: 'HP-200', qty: 1 },
+    { sku: 'KET-01', qty: 2 },
+  ];
+  const parts = async (orderId: string) =>
+    Object.fromEntries(
+      (await db().select().from(sellerOrders).where(eq(sellerOrders.orderId, orderId))).map((p) => [
+        p.sellerId,
+        p.status,
+      ]),
+    );
+  const start = () =>
+    startOrder(env, {
+      flowId: 'tpl-marketplace-order',
+      input: input({ model: 'marketplace', channel: 'marketplace', customerId: 'cus_ada', lines }),
+    });
+  const awaitingSeller = (orderId: string) =>
+    waitingOn(orderId, (s) => s.waits.some((w) => w.event === 'seller.responded'), 'seller wait');
+
+  it('waits for the seller that does not auto-accept, then pays both out net of commission', async () => {
+    await introspect(['window#1']);
+    const { orderId } = await start();
+    await awaitingSeller(orderId);
+    expect(await parts(orderId)).toEqual({ sel_brightside: 'accepted', sel_kettle: 'pending' });
+    const asked = await db().select().from(messages).where(eq(messages.orderId, orderId));
+    expect(asked.map((m) => m.recipient)).toEqual(['shop@kettleandco.example']);
+
+    await agent(orderId).deliver('seller.responded', {
+      sellerId: 'sel_kettle',
+      decision: 'accepted',
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(await parts(orderId)).toEqual({ sel_brightside: 'accepted', sel_kettle: 'accepted' });
+    const out = await db().select().from(payouts).where(eq(payouts.orderId, orderId));
+    expect(
+      Object.fromEntries(out.map((p) => [p.sellerId, [p.gross, p.commission, p.net]])),
+    ).toEqual({
+      sel_brightside: [129, 15.48, 113.52],
+      sel_kettle: [158, 23.7, 134.3],
+    });
+    expect(out.every((p) => p.status === 'scheduled')).toBe(true);
+  });
+
+  it('drops a rejecting seller’s lines and captures only what was accepted', async () => {
+    await introspect(['window#1']);
+    const { orderId } = await start();
+    await awaitingSeller(orderId);
+    await agent(orderId).deliver('seller.responded', {
+      sellerId: 'sel_kettle',
+      decision: 'rejected',
+      reason: 'Out of the blue colour',
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.record!.summary).toBe('1 accepted, 1 rejected (Kettle & Co)');
+    expect(done.order!.lines.map((l) => l.sku)).toEqual(['HP-200']);
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    const auth = pays.find((p) => p.kind.startsWith('authorization'))!;
+    const capture = pays.find((p) => p.kind === 'capture')!;
+    expect(capture.amount).toBe(done.order!.total);
+    expect(capture.amount).toBeLessThan(auth.amount);
+    const out = await db().select().from(payouts).where(eq(payouts.orderId, orderId));
+    expect(out.map((p) => p.sellerId)).toEqual(['sel_brightside']);
+  });
+
+  it('fails and voids the authorization when no seller accepts in time', async () => {
+    await introspect(['responded#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-marketplace-order',
+      input: input({
+        model: 'marketplace',
+        channel: 'marketplace',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'KET-01', qty: 1 }],
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('failed');
+    expect(done.nodes.no_sellers!.status).toBe('succeeded');
+    expect(await parts(orderId)).toEqual({ sel_kettle: 'rejected' });
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    expect(pays.map((p) => p.status)).toEqual(['voided']);
+  });
+
+  it('cancels seller orders when the order fails after the split', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-marketplace-order',
+      input: input({
+        model: 'marketplace',
+        channel: 'marketplace',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'HP-200', qty: 1 }],
+        meta: { simulate: 'out_of_stock' },
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('failed');
+    expect(await parts(orderId)).toEqual({ sel_brightside: 'cancelled' });
   });
 });
 

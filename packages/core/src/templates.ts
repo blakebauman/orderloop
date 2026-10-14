@@ -473,12 +473,139 @@ export function storefrontOrderFlow(): Flow {
   );
 }
 
+export function marketplaceOrderFlow(): Flow {
+  return (
+    new Builder()
+      .n('checkout', 'trigger.webhook', 'Marketplace checkout', { source: 'marketplace' })
+      .n('validate', 'commerce.validate', 'Validate')
+      .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('tax', 'commerce.tax', 'Tax')
+      .n('risk', 'ai.risk_score', 'Fraud check', { threshold: 70 })
+      .n('trust', 'control.approval', 'Trust & safety review', {
+        title: 'Review risky marketplace order {{order.id}}',
+        assignee: 'trust_safety',
+        timeout: '1 day',
+      })
+      .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })
+      .n('split', 'commerce.split_by_seller', 'Split by seller')
+      .n('ask', 'commerce.notify', 'Ask sellers', {
+        to: 'seller',
+        subject: 'New order {{order.id}} to accept',
+        body: 'Accept or reject your part of order {{order.id}} within 2 days.',
+      })
+      .n('accepting', 'control.loop', 'Seller responses', { while: true, maxIterations: 10 })
+      .n('responded', 'control.wait_event', 'Seller responds', {
+        event: 'seller.responded',
+        timeout: '2 days',
+      })
+      .n('record', 'commerce.seller_accept', 'Record response', { decision: 'from_event' })
+      .n('expire', 'commerce.seller_accept', 'Reject unanswered', { decision: 'expire_pending' })
+      .n('reserve', 'commerce.reserve_inventory', 'Reserve stock')
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('capture', 'commerce.capture_payment', 'Capture payment')
+      .n('shipped', 'commerce.notify', 'Shipping confirmation', {
+        to: 'customer',
+        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+      })
+      .n('window', 'control.wait_event', 'Return window', {
+        event: 'return.requested',
+        timeout: '14 days',
+      })
+      .n('rma', 'commerce.return_label', 'Return label', { carrier: 'ups' })
+      .n('back', 'control.wait_event', 'Return received', {
+        event: 'return.received',
+        timeout: '14 days',
+      })
+      .n('restock', 'commerce.restock', 'Restock', {
+        lines: { var: 'vars.return_requested.lines' },
+      })
+      .n('refund', 'commerce.refund', 'Refund', {
+        amount: { or: [{ var: 'vars.return_requested.amount' }, { var: 'order.total' }] },
+        reason: '{{vars.return_requested.reason}}',
+      })
+      .n('payout', 'commerce.payout', 'Seller payouts')
+      .n('done', 'control.end', 'Fulfilled', { outcome: 'completed' })
+      .n('blocked', 'control.end', 'Blocked', {
+        outcome: 'declined',
+        reason: 'Failed fraud review',
+      })
+      .n('declined', 'control.end', 'Card declined', { outcome: 'failed', reason: 'Card declined' })
+      .n('no_sellers', 'control.end', 'No seller accepted', {
+        outcome: 'failed',
+        reason: 'No seller accepted; authorization voided',
+      })
+      .n('unanswered', 'control.end', 'Sellers did not answer', {
+        outcome: 'failed',
+        reason: 'Sellers kept the order pending; authorization voided',
+      })
+      .n('short', 'control.end', 'Out of stock', {
+        outcome: 'failed',
+        reason: 'Insufficient stock; authorization voided',
+      })
+      .n('uncaptured', 'control.end', 'Capture failed', {
+        outcome: 'failed',
+        reason: 'Payment capture failed',
+      })
+      .e('checkout', 'validate')
+      .e('validate', 'price')
+      .e('price', 'tax')
+      .e('tax', 'risk')
+      .e('risk.low', 'authorize')
+      .e('risk.high', 'trust')
+      .e('trust.approved', 'authorize')
+      .e('trust.rejected', 'blocked')
+      .e('trust.escalated', 'blocked')
+      .e('authorize.ok', 'split')
+      .e('authorize.declined', 'declined')
+      .e('split.accepted', 'reserve')
+      .e('split.awaiting', 'ask')
+      .e('ask', 'accepting')
+      // One response per pass; the loop goes round until no seller is left to answer.
+      .e('accepting.body', 'responded')
+      .e('responded.received', 'record')
+      .e('responded.timeout', 'expire')
+      .e('record.pending', 'accepting', LOOP_INPUT)
+      .e('record.accepted', 'reserve')
+      .e('record.partial', 'reserve')
+      .e('record.rejected', 'no_sellers')
+      .e('expire.accepted', 'reserve')
+      .e('expire.partial', 'reserve')
+      .e('expire.rejected', 'no_sellers')
+      // Exits from the loop body join at reserve, so its "done" exit can only end the order.
+      .e('accepting.done', 'unanswered')
+      .e('reserve.ok', 'ship')
+      .e('reserve.backorder', 'short')
+      .e('ship', 'capture')
+      .e('capture.ok', 'shipped')
+      .e('capture.failed', 'uncaptured')
+      .e('shipped', 'window')
+      .e('window.timeout', 'payout')
+      .e('window.received', 'rma')
+      .e('rma', 'back')
+      .e('back.received', 'restock')
+      .e('back.timeout', 'payout')
+      .e('restock', 'refund')
+      .e('refund.ok', 'payout')
+      .e('refund.failed', 'payout')
+      .e('payout', 'done')
+      .build({
+        id: 'tpl-marketplace-order',
+        name: 'Marketplace order',
+        description:
+          'Multi-seller checkout: fraud check, authorize, split by seller and wait for each seller to accept, ship and capture what was accepted, a return window, then seller payouts net of commission and refunds.',
+        model: 'marketplace',
+        channels: ['marketplace', 'web', 'mobile', 'api'],
+      })
+  );
+}
+
 export const TEMPLATES = {
   'tpl-purchase-request': purchaseRequestFlow,
   'tpl-b2b-order': b2bOrderFlow,
   'tpl-reorder': reorderFlow,
   'tpl-subscription': subscriptionFlow,
   'tpl-storefront-order': storefrontOrderFlow,
+  'tpl-marketplace-order': marketplaceOrderFlow,
 } satisfies Record<string, () => Flow>;
 export type TemplateId = keyof typeof TEMPLATES;
 
@@ -487,7 +614,7 @@ export const DEFAULT_TEMPLATE: Record<OrderModel, TemplateId> = {
   b2b: 'tpl-b2b-order',
   b2c: 'tpl-storefront-order',
   d2c: 'tpl-storefront-order',
-  marketplace: 'tpl-storefront-order',
+  marketplace: 'tpl-marketplace-order',
   subscription: 'tpl-subscription',
   procurement: 'tpl-purchase-request',
   replenishment: 'tpl-reorder',

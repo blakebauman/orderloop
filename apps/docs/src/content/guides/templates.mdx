@@ -27,6 +27,8 @@ the code, the editor of a template-based flow offers the new graph as a proposal
 
 <Templates />
 
+`tpl-marketplace-order` is the `marketplace` model's flow; [Marketplace](/guides/marketplace/) walks through it.
+
 ## Scenarios
 
 The dashboard's **Demo scenarios** start an order on a seeded flow with a canned input
@@ -43,6 +45,7 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 | Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
 | Retail order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices convert at the stored rate, and the order, capture and webhooks are in euros |
+| Marketplace order, two sellers | `tpl-marketplace-order` | `HP-200` from a seller that auto-accepts and `KET-01` from one that is asked: the order waits for Kettle & Co, then ships what was accepted and schedules each seller's payout net of commission. See [Marketplace](/guides/marketplace/) |
 | Retail order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund. A `return.requested` payload with `lines: [{ sku, qty }]` restocks only those lines; `amount` sets a partial refund |
 
 ### Simulating failures

@@ -343,7 +343,14 @@ export default function OrderPage() {
             {/* Stays mounted while hidden so an open undo window survives a tab switch. */}
             <div hidden={tab !== 'actions'}>
               <Compensation state={state} records={records} onSelect={select} />
-              <Actions state={state} busy={busy} call={call} by={by} onSelect={select} />
+              <Actions
+                state={state}
+                busy={busy}
+                call={call}
+                by={by}
+                onSelect={select}
+                sellers={records.sellers}
+              />
             </div>
             {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
             {tab === 'details' ? <Details state={state} records={records} /> : null}
@@ -604,12 +611,14 @@ function Actions({
   call,
   by,
   onSelect,
+  sellers,
 }: {
   state: OrderState;
   busy: string | null;
   call: Call;
   by: string;
   onSelect: (id: string) => void;
+  sellers: Records['sellers'];
 }) {
   const canApprove = useCan('approver');
   const canOperate = useCan('operator');
@@ -675,7 +684,33 @@ function Actions({
                 </span>
                 .
               </p>
-              {canOperate ? (
+              {canOperate && w.event === 'seller.responded' ? (
+                <div className="mt-3 space-y-1.5">
+                  {sellers
+                    .filter((s) => s.status === 'pending')
+                    .map((s) => (
+                      <div key={s.sellerId} className="flex flex-wrap items-center gap-1.5">
+                        <span className="mr-auto text-xs">{s.name}</span>
+                        {(['accepted', 'rejected'] as const).map((decision) => (
+                          <Button
+                            key={decision}
+                            size="sm"
+                            variant="outline"
+                            disabled={!!busy}
+                            onClick={() =>
+                              call('event', 'deliver', [
+                                w.event,
+                                { source: 'dashboard', sellerId: s.sellerId, decision },
+                              ])
+                            }
+                          >
+                            <Zap /> {decision === 'accepted' ? 'Accepts' : 'Rejects'}
+                          </Button>
+                        ))}
+                      </div>
+                    ))}
+                </div>
+              ) : canOperate ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -829,6 +864,22 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
           humanize(p.kind),
           humanize(p.status),
           money(p.amount, o.currency),
+        ])}
+      />
+      <Ledger
+        title="Sellers"
+        rows={records.sellers.map((s) => [
+          s.name,
+          s.reason ? `${humanize(s.status)}: ${s.reason}` : humanize(s.status),
+          money(s.subtotal, o.currency),
+        ])}
+      />
+      <Ledger
+        title="Seller payouts"
+        rows={records.payouts.map((p) => [
+          `${p.name ?? p.sellerId} (${money(p.commission, o.currency)} commission)`,
+          humanize(p.status),
+          money(p.net, o.currency),
         ])}
       />
       <Ledger

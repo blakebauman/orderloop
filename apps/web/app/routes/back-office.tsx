@@ -48,7 +48,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function BackOffice() {
-  const { products, customers, pricing, events, emails, mailboxes } =
+  const { products, customers, sellers, pricing, events, emails, mailboxes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
@@ -241,6 +241,44 @@ export default function BackOffice() {
                     </td>
                     <td className="px-4 py-1.5 text-right tabular">
                       {c.creditLimit ? money(c.creditLimit) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+        <Section title="Marketplace sellers" flush>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left">
+                <tr>
+                  <th scope="col" className="caption px-4 py-2 font-medium">
+                    Seller
+                  </th>
+                  <th scope="col" className="caption px-2 py-2 font-medium">
+                    Accepts orders
+                  </th>
+                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
+                    Commission
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {sellers.map((s) => (
+                  <tr key={s.id}>
+                    <td className="px-4 py-1.5">
+                      {s.name}
+                      <div className="text-muted-foreground text-xs">
+                        {s.email}
+                        {s.active ? '' : ' · inactive'}
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {s.autoAccept ? 'Automatically' : 'Asked per order'}
+                    </td>
+                    <td className="px-4 py-1.5 text-right tabular">
+                      {Math.round(s.commissionPct * 1000) / 10}%
                     </td>
                   </tr>
                 ))}

@@ -13,6 +13,7 @@ import {
   money,
   newId,
   type Order,
+  type OrderLine,
   type PriceRule,
   type PriceSource,
   type PriceSourceKind,
@@ -26,10 +27,13 @@ import {
   fxRates,
   messages,
   payments,
+  payouts,
   priceRules,
   priceSources,
   products,
   reservations,
+  sellerOrders,
+  sellers,
   shipments,
   stockMovements,
 } from '@orderloop/db';
@@ -299,12 +303,14 @@ export async function capturePayment(env: Env, order: Order, stepKey: string) {
     .where(and(eq(payments.orderId, order.id), eq(payments.status, 'authorized')));
   if (!auth) return { paymentId: null, amount: 0, status: 'failed' };
   await d.update(payments).set({ status: 'captured' }).where(eq(payments.id, auth.id));
+  // Never more than the order now costs: lines dropped after authorizing (a seller rejecting
+  // their part) are released, not charged.
   return recordPayment(
     env,
     `cap_${stepKey}_${order.id}`.replace(/[^\w-]/g, '_'),
     order.id,
     'capture',
-    auth.amount,
+    money(Math.min(auth.amount, order.total)),
     'succeeded',
     auth.id,
   );
@@ -361,6 +367,184 @@ export async function addToBalance(env: Env, customerId: string | undefined, amo
     .update(customers)
     .set({ balance: sql`${customers.balance} + ${amount}` })
     .where(eq(customers.id, customerId));
+}
+
+// ── Marketplace ────────────────────────────────────────────────────────────
+
+/** The seller id for lines the marketplace operator sells itself. */
+export const FIRST_PARTY = 'first_party';
+
+export type SellerPart = {
+  sellerId: string;
+  name: string;
+  status: string;
+  subtotal: number;
+  reason: string | null;
+};
+
+/**
+ * One seller order per seller on the order: a line's own `sellerId`, else its product's seller,
+ * else first party. First-party lines and sellers that auto-accept start accepted. Keyed by order
+ * and seller, so a retried step changes nothing.
+ */
+export async function splitBySeller(env: Env, order: Order) {
+  const d = db(env);
+  const skus = order.lines.map((l) => l.sku);
+  const bySku = new Map((await getProducts(env, skus)).map((p) => [p.sku, p]));
+  const groups = new Map<string, OrderLine[]>();
+  for (const l of order.lines) {
+    const seller = l.sellerId ?? bySku.get(l.sku)?.sellerId ?? FIRST_PARTY;
+    groups.set(seller, [...(groups.get(seller) ?? []), l]);
+  }
+  const ids = [...groups.keys()].filter((id) => id !== FIRST_PARTY);
+  const known = new Map(
+    (ids.length ? await d.select().from(sellers).where(inArray(sellers.id, ids)) : []).map((s) => [
+      s.id,
+      s,
+    ]),
+  );
+  const missing = ids.filter((id) => !known.get(id)?.active);
+  if (missing.length)
+    return { ok: false, error: `Unknown or inactive seller: ${missing.join(', ')}` } as const;
+  const now = Date.now();
+  for (const [sellerId, lines] of groups) {
+    const seller = known.get(sellerId);
+    const accepted = sellerId === FIRST_PARTY || !!seller?.autoAccept;
+    await d
+      .insert(sellerOrders)
+      .values({
+        id: `so_${order.id}_${sellerId}`,
+        orderId: order.id,
+        sellerId,
+        status: accepted ? 'accepted' : 'pending',
+        lines: JSON.stringify(lines),
+        subtotal: money(lines.reduce((s, l) => s + l.qty * (l.unitPrice ?? 0), 0)),
+        createdAt: now,
+        decidedAt: accepted ? now : null,
+      })
+      .onConflictDoNothing();
+  }
+  return { ok: true, parts: await sellerParts(env, order.id) } as const;
+}
+
+export async function sellerParts(env: Env, orderId: string): Promise<SellerPart[]> {
+  const rows = await db(env)
+    .select({
+      sellerId: sellerOrders.sellerId,
+      name: sellers.name,
+      status: sellerOrders.status,
+      subtotal: sellerOrders.subtotal,
+      reason: sellerOrders.reason,
+    })
+    .from(sellerOrders)
+    .leftJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
+    .where(eq(sellerOrders.orderId, orderId))
+    .orderBy(sellerOrders.sellerId);
+  return rows.map((r) => ({ ...r, name: r.name ?? 'Marketplace' }));
+}
+
+/** Accepts or rejects a seller's part. Only a pending part changes, so a replay is a no-op. */
+export async function decideSellerOrder(
+  env: Env,
+  orderId: string,
+  sellerId: string,
+  decision: 'accepted' | 'rejected',
+  reason?: string,
+) {
+  await db(env)
+    .update(sellerOrders)
+    .set({ status: decision, reason: reason ?? null, decidedAt: Date.now() })
+    .where(
+      and(
+        eq(sellerOrders.orderId, orderId),
+        eq(sellerOrders.sellerId, sellerId),
+        eq(sellerOrders.status, 'pending'),
+      ),
+    );
+}
+
+/** Rejects every part still pending. */
+export async function expireSellerOrders(env: Env, orderId: string, reason: string) {
+  const res = await db(env)
+    .update(sellerOrders)
+    .set({ status: 'rejected', reason, decidedAt: Date.now() })
+    .where(and(eq(sellerOrders.orderId, orderId), eq(sellerOrders.status, 'pending')))
+    .returning();
+  return res.length;
+}
+
+/** Compensation: cancels every part not already rejected. Idempotent. */
+export async function cancelSellerOrders(env: Env, orderId: string) {
+  const res = await db(env)
+    .update(sellerOrders)
+    .set({ status: 'cancelled' })
+    .where(
+      and(eq(sellerOrders.orderId, orderId), inArray(sellerOrders.status, ['pending', 'accepted'])),
+    )
+    .returning();
+  return res.length;
+}
+
+/**
+ * Emails of the third-party sellers to tell: those still to answer when any are, else those who
+ * accepted.
+ */
+export async function sellerContacts(env: Env, orderId: string) {
+  const rows = await db(env)
+    .select({ id: sellers.id, email: sellers.email, status: sellerOrders.status })
+    .from(sellerOrders)
+    .innerJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
+    .where(eq(sellerOrders.orderId, orderId))
+    .orderBy(sellers.id);
+  const pending = rows.filter((r) => r.status === 'pending');
+  return pending.length ? pending : rows.filter((r) => r.status === 'accepted');
+}
+
+/**
+ * One payout per accepted third-party seller: their lines, less their share of refunds so far
+ * (pro rata to the order total) and the commission on what is left. Keyed by step and seller.
+ */
+export async function schedulePayouts(env: Env, order: Order, stepKey: string) {
+  const d = db(env);
+  const parts = await d
+    .select({ part: sellerOrders, pct: sellers.commissionPct })
+    .from(sellerOrders)
+    .innerJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
+    .where(and(eq(sellerOrders.orderId, order.id), eq(sellerOrders.status, 'accepted')));
+  const refunds = (await d.select().from(payments).where(eq(payments.orderId, order.id)))
+    .filter((p) => p.kind === 'refund' && p.status === 'succeeded')
+    .reduce((s, p) => s + p.amount, 0);
+  const now = Date.now();
+  const out = [];
+  for (const { part, pct } of parts) {
+    const gross = part.subtotal;
+    const refunded = order.total > 0 ? money(Math.min(gross, (refunds * gross) / order.total)) : 0;
+    const commission = money((gross - refunded) * pct);
+    const row = {
+      id: `pout_${order.id}_${stepKey}_${part.sellerId}`.replace(/[^\w-]/g, '_'),
+      orderId: order.id,
+      sellerId: part.sellerId,
+      gross,
+      commission,
+      refunded,
+      net: money(gross - refunded - commission),
+      status: 'scheduled',
+      createdAt: now,
+    };
+    await d.insert(payouts).values(row).onConflictDoNothing();
+    out.push(row);
+  }
+  return out;
+}
+
+/** Compensation: reverses payouts that have not been paid. Idempotent. */
+export async function reversePayouts(env: Env, orderId: string) {
+  const res = await db(env)
+    .update(payouts)
+    .set({ status: 'reversed' })
+    .where(and(eq(payouts.orderId, orderId), eq(payouts.status, 'scheduled')))
+    .returning();
+  return res.length;
 }
 
 // ── Shipping ───────────────────────────────────────────────────────────────
@@ -471,12 +655,14 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */
 export async function compensateOrder(env: Env, orderId: string) {
-  const [released, voided, cancelled] = await Promise.all([
+  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed] = await Promise.all([
     releaseInventory(env, orderId),
     voidAuthorizations(env, orderId),
     cancelOpenShipments(env, orderId),
+    cancelSellerOrders(env, orderId),
+    reversePayouts(env, orderId),
   ]);
-  return { released, voided, cancelled };
+  return { released, voided, cancelled, sellerOrdersCancelled, payoutsReversed };
 }
 
 export const idFor = newId;
