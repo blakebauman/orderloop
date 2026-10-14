@@ -223,9 +223,14 @@ export default function BackOffice() {
                   <tr key={c.id}>
                     <td className="px-4 py-1.5">
                       {c.name}
-                      <div className="text-muted-foreground text-xs">{humanize(c.tier)}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {humanize(c.kind)}
+                        {c.kind === 'business' ? ` · ${humanize(c.tier)}` : ''}
+                      </div>
                     </td>
-                    <td className="px-2 py-1.5">{humanize(c.terms)}</td>
+                    <td className="px-2 py-1.5">
+                      {c.kind === 'business' ? humanize(c.terms) : 'Pays at checkout'}
+                    </td>
                     <td
                       className={`px-2 py-1.5 text-right tabular ${c.creditLimit && c.balance > c.creditLimit ? 'font-medium text-bad' : ''}`}
                     >

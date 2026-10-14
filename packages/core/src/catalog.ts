@@ -86,8 +86,9 @@ export const NODE_SPECS = [
   node({
     type: 'trigger.email_po',
     category: 'trigger',
-    label: 'Inbound PO email',
-    description: 'A purchase order arrives by email or upload; the document is stored in R2.',
+    label: 'Inbound email',
+    description:
+      'An order, order form or purchase order arrives by email or upload; the document is stored in R2.',
     icon: 'Mail',
     fields: [{ key: 'mailbox', label: 'Mailbox', kind: 'text', default: 'orders@' }],
     outputs: OUT,
@@ -124,7 +125,7 @@ export const NODE_SPECS = [
   node({
     type: 'commerce.price',
     category: 'commerce',
-    label: 'Price & quote',
+    label: 'Price lines',
     description:
       'Prices each line through the pricing chain (price books, contract prices, volume tiers, then list price) and computes the subtotal.',
     icon: 'Tags',
@@ -134,7 +135,7 @@ export const NODE_SPECS = [
         label: 'Contract pricing',
         kind: 'boolean',
         default: true,
-        hint: 'Use the customer’s negotiated prices',
+        hint: 'Use negotiated prices when the customer has any',
       },
       {
         key: 'usePriceRules',
@@ -200,9 +201,19 @@ export const NODE_SPECS = [
     type: 'commerce.credit_check',
     category: 'commerce',
     label: 'Credit check',
-    description: 'Compares the order total plus open balance with the customer’s credit limit.',
+    description:
+      'Compares the order total plus open balance with the customer’s credit limit. Guests and consumers have no credit account.',
     icon: 'ShieldCheck',
-    fields: [],
+    fields: [
+      {
+        key: 'noAccount',
+        label: 'Without a credit account',
+        kind: 'select',
+        options: ['over_limit', 'ok'],
+        default: 'over_limit',
+        hint: 'Where orders from guests and customers without credit go',
+      },
+    ],
     outputs: ['ok', 'over_limit'],
   }),
   node({
@@ -283,7 +294,8 @@ export const NODE_SPECS = [
     type: 'commerce.invoice',
     category: 'commerce',
     label: 'Generate invoice',
-    description: 'Renders the invoice to R2 with the configured payment terms.',
+    description:
+      'Renders the invoice to R2 with the configured payment terms. Unpaid invoices for business customers go on their account.',
     icon: 'FileText',
     fields: [
       {
@@ -291,7 +303,14 @@ export const NODE_SPECS = [
         label: 'Terms',
         kind: 'select',
         options: ['due_on_receipt', 'net_15', 'net_30', 'net_60'],
-        default: 'net_30',
+        default: 'due_on_receipt',
+      },
+      {
+        key: 'onAccount',
+        label: 'Bill to account',
+        kind: 'boolean',
+        default: true,
+        hint: 'Add unpaid business invoices to the customer’s balance',
       },
     ],
     outputs: OUT,
@@ -387,7 +406,8 @@ export const NODE_SPECS = [
     type: 'commerce.notify',
     category: 'commerce',
     label: 'Notify',
-    description: 'Sends a message to the customer, a supplier or the team.',
+    description:
+      'Sends a message to the customer (or a guest’s contact email), a supplier or the team.',
     icon: 'Send',
     fields: [
       {
@@ -531,7 +551,8 @@ export const NODE_SPECS = [
     type: 'ai.extract',
     category: 'ai',
     label: 'Extract order',
-    description: 'Reads an email or PO document and extracts the customer and line items.',
+    description:
+      'Reads an emailed order, order form or purchase order and extracts the customer, reference and line items.',
     icon: 'ScanText',
     fields: [],
     outputs: OUT,

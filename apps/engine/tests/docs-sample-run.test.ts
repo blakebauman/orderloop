@@ -16,7 +16,7 @@ import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
 
 const VOLATILE: Record<string, RegExp> = {
-  invoice: /^net_30 · due \d{4}-\d{2}-\d{2}$/,
+  invoice: /^net_30 · due \d{4}-\d{2}-\d{2} · on account$/,
   ship: /^FREIGHT \S+$/,
   erp: /^NETSUITE-\S+$/,
 };

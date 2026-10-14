@@ -74,6 +74,9 @@ export async function action({ request }: Route.ActionArgs) {
     return {
       error: `No SKU found on ${parsed.unreadable.length === 1 ? 'this line' : 'these lines'}: ${parsed.unreadable.map((l) => `“${l}”`).join(', ')}. Use “SKU x qty”, e.g. WID-100 x 5.`,
     };
+  const contactEmail = String(f.get('contactEmail') ?? '').trim();
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail))
+    return { error: `“${contactEmail}” is not an email address.` };
   try {
     const { orderId } = await engine().startOrder({
       flowId,
@@ -82,6 +85,9 @@ export async function action({ request }: Route.ActionArgs) {
         channel: channelOf(f.get('channel')),
         title: String(f.get('title') ?? '') || undefined,
         customerId: String(f.get('customerId') ?? '') || undefined,
+        contact: contactEmail
+          ? { email: contactEmail, name: String(f.get('contactName') ?? '') || undefined }
+          : undefined,
         currency,
         lines: parsed.lines,
         documentText: String(f.get('documentText') ?? '') || undefined,
@@ -141,7 +147,9 @@ export default function NewOrder() {
                 defaultValue={preset.input.customerId ?? ''}
                 className="h-9 w-full"
               >
-                <NativeSelectOption value="">Find it from the document</NativeSelectOption>
+                <NativeSelectOption value="">
+                  Guest, or find it from the document
+                </NativeSelectOption>
                 {customers.map((c) => (
                   <NativeSelectOption key={c.id} value={c.id}>
                     {c.name} ({humanize(c.tier)})
@@ -161,6 +169,19 @@ export default function NewOrder() {
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Guest email" hint="For a buyer without an account">
+              <Input
+                name="contactEmail"
+                type="email"
+                defaultValue={preset.input.contact?.email ?? ''}
+                placeholder="sam@example.com"
+              />
+            </Field>
+            <Field label="Guest name" hint="Optional">
+              <Input name="contactName" defaultValue={preset.input.contact?.name ?? ''} />
             </Field>
           </div>
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">

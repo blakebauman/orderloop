@@ -82,7 +82,7 @@ export const EXECUTORS: Record<string, Exec> = {
   'trigger.email_po': async ({ ctx }) => ({
     summary: ctx.order.documentKey
       ? `Document ${ctx.order.documentKey.split('/').pop()}`
-      : 'PO received',
+      : 'Email received',
   }),
 
   'commerce.validate': async ({ env, ctx }) => {
@@ -190,10 +190,16 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.credit_check': async ({ env, ctx }) => {
+  'commerce.credit_check': async ({ env, ctx, config }) => {
     const c = await cx.getCustomer(env, ctx.order.customerId);
-    if (!c)
-      return { branches: ['over_limit'], summary: 'No credit account', output: { available: 0 } };
+    if (!c || c.kind !== 'business') {
+      const branch = str(config.noAccount, 'over_limit') === 'ok' ? 'ok' : 'over_limit';
+      return {
+        branches: [branch],
+        summary: c ? `No credit account (${c.kind})` : 'Guest checkout (no credit account)',
+        output: { available: 0 },
+      };
+    }
     // Limits and balances are in the base currency; compare the order there too.
     const available = money(c.creditLimit - c.balance);
     const total = ctx.order.baseTotal ?? toBase(ctx.order.total, ctx.order.fxRate);
@@ -275,7 +281,7 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   'commerce.invoice': async ({ env, ctx, config, stepKey }) => {
-    const terms = str(config.terms, 'net_30');
+    const terms = str(config.terms, 'due_on_receipt');
     const days = { due_on_receipt: 0, net_15: 15, net_30: 30, net_60: 60 }[terms] ?? 30;
     const due = new Date(ctx.now + days * 86_400_000).toISOString().slice(0, 10);
     const key = await cx.storeDocument(
@@ -285,11 +291,18 @@ export const EXECUTORS: Record<string, Exec> = {
       `${stepKey.replace('#', '-')}.html`,
       cx.renderDocument(`Invoice ${ctx.order.id}`, ctx.order, { Terms: terms, Due: due }),
     );
-    await cx.addToBalance(env, ctx.order.customerId, toBase(ctx.order.total, ctx.order.fxRate));
+    // Only an unpaid invoice to a business customer is owed on account; a paid order, a consumer
+    // or a guest has nothing outstanding.
+    const customer = await cx.getCustomer(env, ctx.order.customerId);
+    const owed =
+      config.onAccount !== false &&
+      customer?.kind === 'business' &&
+      (await cx.paidAmount(env, ctx.order.id)) < ctx.order.total;
+    if (owed) await cx.addToBalance(env, customer.id, toBase(ctx.order.total, ctx.order.fxRate));
     return {
-      output: { key, terms, due },
+      output: { key, terms, due, onAccount: owed },
       vars: { invoiceKey: key, dueDate: due },
-      summary: `${terms} · due ${due}`,
+      summary: `${terms} · due ${due}${owed ? ' · on account' : ''}`,
     };
   },
 
@@ -386,7 +399,7 @@ export const EXECUTORS: Record<string, Exec> = {
     const customer = await cx.getCustomer(env, ctx.order.customerId);
     const recipient =
       to === 'customer'
-        ? (customer?.email ?? 'customer')
+        ? (customer?.email ?? ctx.order.contact?.email ?? 'customer')
         : to === 'supplier'
           ? str(ctx.vars.supplier, 'supplier')
           : 'team';
@@ -441,7 +454,11 @@ export const EXECUTORS: Record<string, Exec> = {
       order: {
         ...(lines.length ? { lines } : {}),
         ...(customer ? { customerId: customer.id } : {}),
-        ...(value.poNumber ? { title: `PO ${value.poNumber}` } : {}),
+        ...(value.poNumber
+          ? {
+              title: `${['b2b', 'procurement'].includes(ctx.order.model) ? 'PO' : 'Ref'} ${value.poNumber}`,
+            }
+          : {}),
       },
       output: { ...value, source },
       vars: { poNumber: value.poNumber },

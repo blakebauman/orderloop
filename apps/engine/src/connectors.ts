@@ -345,6 +345,16 @@ export async function refund(env: Env, order: Order, stepKey: string, requested?
   return recordPayment(env, id, order.id, 'refund', amount, 'succeeded');
 }
 
+/** Money captured or charged on the order, before refunds. */
+export async function paidAmount(env: Env, orderId: string) {
+  const rows = await db(env).select().from(payments).where(eq(payments.orderId, orderId));
+  return money(
+    rows
+      .filter((p) => p.status === 'succeeded' && (p.kind === 'capture' || p.kind === 'charge'))
+      .reduce((s, p) => s + p.amount, 0),
+  );
+}
+
 export async function addToBalance(env: Env, customerId: string | undefined, amount: number) {
   if (!customerId) return;
   await db(env)

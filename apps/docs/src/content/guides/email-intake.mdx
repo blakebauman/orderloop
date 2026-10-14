@@ -3,7 +3,7 @@ title: Email intake
 description: Start orders from email with Cloudflare Email Routing — mailboxes, who may send, what becomes the order, and setup.
 ---
 
-Customers can start an order by emailing a purchase order. Cloudflare Email Routing delivers mail
+Customers can start an order by emailing an order, an order form or a purchase order. Cloudflare Email Routing delivers mail
 for the configured addresses to the engine Worker's `email()` entrypoint
 (`apps/engine/src/email.ts`), which checks the message, turns it into order input and starts the
 mailbox's flow. Deciding what to accept is pure code in `packages/core/src/intake.ts`.
