@@ -4,9 +4,13 @@ Run the fleet: one OrderLoop deployment per customer, each with its own Workers,
 bucket, AI Gateway, domain and secrets, all in OrderLoop's Cloudflare account and all deployed by
 CI.
 
+The product lives on its own zone, `orderloop.app`; `orderloop.io` is for the marketing site and
+the docs (`docs.orderloop.io`). Every customer workspace is a subdomain of `orderloop.app`, so
+nothing outside the product can set cookies for it.
+
 A deployment shares nothing with another: not data, not secrets, not rate-limit counters. Isolating
 a customer, choosing where their data lives and removing them are all per-deployment operations.
-OrderLoop itself (`orderloop.io`) is a deployment like the others, the one in the `internal` ring.
+OrderLoop itself (`orderloop.app`) is a deployment like the others, the one in the `internal` ring.
 
 ## The registry
 
@@ -14,10 +18,10 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 
 | Field | Default | Meaning |
 |---|---|---|
-| `id` | required | Lowercase letters, digits and dashes; matches the file name |
+| `id` | required | Lowercase letters, digits and dashes; matches the file name. Names that would read as part of OrderLoop (`api`, `app`, `docs`, `www`, `staging` and the rest of `RESERVED` in `scripts/fleet.ts`) are refused unless the entry sets `domain` |
 | `ring` | required | `staging`, `internal`, `canary` or `general`: when CI deploys it (see [Rings](#rings)) |
 | `slot` | required | A number from 1 to 999, unique across the fleet. Rate-limit namespaces are per account, so the web Worker's are `<slot>001` and `<slot>002` |
-| `domain` | `<id>.orderloop.io` | The web app's custom domain |
+| `domain` | `<id>.orderloop.app` | The web app's custom domain |
 | `suffix` | `-<id>` | Added to every resource name. `orderloop` uses `""`, so its resources keep the base names |
 | `environment` | `deploy-<id>` | The GitHub environment holding the deployment's secrets. `orderloop` uses `production` |
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
@@ -29,7 +33,7 @@ With the suffix, deployment `acme` gets these resource names:
 
 | Resource | Name |
 |---|---|
-| Web Worker | `orderloop-web-acme`, at `acme.orderloop.io` |
+| Web Worker | `orderloop-web-acme`, at `acme.orderloop.app` |
 | Engine Worker | `orderloop-engine-acme` (the web Worker's `ENGINE` binding points at it) |
 | Workflows | `orderloop-order-acme`, `orderloop-replenish-acme` (Workflow names are unique per account) |
 | D1 | `orderloop-acme` |
@@ -49,7 +53,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 1. Create `deployments/<id>.jsonc` with `id`, `ring` (usually `canary` first), the next free
    `slot` and, for EU data, `"jurisdiction": "eu"`.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
-   database and R2 bucket (in the jurisdiction), the AI Gateway (with orderloop.io's settings:
+   database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, logs kept, no cache, authentication on), and the GitHub environment.
    It writes `d1Id` into the registry file and sets the environment's `APP_PASSWORD` and
    `WEBHOOK_SECRET`. New values are generated and saved in `.secrets/<id>/` (gitignored); a secret
@@ -59,7 +63,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    the environment. Add `SHOPIFY_WEBHOOK_SECRET` or `INTAKE_ALLOWLIST` there if the customer uses
    them. To gate this customer's deploys, add a required reviewer to the environment.
 4. Commit the registry file and merge. CI deploys the customer in its ring, and the custom domain
-   creates its DNS record in the `orderloop.io` zone.
+   creates its DNS record in the `orderloop.app` zone.
 5. Give the customer their URL and the workspace password from `.secrets/<id>/app-password`, so
    they can sign in and add their team.
 

@@ -93,6 +93,7 @@ jobs:
       fail-fast: false
       matrix:
         deployment: ${{ fromJSON(needs.plan.outputs.staging) }}
+    name: ${{ matrix.deployment.id }}
     uses: ./.github/workflows/deploy.yml
     with:
       deployment: ${{ toJSON(matrix.deployment) }}
@@ -105,6 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         deployment: ${{ fromJSON(needs.plan.outputs.internal) }}
+    name: ${{ matrix.deployment.id }}
     uses: ./.github/workflows/deploy.yml
     with:
       deployment: ${{ toJSON(matrix.deployment) }}
@@ -117,6 +119,7 @@ jobs:
       fail-fast: false
       matrix:
         deployment: ${{ fromJSON(needs.plan.outputs.canary) }}
+    name: ${{ matrix.deployment.id }}
     uses: ./.github/workflows/deploy.yml
     with:
       deployment: ${{ toJSON(matrix.deployment) }}
@@ -131,6 +134,7 @@ jobs:
       max-parallel: 4
       matrix:
         deployment: ${{ fromJSON(needs.plan.outputs.general) }}
+    name: ${{ matrix.deployment.id }}
     uses: ./.github/workflows/deploy.yml
     with:
       deployment: ${{ toJSON(matrix.deployment) }}

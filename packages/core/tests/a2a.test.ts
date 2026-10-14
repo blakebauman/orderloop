@@ -50,26 +50,26 @@ describe('A2A', () => {
   });
 
   it('points the card at this origin', () => {
-    const card = agentCard('https://orderloop.io');
+    const card = agentCard('https://orderloop.app');
     expect(card.supportedInterfaces).toEqual([
-      { url: 'https://orderloop.io/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
-      { url: 'https://orderloop.io/a2a', protocolBinding: 'JSONRPC', protocolVersion: '0.3' },
+      { url: 'https://orderloop.app/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+      { url: 'https://orderloop.app/a2a', protocolBinding: 'JSONRPC', protocolVersion: '0.3' },
     ]);
     expect(card.securitySchemes.oauth.oauth2SecurityScheme.oauth2MetadataUrl).toBe(
-      'https://orderloop.io/.well-known/oauth-authorization-server',
+      'https://orderloop.app/.well-known/oauth-authorization-server',
     );
   });
   it('serves 0.3 clients a 0.3 card that still names the 1.0 interface', () => {
-    const card = legacyAgentCard('https://orderloop.io');
+    const card = legacyAgentCard('https://orderloop.app');
     expect(card).toMatchObject({
-      url: 'https://orderloop.io/a2a',
+      url: 'https://orderloop.app/a2a',
       preferredTransport: 'JSONRPC',
       protocolVersion: '0.3',
       security: [{ apiToken: [] }, { oauth: [] }],
     });
     expect(card.securitySchemes.apiToken).toMatchObject({ type: 'http', scheme: 'bearer' });
     expect(card.supportedInterfaces.map((i) => i.protocolVersion)).toEqual(['1.0', '0.3']);
-    expect(card.skills).toEqual(agentCard('https://orderloop.io').skills);
+    expect(card.skills).toEqual(agentCard('https://orderloop.app').skills);
   });
 
   it('treats a missing or 0.x version as a 0.3 client', () => {

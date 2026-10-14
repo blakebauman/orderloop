@@ -7,7 +7,7 @@ import A2aSkills from '../../components/A2aSkills.astro';
 import A2aTaskStates from '../../components/A2aTaskStates.astro';
 
 OrderLoop answers [Agent2Agent](https://a2a-protocol.org) (A2A) 1.0 requests at
-`https://orderloop.io/a2a`. Another agent can ask about
+`https://orderloop.app/a2a`. Another agent can ask about
 orders, stock and flows, place an order and follow it, and decide an approval, all within the role
 it connects with. The skills are the tools of [the assistant](/guides/assistant/) and the
 [MCP server](/reference/mcp/), plus `place_order` and `chat`. An A2A **task** is a request that
@@ -18,7 +18,7 @@ The binding is JSON-RPC over HTTP `POST`; the card advertises streaming and push
 
 ## Discovery
 
-The Agent Card is public at `https://orderloop.io/.well-known/agent-card.json` (cached for five
+The Agent Card is public at `https://orderloop.app/.well-known/agent-card.json` (cached for five
 minutes). It lists the interfaces (`/a2a`, `JSONRPC`, protocols `1.0` and `0.3`), the two security
 schemes below and every skill. Request it with `A2A-Version: 1.0` for the 1.0 card; without the
 header you get the 0.3 card (top-level `url` and `protocolVersion`, OpenAPI-style security
@@ -32,7 +32,7 @@ Send `Authorization: Bearer …` with every request, one of:
 - An [API token](/guides/team-and-roles/#api-tokens) (`ol_live_…`). It carries the role it was
   created with and its expiry. The workspace password works as a break-glass operator.
 - An OAuth access token, from the authorization-code flow with PKCE. Request the resource
-  `https://orderloop.io/a2a`; the scope is the role to act with. The person signs in on
+  `https://orderloop.app/a2a`; the scope is the role to act with. The person signs in on
   OrderLoop's consent page with their own account (not the workspace password), sees that the
   app acts "via A2A", and grants a role no higher than their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
 
@@ -127,7 +127,7 @@ dropped. Delivery is at least once: dedupe on your side
 if a receiver acknowledges slowly.
 
 ```bash
-curl https://orderloop.io/a2a \
+curl https://orderloop.app/a2a \
   -H "Authorization: Bearer ol_live_…" -H "A2A-Version: 1.0" \
   -H "Content-Type: application/json" \
   -d '{
@@ -182,7 +182,7 @@ confirm-waiting chat task just ends it. An order's status after cancelling may b
 Place an order and follow it:
 
 ```bash
-curl https://orderloop.io/a2a \
+curl https://orderloop.app/a2a \
   -H "Authorization: Bearer ol_live_…" \
   -H "A2A-Version: 1.0" \
   -H "Content-Type: application/json" \
@@ -203,7 +203,7 @@ The result is a `task` whose `status.state` is `TASK_STATE_INPUT_REQUIRED` if th
 an approval. Decide it on the same task:
 
 ```bash
-curl https://orderloop.io/a2a \
+curl https://orderloop.app/a2a \
   -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0", "id": 2, "method": "SendMessage",
@@ -217,7 +217,7 @@ curl https://orderloop.io/a2a \
 Read a task, which for an order task reads the order live:
 
 ```bash
-curl https://orderloop.io/a2a \
+curl https://orderloop.app/a2a \
   -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
   -d '{ "jsonrpc": "2.0", "id": 3, "method": "GetTask", "params": { "id": "<task id>" } }'
 ```
@@ -226,7 +226,7 @@ Stream status updates as server-sent events (`SendStreamingMessage`; `SubscribeT
 a task that is still running):
 
 ```bash
-curl -N https://orderloop.io/a2a \
+curl -N https://orderloop.app/a2a \
   -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0", "id": 4, "method": "SendStreamingMessage",

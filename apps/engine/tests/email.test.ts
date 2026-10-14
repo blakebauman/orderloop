@@ -91,7 +91,7 @@ describe('email intake', () => {
   it('turns a customer PO email with a CSV attachment into a B2B order, once', async () => {
     const mail = {
       from: 'purchasing@northwind.example',
-      to: 'orders@orderloop.io',
+      to: 'orders@orderloop.app',
       subject: 'PO NW-4411',
       messageId: '<po-4411@northwind.example>',
       body: 'Hello, please ship the attached. Also 30 x GSK-010.',
@@ -148,7 +148,7 @@ describe('email intake', () => {
   it('rejects unknown senders, unknown mailboxes and unauthenticated mail', async () => {
     const stranger = inbound({
       from: 'eve@evil.example',
-      to: 'orders@orderloop.io',
+      to: 'orders@orderloop.app',
       subject: 'x',
       body: 'x',
       messageId: '<a@evil>',
@@ -161,7 +161,7 @@ describe('email intake', () => {
 
     const noBox = inbound({
       from: 'purchasing@northwind.example',
-      to: 'hello@orderloop.io',
+      to: 'hello@orderloop.app',
       subject: 'x',
       body: 'x',
       messageId: '<b@nw>',
@@ -170,7 +170,7 @@ describe('email intake', () => {
 
     const spoof = inbound({
       from: 'purchasing@northwind.example',
-      to: 'orders@orderloop.io',
+      to: 'orders@orderloop.app',
       subject: 'x',
       body: 'x',
       messageId: '<c@nw>',
@@ -191,7 +191,7 @@ describe('email intake', () => {
   it('accepts an allowlisted sender and routes purchasing@ to a purchase request', async () => {
     const mail = inbound({
       from: 'Me@Example.org',
-      to: 'purchasing@orderloop.io',
+      to: 'purchasing@orderloop.app',
       subject: 'Two monitors',
       body: '2 x MON-27 for the design team',
       messageId: '<d@example.org>',

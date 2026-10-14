@@ -8,11 +8,11 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
   "upload_source_maps": true,
-  // Served only at orderloop.io, so the zone's rules apply to every request: no workers.dev or
+  // Served only at orderloop.app, so the zone's rules apply to every request: no workers.dev or
   // preview URL as a second way in.
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "orderloop.io", "custom_domain": true }],
+  "routes": [{ "pattern": "orderloop.app", "custom_domain": true }],
   "d1_databases": [
     {
       "binding": "DB",

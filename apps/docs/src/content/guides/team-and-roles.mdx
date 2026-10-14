@@ -117,7 +117,7 @@ Cloudflare sees it.
 Systems that call the [REST API](/reference/rest-api/) use a token:
 
 ```bash
-curl https://orderloop.io/api/v1/orders -H "Authorization: Bearer ol_live_…"
+curl https://orderloop.app/api/v1/orders -H "Authorization: Bearer ol_live_…"
 ```
 
 Create one on the Team page with a name (what will use it), a role and how long it lasts: 30 days,
@@ -176,7 +176,7 @@ password reset, being disabled or the session going idle ends it.
 
 A browser request that changes something (any method but `GET`, `HEAD` and `OPTIONS`), or opens the
 order page's live connection, is refused unless its `Origin` is the app's own; without `Origin`,
-its `Sec-Fetch-Site` must be `same-origin` or `none`. This holds for other `*.orderloop.io`
+its `Sec-Fetch-Site` must be `same-origin` or `none`. This holds for other `*.orderloop.app`
 subdomains too. The answer is `403 { "error": "Cross-site request refused" }`. Requests with a
 bearer token are exempt, since they carry no cookie, and so are clients that send neither header.
 

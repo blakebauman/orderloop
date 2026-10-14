@@ -10,7 +10,7 @@ metadata:
 
 ## Who it is for
 
-The published site is for two readers: people who use a workspace at `orderloop.io` (build flows,
+The published site is for two readers: people who use a workspace at `orderloop.app` (build flows,
 run orders, decide approvals, manage the team) and developers who integrate another system with one
 (REST API, signed webhooks, channel adapters, email intake, MCP, A2A). It is not for people who
 deploy, configure or develop OrderLoop.

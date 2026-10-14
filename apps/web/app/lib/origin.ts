@@ -1,6 +1,6 @@
 /**
  * Cross-site request protection. A browser attaches the session cookie to requests from other
- * sites on the same registrable domain (every *.orderloop.io host counts as the same site, so
+ * sites on the same registrable domain (every *.orderloop.app host counts as the same site, so
  * SameSite=Lax doesn't stop them). Anything that changes state, and the order page's WebSocket,
  * must therefore come from this app's own origin.
  */

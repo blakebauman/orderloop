@@ -15,7 +15,7 @@ Subscriptions are managed through the [REST API](/reference/rest-api/) with an `
 [API token](/guides/team-and-roles/#api-tokens); there is no UI for them.
 
 ```bash
-curl -X POST https://orderloop.io/api/v1/webhook-subscriptions \
+curl -X POST https://orderloop.app/api/v1/webhook-subscriptions \
   -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
   -d '{ "url": "https://erp.example.com/hooks/orderloop", "events": ["order.shipped", "order.paid"] }'
 ```

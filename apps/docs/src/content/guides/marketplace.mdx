@@ -67,7 +67,7 @@ page, a `seller.responded` wait lists each pending seller with **Accepts** and *
 Through the REST API:
 
 ```bash
-curl -X POST https://orderloop.io/api/v1/orders/ord_…/events \
+curl -X POST https://orderloop.app/api/v1/orders/ord_…/events \
   -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
   -d '{ "event": "seller.responded", "payload": { "sellerId": "sel_kettle", "decision": "accepted" } }'
 ```
