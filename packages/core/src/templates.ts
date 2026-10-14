@@ -220,6 +220,14 @@ export function b2bOrderFlow(): Flow {
       outcome: 'declined',
       reason: 'No approval decision in time',
     })
+    .n('unanswered', 'commerce.notify', 'Decline order', {
+      to: 'customer',
+      subject: 'We could not accept PO {{order.id}}',
+    })
+    .n('no_reply', 'control.end', 'No reply', {
+      outcome: 'declined',
+      reason: 'Customer did not reply in time',
+    })
     .n('backorder', 'control.end', 'Out of stock', {
       outcome: 'failed',
       reason: 'Insufficient stock; reservations released',
@@ -239,12 +247,13 @@ export function b2bOrderFlow(): Flow {
     .e('router.ask_customer', 'clarify')
     .e('clarify', 'reply')
     .e('reply.received', 'approval')
-    .e('reply.timeout', 'decline')
+    .e('reply.timeout', 'unanswered')
     .e('approval.approved', 'reserve')
     .e('approval.rejected', 'decline')
     .e('approval.escalated', 'expire')
     .e('decline', 'declined')
     .e('expire', 'expired')
+    .e('unanswered', 'no_reply')
     .e('reserve.ok', 'invoice')
     .e('reserve.backorder', 'backorder')
     .e('invoice', 'ship')
