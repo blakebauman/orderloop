@@ -4,7 +4,15 @@ import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Download } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { data, Form, useActionData, useFetcher, useLoaderData, useNavigation } from 'react-router';
+import {
+  data,
+  Form,
+  Link,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+} from 'react-router';
 import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
 import { CopyButton } from '~/components/copy-button';
@@ -216,9 +224,18 @@ export default function Account() {
               </Form>
             ) : (
               <p className="text-muted-foreground text-sm">
-                {me.kind === 'open'
-                  ? 'Sign-in is off: there is no workspace password and nobody has their own sign-in yet.'
-                  : 'You are signed in with the workspace password, which has no account of its own.'}
+                {me.kind === 'open' ? (
+                  <>
+                    Sign-in is off: there is no workspace password and nobody has their own sign-in
+                    yet.{' '}
+                    <Link to="/team" className="text-link hover:underline">
+                      Turn it on from the Team page
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  'You are signed in with the workspace password, which has no account of its own.'
+                )}
               </p>
             )}
           </Section>
