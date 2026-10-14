@@ -11,6 +11,22 @@ export type Scenario = {
 
 export const SCENARIOS: Scenario[] = [
   {
+    id: 'guest-checkout',
+    label: 'Guest checkout',
+    blurb:
+      'A web order from a shopper with no account: card checkout, and the shipping and return emails go to their contact address.',
+    flowId: 'tpl-storefront-order',
+    input: {
+      model: 'b2c',
+      channel: 'web',
+      currency: 'USD',
+      title: 'Web order #10601',
+      contact: { email: 'sam.rivera@example.com', name: 'Sam Rivera' },
+      lines: [{ sku: 'MON-27', qty: 1 }],
+      meta: {},
+    },
+  },
+  {
     id: 'b2b-email',
     label: 'B2B PO by email',
     blurb:

@@ -123,7 +123,7 @@ problem in its summary and output, including a missing or free-text ship-to.
 
 ## Pricing chain
 
-[Price & quote](/reference/nodes/#commerce.price) prices each line through a chain of sources in
+[Price lines](/reference/nodes/#commerce.price) prices each line through a chain of sources in
 `price_sources`, lowest `priority` first. The seeded chain is price books (`10`, stops), contract
 prices (`20`, stops) and volume tiers (`30`, keeps going), with list price (`products.price`) as the
 fallback. `resolvePrice` in `packages/core/src/pricing.ts`:
@@ -151,14 +151,14 @@ back office shows the chain in order.
 
 An order's `currency` is any code with a row in `fx_rates`; the REST API answers `400` for one
 without. Prices, price rules, credit limits, balances, budgets and reports are in the base currency,
-`USD` (`BASE_CURRENCY` in core). Price & quote reads the rate (units of the order's currency per one
+`USD` (`BASE_CURRENCY` in core). Price lines reads the rate (units of the order's currency per one
 USD), converts each base price at it, and stores it on the order as `fxRate` and on the `orders` row
 as `fx_rate`, so later rate changes never reprice the order. A `unitPrice` given on the order is
 already in the order's currency. Totals carry `baseTotal`, the total in USD.
 
 - Amounts on the order, its documents, payments and refunds are in the order's currency.
 - Credit check and budget check compare `baseTotal`; the credit check reports in the order's
-  currency, and invoicing adds `baseTotal` to the customer's balance.
+  currency, and an unpaid invoice to a business customer adds `baseTotal` to their balance.
 - The dashboard converts at each order's `fx_rate`, so its figures are in USD.
 - `order.total` in an expression is in the order's currency; use `order.baseTotal` for a threshold
   that should hold across currencies. Policy rule amounts compare `order.total`.

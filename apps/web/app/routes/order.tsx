@@ -6,6 +6,7 @@
  */
 
 import {
+  ORDER_CHANNEL_LABELS,
   ORDER_MODEL_LABELS,
   type OrderModel,
   type OrderState,
@@ -206,7 +207,10 @@ export default function OrderPage() {
             <StatusBadge status={shownStatus(state)} />
           </h1>
           <p className="mt-1 text-muted-foreground text-xs">
-            {customerName ?? order.customerId ?? 'No customer'} · {flow.name} v{flow.version}
+            {customerName ??
+              order.customerId ??
+              (order.contact ? `Guest · ${order.contact.email}` : 'No customer')}{' '}
+            · {ORDER_CHANNEL_LABELS[order.channel] ?? order.channel} · {flow.name} v{flow.version}
             {state.generation > 1 ? ` · run ${state.generation}` : ''} ·{' '}
             <span className="select-all font-mono">{order.id}</span>
           </p>

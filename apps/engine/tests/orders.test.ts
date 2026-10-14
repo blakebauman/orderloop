@@ -16,6 +16,7 @@ import {
   approvals,
   createDb,
   customers,
+  messages,
   nodeRuns,
   orders,
   payments,
@@ -452,6 +453,26 @@ describe('storefront order', () => {
     expect(done.nodes.refund!.status).toBe('skipped');
   });
 
+  it('runs a guest checkout: emails go to the contact and nothing is billed on account', async () => {
+    await introspect(['window#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        model: 'b2c',
+        channel: 'web',
+        contact: { email: 'sam.rivera@example.com', name: 'Sam Rivera' },
+        lines: [{ sku: 'MON-27', qty: 1 }],
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    const sent = await db().select().from(messages).where(eq(messages.orderId, orderId));
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every((m) => m.recipient === 'sam.rivera@example.com')).toBe(true);
+    const row = await db().select().from(orders).where(eq(orders.id, orderId)).get();
+    expect(row).toMatchObject({ channel: 'web', contactEmail: 'sam.rivera@example.com' });
+  });
+
   it('refunds idempotently per step and never more than was captured', async () => {
     await introspect(['window#1']);
     const { orderId } = await startOrder(env, {
@@ -689,6 +710,74 @@ describe('pricing chain', () => {
     const gbp = await check(85_000, 'GBP', 0.79);
     expect(gbp.branches).toEqual(['over_limit']);
     expect(gbp.summary).toBe('Over limit by £15,480.00');
+  });
+
+  const run = (
+    type: string,
+    config: Record<string, unknown>,
+    order: Partial<OrderInput>,
+    total = 500,
+  ) =>
+    EXECUTORS[type]!({
+      env,
+      node: { id: 'n', type, label: type, config, position: { x: 0, y: 0 } },
+      config: withDefaults(type, config),
+      ctx: {
+        order: {
+          ...input({ model: 'b2c', ...order }),
+          id: `ord_${type.replace('.', '_')}_${order.customerId ?? 'guest'}`,
+          createdAt: 0,
+          subtotal: total,
+          tax: 0,
+          total,
+          fxRate: 1,
+          baseTotal: total,
+        },
+        nodes: {},
+        vars: {},
+        input: {},
+        now: Date.now(),
+      },
+      stepKey: 'n#1',
+    });
+
+  it('sends guests and consumers to the no-account branch of a credit check', async () => {
+    const guest = await run('commerce.credit_check', {}, { contact: { email: 'g@example.com' } });
+    expect(guest).toMatchObject({
+      branches: ['over_limit'],
+      summary: 'Guest checkout (no credit account)',
+    });
+    const consumer = await run(
+      'commerce.credit_check',
+      { noAccount: 'ok' },
+      { customerId: 'cus_ada' },
+    );
+    expect(consumer).toMatchObject({ branches: ['ok'], summary: 'No credit account (consumer)' });
+  });
+
+  it('bills only unpaid business invoices on account', async () => {
+    const balance = async (id: string) =>
+      (await db().select().from(customers).where(eq(customers.id, id)).get())!.balance;
+    const fabrikam = await balance('cus_fabrikam');
+    const owed = await run(
+      'commerce.invoice',
+      { terms: 'net_30' },
+      { model: 'b2b', customerId: 'cus_fabrikam' },
+    );
+    expect(owed.output).toMatchObject({ terms: 'net_30', onAccount: true });
+    expect(await balance('cus_fabrikam')).toBe(fabrikam + 500);
+
+    const off = await run(
+      'commerce.invoice',
+      { onAccount: false },
+      { model: 'b2b', customerId: 'cus_fabrikam' },
+    );
+    expect(off.output).toMatchObject({ terms: 'due_on_receipt', onAccount: false });
+    const ada = await balance('cus_ada');
+    const consumer = await run('commerce.invoice', {}, { customerId: 'cus_ada' });
+    expect(consumer.output).toMatchObject({ onAccount: false });
+    expect(await balance('cus_ada')).toBe(ada);
+    expect(await balance('cus_fabrikam')).toBe(fabrikam + 500);
   });
 
   it('switches sources off per node and keeps given prices', async () => {

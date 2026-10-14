@@ -61,6 +61,25 @@ summary carries `model`, `channel` and `externalId`.
 
 Customers have a `kind`: `business`, `consumer` or `internal`.
 
+## Guest checkout
+
+An order with a `contact` and no `customerId` is a guest order. The dashboard's **New order** form
+sends it from the Guest email and Guest name fields, and the **Guest checkout** scenario starts one.
+The order page shows `Guest · <email>` in place of a customer.
+
+- [Credit check](/reference/nodes/#commerce.credit_check): a guest, or a customer whose `kind` is not
+  `business`, has no credit account. The node takes the branch set by `noAccount` (`over_limit` by
+  default, `ok` to let them through) and reports "Guest checkout (no credit account)" or
+  "No credit account (consumer)".
+- [Generate invoice](/reference/nodes/#commerce.invoice): only an invoice to a business customer with
+  nothing captured or charged yet is added to their balance, and its summary ends "· on account".
+  Set `onAccount` to `false` to never add it. `terms` defaults to `due_on_receipt`.
+- [Notify](/reference/nodes/#commerce.notify) with `to: customer` falls back to `contact.email`.
+- [Risk score](/guides/ai/#ai-nodes): the offline heuristic adds 15 for a guest ("Guest checkout")
+  and 30 for an order with neither customer nor contact ("Unknown customer").
+- The back office customers table shows each customer's `kind`; a consumer or internal customer
+  reads "Pays at checkout" in place of payment terms.
+
 ## Starting a flow for a model
 
 **New flow** on `/flows` takes a model. With the Template start it copies that model's default flow

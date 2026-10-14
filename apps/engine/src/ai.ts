@@ -123,7 +123,7 @@ export async function extractOrder(
     [
       {
         role: 'system',
-        content: `You extract purchase orders. Map every requested item to a SKU from this catalog, using the closest name match: ${JSON.stringify(catalog)}. Use null when unknown. Quantities are integers.`,
+        content: `You extract orders from emails and documents: purchase orders, order forms and customer messages. poNumber is the buyer's order or PO reference. Map every requested item to a SKU from this catalog, using the closest name match: ${JSON.stringify(catalog)}. Use null when unknown. Quantities are integers.`,
       },
       { role: 'user', content: text.slice(0, 20_000) },
     ],
@@ -209,7 +209,10 @@ export async function riskScore(env: Env, order: Order, customer: unknown) {
     () => {
       const reasons: string[] = [];
       let score = 10;
-      if (!order.customerId) (score += 30), reasons.push('Unknown customer');
+      if (!order.customerId) {
+        score += order.contact ? 15 : 30;
+        reasons.push(order.contact ? 'Guest checkout' : 'Unknown customer');
+      }
       if ((order.baseTotal ?? order.total) > 20_000)
         (score += 30), reasons.push('High order value');
       if (order.lines.some((l) => l.qty > 1000)) (score += 20), reasons.push('Unusual quantity');
@@ -313,7 +316,7 @@ export async function route(
           route: pick('needs_approval', routes[0]!),
           reason: 'Order total is above $10,000.',
         };
-      return { route: routes[0]!, reason: 'Routine order from a customer in good standing.' };
+      return { route: routes[0]!, reason: 'Routine order; nothing unusual stands out.' };
     },
   ).then((r) => ({
     ...r,

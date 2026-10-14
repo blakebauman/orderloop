@@ -78,7 +78,7 @@ writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
-| `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing), payment `terms` |
+| `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order), payment `terms` |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |

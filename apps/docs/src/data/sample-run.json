@@ -68,7 +68,7 @@
     },
     "invoice": {
       "status": "succeeded",
-      "summary": "net_30 · due 2026-11-12",
+      "summary": "net_30 · due 2026-11-12 · on account",
       "branches": ["out"]
     },
     "ship": {
