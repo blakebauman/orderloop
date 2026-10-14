@@ -312,7 +312,13 @@ export const EXECUTORS: Record<string, Exec> = {
       config.onAccount !== false &&
       customer?.kind === 'business' &&
       (await cx.paidAmount(env, ctx.order.id)) < ctx.order.total;
-    if (owed) await cx.addToBalance(env, customer.id, toBase(ctx.order.total, ctx.order.fxRate));
+    if (owed)
+      await cx.addToBalance(env, {
+        orderId: ctx.order.id,
+        stepKey,
+        customerId: customer.id,
+        amount: toBase(ctx.order.total, ctx.order.fxRate),
+      });
     return {
       output: { key, terms, due, onAccount: owed },
       vars: { invoiceKey: key, dueDate: due },

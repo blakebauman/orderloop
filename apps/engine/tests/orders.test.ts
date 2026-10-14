@@ -1052,6 +1052,13 @@ describe('pricing chain', () => {
     );
     expect(owed.output).toMatchObject({ terms: 'net_30', onAccount: true });
     expect(await balance('cus_fabrikam')).toBe(fabrikam + 500);
+    // A retried step (same order and step key) bills the account once.
+    await run(
+      'commerce.invoice',
+      { terms: 'net_30' },
+      { model: 'b2b', customerId: 'cus_fabrikam' },
+    );
+    expect(await balance('cus_fabrikam')).toBe(fabrikam + 500);
 
     const off = await run(
       'commerce.invoice',

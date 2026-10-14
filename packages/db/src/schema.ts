@@ -293,6 +293,20 @@ export const priceRules = sqliteTable(
 );
 
 /** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
+/** One change to a customer's balance, keyed by the step that made it. */
+export const balanceEntries = sqliteTable(
+  'balance_entries',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    customerId: text('customer_id').notNull(),
+    amount: real('amount').notNull(),
+    applied: integer('applied', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('balance_entries_customer').on(t.customerId, t.createdAt)],
+);
+
 export const stockMovements = sqliteTable(
   'stock_movements',
   {
