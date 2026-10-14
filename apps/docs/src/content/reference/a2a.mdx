@@ -34,8 +34,8 @@ Send `Authorization: Bearer …` with every request, one of:
   created with and its expiry. `APP_PASSWORD` works as a break-glass operator.
 - An OAuth access token, from the authorization-code flow with PKCE. Request the resource
   `https://orderloop.io/a2a`; the scope is the role to act with. The person signs in on
-  OrderLoop's consent page, which says the app acts "via A2A", and grants a role no higher than
-  their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
+  OrderLoop's consent page with their own account (not the workspace password), sees that the
+  app acts "via A2A", and grants a role no higher than their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
 
 Both are the credentials the [REST API](/reference/rest-api/) takes, with the same throttling
 (`429` with `Retry-After`) and expiry (`401` with the reason). A token is bound to one endpoint:

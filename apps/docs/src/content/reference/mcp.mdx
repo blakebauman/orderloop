@@ -23,7 +23,8 @@ connects at `/a2a`; see [A2A endpoint](/reference/a2a/).
 Add a custom connector with the URL `https://orderloop.io/mcp`. The client discovers the
 authorization server, registers itself and opens OrderLoop's consent page in your browser:
 
-1. Sign in as usual. Two-factor sign-in applies.
+1. Sign in with your own account. Two-factor sign-in applies. The workspace password can't
+   connect an app, because an app's actions must trace to a person.
 2. Check which app is asking and where access will be sent. An app that registered itself is
    marked as unverified; an app on your own computer gets an extra warning.
 3. Choose a role. You are offered your own role and the roles below it, lowest first, and the

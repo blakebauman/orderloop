@@ -54,7 +54,10 @@ export async function action({ request }: Route.ActionArgs) {
     // The ten minutes ran out, or the person was disabled meanwhile: start again.
     if (!(await pendingChallenge(request))) throw backToSignIn(request);
     return {
-      error: 'That code is not right. Check the time on your phone, or use a recovery code.',
+      error:
+        form.get('method') === 'recovery'
+          ? 'That recovery code isn’t one of yours, or it has been used.'
+          : 'That code is not right. Check the time on your phone, or use a recovery code.',
     };
   }
   const headers = new Headers();
@@ -69,13 +72,14 @@ export default function LoginTwoFactor() {
   // Authenticator codes are digits (a number keypad on phones); recovery codes have letters.
   const [recovery, setRecovery] = useState(false);
   const code = useRef<HTMLInputElement>(null);
-  const error = result?.error;
+  const [cleared, setCleared] = useState<typeof result>(undefined);
+  const error = result && result !== cleared ? result.error : undefined;
   useEffect(() => {
     if (error) code.current?.select();
   }, [error]);
   return (
-    <main className="grid min-h-dvh place-items-center bg-background px-4">
-      <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
+    <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
+      <Form method="post" className="h-fit w-full max-w-sm rounded-md border bg-card p-6">
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">Two-factor sign-in</h1>
         <p className="mt-1 text-muted-foreground text-sm">
@@ -86,6 +90,7 @@ export default function LoginTwoFactor() {
         <label className="mt-5 block text-sm" htmlFor="code">
           {recovery ? 'Recovery code' : 'Code'}
         </label>
+        <input type="hidden" name="method" value={recovery ? 'recovery' : 'app'} />
         <Input
           ref={code}
           key={recovery ? 'recovery' : 'app'}
@@ -111,17 +116,21 @@ export default function LoginTwoFactor() {
         <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
           <button
             type="button"
-            className="text-link hover:underline"
-            onClick={() => setRecovery((r) => !r)}
+            className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
+            onClick={() => {
+              setCleared(result);
+              setRecovery((r) => !r);
+            }}
           >
             {recovery ? 'Use a code from your app instead' : 'Lost your phone? Use a recovery code'}
           </button>
-          <p>
-            No codes left? Ask an operator to reset your two-factor sign-in.{' '}
-            <Link to="/logout" className="text-link hover:underline">
-              Use a different account
-            </Link>
-          </p>
+          <p>No codes left? Ask an operator to reset your two-factor sign-in.</p>
+          <Link
+            to="/logout"
+            className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
+          >
+            Use a different account
+          </Link>
         </div>
       </Form>
     </main>

@@ -339,7 +339,8 @@ export async function requireUser(request: Request, min: Role = 'viewer'): Promi
   // Client navigations fetch loader data from `<path>.data`.
   if ((p.twoFactorDue || p.passwordChangeDue) && url.pathname.replace(/\.data$/, '') !== SETUP_PATH)
     throw redirect(SETUP_PATH);
-  if (!atLeast(p.role, min)) throw data({ ok: false, error: forbidden(min) }, { status: 403 });
+  if (!atLeast(p.role, min))
+    throw data({ ok: false, error: forbidden(min), need: min }, { status: 403 });
   return p;
 }
 
