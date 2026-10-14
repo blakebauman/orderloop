@@ -11,17 +11,18 @@ change it and publish a new version. The list below is rendered from `TEMPLATES`
 
 ## Seeding
 
-`seedFlows` (`packages/db/src/flows.ts`) publishes each template whose flow id doesn't exist yet
-as version 1. It runs:
+`seedFlows` (`packages/db/src/flows.ts`) publishes each template whose exact JSON has never been
+published as a version of that flow: a new template as version 1, a changed one as the next version. It runs:
 
 - in the web app, through `ensureSeeded()`, the first time a worker isolate lists or loads flows
   (the dashboard, `/flows`, a flow page, `GET /api/v1/flows`), or starts an order from the New order form, `POST /api/v1/orders` or a signed
   `POST /api/v1/webhooks/orders`;
 - in the engine, through `ensureTemplates()`, before the Replenish Workflow starts a replenishment order.
 
-Seeding never overwrites a flow that exists, so your edits survive. When a template changes in
-the code, the editor of a template-based flow offers the new graph as a proposal to review
-(see [Building flows](/guides/building-flows/#the-editor)).
+A template that matches any earlier published version is left alone, so code still running from before
+a change can't roll a newer version back, and seeding twice publishes once. A template that
+changed in the code is published over the flow's draft and over anything you published from the editor since, so
+keep a customised copy as its own flow. Orders already running keep the version they pinned.
 
 ## The flows
 
@@ -38,7 +39,7 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 | Scenario | Flow | Path |
 |---|---|---|
 | Guest checkout | `tpl-storefront-order` | A `b2c` web order with `contact` and no customer: card checkout, and the shipping and return emails go to the contact address |
-| B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the agent router auto-approves, ships, waits for payment |
+| B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the credit check passes, the routine assessment is unsure (`AI_MODE=mock` always answers 0.5), so the agent router triages and auto-approves; ships, waits for payment |
 | B2B over credit limit | `tpl-b2b-order` | `cus_contoso` is near its limit, so the credit check routes to a person |
 | B2B out of stock | `tpl-b2b-order` | `meta.simulate: "out_of_stock"`: the reservation comes up short and the order fails and rolls back |
 | Procurement request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |

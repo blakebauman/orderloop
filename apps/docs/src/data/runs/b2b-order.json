@@ -55,6 +55,11 @@
       "summary": "Within credit ($88,000.00 available)",
       "branches": ["ok"]
     },
+    "assess": {
+      "status": "succeeded",
+      "summary": "routine 0.50 · ambiguous 0.50 · urgent 0.50 (heuristic)",
+      "branches": ["unsure"]
+    },
     "router": {
       "status": "succeeded",
       "summary": "→ auto_approve",
