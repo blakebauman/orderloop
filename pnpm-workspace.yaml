@@ -29,7 +29,7 @@ catalog:
   json-logic-js: ^2.0.5
 
   # Agents
-  agents: ^0.28.0
+  agents: ^0.28.1
   '@cloudflare/ai-chat': 0.12.0
   ai: 7.0.122
   '@ai-sdk/react': 4.0.125
@@ -46,3 +46,8 @@ catalog:
   wrangler: ^4.149.0
   '@cloudflare/workers-types': ^5.20261009.1
   '@cloudflare/vitest-plugin': ^1.4.0
+
+overrides:
+  # GHSA: quadratic selector parsing (< 7.1.6). Starlight → expressive-code → postcss-nested@6
+  # still asks for ^6, which has no patched release. Drop once postcss-nested moves to ^7.
+  'postcss-nested>postcss-selector-parser': ^7.1.6
