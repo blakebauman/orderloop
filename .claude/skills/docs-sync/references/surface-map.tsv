@@ -16,7 +16,7 @@
 ^packages/core/src/address\.ts$	reference/expressions	prose
 ^packages/core/src/pricing\.ts$	reference/expressions internals/data-model	prose
 ^apps/web/app/lib/approvals\.ts$	guides/approvals-and-events	prose
-^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api	gen
+^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api reference/a2a	gen
 ^apps/web/workers/app\.ts$	internals/architecture reference/rest-api guides/team-and-roles reference/a2a	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders	gen
 ^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api reference/configuration	gen

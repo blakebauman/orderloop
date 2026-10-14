@@ -140,6 +140,16 @@ every pending approval row `cancelled`, sets status `cancelled` with the reason 
 waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
 `emitWebhook` for `order.cancelled`.
 
+## A2A watchers
+
+An [A2A](/reference/a2a/) task that follows this order calls `watch(name)`, which records the
+caller's `A2AAgent` name in `a2a_watchers` (repeats are ignored). `onStateChanged` computes a key
+from the status and the event types the order waits on; when it differs from the last one stored
+(`a2a_watch_state`) and someone watches, it schedules `notifyWatchers({ names, attempt })` at once.
+That calls `orderChanged(orderId)` on each watcher's `A2AAgent`. A watcher that can't be reached is
+retried with the webhooks' backoff (`10 * 2^attempt` seconds, up to 5 retries, `WEBHOOK_RETRIES`).
+When the order has finished and everyone has heard, `a2a_watchers` is cleared.
+
 ## Agent-side webhooks
 
 `emitWebhook({ key, event, data, attempt })` calls the same `emit` as the Workflow's emit steps,

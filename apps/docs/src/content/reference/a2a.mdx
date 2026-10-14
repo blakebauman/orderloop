@@ -13,8 +13,8 @@ it connects with. The skills are the tools of [the assistant](/guides/assistant/
 [MCP server](/reference/mcp/), plus `place_order` and `chat`. An A2A **task** is a request that
 runs to an outcome; a task about an order follows the order.
 
-The binding is JSON-RPC over HTTP `POST`; the card advertises streaming and no push
-notifications. Any other method on `/a2a` gets `405`.
+The binding is JSON-RPC over HTTP `POST`; the card advertises streaming and push notifications
+(`capabilities.pushNotifications`). Any other method on `/a2a` gets `405`.
 
 ## Discovery
 
@@ -71,7 +71,62 @@ A task that follows an order reports its state as the order moves, with a line s
 for example that it is waiting for approval “Credit over limit” and how to reply. One request
 follows the order for about 25 seconds, ending early when the order finishes or waits. If the
 order is still running after that, the task stays `TASK_STATE_WORKING`; `GetTask` (and `ListTasks`)
-read the order live while it is unfinished, so they are current without anything polling.
+read the order live while it is unfinished, so they are current without anything polling. To be
+told instead of asking, register a [push notification](#push-notifications).
+
+## Push notifications
+
+A task can have up to 5 push URLs. OrderLoop POSTs every update to the task to each of them, so a
+caller needs no open request and no polling. Register a URL in either of two ways:
+
+- Inline, in the first message: `SendMessage` with
+  `configuration.taskPushNotificationConfig` (`url`, optional `token`, optional `authentication`).
+  It applies to the task that message creates.
+- With the config methods on an existing task: `CreateTaskPushNotificationConfig`,
+  `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs` and
+  `DeleteTaskPushNotificationConfig`, each with the `taskId`. A config without an `id` gets one
+  assigned; creating with an existing `id` replaces that config. Deleting a config also drops any
+  notification still queued for it, so nothing more is sent to that URL.
+
+A `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`
+(the rule is `isWebhookUrl` in `packages/core/src/webhooks.ts`, the one
+[webhook subscriptions](/guides/outbound-webhooks/) use). Anything else, or a sixth URL, is
+refused with an invalid-request error. The engine's outbound `fetch` runs with
+`global_fetch_strictly_public`, so only public addresses are reached.
+
+**Payload.** The body is an A2A 1.0 `StreamResponse` as JSON, with content type
+`application/a2a+json`: a `statusUpdate` (`taskId`, `contextId`, `status`), or the `task`,
+`artifactUpdate` or `message` the live request produced.
+
+**Authenticating the sender.** With `authentication` set, the request carries
+`Authorization: <scheme> <credentials>`; otherwise, with `token` set, it carries
+`X-A2A-Notification-Token: <token>`. Check one of them on your receiver.
+
+**What triggers a push.** Updates from the request that creates or continues the task, and
+afterwards every change in the order the task follows: a status change or a change in what the
+order waits for. These arrive after the request has ended, for example when the approval is
+decided on the order page, the payment event arrives or the order completes. The same status
+(state and text) is never pushed twice in a row for a task.
+
+**Delivery.** Each notification is a row in the caller's `A2AAgent` SQLite, tried at once with a
+5-second timeout. A non-`2xx` answer, a timeout or a connection error is retried 5 more times on
+the object's alarm, after 10 seconds doubling each time (10s, 20s, 40s, 80s, 160s). After that the
+row is kept as `failed` for 7 days, then removed. Delivery is at least once: dedupe on your side
+if a receiver acknowledges slowly.
+
+```bash
+curl https://orderloop.io/a2a \
+  -H "Authorization: Bearer ol_live_…" -H "A2A-Version: 1.0" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 5, "method": "CreateTaskPushNotificationConfig",
+    "params": {
+      "taskId": "<task id>",
+      "url": "https://agent.example.com/a2a-hooks",
+      "authentication": { "scheme": "Bearer", "credentials": "<secret>" }
+    }
+  }'
+```
 
 ## Replying to a task
 
@@ -197,4 +252,6 @@ to `apps/web/app/lib/oauth.server.ts`, which resolves the caller and forwards to
 engine's `handleA2A` (`apps/engine/src/a2a/route.ts`) sends the request to the caller's `A2AAgent`
 Durable Object (`apps/engine/src/a2a/agent.ts`), which speaks JSON-RPC with `@a2a-js/sdk`. Tasks
 and their order links live in the object's SQLite (`store.ts`); `executor.ts` maps messages to the
-assistant's tools. See [Architecture](/internals/architecture/#a2a).
+assistant's tools. `push.ts` holds the push configs (`SqlPushStore`) and the outbox
+(`PushSender`). Following an order registers the caller's `A2AAgent` with the `OrderAgent`, which
+calls `orderChanged` on it when the order moves. See [Architecture](/internals/architecture/#a2a).

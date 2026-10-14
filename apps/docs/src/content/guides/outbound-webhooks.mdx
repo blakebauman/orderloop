@@ -21,6 +21,8 @@ curl -X POST https://orderloop.io/api/v1/webhook-subscriptions \
 ```
 
 - `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`.
+  Deliveries leave the engine with `global_fetch_strictly_public`, so they reach public addresses only; a local `http` URL is
+  accepted when subscribing but is not reachable from a deployed engine.
 - `events` is a list of the event names above, or `["*"]` for every event (the default). An unknown name returns `400`.
 
 The `201` response is `{ "subscription": { … }, "secret": "whsec_…" }`. **The secret is returned

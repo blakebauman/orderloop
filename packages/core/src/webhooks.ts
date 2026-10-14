@@ -10,6 +10,23 @@
 
 export const SIGNATURE_HEADER = 'x-orderloop-signature';
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Where OrderLoop may POST to: https, or plain http on this machine for local development. Used for
+ * webhook subscriptions and A2A push notification URLs.
+ */
+export function isWebhookUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === 'https:' || (protocol === 'http:' && LOCAL_HOSTS.has(hostname));
+  } catch {
+    return false;
+  }
+}
+
+export const WEBHOOK_URL_RULE = 'Use an https URL (plain http is allowed only for localhost)';
+
 const enc = new TextEncoder();
 
 async function hmacHex(secret: string, message: string): Promise<string> {

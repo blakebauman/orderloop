@@ -55,6 +55,9 @@ const TIMELINE_CAP = 400;
 // Matches the Workflow's emit step: 5 retries with exponential backoff from 10 seconds.
 const WEBHOOK_RETRIES = 5;
 
+/** What an A2A watcher cares about: the order's status and what it waits on. */
+const watchKey = (s: State) => `${s.status}|${s.waits.map((w) => w.eventType).join(',')}`;
+
 export class OrderAgent extends Agent<Env, State> {
   override initialState: State = { ...EMPTY_ORDER_STATE, seq: 0 };
 
@@ -444,6 +447,57 @@ export class OrderAgent extends Agent<Env, State> {
       attempt: 0,
     });
     return { ok: true };
+  }
+
+  // ── A2A watchers ──
+  // An A2A task that follows this order (apps/engine/src/a2a/) registers its caller's A2AAgent
+  // here, and is told whenever the order's status or waits change, so the task can push the update
+  // after the request that started it has ended.
+
+  private watchers(): string[] {
+    this.sql`CREATE TABLE IF NOT EXISTS a2a_watchers (name TEXT PRIMARY KEY)`;
+    return this.sql<{ name: string }>`SELECT name FROM a2a_watchers`.map((r) => r.name);
+  }
+
+  /** Registers an A2AAgent (by name) to hear about this order. Repeats are harmless. */
+  async watch(name: string) {
+    this.watchers();
+    this.sql`INSERT OR IGNORE INTO a2a_watchers (name) VALUES (${name})`;
+  }
+
+  override onStateChanged(state: State | undefined) {
+    if (!state?.orderId || !this.watchers().length) return;
+    this.sql`CREATE TABLE IF NOT EXISTS a2a_watch_state (id INTEGER PRIMARY KEY, key TEXT)`;
+    const key = watchKey(state);
+    const last = this.sql<{ key: string }>`SELECT key FROM a2a_watch_state WHERE id = 1`[0]?.key;
+    if (key === last) return;
+    this.sql`INSERT OR REPLACE INTO a2a_watch_state (id, key) VALUES (1, ${key})`;
+    this.ctx.waitUntil(this.schedule(0, 'notifyWatchers', { names: this.watchers(), attempt: 0 }));
+  }
+
+  /**
+   * Tells each watcher the order moved. A watcher that can't be reached is retried with the
+   * webhooks' backoff; once the order has finished and everyone has heard, the list is cleared.
+   */
+  async notifyWatchers(p: { names: string[]; attempt: number }) {
+    const orderId = this.state.orderId;
+    if (!orderId) return;
+    const missed: string[] = [];
+    for (const name of p.names) {
+      try {
+        await this.env.A2A_AGENT.getByName(name).orderChanged(orderId);
+      } catch (err) {
+        console.warn('a2a watcher', name, err);
+        missed.push(name);
+      }
+    }
+    if (missed.length && p.attempt < WEBHOOK_RETRIES)
+      await this.schedule(10 * 2 ** p.attempt, 'notifyWatchers', {
+        names: missed,
+        attempt: p.attempt + 1,
+      });
+    else if (TERMINAL_ORDER_STATUSES.includes(this.state.status))
+      this.sql`DELETE FROM a2a_watchers`;
   }
 
   /**

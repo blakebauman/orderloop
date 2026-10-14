@@ -3,7 +3,9 @@
   "name": "orderloop-engine",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // Outbound fetches (webhooks, A2A push notifications) go to URLs callers give us: public
+  // addresses only.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   // Reachable only through the web app's service binding: no workers.dev URL, no routes.
   "workers_dev": false,
   "preview_urls": false,

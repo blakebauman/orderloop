@@ -124,7 +124,7 @@ export function agentCard(origin: string) {
     provider: { organization: 'OrderLoop', url: origin },
     version: '1.0.0',
     documentationUrl: 'https://docs.orderloop.io/reference/a2a/',
-    capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false },
+    capabilities: { streaming: true, pushNotifications: true, extendedAgentCard: false },
     securitySchemes: {
       apiToken: {
         httpAuthSecurityScheme: {

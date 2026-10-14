@@ -128,7 +128,14 @@ JSON-RPC through `@a2a-js/sdk`'s `DefaultRequestHandler`, with SSE for `SendStre
 `{ skill, input }` into `runTool` with `via: 'A2A'`, starts orders with `startOrderOnce` keyed
 `a2a:<principal id>:<messageId>`, runs `chat` with `assistantModel` (an action it proposes stops at
 `input-required` until `{ confirm }`), and follows an order for up to 25 seconds per request.
-`CancelTask` cancels the order first, as the caller. See [A2A endpoint](/reference/a2a/).
+`CancelTask` cancels the order first, as the caller.
+
+Push notifications (`push.ts`) keep their configs in `push_configs` and a durable outbox in
+`push_outbox` in the same SQLite, retried on the object's alarm. Updates that happen with no
+request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<A2AAgent name>)`,
+the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
+`A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
+changed. See [A2A endpoint](/reference/a2a/#push-notifications).
 
 ## Bindings
 

@@ -21,6 +21,13 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `INTAKE_REQUIRE_AUTH` | `true` | `"false"` accepts mail without a passing DMARC, DKIM or SPF result. Never in production |
 | `INTAKE_REPLY` | `true` | `"false"` turns off the acknowledgement reply to accepted email |
 
+## Compatibility flags
+
+`apps/engine/wrangler.jsonc` sets `nodejs_compat` and `global_fetch_strictly_public`. The second
+makes the engine's outbound `fetch` (outbound webhooks and [A2A push
+notifications](/reference/a2a/#push-notifications), whose URLs callers supply) reach public
+addresses only, not private or loopback ones.
+
 ## Engine secrets
 
 Set with `pnpm --filter @orderloop/engine exec wrangler secret put <NAME>`.
