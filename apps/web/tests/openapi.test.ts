@@ -17,13 +17,17 @@ describe('OpenAPI document', () => {
     for (const [path, item] of Object.entries(json.paths) as [string, Record<string, Op>][])
       for (const op of Object.values(item))
         if (op.requestBody)
-          expect(op.requestBody.content['application/json']!.schema, path).toHaveProperty('type');
+          for (const media of Object.values(op.requestBody.content))
+            expect(media.schema, path).toHaveProperty('type');
   });
 
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);
     expect(doc.paths['/api/v1/webhooks/orders'].post.security).toEqual([]);
+    // Shopify signs with its own header; EDI comes from an operator token.
+    expect(doc.paths['/api/v1/channels/shopify/orders'].post.security).toEqual([]);
+    expect(doc.paths['/api/v1/channels/edi/850'].post).not.toHaveProperty('security');
   });
 });
 

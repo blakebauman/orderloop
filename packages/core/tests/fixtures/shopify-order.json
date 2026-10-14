@@ -1,0 +1,24 @@
+{
+  "id": 820982911946154508,
+  "name": "#1001",
+  "email": "jon@example.com",
+  "currency": "USD",
+  "source_name": "web",
+  "company": null,
+  "customer": { "first_name": "Jon", "last_name": "Snow", "phone": null },
+  "line_items": [
+    { "sku": "MON-27", "title": "27\" monitor", "quantity": 1, "price": "349.00" },
+    { "sku": "TEE-01", "title": "Organic cotton tee", "quantity": 2, "price": "32.00" }
+  ],
+  "shipping_address": {
+    "name": "Jon Snow",
+    "address1": "1 Market St",
+    "address2": null,
+    "city": "San Francisco",
+    "province_code": "CA",
+    "zip": "94105",
+    "country_code": "US",
+    "latitude": 37.7946,
+    "longitude": -122.3947
+  }
+}

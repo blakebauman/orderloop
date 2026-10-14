@@ -1,6 +1,11 @@
 import { AGENT_CARD_PATH, agentCard, encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
-import { handleApi, handleSignedEvent, handleSignedOrder } from '../app/lib/api.server';
+import {
+  handleApi,
+  handleShopifyOrder,
+  handleSignedEvent,
+  handleSignedOrder,
+} from '../app/lib/api.server';
 import {
   apiPrincipal,
   principal,
@@ -41,6 +46,10 @@ export default {
     }
     if (url.pathname === '/api/v1/webhooks/orders' && request.method === 'POST') {
       return handleSignedOrder(request);
+    }
+    // Shopify signs with its own HMAC header, not a bearer token.
+    if (url.pathname === '/api/v1/channels/shopify/orders' && request.method === 'POST') {
+      return handleShopifyOrder(request);
     }
 
     // A browser's state-changing requests and the order page's socket must come from this origin;

@@ -241,3 +241,14 @@ export async function currencies() {
   const rows = await db().select().from(fxRates).orderBy(fxRates.currency);
   return rows.sort((a, b) => Number(b.rate === 1) - Number(a.rate === 1));
 }
+
+/** The customer a channel's buyer email belongs to, for orders that arrive without an id. */
+export async function customerIdByEmail(email: string | null | undefined) {
+  if (!email) return undefined;
+  const row = await db()
+    .select({ id: customers.id })
+    .from(customers)
+    .where(sql`lower(${customers.email}) = ${email.trim().toLowerCase()}`)
+    .get();
+  return row?.id;
+}

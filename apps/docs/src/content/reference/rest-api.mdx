@@ -18,8 +18,8 @@ session cookie also works, and so does `APP_PASSWORD` as a break-glass operator)
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
 (starting, cancelling, events, webhook subscriptions) `operator`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). An open deployment (no `APP_PASSWORD`, no
-people) needs no token. Three routes are exceptions: `GET /api/v1/openapi.json` is public, and `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
-authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)).
+people) needs no token. Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
+authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)), and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
 `401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` too many wrong bearer tokens from one address (more
@@ -44,6 +44,8 @@ than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWOR
 | `GET` | `/api/v1/webhook-subscriptions/:id/deliveries` | | `{ deliveries }` |
 | `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }`, `404` or `409` |
 | `POST` | `/api/v1/webhooks/orders` | `{ model, channel, externalId, lines, … }` | `201 { orderId, flowId }`, or `200` on a replay |
+| `POST` | `/api/v1/channels/shopify/orders` | A Shopify `orders/create` payload | `201 { orderId, flowId }`, `200` on a replay or `{ ignored: true, topic }` |
+| `POST` | `/api/v1/channels/edi/850` | Raw X12 (`application/edi-x12` or `text/plain`) | `200 { sender, results }` (operator) |
 
 ## Flows
 
@@ -186,6 +188,21 @@ channel, signed the same way as events. The body is `input` plus a required `cha
 Statuses: `201 { orderId, flowId }` started, `200 { orderId, replayed: true }` replay, `400` invalid body or unsupported currency, `401` bad
 signature, `409` flow not published, `422` same order with different contents, `503`
 `WEBHOOK_SECRET` not set. See [Inbound orders](/guides/inbound-orders/).
+
+## Channel adapters
+
+`POST /api/v1/channels/shopify/orders` takes a Shopify `orders/create` webhook, verified by the
+`X-Shopify-Hmac-Sha256` header (base64 HMAC-SHA256 of the raw body with `SHOPIFY_WEBHOOK_SECRET`)
+rather than a token. Statuses: `201 { orderId, flowId }` started, `200 { orderId, replayed: true }`
+replay, `200 { ignored: true, topic }` for any other `X-Shopify-Topic`, `400` not JSON, unmappable
+(a line item without a SKU) or invalid, or an unsupported currency, `401` bad signature, `409` flow not published,
+`422` same order with different contents, `503` `SHOPIFY_WEBHOOK_SECRET` not set.
+
+`POST /api/v1/channels/edi/850` takes a raw X12 interchange and needs the `operator` role. The
+sender (`ISA06`) must be in `EDI_PARTNERS`. It answers `200 { sender, results }` with one
+`{ control, poNumber?, status, orderId?, flowId?, replayed?, error? }` per transaction; `400` is
+not valid X12, `403` an unlisted sender or a caller below `operator`. Both start orders once per
+`order:<channel>:<externalId>`. See [Channel adapters](/guides/channel-adapters/).
 
 ## Audit events
 

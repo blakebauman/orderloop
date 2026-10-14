@@ -3,6 +3,8 @@ export * from './address';
 export * from './api';
 export * from './assistant';
 export * from './catalog';
+export * from './channels/shopify';
+export * from './channels/x12';
 export * from './fulfillment';
 export * from './graph';
 export * from './layout';

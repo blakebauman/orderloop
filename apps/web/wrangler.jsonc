@@ -26,9 +26,13 @@
   "vars": {
     // Inbound orders: JSON from "model:channel" or "model:*" to a flow id. Anything not routed
     // starts the model's default template.
-    "ORDER_ROUTES": ""
+    "ORDER_ROUTES": "",
+    // EDI 850s: JSON from a trading partner's ISA sender id to the customer it orders for. A
+    // sender not listed here is refused.
+    "EDI_PARTNERS": ""
   }
   // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
   // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). WEBHOOK_SECRET — enables
-  // signed events at POST /api/v1/webhooks/events and signed orders at POST /api/v1/webhooks/orders.
+  // signed events at POST /api/v1/webhooks/events and signed orders at POST /api/v1/webhooks/orders. SHOPIFY_WEBHOOK_SECRET — the
+  // Shopify app's client secret; enables POST /api/v1/channels/shopify/orders.
 }

@@ -6,7 +6,7 @@ Planned work, roughly in priority order. Most of it ports ideas from commercewor
 
 Nothing is scheduled. Candidates:
 
-- **Channel adapters.** Map Shopify, Amazon and other marketplace payloads, and EDI 850 purchase orders, onto the signed `POST /api/v1/webhooks/orders` body, so a store or trading partner connects without its own integration code.
+- **More channel adapters.** Shopify orders and EDI X12 850 purchase orders are in. Still to come: Amazon (an SP-API notification consumer and order fetch), 997 functional acknowledgements for EDI, and AS2/SFTP transport so partners can send without a provider in between.
 - **Sign in with an outside identity provider.** Users already carry `external_sub`; an OpenID Connect login could match people by subject and start the same session.
 
 ## Not planned

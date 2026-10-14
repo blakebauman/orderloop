@@ -89,6 +89,7 @@ export default defineConfig({
             { label: 'Marketplace', slug: 'guides/marketplace' },
             { label: 'Approvals and events', slug: 'guides/approvals-and-events' },
             { label: 'Inbound orders', slug: 'guides/inbound-orders' },
+            { label: 'Channel adapters', slug: 'guides/channel-adapters' },
             { label: 'Email intake', slug: 'guides/email-intake' },
             { label: 'Outbound webhooks', slug: 'guides/outbound-webhooks' },
             { label: 'AI nodes and the assistant', slug: 'guides/ai' },

@@ -9,6 +9,8 @@ Systems that take orders elsewhere (a storefront checkout, a marketplace, a till
 `POST /api/v1/webhooks/orders`. The request is signed with the web Worker's `WEBHOOK_SECRET`
 instead of carrying a token, so the sender needs no admin password. The order starts on a published
 flow and shows up in the dashboard under its channel, with the sender's id as its external id.
+Shopify and EDI X12 850 senders can post their native payloads instead; see
+[Channel adapters](/guides/channel-adapters/), which share this page's routing and idempotency.
 
 ## Payload
 
