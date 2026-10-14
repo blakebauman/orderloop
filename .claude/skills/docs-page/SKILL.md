@@ -62,7 +62,7 @@ source. The one exception is `src/pages/openapi.json.ts`, which builds the OpenA
 - Identifiers, paths, routes and values in backticks. Paths are repo-relative.
 - Sentence-case headings. No marketing words ("powerful", "seamless", "simply").
 - Say what happens and why, then stop. A table beats a paragraph listing five fields.
-- Examples are real: ids from the seeded data (`cus_northwind`, `tpl-b2b-order`, `WID-100`), real
+- Examples are real: ids from the seeded data (`cus_ada`, `tpl-storefront-order`, `MON-27`, `cus_northwind`, `tpl-b2b-order`, `WID-100`), across more than one commerce model, real
   node ids from the built-in flows, routes that exist.
 - Styling follows `apps/docs/DESIGN.md`. Colours come from the generated `src/styles/theme.css`
   (never hand-edited); hand-written rules go in `src/styles/brand.css`. Draw Order Loop concepts

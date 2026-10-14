@@ -12,14 +12,15 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               ├─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
               └─ /agents/assistant-agent/* WebSocket ──────►├─ AssistantAgent DO (one per person): the workspace assistant
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
-inbound PO email ── Cloudflare Email Routing ── email() ────►├─ Email intake: orders@ / po@ / purchasing@ start orders
+storefront, marketplace, POS ── POST /api/v1/webhooks/orders (signed, on apps/web)
+inbound order email ── Cloudflare Email Routing ── email() ─►├─ Email intake: orders@ / po@ / purchasing@ start orders
                                                             └─ Workers AI (extract, classify, risk, forecast, router,
                                                                copilot, assistant), R2 (POs, invoices, inbound docs)
 ```
 
 - **Flows are data.** A flow is a JSON graph of catalog nodes (`packages/core/src/catalog.ts`):
   - triggers;
-  - commerce steps (validate, address check, policy check, price, tax, credit, reserve, authorize, invoice, ship, return label, refund, …);
+  - commerce steps (validate, address check, policy check, price, tax, credit, reserve, authorize, invoice, ship, route fulfillment, pickup, hand over, digital delivery, split by seller, seller payouts, return label, refund, …);
   - control (condition, approval, wait for event, wait, loop, continue-as-new, end);
   - AI (extract, classify, risk score, forecast, summarize, and an LLM **router** that chooses a branch).
 
@@ -127,7 +128,7 @@ The flow is `flowId` when given, else the `ORDER_ROUTES` entry for `model:channe
 
 ### Email intake
 
-Send a purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send, and how to set up Email Routing for your own domain, are covered in the docs.
+Send an order, order form or purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send, and how to set up Email Routing for your own domain, are covered in the docs.
 
 ## Docs
 
