@@ -81,9 +81,11 @@ export const EXECUTORS: Record<string, Exec> = {
   'trigger.manual': passthrough,
   'trigger.webhook': async ({ ctx, config }) => {
     const { channel, externalId } = ctx.order;
-    const source = str(ctx.order.meta?.source, str(config.source, ''));
-    // The source adds nothing when it only repeats the channel ("web" on a web order).
-    const named = source && source !== channel ? ` (${source})` : '';
+    // The summary names the sending system only when the order says which it was (an inbound
+    // order's `source`, e.g. "shopify"): the node's own default would repeat or contradict the channel.
+    const given = str(ctx.order.meta?.source, '');
+    const source = given || str(config.source, '');
+    const named = given && given !== channel ? ` (${given})` : '';
     return {
       output: { channel, externalId: externalId ?? null, source },
       summary: `${ORDER_CHANNEL_LABELS[channel]}${externalId ? ` · ${externalId}` : ''}${named}`,
@@ -575,7 +577,10 @@ export const EXECUTORS: Record<string, Exec> = {
         sent.push(
           await cx.sendMessage(env, ctx.order.id, `${stepKey}:${s.id}`, s.email, subject, body),
         );
-      return { output: { messages: sent }, summary: `→ ${sent.length} sellers: ${subject}` };
+      return {
+        output: { messages: sent },
+        summary: `→ ${sent.length} ${sent.length === 1 ? 'seller' : 'sellers'}: ${subject}`,
+      };
     }
     const r = await cx.sendMessage(env, ctx.order.id, stepKey, recipient, subject, body);
     return { output: r, summary: `→ ${recipient}: ${subject}` };

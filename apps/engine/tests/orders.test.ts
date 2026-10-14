@@ -475,6 +475,8 @@ describe('storefront order', () => {
     expect(sent.every((m) => m.recipient === 'sam.rivera@example.com')).toBe(true);
     const row = await db().select().from(orders).where(eq(orders.id, orderId)).get();
     expect(row).toMatchObject({ channel: 'web', contactEmail: 'sam.rivera@example.com' });
+    // The flow's default source ("storefront") is not the order's, so it isn't shown.
+    expect(done.nodes.checkout!.summary).toBe('Web');
   });
 
   it('starts from an inbound order keyed by channel and external id', async () => {
@@ -560,6 +562,7 @@ describe('marketplace order', () => {
     expect(await parts(orderId)).toEqual({ sel_brightside: 'accepted', sel_kettle: 'pending' });
     const asked = await db().select().from(messages).where(eq(messages.orderId, orderId));
     expect(asked.map((m) => m.recipient)).toEqual(['shop@kettleandco.example']);
+    expect((await state(orderId)).nodes.ask!.summary).toMatch(/^→ 1 seller: New order /);
 
     await agent(orderId).deliver('seller.responded', {
       sellerId: 'sel_kettle',
