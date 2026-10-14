@@ -1,74 +1,75 @@
 # Source surface → docs that describe it. One source of truth, read by the docs-sync skill and by
 # .claude/hooks/docs-impact.sh and docs-drift.sh. Columns are TAB-separated:
 #   1. extended regex over repo-relative paths
-#   2. space-separated docs pages, relative to apps/docs/src/content/ (".mdx" implied), or a path
-#      starting with apps/ for a non-page file that mirrors the source
+#   2. space-separated docs pages: a published page relative to apps/docs/src/content/ (".mdx"
+#      implied), a maintainer page under docs/ (unpublished: internals, deploy, configuration), or
+#      a path starting with apps/ or packages/ for a non-page file that mirrors the source
 #   3. "gen" when a reference page renders from this source at build time (rebuild, then check the
 #      prose around it), else "prose"
 # Keep rows narrow: a row that matches everything nags on every edit and gets ignored.
 ^packages/core/src/catalog\.ts$	reference/nodes guides/building-flows guides/ai	gen
 ^packages/core/src/templates\.ts$	guides/templates guides/commerce-models start/getting-started index	gen
-^packages/core/src/graph\.ts$	internals/planner guides/building-flows start/concepts	prose
+^packages/core/src/graph\.ts$	docs/planner.md guides/building-flows start/concepts	prose
 ^packages/core/src/types\.ts$	start/concepts guides/commerce-models reference/rest-api reference/expressions	gen
-^packages/core/src/api\.ts$	reference/rest-api internals/architecture internals/order-agent	prose
+^packages/core/src/api\.ts$	reference/rest-api docs/architecture.md docs/order-agent.md	prose
 ^packages/core/src/logic\.ts$	reference/expressions	prose
 ^packages/core/src/policy\.ts$	reference/expressions	gen
 ^packages/core/src/address\.ts$	reference/expressions	prose
-^packages/core/src/fulfillment\.ts$	guides/fulfillment internals/testing	prose
-^packages/core/src/pricing\.ts$	reference/expressions internals/data-model	prose
+^packages/core/src/fulfillment\.ts$	guides/fulfillment docs/testing.md	prose
+^packages/core/src/pricing\.ts$	reference/expressions docs/data-model.md	prose
 ^apps/web/app/lib/approvals\.ts$	guides/approvals-and-events	prose
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api reference/a2a	gen
-^apps/web/workers/app\.ts$	internals/architecture reference/rest-api guides/team-and-roles reference/a2a	prose
+^apps/web/workers/app\.ts$	docs/architecture.md reference/rest-api guides/team-and-roles reference/a2a	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders	gen
-^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api reference/configuration	gen
-^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api reference/configuration start/deploy internals/architecture	prose
+^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api docs/configuration.md	gen
+^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api docs/configuration.md docs/deploy.md docs/architecture.md	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
 ^apps/web/app/lib/scenarios\.ts$	guides/templates start/getting-started	prose
-^apps/web/app/(lib/metrics\.server\.ts|components/performance\.tsx)$	internals/data-model start/getting-started	prose
+^apps/web/app/(lib/metrics\.server\.ts|components/performance\.tsx)$	docs/data-model.md start/getting-started	prose
 ^apps/web/app/components/decision\.tsx$	guides/approvals-and-events	prose
 ^apps/web/app/routes/flow-(editor|action)\.tsx?$	guides/building-flows	prose
 ^apps/web/app/routes/(approvals|order)\.tsx$	guides/approvals-and-events	prose
 ^apps/web/app/app\.css$	packages/design/src/tokens.ts apps/docs/src/styles/brand.css apps/docs/DESIGN.md	prose
 ^packages/design/src/tokens\.ts$	apps/docs/src/styles/theme.css apps/docs/DESIGN.md	gen
 ^apps/web/app/(routes/shell|components/(flow-node|node-icon|status|page))\.tsx$	apps/docs/src/styles/brand.css apps/docs/DESIGN.md	prose
-^apps/engine/src/workflow\.ts$	internals/workflow guides/approvals-and-events guides/building-flows	prose
-^apps/engine/src/agent\.ts$	internals/order-agent guides/approvals-and-events guides/ai	prose
-^apps/engine/src/nodes\.ts$	reference/expressions guides/building-flows internals/workflow	prose
-^apps/engine/src/connectors\.ts$	internals/architecture guides/templates	prose
+^apps/engine/src/workflow\.ts$	docs/workflow.md guides/approvals-and-events guides/building-flows	prose
+^apps/engine/src/agent\.ts$	docs/order-agent.md guides/approvals-and-events guides/ai	prose
+^apps/engine/src/nodes\.ts$	reference/expressions guides/building-flows docs/workflow.md	prose
+^apps/engine/src/connectors\.ts$	docs/architecture.md guides/templates	prose
 ^apps/engine/src/outbox\.ts$	guides/outbound-webhooks	prose
 ^apps/engine/src/ai\.ts$	guides/ai	prose
-^apps/engine/src/email\.ts$	guides/email-intake internals/architecture internals/data-model	prose
+^apps/engine/src/email\.ts$	guides/email-intake docs/architecture.md docs/data-model.md	prose
 ^packages/core/src/intake\.ts$	guides/email-intake	prose
 ^apps/web/app/routes/back-office\.tsx$	guides/email-intake	prose
-^apps/engine/src/(orders|replenish|api|index)\.ts$	internals/architecture internals/workflow reference/rest-api	prose
-^apps/(engine|web)/wrangler\.jsonc$	reference/configuration start/deploy internals/architecture reference/a2a	prose
-^apps/web/\.dev\.vars\.example$	reference/configuration start/getting-started	prose
-^packages/db/(src/schema\.ts|migrations/)	internals/data-model guides/marketplace	prose
-^(apps|packages)/[^/]+/(vitest\.config\.ts|tests/)	internals/testing	prose
-^(\.github/workflows/|scripts/provision\.sh$)	start/deploy	prose
-^package\.json$	start/getting-started start/deploy	prose
-^packages/core/src/roles\.ts$	guides/team-and-roles internals/order-agent	prose
-^apps/web/app/(lib/team\.server\.ts|lib/auth\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|lib/totp\.ts|lib/two-factor(\.server)?\.ts|lib/settings\.server\.ts|routes/shell\.tsx|routes/audit\.tsx|routes/(team|account|login|login-two-factor)\.tsx)$	guides/team-and-roles reference/rest-api reference/configuration	prose
-^apps/engine/src/(assistant/|principal\.ts$)	guides/assistant guides/ai internals/architecture reference/mcp reference/a2a	prose
+^apps/engine/src/(orders|replenish|api|index)\.ts$	docs/architecture.md docs/workflow.md reference/rest-api	prose
+^apps/(engine|web)/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md reference/a2a	prose
+^apps/web/\.dev\.vars\.example$	docs/configuration.md docs/local-development.md	prose
+^packages/db/(src/schema\.ts|migrations/)	docs/data-model.md guides/marketplace	prose
+^(apps|packages)/[^/]+/(vitest\.config\.ts|tests/)	docs/testing.md	prose
+^(\.github/workflows/|scripts/provision\.sh$)	docs/deploy.md	prose
+^package\.json$	docs/local-development.md docs/deploy.md	prose
+^packages/core/src/roles\.ts$	guides/team-and-roles docs/order-agent.md	prose
+^apps/web/app/(lib/team\.server\.ts|lib/auth\.server\.ts|lib/credentials\.ts|lib/throttle\.ts|lib/origin\.ts|lib/audit(\.server)?\.ts|lib/tokens\.ts|lib/sessions\.ts|lib/totp\.ts|lib/two-factor(\.server)?\.ts|lib/settings\.server\.ts|routes/shell\.tsx|routes/audit\.tsx|routes/(team|account|login|login-two-factor)\.tsx)$	guides/team-and-roles reference/rest-api docs/configuration.md	prose
+^apps/engine/src/(assistant/|principal\.ts$)	guides/assistant guides/ai docs/architecture.md reference/mcp reference/a2a	prose
 ^packages/core/src/assistant\.ts$	guides/assistant guides/ai reference/mcp reference/a2a	gen
 ^apps/web/app/(components/assistant/|lib/assistant\.tsx$)	guides/assistant	prose
 ^packages/core/src/(catalog|templates)\.ts$	guides/marketplace	gen
-^apps/engine/src/mcp\.ts$	reference/mcp guides/assistant internals/architecture	prose
-^apps/web/app/(lib/oauth\.server|routes/oauth-authorize)\.tsx?$	reference/mcp reference/a2a guides/team-and-roles internals/architecture reference/configuration	prose
+^apps/engine/src/mcp\.ts$	reference/mcp guides/assistant docs/architecture.md	prose
+^apps/web/app/(lib/oauth\.server|routes/oauth-authorize)\.tsx?$	reference/mcp reference/a2a guides/team-and-roles docs/architecture.md docs/configuration.md	prose
 ^apps/docs/src/components/McpTools\.astro$	reference/mcp	gen
 ^(packages/core/src/(catalog|templates|inbound|webhooks)\.ts|apps/engine/src/(connectors|nodes)\.ts|packages/db/(src/schema\.ts|migrations/0020_fulfillment\.sql)|apps/web/app/routes/order-new\.tsx)$	guides/fulfillment	gen
-^packages/core/src/catalog\.ts$	internals/workflow internals/planner	prose
-^packages/core/src/(webhooks|assistant)\.ts$	internals/workflow internals/architecture	prose
-^apps/engine/src/outbox\.ts$	internals/workflow internals/data-model	prose
-^apps/engine/src/(connectors|flows|orders)\.ts$	internals/data-model	prose
-^packages/db/src/flows\.ts$	internals/data-model	prose
-^apps/web/app/lib/(flows|orders)\.server\.ts$	internals/data-model	prose
-^apps/web/app/lib/origin\.ts$	internals/architecture	prose
-^apps/engine/src/principal\.ts$	internals/order-agent internals/architecture	prose
-^apps/docs/src/data/runs/	internals/testing index	prose
-^(turbo\.json|pnpm-workspace\.yaml|\.github/workflows/ci\.yml)$	internals/testing	prose
-^apps/engine/src/assistant/	internals/architecture internals/testing	prose
-^apps/engine/src/a2a/	reference/a2a internals/architecture guides/assistant internals/testing	prose
-^packages/core/src/a2a\.ts$	reference/a2a internals/architecture	gen
+^packages/core/src/catalog\.ts$	docs/workflow.md docs/planner.md	prose
+^packages/core/src/(webhooks|assistant)\.ts$	docs/workflow.md docs/architecture.md	prose
+^apps/engine/src/outbox\.ts$	docs/workflow.md docs/data-model.md	prose
+^apps/engine/src/(connectors|flows|orders)\.ts$	docs/data-model.md	prose
+^packages/db/src/flows\.ts$	docs/data-model.md	prose
+^apps/web/app/lib/(flows|orders)\.server\.ts$	docs/data-model.md	prose
+^apps/web/app/lib/origin\.ts$	docs/architecture.md	prose
+^apps/engine/src/principal\.ts$	docs/order-agent.md docs/architecture.md	prose
+^apps/docs/src/data/runs/	docs/testing.md index	prose
+^(turbo\.json|pnpm-workspace\.yaml|\.github/workflows/ci\.yml)$	docs/testing.md	prose
+^apps/engine/src/assistant/	docs/architecture.md docs/testing.md	prose
+^apps/engine/src/a2a/	reference/a2a docs/architecture.md guides/assistant docs/testing.md	prose
+^packages/core/src/a2a\.ts$	reference/a2a docs/architecture.md	gen
 ^apps/docs/src/components/A2a(Skills|TaskStates)\.astro$	reference/a2a	gen
-^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api reference/configuration	prose
+^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api docs/configuration.md	prose

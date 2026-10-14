@@ -18,7 +18,7 @@ export default defineConfig({
         alt: '',
       },
       description:
-        'OrderLoop: a durable agent loop for the commerce order lifecycle, built on Cloudflare Workers, Workflows, Durable Objects, Workers AI, D1 and R2.',
+        'OrderLoop: a durable agent loop for the commerce order lifecycle. Guides for the people who use it and reference for the systems that integrate with it.',
       // Prose lives at src/content/ (see content.config.ts). Without this Starlight skips its
       // Markdown transforms (asides, heading anchors) for files outside src/content/docs/.
       markdown: { processedDirs: ['./src/content'] },
@@ -70,13 +70,14 @@ export default defineConfig({
       head: [{ tag: 'link', attrs: { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' } }],
       // Explicit sidebar: autogenerate expects src/content/docs/. A new page is invisible until
       // it is listed here. Start reads as a sequence (Starlight's prev/next follows this order).
+      // The site is for people who use a workspace and developers who integrate with one;
+      // deployment, configuration and internals live in the repo's docs/ folder, unpublished.
       sidebar: [
         {
           label: 'Start',
           items: [
             { label: 'Getting started', slug: 'start/getting-started' },
             { label: 'Concepts', slug: 'start/concepts' },
-            { label: 'Deploy', slug: 'start/deploy' },
           ],
         },
         {
@@ -105,21 +106,8 @@ export default defineConfig({
             { label: 'Expressions and policy rules', slug: 'reference/expressions' },
             { label: 'MCP server', slug: 'reference/mcp' },
             { label: 'A2A endpoint', slug: 'reference/a2a' },
-            { label: 'Configuration', slug: 'reference/configuration' },
             // Scalar over the OpenAPI document generated from apps/web (src/pages/api.astro).
             { label: 'OpenAPI explorer', link: '/api/' },
-          ],
-        },
-        {
-          label: 'Internals',
-          collapsed: true,
-          items: [
-            { label: 'Architecture', slug: 'internals/architecture' },
-            { label: 'Planner', slug: 'internals/planner' },
-            { label: 'OrderLoop Workflow', slug: 'internals/workflow' },
-            { label: 'OrderAgent', slug: 'internals/order-agent' },
-            { label: 'Data model', slug: 'internals/data-model' },
-            { label: 'Testing', slug: 'internals/testing' },
           ],
         },
       ],

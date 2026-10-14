@@ -1,35 +1,24 @@
 ---
 title: AI nodes and the assistant
-description: The AI nodes, the heuristic each falls back to, the flow copilot, the workspace assistant, and how to configure the models.
+description: The AI nodes, the heuristic each falls back to, Assess, the flow copilot and the workspace assistant.
 ---
 
 OrderLoop uses Workers AI in three places: the AI nodes in a flow, the flow copilot, and the
-[workspace assistant](#the-assistant). The nodes (except [Assess](#assess)) and the copilot go
-through one function, `runJson` (`apps/engine/src/ai.ts`), with the same guarantees:
+[workspace assistant](#the-assistant). The AI nodes and the copilot share the same guarantees:
 
-- **JSON mode with a schema.** Every call asks for `response_format: json_schema`, so the result
-  has a known shape (temperature `0.2`, at most 2048 tokens).
-- **Answers are checked.** The parsed answer must conform to the JSON Schema it was asked for (`conforms` in `packages/core/src/json-schema.ts`); one that doesn't is treated like an error, so the fallback below applies.
+- **Structured answers.** Every call asks for JSON in a fixed schema, at a low temperature
+  (`0.2`, at most 2048 tokens).
+- **Answers are checked.** An answer that doesn't match its schema counts as a failure, so the
+  fallback below applies.
 - **A 20-second cap.** A slower call is abandoned.
-- **A deterministic fallback.** When `AI_MODE` is `mock`, or the model errors, times out or returns
+- **A deterministic fallback.** When AI is unavailable, or the model errors, times out or returns
   nothing, a heuristic produces the result instead. An order never stalls on the model.
 - **The source is recorded.** Each AI node's output carries `source: "model"` or
   `source: "heuristic"`; the Extract order and Demand forecast summaries show it too.
 
-## Configuration
-
-Set in `apps/engine/wrangler.jsonc` under `vars` (see [Configuration](/reference/configuration/)):
-
-| Variable | Default | Effect |
-|---|---|---|
-| `AI_MODE` | `live` | `mock` skips the models and always uses the heuristics (tests, offline dev) |
-| `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | The text model for every AI node and the copilot |
-| `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | The model for the assistant, which needs multi-turn tool calling |
-| `ASSESS_MODEL` | `@cf/cloudflare/clef` | The decision model behind [Assess](#assess) and the assistant's `assess_order`; its request body is fixed (`model: "clef"`, `state`, `questions`, `images`) |
-| `AI_GATEWAY_ID` | `""` | When set, every call, the assistant's and Assess's included, goes through that AI Gateway (caching, rate limits, logs) |
-
-Workers AI always calls your Cloudflare account, even in local dev. The engine's tests run with
-`AI_MODE=mock`, so they need no network.
+By default the AI nodes and the copilot use `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, the
+assistant `@cf/moonshotai/kimi-k2.6`, and Assess `@cf/cloudflare/clef`. Your OrderLoop
+administrator can change them for the workspace.
 
 ## AI nodes
 
@@ -37,7 +26,7 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 
 | Node | Model task | Fallback | Result |
 |---|---|---|---|
-| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the R2 document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` when the order had none and `customerName` matches exactly one customer's name, ignoring case and punctuation (a near match or several matches attach nobody); titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
+| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the order's document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` when the order had none and `customerName` matches exactly one customer's name, ignoring case and punctuation (a near match or several matches attach nobody); titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
 | [Classify](/reference/nodes/#ai.classify) | Pick one of `labels` with a confidence | Keyword match on the title and lines; the first label otherwise | Sets `vars.<into>` (default `category`). A label outside the list becomes the first label |
 | [Risk score](/reference/nodes/#ai.risk_score) | Score fraud and credit risk 0–100 with up to three reasons | 10, +15 for a guest (a `contact`, no customer), +30 with neither, +30 over 20,000, +20 for a line over 1,000 units | Takes `high` at or above `threshold` (default 70), else `low`; sets `vars.risk` |
 | [Demand forecast](/reference/nodes/#ai.forecast) | Suggest quantities for SKUs whose available stock (stock minus reserved) is at or below their reorder point, over `horizonDays` | Each low SKU's `reorderQty` | Replaces the order's lines; sets `vars.supplier` from the first SKU. With nothing low it reports "Stock is healthy" without calling the model |
@@ -50,12 +39,10 @@ nodes.
 
 ## Assess
 
-[Assess](/reference/nodes/#ai.assess) (`ai.assess`) asks Workers AI Clef (`ASSESS_MODEL`), a
-multimodal decision model, typed questions about the order and gets a probability for every allowed
-option, not just a pick. It reads a state (the order as text/JSON) and up to 4 images. It does not
-go through `runJson`, but keeps the same guarantees: a 20-second cap, AI Gateway when
-`AI_GATEWAY_ID` is set, and a heuristic when `AI_MODE` is `mock` or the call fails. Clef has no
-video input, so video can't be assessed.
+[Assess](/reference/nodes/#ai.assess) (`ai.assess`) asks Clef, a multimodal decision model, typed
+questions about the order and gets a probability for every allowed option, not just a pick. It
+reads a state (the order as text/JSON) and up to 4 images. It has the same 20-second cap and
+heuristic fallback as the other AI nodes. Clef has no video input, so video can't be assessed.
 
 `questions` maps a question id (letters, digits, `_ . -`, up to 100 characters) to one of three
 types, with 1 to 64 questions per node:
@@ -67,10 +54,9 @@ types, with 1 to 64 questions per node:
 | `score` | An ordered list of 2 to 10 levels, lowest first | `score` (the probability-weighted level, from 0), `legend`, `probabilities` per level and `confidence` |
 
 `instructions` is text, or an object or list that holds the question with data it refers to.
-Answers are held to the questions asked (`clampAnswers`): unknown ids and options are dropped,
-probabilities are renormalised to sum to 1, the chosen option and the score are recomputed from
-them, and a question the model skipped gets an uninformed answer (`noul` 0.5, uniform
-probabilities).
+Answers are held to the questions asked: unknown ids and options are dropped, probabilities are
+renormalised to sum to 1, the chosen option and the score are recomputed from them, and a question
+the model skipped gets an uninformed answer (`noul` 0.5, uniform probabilities).
 
 The node's other fields:
 
@@ -85,9 +71,9 @@ The node's other fields:
   as is, a string or a list (`{{order.meta.photos}}`); any other entry is interpolated.
 - **`into`** (default `assessment`): `vars.<into>` holds the answers by question id.
 
-Images are embedded by the engine, inside the step. A reference is one of:
+An image reference is one of:
 
-- an R2 key under `orders/<orderId>/`, this order's own documents only;
+- a document key under `orders/<orderId>/`, this order's own documents only;
 - an `https` URL (10-second fetch);
 - a base64 `data:` URL.
 
@@ -113,45 +99,24 @@ toward the option whose id and description share the most words (4 letters or mo
 ## The flow copilot
 
 The copilot proposes a whole graph. It is reachable from **Describe it** when creating a flow and,
-in the editor, through the [assistant](/guides/assistant/#flow-changes). The model gets the node catalog (types, outputs, config
-fields) and the graph rules, and returns a complete graph plus an explanation. The engine then:
-
-1. fills each node's missing config from its catalog defaults and gives edges ids;
-2. keeps existing nodes' positions, and lays the graph out again only when nodes were added;
-3. runs `validateGraph` and returns the errors and warnings with the graph.
+in the editor, through the [assistant](/guides/assistant/#flow-changes). The model gets the node
+catalog (types, outputs, config fields) and the graph rules, and returns a complete graph plus an
+explanation. OrderLoop then fills each node's missing config from its defaults, keeps existing
+nodes' positions (laying the graph out again only when nodes were added), and
+[validates](/guides/building-flows/#validation) the result.
 
 In the editor the result is a proposal: it shows the explanation and what it adds, removes, edits
 and rewires, and the graph changes only if you accept it. Accepting doesn't publish.
 
-The offline fallback understands one sentence shape, "add a *node label* after *node id or
-label*" ("fraud" or "risk" mean Risk score; "the", "a" and "an" are ignored), and splices the node into that node's outgoing
-edges.
+Without the model, the copilot understands one sentence shape, "add a *node label* after *node id
+or label*" ("fraud" or "risk" mean Risk score; "the", "a" and "an" are ignored), and splices the
+node into that node's outgoing edges.
 
 ## The assistant
 
-The [workspace assistant](/guides/assistant/) is the chat panel available on every page. It does not use `runJson`. `AssistantAgent`
-(`apps/engine/src/assistant/`) streams a multi-turn, tool-calling conversation from
-`ASSISTANT_MODEL` with up to 6 steps per message, through `workers-ai-provider`, and through AI
-Gateway when `AI_GATEWAY_ID` is set.
-
-Its tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`, each with the lowest role that
-may use it and whether it stops for a confirm:
-
-| Tool | Role | Confirm |
-|---|---|---|
-| `needs_attention`, `find_orders`, `get_order`, `assess_order`, `find_products`, `list_flows`, `get_flow` | `viewer` | no |
-| `propose_flow_change` | `operator` | no; drafts through the copilot, never saves |
-| `decide_approval` | `approver` | yes |
-| `deliver_event`, `cancel_order`, `publish_flow`, `run_stock_review` | `operator` | yes |
-
-A tool the caller's role can't use is not offered to the model, and each tool checks the role
-again, as the person is when it runs. The same 20-second cap applies: when `AI_MODE` is `mock`, or
-the model errors or produces nothing in time, a deterministic heuristic model takes the turn, calls
-the same tools through the same confirms, and the reply is labelled as answered without the
-model.
-
-`assess_order` runs the same Assess call as the node on one order (`questions`, optional `images`)
-and returns the probabilities.
-
-`propose_flow_change` and the Flows page's **Describe it** both call the copilot above
-(`EngineRpc.copilot`).
+The [workspace assistant](/guides/assistant/) is the chat panel available on every page. It holds
+a multi-turn, tool-calling conversation, with up to 6 tool steps per message, and offers only the
+tools your role can use. Its `assess_order` tool runs the same Assess call as the node on one order
+(`questions`, optional `images`) and returns the probabilities; its `propose_flow_change` tool uses
+the copilot above. Without the model, a rule-based fallback takes the turn; see
+[Without the model](/guides/assistant/#without-the-model).

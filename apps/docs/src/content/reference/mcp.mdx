@@ -6,7 +6,7 @@ description: Connect Claude, Claude Code, Cursor or any MCP client to OrderLoop 
 import McpTools from '../../components/McpTools.astro';
 
 OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
-clients at `https://orderloop.io/mcp` (your own host, if you deploy it yourself). They are the
+clients at `https://orderloop.io/mcp`. They are the
 tools of [the assistant](/guides/assistant/), so a client can check what needs attention, find and
 read orders, and, with the right role, decide approvals or cancel orders. Each person is limited to
 what their role allows.
@@ -61,15 +61,19 @@ request. In Cursor's `mcp.json`:
 }
 ```
 
+A client that runs OAuth itself finds the authorization server from
+`/.well-known/oauth-protected-resource/mcp`. It registers with dynamic client registration at
+`/oauth/register` or with a Client ID Metadata Document (an `https` `client_id`), sends the person
+to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.
+
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
-credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and `APP_PASSWORD` as a
-break-glass operator. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
+credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and the workspace
+password as a break-glass operator. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
 refused (`401` with the reason), as there.
 
 ## Tools
 
-The table is rendered from `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts` when the docs
-are built. A client sees only the rows its role can use. **Write** tools are the ones the
+A client sees only the rows its role can use. **Write** tools are the ones the
 assistant stops to confirm; over MCP the client decides how to ask, using the annotations below.
 
 <McpTools />
@@ -115,24 +119,15 @@ tokens 30 days.
   `/.well-known/oauth-protected-resource/<path>`.
 - **Role cap.** A grant is never higher than the role of the person who approved it, and the
   consent page offers no more. Pick the lowest role the client needs.
-- **Checked on every request.** The web Worker re-reads the person each time. A disabled or deleted
+- **Checked on every request.** OrderLoop re-reads the person each time. A disabled or deleted
   person's grants stop working at once. The role is the lower of the one granted and the
   person's current role, so demoting someone narrows the apps they connected. A person whose role
   must use two-factor sign-in and hasn't set it up, or who is still on a temporary password, gets
   `403`.
-- **Credentials stay in the web Worker.** It resolves the caller, then forwards the request to
-  the engine over the service binding with the `x-orderloop-principal` header; `Authorization`
-  and cookies are removed first. The engine has no public route, answers `401` without that
-  header, and the model never sees a token.
+- **Credentials stay at the edge.** OrderLoop resolves the caller before the request reaches the
+  tools; `Authorization` and cookies go no further, and the model never sees a token.
 - **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
-- **Rate limits.** `/oauth/register` allows 10 requests a minute and `/oauth/token` 60, per address, through the `OAUTH_REGISTER_LIMIT` and `OAUTH_TOKEN_LIMIT` rate-limit bindings; over it answers `429 { "error": "slow_down" }` with `Retry-After: 60`.
-- **Tokens at rest.** The OAuth provider keeps clients, grants and tokens in the `OAUTH_KV`
-  namespace; tokens are stored hashed and grant data encrypted. See
-  [Configuration](/reference/configuration/#bindings).
+- **Rate limits.** `/oauth/register` allows 10 requests a minute and `/oauth/token` 60, per
+  address; over that it answers `429 { "error": "slow_down" }` with `Retry-After: 60`.
+- **Tokens at rest.** Tokens are stored hashed and grant data encrypted.
 
-## How it works
-
-The web Worker hands `/mcp`, `/a2a`, `/.well-known/oauth-*` and `/oauth/*` (except `/oauth/authorize`,
-the consent page) to `@cloudflare/workers-oauth-provider`, which serves discovery, dynamic client
-registration (`/oauth/register`), Client ID Metadata Documents and tokens (`/oauth/token`). See
-[Architecture](/internals/architecture/#mcp).

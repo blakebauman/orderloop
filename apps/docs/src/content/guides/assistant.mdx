@@ -93,17 +93,14 @@ Creating a flow from a description still happens on the Flows page.
 
 ## Without the model
 
-The assistant uses the model in `ASSISTANT_MODEL` (default `@cf/moonshotai/kimi-k2.6`) through
-Workers AI, and through AI Gateway when `AI_GATEWAY_ID` is set. It falls back to a deterministic
-rule-based model, which calls the same tools through the same confirm cards, when:
-
-- `AI_MODE` is `mock`;
-- the model errors; or
-- nothing useful arrives within 20 seconds.
+The assistant answers with `@cf/moonshotai/kimi-k2.6` by default (see
+[AI nodes and the assistant](/guides/ai/)). It falls back to a deterministic rule-based model,
+which calls the same tools through the same confirm cards, when AI is unavailable, the model
+errors, or nothing useful arrives within 20 seconds.
 
 A reply from the fallback is labelled **Answered without the language model, from fixed rules**.
 It understands plain requests ("what needs attention", "add a risk score after
-credit check"), not open questions. See [AI nodes and the assistant](/guides/ai/).
+credit check"), not open questions.
 
 ## Over MCP
 
@@ -115,10 +112,9 @@ Agent2Agent protocol at `/a2a`, as skills; see [A2A endpoint](/reference/a2a/).
 
 ## Privacy
 
-Each person has one assistant and one conversation, kept in a Durable Object (`AssistantAgent`)
-named after their user id. The web app sets that name from your session, whatever the browser
-asks for, so nobody can open another person's thread. The conversation keeps the last 200 messages. **Conversation options** in the panel
-clears it. A reply that is in progress when the tab closes keeps streaming and is there when you
-come back. The shared workspace password and open local development each use a single shared
-assistant. Orders, flows and approvals are read from the same data the dashboard shows, so the
-assistant tells you nothing your role couldn't see.
+Each person has one assistant and one conversation, tied to their signed-in account, so nobody can
+open another person's thread. The conversation keeps the last 200 messages. **Conversation options**
+in the panel clears it. A reply that is in progress when the tab closes keeps streaming and is there
+when you come back. Everyone signed in with the shared workspace password shares one assistant.
+Orders, flows and approvals are read from the same data the dashboard shows, so the assistant tells
+you nothing your role couldn't see.

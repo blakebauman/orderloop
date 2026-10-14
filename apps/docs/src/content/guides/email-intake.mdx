@@ -1,16 +1,16 @@
 ---
 title: Email intake
-description: Start orders from email with Cloudflare Email Routing — mailboxes, who may send, what becomes the order, and setup.
+description: Start orders from email — mailboxes, who may send, what becomes the order, redelivery and the intake log.
 ---
 
-Customers can start an order by emailing an order, an order form or a purchase order. Cloudflare Email Routing delivers mail
-for the configured addresses to the engine Worker's `email()` entrypoint
-(`apps/engine/src/email.ts`), which checks the message, turns it into order input and starts the
-mailbox's flow. Deciding what to accept is pure code in `packages/core/src/intake.ts`.
+Customers can start an order by emailing an order, an order form or a purchase order to one of the
+workspace's intake addresses. OrderLoop checks the message, turns it into order input and starts
+the mailbox's flow. Your OrderLoop administrator sets up the intake domain; the **Email intake**
+section of the Back office page lists the addresses.
 
 ## Mailboxes
 
-The local part of the recipient picks the flow. Defaults (`DEFAULT_INTAKE_MAILBOXES`):
+The local part of the recipient picks the flow. The defaults:
 
 | Address | Flow |
 |---|---|
@@ -18,37 +18,37 @@ The local part of the recipient picks the flow. Defaults (`DEFAULT_INTAKE_MAILBO
 | `po@` | `tpl-b2b-order` |
 | `purchasing@` | `tpl-purchase-request` |
 
-Override them with the engine variable `INTAKE_MAILBOXES`, a JSON object of local part to flow id,
-for example `{"orders":"tpl-b2b-order","wholesale":"my-wholesale-flow"}`. Matching ignores case and a
-`+tag` (`orders+acme@` is `orders@`). The order's `model` comes from the flow, its `channel` is `email`, and the flow's latest
-published version runs.
+Your administrator can replace them with the workspace's own mailbox mapping, from local part to
+flow id (for example `wholesale@` → `my-wholesale-flow`). Matching ignores case and a `+tag`
+(`orders+acme@` is `orders@`). The order's `model` comes from the flow, its `channel` is `email`,
+and the flow's latest published version runs.
 
 ## Who may send
 
-A message is accepted only when all of these hold. Otherwise it is rejected at SMTP time, so the
-sender's mail server returns a bounce with the reason:
+A message is accepted only when all of these hold. Otherwise it is rejected while it is being
+delivered, so the sender's mail server returns a bounce with the reason:
 
 | Check | Rejection reason |
 |---|---|
 | The recipient is a configured mailbox | `No mailbox <local>@ here` |
-| The raw message is at most 10 MiB (`MAX_INTAKE_BYTES`) | `Message too large` |
-| The first `Authentication-Results` header, and only if its authserv-id is `mx.cloudflare.net` (Email Routing's own), records `dmarc=pass` with `header.from` equal to the `From` domain, or `dkim=pass` (`header.d`) or `spf=pass` (`smtp.mailfrom`) for a domain aligned with it: the same domain, or one a subdomain of the other. Later headers came with the message and are ignored; a pass for an unrelated domain doesn't count (`authenticated` in `packages/core/src/intake.ts`) | `Message failed SPF, DKIM and DMARC` |
+| The raw message is at most 10 MiB | `Message too large` |
+| The receiving server's authentication result records `dmarc=pass` for the `From` domain, or `dkim=pass` or `spf=pass` for a domain aligned with it (the same domain, or one a subdomain of the other). Authentication headers that came with the message are ignored, and a pass for an unrelated domain doesn't count | `Message failed SPF, DKIM and DMARC` |
 | The sender is recognised (below) | `Sender is not a known customer` |
 | The mailbox's flow has a published version | `Mailbox is not configured` |
 
 A sender is recognised, in this order, by:
 
-1. **Customer address.** The envelope sender equals a `customers.email`; the order gets that
+1. **Customer address.** The envelope sender equals a customer's email; the order gets that
    `customerId`.
 2. **Company domain.** The sender's domain matches exactly one customer's email domain, unless it is
    a webmail domain (Gmail, Outlook, Yahoo, iCloud, Proton and similar), which never identifies a
    customer on its own.
-3. **Allowlist.** The engine secret `INTAKE_ALLOWLIST` lists addresses or `@domains`, separated by
-   commas or spaces. These senders start orders without a `customerId`; the AI extract node then
+3. **Allowed senders.** The workspace's list of allowed senders (addresses or `@domains`, kept by
+   your administrator). These senders start orders without a `customerId`; the AI extract node then
    matches the customer by name from the text.
 
-`INTAKE_REQUIRE_AUTH: "false"` skips the authentication check. Don't use it in production: it lets
-anyone who forges a customer's From address start orders.
+To let a new customer order by email, add them as a customer with their email address; to accept a
+sender who isn't a customer, ask your administrator to add them to the allowed senders.
 
 ## What becomes the order
 
@@ -59,58 +59,34 @@ anyone who forges a customer's From address start orders.
 | `documentText` | `From:` and `Subject:` lines, the plain-text body (or the HTML body reduced to text), then each readable attachment under `--- Attachment: <filename> ---`; capped at 50,000 characters |
 | `meta` | `via: "email"`, `from`, `to`, `subject`, `messageId`, `senderMatch` (`customer`, `domain` or `allowlist`) and `attachments` (the filenames that were read) |
 
-`lines` start empty: the flow's `ai.extract` node reads them from `documentText`, as it does for an
-order whose input carries a document.
+`lines` start empty: the flow's [Extract order](/reference/nodes/#ai.extract) node reads them from
+`documentText`, as it does for an order whose input carries a document.
 
-At most 10 attachments per message are read, each up to 5 MiB. Plain text, CSV, TSV, JSON and XML are decoded directly. PDF,
-Office documents, HTML and PNG, JPEG or WebP images are converted with Workers AI `toMarkdown`;
-that conversion is skipped when `AI_MODE` is `mock`, and an attachment whose conversion takes longer than 20 seconds is skipped. Anything else is ignored.
+At most 10 attachments per message are read, each up to 5 MiB. Plain text, CSV, TSV, JSON and XML
+are read directly. PDF, Office documents, HTML and PNG, JPEG or WebP images are converted to text
+by Workers AI; an attachment whose conversion takes longer than 20 seconds is skipped. Anything else
+is ignored.
 
-The raw message is stored in R2 at `orders/<orderId>/inbound/message.eml` and listed in the
-order's documents as kind `email`.
+The original message is kept with the order's documents, as kind `email`.
 
 ## Redelivery
 
-The order starts through `startOrderOnce` with the idempotency key `email:<Message-ID>`. If Email
-Routing delivers the same message again, it maps to the same order, is logged as `duplicate`, and
-the sender gets no second acknowledgement. A different message that reuses a Message-ID is rejected
-with `Message-ID reused for a different message`.
+The message's `Message-ID` is the order's idempotency key (`email:<Message-ID>`). If the same
+message is delivered again, it maps to the same order, is logged as `duplicate`, and the sender
+gets no second acknowledgement. A different message that reuses a Message-ID is rejected with
+`Message-ID reused for a different message`.
+
+If OrderLoop fails while starting the order (as opposed to a rejection above), the message gets a
+temporary failure and the sender's mail server retries it later. The retry maps to the same order.
 
 ## Acknowledgement
 
-After starting the order, the engine replies to the sender from the mailbox address with the order
-reference. Set `INTAKE_REPLY` to `"false"` to turn this off. Email Routing only allows a reply to a
-message that passed DMARC, so a failed reply is logged and never fails the intake.
-
-## Failures
-
-If `email()` throws (D1, R2 or the engine failing, rather than a rejection above), it logs
-`email intake failed` and rethrows, so Email Routing answers with a temporary failure and the
-sender's server retries. The retry maps to the same order through the idempotency key above.
+After starting the order, OrderLoop replies to the sender from the mailbox address with the order
+reference, unless the workspace has turned replies off. A reply can only go to a message that
+passed DMARC, so a failed reply never fails the intake.
 
 ## The intake log
 
-Every message is recorded in `inbound_emails` with `status` set to `accepted`, `duplicate` or
-`rejected`, along with the reason, the order id and the number of attachments read. The Back
-office page shows the latest twenty under **Email intake**, next to the mailbox addresses, which it
-reads from the engine's `INTAKE_MAILBOXES` (so a custom mapping shows as configured).
-
-## Setting up Email Routing
-
-Email Routing needs the zone's MX records, so it replaces any other mail provider on that domain.
-Use a subdomain (for example `orders.example.com`) if the apex already receives mail.
-
-1. Deploy the engine first. A rule can only point at a Worker that exists.
-2. In the dashboard under **Email → Email Routing**, enable it for the zone. This adds Cloudflare's
-   MX records, an SPF record (`v=spf1 include:_spf.mx.cloudflare.net ~all`) and a DKIM record, and
-   offers to remove conflicting MX records. Through the API it is
-   `POST /zones/<zone_id>/email/routing/dns`.
-3. Add a routing rule for each address with the action **Send to a Worker** → `orderloop-engine`.
-   A literal rule matches one address, so add a rule for every address you want to receive,
-   including any `+tag` variants.
-4. Set the catch-all to **Drop**, so mail to other addresses is never accepted.
-5. Optionally, set the allowlist:
-   `pnpm --filter @orderloop/engine exec wrangler secret put INTAKE_ALLOWLIST`.
-
-To test locally without a mail server, call `receiveEmail` from a test with a fake
-`ForwardableEmailMessage`, as `apps/engine/tests/email.test.ts` does.
+Every message is recorded as `accepted`, `duplicate` or `rejected`, along with the reason, the
+order and the number of attachments read. The Back office page shows the latest twenty under
+**Email intake**, next to the workspace's mailbox addresses.

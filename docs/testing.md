@@ -1,7 +1,6 @@
----
-title: Testing
-description: What pnpm test runs in each package, how the engine runs real Workflows in workerd, and where to add a test.
----
+# Testing
+
+What pnpm test runs in each package, how the engine runs real Workflows in workerd, and where to add a test.
 
 `pnpm test` runs `turbo run test`, which runs `vitest run` in every package that has tests. The
 `test` task has no `dependsOn`, so a failing dependency never silently skips a package's tests.
@@ -128,4 +127,4 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 ## What isn't covered
 
 The flow editor canvas and the live order page are not under test; verify UI changes by running
-`pnpm web:dev` and driving a scenario. See [Getting started](/start/getting-started/).
+`pnpm web:dev` and driving a scenario. See [Getting started](local-development.md).

@@ -138,12 +138,14 @@ Two channels connect without producing that payload themselves:
 
 ### Email intake
 
-Send an order, order form or purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send, and how to set up Email Routing for your own domain, are covered in the docs.
+Send an order, order form or purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send is covered in the [Email intake guide](https://docs.orderloop.io/guides/email-intake/); setting up Email Routing for your own domain is in [docs/deploy.md](docs/deploy.md).
 
 ## Docs
 
-The docs site is `apps/docs`: guides, the REST API, a node catalog generated from the catalog
-source, internals, and an OpenAPI explorer.
+The docs site is `apps/docs`, published at [docs.orderloop.io](https://docs.orderloop.io) for the
+people who use a workspace and the developers who integrate with one: guides, the REST API, a node
+catalog generated from the catalog source, and an OpenAPI explorer. How OrderLoop is built,
+configured, deployed and tested is in [`docs/`](docs/README.md), which isn't published.
 
 ```bash
 pnpm docs:dev        # local preview

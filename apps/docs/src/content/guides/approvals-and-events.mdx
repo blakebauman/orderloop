@@ -3,21 +3,18 @@ title: Approvals and events
 description: How orders wait for people and outside systems, how decisions and events reach them, and how cancelling undoes their work.
 ---
 
-Two node types pause an order until something outside the Workflow happens:
+Two node types pause an order until something outside it happens:
 [Approval](/reference/nodes/#control.approval) waits for a person, and
 [Wait for event](/reference/nodes/#control.wait_event) waits for a business event such as
-`payment.received`. Both call `step.waitForEvent` with a timeout, so a waiting order costs
-nothing while it waits and survives restarts. The order's [OrderAgent](/internals/order-agent/)
-records every open wait and delivers to it.
+`payment.received`. Both have a timeout. A waiting order is durable: it costs nothing while it
+waits and survives restarts, and the order page lists every open wait.
 
 ## Approvals
 
 An Approval node has a `title` (a template, default `Approve order {{order.id}}`), an `assignee`
-(free text, default `manager`) and a `timeout` (default `2 days`). When it starts, the agent:
-
-- adds the wait to the order's live state, where the order page shows it;
-- inserts a row in the `approvals` table with the title, assignee, the order total and status
-  `pending`, which the approvals inbox lists.
+(free text, default `manager`) and a `timeout` (default `2 days`). When it starts, the order page
+shows the wait, and the approvals inbox lists a `pending` approval with the title, assignee and
+order total.
 
 The node takes one of three branches:
 
@@ -28,15 +25,15 @@ The node takes one of three branches:
 | `escalated` | Nobody decided before the timeout. The app shows this as **Timed out** |
 
 The node's output (`nodes.<id>`) is the decision payload: `decision`, `by`, `note` and
-`outcome`. The `approvals` row is updated with the outcome, `decidedBy` (`timeout` for an
-escalation) and the note. Escalation only picks the branch; what happens next is up to the flow,
+`outcome`. The inbox records the outcome, who decided (`timeout` for an escalation) and the
+note. Escalation only picks the branch; what happens next is up to the flow,
 for example a second approval for a more senior assignee.
 
 ### Deciding
 
 From the **order page** or the **approvals inbox** (`/approvals`), each decision has a note field
 and a 5-second undo window. Nothing is sent until the window closes, so **Undo** is real: the
-Workflow never hears about a decision that was taken back. If you leave the page during the
+order never hears about a decision that was taken back. If you leave the page during the
 window, the pending decision is sent then.
 
 Decisions close two seconds before the approval times out, so the last one still arrives in time,
@@ -62,8 +59,8 @@ curl -X POST https://orderloop.io/api/v1/orders/ord_…/approvals/approval \
 ```
 
 `$ORDERLOOP_TOKEN` is an API token with the `approver` role or higher. The decision is recorded
-`by` the token (`token:<name>`) or the signed-in person; a body `by` is used only with the shared
-`APP_PASSWORD`, where it defaults to `api`. A decision for a node that isn't waiting for an approval fails with
+`by` the token (`token:<name>`) or the signed-in person; a body `by` is used only with the
+workspace password, where it defaults to `api`. A decision for a node that isn't waiting for an approval fails with
 `That node is not waiting for an approval`. See the [REST API](/reference/rest-api/).
 
 The [assistant](/guides/assistant/) can decide an approval for an `approver`, but only after the
@@ -78,7 +75,7 @@ A Wait for event node names an `event` (default `payment.received`) and a `timeo
 The event's payload is stored in the run variables under the event name with every run of
 non-alphanumerics replaced by `_`: `payment.received` → `vars.payment_received`,
 `return.requested` → `vars.return_requested`. Later nodes read it from there; the storefront
-flow's Refund node, for example, takes `vars.return_requested.amount`. The agent adds `event` and
+flow's Refund node, for example, takes `vars.return_requested.amount`. OrderLoop adds `event` and
 `at` (epoch ms) to every delivered payload.
 
 ### Delivering an event
@@ -103,21 +100,22 @@ waiting.
 
   The response is `{ "delivered": true, "nodeId": "…" }` or `{ "delivered": false }`.
 
-- **Signed webhook**, for external systems that shouldn't hold the admin password:
-  `POST /api/v1/webhooks/events` with the body signed by `WEBHOOK_SECRET`.
+- **Signed webhook**, for external systems that shouldn't hold an API token:
+  `POST /api/v1/webhooks/events` with the body signed by the workspace's signing secret.
 
 ### Signed events
 
+The signing secret is the workspace's; your OrderLoop administrator provides it.
+
 ```
 POST /api/v1/webhooks/events
-X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<raw body>")>
+X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
 
 { "orderId": "ord_…", "event": "payment.received", "payload": { "amount": 3106.78 } }
 ```
 
 The timestamp is part of the signed message and must be within 5 minutes of the server's clock,
-so a captured request can't be replayed later. The signature of a delivered event is also recorded, so replaying it within the window returns `200 { "delivered": true, "duplicate": true }` and delivers nothing; a `409` is not recorded and may be retried. `signWebhook(secret, rawBody)` in
-`@orderloop/core` produces the header; `verifyWebhook` checks it.
+so a captured request can't be replayed later. The signature of a delivered event is also recorded, so replaying it within the window returns `200 { "delivered": true, "duplicate": true }` and delivers nothing; a `409` is not recorded and may be retried.
 
 | Status | Meaning |
 |---|---|
@@ -126,33 +124,27 @@ so a captured request can't be replayed later. The signature of a delivered even
 | `400` | The body isn't `{ orderId, event, payload? }`, or `payload` is over 32 KiB of JSON |
 | `413` | The body is over 1 MiB |
 | `401` | Missing or malformed header, stale timestamp, or wrong signature |
-| `503` | `WEBHOOK_SECRET` isn't set |
+| `503` | The workspace hasn't enabled signed events (no signing secret) |
 
 Answering `409` lets the sender's own retry policy deliver an event that arrives before the order
 reaches its wait.
-
-## Timeouts and `TIME_SCALE`
-
-Every wait and timeout is divided by `TIME_SCALE` (default `1440` in
-`apps/engine/wrangler.jsonc`: a day becomes a minute, a 2-day escalation about two minutes), and
-never less than one second. Set it to `"1"` for real time. The deadline the order page and the
-inbox show is the scaled one.
 
 ## Cancelling
 
 Cancel from the order page, the API (`POST /api/v1/orders/:id/cancel` with an optional `reason`),
 or the [assistant](/guides/assistant/) (after the person confirms). Cancelling an order that has already
-ended, or one that is already being cancelled, does nothing. Otherwise the agent:
+ended, or one that is already being cancelled, does nothing. Otherwise OrderLoop:
 
-1. terminates the Workflow instance;
-2. compensates the order: releases its inventory reservations, voids its payment authorizations,
-   cancels its open shipments and staged store pickups, restocks stock those shipments consumed once none is live, reverses its on-account invoice charges, revokes its issued digital codes, cancels its seller orders and reverses its scheduled payouts (`compensateOrder` in `apps/engine/src/connectors.ts`);
+1. stops the run;
+2. undoes the order's work: releases its inventory reservations, voids its payment
+   authorizations, cancels its open shipments and staged store pickups, restocks stock those
+   shipments consumed once none is live, reverses its on-account invoice charges, revokes its
+   issued digital codes, cancels its seller orders and reverses its scheduled payouts;
 3. marks pending approvals `cancelled` and clears the order's waits;
 4. sets the status to `cancelled`, with the reason and the counts in the timeline;
 5. sends the `order.cancelled` [outbound webhook](/guides/outbound-webhooks/).
 
 Captured or charged money isn't refunded by a cancel; refunds are a node in the flow.
 
-Cancelling is different from an order that fails: a failure rolls back inside the Workflow,
-which runs each compensable step's rollback in reverse order (see
-[OrderLoop Workflow](/internals/workflow/)).
+Cancelling is different from an order that fails: a failure runs each completed step's rollback in
+reverse order (see [Ending a run](/guides/building-flows/#ending-a-run)) and ends `rolled_back`.

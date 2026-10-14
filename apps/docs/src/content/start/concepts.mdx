@@ -17,7 +17,7 @@ the channels it is meant for. Every model has a [built-in flow](/guides/template
 
 ## Draft and published versions
 
-The editor saves a **draft** to D1 as you work. **Publishing** validates the draft and stores it as
+The editor saves a **draft** as you work. **Publishing** validates the draft and stores it as
 an immutable, numbered **version**. An order runs the version it started on (the latest, unless the
 API request names one), so editing or republishing a flow never changes an order in flight.
 
@@ -29,15 +29,15 @@ fulfillment, an optional inbound document, free-form `meta`) plus the totals the
 
 `declined` means a policy check or an approval said no. `cancelled` means a person or an API call
 cancelled it, or it reached an End node with that outcome. `failed` means a node threw or the order
-reached an End node with outcome `failed`; once the Workflow has run the order's compensations the
+reached an End node with outcome `failed`; once the order's compensations have run the
 status becomes `rolled_back`, and it stays `failed` if the rollback itself fails.
 
 Each order has:
 
-- an **OrderLoop Workflow instance** that interprets the flow. Each node is one durable,
-  memoized step, so an order survives restarts and redeploys and can wait for days.
-- an **OrderAgent**, a Durable Object holding the order's live state. It records what the Workflow
-  reports, owns the order's waits, and syncs every change to each open order page over a WebSocket.
+- a **run** that works through the flow. Each node runs once and its result is kept, so an order
+  survives restarts and can wait for days.
+- a **live state**: every node's status, the open waits and the timeline, which the order page
+  and `GET /api/v1/orders/:id` show as they change.
 
 ## Branches, joins and skips
 
@@ -45,7 +45,7 @@ A node finishes by choosing one or more of its outputs. Edges on the chosen outp
 edges on the others are skipped. A node runs once every incoming edge is resolved and at least one
 is active, so a node after an if/else runs whichever side was taken. A node whose inputs were all
 skipped is skipped too, and the skip carries on downstream. Nodes that become ready together run in
-parallel. The [planner](/internals/planner/) page has the exact rules.
+parallel. [Building flows](/guides/building-flows/) has the exact rules.
 
 ## Waits
 
@@ -56,7 +56,7 @@ Two node types stop and wait for the outside world:
 - **Wait for event** (`control.wait_event`) waits for a named business event such as
   `payment.received`, and takes `timeout` if it doesn't arrive.
 
-The OrderAgent records each open wait, and the dashboard, the REST API, a signed webhook or the
+The order records each open wait, and the dashboard, the REST API, a signed webhook or the
 workspace [assistant](/guides/assistant/) (after you confirm) can resolve it. See [Approvals and events](/guides/approvals-and-events/).
 
 ## Rollback
@@ -64,15 +64,15 @@ workspace [assistant](/guides/assistant/) (after you confirm) can resolve it. Se
 Reserving inventory, authorizing payment, creating a shipment, holding stock for pickup, delivering
 a digital good, splitting an order by seller and paying sellers out each register a compensation on
 their step. When an order fails (an End node with outcome `failed`, or a node that throws), the
-Workflow runs those compensations in reverse order: stock is released, the authorization voided, the
-shipment cancelled, consumed stock restocked once no shipment is live, on-account invoice charges reversed. Cancelling an order does the same through the OrderAgent.
+order runs those compensations in reverse order: stock is released, the authorization voided, the
+shipment cancelled, consumed stock restocked once no shipment is live, on-account invoice charges reversed. Cancelling an order does the same.
 
 ## Loops and generations
 
 A **Loop** node repeats its body while a condition holds, up to a limit; the end of the body
 connects back to the loop's `next` input. Subscriptions loop over billing periods and then
-**continue as new**: the run ends and a fresh Workflow instance starts on the same flow with the
-variables carried over, so the step history doesn't grow without bound. Each run is a
+**continue as new**: the run ends and a fresh run starts on the same flow with the
+variables carried over, so its history doesn't grow without bound. Each run is a
 **generation** of the same order. Step names repeat across generations, so effects (charges,
 holds, webhooks) are keyed by the step name plus the generation, and a second generation's charge
 is a new charge.

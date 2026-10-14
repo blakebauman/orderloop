@@ -14,30 +14,31 @@ schedules each seller's payout net of commission. The nodes are in the [node ref
 
 ## Sellers and first party
 
-A seller is a row in `sellers`: `commission_pct` (a fraction; `0.12` is 12%), `auto_accept` and
-`active`. The back office lists them under **Marketplace sellers**. The seed adds two:
+A seller has a commission (a fraction; `0.12` is 12%), whether it accepts orders automatically,
+and whether it is active. The back office lists sellers under **Marketplace sellers**. The
+workspace starts with two:
 
 | Seller | Commission | Accepts | Product |
 |---|---|---|---|
 | `sel_brightside` (Brightside Audio) | 12% | Automatically | `HP-200` |
 | `sel_kettle` (Kettle & Co) | 15% | When asked, per order | `KET-01` |
 
-A line's seller is, in order: `lines[].sellerId` on the order input, the product's `seller_id`, else
+A line's seller is, in order: `lines[].sellerId` on the order input, the product's seller, else
 first party. A first-party line is the operator's own: it needs no acceptance and has no payout.
 
 ## The split
 
-`commerce.split_by_seller` writes one `seller_orders` row per order and seller, with that seller's
-`lines` and `subtotal`. First-party lines and sellers with `auto_accept` start `accepted`; the others
+`commerce.split_by_seller` records one seller order per order and seller, with that seller's
+`lines` and `subtotal`. First-party lines and sellers that accept automatically start `accepted`; the others
 start `pending`. The node takes `accepted` when nothing is pending and `awaiting` otherwise, and sets
 `vars.sellers` and `vars.pendingSellers`. A seller that doesn't exist or is inactive fails the step
-(it isn't retried), and the order rolls back. A retried step changes nothing: rows are keyed by order
-and seller.
+(it isn't retried), and the order rolls back. A retried step changes nothing: there is one seller order per order and
+seller.
 
 ## Acceptance loop
 
 On `awaiting`, the flow sends `commerce.notify` with `to: seller` (the sellers still to answer), then
-runs a loop of at most 10 passes. Each pass waits 2 days (scaled by `TIME_SCALE`) for
+runs a loop of at most 10 passes. Each pass waits 2 days for
 `seller.responded` and records it with `commerce.seller_accept`:
 
 - `decision: from_event` reads `vars.seller_responded`, the payload of the event:
@@ -88,13 +89,13 @@ releases the rest. The customer is charged only for what ships.
 
 ## Payouts
 
-`commerce.payout` runs after the return window. For each accepted third-party seller it writes a
-`payouts` row, keyed by step and seller:
+`commerce.payout` runs after the return window. For each accepted third-party seller it schedules one
+payout:
 
 - `gross`: the seller's `subtotal`.
 - `refunded`: the succeeded refunds so far, shared pro rata: `refunds × gross / order total`
   (never more than `gross`).
-- `commission`: `(gross − refunded) × commission_pct`.
+- `commission`: `(gross − refunded) ×` the seller's commission.
 - `net`: `gross − refunded − commission`.
 
 Amounts are in the order's currency and rounded to cents. For one `HP-200` at $129 from Brightside
@@ -107,5 +108,4 @@ schedules nothing. The order page shows the **Sellers** and **Seller payouts** l
 
 `commerce.split_by_seller` and `commerce.payout` are compensable. A failed order's rollback cancels
 the seller orders (`pending` and `accepted` become `cancelled`; a rejected one stays rejected) and
-reverses `scheduled` payouts (`status` `reversed`). Cancelling an order runs the same compensation
-through `compensateOrder`. A payout already `paid` is left alone.
+reverses `scheduled` payouts (`status` `reversed`). Cancelling an order does the same. A payout already `paid` is left alone.

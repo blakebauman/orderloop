@@ -1,0 +1,87 @@
+# Local development
+
+Install the monorepo, apply the D1 migrations locally, run the web app and engine together, and start a scenario.
+
+OrderLoop is a pnpm + Turborepo monorepo. Local development runs both Workers in one Vite session:
+the web app, and the engine as a Vite auxiliary Worker, so the `ENGINE` service binding, the
+OrderAgent Durable Objects and both Workflows all work on your machine.
+
+## Requirements
+
+- Node.js 22 or later, and pnpm (the version is pinned in the root `package.json`)
+- A Cloudflare account, if you want live AI. Workers AI always calls your account, even in local dev.
+  Without one, set `AI_MODE` to `"mock"` (see [Configuration](configuration.md)).
+
+## Install and run
+
+```bash
+git clone https://github.com/blakebauman/orderloop
+cd orderloop
+pnpm install
+pnpm db:migrate:local      # applies packages/db/migrations to the local D1
+pnpm web:dev               # web + engine in one Vite session
+```
+
+Open the URL Vite prints (`http://localhost:5173` by default). With `APP_PASSWORD` unset, which is
+the default in `apps/web/.dev.vars.example`, and no people added, the dashboard and the API are
+open (on localhost only; a deployed host answers `503` until `APP_PASSWORD` is set); **Set up sign-in** in the account menu creates the first operator and turns sign-in on (see
+[Team and roles](https://docs.orderloop.io/guides/team-and-roles/)).
+
+The first request that needs a flow seeds the [built-in flows](https://docs.orderloop.io/guides/templates/) and publishes
+each as a new version when its content hasn't been published before (version 1 on a fresh database).
+
+## Run a scenario
+
+The dashboard lists 15 one-click scenarios, each a real order on a seeded flow: a guest checkout, a B2B purchase order
+read from an email, an order over its credit limit, an out-of-stock order that rolls back, a purchase
+request, a stock review, two subscriptions (one with a failing card), a marketplace order with two sellers,
+buy online and pick up in store, a ship-from-store order with an e-book, a shipment split between the warehouse and a store, a till sale with a gift card,
+a retail order that is returned and one priced in euros. Start one and the
+order page opens: the flow graph colours each node as it runs, waits and finishes, and the timeline
+records every step. Below the queues, the dashboard's **Last 30 days** section shows, in USD, completion rate
+by model, revenue per day, refund rate and the slowest steps by p95 duration.
+
+Waits are compressed in development. `TIME_SCALE` (default `1440`) divides every wait and timeout,
+so a day becomes a minute and a 30-day return window closes in about half an hour.
+
+Some orders stop at an approval or wait for an event. Decide approvals from the order page or the
+**Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
+[REST API](https://docs.orderloop.io/reference/rest-api/) or a [signed webhook](https://docs.orderloop.io/guides/approvals-and-events/).
+
+## Start an order over the API
+
+```bash
+curl -s http://localhost:5173/api/v1/orders \
+  -H 'content-type: application/json' \
+  -H 'Idempotency-Key: demo-1' \
+  -d '{
+    "flowId": "tpl-storefront-order",
+    "input": {
+      "model": "b2c",
+      "channel": "web",
+      "customerId": "cus_ada",
+      "lines": [{ "sku": "MON-27", "qty": 1 }]
+    }
+  }'
+# → 201 { "orderId": "ord_…" }   (a repeat with the same key: 200, same orderId)
+```
+
+Then read its live state with `GET /api/v1/orders/:id`.
+
+## Checks
+
+```bash
+pnpm test            # core planner tests (node), engine Workflow e2e (workerd), web tests
+pnpm lint            # Biome
+pnpm check-types     # tsc --noEmit (web runs react-router typegen first)
+```
+
+After changing a `wrangler.jsonc`, regenerate that app's binding types with
+`pnpm --filter @orderloop/engine types` or `pnpm --filter @orderloop/web types`.
+
+## Next
+
+- [Concepts](https://docs.orderloop.io/start/concepts/): flows, versions, orders, waits and rollback.
+- [Building flows](https://docs.orderloop.io/guides/building-flows/): the editor and the rules a flow must follow.
+- [Deploy](deploy.md): ship both Workers to your account.
+- [Configuration](configuration.md): every variable, secret and binding.

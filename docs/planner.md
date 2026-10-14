@@ -1,11 +1,10 @@
----
-title: Planner
-description: The pure state machine that decides which nodes run, which are skipped, and how loops repeat.
----
+# Planner
+
+The pure state machine that decides which nodes run, which are skipped, and how loops repeat.
 
 The planner in `packages/core/src/graph.ts` is the only place flow semantics live. It is a pure
 function of a graph and a `PlanState`, with no I/O, so it is unit tested in Node
-(`packages/core/tests/graph.test.ts`). The [OrderLoop Workflow](/internals/workflow/) drives it and
+(`packages/core/tests/graph.test.ts`). The [OrderLoop Workflow](workflow.md) drives it and
 adds durability; it never re-implements scheduling.
 
 ## State
@@ -147,4 +146,4 @@ keys, which is what lets the Workflow replay after hibernation. Anything a decis
 
 Change `graph.ts` and add a case to `packages/core/tests/graph.test.ts`. Its `simulate(graph,
 choose)` helper drives the planner the way the interpreter does, with `choose(id, run)` standing
-in for execution, and returns the nodes in the order they ran. See [Testing](/internals/testing/).
+in for execution, and returns the nodes in the order they ran. See [Testing](testing.md).

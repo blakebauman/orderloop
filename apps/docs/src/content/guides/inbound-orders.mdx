@@ -6,8 +6,8 @@ description: Start orders from a storefront, marketplace, POS or other channel w
 import Values from '../../components/Values.astro';
 
 Systems that take orders elsewhere (a storefront checkout, a marketplace, a till) start them with
-`POST /api/v1/webhooks/orders`. The request is signed with the web Worker's `WEBHOOK_SECRET`
-instead of carrying a token, so the sender needs no admin password. The order starts on a published
+`POST /api/v1/webhooks/orders`. The request is signed with the workspace's signing secret (your
+OrderLoop administrator provides it) instead of carrying a token. The order starts on a published
 flow and shows up in the dashboard under its channel, with the sender's id as its external id.
 Shopify and EDI X12 850 senders can post their native payloads instead; see
 [Channel adapters](/guides/channel-adapters/), which share this page's routing and idempotency.
@@ -37,8 +37,8 @@ fields that identify the order and pick the flow:
 | `externalId` | Required, 1 to 200 characters: the order's id in the sending system. With `channel` it identifies the order |
 | `lines` | `{ sku, name?, qty, unitPrice?, sellerId? }`. Required unless `documentText` is sent for the [Extract order](/reference/nodes/#ai.extract) node |
 | `flowId` | Optional. Runs this flow instead of the routed one |
-| `source` | Optional, up to 60 characters. The sending system, for display (`shopify`); stored in `meta.source` |
-| `shipTo` | Optional. An address string (up to 500 characters) or `{ name?, line1, line2?, city, region?, postalCode, country, latitude?, longitude? }`. Stored in `meta.shipTo`, where the `no_po_box` policy rule reads it. `latitude` (-90 to 90) and `longitude` (-180 to 180) let route fulfillment [ship from the nearest store](/guides/fulfillment/#nearest-store) |
+| `source` | Optional, up to 60 characters. The sending system, for display (`shopify`); kept in `meta.source` |
+| `shipTo` | Optional. An address string (up to 500 characters) or `{ name?, line1, line2?, city, region?, postalCode, country, latitude?, longitude? }`. Kept in `meta.shipTo`, where the `no_po_box` policy rule reads it. `latitude` (-90 to 90) and `longitude` (-180 to 180) let route fulfillment [ship from the nearest store](/guides/fulfillment/#nearest-store) |
 | `vars` | Optional. Seeds the run's variables |
 
 The rest (`title`, `customerId`, `currency`, `contact`, `fulfillment`, `documentText`,
@@ -50,23 +50,23 @@ The [Webhook trigger](/reference/nodes/#trigger.webhook) summarises the order as
 ## Signing
 
 Sign the raw body exactly as for [signed events](/guides/approvals-and-events/#signed-events):
-`X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<raw body>")>`,
+`X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`,
 with a timestamp within five minutes. Sign the bytes you send; re-serialising the JSON afterwards
 breaks the signature.
 
 ```bash
 BODY='{"model":"b2c","channel":"web","externalId":"SHOP-10442","lines":[{"sku":"MON-27","qty":1}]}'
 T=$(date +%s)
-SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -hex | sed 's/^.* //')
+SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$ORDERLOOP_SIGNING_SECRET" -hex | sed 's/^.* //')
 curl -X POST https://orderloop.io/api/v1/webhooks/orders \
   -H "X-OrderLoop-Signature: t=$T,v1=$SIG" -H 'content-type: application/json' \
   -d "$BODY"
 ```
 
-From Node, `signWebhook(secret, rawBody)` in `@orderloop/core` builds the header:
+From Node:
 
 ```ts
-import { SIGNATURE_HEADER, signWebhook } from '@orderloop/core';
+import { createHmac } from 'node:crypto';
 
 const body = JSON.stringify({
   model: 'b2c',
@@ -74,9 +74,11 @@ const body = JSON.stringify({
   externalId: 'SHOP-10442',
   lines: [{ sku: 'MON-27', qty: 1 }],
 });
+const t = Math.floor(Date.now() / 1000);
+const v1 = createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
 const res = await fetch('https://orderloop.io/api/v1/webhooks/orders', {
   method: 'POST',
-  headers: { 'content-type': 'application/json', [SIGNATURE_HEADER]: await signWebhook(secret, body) },
+  headers: { 'content-type': 'application/json', 'x-orderloop-signature': `t=${t},v1=${v1}` },
   body,
 });
 ```
@@ -86,20 +88,18 @@ const res = await fetch('https://orderloop.io/api/v1/webhooks/orders', {
 The flow that runs is, in order:
 
 1. The body's `flowId`.
-2. The `<model>:<channel>` entry, from `ORDER_ROUTES` or else the built-in routes.
+2. The `<model>:<channel>` entry in the workspace's order routes, else in the built-in routes.
 3. The `<model>:*` entry, likewise.
 4. The model's default [built-in flow](/guides/templates/): `tpl-b2b-order` for `b2b`,
    `tpl-storefront-order` for `b2c`, `tpl-omnichannel-order` for `d2c`, `tpl-marketplace-order` for `marketplace`, `tpl-subscription`,
    `tpl-purchase-request` and `tpl-reorder` for the others.
 
-The built-in routes (`DEFAULT_ORDER_ROUTES` in `packages/core/src/inbound.ts`) send till sales to
-the point-of-sale flow: `b2c:pos` and `d2c:pos` run `tpl-pos-sale` (see
-[Fulfillment](/guides/fulfillment/#carry-out-and-point-of-sale)). `ORDER_ROUTES` entries override
-them, key by key.
+The built-in routes send till sales to the point-of-sale flow: `b2c:pos` and `d2c:pos` run
+`tpl-pos-sale` (see [Fulfillment](/guides/fulfillment/#carry-out-and-point-of-sale)).
 
-`ORDER_ROUTES` is a `vars` entry on the web Worker (see [Configuration](/reference/configuration/#web-variables)):
-a JSON object from `model:channel` or `model:*` to a flow id. Keys are lowercase letters, digits and underscores (`*` is allowed after the colon); entries with any
-other key or an empty flow id are dropped, as is a value that isn't a JSON object.
+The workspace's order routes are set by your OrderLoop administrator: a map from `model:channel`
+or `model:*` to a flow id, which overrides the built-in routes key by key. Keys are lowercase
+letters, digits and underscores (`*` is allowed after the colon). For example:
 
 ```json
 { "b2c:pos": "flow-pos-order", "marketplace:*": "flow-marketplace-order" }
@@ -114,8 +114,8 @@ started finds it first, so it still returns `200` after its flow is unpublished.
 
 `channel` and `externalId` are the idempotency key (`order:<channel>:<externalId>`), so a sender
 can retry freely. A repeat that matches the first request returns `200` with the existing order.
-The match is a fingerprint of the body you sent (`inboundFingerprint` in `@orderloop/core`), not of
-the flow it was routed to, so a retry still finds its order after `ORDER_ROUTES` changes. The same
+The match is a fingerprint of the body you sent, not of the flow it was routed to, so a retry
+still finds its order after the order routes change. The same
 pair with different contents returns `422` and starts nothing. To change an accepted order,
 [deliver events](/guides/approvals-and-events/) to it.
 
@@ -130,6 +130,6 @@ pair with different contents returns `422` and starts nothing. To change an acce
 | `409` | A new order's flow has no published version |
 | `422` | The same `channel` and `externalId` already arrived with different contents |
 | `500` | Engine error |
-| `503` | `WEBHOOK_SECRET` is not set |
+| `503` | The workspace hasn't enabled signed webhooks (no signing secret is set) |
 
 Errors are `{ "error": "…" }`. Treat `201` and `200` as accepted; retry on `5xx` with the same body.

@@ -6,23 +6,16 @@ description: The flow seeded for each commerce model, how seeding works, and the
 import Templates from '../../components/Templates.astro';
 
 OrderLoop seeds at least one flow per [commerce model](/guides/commerce-models/). Each is an ordinary flow: open it in the editor,
-change it and publish a new version. The list below is rendered from `TEMPLATES` in
-`packages/core/src/templates.ts`, the same builders the seed publishes.
+change it and publish a new version.
 
 ## Seeding
 
-`seedFlows` (`packages/db/src/flows.ts`) publishes each template whose exact JSON has never been
-published as a version of that flow: a new template as version 1, a changed one as the next version. It runs:
-
-- in the web app, through `ensureSeeded()`, the first time a worker isolate lists or loads flows
-  (the dashboard, `/flows`, a flow page, `GET /api/v1/flows`), or starts an order from the New order form, `POST /api/v1/orders` or a signed
-  `POST /api/v1/webhooks/orders`;
-- in the engine, through `ensureTemplates()`, before the Replenish Workflow starts a replenishment order.
-
-A template that matches any earlier published version is left alone, so code still running from before
-a change can't roll a newer version back, and seeding twice publishes once. A template that
-changed in the code is published over the flow's draft and over anything you published from the editor since, so
-keep a customised copy as its own flow. Orders already running keep the version they pinned.
+OrderLoop publishes the built-in flows the first time they are needed: when flows are listed or
+opened, when an order starts, and before the stock review starts a replenishment order. When a
+built-in flow changes in a new OrderLoop release, the new version is published over the flow's
+draft and over anything you published from the editor since, so keep a customised copy as its own
+flow. A built-in flow that matches an earlier version is never published again, and orders already
+running keep the version they pinned.
 
 ## The flows
 
@@ -33,13 +26,13 @@ keep a customised copy as its own flow. Orders already running keep the version 
 
 ## Scenarios
 
-The dashboard's **Demo scenarios** start an order on a seeded flow with a canned input
-(`apps/web/app/lib/scenarios.ts`). Each exercises a different path:
+The dashboard's **Demo scenarios** start an order on a built-in flow with a canned input. Each
+exercises a different path:
 
 | Scenario | Flow | Path |
 |---|---|---|
 | Guest checkout | `tpl-storefront-order` | A `b2c` web order with `contact` and no customer: card checkout, and the shipping and return emails go to the contact address |
-| B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the credit check passes, the routine assessment is unsure (`AI_MODE=mock` always answers 0.5), so the agent router triages and auto-approves; ships, waits for payment |
+| B2B PO by email | `tpl-b2b-order` | AI extracts lines from an email, contract pricing, the credit check passes, the routine assessment is unsure (without the model it always answers 0.5), so the agent router triages and auto-approves; ships, waits for payment |
 | B2B over credit limit | `tpl-b2b-order` | `cus_contoso` is near its limit, so the credit check routes to a person |
 | B2B out of stock | `tpl-b2b-order` | `meta.simulate: "out_of_stock"`: the reservation comes up short and the order fails and rolls back |
 | Procurement request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |
@@ -56,8 +49,8 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 
 ### Simulating failures
 
-The mock [connectors](/internals/architecture/#connectors) read `order.meta.simulate`, so any
-order (from the API too) can take a failure path:
+The built-in commerce steps read `order.meta.simulate`, so any order (from the API too) can take a
+failure path:
 
 | Value | Effect |
 |---|---|
@@ -70,6 +63,6 @@ Restarting an order from its page drops `meta.simulate`, so the retry runs for r
 
 ### Stock review
 
-The Replenish Workflow runs daily (`0 6 * * *`, set in `apps/engine/wrangler.jsonc`). It scans for
+The stock review runs daily at 06:00 UTC. It scans for
 SKUs at or below their reorder point and, if there are any, starts one order on `tpl-reorder`
 titled `Replenish <skus>`. **Run stock review now** on the back office page starts it on demand.
