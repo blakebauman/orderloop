@@ -9,9 +9,12 @@ import {
   messages,
   orders,
   payments,
+  payouts,
   priceRules,
   priceSources,
   products,
+  sellerOrders,
+  sellers,
   shipments,
 } from '@orderloop/db';
 import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
@@ -97,7 +100,7 @@ export async function listApprovals(status = 'pending') {
 }
 
 export async function orderRecords(orderId: string) {
-  const [docs, msgs, pays, ships] = await Promise.all([
+  const [docs, msgs, pays, ships, parts, outs] = await Promise.all([
     db()
       .select()
       .from(documents)
@@ -118,8 +121,39 @@ export async function orderRecords(orderId: string) {
       .from(shipments)
       .where(eq(shipments.orderId, orderId))
       .orderBy(desc(shipments.createdAt)),
+    db()
+      .select({
+        sellerId: sellerOrders.sellerId,
+        name: sellers.name,
+        status: sellerOrders.status,
+        subtotal: sellerOrders.subtotal,
+        reason: sellerOrders.reason,
+      })
+      .from(sellerOrders)
+      .leftJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
+      .where(eq(sellerOrders.orderId, orderId))
+      .orderBy(sellerOrders.sellerId),
+    db()
+      .select({
+        sellerId: payouts.sellerId,
+        name: sellers.name,
+        status: payouts.status,
+        net: payouts.net,
+        commission: payouts.commission,
+      })
+      .from(payouts)
+      .leftJoin(sellers, eq(sellers.id, payouts.sellerId))
+      .where(eq(payouts.orderId, orderId))
+      .orderBy(payouts.sellerId),
   ]);
-  return { documents: docs, messages: msgs, payments: pays, shipments: ships };
+  return {
+    documents: docs,
+    messages: msgs,
+    payments: pays,
+    shipments: ships,
+    sellers: parts.map((p) => ({ ...p, name: p.name ?? 'Marketplace' })),
+    payouts: outs,
+  };
 }
 
 export async function getOrderRow(orderId: string) {
@@ -127,15 +161,17 @@ export async function getOrderRow(orderId: string) {
 }
 
 export async function backOffice() {
-  const [cust, prods, sources, rules, contracts] = await Promise.all([
+  const [cust, prods, sources, rules, contracts, sellerRows] = await Promise.all([
     db().select().from(customers).orderBy(customers.name),
     db().select().from(products).orderBy(products.sku),
     db().select().from(priceSources).orderBy(priceSources.priority),
     db().select().from(priceRules).orderBy(priceRules.sourceId, priceRules.sku, priceRules.minQty),
     db().select().from(contractPrices).orderBy(contractPrices.customerId, contractPrices.sku),
+    db().select().from(sellers).orderBy(sellers.name),
   ]);
   return {
     customers: cust,
+    sellers: sellerRows,
     products: prods,
     pricing: { sources, rules, contracts, rates: await currencies() },
   };

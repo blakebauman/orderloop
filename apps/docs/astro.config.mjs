@@ -85,6 +85,7 @@ export default defineConfig({
             { label: 'Building flows', slug: 'guides/building-flows' },
             { label: 'Commerce models', slug: 'guides/commerce-models' },
             { label: 'Built-in flows', slug: 'guides/templates' },
+            { label: 'Marketplace', slug: 'guides/marketplace' },
             { label: 'Approvals and events', slug: 'guides/approvals-and-events' },
             { label: 'Inbound orders', slug: 'guides/inbound-orders' },
             { label: 'Email intake', slug: 'guides/email-intake' },

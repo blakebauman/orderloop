@@ -87,7 +87,7 @@ The flow that runs is, in order:
 2. The `ORDER_ROUTES` entry for `<model>:<channel>`.
 3. The `ORDER_ROUTES` entry for `<model>:*`.
 4. The model's default [built-in flow](/guides/templates/): `tpl-b2b-order` for `b2b`,
-   `tpl-storefront-order` for `b2c`, `d2c` and `marketplace`, `tpl-subscription`,
+   `tpl-storefront-order` for `b2c` and `d2c`, `tpl-marketplace-order` for `marketplace`, `tpl-subscription`,
    `tpl-purchase-request` and `tpl-reorder` for the others.
 
 `ORDER_ROUTES` is a `vars` entry on the web Worker (see [Configuration](/reference/configuration/#web-variables)):

@@ -116,6 +116,57 @@ describe('planner', () => {
     expect(ended).toBe('done');
   });
 
+  it('ships a marketplace order straight away when every seller auto-accepts', () => {
+    const { ran, ended } = simulate(tpl('tpl-marketplace-order'), (id) =>
+      id === 'window' ? ['timeout'] : undefined,
+    );
+    expect(ended).toBe('done');
+    expect(ran).not.toContain('accepting');
+    expect(ran.slice(ran.indexOf('split'))).toEqual([
+      'split',
+      'reserve',
+      'ship',
+      'capture',
+      'shipped',
+      'window',
+      'payout',
+      'done',
+    ]);
+  });
+
+  it('waits for each seller in turn, then ships what was accepted', () => {
+    const { ran, ended, state } = simulate(tpl('tpl-marketplace-order'), (id, run) => {
+      if (id === 'split') return ['awaiting'];
+      if (id === 'record') return run === 1 ? ['pending'] : ['partial'];
+      if (id === 'window') return ['timeout'];
+    });
+    expect(ended).toBe('done');
+    expect(ran.filter((id) => id === 'responded')).toHaveLength(2);
+    expect(state.nodes.reserve!.status).toBe('succeeded');
+    expect(state.nodes.no_sellers!.status).toBe('skipped');
+  });
+
+  it('rejects unanswered sellers when the wait times out, and fails when none accepted', () => {
+    const { ran, ended } = simulate(tpl('tpl-marketplace-order'), (id) => {
+      if (id === 'split') return ['awaiting'];
+      if (id === 'responded') return ['timeout'];
+      if (id === 'expire') return ['rejected'];
+    });
+    expect(ran).toContain('expire');
+    expect(ran).not.toContain('reserve');
+    expect(ended).toBe('no_sellers');
+  });
+
+  it('gives up on sellers after the loop limit', () => {
+    const { ran, ended } = simulate(tpl('tpl-marketplace-order'), (id) => {
+      if (id === 'split') return ['awaiting'];
+      if (id === 'record') return ['pending'];
+    });
+    expect(ran.filter((id) => id === 'record')).toHaveLength(10);
+    expect(ran).not.toContain('reserve');
+    expect(ended).toBe('unanswered');
+  });
+
   it('runs subscription periods with distinct step runs, then continues as new', () => {
     const flow = tpl('tpl-subscription');
     const { ran, state, ended } = simulate(flow, (id, run) => {

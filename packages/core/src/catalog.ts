@@ -255,10 +255,52 @@ export const NODE_SPECS = [
     rollback: true,
   }),
   node({
+    type: 'commerce.split_by_seller',
+    category: 'commerce',
+    label: 'Split by seller',
+    description:
+      'Splits the order into one part per marketplace seller. Sellers that auto-accept, and the operator’s own lines, are accepted at once; the rest wait for the seller.',
+    icon: 'Store',
+    fields: [],
+    outputs: ['accepted', 'awaiting'],
+    rollback: true,
+  }),
+  node({
+    type: 'commerce.seller_accept',
+    category: 'commerce',
+    label: 'Seller response',
+    description:
+      'Records a seller’s accept or reject from a seller.responded event, or rejects every seller still pending. Once none is pending, a partial acceptance drops the rejected sellers’ lines.',
+    icon: 'Handshake',
+    fields: [
+      {
+        key: 'decision',
+        label: 'Decision',
+        kind: 'select',
+        options: ['from_event', 'expire_pending'],
+        default: 'from_event',
+        hint: 'from_event reads vars.seller_responded { sellerId, decision, reason? }',
+      },
+    ],
+    outputs: ['accepted', 'partial', 'rejected', 'pending'],
+  }),
+  node({
+    type: 'commerce.payout',
+    category: 'commerce',
+    label: 'Seller payouts',
+    description:
+      'Schedules a payout to each accepted seller: their lines, less the commission and their share of refunds.',
+    icon: 'HandCoins',
+    fields: [],
+    outputs: OUT,
+    rollback: true,
+  }),
+  node({
     type: 'commerce.capture_payment',
     category: 'commerce',
     label: 'Capture payment',
-    description: 'Captures a previous authorization.',
+    description:
+      'Captures a previous authorization, up to the order total; anything left on the authorization is released.',
     icon: 'BadgeDollarSign',
     fields: [],
     outputs: ['ok', 'failed'],
@@ -408,14 +450,14 @@ export const NODE_SPECS = [
     category: 'commerce',
     label: 'Notify',
     description:
-      'Sends a message to the customer (or a guest’s contact email), a supplier or the team.',
+      'Sends a message to the customer (or a guest’s contact email), a supplier, the marketplace sellers still to answer (else those who accepted) or the team.',
     icon: 'Send',
     fields: [
       {
         key: 'to',
         label: 'To',
         kind: 'select',
-        options: ['customer', 'supplier', 'team'],
+        options: ['customer', 'supplier', 'seller', 'team'],
         default: 'customer',
       },
       { key: 'subject', label: 'Subject', kind: 'text', default: 'Order {{order.id}} update' },

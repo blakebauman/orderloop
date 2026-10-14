@@ -136,8 +136,8 @@ or the [assistant](/guides/assistant/) (after the person confirms). Cancelling a
 ended does nothing. Otherwise the agent:
 
 1. terminates the Workflow instance;
-2. compensates the order: releases its inventory reservations, voids its payment authorizations
-   and cancels its open shipments (`compensateOrder` in `apps/engine/src/connectors.ts`);
+2. compensates the order: releases its inventory reservations, voids its payment authorizations,
+   cancels its open shipments, cancels its seller orders and reverses its scheduled payouts (`compensateOrder` in `apps/engine/src/connectors.ts`);
 3. marks pending approvals `cancelled` and clears the order's waits;
 4. sets the status to `cancelled`, with the reason and the counts in the timeline;
 5. sends the `order.cancelled` [outbound webhook](/guides/outbound-webhooks/).

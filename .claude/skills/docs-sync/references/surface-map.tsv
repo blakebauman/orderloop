@@ -42,7 +42,7 @@
 ^apps/engine/src/(orders|replenish|api|index)\.ts$	internals/architecture internals/workflow reference/rest-api	prose
 ^apps/(engine|web)/wrangler\.jsonc$	reference/configuration start/deploy internals/architecture	prose
 ^apps/web/\.dev\.vars\.example$	reference/configuration start/getting-started	prose
-^packages/db/(src/schema\.ts|migrations/)	internals/data-model	prose
+^packages/db/(src/schema\.ts|migrations/)	internals/data-model guides/marketplace	prose
 ^(apps|packages)/[^/]+/(vitest\.config\.ts|tests/)	internals/testing	prose
 ^(\.github/workflows/|scripts/provision\.sh$)	start/deploy	prose
 ^package\.json$	start/getting-started start/deploy	prose
@@ -51,3 +51,4 @@
 ^apps/engine/src/(assistant/|principal\.ts$)	guides/assistant guides/ai internals/architecture	prose
 ^packages/core/src/assistant\.ts$	guides/assistant guides/ai	prose
 ^apps/web/app/(components/assistant/|lib/assistant\.tsx$)	guides/assistant	prose
+^packages/core/src/(catalog|templates)\.ts$	guides/marketplace	gen

@@ -402,6 +402,89 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: { ref }, vars: { erpRef: ref }, summary: ref };
   },
 
+  'commerce.split_by_seller': async ({ env, ctx }) => {
+    const res = await cx.splitBySeller(env, ctx.order);
+    if (!res.ok) throw new NonRetryableError(res.error);
+    const pending = res.parts.filter((p) => p.status === 'pending');
+    return {
+      branches: [pending.length ? 'awaiting' : 'accepted'],
+      output: { parts: res.parts },
+      vars: {
+        sellers: res.parts.map((p) => p.sellerId),
+        pendingSellers: pending.map((p) => p.sellerId),
+      },
+      summary: `${res.parts.length} ${res.parts.length === 1 ? 'seller' : 'sellers'}${pending.length ? ` · ${pending.length} awaiting` : ''}`,
+    };
+  },
+
+  'commerce.seller_accept': async ({ env, ctx, config }) => {
+    if (str(config.decision, 'from_event') === 'expire_pending') {
+      await cx.expireSellerOrders(env, ctx.order.id, 'No response');
+    } else {
+      const r = (ctx.vars.seller_responded ?? {}) as Record<string, unknown>;
+      const decision = r.decision === 'accepted' || r.decision === 'rejected' ? r.decision : null;
+      if (typeof r.sellerId !== 'string' || !decision)
+        throw new NonRetryableError(
+          'seller.responded needs { sellerId, decision: "accepted" | "rejected" }',
+        );
+      await cx.decideSellerOrder(
+        env,
+        ctx.order.id,
+        r.sellerId,
+        decision,
+        typeof r.reason === 'string' ? r.reason : undefined,
+      );
+    }
+    const parts = await cx.sellerParts(env, ctx.order.id);
+    const pending = parts.filter((p) => p.status === 'pending');
+    const accepted = parts.filter((p) => p.status === 'accepted');
+    const rejected = parts.filter((p) => p.status === 'rejected');
+    const output = { parts };
+    if (pending.length)
+      return {
+        branches: ['pending'],
+        output,
+        vars: { pendingSellers: pending.map((p) => p.sellerId) },
+        summary: `${pending.length} still to answer`,
+      };
+    if (!accepted.length) return { branches: ['rejected'], output, summary: 'No seller accepted' };
+    if (!rejected.length)
+      return { branches: ['accepted'], output, summary: `All ${accepted.length} accepted` };
+    // Keep only the lines of sellers that accepted, and re-total.
+    const keep = new Set(accepted.map((p) => p.sellerId));
+    const products = new Map(
+      (
+        await cx.getProducts(
+          env,
+          ctx.order.lines.map((l) => l.sku),
+        )
+      ).map((p) => [p.sku, p]),
+    );
+    const lines = ctx.order.lines.filter((l) =>
+      keep.has(l.sellerId ?? products.get(l.sku)?.sellerId ?? cx.FIRST_PARTY),
+    );
+    return {
+      branches: ['partial'],
+      output,
+      order: { lines, ...totals({ ...ctx.order, lines }) },
+      vars: { rejectedSellers: rejected.map((p) => p.sellerId) },
+      summary: `${accepted.length} accepted, ${rejected.length} rejected (${rejected.map((p) => p.name).join(', ')})`,
+    };
+  },
+
+  'commerce.payout': async ({ env, ctx, stepKey }) => {
+    const rows = await cx.schedulePayouts(env, ctx.order, stepKey);
+    const net = money(rows.reduce((s, r) => s + r.net, 0));
+    const commission = money(rows.reduce((s, r) => s + r.commission, 0));
+    return {
+      output: { payouts: rows },
+      vars: { commission, payouts: rows.map((r) => ({ sellerId: r.sellerId, net: r.net })) },
+      summary: rows.length
+        ? `${rows.length} ${rows.length === 1 ? 'payout' : 'payouts'} · ${cash(net, ctx)} net, ${cash(commission, ctx)} commission`
+        : 'No third-party sellers',
+    };
+  },
+
   'commerce.notify': async ({ env, ctx, config, stepKey }) => {
     const to = str(config.to, 'customer');
     const customer = await cx.getCustomer(env, ctx.order.customerId);
@@ -413,6 +496,15 @@ export const EXECUTORS: Record<string, Exec> = {
           : 'team';
     const subject = interpolate(str(config.subject), ctx);
     const body = interpolate(str(config.body), ctx) || subject;
+    if (to === 'seller') {
+      const sellers = await cx.sellerContacts(env, ctx.order.id);
+      const sent = [];
+      for (const s of sellers)
+        sent.push(
+          await cx.sendMessage(env, ctx.order.id, `${stepKey}:${s.id}`, s.email, subject, body),
+        );
+      return { output: { messages: sent }, summary: `→ ${sent.length} sellers: ${subject}` };
+    }
     const r = await cx.sendMessage(env, ctx.order.id, stepKey, recipient, subject, body);
     return { output: r, summary: `→ ${recipient}: ${subject}` };
   },
@@ -554,6 +646,10 @@ export const ROLLBACKS: Record<
     `Released ${await cx.releaseInventory(env, orderId)} reservations`,
   'commerce.authorize_payment': async (env, orderId) =>
     `Voided ${await cx.voidAuthorizations(env, orderId)} authorizations`,
+  'commerce.split_by_seller': async (env, orderId) =>
+    `Cancelled ${await cx.cancelSellerOrders(env, orderId)} seller orders`,
+  'commerce.payout': async (env, orderId) =>
+    `Reversed ${await cx.reversePayouts(env, orderId)} payouts`,
   'commerce.ship': async (env, _orderId, output) => {
     const id = (output as { shipmentId?: string } | undefined)?.shipmentId;
     if (id) await cx.cancelShipment(env, id);

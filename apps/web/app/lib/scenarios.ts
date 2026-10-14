@@ -137,6 +137,25 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
+    id: 'marketplace',
+    label: 'Marketplace order, two sellers',
+    blurb:
+      'Headphones from a seller that auto-accepts and a kettle from one that is asked: the order waits for Kettle & Co, then ships what was accepted and pays each seller out net of commission.',
+    flowId: 'tpl-marketplace-order',
+    input: {
+      model: 'marketplace',
+      channel: 'marketplace',
+      currency: 'USD',
+      customerId: 'cus_ada',
+      title: 'Marketplace order M-30417',
+      lines: [
+        { sku: 'HP-200', qty: 1 },
+        { sku: 'KET-01', qty: 1 },
+      ],
+      meta: {},
+    },
+  },
+  {
     id: 'storefront-return',
     label: 'Storefront order, returned',
     blurb:

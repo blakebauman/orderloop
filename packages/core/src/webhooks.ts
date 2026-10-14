@@ -80,6 +80,7 @@ export const OUTBOUND_EVENTS = [
   'order.invoiced',
   'order.shipped',
   'order.refunded',
+  'order.payout_scheduled',
   'order.completed',
   'order.declined',
   'order.cancelled',
@@ -94,6 +95,7 @@ export const NODE_EVENTS: Record<string, { event: OutboundEvent; branch?: string
   'commerce.invoice': { event: 'order.invoiced' },
   'commerce.ship': { event: 'order.shipped' },
   'commerce.refund': { event: 'order.refunded', branch: 'ok' },
+  'commerce.payout': { event: 'order.payout_scheduled' },
 };
 
 export type OutboundPayload = {
