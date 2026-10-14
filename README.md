@@ -10,7 +10,8 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               │     approvals, mock back office            │    live state, waits, approvals
               │ flow editor, live order view, /api/v1       ├─ OrderLoop Workflow: interprets the pinned
               ├─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
-              └─ /agents/assistant-agent/* WebSocket ──────►├─ AssistantAgent DO (one per person): the workspace assistant
+              ├─ /agents/assistant-agent/* WebSocket ──────►├─ AssistantAgent DO (one per person): the workspace assistant
+              └─ /mcp (OAuth, MCP clients) ────────────────►│    its tools, served to MCP clients
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
 storefront, marketplace, POS ── POST /api/v1/webhooks/orders (signed, on apps/web)
 inbound order email ── Cloudflare Email Routing ── email() ─►├─ Email intake: orders@ / po@ / purchasing@ start orders
@@ -88,7 +89,7 @@ GET  /api/v1/audit-events?type=&before=     security audit log (operator)
 
 ### Outbound webhooks
 
-Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`, `order.completed`, `order.declined` (a policy or approval “no”), `order.cancelled` and `order.failed`.
+Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.shipped`, `order.ready_for_pickup`, `order.delivered`, `order.refunded`, `order.payout_scheduled`, `order.completed`, `order.declined` (a policy or approval “no”), `order.cancelled` and `order.failed`.
 
 ```
 GET    /api/v1/webhook-subscriptions

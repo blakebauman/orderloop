@@ -58,8 +58,8 @@ That can resolve the inputs of the next node down, so the pass repeats until not
 Skipping therefore runs down every path that depends only on an untaken branch, and stops at the
 first join that still has an active input.
 
-`readyNodes` returns `{ ready, skipped }`, both in graph order (the order of `graph.nodes`), and
-mutates the state for the skips.
+`readyNodes` returns `{ ready, skipped }` and mutates the state for the skips. `ready` is in graph
+order (the order of `graph.nodes`); `skipped` is in the order the passes resolved them.
 
 ## Completing a node
 

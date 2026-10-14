@@ -94,7 +94,7 @@ Two kinds of report go to `OrderAgent.report` (types in `apps/engine/src/agent.t
   them again. They carry a `seq` that increments per run; the agent drops any snapshot whose `seq`
   is not newer than what it has for that generation.
 - **Detail reports** (node start, finish, summary, output, timeline entries) are sent from inside
-  steps and carry no `seq`. Timeline entries have a `key`, and the agent replaces an entry with the
+  executor steps (or, for waits and loops, once the memoized step has returned) and carry no `seq`. Timeline entries have a `key`, and the agent replaces an entry with the
   same key instead of appending, so a retried step does not duplicate history.
 
 Report failures are logged and swallowed: the UI must never fail an order. See

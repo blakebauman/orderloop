@@ -61,7 +61,8 @@ workspace [assistant](/guides/assistant/) (after you confirm) can resolve it. Se
 
 ## Rollback
 
-Reserving inventory, authorizing payment and creating a shipment each register a compensation on
+Reserving inventory, authorizing payment, creating a shipment, holding stock for pickup, delivering
+a digital good, splitting an order by seller and paying sellers out each register a compensation on
 their step. When an order fails (an End node with outcome `failed`, or a node that throws), the
 Workflow runs those compensations in reverse order: stock is released, the authorization voided, the
 shipment cancelled. Cancelling an order does the same through the OrderAgent.
@@ -82,5 +83,6 @@ by nodes and events), `nodes` (each node's latest output, by id), `input` (the o
 
 ## Outbound events
 
-Subscribers receive signed webhooks when an order is paid, invoiced, shipped or refunded, and
-whenever it ends. See [Outbound webhooks](/guides/outbound-webhooks/).
+Subscribers receive signed webhooks when an order is paid, invoiced, shipped, ready for pickup,
+delivered, refunded or seller payouts are scheduled, and whenever it ends (completed,
+declined, cancelled or failed). See [Outbound webhooks](/guides/outbound-webhooks/).

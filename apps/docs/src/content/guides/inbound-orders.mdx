@@ -43,7 +43,7 @@ The rest (`title`, `customerId`, `currency`, `contact`, `fulfillment`, `document
 `documentKey`, `meta`) are the fields of `input` in the REST API. `currency` defaults to `USD` and
 must have an exchange rate, or the request returns `400`. The server sets `meta.via` to `webhook`.
 The [Webhook trigger](/reference/nodes/#trigger.webhook) summarises the order as
-`<channel label> · <externalId> (<source>)` and outputs `{ channel, externalId, source }`.
+`<channel label> · <externalId>`, plus `(<source>)` when the order carries a `source` that differs from the channel, and outputs `{ channel, externalId, source }` (`source` falls back to the node's configured one).
 
 ## Signing
 
@@ -96,8 +96,8 @@ the point-of-sale flow: `b2c:pos` and `d2c:pos` run `tpl-pos-sale` (see
 them, key by key.
 
 `ORDER_ROUTES` is a `vars` entry on the web Worker (see [Configuration](/reference/configuration/#web-variables)):
-a JSON object from `model:channel` or `model:*` to a flow id. Keys are lowercase; entries that are
-malformed or have an empty flow id are dropped, as is a value that isn't a JSON object.
+a JSON object from `model:channel` or `model:*` to a flow id. Keys are lowercase letters, digits and underscores (`*` is allowed after the colon); entries with any
+other key or an empty flow id are dropped, as is a value that isn't a JSON object.
 
 ```json
 { "b2c:pos": "flow-pos-order", "marketplace:*": "flow-marketplace-order" }

@@ -73,8 +73,8 @@ On `tpl-omnichannel-order`, the `pickup` branch is:
    `collected` and consumes the held store stock.
 
 Send `pickup.collected` when the customer has the goods, the way any
-[wait event](/guides/approvals-and-events/#waiting-for-events) is sent: the **Deliver** button on the back office
-page, `POST /api/v1/orders/:id/events` with `{ "event": "pickup.collected" }`, or a
+[wait event](/guides/approvals-and-events/#waiting-for-events) is sent: the **Send `pickup.collected`** button on the
+back office page, `POST /api/v1/orders/:id/events` with `{ "event": "pickup.collected" }`, or a
 [signed event](/guides/approvals-and-events/#signed-events) from the store's system. The payload is
 optional.
 

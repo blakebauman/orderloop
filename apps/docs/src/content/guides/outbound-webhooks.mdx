@@ -11,8 +11,8 @@ OrderLoop POSTs signed order events to the endpoints you subscribe. The events a
 
 ## Subscribing
 
-Subscriptions are managed through the [REST API](/reference/rest-api/) with the admin password;
-there is no UI for them.
+Subscriptions are managed through the [REST API](/reference/rest-api/) with an `operator` token or
+the shared password; there is no UI for them.
 
 ```bash
 curl -X POST https://orderloop.io/api/v1/webhook-subscriptions \
@@ -21,7 +21,7 @@ curl -X POST https://orderloop.io/api/v1/webhook-subscriptions \
 ```
 
 - `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`.
-- `events` is a list of event names, or `["*"]` for every event (the default).
+- `events` is a list of the event names above, or `["*"]` for every event (the default). An unknown name returns `400`.
 
 The `201` response is `{ "subscription": { … }, "secret": "whsec_…" }`. **The secret is returned
 once**, here; listing subscriptions never shows it. Store it with the receiver.

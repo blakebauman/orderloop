@@ -42,7 +42,7 @@ window, the pending decision is sent then.
 The inbox filters by `pending`, `approved`, `rejected`, `escalated` or `all`. For a pending row it
 shows why a person is being asked (for a credit check: how far over the limit, the limit and the
 balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval escalates and to which step. Keyboard: `j`/`k` (or the arrow keys)
-move between rows, `a` approves, `r` rejects.
+move between rows, `a` approves, `r` rejects and `z` undoes.
 
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`operator` for
 the shared workspace password); see [Team and roles](/guides/team-and-roles/#who-decided).
@@ -83,9 +83,9 @@ waiting.
 
 - **Order page**: the open wait has a **Simulate `<event>`** button (payload
   `{ "source": "dashboard", "amount": <order total> }`).
-- **Back office**: lists every order waiting on an event, with a button to deliver it (payload
+- **Back office**: lists orders waiting on an event (up to 20), each with a **Send `<event>`** button (payload
   `{ "source": "back-office" }`).
-- **REST API**, with the admin password:
+- **REST API**, with an API token of the `operator` role:
 
   ```bash
   curl -X POST https://orderloop.io/api/v1/orders/ord_…/events \

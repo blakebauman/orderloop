@@ -40,8 +40,8 @@ The flow id is a slug of the name plus a short suffix. A new flow is a draft unt
 **Save** stores the draft and returns the current validation errors and warnings. **Publish**
 asks for confirmation, then publishes the next version. **Test run** publishes too when the graph
 differs from the published version, then starts a sample order on it: the input of the first
-[dashboard scenario](/guides/templates/#scenarios) for the flow's model, or an empty order
-when there is none.
+[dashboard scenario](/guides/templates/#scenarios) that uses this flow, else the first one for its
+model, else an empty `manual` order.
 
 A flow created from a built-in template offers the template's current graph when the template
 has changed since (layout differences don't count). It is a proposal you review; nothing is
@@ -104,8 +104,10 @@ A `control.end` node finishes the order with an outcome:
 are all skipped, with no End node reached, finishes as `completed`.
 
 A commerce node that throws after its retries fails the order the same way, without reaching an
-End node. Only reserve inventory, authorize payment and create shipment register compensations;
-they release the reservation, void the hold and cancel the shipment.
+End node. Only nodes with `rollback: true` in the catalog register compensations: reserve inventory
+(releases the reservation), authorize payment (voids the hold), create shipment and ready for
+pickup (cancel the shipment or staged pickup), deliver digital goods (revokes the codes), split by
+seller (cancels the seller orders) and seller payouts (reverses scheduled payouts).
 
 ## Expressions and templates
 

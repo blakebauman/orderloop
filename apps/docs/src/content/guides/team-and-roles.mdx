@@ -34,14 +34,14 @@ Operators manage people and tokens at `/team`:
   once; hand it over and ask them to change it on their **Account** page.
 - **Role:** change and save. You can't lower your own role.
 - **Reset password:** shows a new one-time password and signs the person out everywhere.
-- **Disable / Enable:** a disabled person can't sign in, and their sessions end.
+- **Disable / Enable:** a disabled person can't sign in, and their sessions end. You can't disable yourself.
 - **Reset two-factor:** for someone who has lost their phone and their recovery codes. It turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. You can't reset your own.
 - Without `APP_PASSWORD`, the last active operator can't be demoted or disabled, so someone can
   always manage the team.
 
-Passwords must be 10 to 256 characters, not a common password and not contain the email address.
+Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
 They are stored as PBKDF2-SHA256 (100,000 iterations, the Workers limit) as
 `pbkdf2:<iterations>:<salt>:<hash>`.
 
@@ -102,7 +102,7 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 | Person, at the code step | 5 | Guessing two-factor codes after a correct password |
 
 A successful sign-in clears its email-and-address count. The workspace password counts as one
-email. Addresses come from `cf-connecting-ip`, which Cloudflare sets. The limits are `LIMITS` in
+email. Separately, 20 wrong guesses at the shared password as an API bearer token from one address in 15 minutes are refused with `429`. Addresses come from `cf-connecting-ip`, which Cloudflare sets. The limits are `LIMITS` in
 `apps/web/app/lib/throttle.ts`, and the counts are D1 `auth_failures`.
 
 ## API tokens
