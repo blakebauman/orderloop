@@ -49,41 +49,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm test
 
+      # The registry in deployments/ and the configs rendered from it.
+      - name: Test fleet
+        if: ${{ !cancelled() }}
+        run: pnpm test:fleet
+
       # Known high or critical advisories in anything that ships (dev tooling excluded).
       - name: Audit dependencies
         if: ${{ !cancelled() }}
         run: pnpm audit --prod --audit-level high
 
-  deploy:
-    # Ships main to orderloop.io. The `production` environment holds CLOUDFLARE_API_TOKEN and
-    # CLOUDFLARE_ACCOUNT_ID (repository secrets work too) and is where a required reviewer goes.
+  # The fleet: every deployment in deployments/, grouped by ring. Each ring waits for the one
+  # before it to finish cleanly; an empty ring is skipped. See docs/operations.md.
+  plan:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: production
-      url: https://orderloop.io
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    # The Cloudflare API sometimes fails a request outright (codes 7403, 10013) and succeeds on
-    # the next try. Each step below is idempotent, so `retry` runs it up to three times; without
-    # it a blip between the engine and web steps leaves production running mismatched Workers.
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 5
+    outputs:
+      staging: ${{ steps.rings.outputs.staging }}
+      internal: ${{ steps.rings.outputs.internal }}
+      canary: ${{ steps.rings.outputs.canary }}
+      general: ${{ steps.rings.outputs.general }}
     steps:
-      # A merge that silently skips its deploy looks like a deploy: fail instead.
-      - name: Check deploy credentials
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set to deploy"
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -91,59 +79,59 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install retry helper
+      - id: rings
         run: |
-          mkdir -p "$HOME/.local/bin"
-          cat > "$HOME/.local/bin/retry" <<'SH'
-          #!/usr/bin/env bash
-          for attempt in 1 2 3; do
-            "$@" && exit 0
-            echo "::warning::attempt $attempt failed: $*"
-            [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+          rings=$(node scripts/fleet.ts matrix)
+          for ring in staging internal canary general; do
+            echo "$ring=$(jq -c --arg r "$ring" '.[$r]' <<<"$rings")" >> "$GITHUB_OUTPUT"
           done
-          exit 1
-          SH
-          chmod +x "$HOME/.local/bin/retry"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
-      # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
-      - name: Record D1 bookmark
-        run: |
-          retry bash -c 'pnpm --filter @orderloop/web exec wrangler d1 time-travel info orderloop --json > "$RUNNER_TEMP/d1-bookmark.json"'
-          bookmark=$(jq -er .bookmark "$RUNNER_TEMP/d1-bookmark.json")
-          echo "D1 bookmark before ${GITHUB_SHA::7}: \`$bookmark\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::D1 bookmark before this deploy: $bookmark"
-      # Migrations run before the new code, and old code runs against the new schema until the
-      # Workers below are live: a migration must be additive (expand), and a destructive one
-      # (contract) ships in a later change, once no deployed code needs what it removes.
-      - name: Migrate D1
-        run: retry pnpm --filter @orderloop/web db:migrate:remote
-      # The web Worker binds to the engine, so the engine goes first.
-      - name: Deploy engine
-        id: engine
-        run: retry pnpm --filter @orderloop/engine run deploy
-      - name: Deploy web
-        id: web
-        run: retry pnpm --filter @orderloop/web run deploy
-      - name: Smoke test
-        id: smoke
-        run: |
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health
-          # D1, R2 and the engine (over the service binding) all answer.
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health/deep
-          # The app itself, not just the health route: the sign-in page renders.
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /dev/null https://orderloop.io/login
-      # Any failure once the engine has shipped puts each Worker that deployed back on its
-      # previous version, so production never runs a new engine behind an old web app (or the
-      # reverse). D1 migrations are not rolled back, which is why they must be additive.
-      - name: Roll back on a failed deploy
-        if: failure() && steps.engine.outcome == 'success'
-        run: |
-          msg="Deploy failed for ${GITHUB_SHA::7}"
-          if [ "${{ steps.web.outcome }}" = "success" ]; then
-            retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "$msg"
-          fi
-          retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg"
-      # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
-      - name: Deploy docs
-        run: retry pnpm docs:deploy
+
+  staging:
+    needs: plan
+    if: needs.plan.outputs.staging != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: ${{ fromJSON(needs.plan.outputs.staging) }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: ${{ toJSON(matrix.deployment) }}
+    secrets: inherit
+
+  internal:
+    needs: [plan, staging]
+    if: ${{ !failure() && !cancelled() && needs.plan.outputs.internal != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: ${{ fromJSON(needs.plan.outputs.internal) }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: ${{ toJSON(matrix.deployment) }}
+    secrets: inherit
+
+  canary:
+    needs: [plan, internal]
+    if: ${{ !failure() && !cancelled() && needs.plan.outputs.canary != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: ${{ fromJSON(needs.plan.outputs.canary) }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: ${{ toJSON(matrix.deployment) }}
+    secrets: inherit
+
+  general:
+    needs: [plan, canary]
+    if: ${{ !failure() && !cancelled() && needs.plan.outputs.general != '[]' }}
+    strategy:
+      fail-fast: false
+      # Customers in the general ring deploy a few at a time.
+      max-parallel: 4
+      matrix:
+        deployment: ${{ fromJSON(needs.plan.outputs.general) }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: ${{ toJSON(matrix.deployment) }}
+    secrets: inherit

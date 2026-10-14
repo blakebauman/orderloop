@@ -13,6 +13,7 @@ matter to someone with the source or a Cloudflare account (file paths, bindings,
 |---|---|
 | [Local development](local-development.md) | Install, local D1, `pnpm web:dev`, scenarios, checks |
 | [Deploy](deploy.md) | Provisioning, first deploy, CI, Email Routing, production settings, the docs site |
+| [Operations](operations.md) | The fleet: one deployment per customer, the registry, rings, adding, holding and removing a customer |
 | [Configuration](configuration.md) | Engine and web variables, secrets, bindings, routes |
 | [Architecture](architecture.md) | The web app, the engine, RPC, sockets, connectors, MCP, A2A, the assistant |
 | [Planner](planner.md) | Readiness, skips, joins and loops in `packages/core/src/graph.ts` |

@@ -10,6 +10,8 @@ export default defineConfig({
     ...agents(),
     cloudflare({
       viteEnvironment: { name: 'ssr' },
+      // A fleet deploy builds against its rendered config (`scripts/fleet.ts render <id>`).
+      configPath: process.env.ORDERLOOP_WRANGLER_CONFIG,
       // In dev, run the engine Worker in the same session so the ENGINE service binding, its
       // OrderAgent Durable Objects and Workflows all work locally. It deploys on its own. Dev
       // compresses waits so scenarios finish in minutes (production runs in real time), and calls

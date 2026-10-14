@@ -18,3 +18,6 @@ worker-configuration.d.ts.bak
 .DS_Store
 .secrets/
 .astro
+
+# Rendered per deployment by scripts/fleet.ts render <id>
+apps/*/wrangler.*.json
