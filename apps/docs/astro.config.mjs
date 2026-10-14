@@ -103,6 +103,7 @@ export default defineConfig({
             { label: 'Node catalog', slug: 'reference/nodes' },
             { label: 'Expressions and policy rules', slug: 'reference/expressions' },
             { label: 'MCP server', slug: 'reference/mcp' },
+            { label: 'A2A endpoint', slug: 'reference/a2a' },
             { label: 'Configuration', slug: 'reference/configuration' },
             // Scalar over the OpenAPI document generated from apps/web (src/pages/api.astro).
             { label: 'OpenAPI explorer', link: '/api/' },

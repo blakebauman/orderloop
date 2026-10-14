@@ -9,9 +9,10 @@ import {
   ORDER_MODELS,
   ORDER_STATUSES,
   OUTBOUND_EVENTS,
+  startOrderSchema,
 } from '@orderloop/core';
 import { z } from 'zod';
-import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
+import { eventSchema, subscriptionInput } from './api-schemas';
 
 import { AUDIT_GROUPS } from './audit';
 
@@ -68,7 +69,7 @@ export function openApiDocument(serverUrl: string) {
                 'A repeat with the same key and body returns 200 and the order it created; a different body under the same key returns 422.',
             },
           ],
-          requestBody: body(startSchema),
+          requestBody: body(startOrderSchema),
           responses: {
             '201': ok('Started', '#/components/schemas/StartOrderResult'),
             '200': ok(

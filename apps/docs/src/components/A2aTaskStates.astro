@@ -1,0 +1,44 @@
+---
+/*
+ * How an order's status reads as an A2A task state, rendered from ORDER_TASK_STATES and
+ * TERMINAL_TASK_STATES in @orderloop/core: the mapping GetTask and the status updates use.
+ */
+import {
+  ORDER_STATUSES,
+  ORDER_TASK_STATES,
+  type OrderStatus,
+  TERMINAL_TASK_STATES,
+} from '@orderloop/core';
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const rows = (ORDER_STATUSES as readonly OrderStatus[]).map((status) => ({
+  status,
+  state: ORDER_TASK_STATES[status],
+  terminal: TERMINAL_TASK_STATES.includes(ORDER_TASK_STATES[status]),
+}));
+---
+
+<table>
+  <thead>
+    <tr>
+      <th>Order status</th>
+      <th>Task state</th>
+      <th>Final</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      rows.map((r) => (
+        <tr>
+          <td>
+            <code>{r.status}</code>
+          </td>
+          <td>
+            <code>{r.state}</code>
+          </td>
+          <td>{r.terminal ? 'Yes' : 'No'}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

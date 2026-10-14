@@ -1,0 +1,38 @@
+---
+/*
+ * The skills an A2A agent can ask for, rendered from A2A_SKILLS in @orderloop/core: the table the
+ * Agent Card is built from, so a new tool or a changed role shows up here on rebuild.
+ */
+// biome-ignore lint/correctness/noUnusedImports: ROLE_LABELS is used in the markup
+import { A2A_SKILLS, type A2ASkill, ROLE_LABELS } from '@orderloop/core';
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const skills = (Object.keys(A2A_SKILLS) as A2ASkill[]).map((id) => ({ id, ...A2A_SKILLS[id] }));
+---
+
+<table>
+  <thead>
+    <tr>
+      <th>Skill</th>
+      <th>Role</th>
+      <th>Access</th>
+      <th>Does</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      skills.map((s) => (
+        <tr>
+          <td>
+            <code>{s.id}</code>
+          </td>
+          <td>
+            <code>{s.role}</code> ({ROLE_LABELS[s.role]})
+          </td>
+          <td>{s.tags.includes('write') ? 'Write' : 'Read'}</td>
+          <td>{s.description}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

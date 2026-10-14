@@ -1,3 +1,4 @@
+export * from './a2a';
 export * from './address';
 export * from './api';
 export * from './assistant';

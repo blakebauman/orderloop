@@ -33,11 +33,12 @@ import {
   parseOrderRoutes,
   type Role,
   SIGNATURE_HEADER,
+  startOrderSchema,
   toStartRequest,
   verifyWebhook,
 } from '@orderloop/core';
 import type { z } from 'zod';
-import { eventSchema, startSchema, subscriptionInput } from './api-schemas';
+import { eventSchema, subscriptionInput } from './api-schemas';
 import { isAuditGroup } from './audit';
 import { listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
@@ -100,7 +101,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (request.method === 'POST') {
         const denied = need('operator');
         if (denied) return denied;
-        const parsed = startSchema.safeParse(await body());
+        const parsed = startOrderSchema.safeParse(await body());
         if (!parsed.success)
           return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
         const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;

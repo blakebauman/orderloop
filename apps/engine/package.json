@@ -13,6 +13,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@a2a-js/sdk": "1.3.0",
     "@ai-sdk/provider": "catalog:",
     "@cloudflare/ai-chat": "catalog:",
     "@modelcontextprotocol/server": "2.3.1",

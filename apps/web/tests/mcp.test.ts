@@ -11,9 +11,10 @@ class TokenExpired extends Error {}
 const kv = new Map<string, string>();
 const env = {
   OAUTH_KV: {
-    get: async (k: string, type?: string) => {
+    get: async (k: string, type?: string | { type?: string }) => {
       const v = kv.get(k) ?? null;
-      return v && type === 'json' ? JSON.parse(v) : v;
+      const json = type === 'json' || (typeof type === 'object' && type.type === 'json');
+      return v && json ? JSON.parse(v) : v;
     },
     put: async (k: string, v: string) => {
       kv.set(k, v);
@@ -38,12 +39,12 @@ vi.mock('~/lib/auth.server', () => ({
   TWO_FACTOR_DUE: 'Two-factor due',
 }));
 
-const { isOAuthPath, oauthProvider } = await import('~/lib/oauth.server');
+const { isOAuthPath, oauthApi, oauthFetch } = await import('~/lib/oauth.server');
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as never;
-const mcp = (headers: Record<string, string> = {}) =>
-  oauthProvider('https://app.test').fetch(
-    new Request('https://app.test/mcp', {
+const post = (path: string, headers: Record<string, string> = {}) =>
+  oauthFetch(
+    new Request(`https://app.test${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
@@ -51,18 +52,20 @@ const mcp = (headers: Record<string, string> = {}) =>
     env as never,
     ctx,
   );
+const mcp = (headers: Record<string, string> = {}) => post('/mcp', headers);
 
 const token: Principal = { kind: 'token', id: 'tok_1', name: 'token:claude', role: 'viewer' };
 
-describe('MCP on the web Worker', () => {
+describe('MCP and A2A on the web Worker', () => {
   beforeEach(() => {
     apiPrincipal.mockReset();
     grantPrincipal.mockReset();
     engineFetch.mockClear();
   });
 
-  it('sends only MCP and OAuth protocol paths to the provider', () => {
+  it('sends only MCP, A2A and OAuth protocol paths to the provider', () => {
     expect(isOAuthPath('/mcp')).toBe(true);
+    expect(isOAuthPath('/a2a')).toBe(true);
     expect(isOAuthPath('/.well-known/oauth-protected-resource/mcp')).toBe(true);
     expect(isOAuthPath('/oauth/token')).toBe(true);
     expect(isOAuthPath('/oauth/authorize')).toBe(false);
@@ -79,12 +82,17 @@ describe('MCP on the web Worker', () => {
   });
 
   it('publishes the resource for this origin', async () => {
-    const res = await oauthProvider('https://app.test').fetch(
-      new Request('https://app.test/.well-known/oauth-protected-resource/mcp'),
-      env as never,
-      ctx,
-    );
-    expect(await res.json()).toMatchObject({ resource: 'https://app.test/mcp' });
+    for (const path of ['/mcp', '/a2a']) {
+      const res = await oauthFetch(
+        new Request(`https://app.test/.well-known/oauth-protected-resource${path}`),
+        env as never,
+        ctx,
+      );
+      expect(await res.json()).toMatchObject({
+        resource: `https://app.test${path}`,
+        authorization_servers: ['https://app.test'],
+      });
+    }
   });
 
   it('forwards an API token caller to the engine without the credential', async () => {
@@ -118,5 +126,92 @@ describe('MCP on the web Worker', () => {
     const res = await mcp({ authorization: 'Bearer ol_live_abc', origin: 'null' });
     expect(res.status).toBe(403);
     expect(engineFetch).not.toHaveBeenCalled();
+  });
+
+  it('advertises both resources from one authorization server', async () => {
+    const res = await oauthFetch(
+      new Request('https://app.test/.well-known/oauth-authorization-server'),
+      env as never,
+      ctx,
+    );
+    const meta = (await res.json()) as Record<string, unknown>;
+    expect(meta.issuer).toBe('https://app.test');
+    expect(meta.protected_resources).toEqual(['https://app.test/mcp', 'https://app.test/a2a']);
+  });
+
+  it('challenges /a2a with its own resource and forwards a token caller there', async () => {
+    const challenged = await post('/a2a');
+    expect(challenged.status).toBe(401);
+    expect(challenged.headers.get('www-authenticate')).toContain(
+      'https://app.test/.well-known/oauth-protected-resource/a2a',
+    );
+
+    apiPrincipal.mockResolvedValueOnce(token);
+    const res = await post('/a2a', { authorization: 'Bearer ol_live_abc' });
+    expect(res.status).toBe(200);
+    const forwarded = engineFetch.mock.calls[0]![0];
+    expect(new URL(forwarded.url).pathname).toBe('/a2a');
+    expect(forwarded.headers.get('authorization')).toBeNull();
+    expect(decodePrincipal(forwarded.headers.get(PRINCIPAL_HEADER))).toMatchObject(token);
+  });
+
+  it('binds an OAuth token to the endpoint it was granted for', async () => {
+    const oauth = oauthApi(new Request('https://app.test/oauth/authorize'));
+    const client = await oauth.createClient({
+      redirectUris: ['https://client.test/cb'],
+      tokenEndpointAuthMethod: 'none',
+    });
+    const verifier = 'v'.repeat(64);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const grant = async (path: string) => {
+      const { redirectTo } = await oauth.completeAuthorization({
+        request: {
+          responseType: 'code',
+          clientId: client.clientId,
+          redirectUri: 'https://client.test/cb',
+          scope: ['viewer'],
+          state: 's',
+          codeChallenge: challenge,
+          codeChallengeMethod: 'S256',
+          resource: `https://app.test${path}`,
+        },
+        userId: 'usr_1',
+        metadata: {},
+        scope: ['viewer'],
+        props: { kind: 'user', id: 'usr_1', role: 'viewer' },
+      });
+      const code = new URL(redirectTo).searchParams.get('code')!;
+      const res = await oauthFetch(
+        new Request('https://app.test/oauth/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: 'https://client.test/cb',
+            client_id: client.clientId,
+            code_verifier: verifier,
+          }),
+        }),
+        env as never,
+        ctx,
+      );
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+    const person = { ...token, kind: 'user' as const, id: 'usr_1' };
+    grantPrincipal.mockResolvedValue(person);
+
+    const mcpToken = await grant('/mcp');
+    expect((await post('/mcp', { authorization: `Bearer ${mcpToken}` })).status).toBe(200);
+    expect((await post('/a2a', { authorization: `Bearer ${mcpToken}` })).status).toBe(401);
+
+    const a2aToken = await grant('/a2a');
+    expect((await post('/a2a', { authorization: `Bearer ${a2aToken}` })).status).toBe(200);
+    expect((await post('/mcp', { authorization: `Bearer ${a2aToken}` })).status).toBe(401);
+    expect(apiPrincipal).not.toHaveBeenCalled();
   });
 });

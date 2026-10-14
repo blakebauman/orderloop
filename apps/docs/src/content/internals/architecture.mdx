@@ -14,7 +14,8 @@ browser ──► orderloop-web (apps/web, React Router on Workers)
               ├── ENGINE service binding ──RPC──► orderloop-engine (apps/engine)
               │                                     ├─ EngineApi      WorkerEntrypoint (RPC)
               ├── /agents/order-agent/:id ─fetch─►  ├─ OrderAgent     Durable Object, one per order
-              └── /agents/assistant-agent/* ─────►  ├─ AssistantAgent Durable Object, one per person
+              ├── /agents/assistant-agent/* ─────►  ├─ AssistantAgent Durable Object, one per person
+              └── /a2a (fetch, via OAuth) ───────►  ├─ A2AAgent       Durable Object, one per caller
                                                     ├─ OrderLoop      Workflow, one instance per generation
                                                     ├─ Replenish      Workflow, daily cron
 inbound mail ── Email Routing ──email()────────────►├─ receiveEmail   email intake (email.ts)
@@ -70,7 +71,8 @@ engine source.
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
-| `/mcp`, `/.well-known/oauth-*`, `/oauth/*` | `oauthProvider(origin)` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
+| `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
+| `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
 | everything else | React Router (UI routes guard themselves with `requireUser(request, role)`) |
 
@@ -91,11 +93,15 @@ receives messages from Email Routing and hands them to `receiveEmail`; see
 
 `/mcp` is the assistant's tools for MCP clients. The web Worker routes it, with the OAuth
 discovery, registration and token paths, to `@cloudflare/workers-oauth-provider`
-(`apps/web/app/lib/oauth.server.ts`), which is the authorization server: dynamic client
-registration, Client ID Metadata Documents, tokens of 1 hour (access) and 30 days (refresh), and
-grants in KV `OAUTH_KV`. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
-the approver and the role they chose. `resolveExternalToken` lets `ol_live_` tokens and
-`APP_PASSWORD` through the same door by calling `apiPrincipal`, with its throttling and expiry.
+(`apps/web/app/lib/oauth.server.ts`). There it is one `OAuthAuthorizationServer` (issuer the
+origin; resources `/mcp` and `/a2a`, with `/mcp` the default and the resource of grants made
+before A2A) and one `OAuthResourceServer` per endpoint, which publishes
+`/.well-known/oauth-protected-resource/<path>` and accepts only tokens issued for it. The
+authorization server does dynamic client registration, Client ID Metadata Documents, tokens of
+1 hour (access) and 30 days (refresh), and keeps grants in KV `OAUTH_KV`. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
+the approver and the role they chose. A bearer that is not an issued
+token (one not shaped `<user>:<grant>:<secret>`) is checked as `ol_live_` or `APP_PASSWORD` by
+`apiPrincipal`, with its throttling and expiry, on either endpoint.
 
 `forward` resolves the caller (for a grant, `grantPrincipal` re-reads the person: disabled means
 refused, and the role is the lower of granted and current), refuses a pending two-factor setup,
@@ -107,19 +113,37 @@ deletes `authorization` and `cookie`, sets `x-orderloop-principal` and fetches t
 code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`. See
 [MCP server](/reference/mcp/).
 
+## A2A
+
+`/a2a` is the same tools, plus `place_order` and `chat`, for Agent2Agent clients. `forward` is the
+same function as for MCP, aimed at `/a2a`. The engine's `fetch` and `EngineApi.fetch` hand it to
+`handleA2A` (`apps/engine/src/a2a/route.ts`), which sends it to
+`env.A2A_AGENT.getByName` named `<kind>:<id>` after the principal, so each caller has an `A2AAgent` Durable Object
+(`agent.ts`, migration `v3`). It checks the `A2A-Version` header (absent means 1.0) and runs
+JSON-RPC through `@a2a-js/sdk`'s `DefaultRequestHandler`, with SSE for `SendStreamingMessage` and
+`SubscribeToTask`. `SqlTaskStore` (`store.ts`) keeps tasks in `tasks` and the order a task follows
+(or a chat action waiting for a confirm) in `task_links`; for an unfinished order, `load` and
+`list` take the status from the `OrderAgent` snapshot through `orderTaskState` in
+`packages/core/src/a2a.ts`. `OrderLoopExecutor` (`executor.ts`) reads a data part
+`{ skill, input }` into `runTool` with `via: 'A2A'`, starts orders with `startOrderOnce` keyed
+`a2a:<principal id>:<messageId>`, runs `chat` with `assistantModel` (an action it proposes stops at
+`input-required` until `{ confirm }`), and follows an order for up to 25 seconds per request.
+`CancelTask` cancels the order first, as the caller. See [A2A endpoint](/reference/a2a/).
+
 ## Bindings
 
 | Binding | Worker | Resource |
 |---|---|---|
 | `ORDER_AGENT` | engine | Durable Object class `OrderAgent` (SQLite, migration tag `v1`) |
 | `ASSISTANT_AGENT` | engine | Durable Object class `AssistantAgent` (SQLite, migration tag `v2`) |
+| `A2A_AGENT` | engine | Durable Object class `A2AAgent` (SQLite, migration tag `v3`) |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order`, class `OrderLoop`, `limits.steps: 10000` |
 | `REPLENISH` | engine | Workflow `orderloop-replenish`, class `Replenish`, schedule `0 6 * * *` |
 | `DB` | both | D1 `orderloop`, migrations in `packages/db/migrations` |
 | `DOCS` | both | R2 `orderloop-docs` |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
-| `OAUTH_KV` | web | KV namespace for MCP OAuth clients, grants and tokens; created on first deploy |
+| `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
 
 Variables and secrets are listed in [Configuration](/reference/configuration/).
 

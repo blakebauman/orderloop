@@ -1,0 +1,200 @@
+---
+title: A2A endpoint
+description: Let another agent ask OrderLoop about orders, place them and follow them to their outcome over the Agent2Agent protocol at /a2a, limited by role.
+---
+
+import A2aSkills from '../../components/A2aSkills.astro';
+import A2aTaskStates from '../../components/A2aTaskStates.astro';
+
+OrderLoop answers [Agent2Agent](https://a2a-protocol.org) (A2A) 1.0 requests at
+`https://orderloop.io/a2a` (your own host, if you deploy it yourself). Another agent can ask about
+orders, stock and flows, place an order and follow it, and decide an approval, all within the role
+it connects with. The skills are the tools of [the assistant](/guides/assistant/) and the
+[MCP server](/reference/mcp/), plus `place_order` and `chat`. An A2A **task** is a request that
+runs to an outcome; a task about an order follows the order.
+
+The binding is JSON-RPC over HTTP `POST`; the card advertises streaming and no push
+notifications. Any other method on `/a2a` gets `405`.
+
+## Discovery
+
+The Agent Card is public at `https://orderloop.io/.well-known/agent-card.json` (cached for five
+minutes). It lists the interface (`/a2a`, `JSONRPC`, protocol `1.0`), the two security schemes
+below and every skill. The card is built by `agentCard(origin)` in `packages/core/src/a2a.ts`, so
+it always names the host it is served from.
+
+## Authentication
+
+Send `Authorization: Bearer …` with every request, one of:
+
+- An [API token](/guides/team-and-roles/#api-tokens) (`ol_live_…`). It carries the role it was
+  created with and its expiry. `APP_PASSWORD` works as a break-glass operator.
+- An OAuth access token, from the authorization-code flow with PKCE. Request the resource
+  `https://orderloop.io/a2a`; the scope is the role to act with. The person signs in on
+  OrderLoop's consent page, which says the app acts "via A2A", and grants a role no higher than
+  their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
+
+Both are the credentials the [REST API](/reference/rest-api/) takes, with the same throttling
+(`429` with `Retry-After`) and expiry (`401` with the reason). A token is bound to one endpoint:
+an OAuth grant for `/mcp` is refused at `/a2a` and the reverse, so connecting the same app to both
+is two grants, each listed (and disconnected) on **Account**. API tokens work on both.
+
+Send `A2A-Version: 1.0`. A request without the header is treated as `1.0`; any other version gets
+a JSON-RPC error.
+
+## Skills
+
+The table is rendered from `A2A_SKILLS` in `packages/core/src/a2a.ts` when the docs are built.
+Every assistant tool is a skill at the same role. A skill the caller's role can't use is refused:
+the task ends `TASK_STATE_REJECTED` with the reason.
+
+<A2aSkills />
+
+A typed request puts the skill in a data part: `{ "skill": "find_orders", "input": { … } }`, with
+the `input` the same tool takes over MCP. `place_order` takes the body of
+`POST /api/v1/orders`: `flowId`, optional `version`, `input` and optional `vars`. A message with
+only text goes to `chat`.
+
+## Task states
+
+An order's status reads as a task state, in `ORDER_TASK_STATES`:
+
+<A2aTaskStates />
+
+A typed read ends `TASK_STATE_COMPLETED` with its result as a data artifact named after the skill.
+A write that acts on an order (`decide_approval`, `deliver_event`, `cancel_order`) and
+`place_order` then follow that order.
+
+## Following an order
+
+A task that follows an order reports its state as the order moves, with a line saying where it is,
+for example that it is waiting for approval “Credit over limit” and how to reply. One request
+follows the order for about 25 seconds, ending early when the order finishes or waits. If the
+order is still running after that, the task stays `TASK_STATE_WORKING`; `GetTask` (and `ListTasks`)
+read the order live while it is unfinished, so they are current without anything polling.
+
+## Replying to a task
+
+A task in `TASK_STATE_INPUT_REQUIRED` takes a new message with the same `taskId`, carrying a data
+part:
+
+| Waiting for | Reply |
+|---|---|
+| An approval on an order | `{ "decision": "approved" \| "rejected", "nodeId"?, "note"? }` |
+| An event on an order | `{ "event": "payment.received" }` |
+| An action `chat` proposed | `{ "confirm": true }` to run it, `{ "confirm": false }` to leave it |
+
+The status text of a waiting order names the approval's `nodeId` and the event to send. Replies
+run the `decide_approval` and `deliver_event` skills as the caller, so the same role and live-state
+checks apply, and the task follows the order again. A reply on a task that is waiting for nothing
+is refused.
+
+### Chat
+
+Text goes to the assistant's model with the role's tools. Reads run directly and the answer comes
+back as the final status text. When the model proposes an action, nothing runs: the task stops in
+`TASK_STATE_INPUT_REQUIRED` with the same preview the assistant shows (also as a `proposal`
+artifact) until the caller confirms. Tasks sharing a `contextId` are one conversation.
+
+## Placing and repeating
+
+`place_order` starts the order once per `messageId`: sending the same message id again returns the
+same order, and the same id with a different order is refused ("Use a new message id"). Use a new
+`messageId` for each order, and keep it when retrying.
+
+## Cancelling
+
+`CancelTask` on a task that follows an unfinished order cancels the order, as the caller and with
+their role (`cancel_order`, reason “Cancelled over A2A”), then cancels the task. If the order
+refuses the cancel (it has finished, say), the task is not cancelable. Cancelling a
+confirm-waiting chat task just ends it. An order's status after cancelling may be `cancelled` or
+`rolled_back`; both are `TASK_STATE_CANCELED`.
+
+## Examples
+
+Place an order and follow it:
+
+```bash
+curl https://orderloop.io/a2a \
+  -H "Authorization: Bearer ol_live_…" \
+  -H "A2A-Version: 1.0" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+    "params": { "message": {
+      "messageId": "po-4471", "role": "ROLE_USER",
+      "parts": [{ "data": { "skill": "place_order", "input": {
+        "flowId": "tpl-b2b-order",
+        "input": { "model": "b2b", "channel": "api", "currency": "USD",
+          "customerId": "cus_contoso", "lines": [{ "sku": "WID-200", "qty": 100 }] }
+      } } }]
+    } }
+  }'
+```
+
+The result is a `task` whose `status.state` is `TASK_STATE_INPUT_REQUIRED` if the order stopped at
+an approval. Decide it on the same task:
+
+```bash
+curl https://orderloop.io/a2a \
+  -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 2, "method": "SendMessage",
+    "params": { "message": {
+      "messageId": "po-4471-approve", "role": "ROLE_USER", "taskId": "<task id>",
+      "parts": [{ "data": { "decision": "approved", "note": "Within terms" } }]
+    } }
+  }'
+```
+
+Read a task, which for an order task reads the order live:
+
+```bash
+curl https://orderloop.io/a2a \
+  -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
+  -d '{ "jsonrpc": "2.0", "id": 3, "method": "GetTask", "params": { "id": "<task id>" } }'
+```
+
+Stream status updates as server-sent events (`SendStreamingMessage`; `SubscribeToTask` attaches to
+a task that is still running):
+
+```bash
+curl -N https://orderloop.io/a2a \
+  -H "Authorization: Bearer ol_live_…" -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 4, "method": "SendStreamingMessage",
+    "params": { "message": {
+      "messageId": "q-1", "role": "ROLE_USER",
+      "parts": [{ "text": "What needs attention?" }]
+    } }
+  }'
+```
+
+## Who did it
+
+An act made over A2A is attributed to the person (or token) behind the credential, with the
+channel: `<email> via A2A`, which is the approval's `by` or ends the cancel reason, as `via MCP`
+does for [MCP](/reference/mcp/#who-did-it). A caller using an API token acts as `token:<name>`.
+
+## Security
+
+- **Role cap and live checks.** As for MCP: a grant is never higher than its approver's role, the
+  web Worker re-reads the person on every request, and the role is the lower of granted and
+  current. A person whose two-factor setup is due gets `403`.
+- **Credentials stay in the web Worker.** It resolves the caller and forwards to the engine with
+  the `x-orderloop-principal` header, removing `Authorization` and cookies. The engine has no public
+  route and answers `401` without the header.
+- **Your tasks only.** Each caller, a token or a person through a grant, has its own `A2AAgent`
+  object named `<kind>:<id>`, so `GetTask`, `ListTasks` and the stream show only their own tasks.
+  A token and the person who made it keep separate tasks.
+- **One endpoint per token.** An OAuth token is issued for one resource and refused at the other.
+- **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
+
+## How it works
+
+The web Worker serves the card, and hands `/a2a`, the protected-resource metadata and `/oauth/*`
+to `apps/web/app/lib/oauth.server.ts`, which resolves the caller and forwards to the engine. The
+engine's `handleA2A` (`apps/engine/src/a2a/route.ts`) sends the request to the caller's `A2AAgent`
+Durable Object (`apps/engine/src/a2a/agent.ts`), which speaks JSON-RPC with `@a2a-js/sdk`. Tasks
+and their order links live in the object's SQLite (`store.ts`); `executor.ts` maps messages to the
+assistant's tools. See [Architecture](/internals/architecture/#a2a).

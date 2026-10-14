@@ -13,7 +13,8 @@ what their role allows.
 
 The server is stateless: every request is answered by a fresh server that lists only the tools
 the caller's role can use. It speaks streamable HTTP, the draft 2026-07-28 revision of the
-protocol and the 2025 stateless lane.
+protocol and the 2025 stateless lane. Another agent that speaks Agent2Agent rather than MCP
+connects at `/a2a`; see [A2A endpoint](/reference/a2a/).
 
 ## Connecting
 
@@ -61,7 +62,7 @@ request. In Cursor's `mcp.json`:
 
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
 credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and `APP_PASSWORD` as a
-break-glass operator. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
+break-glass operator. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
 refused (`401` with the reason), as there.
 
 ## Tools
@@ -96,7 +97,7 @@ using an API token acts as `token:<name>`.
 
 ## Disconnecting
 
-**Account** lists **Connected apps**: the app's name, the role you granted and when it connected.
+**Account** lists **Connected apps** (MCP clients and A2A agents alike): the app's name, the role you granted and when it connected.
 **Disconnect** revokes the grant, and the app has to be connected again. Connecting and
 disconnecting are recorded in the [audit log](/guides/team-and-roles/#audit-log) as
 `oauth.app_connected` and `oauth.app_disconnected`. Access tokens last one hour and refresh
@@ -104,6 +105,11 @@ tokens 30 days.
 
 ## Security
 
+- **One endpoint per token.** `/mcp` and `/a2a` are separate OAuth resources of one authorization
+  server. A client requests `https://orderloop.io/mcp` (a client that names no resource, and grants
+  made before A2A existed, are for MCP), and the access token it gets is refused at `/a2a`; an
+  A2A token is likewise refused here. Each endpoint publishes its own metadata at
+  `/.well-known/oauth-protected-resource/<path>`.
 - **Role cap.** A grant is never higher than the role of the person who approved it, and the
   consent page offers no more. Pick the lowest role the client needs.
 - **Checked on every request.** The web Worker re-reads the person each time. A disabled or deleted
@@ -121,7 +127,7 @@ tokens 30 days.
 
 ## How it works
 
-The web Worker hands `/mcp`, `/.well-known/oauth-*` and `/oauth/*` (except `/oauth/authorize`,
+The web Worker hands `/mcp`, `/a2a`, `/.well-known/oauth-*` and `/oauth/*` (except `/oauth/authorize`,
 the consent page) to `@cloudflare/workers-oauth-provider`, which serves discovery, dynamic client
 registration (`/oauth/register`), Client ID Metadata Documents and tokens (`/oauth/token`). See
 [Architecture](/internals/architecture/#mcp).

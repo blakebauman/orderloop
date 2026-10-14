@@ -1,14 +1,7 @@
 /** Request bodies for /api/v1. Shared by the handlers and the OpenAPI document. */
 
-import { OUTBOUND_EVENTS, orderInputSchema } from '@orderloop/core';
+import { OUTBOUND_EVENTS } from '@orderloop/core';
 import { z } from 'zod';
-
-export const startSchema = z.object({
-  flowId: z.string(),
-  version: z.number().int().positive().optional(),
-  input: orderInputSchema,
-  vars: z.record(z.string(), z.unknown()).optional(),
-});
 
 export const eventSchema = z.object({
   orderId: z.string().min(1),

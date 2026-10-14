@@ -256,7 +256,8 @@ export default function Account() {
             ) : (
               <p className="px-4 py-2.5 text-muted-foreground text-sm">
                 No apps are connected. MCP clients such as Claude connect at{' '}
-                <code className="font-mono">/mcp</code> and ask you here to approve them.
+                <code className="font-mono">/mcp</code>, and A2A agents at{' '}
+                <code className="font-mono">/a2a</code>; each asks you here to approve it.
               </p>
             )}
           </Section>

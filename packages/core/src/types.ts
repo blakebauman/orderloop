@@ -156,6 +156,14 @@ export type OrderInput = z.infer<typeof orderInputSchema>;
 /** What callers send: `channel`, `currency`, `lines` and `meta` have defaults. */
 export type OrderInputDraft = z.input<typeof orderInputSchema>;
 
+/** A request to start an order: POST /api/v1/orders, and A2A's place_order skill. */
+export const startOrderSchema = z.object({
+  flowId: z.string(),
+  version: z.number().int().positive().optional(),
+  input: orderInputSchema,
+  vars: z.record(z.string(), z.unknown()).optional(),
+});
+
 /** The currency list prices, contract prices, price rules, credit limits and reports are in. */
 export const BASE_CURRENCY = 'USD';
 

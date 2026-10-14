@@ -2,7 +2,7 @@
  * What the assistant reads and does, independent of the model. Every function takes the caller as
  * they are now and refuses what their role doesn't allow, so a tool can never do more than the
  * person asking could do themselves. Writes go through the same agents and helpers the pages use;
- * the audit trail names the person and the channel: "via assistant" or "via MCP".
+ * the audit trail names the person and the channel: "via assistant", "via MCP" or "via A2A".
  */
 
 import {
@@ -48,8 +48,8 @@ export function requireRole(p: Principal, tool: AssistantTool) {
   if (!atLeast(p.role, min)) throw new Refused(`This needs the ${ROLE_LABELS[min]} role.`);
 }
 
-/** Where a tool call came from: the workspace assistant, or an MCP client. */
-export type Channel = 'assistant' | 'MCP';
+/** Where a tool call came from: the workspace assistant, an MCP client or an A2A agent. */
+export type Channel = 'assistant' | 'MCP' | 'A2A';
 
 /** How the audit trail names an act taken for someone through a channel. */
 export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
@@ -230,7 +230,7 @@ export async function resolveOrderId(env: Env, ref: string): Promise<string | nu
   return tail.length === 1 ? tail[0]!.id : null;
 }
 
-async function snapshot(env: Env, orderId: string): Promise<OrderState | null> {
+export async function snapshot(env: Env, orderId: string): Promise<OrderState | null> {
   const s = (await env.ORDER_AGENT.getByName(orderId).snapshot()) as OrderState;
   return s.orderId ? s : null;
 }

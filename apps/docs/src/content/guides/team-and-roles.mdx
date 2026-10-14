@@ -124,12 +124,14 @@ decide approvals but not start orders. Approval decisions made with a token are 
 
 ## Connected apps
 
-MCP clients such as Claude connect at `/mcp` and ask you to approve them on a consent page, where
+MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
 you sign in (two-factor included) and choose a role. You can grant your own role or a lower one,
 never a higher one. **Account** lists **Connected apps**, each with its role and when it
 connected, and **Disconnect** ends it. Every request from a connected app re-reads you: if you are
 disabled it stops working, and its role is the lower of what you granted and what you have now. What
-it does is recorded as `<email> via MCP`. See [MCP server](/reference/mcp/).
+it does is recorded as `<email> via MCP` or `<email> via A2A`. A grant is for one endpoint, so
+an app that uses both is connected twice. See [MCP server](/reference/mcp/) and
+[A2A endpoint](/reference/a2a/).
 
 ## Audit log
 
@@ -153,7 +155,7 @@ not here.
 ## Who decided
 
 An approval's `by` is the person who decided: their email for a signed-in person, `token:<name>`
-for an API token. Through the [assistant](/guides/assistant/) or MCP it is `<email> via assistant` or `<email> via MCP`. On the order page's live connection, the agent takes the name from the
+for an API token. Through the [assistant](/guides/assistant/), MCP or A2A it is `<email> via assistant`, `<email> via MCP` or `<email> via A2A`. On the order page's live connection, the agent takes the name from the
 connection, never from what the page sends; see
 [OrderAgent](/internals/order-agent/#roles-on-the-socket).
 
