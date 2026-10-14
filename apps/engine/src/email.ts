@@ -21,7 +21,8 @@ import {
   resolveSender,
   splitAddress,
 } from '@orderloop/core';
-import { createDb, customers, documents, inboundEmails } from '@orderloop/db';
+import { createDb, customers, documents, endsWith, inboundEmails } from '@orderloop/db';
+import { or, sql } from 'drizzle-orm';
 import PostalMime, { type Attachment } from 'postal-mime';
 import { withTimeout } from './ai';
 import { loadFlowVersion } from './flows';
@@ -81,7 +82,19 @@ export async function receiveEmail(
   ) {
     return reject('Message failed SPF, DKIM and DMARC');
   }
-  const known = await db.select({ id: customers.id, email: customers.email }).from(customers);
+  // Only customers the sender could be: this exact address, or another at the same domain.
+  const from = splitAddress(message.from);
+  const known = from.domain
+    ? await db
+        .select({ id: customers.id, email: customers.email })
+        .from(customers)
+        .where(
+          or(
+            sql`lower(${customers.email}) = ${`${from.local}@${from.domain}`}`,
+            endsWith(sql`lower(${customers.email})`, `@${from.domain}`),
+          ),
+        )
+    : [];
   const sender = resolveSender(message.from, known, env.INTAKE_ALLOWLIST);
   if (!sender.allowed) return reject('Sender is not a known customer');
 

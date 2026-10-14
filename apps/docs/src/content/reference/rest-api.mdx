@@ -32,7 +32,7 @@ password produce; see `Retry-After`), `404` an unknown route or order, and `413`
 |---|---|---|---|
 | `GET` | `/api/v1/flows` | | `{ flows }` |
 | `POST` | `/api/v1/orders` | `{ flowId, version?, input, vars? }` | `201 { orderId }`, or `200 { orderId, replayed: true }` |
-| `GET` | `/api/v1/orders?model=&channel=&status=&q=` | | `{ orders }` |
+| `GET` | `/api/v1/orders?model=&channel=&status=&q=&limit=&cursor=` | | `{ orders, nextCursor }` |
 | `GET` | `/api/v1/orders/:id` | | The order's live state |
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }` |
@@ -97,7 +97,7 @@ with a different body returns `422` and starts nothing.
 
 ## List orders
 
-`GET /api/v1/orders` returns up to 200 orders, newest first. Filter with
+`GET /api/v1/orders` returns a page of orders, newest first (by `created_at`, then `id`). `limit` is 1 to 200 (default 50); `nextCursor` is an opaque string to pass back as `cursor` for the next page, and is `null` on the last page. A `cursor` the API did not issue is `400`. Filter with
 `model`, `channel`, `status` (one of <Values of="order-statuses" />) and `q`, which matches the order id, title,
 customer id, contact email or external id. Each row has `id`, `model`, `channel`, `externalId`, `contactEmail`, `status`, `title`, `flowId`, `flowVersion`, `instanceId`,
 `generation`, `customerId`, `currency`, `total`, `waitingOn` (the open waits' titles),

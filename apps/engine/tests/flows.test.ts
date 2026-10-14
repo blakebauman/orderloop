@@ -46,3 +46,23 @@ describe('template seeding', () => {
     expect((await getFlowVersionJson(db(), 'test-seed'))?.version).toBe(3);
   });
 });
+
+describe('publishing', () => {
+  const other = (label: string) => ({ ...flow(label), id: 'test-race' });
+
+  it('numbers racing publishes one after another instead of failing', async () => {
+    const got = await Promise.all([
+      publishFlow(db(), other('a')),
+      publishFlow(db(), other('b')),
+      publishFlow(db(), other('c')),
+    ]);
+    expect([...got].sort()).toEqual([1, 2, 3]);
+    expect((await getFlowVersionJson(db(), 'test-race'))?.version).toBe(3);
+  });
+
+  it('seeds a template once when two isolates seed it at the same time', async () => {
+    const t = { ...flow('same'), id: 'test-race-seed' };
+    await Promise.all([seedFlows(db(), [t]), seedFlows(db(), [t]), seedFlows(db(), [t])]);
+    expect(await versions('test-race-seed')).toBe(1);
+  });
+});

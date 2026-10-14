@@ -70,6 +70,7 @@ created; they are not configuration.
 | `A2A_AGENT` | engine | Durable Object `A2AAgent` (SQLite-backed, migration `v3`), one per [A2A](https://docs.orderloop.io/reference/a2a/) caller |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order` (class `OrderLoop`), up to 10,000 steps per instance |
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
+| Cron trigger | engine | `triggers.crons` `30 3 * * *`: `scheduled()` runs the daily [retention sweep](data-model.md#retention) |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |

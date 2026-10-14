@@ -29,6 +29,12 @@ export const isTerminal = (t: Task | undefined) =>
 
 type Row = { json: string; order_id: string | null };
 
+/** Finished tasks are kept this long after their last update, then dropped on the next save. */
+export const FINISHED_TASK_RETENTION_MS = 90 * 86_400_000;
+/** The most tasks of one conversation a chat turn reads back as history. */
+export const CONTEXT_HISTORY_LIMIT = 50;
+const TERMINAL_STATES = [...TERMINAL].join(', ');
+
 const SELECT = 'SELECT t.json, l.order_id FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id';
 
 export class SqlTaskStore implements TaskStore {
@@ -59,6 +65,11 @@ export class SqlTaskStore implements TaskStore {
   }
 
   async save(task: Task, _context?: ServerCallContext): Promise<void> {
+    // Finished tasks past their retention go first, with their links.
+    const cutoff = Date.now() - FINISHED_TASK_RETENTION_MS;
+    const old = `SELECT id FROM tasks WHERE updated_at < ? AND state IN (${TERMINAL_STATES})`;
+    this.sql.exec(`DELETE FROM task_links WHERE task_id IN (${old})`, cutoff);
+    this.sql.exec(`DELETE FROM tasks WHERE id IN (${old})`, cutoff);
     this.sql.exec(
       `INSERT INTO tasks (id, context_id, state, updated_at, json) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET
@@ -112,11 +123,19 @@ export class SqlTaskStore implements TaskStore {
     };
   }
 
-  /** The tasks of one conversation, oldest first: the history a chat turn continues. */
+  /**
+   * The latest tasks of one conversation (at most `CONTEXT_HISTORY_LIMIT`), oldest first: the
+   * history a chat turn continues.
+   */
   inContext(contextId: string): Task[] {
     return this.sql
-      .exec<Row>(`${SELECT} WHERE context_id = ? ORDER BY updated_at ASC`, contextId)
+      .exec<Row>(
+        `${SELECT} WHERE context_id = ? ORDER BY updated_at DESC LIMIT ?`,
+        contextId,
+        CONTEXT_HISTORY_LIMIT,
+      )
       .toArray()
+      .reverse()
       .map((r) => Task.fromJSON(JSON.parse(r.json)));
   }
 

@@ -161,7 +161,7 @@ is refused.
 Text goes to the assistant's model with the role's tools. Reads run directly and the answer comes
 back as the final status text. When the model proposes an action, nothing runs: the task stops in
 `TASK_STATE_INPUT_REQUIRED` with the same preview the assistant shows (also as a `proposal`
-artifact) until the caller confirms. Tasks sharing a `contextId` are one conversation.
+artifact) until the caller confirms. Tasks sharing a `contextId` are one conversation; a chat turn reads at most the latest 50 tasks of its context as history. Finished tasks (completed, failed, canceled, rejected) not updated for 90 days are deleted, with their order links, on the caller's next save.
 
 ## Placing and repeating
 

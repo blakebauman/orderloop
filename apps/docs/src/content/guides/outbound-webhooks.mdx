@@ -30,7 +30,7 @@ once**, here; listing subscriptions never shows it. Store it with the receiver.
 
 | Route | Does |
 |---|---|
-| `GET /api/v1/webhook-subscriptions` | List subscriptions (no secrets) |
+| `GET /api/v1/webhook-subscriptions` | List subscriptions (no secrets), at most 500 |
 | `POST /api/v1/webhook-subscriptions` | Create one; returns the secret |
 | `DELETE /api/v1/webhook-subscriptions/:id` | Delete one |
 | `GET /api/v1/webhook-subscriptions/:id/deliveries` | The 50 most recent deliveries, newest first |

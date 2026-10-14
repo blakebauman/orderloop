@@ -18,7 +18,8 @@ export async function listSubscriptions() {
   const rows = await db()
     .select()
     .from(webhookSubscriptions)
-    .orderBy(desc(webhookSubscriptions.createdAt));
+    .orderBy(desc(webhookSubscriptions.createdAt))
+    .limit(500);
   return rows.map(view);
 }
 

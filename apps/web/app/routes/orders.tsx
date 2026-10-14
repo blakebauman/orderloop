@@ -27,17 +27,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const q = new URL(request.url).searchParams;
   const sort = (['updated', 'total'] as const).find((s) => s === q.get('sort')) ?? 'created';
-  const [orders, names] = await Promise.all([
-    listOrders({
-      model: q.get('model') || undefined,
-      channel: q.get('channel') || undefined,
-      status: q.get('status') || undefined,
-      q: q.get('q') || undefined,
-      sort,
-    }),
-    customerNames(),
+  const orders = await listOrders({
+    model: q.get('model') || undefined,
+    channel: q.get('channel') || undefined,
+    status: q.get('status') || undefined,
+    q: q.get('q') || undefined,
+    sort,
+  });
+  const [names, declinedSet] = await Promise.all([
+    customerNames(orders.map((o) => o.customerId)),
+    declinedOrderIds(orders.map((o) => o.id)),
   ]);
-  const declined = [...(await declinedOrderIds())];
+  const declined = [...declinedSet];
   return { orders, names, sort, declined };
 }
 
