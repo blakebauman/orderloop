@@ -51,6 +51,9 @@
     }
   ],
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
+  // Daily retention sweep (src/retention.ts): expired sessions, old webhook deliveries, node
+  // timings and the intake log.
+  "triggers": { "crons": ["30 3 * * *"] },
   "ai": { "binding": "AI" },
   "vars": {
     // Text model for every structured AI call (JSON mode).

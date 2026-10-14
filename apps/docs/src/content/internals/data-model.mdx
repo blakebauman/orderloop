@@ -44,6 +44,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0023_order_waiting_at.sql` | `orders.waiting_at` and `waiting_since`, where an order waits and since when |
 | `0024_password_change_due.sql` | `users.password_change_due`, set while a person is on a temporary password |
 | `0025_webhook_receipts.sql` | `webhook_receipts`, signatures of delivered signed events, for replay protection |
+| `0026_query_indexes.sql` | Indexes: `orders(created_at)`, `orders(updated_at)`, `node_runs(ended_at)`, `payments(status, created_at)`, `customers(lower(email))`, `sessions(expires_at)`, `webhook_deliveries(created_at)` |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -55,7 +56,7 @@ deploying code that needs them. The engine's tests apply the same directory to t
 | `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `description`, `model`, `channels` (JSON array), `published_version` |
 | `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at` |
 
-`publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version.
+`publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version, numbering and inserting it in one statement so racing publishes get consecutive versions; seeding passes `unlessPublished`, which inserts nothing when the identical content is already a version.
 `getFlowVersionJson` loads a given version or the latest. Orders pin `(flow_id, flow_version)` at
 start, so editing or republishing never changes a running order. The built-in templates are
 published as a new version whenever their content has not been published before: version 1 the
@@ -116,7 +117,7 @@ writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
-| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` |
+| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` and `ended_at`; rows older than 180 days are deleted by the [retention sweep](#retention) |
 
 The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at
 request time: completion rate by model from `orders` (completed over finished, by
@@ -130,12 +131,12 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 | Table | Purpose |
 |---|---|
 | `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at`, and for [two-factor sign-in](/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), and `password_change_due` (the password was set by an operator; see [temporary passwords](/guides/team-and-roles/#temporary-passwords)) |
-| `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page) |
+| `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page). Expired sessions are deleted by the [retention sweep](#retention) |
 | `recovery_codes` | One-use two-factor recovery codes: `code_hash` (SHA-256 of the code, lowercased without the dash), `user_id`. A row is deleted when its code is used |
 | `sign_in_challenges` | A correct password waiting for its two-factor code: `token_hash` (SHA-256 of the `__Host-ol_2fa` cookie), `user_id`, `expires_at` (10 minutes). Deleted on success; expired rows are dropped at the next sign-in |
 | `api_tokens` | `name`, `prefix` (the first 12 characters, for lists), `token_hash` (SHA-256 of the `ol_live_` token, unique), `role`, `created_by`, `last_used_at` (updated at most every 5 minutes), `revoked_at`, `expires_at` (null never expires). For an expired token, `last_used_at` limits its `api.token_expired` audit events to one an hour |
 | `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `api-ip:` for shared-password bearers; `two-factor:<user id>` for wrong codes; `reauth:<user id>` for wrong current passwords on the Account page) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](/guides/team-and-roles/#failed-sign-ins) |
-| `webhook_receipts` | Delivered signed events: `id` (`event:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written. See [Signed events](/reference/rest-api/#signed-events) |
+| `webhook_receipts` | Delivered signed events: `id` (`event:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written (and by the [retention sweep](#retention)). See [Signed events](/reference/rest-api/#signed-events) |
 | `workspace_settings` | Settings operators change in the app: `key`, `value`, `updated_at`, `updated_by`. `two_factor_required` is `off`, `operator`, `approver` or `viewer`, the lowest role that must use [two-factor sign-in](/guides/team-and-roles/#requiring-it) |
 | `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
 
@@ -149,14 +150,14 @@ checking a code needs it. See [Team and roles](/guides/team-and-roles/).
 | `webhook_subscriptions` | `url`, `secret` (returned once, at creation), `events` (a JSON array; `"*"` matches all), `active` |
 | `webhook_deliveries` | The outbox: one row per event per subscription, id `whd_${orderId}_${stepKey}_${subscriptionId}`. `status` is `pending`, `delivered` or `failed`; with `attempts`, `response_status`, `last_error`, `delivered_at` |
 
-Deliveries are indexed by `order_id` and by `(subscription_id, created_at)`. See
+Deliveries are indexed by `order_id`, `created_at` and `(subscription_id, created_at)`; delivered or failed ones older than 90 days are deleted by the [retention sweep](#retention). See
 [Outbound webhooks](/guides/outbound-webhooks/).
 
 ## Email intake
 
 | Table | Purpose |
 |---|---|
-| `inbound_emails` | One row per message the `email()` entrypoint saw: `message_id` (unique), `mailbox`, `sender`, `subject`, `status` (`accepted`, `duplicate`, `rejected`), `reason`, `order_id`, `r2_key`, `attachments`, `received_at` |
+| `inbound_emails` | One row per message the `email()` entrypoint saw: `message_id` (unique), `mailbox`, `sender`, `subject`, `status` (`accepted`, `duplicate`, `rejected`), `reason`, `order_id`, `r2_key`, `attachments`, `received_at`. Rows older than 180 days are deleted by the [retention sweep](#retention) |
 
 See [Email intake](/guides/email-intake/#the-intake-log).
 
@@ -172,3 +173,17 @@ See [Email intake](/guides/email-intake/#the-intake-log).
 | `po` | `<nodeId>-<run>.html` | `commerce.generate_po` |
 
 The web app serves them at `/docs/<key>` to signed-in users only.
+
+## Retention
+
+A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `scheduled()` handler on the cron `30 3 * * *`, UTC) deletes, in one batch:
+
+| Table | Deleted when |
+|---|---|
+| `sessions` | `expires_at` has passed |
+| `webhook_deliveries` | not `pending` and older than 90 days |
+| `node_runs` | `ended_at` older than 180 days |
+| `inbound_emails` | `received_at` older than 180 days |
+| `webhook_receipts` | `received_at` older than 10 minutes |
+
+Orders and everything in an order's record (payments, shipments, the stock and balance ledgers, flow versions) are kept. `audit_events` prunes itself on write.

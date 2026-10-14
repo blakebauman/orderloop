@@ -15,6 +15,7 @@ import { performance } from '~/lib/metrics.server';
 import {
   customerNames,
   dashboardStats,
+  declinedCount,
   declinedOrderIds,
   listApprovals,
   listOrders,
@@ -29,14 +30,17 @@ export const meta = () => [{ title: 'Overview · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   await ensureSeeded();
-  const [stats, recent, approvals, waiting, names, declinedSet, perf] = await Promise.all([
+  const [stats, recent, approvals, waiting, declinedTotal, perf] = await Promise.all([
     dashboardStats(),
     listOrders({ sort: 'updated' }, 10),
     listApprovals('pending'),
     waitingOrders(),
-    customerNames(),
-    declinedOrderIds(),
+    declinedCount(),
     performance(),
+  ]);
+  const [names, declinedSet] = await Promise.all([
+    customerNames([...recent, ...waiting].map((o) => o.customerId)),
+    declinedOrderIds(recent.map((o) => o.id)),
   ]);
   const declined = [...declinedSet];
   const top = approvals.slice(0, 5);
@@ -65,6 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     recent,
     names,
     declined,
+    declinedTotal,
     decisions,
     moreDecisions: Math.max(0, approvals.length - top.length),
     lanes: [...lanes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
@@ -82,7 +87,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Dashboard() {
-  const { stats, perf, recent, names, declined, decisions, moreDecisions, lanes } =
+  const { stats, perf, recent, names, declined, declinedTotal, decisions, moreDecisions, lanes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
@@ -121,10 +126,10 @@ export default function Dashboard() {
       cols: 'grid-cols-2 sm:grid-cols-4',
       rows: [
         // Older policy declines were stored as cancelled; count them where they belong.
-        { label: 'Declined', n: count(['declined']) + declined.length, status: 'declined' },
+        { label: 'Declined', n: count(['declined']) + declinedTotal, status: 'declined' },
         { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
         { label: 'Failed', n: count(['failed']), status: 'failed' },
-        { label: 'Cancelled', n: count(['cancelled']) - declined.length, status: 'cancelled' },
+        { label: 'Cancelled', n: count(['cancelled']) - declinedTotal, status: 'cancelled' },
       ],
     },
   ];

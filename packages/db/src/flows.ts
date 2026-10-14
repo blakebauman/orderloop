@@ -3,7 +3,7 @@
  * so these helpers take and return plain JSON-able objects.
  */
 
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Db } from './index';
 import { flows, flowVersions } from './schema';
 
@@ -38,28 +38,56 @@ export async function getFlowVersionJson(db: Db, flowId: string, version?: numbe
     : null;
 }
 
-/** Saves the draft and snapshots it as the next version. Returns the new version number. */
-export async function publishFlow(db: Db, flow: StoredFlow, now = Date.now()): Promise<number> {
+/**
+ * Saves the draft and snapshots it as the next version. Returns the new version number.
+ *
+ * The version is numbered and inserted in one statement, so two publishes racing (two isolates
+ * seeding templates on their first request, say) get consecutive versions instead of one failing
+ * on the primary key. With `unlessPublished`, nothing is inserted when this exact content is
+ * already a version, and the latest version is returned.
+ */
+export async function publishFlow(
+  db: Db,
+  flow: StoredFlow,
+  now = Date.now(),
+  { unlessPublished = false } = {},
+): Promise<number> {
   await saveDraft(db, flow, now);
-  const latest = await db
-    .select({ v: flowVersions.version })
+  const flowJson = JSON.stringify(flow);
+  const next = db
+    .select({ v: sql<number>`coalesce(max(${flowVersions.version}), 0) + 1`.as('v') })
     .from(flowVersions)
     .where(eq(flowVersions.flowId, flow.id))
-    .orderBy(desc(flowVersions.version))
-    .limit(1)
-    .get();
-  const version = (latest?.v ?? 0) + 1;
-  await db.insert(flowVersions).values({
-    flowId: flow.id,
-    version,
-    flowJson: JSON.stringify(flow),
-    publishedAt: now,
-  });
+    .as('next');
+  const [row] = await db
+    .insert(flowVersions)
+    .select(
+      db
+        .select({
+          flowId: sql<string>`${flow.id}`.as('flow_id'),
+          version: next.v,
+          flowJson: sql<string>`${flowJson}`.as('flow_json'),
+          publishedAt: sql<number>`${now}`.as('published_at'),
+        })
+        .from(next)
+        .where(
+          unlessPublished
+            ? sql`not exists (select 1 from ${flowVersions} where ${and(eq(flowVersions.flowId, flow.id), eq(flowVersions.flowJson, flowJson))})`
+            : undefined,
+        ),
+    )
+    .returning({ version: flowVersions.version });
+  // Points at the highest version, whichever of two racing publishes wrote it.
   await db
     .update(flows)
-    .set({ publishedVersion: version, updatedAt: now })
+    .set({
+      publishedVersion: sql`(select max(${flowVersions.version}) from ${flowVersions} where ${eq(flowVersions.flowId, flow.id)})`,
+      updatedAt: now,
+    })
     .where(eq(flows.id, flow.id));
-  return version;
+  if (row) return row.version;
+  const latest = await getFlowVersionJson(db, flow.id);
+  return latest?.version ?? 0;
 }
 
 export async function saveDraft(db: Db, flow: StoredFlow, now = Date.now()) {
@@ -110,5 +138,7 @@ export async function seedFlows(db: Db, all: StoredFlow[]) {
         )
     ).map((r) => r.flowJson),
   );
-  for (const f of all) if (!published.has(JSON.stringify(f))) await publishFlow(db, f);
+  for (const f of all)
+    if (!published.has(JSON.stringify(f)))
+      await publishFlow(db, f, Date.now(), { unlessPublished: true });
 }

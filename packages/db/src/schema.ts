@@ -70,6 +70,8 @@ export const orders = sqliteTable(
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),
     index('orders_model').on(t.model, t.updatedAt),
+    index('orders_created').on(t.createdAt),
+    index('orders_updated').on(t.updatedAt),
     index('orders_channel_external')
       .on(t.channel, t.externalId)
       .where(sql`${t.externalId} IS NOT NULL`),
@@ -102,17 +104,21 @@ export const approvals = sqliteTable(
   ],
 );
 
-export const customers = sqliteTable('customers', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
-  /** business | consumer | internal. Only business customers buy on account. */
-  kind: text('kind').notNull().default('business'),
-  tier: text('tier').notNull().default('standard'),
-  creditLimit: real('credit_limit').notNull().default(0),
-  balance: real('balance').notNull().default(0),
-  terms: text('terms').notNull().default('net_30'),
-});
+export const customers = sqliteTable(
+  'customers',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    /** business | consumer | internal. Only business customers buy on account. */
+    kind: text('kind').notNull().default('business'),
+    tier: text('tier').notNull().default('standard'),
+    creditLimit: real('credit_limit').notNull().default(0),
+    balance: real('balance').notNull().default(0),
+    terms: text('terms').notNull().default('net_30'),
+  },
+  (t) => [index('customers_email').on(sql`lower(${t.email})`)],
+);
 
 export const products = sqliteTable('products', {
   sku: text('sku').primaryKey(),
@@ -258,6 +264,7 @@ export const nodeRuns = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.orderId, t.generation, t.nodeId, t.run] }),
     index('node_runs_type').on(t.nodeType, t.endedAt),
+    index('node_runs_ended').on(t.endedAt),
   ],
 );
 
@@ -340,7 +347,10 @@ export const payments = sqliteTable(
     ref: text('ref'),
     createdAt: integer('created_at').notNull(),
   },
-  (t) => [index('payments_order').on(t.orderId)],
+  (t) => [
+    index('payments_order').on(t.orderId),
+    index('payments_status_created').on(t.status, t.createdAt),
+  ],
 );
 
 export const shipments = sqliteTable(
@@ -410,6 +420,7 @@ export const webhookDeliveries = sqliteTable(
   (t) => [
     index('webhook_deliveries_order').on(t.orderId),
     index('webhook_deliveries_subscription').on(t.subscriptionId, t.createdAt),
+    index('webhook_deliveries_created').on(t.createdAt),
   ],
 );
 
@@ -477,7 +488,7 @@ export const sessions = sqliteTable(
     ip: text('ip'),
     userAgent: text('user_agent'),
   },
-  (t) => [index('sessions_user').on(t.userId)],
+  (t) => [index('sessions_user').on(t.userId), index('sessions_expires').on(t.expiresAt)],
 );
 
 /** One-use two-factor recovery codes, stored as SHA-256; a row is deleted when its code is used. */

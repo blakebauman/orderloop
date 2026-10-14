@@ -145,3 +145,18 @@ describe('signed events', () => {
     expect(engine.sendEvent).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('order list paging', () => {
+  it('round-trips a cursor and refuses one it did not issue', async () => {
+    const { decodeCursor, encodeCursor } = await import('~/lib/cursor');
+    const c = { createdAt: 1_790_000_000_000, id: 'ord_abc:1' };
+    expect(decodeCursor(encodeCursor(c))).toEqual(c);
+    expect(decodeCursor('not-base64!')).toBeNull();
+    expect(decodeCursor(btoa('later:ord_1'))).toBeNull();
+    const res = await handleApi(
+      new Request('https://app.test/api/v1/orders?cursor=bogus'),
+      operator,
+    );
+    expect(res.status).toBe(400);
+  });
+});

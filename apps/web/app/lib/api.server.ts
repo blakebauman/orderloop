@@ -6,7 +6,7 @@
  *   POST /api/v1/orders                         { flowId, version?, input: OrderInput, vars? }
  *                                               Idempotency-Key header: a repeat returns 200 + the same order,
  *                                               422 if the body differs
- *   GET  /api/v1/orders?model=&channel=&status=&q=
+ *   GET  /api/v1/orders?model=&channel=&status=&q=&limit=&cursor=   newest first; { orders, nextCursor }
  *   GET  /api/v1/orders/:id                     live state from the order's agent
  *   POST /api/v1/orders/:id/events              { event: "payment.received", payload? }  (404 unknown order)
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }  (409 not waiting)
@@ -63,6 +63,7 @@ import { isAuditGroup } from './audit';
 import { listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
+import { decodeCursor, encodeCursor } from './cursor';
 import { db, engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
@@ -74,6 +75,9 @@ import {
 } from './webhooks.server';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
+
+/** The most orders one page of GET /api/v1/orders returns. */
+const MAX_PAGE = 200;
 
 export async function handleApi(request: Request, caller: Principal): Promise<Response> {
   // Reads need viewer; approvals need approver; anything else that changes state needs operator.
@@ -121,13 +125,23 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     if (parts.length === 1) {
       if (request.method === 'GET') {
         const q = url.searchParams;
-        return json({
-          orders: await listOrders({
+        const after = decodeCursor(q.get('cursor'));
+        if (q.get('cursor') && !after) return json({ error: 'Invalid cursor' }, 400);
+        const limit = Math.min(Math.max(Number(q.get('limit')) || 50, 1), MAX_PAGE);
+        const page = await listOrders(
+          {
             model: q.get('model') ?? undefined,
             channel: q.get('channel') ?? undefined,
             status: q.get('status') ?? undefined,
             q: q.get('q') ?? undefined,
-          }),
+            after: after ?? undefined,
+          },
+          limit,
+        );
+        const last = page.at(-1);
+        return json({
+          orders: page,
+          nextCursor: page.length === limit && last ? encodeCursor(last) : null,
         });
       }
       if (request.method === 'POST') {
