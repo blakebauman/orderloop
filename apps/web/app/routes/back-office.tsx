@@ -84,19 +84,24 @@ export default function BackOffice() {
           )}
         </Section>
         <Section title="Email intake" className="xl:col-span-2" flush>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-2.5 text-sm">
-            <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
-            {mailboxes.map((m) => (
-              <span key={m.address}>
-                <a href={`mailto:${m.address}`} className="font-mono text-link hover:underline">
-                  {m.address}
-                </a>{' '}
-                <span className="text-muted-foreground">→ {m.flowId}</span>
-              </span>
-            ))}
-            <span className="text-muted-foreground text-xs">
-              Customers’ own addresses, their company domains and INTAKE_ALLOWLIST may send.
-            </span>
+          <div className="flex items-start gap-3 border-b px-4 py-2.5 text-sm">
+            <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap gap-x-5 gap-y-1">
+                {mailboxes.map((m) => (
+                  <span key={m.address}>
+                    <a href={`mailto:${m.address}`} className="font-mono text-link hover:underline">
+                      {m.address}
+                    </a>{' '}
+                    <span className="text-muted-foreground">→ {m.flowId}</span>
+                  </span>
+                ))}
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Customers’ own addresses, their company domains and{' '}
+                <code className="font-mono">INTAKE_ALLOWLIST</code> may send.
+              </p>
+            </div>
           </div>
           {emails.length ? (
             <ul className="divide-y">

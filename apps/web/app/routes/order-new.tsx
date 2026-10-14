@@ -13,6 +13,7 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Textarea } from '@orderloop/ui/textarea';
+import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Field } from '~/components/inspector';
@@ -226,7 +227,7 @@ export default function NewOrder() {
               </NativeSelect>
             </Field>
           </div>
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_14rem]">
             <Field label="Title" hint="Optional">
               <Input
                 name="title"
@@ -285,7 +286,13 @@ export default function NewOrder() {
             className="group rounded-md border px-3 py-2"
             open={!!preset.input.meta?.simulate}
           >
-            <summary className="caption cursor-pointer hover:text-foreground">Demo options</summary>
+            <summary className="caption flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
+              <ChevronRight
+                className="size-3.5 transition-transform group-open:rotate-90"
+                aria-hidden="true"
+              />
+              Demo options
+            </summary>
             <div className="mt-2">
               <Field label="Simulate a failure">
                 <NativeSelect
