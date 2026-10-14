@@ -8,6 +8,7 @@
  */
 
 import {
+  allocateLines,
   BASE_CURRENCY,
   checkAddress,
   money,
@@ -17,7 +18,10 @@ import {
   type PriceRule,
   type PriceSource,
   type PriceSourceKind,
+  rankStores,
   type StockLine,
+  type StockSource,
+  shipToPoint,
 } from '@orderloop/core';
 import {
   balanceEntries,
@@ -145,12 +149,13 @@ async function available(env: Env, skus: string[], locationId?: string) {
 }
 
 /**
- * Holds stock for every physical line: centrally, or at the store in `order.fulfillment` (pickup,
- * carry-out, ship-from-store). Keyed by order, step and line.
+ * Holds stock for every physical line: at the line's own store when routing split the shipment,
+ * else at the store in `order.fulfillment` (pickup, carry-out, ship-from-store), else centrally.
+ * Keyed by order, step and line.
  */
 export async function reserveInventory(env: Env, order: Order, stepKey: string) {
   const d = db(env);
-  const locationId = order.fulfillment?.locationId;
+  const locationOf = (l: OrderLine) => l.locationId ?? order.fulfillment?.locationId;
   const idFor = (i: number, sku: string) =>
     `res_${order.id}_${stepKey}_${i}_${sku}`.replace(/[^\w-]/g, '_');
   const prefix = idFor(0, '').slice(0, -2);
@@ -165,15 +170,22 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
   const mine = new Set(held.map((r) => r.id));
 
   const { lines } = await stockedLines(env, order);
-  const free = await available(
-    env,
-    lines.map(([, l]) => l.sku),
-    locationId,
-  );
+  const free = new Map<string | undefined, Map<string, number>>();
+  for (const loc of new Set(lines.map(([, l]) => locationOf(l))))
+    free.set(
+      loc,
+      await available(
+        env,
+        lines.filter(([, l]) => locationOf(l) === loc).map(([, l]) => l.sku),
+        loc,
+      ),
+    );
   const short = lines
     .filter(([i, l]) => {
       if (mine.has(idFor(i, l.sku))) return false;
-      return simulate(order) === 'out_of_stock' || (free.get(l.sku) ?? 0) < l.qty;
+      return (
+        simulate(order) === 'out_of_stock' || (free.get(locationOf(l))?.get(l.sku) ?? 0) < l.qty
+      );
     })
     .map(([, l]) => l.sku);
 
@@ -182,6 +194,7 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
     if (short.includes(line.sku)) continue;
     // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
     const id = idFor(i, line.sku);
+    const locationId = locationOf(line);
     await moveStock(
       env,
       { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty, locationId },
@@ -327,6 +340,8 @@ export type Routing = {
   method: 'ship' | 'pickup' | 'carry_out' | null;
   locationId?: string;
   locationName?: string;
+  /** A split shipment: where each part ships from (`locationId` null is central stock). */
+  sources?: { locationId: string | null; name: string; lines: number[] }[];
   reason?: string;
 };
 
@@ -352,11 +367,42 @@ export async function routeFulfillment(
   const skus = lines.map(([, l]) => l.sku);
   const stores = await db(env).select().from(locations).orderBy(locations.id);
   if (method === 'ship') {
-    if (covers(await available(env, skus))) return done({ branch: 'ship', method });
-    for (const store of stores.filter((s) => s.ships))
-      if (covers(await available(env, skus, store.id)))
-        return done({ branch: 'ship', method, locationId: store.id, locationName: store.name });
-    return done({ branch: 'unavailable', method, reason: 'No warehouse or store has every item' });
+    // Central stock first, then the shipping stores nearest the customer.
+    const sources: StockSource[] = [
+      { id: null, name: 'Warehouse', free: await available(env, skus) },
+    ];
+    for (const store of rankStores(
+      stores.filter((s) => s.ships),
+      shipToPoint(order),
+    ))
+      sources.push({ id: store.id, name: store.name, free: await available(env, skus, store.id) });
+    const a = allocateLines(
+      lines.map(([index, l]) => ({ index, sku: l.sku, qty: l.qty })),
+      sources,
+    );
+    if (a.kind === 'unavailable')
+      return done({
+        branch: 'unavailable',
+        method,
+        reason: `No warehouse or store has enough ${a.short.join(', ')}`,
+      });
+    if (a.kind === 'whole')
+      return done({
+        branch: 'ship',
+        method,
+        ...(a.source.id ? { locationId: a.source.id, locationName: a.source.name } : {}),
+      });
+    const parts = new Map<StockSource, number[]>();
+    for (const [index, source] of a.lines) parts.set(source, [...(parts.get(source) ?? []), index]);
+    return done({
+      branch: 'ship',
+      method,
+      sources: [...parts].map(([source, idx]) => ({
+        locationId: source.id,
+        name: source.name,
+        lines: idx,
+      })),
+    });
   }
   const store = stores.find((s) => s.id === order.fulfillment?.locationId);
   if (!store || (method === 'pickup' && !store.pickup))
@@ -797,22 +843,41 @@ export async function reversePayouts(env: Env, orderId: string) {
 
 // ── Shipping ───────────────────────────────────────────────────────────────
 
+/**
+ * Books one shipment per location the physical lines ship from (one, unless routing split the
+ * order), then consumes the held stock. The first shipment keeps the step's id, so a single-source
+ * order books exactly what it always did; the groups come from the order, so a retry books the same.
+ */
 export async function createShipment(env: Env, order: Order, stepKey: string, carrier: string) {
-  const id = `shp_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
-  const tracking = `${carrier.toUpperCase()}${Math.abs(hash(id)).toString().padStart(10, '0').slice(0, 10)}`;
-  await db(env)
-    .insert(shipments)
-    .values({
-      id,
-      orderId: order.id,
-      carrier,
-      tracking,
-      status: 'label_created',
-      createdAt: Date.now(),
-    })
-    .onConflictDoNothing();
+  const base = `shp_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
+  const { lines } = await stockedLines(env, order);
+  const from = [
+    ...new Set(lines.map(([, l]) => l.locationId ?? order.fulfillment?.locationId ?? null)),
+  ].sort((a, b) => (a ?? '').localeCompare(b ?? ''));
+  const out = [];
+  for (const [n, locationId] of (from.length ? from : [null]).entries()) {
+    const id = n === 0 ? base : `${base}_${n + 1}`;
+    const tracking = `${carrier.toUpperCase()}${Math.abs(hash(id)).toString().padStart(10, '0').slice(0, 10)}`;
+    await db(env)
+      .insert(shipments)
+      .values({
+        id,
+        orderId: order.id,
+        carrier,
+        tracking,
+        status: 'label_created',
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing();
+    out.push({ shipmentId: id, tracking, locationId });
+  }
   await consumeInventory(env, order.id);
-  return { shipmentId: id, carrier, tracking };
+  return {
+    shipmentId: out[0]!.shipmentId,
+    carrier,
+    tracking: out[0]!.tracking,
+    shipments: out,
+  };
 }
 
 /** A prepaid return label. Stock comes back with `restock` once the goods arrive. */

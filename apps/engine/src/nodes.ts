@@ -346,10 +346,14 @@ export const EXECUTORS: Record<string, Exec> = {
 
   'commerce.ship': async ({ env, ctx, config, stepKey }) => {
     const r = await cx.createShipment(env, ctx.order, stepKey, str(config.carrier, 'ups'));
+    const tracking = r.shipments.map((s) => s.tracking).join(', ');
     return {
       output: r,
-      vars: { tracking: r.tracking },
-      summary: `${r.carrier.toUpperCase()} ${r.tracking}`,
+      vars: { tracking },
+      summary:
+        r.shipments.length === 1
+          ? `${r.carrier.toUpperCase()} ${r.tracking}`
+          : `${r.shipments.length} ${r.carrier.toUpperCase()} shipments: ${tracking}`,
     };
   },
 
@@ -424,8 +428,17 @@ export const EXECUTORS: Record<string, Exec> = {
       | 'carry_out'
       | 'digital';
     const r = await cx.routeFulfillment(env, ctx.order, method === 'digital' ? 'ship' : method);
-    const at = (b: string) =>
-      !r.locationName ? '' : b === 'ship' ? ` from ${r.locationName}` : ` at ${r.locationName}`;
+    // A split names every source; otherwise the one store (none for central stock).
+    const where = r.sources ? r.sources.map((x) => x.name).join(' and ') : (r.locationName ?? null);
+    const at = (b: string) => (!where ? '' : b === 'ship' ? ` from ${where}` : ` at ${where}`);
+    // Each line records where it ships from on a split; a single source clears any earlier split.
+    const source = new Map(
+      (r.sources ?? []).flatMap((x) => x.lines.map((i) => [i, x.locationId] as const)),
+    );
+    const lines = ctx.order.lines.map(({ locationId: _from, ...l }, i) => {
+      const from = source.get(i);
+      return from ? { ...l, locationId: from } : l;
+    });
     return {
       branches: r.branches,
       output: r,
@@ -436,10 +449,11 @@ export const EXECUTORS: Record<string, Exec> = {
                 method: r.method,
                 ...(r.locationId ? { locationId: r.locationId } : {}),
               },
+              lines,
             },
           }
         : {}),
-      vars: { fulfillmentLocation: r.locationName ?? null },
+      vars: { fulfillmentLocation: where },
       summary:
         r.branches[0] === 'unavailable'
           ? (r.reason ?? 'Unavailable')
@@ -735,9 +749,10 @@ export const ROLLBACKS: Record<
   'commerce.payout': async (env, orderId) =>
     `Reversed ${await cx.reversePayouts(env, orderId)} payouts`,
   'commerce.ship': async (env, _orderId, output) => {
-    const id = (output as { shipmentId?: string } | undefined)?.shipmentId;
-    if (id) await cx.cancelShipment(env, id);
-    return id ? `Cancelled shipment ${id}` : 'No shipment to cancel';
+    const o = output as { shipmentId?: string; shipments?: { shipmentId: string }[] } | undefined;
+    const ids = o?.shipments?.map((s) => s.shipmentId) ?? (o?.shipmentId ? [o.shipmentId] : []);
+    for (const id of ids) await cx.cancelShipment(env, id);
+    return ids.length ? `Cancelled ${ids.join(', ')}` : 'No shipment to cancel';
   },
 };
 

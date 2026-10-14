@@ -77,7 +77,7 @@ Idempotency-Key: po-NW-7781
   buyer without a customer account; `input.fulfillment` is `{ method, locationId? }`.
 - `input.currency` defaults to `USD` and must have an exchange rate (`EUR`, `GBP` and `CAD` are
   seeded); another code returns `400`. See [Currency](/reference/expressions/#currency).
-- `input.lines` are `{ sku, name?, qty, unitPrice?, sellerId? }`. Pricing nodes fill in prices, in the order's
+- `input.lines` are `{ sku, name?, qty, unitPrice?, sellerId?, locationId? }` (`locationId` pins the store a line ships from; route fulfillment normally sets it). Pricing nodes fill in prices, in the order's
   currency.
 - `input.documentText` (up to 50,000 characters) is an inbound email or PO for the
   [Extract order](/reference/nodes/#ai.extract) node; it is stored in R2 before the run starts.

@@ -111,7 +111,7 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 | `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization |
 | `commerce.split_by_seller` | `cancelSellerOrders`: cancels every pending or accepted seller order |
 | `commerce.payout` | `reversePayouts`: reverses every scheduled payout |
-| `commerce.ship` | `cancelShipment` for the shipment id in the step's output |
+| `commerce.ship` | `cancelShipment` for every shipment id in the step's output (`shipments`; one per source location on a split) |
 | `commerce.pickup_ready` | `cancelShipment` for the staged pickup's shipment id in the step's output |
 | `commerce.deliver_digital` | `revokeEntitlements`: revokes every issued code |
 

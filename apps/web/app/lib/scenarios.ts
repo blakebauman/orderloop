@@ -188,7 +188,46 @@ export const SCENARIOS: Scenario[] = [
         { sku: 'TEE-01', qty: 2 },
         { sku: 'EBK-101', qty: 1 },
       ],
-      meta: {},
+      meta: {
+        shipTo: {
+          line1: '200 Lafayette St',
+          city: 'New York',
+          region: 'NY',
+          postalCode: '10012',
+          country: 'US',
+          latitude: 40.7215,
+          longitude: -73.9977,
+        },
+      },
+    },
+  },
+  {
+    id: 'split-ship',
+    label: 'Split shipment, nearest store',
+    blurb:
+      'Eight monitors and three tees to San Francisco: no one place has both, so the monitors ship from the warehouse and the tees from the Mission store, the nearest that has them.',
+    flowId: 'tpl-omnichannel-order',
+    input: {
+      model: 'd2c',
+      channel: 'web',
+      currency: 'USD',
+      customerId: 'cus_ada',
+      title: 'Web order #10702 (split)',
+      lines: [
+        { sku: 'MON-27', qty: 8 },
+        { sku: 'TEE-01', qty: 3 },
+      ],
+      meta: {
+        shipTo: {
+          line1: '1 Market St',
+          city: 'San Francisco',
+          region: 'CA',
+          postalCode: '94105',
+          country: 'US',
+          latitude: 37.7946,
+          longitude: -122.3947,
+        },
+      },
     },
   },
   {
