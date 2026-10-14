@@ -90,7 +90,6 @@ export async function getFlow(id: string) {
     versions,
     dirty,
     publishedGraph,
-    templateUpdate: templateUpdate(id, graph),
   };
 }
 
@@ -132,27 +131,11 @@ export async function flowCount() {
 }
 
 /** Same nodes and edges, ignoring array order (the editor appends; the store keeps insertion order). */
-export function sameGraph(a: FlowGraph, b: FlowGraph, opts: { ignoreLayout?: boolean } = {}) {
+export function sameGraph(a: FlowGraph, b: FlowGraph) {
   const norm = (g: FlowGraph) =>
     JSON.stringify({
-      nodes: [...g.nodes]
-        .sort((x, y) => x.id.localeCompare(y.id))
-        .map((n) => (opts.ignoreLayout ? { ...n, position: null } : n)),
+      nodes: [...g.nodes].sort((x, y) => x.id.localeCompare(y.id)),
       edges: [...g.edges].sort((x, y) => x.id.localeCompare(y.id)),
     });
   return norm(a) === norm(b);
-}
-
-/**
- * For a flow created from a built-in template: the template's current graph, when it now differs
- * from the stored one beyond layout. The editor offers it as a reviewable proposal; nothing is
- * published automatically.
- */
-export function templateUpdate(id: string, graph: FlowGraph): FlowGraph | null {
-  const t = Object.values(TEMPLATES)
-    .map((make) => make())
-    .find((f) => f.id === id);
-  if (!t) return null;
-  const latest: FlowGraph = { nodes: t.nodes, edges: t.edges };
-  return sameGraph(latest, graph, { ignoreLayout: true }) ? null : latest;
 }
