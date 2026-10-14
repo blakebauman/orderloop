@@ -15,7 +15,7 @@ Both bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`).
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh                         # creates D1 `orderloop` and R2 `orderloop-docs`; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
 pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
@@ -25,8 +25,10 @@ pnpm run deploy                                # engine first (web binds to it),
 Production has no demo data (migration `0027` removed it and `packages/db/seed` is never applied remotely), so the
 dashboard's demo scenarios are hidden and only `USD` orders are accepted until an exchange rate is added to `fx_rates`.
 
-If `provision.sh` prints a `database_id`, put it in the `d1_databases` entry of both
-`wrangler.jsonc` files. Change the web app's `routes` to your own hostname.
+`provision.sh` records the database id in `deployments/orderloop.jsonc`; put it in the
+`d1_databases` entry of both `wrangler.jsonc` files too, since `orderloop` renders them unchanged.
+Change the web app's `routes` to your own hostname. To add a customer's deployment instead, see
+[Operations](operations.md#adding-a-customer).
 
 Use `pnpm run deploy`, not `pnpm deploy`: the bare form is pnpm's built-in `deploy` command and does
 something else entirely.
@@ -119,17 +121,21 @@ All settings are listed in [Configuration](configuration.md).
 ## CI
 
 Production deploys from CI: merging to `main` is the release. `.github/workflows/ci.yml` runs lint,
-type-check, build, tests and `pnpm audit --prod --audit-level high` on every push and pull request.
-On `main` it then records a D1 Time Travel bookmark, migrates D1, deploys the engine, deploys the
-web app, smoke-tests `/health`, `/health/deep` and `/login` and deploys these docs, in that order,
-so a change never reaches production before its migration. If anything fails once the engine has
-deployed (the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that
-deployed. D1 is not rolled back, which is why migrations only add; see
-[Restoring D1](#restoring-d1).
+type-check, build, tests, the fleet tests (`pnpm test:fleet`) and
+`pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
+every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
+deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
+D1, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login`
+and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
+deployment before its migration. If anything fails once the engine has deployed (the web deploy or
+the smoke test), the job runs `wrangler rollback` for each Worker that deployed. D1 is not rolled
+back, which is why migrations only add; see [Restoring D1](#restoring-d1).
 
-The deploy job runs in the `production` GitHub environment (add a required reviewer there to gate
-releases) and needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository
-secrets; without them it fails rather than skipping. The workflow's token is read-only
+Each deployment's job runs in its GitHub environment (`production` for orderloop.io, `deploy-<id>`
+for a customer; add a required reviewer there to gate its releases). It needs
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
+them it fails rather than skipping. The environment's `APP_PASSWORD`, `WEBHOOK_SECRET`,
+`SHOPIFY_WEBHOOK_SECRET` and `INTAKE_ALLOWLIST`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.
 
@@ -148,6 +154,8 @@ after a migration that corrupted rows, restore to that bookmark:
 ```bash
 pnpm --filter @orderloop/web exec wrangler d1 time-travel restore orderloop --bookmark=<bookmark>
 ```
+
+For a customer's deployment the database is `orderloop-<id>`.
 
 A restore replaces the whole database, so every write since the bookmark is lost: orders started,
 approvals decided and audit events after that point. Roll the Workers back first if the deployed

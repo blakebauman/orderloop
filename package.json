@@ -2,7 +2,7 @@
   "name": "orderloop",
   "version": "0.1.0",
   "private": true,
-  "description": "Order Loop — an agent loop for the full order lifecycle (purchase requests, B2B orders, reorders, subscriptions), built entirely on Cloudflare. Turborepo + Biome.",
+  "description": "Order Loop \u2014 an agent loop for the full order lifecycle (purchase requests, B2B orders, reorders, subscriptions), built entirely on Cloudflare. Turborepo + Biome.",
   "type": "module",
   "scripts": {
     "build": "turbo run build",
@@ -19,12 +19,15 @@
     "sync:theme": "pnpm --filter @orderloop/design sync:theme",
     "db:migrate:local": "pnpm --filter @orderloop/web db:migrate:local",
     "db:seed:local": "pnpm --filter @orderloop/web db:seed:local",
-    "deploy": "pnpm --filter @orderloop/engine run deploy && pnpm --filter @orderloop/web run deploy"
+    "deploy": "pnpm --filter @orderloop/engine run deploy && pnpm --filter @orderloop/web run deploy",
+    "test:fleet": "node --test scripts/*.test.ts",
+    "fleet": "node scripts/fleet.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "^22.20.5",
+    "jsonc-parser": "3.3.1",
     "turbo": "^2.5.8",
     "typescript": "catalog:"
   },
