@@ -10,6 +10,7 @@ import {
   type Principal,
 } from '@orderloop/core';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { SqlPushStore } from '../src/a2a/push';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
@@ -125,7 +126,7 @@ describe('A2A', () => {
   it('refuses a request the web Worker did not forward, and versions it does not speak', async () => {
     expect((await rpc(null, 'GetTask', { id: 'x' })).status).toBe(401);
     const old = (await (
-      await rpc(person('viewer', 'v@example.com'), 'GetTask', { id: 'x' }, '0.3')
+      await rpc(person('viewer', 'v@example.com'), 'GetTask', { id: 'x' }, '2.0')
     ).json()) as Json;
     expect(old.error).toBeDefined();
   });
@@ -464,5 +465,154 @@ describe('A2A push notifications', () => {
     await runDurableObjectAlarm(stub);
     expect(after).toHaveLength(0);
     expect(received).toHaveLength(0);
+  });
+});
+
+describe('A2A 0.3 clients', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A 0.3 call: its own method names, no A2A-Version header. */
+  async function legacy(p: Principal, method: string, params: Json) {
+    const res = await worker.fetch(
+      new Request('https://engine/a2a', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [PRINCIPAL_HEADER]: encodePrincipal(p) },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method, params }),
+      }),
+      env,
+    );
+    return res;
+  }
+  const legacyMessage = (parts: Json[], extra: Json = {}) => ({
+    message: {
+      kind: 'message',
+      messageId: `l-${++m}-${Date.now()}`,
+      role: 'user',
+      parts,
+      ...extra,
+    },
+  });
+
+  it('answers 0.3 method names in 0.3 shapes', async () => {
+    const viewer = person('viewer', 'old@example.com');
+    const sent = (await (
+      await legacy(
+        viewer,
+        'message/send',
+        legacyMessage([{ kind: 'data', data: { skill: 'list_flows' } }]),
+      )
+    ).json()) as Json;
+    expect(sent.result).toMatchObject({ kind: 'task', status: { state: 'completed' } });
+    expect(sent.result.artifacts[0].parts[0]).toMatchObject({ kind: 'data' });
+
+    const got = (await (await legacy(viewer, 'tasks/get', { id: sent.result.id })).json()) as Json;
+    expect(got.result).toMatchObject({ id: sent.result.id, status: { state: 'completed' } });
+
+    // The same task reads in 1.0 shapes over the 1.0 methods.
+    const v1 = await call(viewer, 'GetTask', { id: sent.result.id });
+    expect(v1.result?.status.state).toBe('TASK_STATE_COMPLETED');
+  });
+
+  it('follows an order and takes a 0.3 reply', async () => {
+    await fastWorkflows();
+    const op = person('operator', 'old-op@example.com');
+    const placed = (
+      (await (
+        await legacy(
+          op,
+          'message/send',
+          legacyMessage([
+            {
+              kind: 'data',
+              data: { skill: 'place_order', input: { flowId: 'tpl-b2b-order', input: b2b } },
+            },
+          ]),
+        )
+      ).json()) as Json
+    ).result;
+    expect(placed.status.state).toBe('input-required');
+    const orderId = placed.artifacts[0].parts[0].data.orderId as string;
+
+    const res = await legacy(
+      op,
+      'message/stream',
+      legacyMessage([{ kind: 'data', data: { decision: 'approved' } }], {
+        taskId: placed.id,
+        contextId: placed.contextId,
+      }),
+    );
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const events = (await res.text())
+      .split('\n')
+      .filter((l) => l.startsWith('data:'))
+      .map((l) => JSON.parse(l.slice(5)) as Json);
+    expect(events.every((e) => !e.error)).toBe(true);
+    expect(events.map((e) => e.result?.kind)).toContain('status-update');
+    await until(async () => {
+      const s = await state(orderId);
+      return s.waits.some((w) => w.kind === 'approval') ? false : s;
+    }, 'the decision');
+    expect(JSON.stringify(await state(orderId))).toContain('old-op@example.com via A2A');
+  });
+
+  it('pushes 0.3-shaped notifications to a URL registered over 0.3', async () => {
+    const received: Json[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      received.push(JSON.parse(String(init?.body)) as Json);
+      return new Response('ok');
+    });
+    await fastWorkflows();
+    const op = person('operator', 'old-push@example.com');
+    const placed = (
+      (await (
+        await legacy(
+          op,
+          'message/send',
+          legacyMessage([
+            {
+              kind: 'data',
+              data: { skill: 'place_order', input: { flowId: 'tpl-b2b-order', input: b2b } },
+            },
+          ]),
+        )
+      ).json()) as Json
+    ).result;
+    const orderId = placed.artifacts[0].parts[0].data.orderId as string;
+    const set = (await (
+      await legacy(op, 'tasks/pushNotificationConfig/set', {
+        taskId: placed.id,
+        pushNotificationConfig: { url: 'https://hooks.example/old', token: 'old-tok' },
+      })
+    ).json()) as Json;
+    expect(set.error).toBeUndefined();
+
+    // The order moves outside any request; the update goes out in the 0.3 shape, which is the
+    // whole task (`kind: "task"`, 0.3 state names), with no StreamResponse wrapper.
+    const wait = (await state(orderId)).waits.find((w) => w.kind === 'approval')!;
+    await env.ORDER_AGENT.getByName(orderId).decide(wait.nodeId, 'approved', 'someone@example.com');
+    await until(async () => received.length > 0, 'the 0.3 push');
+    expect(received[0]).toMatchObject({ kind: 'task', id: placed.id });
+    expect(received[0]!.status.state).not.toMatch(/^TASK_STATE_/);
+    expect(received[0]).not.toHaveProperty('statusUpdate');
+  });
+  it('adds the wire version to a push table made before 0.3 support', async () => {
+    const stub = env.A2A_AGENT.getByName('user:usr_pre03');
+    await runInDurableObject(stub, async (_i, state) => {
+      const sql = state.storage.sql;
+      sql.exec('DROP TABLE IF EXISTS push_configs');
+      sql.exec(`CREATE TABLE push_configs (
+        task_id TEXT NOT NULL, id TEXT NOT NULL, url TEXT NOT NULL, token TEXT NOT NULL DEFAULT '',
+        auth_scheme TEXT, auth_credentials TEXT, created_at INTEGER NOT NULL,
+        PRIMARY KEY (task_id, id))`);
+      sql.exec(
+        "INSERT INTO push_configs (task_id, id, url, created_at) VALUES ('t1', 'c1', 'https://x.example', 0)",
+      );
+      const store = new SqlPushStore(sql);
+      expect(await store.loadWithMetadata('t1')).toEqual([
+        expect.objectContaining({ wireVersion: '1.0' }),
+      ]);
+    });
   });
 });

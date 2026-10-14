@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   A2A_SKILLS,
   agentCard,
+  isLegacyA2AVersion,
+  legacyAgentCard,
   ORDER_TASK_STATES,
   orderTaskState,
   TERMINAL_TASK_STATES,
@@ -51,9 +53,29 @@ describe('A2A', () => {
     const card = agentCard('https://orderloop.io');
     expect(card.supportedInterfaces).toEqual([
       { url: 'https://orderloop.io/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+      { url: 'https://orderloop.io/a2a', protocolBinding: 'JSONRPC', protocolVersion: '0.3' },
     ]);
     expect(card.securitySchemes.oauth.oauth2SecurityScheme.oauth2MetadataUrl).toBe(
       'https://orderloop.io/.well-known/oauth-authorization-server',
     );
+  });
+  it('serves 0.3 clients a 0.3 card that still names the 1.0 interface', () => {
+    const card = legacyAgentCard('https://orderloop.io');
+    expect(card).toMatchObject({
+      url: 'https://orderloop.io/a2a',
+      preferredTransport: 'JSONRPC',
+      protocolVersion: '0.3',
+      security: [{ apiToken: [] }, { oauth: [] }],
+    });
+    expect(card.securitySchemes.apiToken).toMatchObject({ type: 'http', scheme: 'bearer' });
+    expect(card.supportedInterfaces.map((i) => i.protocolVersion)).toEqual(['1.0', '0.3']);
+    expect(card.skills).toEqual(agentCard('https://orderloop.io').skills);
+  });
+
+  it('treats a missing or 0.x version as a 0.3 client', () => {
+    expect(isLegacyA2AVersion(null)).toBe(true);
+    expect(isLegacyA2AVersion('')).toBe(true);
+    expect(isLegacyA2AVersion('0.3')).toBe(true);
+    expect(isLegacyA2AVersion('1.0')).toBe(false);
   });
 });

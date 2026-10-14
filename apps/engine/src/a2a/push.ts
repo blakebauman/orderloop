@@ -11,15 +11,22 @@
  */
 
 import type { StreamResponse, Task, TaskPushNotificationConfig } from '@a2a-js/sdk';
+import { V03PushNotificationSerializer } from '@a2a-js/sdk/compat/v0_3/server';
 import { RequestMalformedError } from '@a2a-js/sdk/errors';
 import {
   type PushNotificationSender,
+  type PushNotificationSerializer,
   type PushNotificationStore,
   type ServerCallContext,
   type StoredPushNotificationConfig,
   V1PushNotificationSerializer,
 } from '@a2a-js/sdk/server';
-import { isWebhookUrl, WEBHOOK_URL_RULE } from '@orderloop/core';
+import {
+  A2A_LEGACY_PROTOCOL_VERSION,
+  isLegacyA2AVersion,
+  isWebhookUrl,
+  WEBHOOK_URL_RULE,
+} from '@orderloop/core';
 
 /** Per task: enough for a caller and a backup, not a fan-out service. */
 const MAX_CONFIGS = 5;
@@ -36,6 +43,7 @@ type ConfigRow = {
   token: string;
   auth_scheme: string | null;
   auth_credentials: string | null;
+  wire_version: string;
 };
 
 export class SqlPushStore implements PushNotificationStore {
@@ -48,13 +56,21 @@ export class SqlPushStore implements PushNotificationStore {
       auth_scheme TEXT,
       auth_credentials TEXT,
       created_at INTEGER NOT NULL,
+      wire_version TEXT NOT NULL DEFAULT '1.0',
       PRIMARY KEY (task_id, id)
     )`);
+    // Objects created before 0.3 support have the table without this column.
+    const columns = sql
+      .exec<{ name: string }>("SELECT name FROM pragma_table_info('push_configs')")
+      .toArray()
+      .map((c) => c.name);
+    if (!columns.includes('wire_version'))
+      sql.exec("ALTER TABLE push_configs ADD COLUMN wire_version TEXT NOT NULL DEFAULT '1.0'");
   }
 
   async save(
     taskId: string,
-    _context: ServerCallContext,
+    context: ServerCallContext,
     config: TaskPushNotificationConfig,
   ): Promise<void> {
     if (!isWebhookUrl(config.url)) throw new RequestMalformedError(WEBHOOK_URL_RULE);
@@ -70,10 +86,12 @@ export class SqlPushStore implements PushNotificationStore {
     if (!exists && count >= MAX_CONFIGS)
       throw new RequestMalformedError(`A task takes at most ${MAX_CONFIGS} push URLs.`);
     this.sql.exec(
-      `INSERT INTO push_configs (task_id, id, url, token, auth_scheme, auth_credentials, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO push_configs
+         (task_id, id, url, token, auth_scheme, auth_credentials, created_at, wire_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (task_id, id) DO UPDATE SET url = excluded.url, token = excluded.token,
-         auth_scheme = excluded.auth_scheme, auth_credentials = excluded.auth_credentials`,
+         auth_scheme = excluded.auth_scheme, auth_credentials = excluded.auth_credentials,
+         wire_version = excluded.wire_version`,
       taskId,
       config.id,
       config.url,
@@ -81,30 +99,35 @@ export class SqlPushStore implements PushNotificationStore {
       config.authentication?.scheme || null,
       config.authentication?.credentials || null,
       Date.now(),
+      // A URL registered over 0.3 gets 0.3-shaped notifications.
+      isLegacyA2AVersion(context.requestedVersion) ? A2A_LEGACY_PROTOCOL_VERSION : '1.0',
     );
   }
 
-  async load(taskId: string, _context?: ServerCallContext): Promise<TaskPushNotificationConfig[]> {
-    return this.sql
-      .exec<ConfigRow>('SELECT * FROM push_configs WHERE task_id = ? ORDER BY created_at', taskId)
-      .toArray()
-      .map((r) => ({
-        tenant: '',
-        id: r.id,
-        taskId: r.task_id,
-        url: r.url,
-        token: r.token,
-        authentication: r.auth_scheme
-          ? { scheme: r.auth_scheme, credentials: r.auth_credentials ?? '' }
-          : undefined,
-      }));
+  async load(taskId: string, context?: ServerCallContext): Promise<TaskPushNotificationConfig[]> {
+    return (await this.loadWithMetadata(taskId, context)).map((s) => s.config);
   }
 
   async loadWithMetadata(
     taskId: string,
-    context?: ServerCallContext,
+    _context?: ServerCallContext,
   ): Promise<StoredPushNotificationConfig[]> {
-    return (await this.load(taskId, context)).map((config) => ({ config, wireVersion: '1.0' }));
+    return this.sql
+      .exec<ConfigRow>('SELECT * FROM push_configs WHERE task_id = ? ORDER BY created_at', taskId)
+      .toArray()
+      .map((r) => ({
+        wireVersion: r.wire_version,
+        config: {
+          tenant: '',
+          id: r.id,
+          taskId: r.task_id,
+          url: r.url,
+          token: r.token,
+          authentication: r.auth_scheme
+            ? { scheme: r.auth_scheme, credentials: r.auth_credentials ?? '' }
+            : undefined,
+        },
+      }));
   }
 
   /** Removes a config (or all of a task's) and drops what is still queued for it. */
@@ -141,7 +164,10 @@ function authHeaders(config: TaskPushNotificationConfig): Record<string, string>
 }
 
 export class PushSender implements PushNotificationSender {
-  private readonly serializer = new V1PushNotificationSerializer();
+  private readonly serializers: Record<string, PushNotificationSerializer> = {
+    '1.0': new V1PushNotificationSerializer(),
+    [A2A_LEGACY_PROTOCOL_VERSION]: new V03PushNotificationSerializer(),
+  };
   private running: Promise<void> | null = null;
   private again = false;
 
@@ -174,12 +200,13 @@ export class PushSender implements PushNotificationSender {
   async send(update: StreamResponse, _context?: ServerCallContext, task?: Task): Promise<void> {
     const taskId = taskIdOf(update) ?? task?.id;
     if (!taskId) return;
-    const configs = await this.configs.load(taskId);
+    const configs = await this.configs.loadWithMetadata(taskId);
     if (!configs.length) return;
     if (update.payload?.$case === 'statusUpdate' && this.repeats(taskId, update)) return;
-    const { body, contentType } = this.serializer.serialize(update, task);
     const now = Date.now();
-    for (const config of configs)
+    for (const { config, wireVersion } of configs) {
+      const serializer = this.serializers[wireVersion] ?? this.serializers['1.0']!;
+      const { body, contentType } = serializer.serialize(update, task);
       this.storage.sql.exec(
         `INSERT INTO push_outbox (id, task_id, config_id, url, headers, body, next_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -192,6 +219,7 @@ export class PushSender implements PushNotificationSender {
         now,
         now,
       );
+    }
     // Tried now without holding up the caller; the alarm is the backstop if this object is
     // evicted before the first try finishes.
     await this.arm();

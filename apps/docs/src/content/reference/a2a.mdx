@@ -19,9 +19,12 @@ The binding is JSON-RPC over HTTP `POST`; the card advertises streaming and push
 ## Discovery
 
 The Agent Card is public at `https://orderloop.io/.well-known/agent-card.json` (cached for five
-minutes). It lists the interface (`/a2a`, `JSONRPC`, protocol `1.0`), the two security schemes
-below and every skill. The card is built by `agentCard(origin)` in `packages/core/src/a2a.ts`, so
-it always names the host it is served from.
+minutes). It lists the interfaces (`/a2a`, `JSONRPC`, protocols `1.0` and `0.3`), the two security
+schemes below and every skill. Request it with `A2A-Version: 1.0` for the 1.0 card; without the
+header you get the 0.3 card (top-level `url` and `protocolVersion`, OpenAPI-style security
+schemes), which still embeds the 1.0 interfaces as `supportedInterfaces`. Both are built in
+`packages/core/src/a2a.ts` (`agentCard` and `legacyAgentCard`), so they always name the host they
+are served from.
 
 ## Authentication
 
@@ -39,8 +42,21 @@ Both are the credentials the [REST API](/reference/rest-api/) takes, with the sa
 an OAuth grant for `/mcp` is refused at `/a2a` and the reverse, so connecting the same app to both
 is two grants, each listed (and disconnected) on **Account**. API tokens work on both.
 
-Send `A2A-Version: 1.0`. A request without the header is treated as `1.0`; any other version gets
-a JSON-RPC error.
+Send `A2A-Version: 1.0`. A request with 1.0 method names and no header is treated as `1.0`; any
+other version gets a JSON-RPC error.
+
+## A2A 0.3 clients
+
+`/a2a` also answers clients still on A2A 0.3, recognised by their method names: `message/send`,
+`message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe` and
+`tasks/pushNotificationConfig/{set,get,list,delete}`. They need no header. `@a2a-js/sdk`'s 0.3
+transport translates each call to the same handler and its answer back to 0.3 shapes (`kind` on
+every object, `input-required`-style state names), so everything on this page applies: the same
+skills, replies, order following and roles. Tasks are shared across versions; a task created over
+0.3 reads in 1.0 shapes over `GetTask`.
+
+A push URL registered over 0.3 receives 0.3 notifications: the whole task (`kind: "task"`), not a
+`StreamResponse`. A URL registered over 1.0 keeps getting 1.0 notifications.
 
 ## Skills
 

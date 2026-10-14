@@ -13,6 +13,12 @@ import type { OrderStatus } from './types';
 
 export const A2A_PATH = '/a2a';
 export const A2A_PROTOCOL_VERSION = '1.0';
+/** The earlier protocol, still served at the same endpoint (its own method names and shapes). */
+export const A2A_LEGACY_PROTOCOL_VERSION = '0.3';
+
+/** Whether a client speaks 0.3: it says so, or (as 0.3 clients do) says nothing. */
+export const isLegacyA2AVersion = (version: string | null | undefined) =>
+  !version?.trim() || version.trim().startsWith('0.');
 export const AGENT_CARD_PATH = '/.well-known/agent-card.json';
 
 export type A2ASkill = AssistantTool | 'place_order' | 'chat';
@@ -107,40 +113,54 @@ export function orderTaskState(s: OrderState): { state: A2ATaskState; text: stri
   return { state, text: `${ref} is waiting for ${waits.join('; ')}.` };
 }
 
+const DESCRIPTION =
+  'Runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Ask about orders, stock and flows, place orders and follow them to their outcome, and decide approvals, all within the role you connect with.';
+const API_TOKEN_HELP = 'An OrderLoop API token (ol_live_…), created on the Settings page.';
+const oauthHelp = (origin: string) =>
+  `OAuth 2.1 with PKCE. Request the resource ${origin}${A2A_PATH}; the scope is the role to act with.`;
+const roleScopes = () => Object.fromEntries(ROLES.map((r) => [r, `Act with the ${r} role`]));
+
+const cardSkills = () =>
+  (Object.keys(A2A_SKILLS) as A2ASkill[]).map((id) => {
+    const s = A2A_SKILLS[id];
+    return {
+      id,
+      name: s.name,
+      description: `${s.description} Needs the ${s.role} role.`,
+      tags: s.tags,
+      examples: s.examples,
+    };
+  });
+
+/** Both protocol versions, on the one endpoint. */
+const interfaces = (origin: string) =>
+  [A2A_PROTOCOL_VERSION, A2A_LEGACY_PROTOCOL_VERSION].map((protocolVersion) => ({
+    url: `${origin}${A2A_PATH}`,
+    protocolBinding: 'JSONRPC',
+    protocolVersion,
+  }));
+
 /** The public Agent Card for this origin, in A2A 1.0 JSON. */
 export function agentCard(origin: string) {
-  const roleScopes = Object.fromEntries(ROLES.map((r) => [r, `Act with the ${r} role`]));
   return {
     name: 'OrderLoop',
-    description:
-      'Runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Ask about orders, stock and flows, place orders and follow them to their outcome, and decide approvals, all within the role you connect with.',
-    supportedInterfaces: [
-      {
-        url: `${origin}${A2A_PATH}`,
-        protocolBinding: 'JSONRPC',
-        protocolVersion: A2A_PROTOCOL_VERSION,
-      },
-    ],
+    description: DESCRIPTION,
+    supportedInterfaces: interfaces(origin),
     provider: { organization: 'OrderLoop', url: origin },
     version: '1.0.0',
     documentationUrl: 'https://docs.orderloop.io/reference/a2a/',
     capabilities: { streaming: true, pushNotifications: true, extendedAgentCard: false },
     securitySchemes: {
-      apiToken: {
-        httpAuthSecurityScheme: {
-          scheme: 'Bearer',
-          description: 'An OrderLoop API token (ol_live_…), created on the Settings page.',
-        },
-      },
+      apiToken: { httpAuthSecurityScheme: { scheme: 'Bearer', description: API_TOKEN_HELP } },
       oauth: {
         oauth2SecurityScheme: {
-          description: `OAuth 2.1 with PKCE. Request the resource ${origin}${A2A_PATH}; the scope is the role to act with.`,
+          description: oauthHelp(origin),
           oauth2MetadataUrl: `${origin}/.well-known/oauth-authorization-server`,
           flows: {
             authorizationCode: {
               authorizationUrl: `${origin}/oauth/authorize`,
               tokenUrl: `${origin}/oauth/token`,
-              scopes: roleScopes,
+              scopes: roleScopes(),
               pkceRequired: true,
             },
           },
@@ -153,15 +173,47 @@ export function agentCard(origin: string) {
     ],
     defaultInputModes: ['text/plain', 'application/json'],
     defaultOutputModes: ['text/plain', 'application/json'],
-    skills: (Object.keys(A2A_SKILLS) as A2ASkill[]).map((id) => {
-      const s = A2A_SKILLS[id];
-      return {
-        id,
-        name: s.name,
-        description: `${s.description} Needs the ${s.role} role.`,
-        tags: s.tags,
-        examples: s.examples,
-      };
-    }),
+    skills: cardSkills(),
+  };
+}
+
+/**
+ * The same card in A2A 0.3 JSON, for clients that ask without `A2A-Version: 1.0`: a top-level
+ * `url` and `protocolVersion`, OpenAPI-style security schemes, and the 1.0 interfaces embedded
+ * (`supportedInterfaces`) so a 1.0 client reading it still finds the endpoint. The A2A SDK's own
+ * 0.3 card handler serves the same shape.
+ */
+export function legacyAgentCard(origin: string) {
+  return {
+    name: 'OrderLoop',
+    description: DESCRIPTION,
+    url: `${origin}${A2A_PATH}`,
+    preferredTransport: 'JSONRPC',
+    protocolVersion: A2A_LEGACY_PROTOCOL_VERSION,
+    version: '1.0.0',
+    provider: { organization: 'OrderLoop', url: origin },
+    documentationUrl: 'https://docs.orderloop.io/reference/a2a/',
+    capabilities: { streaming: true, pushNotifications: true },
+    supportsAuthenticatedExtendedCard: false,
+    securitySchemes: {
+      apiToken: { type: 'http', scheme: 'bearer', description: API_TOKEN_HELP },
+      oauth: {
+        type: 'oauth2',
+        description: oauthHelp(origin),
+        oauth2MetadataUrl: `${origin}/.well-known/oauth-authorization-server`,
+        flows: {
+          authorizationCode: {
+            authorizationUrl: `${origin}/oauth/authorize`,
+            tokenUrl: `${origin}/oauth/token`,
+            scopes: roleScopes(),
+          },
+        },
+      },
+    },
+    security: [{ apiToken: [] }, { oauth: [] }],
+    defaultInputModes: ['text/plain', 'application/json'],
+    defaultOutputModes: ['text/plain', 'application/json'],
+    skills: cardSkills(),
+    supportedInterfaces: interfaces(origin),
   };
 }
