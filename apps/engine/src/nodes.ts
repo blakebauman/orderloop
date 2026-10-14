@@ -801,12 +801,16 @@ export const ROLLBACKS: Record<
     `Cancelled ${await cx.cancelSellerOrders(env, orderId)} seller orders`,
   'commerce.payout': async (env, orderId) =>
     `Reversed ${await cx.reversePayouts(env, orderId)} payouts`,
-  'commerce.ship': async (env, _orderId, output) => {
+  'commerce.ship': async (env, orderId, output) => {
     const o = output as { shipmentId?: string; shipments?: { shipmentId: string }[] } | undefined;
     const ids = o?.shipments?.map((s) => s.shipmentId) ?? (o?.shipmentId ? [o.shipmentId] : []);
     for (const id of ids) await cx.cancelShipment(env, id);
-    return ids.length ? `Cancelled ${ids.join(', ')}` : 'No shipment to cancel';
+    if (!ids.length) return 'No shipment to cancel';
+    const restored = await cx.restoreShippedStock(env, orderId);
+    return `Cancelled ${ids.join(', ')}${restored ? `, restocked ${restored} lines` : ''}`;
   },
+  'commerce.invoice': async (env, orderId) =>
+    `Reversed ${await cx.reverseBalance(env, orderId)} account charges`,
 };
 
 /** Applies TIME_SCALE so demos compress days into minutes. Never below one second. */

@@ -65,7 +65,7 @@ Reserving inventory, authorizing payment, creating a shipment, holding stock for
 a digital good, splitting an order by seller and paying sellers out each register a compensation on
 their step. When an order fails (an End node with outcome `failed`, or a node that throws), the
 Workflow runs those compensations in reverse order: stock is released, the authorization voided, the
-shipment cancelled. Cancelling an order does the same through the OrderAgent.
+shipment cancelled, consumed stock restocked once no shipment is live, on-account invoice charges reversed. Cancelling an order does the same through the OrderAgent.
 
 ## Loops and generations
 
@@ -73,7 +73,9 @@ A **Loop** node repeats its body while a condition holds, up to a limit; the end
 connects back to the loop's `next` input. Subscriptions loop over billing periods and then
 **continue as new**: the run ends and a fresh Workflow instance starts on the same flow with the
 variables carried over, so the step history doesn't grow without bound. Each run is a
-**generation** of the same order.
+**generation** of the same order. Step names repeat across generations, so effects (charges,
+holds, webhooks) are keyed by the step name plus the generation, and a second generation's charge
+is a new charge.
 
 ## Run context
 

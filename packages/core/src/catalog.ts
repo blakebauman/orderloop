@@ -391,7 +391,7 @@ export const NODE_SPECS = [
     category: 'commerce',
     label: 'Generate invoice',
     description:
-      'Renders the invoice to R2 with the configured payment terms. Unpaid invoices for business customers go on their account.',
+      'Renders the invoice to R2 with the configured payment terms. Unpaid invoices for business customers go on their account, and come off it if the order fails.',
     icon: 'FileText',
     fields: [
       {
@@ -410,6 +410,7 @@ export const NODE_SPECS = [
       },
     ],
     outputs: OUT,
+    rollback: true,
   }),
   node({
     type: 'commerce.generate_po',

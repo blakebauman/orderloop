@@ -40,7 +40,16 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { EngineApi } from '../src/api';
 import { resolveImages } from '../src/clef';
-import { refund, reserveInventory, restock } from '../src/connectors';
+import {
+  authorizePayment,
+  capturePayment,
+  consumeInventory,
+  refund,
+  releaseInventory,
+  reserveInventory,
+  restock,
+  voidAuthorizations,
+} from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { EXECUTORS } from '../src/nodes';
@@ -356,6 +365,65 @@ describe('subscription', () => {
     expect(done.nodes.fulfill!.status).toBe('skipped');
     const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
     expect(pays.map((p) => p.status).sort()).toEqual(['authorized', 'failed', 'failed']);
+  });
+});
+
+describe('continue as new', () => {
+  const node = (id: string, type: string, config: Record<string, unknown> = {}) => ({
+    id,
+    type,
+    label: id,
+    config,
+    position: { x: 0, y: 0 },
+  });
+  const edge = (source: string, target: string, sourceHandle: string | null = null) => ({
+    id: `${source}.${sourceHandle ?? 'out'}-${target}`,
+    source,
+    target,
+    sourceHandle,
+    targetHandle: null,
+  });
+
+  beforeAll(async () => {
+    await publishFlow(db(), {
+      id: 'test-generations',
+      name: 'Generations',
+      description: '',
+      model: 'subscription',
+      channels: [],
+      nodes: [
+        node('start', 'trigger.manual'),
+        node('year', 'control.set', { assign: { year: { '+': [{ var: 'vars.year' }, 1] } } }),
+        node('charge', 'commerce.charge'),
+        node('again', 'control.condition', { expression: { '<': [{ var: 'vars.year' }, 2] } }),
+        node('renew', 'control.continue_as_new'),
+        node('done', 'control.end', { outcome: 'completed', reason: 'two years' }),
+      ],
+      edges: [
+        edge('start', 'year'),
+        edge('year', 'charge'),
+        edge('charge', 'again', 'ok'),
+        edge('again', 'renew', 'true'),
+        edge('again', 'done', 'false'),
+      ],
+    });
+  });
+
+  it('charges again in the next generation, though its step names repeat', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'test-generations',
+      input: input({ model: 'subscription', customerId: 'cus_ada' }),
+      vars: { year: 0 },
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.generation).toBe(2);
+    const charges = (
+      await db().select().from(payments).where(eq(payments.orderId, orderId))
+    ).filter((p) => p.kind === 'charge');
+    expect(charges).toHaveLength(2);
+    expect(new Set(charges.map((c) => c.id)).size).toBe(2);
   });
 });
 
@@ -1546,6 +1614,84 @@ describe('inventory', () => {
       ['restock', 1, true],
       ['restock', 1, true],
     ]);
+  });
+
+  it('holds the last units for one of two orders racing for them', async () => {
+    await db()
+      .insert(products)
+      .values({ sku: 'RACE-1', name: 'Race', price: 1, cost: 1, stock: 3 })
+      .onConflictDoNothing();
+    const lines = [{ sku: 'RACE-1', qty: 3 }];
+    const [a, b] = await Promise.all([
+      reserveInventory(env, order('ord_race_a', lines), 'reserve#1'),
+      reserveInventory(env, order('ord_race_b', lines), 'reserve#1'),
+    ]);
+    expect([a.short, b.short].sort()).toEqual([[], ['RACE-1']]);
+    expect(a.reservationIds.length + b.reservationIds.length).toBe(1);
+    expect((await product('RACE-1')).reserved).toBe(3);
+  });
+
+  it('releases a hold once when a cancel races a rollback and a shipment', async () => {
+    const before = await product('GSK-010');
+    await reserveInventory(env, order('ord_inv_e', two), 'reserve#1');
+    await Promise.all([
+      releaseInventory(env, 'ord_inv_e'),
+      releaseInventory(env, 'ord_inv_e'),
+      consumeInventory(env, 'ord_inv_e'),
+    ]);
+    const after = await product('GSK-010');
+    const rows = await db()
+      .select()
+      .from(reservations)
+      .where(eq(reservations.orderId, 'ord_inv_e'));
+    const consumed = rows.filter((r) => r.status === 'consumed').reduce((n, r) => n + r.qty, 0);
+    // Every reservation settled exactly one way, and stock moved once for each.
+    expect(rows.every((r) => r.status === 'released' || r.status === 'consumed')).toBe(true);
+    expect(after.reserved).toBe(before.reserved);
+    expect(after.stock).toBe(before.stock - consumed);
+  });
+});
+
+describe('payments', () => {
+  const order = (id: string) => ({
+    ...input({ model: 'b2c', customerId: 'cus_ada' }),
+    id,
+    createdAt: Date.now(),
+    subtotal: 40,
+    tax: 0,
+    total: 40,
+    lines: [],
+  });
+
+  it('returns the same capture when the step is retried', async () => {
+    const o = order('ord_pay_a');
+    await authorizePayment(env, o, 'authorize#1', 'card');
+    const first = await capturePayment(env, o, 'capture#1');
+    const again = await capturePayment(env, o, 'capture#1');
+    expect(first.status).toBe('succeeded');
+    expect(again).toEqual(first);
+    const rows = await db().select().from(payments).where(eq(payments.orderId, 'ord_pay_a'));
+    expect(rows.filter((r) => r.kind === 'capture')).toHaveLength(1);
+  });
+
+  it('captures or voids an authorization, never both', async () => {
+    const o = order('ord_pay_b');
+    await authorizePayment(env, o, 'authorize#1', 'card');
+    const [capture, voided] = await Promise.all([
+      capturePayment(env, o, 'capture#1'),
+      voidAuthorizations(env, 'ord_pay_b'),
+    ]);
+    const rows = await db().select().from(payments).where(eq(payments.orderId, 'ord_pay_b'));
+    const auth = rows.find((r) => r.kind.startsWith('authorization'))!;
+    const captures = rows.filter((r) => r.kind === 'capture');
+    if (voided) {
+      expect(auth.status).toBe('voided');
+      expect(captures).toHaveLength(0);
+      expect(capture.status).toBe('failed');
+    } else {
+      expect(auth.status).toBe('captured');
+      expect(captures).toHaveLength(1);
+    }
   });
 });
 

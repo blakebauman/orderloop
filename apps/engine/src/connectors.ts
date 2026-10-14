@@ -45,8 +45,9 @@ import {
   shipments,
   stockMovements,
 } from '@orderloop/db';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 const db = (env: Env) => createDb(env.DB);
 const simulate = (order: Order) => String(order.meta?.simulate ?? '');
@@ -195,85 +196,152 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
     // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
     const id = idFor(i, line.sku);
     const locationId = locationOf(line);
+    // The reservation row is written only while the stock is still free, so two orders racing
+    // for the last units can't both hold them. The hold applies only if the row exists.
+    const row = {
+      id: sql`${id}`.as('id'),
+      orderId: sql`${order.id}`.as('order_id'),
+      sku: sql`${line.sku}`.as('sku'),
+      qty: sql`${line.qty}`.as('qty'),
+      status: sql`'held'`.as('status'),
+      createdAt: sql`${Date.now()}`.as('created_at'),
+      locationId: sql`${locationId ?? null}`.as('location_id'),
+    };
+    const free = locationId
+      ? d
+          .select(row)
+          .from(locationStock)
+          .where(
+            and(
+              eq(locationStock.locationId, locationId),
+              eq(locationStock.sku, line.sku),
+              sql`${locationStock.stock} - ${locationStock.reserved} >= ${line.qty}`,
+            ),
+          )
+      : d
+          .select(row)
+          .from(products)
+          .where(
+            and(
+              eq(products.sku, line.sku),
+              sql`${products.stock} - ${products.reserved} >= ${line.qty}`,
+            ),
+          );
     await moveStock(
       env,
       { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty, locationId },
-      d
-        .insert(reservations)
-        .values({
-          id,
-          orderId: order.id,
-          sku: line.sku,
-          qty: line.qty,
-          status: 'held',
-          createdAt: Date.now(),
-          locationId: locationId ?? null,
-        })
-        .onConflictDoNothing(),
+      d.insert(reservations).select(free).onConflictDoNothing(),
+      sql`exists (select 1 from ${reservations} where ${eq(reservations.id, id)})`,
     );
     reservationIds.push(id);
   }
-  return { reservationIds, short };
+  if (!reservationIds.length) return { reservationIds, short };
+  // Lines another order took between the read above and the hold are short after all.
+  const got = new Set(
+    (
+      await d
+        .select({ id: reservations.id })
+        .from(reservations)
+        .where(inArray(reservations.id, reservationIds))
+    ).map((r) => r.id),
+  );
+  for (const [i, line] of lines) {
+    const id = idFor(i, line.sku);
+    if (reservationIds.includes(id) && !got.has(id)) short.push(line.sku);
+  }
+  return { reservationIds: reservationIds.filter((id) => got.has(id)), short };
 }
 
-/** The stock row a reservation was held against: the store's, or central. */
-function stockRow(env: Env, r: { sku: string; locationId: string | null }) {
-  const d = db(env);
-  return {
-    release: (qty: number) =>
-      r.locationId
-        ? d
-            .update(locationStock)
-            .set({ reserved: sql`max(0, ${locationStock.reserved} - ${qty})` })
-            .where(and(eq(locationStock.locationId, r.locationId), eq(locationStock.sku, r.sku)))
-        : d
-            .update(products)
-            .set({ reserved: sql`max(0, ${products.reserved} - ${qty})` })
-            .where(eq(products.sku, r.sku)),
-    consume: (qty: number) =>
-      r.locationId
-        ? d
-            .update(locationStock)
-            .set({
-              stock: sql`${locationStock.stock} - ${qty}`,
-              reserved: sql`max(0, ${locationStock.reserved} - ${qty})`,
-            })
-            .where(and(eq(locationStock.locationId, r.locationId), eq(locationStock.sku, r.sku)))
-        : d
-            .update(products)
-            .set({
-              stock: sql`${products.stock} - ${qty}`,
-              reserved: sql`max(0, ${products.reserved} - ${qty})`,
-            })
-            .where(eq(products.sku, r.sku)),
-  };
-}
-
-/** Compensation: release every held reservation for the order. Idempotent. */
-export async function releaseInventory(env: Env, orderId: string) {
+/**
+ * Moves every held reservation for the order to `status` (released or consumed) and applies it to
+ * stock in the same batch. Each row's movement is keyed by the reservation and applies only while
+ * the row is the one that made the move, so a cancel racing a rollback, or a release racing a
+ * consume, changes stock once. Returns how many reservations this call moved.
+ */
+async function settleReservations(env: Env, orderId: string, status: 'released' | 'consumed') {
   const d = db(env);
   const held = await d
     .select()
     .from(reservations)
     .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'held')));
+  let moved = 0;
   for (const r of held) {
-    await d.update(reservations).set({ status: 'released' }).where(eq(reservations.id, r.id));
-    await stockRow(env, r).release(r.qty);
+    const kind = status === 'released' ? 'release' : 'consume';
+    await moveStock(
+      env,
+      {
+        id: `${kind}_${r.id}`,
+        orderId,
+        sku: r.sku,
+        kind,
+        qty: r.qty,
+        locationId: r.locationId ?? undefined,
+      },
+      d
+        .update(reservations)
+        .set({ status })
+        .where(and(eq(reservations.id, r.id), eq(reservations.status, 'held'))),
+      sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, status))})`,
+    );
+    const [row] = await d
+      .select({ applied: stockMovements.applied })
+      .from(stockMovements)
+      .where(eq(stockMovements.id, `${kind}_${r.id}`));
+    if (row?.applied) moved += 1;
   }
-  return held.length;
+  return moved;
+}
+
+/** Compensation: release every held reservation for the order. Idempotent. */
+export function releaseInventory(env: Env, orderId: string) {
+  return settleReservations(env, orderId, 'released');
 }
 
 /** Shipping or handing goods over consumes held stock. */
 export async function consumeInventory(env: Env, orderId: string) {
+  await settleReservations(env, orderId, 'consumed');
+}
+
+/**
+ * Compensation for a cancelled shipment: once none of the order's goods are still booked or with
+ * the customer, stock its shipments consumed goes back where it came from. Each reservation comes
+ * back at most once. Returns how many reservations were restored.
+ */
+export async function restoreShippedStock(env: Env, orderId: string) {
   const d = db(env);
-  const held = await d
+  const live = await d
+    .select({ id: shipments.id })
+    .from(shipments)
+    .where(
+      and(
+        eq(shipments.orderId, orderId),
+        inArray(shipments.status, ['label_created', 'ready_for_pickup', 'collected']),
+      ),
+    )
+    .limit(1);
+  if (live.length) return 0;
+  const consumed = await d
     .select()
     .from(reservations)
-    .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'held')));
-  for (const r of held) {
-    await d.update(reservations).set({ status: 'consumed' }).where(eq(reservations.id, r.id));
-    await stockRow(env, r).consume(r.qty);
-  }
+    .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'consumed')));
+  for (const r of consumed)
+    await moveStock(
+      env,
+      {
+        id: `unconsume_${r.id}`,
+        orderId,
+        sku: r.sku,
+        kind: 'restock',
+        qty: r.qty,
+        locationId: r.locationId ?? undefined,
+      },
+      d
+        .update(reservations)
+        .set({ status: 'restored' })
+        .where(and(eq(reservations.id, r.id), eq(reservations.status, 'consumed'))),
+      sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, 'restored'))})`,
+    );
+  return consumed.length;
 }
 
 /** Adds returned or received stock to central stock, once per step and line. */
@@ -288,8 +356,9 @@ export async function restock(env: Env, orderId: string, stepKey: string, lines:
  * Records one inventory change in the ledger and applies it in the same batch, only if it hasn't
  * been applied yet. D1 runs a batch as one transaction, so a crash can't leave the ledger and the
  * stock row disagreeing, and a retry with the same id changes nothing. `first` runs at the start
- * of the batch (the reservation row for a hold). A `locationId` moves a store's stock instead of
- * central stock.
+ * of the batch (the reservation row it belongs to); `guard`, checked after it, must hold for the
+ * change to apply and be marked applied. A `locationId` moves a store's stock instead of central
+ * stock.
  */
 async function moveStock(
   env: Env,
@@ -297,14 +366,18 @@ async function moveStock(
     id: string;
     orderId: string;
     sku: string;
-    kind: 'hold' | 'restock';
+    kind: 'hold' | 'restock' | 'release' | 'consume';
     qty: number;
     locationId?: string;
   },
   first?: BatchItem<'sqlite'>,
+  guard?: SQL,
 ) {
   const d = db(env);
-  const pending = sql`exists (select 1 from ${stockMovements} where ${and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false))})`;
+  const pending = and(
+    sql`exists (select 1 from ${stockMovements} where ${and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false))})`,
+    guard,
+  );
   const record = d
     .insert(stockMovements)
     .values({ ...m, locationId: m.locationId ?? null, createdAt: Date.now() })
@@ -312,24 +385,37 @@ async function moveStock(
   const apply = m.locationId
     ? d
         .update(locationStock)
-        .set(
-          m.kind === 'hold'
-            ? { reserved: sql`${locationStock.reserved} + ${m.qty}` }
-            : { stock: sql`${locationStock.stock} + ${m.qty}` },
-        )
+        .set(stockChange(m.kind, m.qty, locationStock))
         .where(
           and(eq(locationStock.locationId, m.locationId), eq(locationStock.sku, m.sku), pending),
         )
     : d
         .update(products)
-        .set(
-          m.kind === 'hold'
-            ? { reserved: sql`${products.reserved} + ${m.qty}` }
-            : { stock: sql`${products.stock} + ${m.qty}` },
-        )
+        .set(stockChange(m.kind, m.qty, products))
         .where(and(eq(products.sku, m.sku), pending));
-  const mark = d.update(stockMovements).set({ applied: true }).where(eq(stockMovements.id, m.id));
+  const mark = d
+    .update(stockMovements)
+    .set({ applied: true })
+    .where(and(eq(stockMovements.id, m.id), guard));
   await (first ? d.batch([first, record, apply, mark]) : d.batch([record, apply, mark]));
+}
+
+/** What a movement does to a stock row (central or a store's). */
+function stockChange(
+  kind: 'hold' | 'restock' | 'release' | 'consume',
+  qty: number,
+  t: { stock: SQLiteColumn; reserved: SQLiteColumn },
+) {
+  switch (kind) {
+    case 'hold':
+      return { reserved: sql`${t.reserved} + ${qty}` };
+    case 'restock':
+      return { stock: sql`${t.stock} + ${qty}` };
+    case 'release':
+      return { reserved: sql`max(0, ${t.reserved} - ${qty})` };
+    case 'consume':
+      return { stock: sql`${t.stock} - ${qty}`, reserved: sql`max(0, ${t.reserved} - ${qty})` };
+  }
 }
 
 // ── Fulfillment ────────────────────────────────────────────────────────────
@@ -532,11 +618,14 @@ async function recordPayment(
   status: string,
   ref?: string,
 ) {
-  await db(env)
+  const d = db(env);
+  await d
     .insert(payments)
     .values({ id, orderId, kind, amount, status, ref, createdAt: Date.now() })
     .onConflictDoNothing();
-  return { paymentId: id, amount, status };
+  // A retried step returns what the first attempt recorded, not what this one asked for.
+  const row = await d.select().from(payments).where(eq(payments.id, id)).get();
+  return { paymentId: id, amount: row?.amount ?? amount, status: row?.status ?? status };
 }
 
 export async function authorizePayment(env: Env, order: Order, stepKey: string, method: string) {
@@ -563,23 +652,49 @@ export async function voidAuthorizations(env: Env, orderId: string) {
 
 export async function capturePayment(env: Env, order: Order, stepKey: string) {
   const d = db(env);
+  const id = `cap_${stepKey}_${order.id}`.replace(/[^\w-]/g, '_');
+  // A retry after the capture was recorded returns it rather than looking for an open authorization.
+  const done = await d.select().from(payments).where(eq(payments.id, id)).get();
+  if (done) return { paymentId: id, amount: done.amount, status: done.status };
   const [auth] = await d
     .select()
     .from(payments)
     .where(and(eq(payments.orderId, order.id), eq(payments.status, 'authorized')));
   if (!auth) return { paymentId: null, amount: 0, status: 'failed' };
-  await d.update(payments).set({ status: 'captured' }).where(eq(payments.id, auth.id));
   // Never more than the order now costs: lines dropped after authorizing (a seller rejecting
   // their part) are released, not charged.
-  return recordPayment(
-    env,
-    `cap_${stepKey}_${order.id}`.replace(/[^\w-]/g, '_'),
-    order.id,
-    'capture',
-    money(Math.min(auth.amount, order.total)),
-    'succeeded',
-    auth.id,
-  );
+  const amount = money(Math.min(auth.amount, order.total));
+  // One transaction: the authorization flips only if still open, and the capture is recorded only
+  // if this call flipped it, so a void racing the capture leaves exactly one of them.
+  await d.batch([
+    d
+      .update(payments)
+      .set({ status: 'captured', ref: id })
+      .where(and(eq(payments.id, auth.id), eq(payments.status, 'authorized'))),
+    d
+      .insert(payments)
+      .select(
+        d
+          .select({
+            id: sql`${id}`.as('id'),
+            orderId: sql`${order.id}`.as('order_id'),
+            kind: sql`'capture'`.as('kind'),
+            amount: sql`${amount}`.as('amount'),
+            status: sql`'succeeded'`.as('status'),
+            ref: sql`${auth.id}`.as('ref'),
+            createdAt: sql`${Date.now()}`.as('created_at'),
+          })
+          .from(payments)
+          .where(
+            and(eq(payments.id, auth.id), eq(payments.status, 'captured'), eq(payments.ref, id)),
+          ),
+      )
+      .onConflictDoNothing(),
+  ]);
+  const row = await d.select().from(payments).where(eq(payments.id, id)).get();
+  return row
+    ? { paymentId: id, amount: row.amount, status: row.status }
+    : { paymentId: null, amount: 0, status: 'failed' };
 }
 
 export async function charge(env: Env, order: Order, stepKey: string) {
@@ -661,6 +776,54 @@ export async function addToBalance(
       ),
     d.update(balanceEntries).set({ applied: true }).where(eq(balanceEntries.id, id)),
   ]);
+}
+
+/**
+ * Compensation: takes the order's invoices back off the customer's account. Each entry is reversed
+ * at most once, by its own ledger row. Returns how many entries were reversed.
+ */
+export async function reverseBalance(env: Env, orderId: string) {
+  const d = db(env);
+  const entries = await d
+    .select()
+    .from(balanceEntries)
+    .where(
+      and(
+        eq(balanceEntries.orderId, orderId),
+        eq(balanceEntries.applied, true),
+        sql`${balanceEntries.amount} > 0`,
+        sql`${balanceEntries.id} not like 'rev_%'`,
+      ),
+    );
+  let reversed = 0;
+  for (const e of entries) {
+    const id = `rev_${e.id}`;
+    const pending = and(eq(balanceEntries.id, id), eq(balanceEntries.applied, false));
+    const [, , [mark]] = await d.batch([
+      d
+        .insert(balanceEntries)
+        .values({
+          id,
+          orderId,
+          customerId: e.customerId,
+          amount: -e.amount,
+          createdAt: Date.now(),
+        })
+        .onConflictDoNothing(),
+      d
+        .update(customers)
+        .set({ balance: sql`${customers.balance} - ${e.amount}` })
+        .where(
+          and(
+            eq(customers.id, e.customerId),
+            sql`exists (select 1 from ${balanceEntries} where ${pending})`,
+          ),
+        ),
+      d.update(balanceEntries).set({ applied: true }).where(pending).returning(),
+    ]);
+    if (mark) reversed += 1;
+  }
+  return reversed;
 }
 
 // ── Marketplace ────────────────────────────────────────────────────────────
@@ -973,7 +1136,7 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */
 export async function compensateOrder(env: Env, orderId: string) {
-  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked] =
+  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked, unbilled] =
     await Promise.all([
       releaseInventory(env, orderId),
       voidAuthorizations(env, orderId),
@@ -981,8 +1144,20 @@ export async function compensateOrder(env: Env, orderId: string) {
       cancelSellerOrders(env, orderId),
       reversePayouts(env, orderId),
       revokeEntitlements(env, orderId),
+      reverseBalance(env, orderId),
     ]);
-  return { released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked };
+  // After the cancel above, so a shipment it cancelled no longer holds the stock.
+  const restored = await restoreShippedStock(env, orderId);
+  return {
+    released,
+    voided,
+    cancelled,
+    restored,
+    sellerOrdersCancelled,
+    payoutsReversed,
+    revoked,
+    unbilled,
+  };
 }
 
 export const idFor = newId;

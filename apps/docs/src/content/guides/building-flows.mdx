@@ -105,7 +105,7 @@ are all skipped, with no End node reached, finishes as `completed`.
 A commerce node that throws after its retries fails the order the same way, without reaching an
 End node. Only nodes with `rollback: true` in the catalog register compensations: reserve inventory
 (releases the reservation), authorize payment (voids the hold), create shipment and ready for
-pickup (cancel the shipment or staged pickup), deliver digital goods (revokes the codes), split by
+pickup (cancel the shipment or staged pickup, and restock what it consumed), generate invoice (takes an on-account charge back off the balance), deliver digital goods (revokes the codes), split by
 seller (cancels the seller orders) and seller payouts (reverses scheduled payouts).
 
 ## Expressions and templates
