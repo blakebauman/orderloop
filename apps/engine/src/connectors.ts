@@ -20,6 +20,7 @@ import {
   type StockLine,
 } from '@orderloop/core';
 import {
+  balanceEntries,
   contractPrices,
   createDb,
   customers,
@@ -580,12 +581,40 @@ export async function paidAmount(env: Env, orderId: string) {
   );
 }
 
-export async function addToBalance(env: Env, customerId: string | undefined, amount: number) {
-  if (!customerId) return;
-  await db(env)
-    .update(customers)
-    .set({ balance: sql`${customers.balance} + ${amount}` })
-    .where(eq(customers.id, customerId));
+/**
+ * Adds to a customer's balance once per order and step: the ledger row and the balance update run
+ * in one batch, and the update only applies while the row is unapplied, so a retried step changes
+ * nothing.
+ */
+export async function addToBalance(
+  env: Env,
+  e: { orderId: string; stepKey: string; customerId: string; amount: number },
+) {
+  const d = db(env);
+  const id = `bal_${e.orderId}_${e.stepKey}`.replace(/[^\w-]/g, '_');
+  const pending = and(eq(balanceEntries.id, id), eq(balanceEntries.applied, false));
+  await d.batch([
+    d
+      .insert(balanceEntries)
+      .values({
+        id,
+        orderId: e.orderId,
+        customerId: e.customerId,
+        amount: e.amount,
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing(),
+    d
+      .update(customers)
+      .set({ balance: sql`${customers.balance} + ${e.amount}` })
+      .where(
+        and(
+          eq(customers.id, e.customerId),
+          sql`exists (select 1 from ${balanceEntries} where ${pending})`,
+        ),
+      ),
+    d.update(balanceEntries).set({ applied: true }).where(eq(balanceEntries.id, id)),
+  ]);
 }
 
 // ── Marketplace ────────────────────────────────────────────────────────────
