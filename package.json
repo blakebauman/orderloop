@@ -18,6 +18,7 @@
     "docs:deploy": "pnpm --filter @orderloop/docs run deploy",
     "sync:theme": "pnpm --filter @orderloop/design sync:theme",
     "db:migrate:local": "pnpm --filter @orderloop/web db:migrate:local",
+    "db:seed:local": "pnpm --filter @orderloop/web db:seed:local",
     "deploy": "pnpm --filter @orderloop/engine run deploy && pnpm --filter @orderloop/web run deploy"
   },
   "devDependencies": {

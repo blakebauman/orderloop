@@ -63,12 +63,13 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 ```bash
 pnpm install
 pnpm db:migrate:local
+pnpm db:seed:local      # demo customers, catalog, stores and rates (migrations seed none)
 pnpm web:dev            # web + engine in one Vite session (engine runs as an auxiliary Worker)
 pnpm test               # core planner tests, engine Workflow e2e (workerd), web tests
 pnpm lint && pnpm check-types
 ```
 
-Open the dashboard and run one of the scenarios. In dev, `TIME_SCALE` is `1440` (set in `apps/web/vite.config.ts`), so a day becomes a minute; deployed, waits run in real time. Workers AI always calls your Cloudflare account, even in local dev; if the call fails or times out, the node uses its heuristic.
+Open the dashboard and run one of the scenarios (they appear once the demo data is loaded). In dev, `TIME_SCALE` is `1440` (set in `apps/web/vite.config.ts`), so a day becomes a minute; deployed, waits run in real time. Workers AI always calls your Cloudflare account, even in local dev; if the call fails or times out, the node uses its heuristic.
 
 ## REST API
 

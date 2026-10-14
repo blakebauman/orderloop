@@ -22,6 +22,9 @@ pnpm --filter @orderloop/web exec wrangler secret put WEBHOOK_SECRET
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
+Production has no demo data (migration `0027` removed it and `packages/db/seed` is never applied remotely), so the
+dashboard's demo scenarios are hidden and only `USD` orders are accepted until an exchange rate is added to `fx_rates`.
+
 If `provision.sh` prints a `database_id`, put it in the `d1_databases` entry of both
 `wrangler.jsonc` files. Change the web app's `routes` to your own hostname.
 

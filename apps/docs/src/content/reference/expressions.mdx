@@ -159,7 +159,8 @@ models (procurement, replenishment) at the product's cost without the chain and 
 ## Currency
 
 An order's `currency` is any code the workspace has an exchange rate for; the REST API answers
-`400` for one without. Prices, price rules, credit limits, balances, budgets and reports are in the
+`400` for one without. A new workspace has a rate for `USD` only, so an order in another currency
+is refused until its rate is added. Prices, price rules, credit limits, balances, budgets and reports are in the
 base currency, `USD`. Price lines reads the rate (units of the order's currency per one USD),
 converts each base price at it, and stores it on the order as `fxRate`, so later rate changes never
 reprice the order. A `unitPrice` given on the order is

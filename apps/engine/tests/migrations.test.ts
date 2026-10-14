@@ -75,3 +75,48 @@ describe('0018_order_models', () => {
     );
   });
 });
+
+describe('0027_remove_demo_data', () => {
+  it('removes the demo catalog and the orders placed against it, keeping the rest', async () => {
+    const db = testEnv.MIGRATION_DB;
+    const { applied, next } = before('0027_');
+    await applyD1Migrations(db, applied);
+    await db.batch([
+      db.prepare(
+        `INSERT INTO orders (id, model, channel, status, title, flow_id, flow_version, customer_id, currency, total, generation, created_at, updated_at) VALUES
+         ('o-demo', 'b2b', 'manual', 'completed', '', 'f', 1, 'cus_northwind', 'USD', 10, 1, 0, 0),
+         ('o-reorder-demo', 'replenishment', 'schedule', 'completed', '', 'f', 1, 'cus_internal', 'USD', 0, 1, 0, 0),
+         ('o-guest-demo', 'b2c', 'web', 'cancelled', '', 'f', 1, NULL, 'USD', 0, 1, 0, 0),
+         ('o-real', 'b2b', 'api', 'completed', '', 'f', 1, NULL, 'USD', 5, 1, 0, 0)`,
+      ),
+      db.prepare(
+        `INSERT INTO reservations (id, order_id, sku, qty, status, created_at) VALUES
+         ('r-demo', 'o-guest-demo', 'MON-27', 1, 'released', 0)`,
+      ),
+      db.prepare(
+        `INSERT INTO balance_entries (id, order_id, customer_id, amount, applied, created_at) VALUES
+         ('b-demo', 'o-demo', 'cus_northwind', 10, 1, 0)`,
+      ),
+      db.prepare(
+        `INSERT INTO node_runs (order_id, generation, node_id, run, node_type, model, status, started_at, ended_at, duration_ms)
+         VALUES ('o-demo', 1, 'start', 1, 'trigger.manual', 'b2b', 'succeeded', 0, 1, 1)`,
+      ),
+    ]);
+    await applyD1Migrations(db, [next]);
+
+    const ids = async (sql: string) =>
+      (await db.prepare(sql).all<{ id: string }>()).results.map((r) => r.id);
+    expect(await ids("SELECT id FROM orders WHERE id LIKE 'o-%demo' OR id = 'o-real'")).toEqual([
+      'o-real',
+    ]);
+    expect(await ids('SELECT id FROM customers')).toEqual(['cus_internal']);
+    expect(await ids("SELECT node_id AS id FROM node_runs WHERE order_id = 'o-demo'")).toEqual([]);
+    expect(await ids('SELECT sku AS id FROM products')).toEqual([]);
+    expect(await ids('SELECT currency AS id FROM fx_rates')).toEqual(['USD']);
+    expect((await ids('SELECT id FROM price_sources ORDER BY id')).length).toBe(3);
+    for (const table of ['reservations', 'balance_entries', 'sellers', 'locations'])
+      expect(
+        (await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>())?.n,
+      ).toBe(0);
+  });
+});

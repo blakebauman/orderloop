@@ -1,6 +1,6 @@
 # Local development
 
-Install the monorepo, apply the D1 migrations locally, run the web app and engine together, and start a scenario.
+Install the monorepo, apply the D1 migrations and demo data locally, run the web app and engine together, and start a scenario.
 
 OrderLoop is a pnpm + Turborepo monorepo. Local development runs both Workers in one Vite session:
 the web app, and the engine as a Vite auxiliary Worker, so the `ENGINE` service binding, the
@@ -19,6 +19,7 @@ git clone https://github.com/blakebauman/orderloop
 cd orderloop
 pnpm install
 pnpm db:migrate:local      # applies packages/db/migrations to the local D1
+pnpm db:seed:local         # loads the demo data from packages/db/seed (optional, safe to re-run)
 pnpm web:dev               # web + engine in one Vite session
 ```
 
@@ -32,7 +33,16 @@ each as a new version when its content hasn't been published before (version 1 o
 
 ## Run a scenario
 
-The dashboard lists 15 one-click scenarios, each a real order on a seeded flow: a guest checkout, a B2B purchase order
+Migrations create no customers, products, stores or exchange rates beyond `USD`: `0027_remove_demo_data.sql`
+removed what the early migrations had seeded, so a fresh database has none of the demo data. `pnpm db:seed:local`
+loads it from `packages/db/seed/0001_demo.sql` (`INSERT OR IGNORE`, so it can be re-run): the demo customers, the
+catalog, sellers, stores and their stock, contract prices, price rules, and the EUR, GBP and CAD rates. The web
+app offers the scenarios only when that data is loaded (`demoAvailable()` in
+`apps/web/app/lib/orders.server.ts` checks that every scenario customer and SKU exists, cached for a minute).
+Without it the dashboard's **Demo scenarios** panel and the New order page's **Demo presets** are hidden, the
+New order form starts blank, and a flow's **Test run** starts an empty order.
+
+With the demo data loaded, the dashboard lists 15 one-click scenarios, each a real order on a seeded flow: a guest checkout, a B2B purchase order
 read from an email, an order over its credit limit, an out-of-stock order that rolls back, a purchase
 request, a stock review, two subscriptions (one with a failing card), a marketplace order with two sellers,
 buy online and pick up in store, a ship-from-store order with an e-book, a shipment split between the warehouse and a store, a till sale with a gift card,

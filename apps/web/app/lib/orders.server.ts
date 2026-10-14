@@ -23,6 +23,7 @@ import {
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
+import { SCENARIO_CUSTOMERS, SCENARIO_SKUS } from './scenarios';
 
 export type OrderFilters = {
   model?: string;
@@ -285,4 +286,30 @@ export async function customerIdByEmail(email: string | null | undefined) {
     .where(sql`lower(${customers.email}) = ${email.trim().toLowerCase()}`)
     .get();
   return row?.id;
+}
+
+let demo: { value: boolean; at: number } | null = null;
+
+/**
+ * Whether the demo data (`packages/db/seed`) is loaded: every customer and SKU the demo scenarios
+ * use exists. Production has none of it, so the scenarios are hidden there. Remembered for a
+ * minute per isolate.
+ */
+export async function demoAvailable(): Promise<boolean> {
+  if (demo && Date.now() - demo.at < 60_000) return demo.value;
+  const [c, p] = await Promise.all([
+    db()
+      .select({ n: sql<number>`count(*)` })
+      .from(customers)
+      .where(inArray(customers.id, SCENARIO_CUSTOMERS))
+      .get(),
+    db()
+      .select({ n: sql<number>`count(*)` })
+      .from(products)
+      .where(inArray(products.sku, SCENARIO_SKUS))
+      .get(),
+  ]);
+  const value = c?.n === SCENARIO_CUSTOMERS.length && p?.n === SCENARIO_SKUS.length;
+  demo = { value, at: Date.now() };
+  return value;
 }

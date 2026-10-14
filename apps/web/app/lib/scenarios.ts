@@ -286,3 +286,20 @@ export const SCENARIOS: Scenario[] = [
     },
   },
 ];
+
+/** An empty form, for a workspace without the demo data. */
+export const BLANK_SCENARIO: Scenario = {
+  id: 'blank',
+  label: 'Blank',
+  blurb: '',
+  flowId: '',
+  input: { model: 'b2b', channel: 'manual', currency: 'USD', lines: [], meta: {} },
+};
+
+/** The customers and SKUs the scenarios need: present only where the demo data was loaded. */
+export const SCENARIO_CUSTOMERS = [
+  ...new Set(SCENARIOS.flatMap((s) => (s.input.customerId ? [s.input.customerId] : []))),
+];
+export const SCENARIO_SKUS = [
+  ...new Set(SCENARIOS.flatMap((s) => s.input.lines.map((l) => l.sku))),
+];

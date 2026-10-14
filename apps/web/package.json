@@ -10,6 +10,7 @@
     "deploy": "pnpm build && wrangler deploy",
     "types": "wrangler types && react-router typegen",
     "db:migrate:local": "wrangler d1 migrations apply orderloop --local",
+    "db:seed:local": "wrangler d1 execute orderloop --local --file ../../packages/db/seed/0001_demo.sql",
     "db:migrate:remote": "wrangler d1 migrations apply orderloop --remote",
     "test": "vitest run",
     "lint": "biome check .",
