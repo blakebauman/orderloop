@@ -36,6 +36,9 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0015_session_activity.sql` | `sessions.last_seen_at`, `ip`, `user_agent` |
 | `0016_two_factor.sql` | `users.totp_secret`, `totp_enabled_at`, `totp_last_step`; `recovery_codes` and `sign_in_challenges` |
 | `0017_workspace_settings.sql` | `workspace_settings`, settings operators change in the app |
+| `0018_order_models.sql` | `flows.model` and `channels`, `orders.model`, `channel`, `external_id` and `contact_email`, `customers.kind` (replacing the single order type) |
+| `0019_marketplace.sql` | `sellers`, `seller_orders`, `payouts` and `products.seller_id` |
+| `0020_fulfillment.sql` | `locations`, `location_stock`, `entitlements`; `products.kind`, `reservations.location_id`, `stock_movements.location_id`; two demo stores, digital products and store stock |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -79,7 +82,7 @@ writes embeds its step key.
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order), payment `terms` |
-| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved`, `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it) |
+| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock) |
 | `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](/guides/marketplace/) |
 | `seller_orders` | One row per order and seller, id `so_${orderId}_${sellerId}` (first party is `first_party`): `status` (`pending`, `accepted`, `rejected` or `cancelled`), `lines` (JSON), `subtotal`, `reason`, `decided_at` |
 | `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
@@ -87,14 +90,17 @@ writes embeds its step key.
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
 | `fx_rates` | Units of each `currency` per one USD, with `updated_at`. See [Currency](/reference/expressions/#currency) |
 | `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
-| `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping) |
-| `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products` in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
+| `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` (pickup, ships) and `loc_mission` (pickup only). See [Fulfillment](/guides/fulfillment/) |
+| `location_stock` | A store's stock per SKU, primary key `(location_id, sku)`: `stock` and `reserved` |
+| `entitlements` | A code per unit of a digital line (licence key, download, gift card): `order_id`, `sku`, `code`, `status` (`issued` or `revoked`), `created_at` |
+| `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping or a hand-over). `location_id` is `NULL` for central stock (`products`) and the store's id otherwise |
+| `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products`, or to `location_stock` when its `location_id` is set, in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
 | `payments` | Authorizations (`kind` `authorization:<method>`), captures, charges and refunds, with `status` and `ref` |
-| `shipments` | Labels and return labels; `status` is `label_created`, `return_label` or `cancelled` |
+| `shipments` | Labels, return labels and store hand-overs; `status` is `label_created`, `return_label`, `ready_for_pickup` (a staged pickup: carrier `pickup`, `tracking` is the pickup code), `collected` (carrier `pickup` or `carry_out`) or `cancelled` |
 | `documents` | Index of R2 objects per order: `kind`, `r2_key`, `content_type` |
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
 
-`reservations`, `stock_movements`, `payments`, `shipments`, `documents`, `messages`, `seller_orders` and `payouts` are each indexed by
+`reservations`, `stock_movements`, `entitlements`, `payments`, `shipments`, `documents`, `messages`, `seller_orders` and `payouts` are each indexed by
 `order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
 
 ## Metrics

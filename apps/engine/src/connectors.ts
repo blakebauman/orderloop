@@ -24,7 +24,10 @@ import {
   createDb,
   customers,
   documents,
+  entitlements,
   fxRates,
+  locationStock,
+  locations,
   messages,
   payments,
   payouts,
@@ -112,8 +115,41 @@ export async function pricingFor(env: Env, customerId: string | undefined) {
 
 // ── Inventory ──────────────────────────────────────────────────────────────
 
+/** Lines that hold stock, with their index in the order (digital goods hold none). */
+async function stockedLines(env: Env, order: Order) {
+  const bySku = new Map(
+    (
+      await getProducts(
+        env,
+        order.lines.map((l) => l.sku),
+      )
+    ).map((p) => [p.sku, p]),
+  );
+  return {
+    bySku,
+    lines: [...order.lines.entries()].filter(([, l]) => bySku.get(l.sku)?.kind !== 'digital'),
+  };
+}
+
+/** Units free to hold per SKU: central stock, or a store's when `locationId` is set. */
+async function available(env: Env, skus: string[], locationId?: string) {
+  if (!skus.length) return new Map<string, number>();
+  if (!locationId)
+    return new Map((await getProducts(env, skus)).map((p) => [p.sku, p.stock - p.reserved]));
+  const rows = await db(env)
+    .select()
+    .from(locationStock)
+    .where(and(eq(locationStock.locationId, locationId), inArray(locationStock.sku, skus)));
+  return new Map(rows.map((r) => [r.sku, r.stock - r.reserved]));
+}
+
+/**
+ * Holds stock for every physical line: centrally, or at the store in `order.fulfillment` (pickup,
+ * carry-out, ship-from-store). Keyed by order, step and line.
+ */
 export async function reserveInventory(env: Env, order: Order, stepKey: string) {
   const d = db(env);
+  const locationId = order.fulfillment?.locationId;
   const idFor = (i: number, sku: string) =>
     `res_${order.id}_${stepKey}_${i}_${sku}`.replace(/[^\w-]/g, '_');
   const prefix = idFor(0, '').slice(0, -2);
@@ -127,30 +163,27 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
   // Lines this step already held before it was retried count as available.
   const mine = new Set(held.map((r) => r.id));
 
-  const stock = new Map(
-    (
-      await getProducts(
-        env,
-        order.lines.map((l) => l.sku),
-      )
-    ).map((p) => [p.sku, p]),
+  const { lines } = await stockedLines(env, order);
+  const free = await available(
+    env,
+    lines.map(([, l]) => l.sku),
+    locationId,
   );
-  const short = order.lines
-    .filter((l, i) => {
+  const short = lines
+    .filter(([i, l]) => {
       if (mine.has(idFor(i, l.sku))) return false;
-      const p = stock.get(l.sku);
-      return simulate(order) === 'out_of_stock' || !p || p.stock - p.reserved < l.qty;
+      return simulate(order) === 'out_of_stock' || (free.get(l.sku) ?? 0) < l.qty;
     })
-    .map((l) => l.sku);
+    .map(([, l]) => l.sku);
 
   const reservationIds: string[] = [];
-  for (const [i, line] of order.lines.entries()) {
+  for (const [i, line] of lines) {
     if (short.includes(line.sku)) continue;
     // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
     const id = idFor(i, line.sku);
     await moveStock(
       env,
-      { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty },
+      { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty, locationId },
       d
         .insert(reservations)
         .values({
@@ -160,12 +193,46 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
           qty: line.qty,
           status: 'held',
           createdAt: Date.now(),
+          locationId: locationId ?? null,
         })
         .onConflictDoNothing(),
     );
     reservationIds.push(id);
   }
   return { reservationIds, short };
+}
+
+/** The stock row a reservation was held against: the store's, or central. */
+function stockRow(env: Env, r: { sku: string; locationId: string | null }) {
+  const d = db(env);
+  return {
+    release: (qty: number) =>
+      r.locationId
+        ? d
+            .update(locationStock)
+            .set({ reserved: sql`max(0, ${locationStock.reserved} - ${qty})` })
+            .where(and(eq(locationStock.locationId, r.locationId), eq(locationStock.sku, r.sku)))
+        : d
+            .update(products)
+            .set({ reserved: sql`max(0, ${products.reserved} - ${qty})` })
+            .where(eq(products.sku, r.sku)),
+    consume: (qty: number) =>
+      r.locationId
+        ? d
+            .update(locationStock)
+            .set({
+              stock: sql`${locationStock.stock} - ${qty}`,
+              reserved: sql`max(0, ${locationStock.reserved} - ${qty})`,
+            })
+            .where(and(eq(locationStock.locationId, r.locationId), eq(locationStock.sku, r.sku)))
+        : d
+            .update(products)
+            .set({
+              stock: sql`${products.stock} - ${qty}`,
+              reserved: sql`max(0, ${products.reserved} - ${qty})`,
+            })
+            .where(eq(products.sku, r.sku)),
+  };
 }
 
 /** Compensation: release every held reservation for the order. Idempotent. */
@@ -177,15 +244,12 @@ export async function releaseInventory(env: Env, orderId: string) {
     .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'held')));
   for (const r of held) {
     await d.update(reservations).set({ status: 'released' }).where(eq(reservations.id, r.id));
-    await d
-      .update(products)
-      .set({ reserved: sql`max(0, ${products.reserved} - ${r.qty})` })
-      .where(eq(products.sku, r.sku));
+    await stockRow(env, r).release(r.qty);
   }
   return held.length;
 }
 
-/** Shipping consumes held stock. */
+/** Shipping or handing goods over consumes held stock. */
 export async function consumeInventory(env: Env, orderId: string) {
   const d = db(env);
   const held = await d
@@ -194,17 +258,11 @@ export async function consumeInventory(env: Env, orderId: string) {
     .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'held')));
   for (const r of held) {
     await d.update(reservations).set({ status: 'consumed' }).where(eq(reservations.id, r.id));
-    await d
-      .update(products)
-      .set({
-        stock: sql`${products.stock} - ${r.qty}`,
-        reserved: sql`max(0, ${products.reserved} - ${r.qty})`,
-      })
-      .where(eq(products.sku, r.sku));
+    await stockRow(env, r).consume(r.qty);
   }
 }
 
-/** Adds returned or received stock, once per step and line. */
+/** Adds returned or received stock to central stock, once per step and line. */
 export async function restock(env: Env, orderId: string, stepKey: string, lines: StockLine[]) {
   for (const [i, l] of lines.entries()) {
     const id = `stk_${orderId}_${stepKey}_${i}_${l.sku}`.replace(/[^\w-]/g, '_');
@@ -215,32 +273,193 @@ export async function restock(env: Env, orderId: string, stepKey: string, lines:
 /**
  * Records one inventory change in the ledger and applies it in the same batch, only if it hasn't
  * been applied yet. D1 runs a batch as one transaction, so a crash can't leave the ledger and the
- * product row disagreeing, and a retry with the same id changes nothing. `first` runs at the
- * start of the batch (the reservation row for a hold).
+ * stock row disagreeing, and a retry with the same id changes nothing. `first` runs at the start
+ * of the batch (the reservation row for a hold). A `locationId` moves a store's stock instead of
+ * central stock.
  */
 async function moveStock(
   env: Env,
-  m: { id: string; orderId: string; sku: string; kind: 'hold' | 'restock'; qty: number },
+  m: {
+    id: string;
+    orderId: string;
+    sku: string;
+    kind: 'hold' | 'restock';
+    qty: number;
+    locationId?: string;
+  },
   first?: BatchItem<'sqlite'>,
 ) {
   const d = db(env);
-  const pending = and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false));
-  const change =
-    m.kind === 'hold'
-      ? { reserved: sql`${products.reserved} + ${m.qty}` }
-      : { stock: sql`${products.stock} + ${m.qty}` };
+  const pending = sql`exists (select 1 from ${stockMovements} where ${and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false))})`;
   const record = d
     .insert(stockMovements)
-    .values({ ...m, createdAt: Date.now() })
+    .values({ ...m, locationId: m.locationId ?? null, createdAt: Date.now() })
     .onConflictDoNothing();
-  const apply = d
-    .update(products)
-    .set(change)
-    .where(
-      and(eq(products.sku, m.sku), sql`exists (select 1 from ${stockMovements} where ${pending})`),
-    );
+  const apply = m.locationId
+    ? d
+        .update(locationStock)
+        .set(
+          m.kind === 'hold'
+            ? { reserved: sql`${locationStock.reserved} + ${m.qty}` }
+            : { stock: sql`${locationStock.stock} + ${m.qty}` },
+        )
+        .where(
+          and(eq(locationStock.locationId, m.locationId), eq(locationStock.sku, m.sku), pending),
+        )
+    : d
+        .update(products)
+        .set(
+          m.kind === 'hold'
+            ? { reserved: sql`${products.reserved} + ${m.qty}` }
+            : { stock: sql`${products.stock} + ${m.qty}` },
+        )
+        .where(and(eq(products.sku, m.sku), pending));
   const mark = d.update(stockMovements).set({ applied: true }).where(eq(stockMovements.id, m.id));
   await (first ? d.batch([first, record, apply, mark]) : d.batch([record, apply, mark]));
+}
+
+// ── Fulfillment ────────────────────────────────────────────────────────────
+
+export type Routing = {
+  /** Branches to take: one physical method (or unavailable), plus digital when there are digital lines. */
+  branches: string[];
+  method: 'ship' | 'pickup' | 'carry_out' | null;
+  locationId?: string;
+  locationName?: string;
+  reason?: string;
+};
+
+/**
+ * Where the physical lines come from: central stock first for shipping, then the first store
+ * that ships and has every line (ship-from-store); for pickup and carry-out, the order's store,
+ * which must hold every line. Reads only; reserving happens in its own step.
+ */
+export async function routeFulfillment(
+  env: Env,
+  order: Order,
+  method: 'ship' | 'pickup' | 'carry_out',
+): Promise<Routing> {
+  const { bySku, lines } = await stockedLines(env, order);
+  const digital = order.lines.some((l) => bySku.get(l.sku)?.kind === 'digital');
+  const done = (r: Omit<Routing, 'branches'> & { branch: string }): Routing => ({
+    ...r,
+    branches: [r.branch, ...(digital ? ['digital'] : [])],
+  });
+  if (!lines.length) return { branches: ['digital'], method: null };
+  const covers = (free: Map<string, number>) =>
+    lines.every(([, l]) => (free.get(l.sku) ?? 0) >= l.qty);
+  const skus = lines.map(([, l]) => l.sku);
+  const stores = await db(env).select().from(locations).orderBy(locations.id);
+  if (method === 'ship') {
+    if (covers(await available(env, skus))) return done({ branch: 'ship', method });
+    for (const store of stores.filter((s) => s.ships))
+      if (covers(await available(env, skus, store.id)))
+        return done({ branch: 'ship', method, locationId: store.id, locationName: store.name });
+    return done({ branch: 'unavailable', method, reason: 'No warehouse or store has every item' });
+  }
+  const store = stores.find((s) => s.id === order.fulfillment?.locationId);
+  if (!store || (method === 'pickup' && !store.pickup))
+    return done({
+      branch: 'unavailable',
+      method,
+      reason: store ? `${store.name} does not offer pickup` : 'No store given for the order',
+    });
+  if (!covers(await available(env, skus, store.id)))
+    return done({
+      branch: 'unavailable',
+      method,
+      reason: `${store.name} does not have every item`,
+    });
+  return done({ branch: method, method, locationId: store.id, locationName: store.name });
+}
+
+/** Stages held stock for collection: a pickup "shipment" whose tracking is the pickup code. */
+export async function stagePickup(env: Env, order: Order, stepKey: string) {
+  const id = `pkp_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
+  const code = Math.abs(hash(id)).toString(36).toUpperCase().padStart(6, '0').slice(0, 6);
+  await db(env)
+    .insert(shipments)
+    .values({
+      id,
+      orderId: order.id,
+      carrier: 'pickup',
+      tracking: code,
+      status: 'ready_for_pickup',
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing();
+  return { shipmentId: id, pickupCode: code };
+}
+
+/**
+ * The customer has the goods: consumes held stock and marks a staged pickup collected, or records
+ * a carry-out. Keyed by step.
+ */
+export async function handOver(env: Env, order: Order, stepKey: string) {
+  const d = db(env);
+  const staged = await d
+    .select()
+    .from(shipments)
+    .where(and(eq(shipments.orderId, order.id), eq(shipments.status, 'ready_for_pickup')));
+  if (staged.length)
+    await d
+      .update(shipments)
+      .set({ status: 'collected' })
+      .where(
+        inArray(
+          shipments.id,
+          staged.map((s) => s.id),
+        ),
+      );
+  else
+    await d
+      .insert(shipments)
+      .values({
+        id: `hnd_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_'),
+        orderId: order.id,
+        carrier: 'carry_out',
+        tracking: order.fulfillment?.locationId ?? 'store',
+        status: 'collected',
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing();
+  await consumeInventory(env, order.id);
+  return { collected: staged.length ? 'pickup' : 'carry_out' };
+}
+
+/** One code per unit of each digital line, keyed by step, line and unit. */
+export async function issueEntitlements(env: Env, order: Order, stepKey: string) {
+  const { bySku } = await stockedLines(env, order);
+  const now = Date.now();
+  const out = [];
+  for (const [i, l] of order.lines.entries()) {
+    if (bySku.get(l.sku)?.kind !== 'digital') continue;
+    for (let n = 0; n < l.qty; n++) {
+      const id = `ent_${order.id}_${stepKey}_${i}_${n}`.replace(/[^\w-]/g, '_');
+      const h = Math.abs(hash(id)).toString(36).toUpperCase().padStart(8, '0');
+      const row = {
+        id,
+        orderId: order.id,
+        sku: l.sku,
+        code: `${l.sku}-${h.slice(0, 4)}-${h.slice(4, 8)}`,
+        status: 'issued',
+        createdAt: now,
+      };
+      await db(env).insert(entitlements).values(row).onConflictDoNothing();
+      out.push({ sku: row.sku, code: row.code });
+    }
+  }
+  return out;
+}
+
+/** Compensation: revokes the order's digital goods. Idempotent. */
+export async function revokeEntitlements(env: Env, orderId: string) {
+  const res = await db(env)
+    .update(entitlements)
+    .set({ status: 'revoked' })
+    .where(and(eq(entitlements.orderId, orderId), eq(entitlements.status, 'issued')))
+    .returning();
+  return res.length;
 }
 
 export async function lowStock(env: Env) {
@@ -594,7 +813,12 @@ export async function cancelOpenShipments(env: Env, orderId: string) {
   const res = await db(env)
     .update(shipments)
     .set({ status: 'cancelled' })
-    .where(and(eq(shipments.orderId, orderId), eq(shipments.status, 'label_created')))
+    .where(
+      and(
+        eq(shipments.orderId, orderId),
+        inArray(shipments.status, ['label_created', 'ready_for_pickup']),
+      ),
+    )
     .returning();
   return res.length;
 }
@@ -655,14 +879,16 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */
 export async function compensateOrder(env: Env, orderId: string) {
-  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed] = await Promise.all([
-    releaseInventory(env, orderId),
-    voidAuthorizations(env, orderId),
-    cancelOpenShipments(env, orderId),
-    cancelSellerOrders(env, orderId),
-    reversePayouts(env, orderId),
-  ]);
-  return { released, voided, cancelled, sellerOrdersCancelled, payoutsReversed };
+  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked] =
+    await Promise.all([
+      releaseInventory(env, orderId),
+      voidAuthorizations(env, orderId),
+      cancelOpenShipments(env, orderId),
+      cancelSellerOrders(env, orderId),
+      reversePayouts(env, orderId),
+      revokeEntitlements(env, orderId),
+    ]);
+  return { released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked };
 }
 
 export const idFor = newId;

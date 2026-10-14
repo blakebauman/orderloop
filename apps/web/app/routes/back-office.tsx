@@ -48,7 +48,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function BackOffice() {
-  const { products, customers, sellers, pricing, events, emails, mailboxes } =
+  const { products, customers, sellers, stores, pricing, events, emails, mailboxes } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
@@ -170,6 +170,21 @@ export default function BackOffice() {
                 {products.map((p) => {
                   const available = p.stock - p.reserved;
                   const low = available <= p.reorderPoint;
+                  if (p.kind === 'digital')
+                    return (
+                      <tr key={p.sku}>
+                        <td className="px-4 py-1.5">
+                          {p.name}
+                          <span className="ml-1.5 font-mono text-muted-foreground text-xs">
+                            {p.sku}
+                          </span>
+                        </td>
+                        <td colSpan={3} className="px-2 py-1.5 text-right text-muted-foreground">
+                          Digital, no stock
+                        </td>
+                        <td className="px-4 py-1.5 text-right tabular">{money(p.price)}</td>
+                      </tr>
+                    );
                   return (
                     <tr key={p.sku}>
                       <td className="px-4 py-1.5">
@@ -199,6 +214,44 @@ export default function BackOffice() {
           </div>
         </Section>
         <Pricing pricing={pricing} customers={customers} />
+        <Section title="Stores" flush>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left">
+                <tr>
+                  <th scope="col" className="caption px-4 py-2 font-medium">
+                    Store
+                  </th>
+                  <th scope="col" className="caption px-4 py-2 font-medium">
+                    Stock (available / on hand)
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {stores.map((l) => (
+                  <tr key={l.id}>
+                    <td className="px-4 py-1.5 align-top">
+                      {l.name}
+                      <div className="text-muted-foreground text-xs">
+                        {[l.pickup ? 'Pickup' : null, l.ships ? 'Ships orders' : null]
+                          .filter(Boolean)
+                          .join(' · ') || 'Sales only'}
+                      </div>
+                    </td>
+                    <td className="px-4 py-1.5 text-xs">
+                      {l.stock.map((s) => (
+                        <span key={s.sku} className="mr-3 inline-block tabular">
+                          <span className="font-mono">{s.sku}</span> {count(s.stock - s.reserved)} /{' '}
+                          {count(s.stock)}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
         <Section title="Customers" flush>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

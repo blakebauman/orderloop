@@ -122,7 +122,44 @@ export const products = sqliteTable('products', {
   supplier: text('supplier').notNull().default(''),
   /** Marketplace seller; null when the operator sells it. */
   sellerId: text('seller_id'),
+  /** physical | digital. Digital goods hold no stock and are delivered as entitlements. */
+  kind: text('kind').notNull().default('physical'),
 });
+
+/** A store that holds its own stock, for pickup, ship-from-store and point of sale. */
+export const locations = sqliteTable('locations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('store'),
+  postalCode: text('postal_code').notNull().default(''),
+  pickup: integer('pickup', { mode: 'boolean' }).notNull().default(true),
+  ships: integer('ships', { mode: 'boolean' }).notNull().default(false),
+});
+
+export const locationStock = sqliteTable(
+  'location_stock',
+  {
+    locationId: text('location_id').notNull(),
+    sku: text('sku').notNull(),
+    stock: integer('stock').notNull().default(0),
+    reserved: integer('reserved').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.locationId, t.sku] })],
+);
+
+/** A delivered digital good: licence key, download or gift card code. Status: issued | revoked. */
+export const entitlements = sqliteTable(
+  'entitlements',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    sku: text('sku').notNull(),
+    code: text('code').notNull(),
+    status: text('status').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('entitlements_order').on(t.orderId)],
+);
 
 export const sellers = sqliteTable('sellers', {
   id: text('id').primaryKey(),
@@ -190,6 +227,8 @@ export const reservations = sqliteTable(
     qty: integer('qty').notNull(),
     status: text('status').notNull(),
     createdAt: integer('created_at').notNull(),
+    /** Null for central stock; otherwise the store holding it. */
+    locationId: text('location_id'),
   },
   (t) => [index('reservations_order').on(t.orderId)],
 );
@@ -264,6 +303,7 @@ export const stockMovements = sqliteTable(
     qty: real('qty').notNull(),
     applied: integer('applied', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull(),
+    locationId: text('location_id'),
   },
   (t) => [index('stock_movements_order').on(t.orderId)],
 );

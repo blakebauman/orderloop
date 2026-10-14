@@ -147,7 +147,7 @@ the dashboard's undo window does not apply to the API.
 ## Cancel
 
 `POST /api/v1/orders/:id/cancel` terminates the order's Workflow, releases reserved stock, voids
-payment authorizations, cancels shipments and seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
+payment authorizations, cancels shipments and staged pickups, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
 `Cancelled via API`. Cancelling a finished order does nothing.
 
 ## Signed events

@@ -68,6 +68,9 @@ Order {{order.id}} is on its way ({{vars.tracking}})
 | `invoiceKey`, `dueDate` | Generate invoice |
 | `poKey`, `supplier` | Generate PO (Demand forecast may also set `supplier`) |
 | `tracking` | Create shipment |
+| `fulfillmentLocation` | Route fulfillment: the chosen store's name, or `null` |
+| `pickupCode` | Ready for pickup: the six-character code the customer shows |
+| `entitlements` | Deliver digital goods: `[{ sku, code }]`, one per unit |
 | `returnTracking` | Return label |
 | `erpRef` | ERP sync |
 | `poNumber` | Extract order |

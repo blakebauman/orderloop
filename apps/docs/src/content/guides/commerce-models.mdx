@@ -24,7 +24,7 @@ routing and the UI use the channels; they do not restrict which orders run on th
 Channels: <Values of="order-channels" />. `input.channel` defaults to `api`. The dashboard starts
 orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the Replenish Workflow as
 `schedule`. Storefronts, marketplaces and POS systems send orders with a signed webhook; see
-[Inbound orders](/guides/inbound-orders/). `GET /api/v1/orders` filters on `model` and `channel`
+[Inbound orders](/guides/inbound-orders/). Orders on `pos` run the point-of-sale flow, `tpl-pos-sale`, for the `b2c` and `d2c` models. `GET /api/v1/orders` filters on `model` and `channel`
 (see [REST API](/reference/rest-api/#list-orders)).
 
 ## Pricing
@@ -51,7 +51,7 @@ Besides `customerId`, `currency`, `lines` and `meta`, the input takes:
 |---|---|
 | `externalId` | The order's id in its channel (storefront, marketplace, POS). Searchable with `q` |
 | `contact` | `{ email, name?, phone? }` for a buyer without a customer account, such as guest checkout or a POS receipt. `email` is searchable with `q` |
-| `fulfillment` | `{ method, locationId? }`. `method` is one of <Values of="fulfillment-methods" />; `locationId` is the store or warehouse to fulfil from |
+| `fulfillment` | `{ method, locationId? }`. `method` is one of <Values of="fulfillment-methods" />; `locationId` is the store to fulfil from or hand over at. See [Fulfillment](/guides/fulfillment/) |
 | `lines[].sellerId` | The marketplace seller for a line; otherwise the product's seller, or first party |
 
 All of these are on the run context's `order` (see [Expressions](/reference/expressions/#the-run-context)),
@@ -85,5 +85,6 @@ The order page shows `Guest · <email>` in place of a customer.
 
 **New flow** on `/flows` takes a model. With the Template start it copies that model's default flow
 from the table above into a new flow of its own, so editing the copy never changes the built-in one
-(see [Building flows](/guides/building-flows/#creating-a-flow)). `b2c` and `d2c` start from the same retail
-flow today; `marketplace` has its own, `tpl-marketplace-order` (see [Marketplace](/guides/marketplace/)).
+(see [Building flows](/guides/building-flows/#creating-a-flow)). `b2c` starts from the retail flow, `tpl-storefront-order`, and `d2c` from `tpl-omnichannel-order`, which routes each order to
+shipping, store pickup or digital delivery (see [Fulfillment](/guides/fulfillment/)); `marketplace` has its own,
+`tpl-marketplace-order` (see [Marketplace](/guides/marketplace/)).

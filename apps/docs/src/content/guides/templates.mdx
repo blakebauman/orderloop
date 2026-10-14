@@ -28,6 +28,7 @@ the code, the editor of a template-based flow offers the new graph as a proposal
 <Templates />
 
 `tpl-marketplace-order` is the `marketplace` model's flow; [Marketplace](/guides/marketplace/) walks through it.
+`tpl-omnichannel-order` is the `d2c` default and `tpl-pos-sale` the flow for `pos` till sales; [Fulfillment](/guides/fulfillment/) walks through them.
 
 ## Scenarios
 
@@ -46,6 +47,9 @@ The dashboard's **Demo scenarios** start an order on a seeded flow with a canned
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
 | Retail order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices convert at the stored rate, and the order, capture and webhooks are in euros |
 | Marketplace order, two sellers | `tpl-marketplace-order` | `HP-200` from a seller that auto-accepts and `KET-01` from one that is asked: the order waits for Kettle & Co, then ships what was accepted and schedules each seller's payout net of commission. See [Marketplace](/guides/marketplace/) |
+| Buy online, pick up in store | `tpl-omnichannel-order` | A monitor held at the SoHo store with a pickup code; the order waits for `pickup.collected`, then hands it over and captures payment |
+| Ship from store, with an e-book | `tpl-omnichannel-order` | The warehouse has no tees, so they ship from the SoHo store; the e-book is delivered as a code, and payment is captured once both parts are done |
+| Till sale with a gift card | `tpl-pos-sale` | A tee and a gift card at the Mission store: card present, the tee leaves store stock, the gift card gets a code, and the receipt is emailed |
 | Retail order, returned | `tpl-storefront-order` | Ships and captures, then a return: RMA label, restock, refund. A `return.requested` payload with `lines: [{ sku, qty }]` restocks only those lines; `amount` sets a partial refund |
 
 ### Simulating failures

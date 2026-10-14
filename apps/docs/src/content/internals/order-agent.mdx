@@ -135,7 +135,7 @@ until a node is waiting for the event.
 ## Cancel
 
 `cancel` terminates the Workflow instance (logging, not failing, if that throws), runs
-`compensateOrder` (release held stock, void open authorizations, cancel booked shipments), marks
+`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, revoke issued digital codes), marks
 every pending approval row `cancelled`, sets status `cancelled` with the reason and clears the
 waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
 `emitWebhook` for `order.cancelled`.
