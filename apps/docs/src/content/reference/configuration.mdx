@@ -13,6 +13,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI text model for every structured AI call (JSON mode) |
+| `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | Workers AI model for the [assistant](/guides/assistant/); it needs multi-turn tool calling |
 | `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
 | `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
 | `TIME_SCALE` | `1440` | Divides every wait and timeout, so `1440` turns a day into a minute. Use `"1"` in production |
@@ -48,6 +49,7 @@ created; they are not configuration.
 | `DB` | engine, web | D1 database `orderloop`; migrations in `packages/db/migrations` |
 | `DOCS` | engine, web | R2 bucket `orderloop-docs`: invoices, POs and inbound documents |
 | `ORDER_AGENT` | engine | Durable Object `OrderAgent` (SQLite-backed), one per order |
+| `ASSISTANT_AGENT` | engine | Durable Object `AssistantAgent` (SQLite-backed, migration `v2`), one per person |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order` (class `OrderLoop`), up to 10,000 steps per instance |
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | `AI` | engine | Workers AI |

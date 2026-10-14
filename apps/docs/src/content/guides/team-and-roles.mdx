@@ -8,9 +8,9 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 
 | Role | Can |
 |---|---|
-| `viewer` | See orders, flows, approvals and the back office; use the ops chat (its proposals still need a person with the right role to confirm) |
-| `approver` | Also approve and reject approvals |
-| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, manage webhook subscriptions, and manage the team and API tokens |
+| `viewer` | See orders, flows, approvals and the back office; use the [assistant](/guides/assistant/) to read |
+| `approver` | Also approve and reject approvals, including through the assistant |
+| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, have the assistant do those and draft flow changes, manage webhook subscriptions, and manage the team and API tokens |
 
 The roles and the order are `ROLES` in `packages/core/src/roles.ts`. Every route checks the role on
 the server; the dashboard also hides controls a role can't use.

@@ -45,7 +45,7 @@ The ending events cover every way an order ends:
 |---|---|
 | `order.completed`, `order.declined`, `order.cancelled`, `order.failed` | An [End node](/reference/nodes/#control.end) with that outcome |
 | `order.failed` | A node that throws after its retries, so the order fails without reaching an End node |
-| `order.cancelled` | A cancel from the order page, the order chat or `POST /api/v1/orders/:id/cancel`, sent by the order's agent because the Workflow is terminated |
+| `order.cancelled` | A cancel from the order page, the assistant or `POST /api/v1/orders/:id/cancel`, sent by the order's agent because the Workflow is terminated |
 
 ## The request
 

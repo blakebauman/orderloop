@@ -7,13 +7,14 @@ An agent loop for commerce. Every order is a durable loop that runs from intake 
 ```
 browser ──► apps/web (React Router on Workers) ──RPC──► apps/engine
               │ D1: flows + versions, orders index,        ├─ OrderAgent DO (one per order, Agents SDK):
-              │     approvals, mock back office            │    live state, waits, approvals, ops chat
+              │     approvals, mock back office            │    live state, waits, approvals
               │ flow editor, live order view, /api/v1       ├─ OrderLoop Workflow: interprets the pinned
-              └─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
+              ├─ /agents/order-agent/:id WebSocket ────────►│    flow graph (step.do / sleep / waitForEvent / rollback)
+              └─ /agents/assistant-agent/* WebSocket ──────►├─ AssistantAgent DO (one per person): the workspace assistant
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
 inbound PO email ── Cloudflare Email Routing ── email() ────►├─ Email intake: orders@ / po@ / purchasing@ start orders
                                                             └─ Workers AI (extract, classify, risk, forecast, router,
-                                                               copilot, chat), R2 (POs, invoices, inbound docs)
+                                                               copilot, assistant), R2 (POs, invoices, inbound docs)
 ```
 
 - **Flows are data.** A flow is a JSON graph of catalog nodes (`packages/core/src/catalog.ts`):
@@ -31,10 +32,11 @@ inbound PO email ── Cloudflare Email Routing ── email() ────►�
   The Workflow makes each node one memoized `step.do` named `${nodeId}#${run}`, so loop iterations replay deterministically.
 - **Saga rollback is native.** Reserve inventory, authorize payment and create shipment register `rollback` handlers on their step. An End node with outcome `failed` throws `NonRetryableError`, and Workflows then runs the compensations in reverse order.
 - **Humans and other systems resume orders with events.** Approval and Wait-for-event nodes call `step.waitForEvent` with a timeout; approvals escalate when it expires. The OrderAgent records every open wait and delivers decisions and business events (for example `payment.received`) to the right instance.
-- **Live UI.** The Workflow reports sequenced plan snapshots to the order's OrderAgent, which ignores stale or replayed ones, and the agent syncs its state to every open order page through `useAgent`. The same socket carries actions: approve, reject, deliver event, cancel, and chat.
+- **Live UI.** The Workflow reports sequenced plan snapshots to the order's OrderAgent, which ignores stale or replayed ones, and the agent syncs its state to every open order page through `useAgent`. The same socket carries actions: approve, reject, deliver event, and cancel.
 - **Long-lived subscriptions** loop over billing periods, then use **continue-as-new**: they start a fresh Workflow instance with their variables carried over, so the step history never grows without bound.
 - **Mock connectors** (`apps/engine/src/connectors.ts`) cover inventory, payments, shipping, documents and the outbox, against D1 and R2. Every write is keyed by its step and every compensation is idempotent. They are where real adapters (Stripe, a WMS, carriers, an ERP) plug in. To exercise failure paths, set `meta.simulate` to one of `out_of_stock`, `payment_decline`, `charge_fail` or `three_way_mismatch`.
 - **Orders arrive by email too.** Cloudflare Email Routing delivers `orders@`, `po@` and `purchasing@` to the engine's `email()` entrypoint (`apps/engine/src/email.ts`). Mail from an authenticated customer address, company domain or allowlisted sender starts the mailbox's flow. The body and attachments (PDF and Office files through Workers AI `toMarkdown`) become the order's document for the AI extract node, and the Message-ID is the idempotency key. See the [Email intake guide](https://docs.orderloop.io/guides/email-intake/).
+- **A workspace assistant.** A panel (⌘J) backed by one `AssistantAgent` Durable Object per person answers from live data through role-checked tools. Deciding an approval, delivering an event, cancelling, publishing a flow and running the stock review show a confirm card first; flow changes come back to the editor as proposals. See the [assistant guide](https://docs.orderloop.io/guides/assistant/).
 - **AI never blocks an order.** Every model call uses JSON mode with a schema, has a 20-second cap, and falls back to a deterministic heuristic. Set `AI_MODE=mock` to use the heuristics only.
 
 See [ROADMAP.md](ROADMAP.md) for planned work.
@@ -43,8 +45,8 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 
 | Path | Role |
 |---|---|
-| `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, copilot), live order view, approvals inbox, back office, REST API. React Router on Workers |
-| `apps/engine` (`@orderloop/engine`) | OrderAgent DO, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
+| `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, assistant), live order view, approvals inbox, back office, REST API. React Router on Workers |
+| `apps/engine` (`@orderloop/engine`) | OrderAgent and AssistantAgent DOs, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
 | `apps/docs` (`@orderloop/docs`) | Documentation site (Starlight), deployed as a static-assets Worker. Reference pages render from `@orderloop/core` at build time |
 | `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
 | `packages/design` (`@orderloop/design`) | Ledger tokens as data, held to `apps/web/app/app.css` by a test; generates the docs theme (`pnpm sync:theme`) |

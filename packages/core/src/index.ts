@@ -1,5 +1,6 @@
 export * from './address';
 export * from './api';
+export * from './assistant';
 export * from './catalog';
 export * from './graph';
 export * from './layout';

@@ -1,4 +1,3 @@
-import { type Flow, flowGraphSchema } from '@orderloop/core';
 import { data } from 'react-router';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
@@ -6,18 +5,11 @@ import { getFlow, parseFlow, publish, sameGraph, saveFlow } from '~/lib/flows.se
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/flow-action';
 
-/** JSON actions from the flow editor: save, publish, copilot, test. */
+/** JSON actions from the flow editor: save, publish, test. */
 export async function action({ request, params }: Route.ActionArgs) {
   await requireUser(request, 'operator');
-  const body = (await request.json()) as { intent: string; flow?: unknown; prompt?: string };
+  const body = (await request.json()) as { intent: string; flow?: unknown };
   try {
-    if (body.intent === 'copilot') {
-      const graph = flowGraphSchema.parse(
-        (body.flow as Flow | undefined) ?? { nodes: [], edges: [] },
-      );
-      const orderType = (body.flow as Flow | undefined)?.orderType;
-      return await engine().copilot({ prompt: String(body.prompt ?? ''), graph, orderType });
-    }
     const flow = parseFlow({ ...(body.flow as object), id: params.flowId });
     if (body.intent === 'save') return { saved: true, ...(await saveFlow(flow)) };
     if (body.intent === 'publish') return await publish(flow);

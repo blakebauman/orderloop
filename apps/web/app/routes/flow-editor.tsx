@@ -16,10 +16,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   FlaskConical,
+  MessageSquareText,
   Redo2,
   Rocket,
   Save,
-  Sparkles,
   Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +28,7 @@ import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Palette } from '~/components/palette';
+import { useAssistant, usePageContext } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { getFlow } from '~/lib/flows.server';
 import { useCan } from '~/lib/use-me';
@@ -101,7 +102,6 @@ export default function FlowEditor() {
   // Publishing (directly or as part of a test run) always passes through one confirmation.
   const [confirm, setConfirm] = useState<null | 'publish' | 'test'>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
-  const [prompt, setPrompt] = useState('');
   const [proposal, setProposal] = useState<CopilotResult | null>(null);
 
   // A newer built-in template, offered once per template version until applied or set aside.
@@ -142,7 +142,6 @@ export default function FlowEditor() {
     hideTemplate();
   };
   const save = useFetcher<ActionResult>();
-  const copilot = useFetcher<CopilotResult & { error?: string }>();
 
   const dirty = JSON.stringify(flow) !== baseline;
   const issues = useMemo(() => validateGraph(flow), [flow]);
@@ -191,11 +190,29 @@ export default function FlowEditor() {
     }
   }, [save.data, save.state]);
 
+  // The assistant drafts changes against the graph on screen, unsaved edits included, and hands
+  // its proposal back here, where applying it is one undoable edit.
+  const assistant = useAssistant();
+  usePageContext(
+    () => ({
+      kind: 'flow',
+      id: flowRef.current.id,
+      label: flowRef.current.name,
+      graph: { nodes: flowRef.current.nodes, edges: flowRef.current.edges },
+      orderType: flowRef.current.orderType,
+    }),
+    [flow.id, flow.name],
+  );
   useEffect(() => {
-    if (copilot.state !== 'idle' || !copilot.data) return;
-    if (copilot.data.error) setNotice({ tone: 'err', text: copilot.data.error });
-    else setProposal(copilot.data);
-  }, [copilot.data, copilot.state]);
+    const p = assistant.takeProposal(flow.id);
+    if (p)
+      setProposal({
+        graph: p.graph,
+        explanation: p.explanation,
+        errors: p.errors,
+        warnings: p.warnings,
+      });
+  }, [assistant.proposalToken, flow.id]);
 
   // ⌘S saves, ⌘Z / ⇧⌘Z undo and redo graph edits (text fields keep their own undo), Escape deselects.
   useEffect(() => {
@@ -330,6 +347,17 @@ export default function FlowEditor() {
               {notice.text}
             </span>
           ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              assistant.setScope('page');
+              assistant.focus();
+            }}
+            title="Ask the assistant to explain or change this flow"
+          >
+            <MessageSquareText /> Ask
+          </Button>
           <div className="flex">
             <Button
               variant="ghost"
@@ -462,31 +490,6 @@ export default function FlowEditor() {
         Building flows needs a wider screen. Here you can review the graph and its settings.
       </p>
 
-      <form
-        className="hidden items-center gap-2 border-b bg-ai/[0.04] px-5 py-2 lg:flex"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!prompt.trim()) return;
-          copilot.submit(JSON.stringify({ intent: 'copilot', prompt, flow }), {
-            method: 'post',
-            action: `/flows/${flow.id}/action`,
-            encType: 'application/json',
-          });
-        }}
-      >
-        <Sparkles className="size-4 shrink-0 text-ai" />
-        <Input
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Ask the copilot to change this flow, e.g. “add a fraud check after credit”"
-          aria-label="Ask the copilot to change this flow"
-          className="h-8 border-ai/20 bg-transparent text-sm"
-        />
-        <Button type="submit" size="sm" variant="secondary" disabled={copilot.state !== 'idle'}>
-          {copilot.state !== 'idle' ? 'Thinking…' : 'Propose'}
-        </Button>
-      </form>
-
       {tpl && !tplHidden && !proposal ? (
         <div className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-2 text-sm">
           <p className="min-w-0 flex-1">
@@ -516,7 +519,6 @@ export default function FlowEditor() {
               onClick={() => {
                 setGraph(proposal.graph);
                 setProposal(null);
-                setPrompt('');
               }}
             >
               Apply changes

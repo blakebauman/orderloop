@@ -30,9 +30,10 @@ The flow id is a slug of the name plus a short suffix. A new flow is a draft unt
   the branch it belongs to. A `control.loop` node has a second input, `next`, for its back-edge.
 - **Inspector.** The selected node's label and config fields, generated from the node's catalog
   entry, plus its per-node `retries` and `timeout`. Validation messages appear beside the field.
-- **Copilot.** A prompt bar that proposes a change to the whole graph ("add a fraud check after
-  credit"). The proposal shows what it adds and removes; nothing changes until you accept it.
-  See [AI nodes and the copilot](/guides/ai/#the-flow-copilot).
+- **Ask.** Opens the [assistant](/guides/assistant/) about this flow, with the graph on screen
+  (unsaved changes included) as context. A change it proposes ("add a fraud check after credit")
+  comes back to the editor as a proposal that shows what it adds, removes, edits and rewires;
+  nothing changes until you accept it, and accepting is one undoable edit.
 
 **Save** stores the draft and returns the current validation errors and warnings. **Publish**
 asks for confirmation, then publishes the next version. **Test run** publishes too when the graph

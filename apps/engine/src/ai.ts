@@ -443,7 +443,8 @@ export function normalizeGraph(raw: FlowGraph, previous?: FlowGraph): FlowGraph 
 /** Offline copilot: understands "add a <node type> after <node id>". */
 export function copilotHeuristic(req: CopilotRequest): { explanation: string; graph: FlowGraph } {
   const graph: FlowGraph = structuredClone(req.graph ?? { nodes: [], edges: [] });
-  const p = req.prompt.toLowerCase();
+  // "after the credit check" means the same as "after credit check".
+  const p = req.prompt.toLowerCase().replace(/\b(the|a|an)\s+/g, '');
   const spec =
     NODE_SPECS.find((s) => p.includes(s.label.toLowerCase())) ??
     (p.includes('fraud') || p.includes('risk')
@@ -453,7 +454,11 @@ export function copilotHeuristic(req: CopilotRequest): { explanation: string; gr
     (n) => p.includes(`after ${n.id}`) || p.includes(`after ${n.label.toLowerCase()}`),
   );
   if (!spec || !after) {
-    return { explanation: 'Offline copilot: say “add a <node> after <node>”.', graph };
+    return {
+      explanation:
+        'Without the model, it follows requests like “add a risk score after credit check”.',
+      graph,
+    };
   }
   const id = `${spec.type.split('.')[1]}_${graph.nodes.length}`;
   const outs = graph.edges.filter((e) => e.source === after.id);

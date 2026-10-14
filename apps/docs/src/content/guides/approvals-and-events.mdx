@@ -60,8 +60,9 @@ curl -X POST https://orderloop.io/api/v1/orders/ord_…/approvals/approval \
 `APP_PASSWORD`, where it defaults to `api`. A decision for a node that isn't waiting for an approval fails with
 `That node is not waiting for an approval`. See the [REST API](/reference/rest-api/).
 
-From the **order chat**, the assistant can prepare an approval or rejection, but a person confirms
-it on the order page, with the same undo window. See [AI nodes and the copilot](/guides/ai/#order-chat).
+The [assistant](/guides/assistant/) can decide an approval for an `approver`, but only after the
+person confirms a card showing the order and where each decision leads. There is no undo window
+for a decision made there, and the decision is recorded `by` `<email> via assistant`.
 
 ## Waiting for events
 
@@ -131,7 +132,7 @@ inbox show is the scaled one.
 ## Cancelling
 
 Cancel from the order page, the API (`POST /api/v1/orders/:id/cancel` with an optional `reason`),
-or the order chat (prepared, then confirmed by a person). Cancelling an order that has already
+or the [assistant](/guides/assistant/) (after the person confirms). Cancelling an order that has already
 ended does nothing. Otherwise the agent:
 
 1. terminates the Workflow instance;

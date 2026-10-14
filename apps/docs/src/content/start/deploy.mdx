@@ -7,7 +7,7 @@ OrderLoop deploys as two Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
-| `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent Durable Object, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
+| `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
 | `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
 
 Both bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`).

@@ -1,6 +1,6 @@
 ---
 title: OrderAgent
-description: The per-order Durable Object that holds live state, owns waits and approvals, cancels, and answers the ops chat.
+description: The per-order Durable Object that holds live state, owns waits and approvals, and cancels.
 ---
 
 import Values from '../../components/Values.astro';
@@ -11,8 +11,10 @@ named by the order id (`orderAgentName` in `@orderloop/core`). It:
 - holds the order's live state, synced to every browser on the order page through `useAgent`;
 - records what the Workflow reports;
 - owns the order's waits and delivers approvals and events to the right instance;
-- cancels with compensation;
-- answers the ops chat with tools over the same state.
+- cancels with compensation.
+
+Questions about an order go to the person's [workspace assistant](/guides/assistant/), which reads
+and acts on the order through this agent.
 
 ## State
 
@@ -27,7 +29,6 @@ The synced state is `OrderState` from `packages/core/src/api.ts`, plus a private
 | `waits` | Open `PendingWait`s: node, event type, kind, title, event, amount, assignee, deadline |
 | `vars` | Run variables |
 | `timeline` | `TimelineEntry`s, capped at the last 400 (`TIMELINE_CAP`) |
-| `chat` | Ops chat messages, capped at the last 100 |
 | `instanceId`, `generation` | The Workflow instance driving the order and its generation |
 | `rollback` | `{ outcome: 'complete' \| 'failed', error }` once a failed run has settled |
 | `reason` | Why it was cancelled, declined or failed |
@@ -96,7 +97,7 @@ the same methods over RPC.
 | `decide(nodeId, decision, by = 'operator', note?)` | Finds the approval wait for `nodeId` (throws if none) and sends its event type to the instance with `{ decision, by, note }` |
 | `deliver(event, payload = {})` | Finds the event wait for `event`. If none is open, returns `{ delivered: false }`; otherwise sends `{ ...payload, event, at }` and returns `{ delivered: true, nodeId }` |
 | `cancel(reason = 'Cancelled by operator')` | See below. Returns `{ ok: false }` for an order that has already ended |
-| `chat(text)` | See below |
+| `whoami()` | The caller as the agent sees them now, `{ name, role }`; fails once their sign-in has ended |
 
 ### Roles on the socket
 
@@ -107,7 +108,8 @@ stores it as the connection's state. For a signed-in person the header also carr
 session's id (the SHA-256 that keys `sessions`), which never reaches the browser.
 
 Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from
-D1, so a page that is already open follows changes made since it connected: a lower role applies
+D1 (`livePrincipal` in `apps/engine/src/principal.ts`, shared with the
+[AssistantAgent](/internals/architecture/#the-assistant)), so a page that is already open follows changes made since it connected: a lower role applies
 at once, and once the session has been signed out, reset, expired or idle for `SESSION_IDLE_MS`,
 or the user disabled, the
 call fails with `Your sign-in has ended. Reload the page to sign in again.` and the connection
@@ -120,12 +122,12 @@ routes already checked the role.
 
 | Method | Socket role |
 |---|---|
-| `chat` | `viewer` |
+| `whoami` | `viewer` |
 | `decide` | `approver`; `by` is replaced by the caller's email (or name) |
 | `deliver`, `cancel` | `operator` |
 
 Readonly connections (`shouldConnectionBeReadonly`) aren't used: they would also block the agent's
-own state writes, such as a viewer's chat history.
+own state writes.
 
 `deliver` returning `delivered: false` is what lets `POST /api/v1/webhooks/events` answer `409`
 until a node is waiting for the event.
@@ -157,22 +159,3 @@ sets status `rolled_back`; a failed one stays `failed` with the error.
 
 `continuedAs(instanceId, generation)` ignores anything not newer than the current generation, then
 switches `instanceId` and `generation`, resets `seq` to 0 and logs `Continued as run N`.
-
-## Ops chat
-
-`chat(text)` appends the user's message (truncated to 4000 characters), then runs up to four model
-turns through `runJson` with a schema of `{ action: 'reply' | 'tool', tool?, args?, reply? }`. The
-model sees a brief of the order state (status, order, waits, vars, non-pending nodes, the last 10
-timeline messages), the tools called so far and the last eight messages.
-
-| Tool | Effect |
-|---|---|
-| `get_state` | Returns the brief |
-| `approve`, `reject` | Prepares a `ChatProposal` of kind `decide` for the waiting approval; does not decide |
-| `deliver_event` | Calls `deliver` directly |
-| `cancel` | Prepares a `ChatProposal` of kind `cancel`; does not cancel |
-
-Decisions and cancellations from chat are only ever proposals: the answer carries the `proposal`,
-and a person confirms it on the order page with the same undo window as any other decision. With
-`AI_MODE=mock` or a model error, `chatHeuristic` picks a tool from keywords or replies with the
-order's status. See [AI nodes and the copilot](/guides/ai/).

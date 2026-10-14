@@ -57,8 +57,11 @@ export default {
       return handleApi(request, caller);
     }
 
-    // The order page's live connection to its OrderAgent (Agents SDK WebSocket + RPC).
-    if (url.pathname.startsWith('/agents/order-agent/')) {
+    // The order page's live connection to its OrderAgent, and the assistant panel's to the
+    // person's own AssistantAgent (Agents SDK WebSocket + RPC, and the chat's message fetch).
+    const order = url.pathname.startsWith('/agents/order-agent/');
+    const assistant = url.pathname.startsWith('/agents/assistant-agent/');
+    if (order || assistant) {
       const caller = await principal(request);
       if (!caller) return new Response('Unauthorized', { status: 401 });
       if (caller.twoFactorDue) return new Response(TWO_FACTOR_DUE, { status: 403 });
@@ -70,11 +73,16 @@ export default {
         PRINCIPAL_HEADER,
         encodePrincipal({ ...caller, ...(session ? { session } : {}) }),
       );
+      // Everyone has exactly one assistant, named after them: whatever name the browser asked
+      // for, it reaches its own.
+      const path = assistant
+        ? url.pathname.replace(
+            /^\/agents\/assistant-agent\/[^/]*/,
+            `/agents/assistant-agent/${encodeURIComponent(caller.id)}`,
+          )
+        : url.pathname;
       return engine().fetch(
-        new Request(
-          `https://engine${url.pathname}${url.search}`,
-          new Request(request, { headers }),
-        ),
+        new Request(`https://engine${path}${url.search}`, new Request(request, { headers })),
       );
     }
 
