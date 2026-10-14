@@ -1,11 +1,13 @@
 /**
  * orderloop-engine. No public routes: the web app reaches it through a service binding, as RPC
- * (`EngineApi`) or plain fetch for the health check and the OrderAgent WebSocket it proxies.
+ * (`EngineApi`) or plain fetch for the health check, the agent WebSockets it proxies and MCP
+ * (`/mcp`, see ./mcp.ts).
  * Cloudflare Email Routing delivers inbound order email to `email()` (see ./email.ts).
  */
 
 import { routeAgentRequest } from 'agents';
 import { receiveEmail } from './email';
+import { handleMcp, MCP_PATH } from './mcp';
 
 export { OrderAgent } from './agent';
 export { EngineApi } from './api';
@@ -17,6 +19,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-engine' });
+    if (url.pathname === MCP_PATH) return handleMcp(request);
     return (await routeAgentRequest(request, env)) ?? new Response('Not found', { status: 404 });
   },
 

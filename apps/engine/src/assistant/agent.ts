@@ -17,9 +17,6 @@ import {
   atLeast,
   decodePrincipal,
   flowGraphSchema,
-  ORDER_CHANNELS,
-  ORDER_MODELS,
-  ORDER_STATUSES,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
@@ -31,36 +28,14 @@ import {
   pruneMessages,
   stepCountIs,
   streamText,
-  type Tool,
   type ToolSet,
   tool,
 } from 'ai';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { livePrincipal, SESSION_ENDED } from '../principal';
-import {
-  type ActionInput,
-  type ActionTool,
-  attention,
-  findOrders,
-  findProducts,
-  getFlow,
-  getOrder,
-  listFlows,
-  previewAction,
-  proposeFlowChange,
-  Refused,
-  requireRole,
-  runAction,
-} from './data';
+import { type ActionInput, type ActionTool, attention, previewAction, Refused } from './data';
 import { assistantModel, type ModelSource } from './model';
-
-const ACTION_TOOLS: ActionTool[] = [
-  'decide_approval',
-  'deliver_event',
-  'cancel_order',
-  'publish_flow',
-  'run_stock_review',
-];
+import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
 
 export class AssistantAgent extends AIChatAgent<Env> {
   override maxPersistedMessages = 200;
@@ -132,145 +107,28 @@ export class AssistantAgent extends AIChatAgent<Env> {
     });
   }
 
-  /** The tools this person's role allows; each checks the role again when it runs. */
+  /**
+   * The tools this person's role allows (tools.ts). Each runs as the person is when it runs;
+   * actions stop for them to confirm first, and `runAction` re-checks everything when they do.
+   */
   private tools(p: Principal, context: AssistantContext): ToolSet {
-    const env = this.env;
-    // Reads and drafts run directly, as the person is when the tool runs.
-    const as = async (name: AssistantTool) => {
-      const now = await this.caller();
-      requireRole(now, name);
-      return now;
-    };
-    // Actions stop for the person to confirm; `runAction` re-checks everything when they do.
-    const act = async <T extends ActionTool>(name: T, input: ActionInput[T]) =>
-      runAction(env, await this.caller(), name, input);
-    const orderId = z.string().describe('The order id (ord_…) or its #reference, e.g. #k3x9q2');
-    const all: Record<AssistantTool, Tool> = {
-      needs_attention: tool({
-        description:
-          'What is waiting on people: open approvals (oldest first), orders that failed or rolled back in the last 3 days, and orders waiting on a business event for over a day.',
-        inputSchema: z.object({}),
-        execute: async () => {
-          await as('needs_attention');
-          return attention(env);
-        },
-      }),
-      find_orders: tool({
-        description:
-          'Search orders. Totals compare in USD. Returns the count and total of all matches plus up to `limit` rows.',
-        inputSchema: z.object({
-          status: z.enum(ORDER_STATUSES).optional(),
-          model: z.enum(ORDER_MODELS).optional(),
-          channel: z.enum(ORDER_CHANNELS).optional(),
-          customer: z.string().optional().describe('Customer name or id'),
-          q: z.string().optional().describe('Free text over id, title and customer'),
-          minTotal: z.number().optional(),
-          maxTotal: z.number().optional(),
-          sinceDays: z.number().int().positive().optional().describe('Created in the last N days'),
-          sort: z.enum(['newest', 'updated', 'largest']).optional(),
-          limit: z.number().int().min(1).max(50).optional(),
-        }),
-        execute: async (f) => {
-          await as('find_orders');
-          return findOrders(env, f);
-        },
-      }),
-      get_order: tool({
-        description:
-          'One order: status, what it waits on (with where each decision leads), steps run so far and recent activity.',
-        inputSchema: z.object({ orderId }),
-        execute: async (i) => {
-          await as('get_order');
-          return getOrder(env, i.orderId);
-        },
-      }),
-      find_products: tool({
-        description: 'Products with stock, reserved and available quantities and reorder points.',
-        inputSchema: z.object({
-          q: z.string().optional().describe('SKU or name'),
-          belowReorder: z
-            .boolean()
-            .optional()
-            .describe('Only SKUs at or below their reorder point'),
-        }),
-        execute: async (i) => {
-          await as('find_products');
-          return findProducts(env, i.q, i.belowReorder);
-        },
-      }),
-      list_flows: tool({
-        description: 'All flows and their published versions.',
-        inputSchema: z.object({}),
-        execute: async () => {
-          await as('list_flows');
-          return listFlows(env);
-        },
-      }),
-      get_flow: tool({
-        description: 'A flow’s saved draft: its steps, connections and validation problems.',
-        inputSchema: z.object({ flowId: z.string() }),
-        execute: async (i) => {
-          await as('get_flow');
-          return getFlow(env, i.flowId);
-        },
-      }),
-      propose_flow_change: tool({
-        description:
-          'Draft a change to a flow from an instruction. Nothing is saved: the person reviews the proposal in the editor and applies it there.',
-        inputSchema: z.object({ flowId: z.string(), instruction: z.string() }),
-        execute: async (i) => {
-          await as('propose_flow_change');
-          const onScreen = context.kind === 'flow' && context.id === i.flowId ? context : undefined;
-          return proposeFlowChange(env, i.flowId, i.instruction, onScreen);
-        },
-      }),
-      decide_approval: tool({
-        description:
-          'Approve or reject an approval an order is waiting on. The person confirms before it is sent.',
-        inputSchema: z.object({
-          orderId,
-          nodeId: z
-            .string()
-            .optional()
-            .describe('The approval step; omit when the order has only one open'),
-          decision: z.enum(['approved', 'rejected']),
-          note: z.string().optional(),
-        }),
-        needsApproval: true,
-        execute: (i) => act('decide_approval', i),
-      }),
-      deliver_event: tool({
-        description:
-          'Deliver a business event (e.g. payment.received) to the order waiting for it. The person confirms first.',
-        inputSchema: z.object({ orderId, event: z.string() }),
-        needsApproval: true,
-        execute: (i) => act('deliver_event', i),
-      }),
-      cancel_order: tool({
-        description:
-          'Cancel an order and undo what it did (release stock, void payment, cancel shipments). The person confirms first.',
-        inputSchema: z.object({ orderId, reason: z.string() }),
-        needsApproval: true,
-        execute: (i) => act('cancel_order', i),
-      }),
-      publish_flow: tool({
-        description: 'Publish a flow’s saved draft as a new version. The person confirms first.',
-        inputSchema: z.object({ flowId: z.string() }),
-        needsApproval: true,
-        execute: (i) => act('publish_flow', i),
-      }),
-      run_stock_review: tool({
-        description:
-          'Run the daily stock review now; it starts reorders for SKUs at or below their reorder point. The person confirms first.',
-        inputSchema: z.object({}),
-        needsApproval: true,
-        execute: () => act('run_stock_review', {}),
-      }),
-    };
+    const names = (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).filter((name) =>
+      atLeast(p.role, ASSISTANT_TOOLS[name].role),
+    );
     return Object.fromEntries(
-      (Object.keys(all) as AssistantTool[])
-        .filter((name) => atLeast(p.role, ASSISTANT_TOOLS[name].role))
-        .map((name) => [name, all[name]]),
+      names.map((name) => {
+        const { confirm, description } = ASSISTANT_TOOLS[name];
+        return [
+          name,
+          tool({
+            description: confirm ? `${description} The person confirms first.` : description,
+            inputSchema: TOOL_INPUTS[name] as z.ZodObject,
+            ...(confirm ? { needsApproval: true } : {}),
+            execute: async (input: ToolInput<typeof name>) =>
+              runTool(this.env, await this.caller(), name, input, { via: 'assistant', context }),
+          }),
+        ];
+      }),
     );
   }
 }

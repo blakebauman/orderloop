@@ -248,6 +248,50 @@ export async function apiPrincipal(request: Request): Promise<Caller | null> {
   return { kind: 'token', id: row.id, name: `token:${row.name}`, role: row.role as Role };
 }
 
+/**
+ * What an OAuth grant for an MCP client carries (see oauth.server.ts): who approved it and the
+ * role they granted, which is never more than their own.
+ */
+export type GrantProps = { kind: Principal['kind']; id: string; role: Role };
+
+const lower = (a: Role, b: Role): Role => (atLeast(a, b) ? b : a);
+
+/**
+ * The caller behind an OAuth grant, as they are now: null once the person is disabled or deleted,
+ * the shared password is unset, or (for open local dev) sign-in has been turned on. The role is
+ * the lower of what was granted and what they have now, so demoting someone also narrows the apps
+ * they connected.
+ */
+export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
+  if (g.kind === 'user') {
+    const row = await db()
+      .select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        role: users.role,
+        totpEnabledAt: users.totpEnabledAt,
+      })
+      .from(users)
+      .where(and(eq(users.id, g.id), isNull(users.disabledAt)))
+      .get();
+    if (!row) return null;
+    const { totpEnabledAt, ...person } = row;
+    const own = person.role as Role;
+    const due = !totpEnabledAt && mustUseTwoFactor(own, await twoFactorRequirement());
+    return {
+      kind: 'user',
+      ...person,
+      role: lower(g.role, own),
+      ...(due ? { twoFactorDue: true as const } : {}),
+    };
+  }
+  if (g.kind === 'password')
+    return password() ? { ...SHARED_PRINCIPAL, role: lower(g.role, SHARED_PRINCIPAL.role) } : null;
+  if (g.kind === 'open') return (await authEnabled()) ? null : { ...OPEN, role: g.role };
+  return null;
+}
+
 /** Thrown for a known API token past its expiry, so the caller hears why it stopped working. */
 export class TokenExpired extends Error {
   constructor(readonly expiredAt: number) {

@@ -1,0 +1,41 @@
+---
+/*
+ * The tools every MCP client sees, rendered from ASSISTANT_TOOLS in @orderloop/core: the same
+ * table the engine registers from, so a new tool or a changed role shows up here on rebuild.
+ * Tools that wait for a confirm in the assistant are the writes.
+ */
+import { ASSISTANT_TOOLS, type AssistantTool, ROLE_LABELS } from '@orderloop/core';
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const tools = (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).map((name) => ({
+  name,
+  ...ASSISTANT_TOOLS[name],
+}));
+---
+
+<table>
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th>Role</th>
+      <th>Access</th>
+      <th>Does</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      tools.map((t) => (
+        <tr>
+          <td>
+            <code>{t.name}</code>
+          </td>
+          <td>
+            <code>{t.role}</code> ({ROLE_LABELS[t.role]})
+          </td>
+          <td>{t.confirm ? 'Write' : 'Read'}</td>
+          <td>{t.description}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

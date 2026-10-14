@@ -15,6 +15,7 @@
   "dependencies": {
     "@ai-sdk/provider": "catalog:",
     "@cloudflare/ai-chat": "catalog:",
+    "@modelcontextprotocol/server": "2.0.0",
     "@orderloop/core": "workspace:*",
     "@orderloop/db": "workspace:*",
     "agents": "catalog:",

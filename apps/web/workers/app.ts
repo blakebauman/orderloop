@@ -10,6 +10,7 @@ import {
   TWO_FACTOR_DUE,
 } from '../app/lib/auth.server';
 import { docs, engine } from '../app/lib/env.server';
+import { isOAuthPath, oauthProvider } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 
@@ -19,9 +20,13 @@ const requestHandler = createRequestHandler(
 );
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
+
+    // MCP and its OAuth endpoints (discovery, registration, tokens). The consent page itself,
+    // /oauth/authorize, is a page of the app below.
+    if (isOAuthPath(url.pathname)) return oauthProvider(url.origin).fetch(request, env, ctx);
 
     // Signed webhooks authenticate by HMAC, not by the admin password.
     if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {

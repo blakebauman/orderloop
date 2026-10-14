@@ -1,0 +1,127 @@
+---
+title: MCP server
+description: Connect Claude, Claude Code, Cursor or any MCP client to OrderLoop at /mcp, with the same tools as the assistant, limited by role.
+---
+
+import McpTools from '../../components/McpTools.astro';
+
+OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
+clients at `https://orderloop.io/mcp` (your own host, if you deploy it yourself). They are the
+tools of [the assistant](/guides/assistant/), so a client can check what needs attention, find and
+read orders, and, with the right role, decide approvals or cancel orders. Each person is limited to
+what their role allows.
+
+The server is stateless: every request is answered by a fresh server that lists only the tools
+the caller's role can use. It speaks streamable HTTP, the draft 2026-07-28 revision of the
+protocol and the 2025 stateless lane.
+
+## Connecting
+
+### Claude and Claude Desktop
+
+Add a custom connector with the URL `https://orderloop.io/mcp`. The client discovers the
+authorization server, registers itself and opens OrderLoop's consent page in your browser:
+
+1. Sign in as usual. Two-factor sign-in applies.
+2. Check which app is asking and where access will be sent. An app that registered itself is
+   marked as unverified; an app on your own computer gets an extra warning.
+3. Choose a role. You are offered your own role and the roles below it, and the first is
+   selected. That role is the grant's scope.
+4. Select **Connect**. **Cancel** refuses the app.
+
+### Claude Code
+
+```bash
+claude mcp add --transport http orderloop https://orderloop.io/mcp
+```
+
+Claude Code runs the same browser flow the first time you use the server. To skip the browser, pass
+an [API token](/guides/team-and-roles/#api-tokens):
+
+```bash
+claude mcp add --transport http orderloop https://orderloop.io/mcp \
+  --header "Authorization: Bearer ol_live_…"
+```
+
+### Cursor and other clients
+
+A client that takes a URL and headers can send `Authorization: Bearer ol_live_…` with every
+request. In Cursor's `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "orderloop": {
+      "url": "https://orderloop.io/mcp",
+      "headers": { "Authorization": "Bearer ol_live_…" }
+    }
+  }
+}
+```
+
+A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
+credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and `APP_PASSWORD` as a
+break-glass operator. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
+refused (`401` with the reason), as there.
+
+## Tools
+
+The table is rendered from `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts` when the docs
+are built. A client sees only the rows its role can use. **Write** tools are the ones the
+assistant stops to confirm; over MCP the client decides how to ask, using the annotations below.
+
+<McpTools />
+
+Each tool has a title, a description and a JSON input schema. Results come back as text and as
+`structuredContent`. A refusal from live data (nothing is waiting on that event, the approval is
+already decided, the order has finished) is returned as a tool error the model can read, not a
+protocol error. A tool the role can't use is not listed, and calling it by name fails as unknown.
+
+Annotations tell a client when to confirm:
+
+| Tools | Hints |
+|---|---|
+| Reads and `propose_flow_change` | `readOnlyHint: true` |
+| `decide_approval`, `cancel_order`, `publish_flow` | `destructiveHint: true`; the first two are also `idempotentHint: true` |
+| `deliver_event`, `run_stock_review` | writes, not destructive |
+
+All tools set `openWorldHint: false`.
+
+## Who did it
+
+A write made over MCP is attributed to the person who approved the connection, with the channel:
+`<email> via MCP`. That string is the approval's `by` or ends the cancel reason, as `<email> via
+assistant` does for the panel (see [Who decided](/guides/team-and-roles/#who-decided)). A client
+using an API token acts as `token:<name>`.
+
+## Disconnecting
+
+**Account** lists **Connected apps**: the app's name, the role you granted and when it connected.
+**Disconnect** revokes the grant, and the app has to be connected again. Connecting and
+disconnecting are recorded in the [audit log](/guides/team-and-roles/#audit-log) as
+`oauth.app_connected` and `oauth.app_disconnected`. Access tokens last one hour and refresh
+tokens 30 days.
+
+## Security
+
+- **Role cap.** A grant is never higher than the role of the person who approved it, and the
+  consent page offers no more. Pick the lowest role the client needs.
+- **Checked on every request.** The web Worker re-reads the person each time. A disabled or deleted
+  person's grants stop working at once. The role is the lower of the one granted and the
+  person's current role, so demoting someone narrows the apps they connected. A person whose role
+  must use two-factor sign-in and hasn't set it up gets `403`.
+- **Credentials stay in the web Worker.** It resolves the caller, then forwards the request to
+  the engine over the service binding with the `x-orderloop-principal` header; `Authorization`
+  and cookies are removed first. The engine has no public route, answers `401` without that
+  header, and the model never sees a token.
+- **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
+- **Tokens at rest.** The OAuth provider keeps clients, grants and tokens in the `OAUTH_KV`
+  namespace; tokens are stored hashed and grant data encrypted. See
+  [Configuration](/reference/configuration/#bindings).
+
+## How it works
+
+The web Worker hands `/mcp`, `/.well-known/oauth-*` and `/oauth/*` (except `/oauth/authorize`,
+the consent page) to `@cloudflare/workers-oauth-provider`, which serves discovery, dynamic client
+registration (`/oauth/register`), Client ID Metadata Documents and tokens (`/oauth/token`). See
+[Architecture](/internals/architecture/#mcp).
