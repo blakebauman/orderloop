@@ -1,7 +1,6 @@
----
-title: Architecture
-description: The two Workers, the service binding between them, the packages, the bindings and the connectors.
----
+# Architecture
+
+The two Workers, the service binding between them, the packages, the bindings and the connectors.
 
 OrderLoop is two Workers in one pnpm monorepo. `orderloop-web` serves the dashboard, the flow
 editor and the REST API; `orderloop-engine` runs orders. The web app reaches the engine only
@@ -35,7 +34,7 @@ inbound mail ── Email Routing ──email()───────────
 
 `packages/core` is pure TypeScript so its semantics can be unit tested in Node: anything that needs
 `env` belongs in an app. The planner lives there, not in the Workflow
-(see [Planner](/internals/planner/)).
+(see [Planner](planner.md)).
 
 ## The engine contract
 
@@ -67,8 +66,8 @@ engine source.
 |---|---|
 | `GET /health` | `{ ok: true, service: "orderloop-web" }` |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
-| `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](/guides/inbound-orders/) |
-| `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](/guides/channel-adapters/) |
+| `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.io/guides/inbound-orders/) |
+| `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.io/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
@@ -80,15 +79,24 @@ engine source.
 Before the API, agent and React Router branches, a browser request that changes state or opens a
 WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/origin.ts`): its
 `Origin`, or failing that `Sec-Fetch-Site`, must show the app's own origin, or it gets `403`. See
-[Cross-site requests](/guides/team-and-roles/#cross-site-requests).
+[Cross-site requests](https://docs.orderloop.io/guides/team-and-roles/#cross-site-requests).
 
 `apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
 row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
-is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](/guides/team-and-roles/). The engine's own
+is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.io/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see
-[Email intake](/guides/email-intake/).
+[Email intake](https://docs.orderloop.io/guides/email-intake/).
+
+## REST API
+
+The `/api/v1` routes are in `apps/web/app/lib/api.server.ts`. Request bodies in the OpenAPI
+document (`apps/web/app/lib/openapi.ts`, served at `/api/v1/openapi.json` and rendered by the docs'
+explorer) are generated from the zod schemas the handlers validate with
+(`apps/web/app/lib/api-schemas.ts`), so they can't drift. Event payloads are capped at 32 KiB
+(`MAX_EVENT_PAYLOAD_BYTES`, `packages/core/src/api.ts`); the OrderAgent's `deliver`, `decide` and
+`cancel` enforce the same bounds on the live socket as the REST schemas do.
 
 ## MCP
 
@@ -112,9 +120,16 @@ deletes `authorization` and `cookie`, sets `x-orderloop-principal` and fetches t
 `McpServer` (`@modelcontextprotocol/server`) per request, no session. It registers only the
 `ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS` and `runTool` from `assistant/tools.ts`, the
 code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`. See
-[MCP server](/reference/mcp/).
+[MCP server](https://docs.orderloop.io/reference/mcp/).
 
 ## A2A
+
+The Agent Card at `/.well-known/agent-card.json` is built from the request's origin by `agentCard`
+(for an `A2A-Version: 1.0` request) or `legacyAgentCard` (the 0.3 shape, for anyone else) in
+`packages/core/src/a2a.ts`. Push
+notification URLs pass `isWebhookUrl` (`packages/core/src/webhooks.ts`), the same rule as outbound
+webhook subscriptions.
+
 
 `/a2a` is the same tools, plus `place_order` and `chat`, for Agent2Agent clients. `forward` is the
 same function as for MCP, aimed at `/a2a`. The engine's `fetch` and `EngineApi.fetch` hand it to
@@ -137,7 +152,7 @@ Push notifications (`push.ts`) keep their configs in `push_configs` and a durabl
 request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<A2AAgent name>)`,
 the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
 `A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
-changed. See [A2A endpoint](/reference/a2a/#push-notifications).
+changed. See [A2A endpoint](https://docs.orderloop.io/reference/a2a/#push-notifications).
 
 ## Bindings
 
@@ -154,7 +169,7 @@ changed. See [A2A endpoint](/reference/a2a/#push-notifications).
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
 
-Variables and secrets are listed in [Configuration](/reference/configuration/).
+Variables and secrets are listed in [Configuration](configuration.md).
 
 ## Connectors
 
@@ -176,7 +191,7 @@ Two rules hold for every connector:
   refunds more than was captured or charged. Stock changes (`reserveInventory`'s holds and
   `restock`) go through the `stock_movements` ledger, which records each change and applies it to
   `products` (or, with a `location_id`, a store's `location_stock` row) in one batch, once. A hold is written only while the stock is still free. Capture flips its authorization to `captured` and records the capture in one batch, and a retried capture returns the one already recorded.
-- **After a continue-as-new, keys gain the generation.** The ids above embed the effect key, `${nodeId}#${run}@g${generation}` from generation 2 on (see [OrderLoop Workflow](/internals/workflow/#step-names)).
+- **After a continue-as-new, keys gain the generation.** The ids above embed the effect key, `${nodeId}#${run}@g${generation}` from generation 2 on (see [OrderLoop Workflow](workflow.md#step-names)).
 - **Compensations are idempotent.** `releaseInventory` releases only `held` reservations (each
   release is a ledger movement, so a cancel racing a rollback releases once),
   `voidAuthorizations` voids only `authorized` payments (a void racing a capture leaves exactly
@@ -197,7 +212,7 @@ To exercise failure paths, set `meta.simulate` on the order input:
 | `three_way_mismatch` | `commerce.three_way_match` sees an invoice 10% over the order total |
 
 Documents go to R2 through `storeDocument` at `orders/<orderId>/<kind>/<name>` and are indexed in
-the `documents` table (see [Data model](/internals/data-model/#r2-documents)).
+the `documents` table (see [Data model](data-model.md#r2-documents)).
 
 ## Scheduled replenishment
 
@@ -234,6 +249,47 @@ directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
 assistant`. Every tool re-reads the person's session first (`livePrincipal` in
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
-deterministic fallback in `assistant/model.ts`. See [The assistant](/guides/assistant/).
+deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.io/guides/assistant/).
 
-See [OrderLoop Workflow](/internals/workflow/) and [OrderAgent](/internals/order-agent/).
+The `AssistantAgent` instance is named after the person's user id, which the web app sets from the
+session whatever the browser asks for. Everyone signed in with the shared `APP_PASSWORD` shares one
+instance (as does open local development).
+
+## AI calls
+
+Every AI node except Assess, and the copilot, go through `runJson` (`apps/engine/src/ai.ts`):
+`response_format: json_schema`, temperature `0.2`, `max_tokens` 2048, a 20-second cap
+(`AI_TIMEOUT_MS`), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
+non-conforming answer is treated like an error. On `AI_MODE=mock`, an error, a timeout or an empty
+answer, each node's heuristic runs and the output records `source: "heuristic"`. Extract order and
+Summarize send at most the first 20,000 characters.
+
+Assess calls Clef directly (`assess` in `apps/engine/src/clef.ts`, `ASSESS_MODEL`) with the fixed
+body `model: "clef"`, `state`, `questions`, `images`; same cap and `AI_MODE` fallback. Answers go through `clampAnswers`
+(`packages/core/src/assess.ts`). Images are embedded inside the step: R2 keys under
+`orders/<orderId>/` only, `https` URLs, or `data:` URLs.
+
+The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_change`) fills missing
+config from catalog defaults, gives edges ids, keeps existing positions and re-runs layout only when
+nodes were added, then returns `validateGraph`'s errors and warnings with the graph. Every model
+call, the assistant's and Assess's included, goes through AI Gateway when `AI_GATEWAY_ID` is set.
+User-facing behaviour: [AI nodes and the assistant](https://docs.orderloop.io/guides/ai/).
+
+## Template seeding
+
+`seedFlows` (`packages/db/src/flows.ts`) publishes each template in `TEMPLATES`
+(`packages/core/src/templates.ts`) whose exact JSON has never been published as a version of that
+flow: a new template as version 1, a changed one as the next version. It runs:
+
+- in the web app, through `ensureSeeded()` (`apps/web/app/lib/flows.server.ts`), the first time an
+  isolate lists or loads flows (dashboard, `/flows`, a flow page, `GET /api/v1/flows`) or starts an
+  order (New order form, `POST /api/v1/orders`, signed `POST /api/v1/webhooks/orders`);
+- in the engine, through `ensureTemplates()` (`apps/engine/src/flows.ts`), before `Replenish`
+  starts a replenishment order.
+
+A template that matches any earlier published version is left alone, so code still running from
+before a change can't roll a newer version back, and seeding twice publishes once. The dashboard's
+demo scenarios are `SCENARIOS` in `apps/web/app/lib/scenarios.ts`; the docs page
+[Built-in flows](https://docs.orderloop.io/guides/templates/) describes them.
+
+See [OrderLoop Workflow](workflow.md) and [OrderAgent](order-agent.md).

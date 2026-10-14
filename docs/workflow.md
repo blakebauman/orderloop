@@ -1,7 +1,6 @@
----
-title: OrderLoop Workflow
-description: How one generic Workflow interprets a pinned flow version durably, with deterministic step names, saga rollback and continue-as-new.
----
+# OrderLoop Workflow
+
+How one generic Workflow interprets a pinned flow version durably, with deterministic step names, saga rollback and continue-as-new.
 
 `OrderLoop` (`apps/engine/src/workflow.ts`, Workflow `orderloop-order`, binding `ORDER_LOOP`)
 interprets every flow. One instance runs one order generation; its params are `OrderLoopParams`:
@@ -11,7 +10,7 @@ interprets every flow. One instance runs one order generation; its params are `O
 
 1. **`load-flow`** step: loads the pinned `FlowVersion` from D1 (`loadFlowVersion`). A missing
    version throws `NonRetryableError`.
-2. Builds the plan (`initPlan`) and the [run context](/reference/expressions/): `order`, `nodes: {}`,
+2. Builds the plan (`initPlan`) and the [run context](https://docs.orderloop.io/reference/expressions/): `order`, `nodes: {}`,
    `vars` from params, `input` = `order.meta`, and `now` = the event's timestamp, not the wall
    clock, so it replays identically.
 3. Reports a `running` snapshot to the agent.
@@ -105,7 +104,7 @@ Two kinds of report go to `OrderAgent.report` (types in `apps/engine/src/agent.t
   same key instead of appending, so a retried step does not duplicate history.
 
 Report failures are logged and swallowed: the UI must never fail an order. See
-[OrderAgent](/internals/order-agent/#reports).
+[OrderAgent](order-agent.md#reports).
 
 ## Rollback
 
@@ -126,7 +125,7 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 Each runs with `{ retries: { limit: 3, delay: '10 seconds', backoff: 'linear' }, timeout: '2 minutes' }`
 and reports the node `rolled_back`. A failed report is logged, not thrown, so Workflows never reruns a compensation that already ran. When the instance fails (an End node with outcome `failed`, or a
 thrown node) Workflows runs the compensations in reverse order. The agent then polls the instance
-to record the rollback outcome (see [OrderAgent](/internals/order-agent/#rollback-outcome)).
+to record the rollback outcome (see [OrderAgent](order-agent.md#rollback-outcome)).
 
 Cancelling does not go through rollback: the agent terminates the instance and calls
 `compensateOrder` directly.
@@ -141,7 +140,7 @@ for that key not yet `delivered`. The step throws while any are pending, so Work
 when retries run out the error is swallowed, the rows stay `failed`, and the order carries on.
 
 Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`; see
-[Outbound webhooks](/guides/outbound-webhooks/).
+[Outbound webhooks](https://docs.orderloop.io/guides/outbound-webhooks/).
 
 ## Continue as new
 

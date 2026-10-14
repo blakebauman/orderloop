@@ -1,6 +1,6 @@
 ---
 name: docs-sync
-description: Keep the Starlight docs in apps/docs true to Order Loop's code after a change. Use when a change touches a documented surface (node catalog, planner, Workflow, OrderAgent, REST API, webhooks, D1 schema, wrangler config, Ledger tokens), when the docs-drift hook fires, or when docs look stale. Maps changed files to pages, separates generated reference pages from hand-written prose, and verifies with the docs build.
+description: Keep the Starlight docs in apps/docs and the maintainer docs in docs/ true to Order Loop's code after a change. Use when a change touches a documented surface (node catalog, planner, Workflow, OrderAgent, REST API, webhooks, D1 schema, wrangler config, Ledger tokens), when the docs-drift hook fires, or when docs look stale. Maps changed files to pages, separates generated reference pages from hand-written prose, and verifies with the docs build.
 license: MIT
 metadata:
   repo: orderloop
@@ -10,7 +10,10 @@ metadata:
 
 The docs are `apps/docs` (`@orderloop/docs`): Starlight on Astro, static output, served by the
 `orderloop-docs` static-assets Worker at `docs.orderloop.io`. They document Order Loop as it is at
-this commit, for operators (Start, Guides, Reference) and contributors (Internals).
+this commit, for the people who use a workspace and the developers who integrate with one (Start,
+Guides, Reference). How OrderLoop is built, configured, deployed and tested is in the repo-root
+`docs/` folder (plain Markdown, unpublished); keep it in step the same way. The `docs-page` skill
+says which material goes where.
 
 ## What syncs itself, and what doesn't
 
@@ -29,8 +32,9 @@ this commit, for operators (Start, Guides, Reference) and contributors (Internal
 Rebuilding refreshes these. But the prose *around* them still makes claims (a node's behaviour, a
 branch name used in an example, a default quoted in a sentence), and those are yours to check.
 
-**Hand-written, so they drift:** everything else in `src/content/`, plus `src/styles/brand.css`
-(the app's components carried into Starlight) and `DESIGN.md`, which describes them.
+**Hand-written, so they drift:** everything else in `src/content/`, every page in `docs/`, plus
+`src/styles/brand.css` (the app's components carried into Starlight) and `DESIGN.md`, which
+describes them.
 
 ## Procedure
 

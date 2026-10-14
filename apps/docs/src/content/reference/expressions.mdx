@@ -7,7 +7,7 @@ import Values from '../../components/Values.astro';
 
 Node configs hold data, not code. Conditions are [JSON Logic](https://jsonlogic.com) expressions and
 text fields interpolate `{{path}}` templates, so a flow is safe to store, to diff and to accept from
-the copilot. Both are evaluated by `packages/core/src/logic.ts`.
+the copilot.
 
 ## The run context
 
@@ -19,7 +19,7 @@ Every expression and template sees one object:
 | `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
 | `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
 | `input` | The order's `meta` |
-| `now` | When this Workflow run started, in epoch milliseconds |
+| `now` | When the current run started, in epoch milliseconds |
 
 ## JSON Logic
 
@@ -45,7 +45,8 @@ OrderLoop adds three operations:
 A condition is true by JSON Logic's truthiness: empty arrays, `0`, `""` and `null` are false. A plain
 value (a number, `true`) is its own result, which is why Loop's default `while` is `true`.
 
-Expressions that read the clock run inside a step, so a replay sees the same value.
+A node's result, including any clock it read, is recorded once, so an order that resumes or
+retries later sees the same value.
 
 ## Text templates
 
@@ -93,7 +94,7 @@ characters other than letters and digits replaced by `_`: `return.requested` bec
 ## Policy rules
 
 The [Policy check](/reference/nodes/#commerce.policy) node's `rules` field is a list of rule
-objects, checked by `packages/core/src/policy.ts`. Every rule runs, and the node takes `fail` with
+objects. Every rule runs, and the node takes `fail` with
 every failure listed (in `vars.policyFailures`), so a customer hears about all of them at once. The
 rule names are <Values of="policy-rules" />.
 
@@ -119,7 +120,7 @@ rule names are <Values of="policy-rules" />.
 
 [Validate address](/reference/nodes/#commerce.address_validate) reads `order.meta.shipTo` as an
 object with `line1`, `city`, `postalCode` and `country`, and optionally `name`, `line2` and
-`region`. `checkAddress` in `packages/core/src/address.ts` trims and collapses whitespace, maps
+`region`. The node trims and collapses whitespace, maps
 country names to two-letter codes (`"usa"` → `US`, `"UK"` → `GB`), and requires a state or province
 for `US`, `CA` and `AU`, accepting the full name (`"Illinois"` → `IL`). It formats postcodes for `US`
 (`627011234` → `62701-1234`), `CA` (`M5V 3L9`), `GB` (`SW1A 2AA`), `AU` and `DE`; other countries
@@ -133,51 +134,48 @@ problem in its summary and output, including a missing or free-text ship-to.
 
 ## Pricing chain
 
-[Price lines](/reference/nodes/#commerce.price) prices each line through a chain of sources in
-`price_sources`, lowest `priority` first. The seeded chain is price books (`10`, stops), contract
-prices (`20`, stops) and volume tiers (`30`, keeps going), with list price (`products.price`) as the
-fallback. `resolvePrice` in `packages/core/src/pricing.ts`:
+[Price lines](/reference/nodes/#commerce.price) prices each line through the workspace's chain of
+price sources, in priority order. The default chain is price books (stops when one matches),
+contract prices (stops) and volume tiers (keeps going), with the product's list price as the
+fallback. The back office shows the chain in order; your administrator maintains its entries.
 
-1. For each active source in order, finds its entries that match the line and takes the lowest
-   price among them, so the deepest volume tier wins.
-2. Adds that price as a candidate. If the source has `stop_processing`, the chain ends there.
-3. Gives the line the lowest candidate, or the list price when no source matched.
+1. For each active source in order, the node finds its entries that match the line and takes the
+   lowest price among them, so the deepest volume tier wins.
+2. It adds that price as a candidate. If the source stops processing, the chain ends there.
+3. It gives the line the lowest candidate, or the list price when no source matched.
 
-A matching contract price therefore wins even above list price, and with the seeded priorities a
-customer's contract is reached before a cheaper volume tier. Entries in `price_rules` (price books
-and volume tiers) match when every scope they set fits: `sku`, `customer_id`, `customer_tier`,
-`min_qty` (the line's quantity), and the `starts_at`/`ends_at` window. Each sets either a fixed
-`price` or `discount_pct` off the list price. Contract prices are the rows in `contract_prices` for
-the order's customer.
+A matching contract price therefore wins even above list price, and with the default priorities a
+customer's contract is reached before a cheaper volume tier. Price-book and volume-tier entries
+match when every scope they set fits: SKU, customer, customer tier, minimum quantity (the line's
+quantity) and a start/end window. Each sets either a fixed price or a percentage off the list
+price. Contract prices are the customer's agreed prices per SKU.
 
 The node's `useContracts` and `usePriceRules` fields drop the contract source or the price-book and
 volume sources for that node. A line with its own `unitPrice` keeps it. The node's `basis` field picks the source: `auto` prices buy-side
-models (procurement, replenishment) at `products.cost` without the chain and every other model through it,
+models (procurement, replenishment) at the product's cost without the chain and every other model through it,
 `chain` and `cost` force one or the other (see [Commerce models](/guides/commerce-models/#pricing)). The node's output lists each line's
-`unitPrice`, the source (`by`) and the entry (`rule`), and its summary counts lines per source. The
-back office shows the chain in order.
+`unitPrice`, the source (`by`) and the entry (`rule`), and its summary counts lines per source.
 
 ## Currency
 
-An order's `currency` is any code with a row in `fx_rates`; the REST API answers `400` for one
-without. Prices, price rules, credit limits, balances, budgets and reports are in the base currency,
-`USD` (`BASE_CURRENCY` in core). Price lines reads the rate (units of the order's currency per one
-USD), converts each base price at it, and stores it on the order as `fxRate` and on the `orders` row
-as `fx_rate`, so later rate changes never reprice the order. A `unitPrice` given on the order is
+An order's `currency` is any code the workspace has an exchange rate for; the REST API answers
+`400` for one without. Prices, price rules, credit limits, balances, budgets and reports are in the
+base currency, `USD`. Price lines reads the rate (units of the order's currency per one USD),
+converts each base price at it, and stores it on the order as `fxRate`, so later rate changes never
+reprice the order. A `unitPrice` given on the order is
 already in the order's currency. Totals carry `baseTotal`, the total in USD.
 
 - Amounts on the order, its documents, payments and refunds are in the order's currency.
 - Credit check and budget check compare `baseTotal`; the credit check reports in the order's
   currency, and an unpaid invoice to a business customer adds `baseTotal` to their balance.
-- The dashboard converts at each order's `fx_rate`, so its figures are in USD.
+- The dashboard converts at each order's `fxRate`, so its figures are in USD.
 - `order.total` in an expression is in the order's currency; use `order.baseTotal` for a threshold
   that should hold across currencies. Policy rule amounts compare `order.total`.
 
-The seeded rates (`EUR` 0.92, `GBP` 0.79, `CAD` 1.37) are demo values; a real deployment refreshes
-`fx_rates` from a rates provider.
+The back office lists the workspace's rates; your administrator keeps them current.
 
 ## Durations
 
 Fields of kind `duration` are a whole number and a unit: `second`, `minute`, `hour`, `day`, `week`,
-`month` (30 days) or `year` (365 days), singular or plural: `"30 seconds"`, `"2 days"`. In the
-engine every wait and timeout is divided by `TIME_SCALE` and never drops below one second.
+`month` (30 days) or `year` (365 days), singular or plural: `"30 seconds"`, `"2 days"`. No wait or
+timeout is shorter than one second.

@@ -1,6 +1,6 @@
 ---
 name: docs-page
-description: Add or restructure a page in the Order Loop docs (apps/docs). Use when a new feature, node family or API surface needs its own page, or when a page should split or move. Covers where the page goes, frontmatter, sidebar registration, the generated components, the writing voice and the checks.
+description: Add or restructure a page in the Order Loop docs (the apps/docs site, or the unpublished maintainer docs in docs/). Use when a new feature, node family or API surface needs its own page, or when a page should split or move. Covers where the page goes, frontmatter, sidebar registration, the generated components, the writing voice and the checks.
 license: MIT
 metadata:
   repo: orderloop
@@ -8,19 +8,39 @@ metadata:
 
 # Adding a docs page
 
+## Who it is for
+
+The published site is for two readers: people who use a workspace at `orderloop.io` (build flows,
+run orders, decide approvals, manage the team) and developers who integrate another system with one
+(REST API, signed webhooks, channel adapters, email intake, MCP, A2A). It is not for people who
+deploy, configure or develop OrderLoop.
+
+Material only someone with the source or a Cloudflare account needs goes in the repo-root `docs/`
+folder instead: plain Markdown, not published, indexed by `docs/README.md`. That covers source
+paths and function names, bindings, env vars and secrets, `wrangler`, D1 tables, R2 keys, Workflow
+and Durable Object mechanics, deploys, CI and local development. On the site, describe a deployment
+setting by what it does and say the workspace administrator sets it (for example "the workspace's
+signing secret"), never by its variable name.
+
 ## Where it goes
 
 | Section | Directory | For |
 |---|---|---|
-| Start | `src/content/start/` | Reading in order: install, concepts, deploy |
+| Start | `src/content/start/` | Reading in order: getting started, concepts |
 | Guides | `src/content/guides/` | A task or a feature, end to end |
-| Reference | `src/content/reference/` | Things you look up: routes, nodes, fields, settings |
-| Internals | `src/content/internals/` | How it works, for contributors; name the source files |
+| Reference | `src/content/reference/` | Things you look up: routes, nodes, fields, expressions |
+| Maintainer docs | `docs/` (repo root) | How it is built, configured, deployed and tested; name the source files |
+
+A maintainer page is a `docs/<slug>.md` with an `#` title and a one-line summary under it, a row in
+`docs/README.md`, and relative links between maintainer pages; it links site pages as
+`https://docs.orderloop.io/…/`. Site pages never link into `docs/`.
 
 Before adding a page, check whether the content belongs as a section of an existing one. A new
 page earns its place when it has its own reader and its own question.
 
 ## Steps
+
+For a site page:
 
 1. Create `src/content/<section>/<slug>.mdx` with frontmatter:
 
@@ -59,7 +79,8 @@ source. The one exception is `src/pages/openapi.json.ts`, which builds the OpenA
 ## Voice
 
 - Dense and factual, present tense, second person where an instruction needs one.
-- Identifiers, paths, routes and values in backticks. Paths are repo-relative.
+- Identifiers, routes and values in backticks. On the site, name routes, fields, headers and
+  values a reader can see or send, not source files; in `docs/`, paths are repo-relative.
 - Sentence-case headings. No marketing words ("powerful", "seamless", "simply").
 - Say what happens and why, then stop. A table beats a paragraph listing five fields.
 - Examples are real: ids from the seeded data (`cus_ada`, `tpl-storefront-order`, `MON-27`, `cus_northwind`, `tpl-b2b-order`, `WID-100`), across more than one commerce model, real

@@ -22,7 +22,7 @@ routing and the UI use the channels; they do not restrict which orders run on th
 ## Channels
 
 Channels: <Values of="order-channels" />. `input.channel` defaults to `api`. The dashboard starts
-orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the Replenish Workflow as
+orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the daily stock review as
 `schedule`. Storefronts, marketplaces and POS systems send orders with a signed webhook; see
 [Inbound orders](/guides/inbound-orders/), and Shopify webhooks and EDI X12 850 purchase orders (channel `edi`, label EDI, `b2b`) arrive through [Channel adapters](/guides/channel-adapters/). Orders on `pos` run the point-of-sale flow, `tpl-pos-sale`, for the `b2c` and `d2c` models. `GET /api/v1/orders` filters on `model` and `channel`
 (see [REST API](/reference/rest-api/#list-orders)).
@@ -39,7 +39,7 @@ The [Price](/reference/nodes/#commerce.price) node's `basis` field makes that ex
 |---|---|
 | `auto` (default) | At cost for buy-side models, through the chain otherwise |
 | `chain` | Through the pricing chain, whatever the model |
-| `cost` | At `products.cost` |
+| `cost` | At the product's cost |
 
 A line with its own `unitPrice` keeps it under every basis.
 
@@ -57,9 +57,9 @@ Besides `customerId`, `currency`, `lines` and `meta`, the input takes:
 
 All of these are on the run context's `order` (see [Expressions](/reference/expressions/#the-run-context)),
 so a condition can branch on `order.model`, `order.channel` or `order.fulfillment.method`. The
-`orders` index stores `model`, `channel`, `external_id` and `contact_email`
-([data model](/internals/data-model/)), and the [outbound webhook](/guides/outbound-webhooks/) order
-summary carries `model`, `channel` and `externalId`.
+order list filters on `model` and `channel` and searches `externalId` and the contact email, and the
+[outbound webhook](/guides/outbound-webhooks/) order summary carries `model`, `channel` and
+`externalId`.
 
 Customers have a `kind`: `business`, `consumer` or `internal`.
 
