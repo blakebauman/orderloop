@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+  # One pnpm workspace: the root lockfile and the catalog in pnpm-workspace.yaml cover every
+  # package under apps/ and packages/.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch bumps land as one weekly PR. Majors stay one PR each so a breaking
+      # change can be reviewed (and reverted) on its own.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned: 5.0.4's module cache breaks @cloudflare/vitest-plugin (see CLAUDE.md).
+      - dependency-name: vitest
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
