@@ -11,12 +11,19 @@ import {
   validateGraph,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@orderloop/ui/dropdown-menu';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   FlaskConical,
   MessageSquareText,
   Redo2,
@@ -282,30 +289,41 @@ export default function FlowEditor() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <fieldset className="flex flex-wrap items-center gap-1 text-xs">
-              <legend className="sr-only">Channels</legend>
-              {ORDER_CHANNELS.map((c) => (
-                <label
-                  key={c}
-                  className="cursor-pointer rounded-sm border px-1.5 py-0.5 text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:checked]:font-medium has-[:checked]:text-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
-                >
-                  <input
-                    type="checkbox"
-                    className="sr-only"
+            {/* Channels are metadata for routing; one control instead of a row of toggles. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex h-8 max-w-72 items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-xs hover:bg-accent">
+                <span className="text-muted-foreground">Channels:</span>
+                <span className="truncate">
+                  {flow.channels.length
+                    ? flow.channels.map((c) => ORDER_CHANNEL_LABELS[c]).join(', ')
+                    : 'None'}
+                </span>
+                <ChevronDown
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                {ORDER_CHANNELS.map((c) => (
+                  <DropdownMenuCheckboxItem
+                    key={c}
                     checked={flow.channels.includes(c)}
-                    onChange={(e) =>
+                    // Stay open so several channels can be set in one go.
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(on) =>
                       setFlow({
                         ...flow,
-                        channels: e.target.checked
+                        channels: on
                           ? ORDER_CHANNELS.filter((x) => x === c || flow.channels.includes(x))
                           : flow.channels.filter((x) => x !== c),
                       })
                     }
-                  />
-                  {ORDER_CHANNEL_LABELS[c]}
-                </label>
-              ))}
-            </fieldset>
+                  >
+                    {ORDER_CHANNEL_LABELS[c]}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* Also why Publish is off: disabled buttons show no tooltip. */}
             <span id={publishStatusId} className="text-muted-foreground text-xs">
               {published ? `Published v${published}` : 'Not published'}

@@ -30,7 +30,7 @@ export function Performance({ p }: { p: Figures }) {
                       <div className="h-1 rounded-full bg-ok" style={{ width: pct(rate) }} />
                     </div>
                     <div className="mt-0.5 text-muted-foreground text-xs tabular">
-                      {c.completed} of {c.finished} finished
+                      {c.completed} of {c.finished} ended orders completed
                     </div>
                   </li>
                 );

@@ -1,4 +1,9 @@
-import { BASE_CURRENCY, type OrderState } from '@orderloop/core';
+import {
+  BASE_CURRENCY,
+  ORDER_MODEL_LABELS,
+  type OrderModel,
+  type OrderState,
+} from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Mail, RefreshCw, Zap } from 'lucide-react';
 import { Form, Link, useFetcher, useLoaderData, useNavigation } from 'react-router';
@@ -6,6 +11,7 @@ import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
+import { eventWaiting } from '~/lib/events';
 import { count, humanize, money, orderRef } from '~/lib/format';
 import { backOffice, recentInboundEmails, waitingOrders } from '~/lib/orders.server';
 import { useCan } from '~/lib/use-me';
@@ -35,7 +41,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .filter((w) => w.kind === 'event')
         .map((w) => ({
           orderId: s.orderId!,
-          title: s.order?.title ?? '',
+          title: s.order?.title || (s.order ? ORDER_MODEL_LABELS[s.order.model as OrderModel] : ''),
           event: w.event!,
           nodeId: w.nodeId,
         })),
@@ -363,8 +369,7 @@ function EventRow({ e }: { e: { orderId: string; title: string; event: string } 
         <span className="font-mono font-normal text-muted-foreground text-xs">
           {orderRef(e.orderId)}
         </span>{' '}
-        <span className="text-muted-foreground">waits for</span>{' '}
-        <span className="font-mono">{e.event}</span>
+        <span className="text-muted-foreground">waits for {eventWaiting(e.event)}</span>
         {f.data?.error ? (
           <p className="mt-1 text-bad text-sm" role="alert">
             {f.data.error}

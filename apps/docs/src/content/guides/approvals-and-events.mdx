@@ -39,9 +39,11 @@ and a 5-second undo window. Nothing is sent until the window closes, so **Undo**
 Workflow never hears about a decision that was taken back. If you leave the page during the
 window, the pending decision is sent then.
 
-The undo window never runs past the approval's timeout. When less than five seconds are left it is
-shortened so the decision still arrives in time, and in the last moments the buttons give way to
-"Too late to decide here", so a decision can't silently lose the race with the timeout.
+Decisions close two seconds before the approval times out, so the last one still arrives in time,
+and the countdown counts to that moment. Ten seconds before, it reads "Decisions close in …" (and
+screen readers hear it once); within five seconds the undo window shortens to fit. When decisions
+close, the buttons stay in place but disabled, any note is kept, and the card says where the order
+is going: "Decisions are closed; the order is going to Decline order".
 
 The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`. For a pending row it
 shows why a person is being asked (for a credit check: how far over the limit, the limit and the
@@ -85,8 +87,10 @@ An event is delivered to whichever node is waiting for that event name. If none 
 happens and the caller is told `delivered: false`; delivering again later works once a node is
 waiting.
 
-- **Order page**: the open wait has a **Simulate `<event>`** button (payload
-  `{ "source": "dashboard", "amount": <order total> }`).
+- **Order page**: the open wait says what it waits for in plain words and has a button that
+  records it by hand, such as **Mark as collected** for `pickup.collected` or **Record payment** for
+  `payment.received` (payload `{ "source": "dashboard", "amount": <order total> }`). The event name
+  and the API endpoint are under **For developers**.
 - **Back office**: lists orders waiting on an event (up to 20), each with a **Send `<event>`** button (payload
   `{ "source": "back-office" }`).
 - **REST API**, with an API token of the `operator` role:

@@ -1,4 +1,5 @@
 import type { NodeStatus, OrderStatus } from '@orderloop/core';
+import { eventShort } from './events';
 
 export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
   pending: 'var(--idle)',
@@ -118,7 +119,10 @@ export const waitLabel = (s: string | null | undefined): string =>
     .join(' · ');
 
 const cleanWait = (s: string) =>
-  s
+  (/^Waiting for\s+[\w.]+$/i.test(s.trim())
+    ? eventShort(s.trim().replace(/^Waiting for\s+/i, ''))
+    : s
+  )
     .replace(/^Waiting for\s+/i, '')
     .replace(/\s+for\s+cus_[\w-]+/g, '')
     .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')

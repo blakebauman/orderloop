@@ -112,7 +112,7 @@ function Inner({
   onAddNode,
   className,
 }: FlowCanvasProps) {
-  const { fitView, screenToFlowPosition } = useReactFlow();
+  const { fitView, screenToFlowPosition, setViewport, getNodesBounds } = useReactFlow();
   const { resolved: colorMode } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const graphRef = useRef(graph);
@@ -216,6 +216,7 @@ function Inner({
   const runsRef = useRef(runs);
   runsRef.current = runs;
 
+  const wrapRef = useRef<HTMLDivElement>(null);
   /** Frame the live step(s); with none, the first few columns from the trigger. */
   const frame = useCallback(
     (animate = false) => {
@@ -233,6 +234,29 @@ function Inner({
         )
         .map((n) => n.id);
       const start = g.nodes.find((n) => n.type.startsWith('trigger.'));
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const duration = animate && !reduce ? 300 : 0;
+      // Nothing to follow: open on the trigger and what comes after it, anchored at the left edge
+      // so the first step is never cut off when the columns don't fit at a readable zoom.
+      if (!live.length && !stopped.length && !ended.length && start && wrapRef.current) {
+        const ids = g.nodes
+          .filter((n) => n.position.x <= start.position.x + 3 * 280)
+          .map((n) => n.id);
+        const b = getNodesBounds(ids);
+        const w = wrapRef.current.clientWidth;
+        const h = wrapRef.current.clientHeight;
+        if (b.width > 0 && w > 0) {
+          const zoom = Math.min(
+            1,
+            Math.max(0.7, Math.min((w - 48) / b.width, (h - 48) / b.height)),
+          );
+          void setViewport(
+            { x: 24 - b.x * zoom, y: h / 2 - (b.y + b.height / 2) * zoom, zoom },
+            { duration },
+          );
+          return;
+        }
+      }
       const focus = live.length
         ? live
         : stopped.length
@@ -242,21 +266,19 @@ function Inner({
             : start
               ? g.nodes.filter((n) => n.position.x <= start.position.x + 3 * 280).map((n) => n.id)
               : [];
-      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       void fitView({
         padding: 0.15,
         // Wide flows would shrink to illegible; keep a readable floor.
         minZoom: 0.7,
         maxZoom: 1,
-        duration: animate && !reduce ? 300 : 0,
+        duration,
         nodes: focus.length && g.nodes.length > 10 ? withNeighbours(g, focus) : undefined,
       });
     },
-    [fitView],
+    [fitView, setViewport, getNodesBounds],
   );
   // The sheet settles its size after the first frame (panels load, a phone stacks the layout,
   // the canvas expands). Until someone pans or zooms, keep the framing true to the new size.
-  const wrapRef = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {

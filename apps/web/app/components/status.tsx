@@ -45,7 +45,8 @@ const APPROVAL_COLOR: Record<string, string> = {
   pending: 'var(--wait)',
   approved: 'var(--ok)',
   rejected: 'var(--bad)',
-  escalated: 'var(--undo)',
+  // Timed out: nobody decided. Neutral, so it doesn't read as a rejection or a rollback.
+  escalated: 'var(--idle)',
 };
 
 /** Approval decisions have their own vocabulary; never borrow order statuses for them. */

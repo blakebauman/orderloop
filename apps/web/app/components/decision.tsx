@@ -17,6 +17,13 @@ import { useNow } from '~/lib/use-now';
 const UNDO_MS = 5000;
 /** Time a decision needs to reach the order before its step times out. */
 const SEND_MS = 1500;
+/** Decisions close this long before the deadline, so the last one still arrives in time. */
+const LOCK_LEAD_MS = SEND_MS + 500;
+/** How long before closing the countdown warns that decisions are about to close. */
+const WARN_MS = 10_000;
+
+/** When decisions on an approval close: a little before its step times out. */
+export const lockAt = (deadline: number) => deadline - LOCK_LEAD_MS;
 
 export type Decision = 'approved' | 'rejected';
 
@@ -31,21 +38,23 @@ export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; clas
       {ctx.facts.length || ctx.deadline ? (
         <p className="mt-0.5 text-muted-foreground text-xs tabular">
           {ctx.facts.join(' · ')}
-          {ctx.facts.length && ctx.deadline ? ' · ' : ''}
-          {ctx.deadline ? (
-            <span
-              className={cn(ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait')}
-              title={formatTime(ctx.deadline)}
-              suppressHydrationWarning
-            >
-              {ctx.onTimeout
-                ? until(ctx.deadline, now) === 'overdue'
-                  ? `Going to ${ctx.onTimeout} now`
-                  : `If no one decides ${until(ctx.deadline, now)}: ${ctx.onTimeout}`
-                : until(ctx.deadline, now) === 'overdue'
-                  ? 'Times out now'
-                  : `Times out ${until(ctx.deadline, now)}`}
-            </span>
+          {/* The clock counts to when decisions close, the moment that matters to the person
+              deciding; once closed, the controls say what happens next. */}
+          {ctx.deadline && lockAt(ctx.deadline) > now ? (
+            <>
+              {ctx.facts.length ? ' · ' : ''}
+              <span
+                className={cn(ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait')}
+                title={formatTime(ctx.deadline)}
+                suppressHydrationWarning
+              >
+                {lockAt(ctx.deadline) - now <= WARN_MS
+                  ? `Decisions close ${until(lockAt(ctx.deadline), now)}${ctx.onTimeout ? `, then ${ctx.onTimeout}` : ''}`
+                  : ctx.onTimeout
+                    ? `If no one decides ${until(lockAt(ctx.deadline), now)}: ${ctx.onTimeout}`
+                    : `Times out ${until(lockAt(ctx.deadline), now)}`}
+              </span>
+            </>
           ) : null}
         </p>
       ) : null}
@@ -93,12 +102,31 @@ export function DecisionControls({
   // Near the deadline, tick so the controls lock before a decision could arrive too late.
   const nearDeadline = deadline !== undefined && deadline - Date.now() < UNDO_MS + 60_000;
   const now = useNow(pending ? 250 : nearDeadline ? 1000 : null);
-  /** The undo window a decision made at `at` gets, or null when it could no longer arrive in time. */
+  /** The undo window a decision made at `at` gets, or null once decisions have closed. */
   const windowFor = (at: number) => {
     if (deadline === undefined) return UNDO_MS;
-    const ms = Math.min(UNDO_MS, deadline - at - SEND_MS);
-    return ms >= 500 ? ms : null;
+    if (at > lockAt(deadline)) return null;
+    return Math.min(UNDO_MS, deadline - at - SEND_MS);
   };
+  const locked = deadline !== undefined && now > lockAt(deadline);
+  const warning = deadline !== undefined && !locked && lockAt(deadline) - now <= WARN_MS;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const closedRef = useRef<HTMLParagraphElement>(null);
+  // When decisions close under someone's focus, hand it to the message that says why. Track focus
+  // ourselves: the browser drops it from a control the moment that control is disabled.
+  const focusWithin = useRef(false);
+  useEffect(() => {
+    // Focus moving anywhere fires focusin; focus dropped because a control was disabled doesn't,
+    // so the last place it went still tells us whether it was in this card.
+    const onIn = (e: FocusEvent) => {
+      focusWithin.current = !!rootRef.current?.contains(e.target as Node);
+    };
+    document.addEventListener('focusin', onIn);
+    return () => document.removeEventListener('focusin', onIn);
+  }, []);
+  useEffect(() => {
+    if (locked && focusWithin.current) closedRef.current?.focus();
+  }, [locked]);
   const decide = (decision: Decision) => {
     const at = Date.now();
     const ms = windowFor(at);
@@ -198,15 +226,52 @@ export function DecisionControls({
     );
   }
 
-  if (windowFor(now) === null) {
-    return (
-      <p className="font-medium text-sm text-wait" role="status">
-        Too late to decide here: the step is timing out
-        {onTimeout ? ` and the order goes to ${onTimeout}` : ''}.
-      </p>
-    );
-  }
+  // Closed decisions keep the controls (and any note) in place, disabled, under one line that
+  // says what happens next. Ten seconds before, screen readers hear it once.
+  return (
+    <div ref={rootRef} className="space-y-2">
+      {locked ? (
+        <p
+          ref={closedRef}
+          tabIndex={-1}
+          role="status"
+          className="font-medium text-sm text-wait outline-none"
+        >
+          Decisions are closed;{' '}
+          {onTimeout ? `the order is going to ${onTimeout}` : 'the step is timing out'}.
+        </p>
+      ) : (
+        <span className="sr-only" aria-live="polite">
+          {warning ? 'Ten seconds left to decide.' : ''}
+        </span>
+      )}
+      <DecisionForm
+        compact={compact}
+        noteId={noteId}
+        note={note}
+        setNote={setNote}
+        disabled={disabled || locked}
+        decide={decide}
+      />
+    </div>
+  );
+}
 
+function DecisionForm({
+  compact,
+  noteId,
+  note,
+  setNote,
+  disabled,
+  decide,
+}: {
+  compact?: boolean;
+  noteId: string;
+  note: string;
+  setNote: (note: string) => void;
+  disabled?: boolean;
+  decide: (decision: Decision) => void;
+}) {
   return (
     <div className={cn('flex flex-wrap items-center gap-2', compact && 'sm:flex-nowrap')}>
       <label htmlFor={noteId} className="sr-only">

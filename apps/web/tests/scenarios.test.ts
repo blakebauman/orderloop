@@ -26,8 +26,10 @@ describe('format', () => {
     expect(waitLabel('Approve B2B order ord_mv6r5qrzvb6sbz for ')).toBe('Approve B2B order');
     expect(waitLabel('Approve B2B order ord_mv6r5qrzvb6sbz')).toBe('Approve B2B order');
     expect(waitLabel('Waiting for payment.received · Approve B2B order ord_x1 for ')).toBe(
-      'payment.received · Approve B2B order',
+      'Payment · Approve B2B order',
     );
+    // An event a custom flow invents keeps its own name.
+    expect(waitLabel('Waiting for invoice.signed')).toBe('invoice.signed');
   });
 
   it('formats money and relative time', () => {
