@@ -18,6 +18,7 @@ import {
 } from '@a2a-js/sdk';
 import { TaskNotCancelableError } from '@a2a-js/sdk/errors';
 import {
+  DefaultExecutionEventBusManager,
   DefaultRequestHandler,
   JsonRpcTransportHandler,
   ServerCallContext,
@@ -32,6 +33,7 @@ import {
 import { Refused } from '../assistant/data';
 import { runTool } from '../assistant/tools';
 import { OrderLoopExecutor, PrincipalUser, principalOf } from './executor';
+import { PushSender, SqlPushStore } from './push';
 import { isTerminal, SqlTaskStore } from './store';
 
 // The handler reads the card only for capabilities and input modes; the public card, with this
@@ -44,8 +46,10 @@ class A2AHandler extends DefaultRequestHandler {
     private readonly env: Env,
     private readonly store: SqlTaskStore,
     executor: OrderLoopExecutor,
+    pushStore: SqlPushStore,
+    push: PushSender,
   ) {
-    super(CARD, store, executor);
+    super(CARD, store, executor, new DefaultExecutionEventBusManager(), pushStore, push);
   }
 
   override async cancelTask(params: CancelTaskRequest, context: ServerCallContext): Promise<Task> {
@@ -71,13 +75,51 @@ class A2AHandler extends DefaultRequestHandler {
 
 export class A2AAgent extends DurableObject<Env> {
   private readonly transport: JsonRpcTransportHandler;
+  private readonly store: SqlTaskStore;
+  private readonly push: PushSender;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    const store = new SqlTaskStore(ctx.storage.sql, env);
+    // route.ts reaches this object by name (getByName), so the id carries it.
+    const name = ctx.id.name;
+    if (!name) throw new Error('A2AAgent must be addressed by name');
+    this.store = new SqlTaskStore(ctx.storage.sql, env, name);
+    const pushStore = new SqlPushStore(ctx.storage.sql);
+    this.push = new PushSender(ctx.storage, pushStore);
     this.transport = new JsonRpcTransportHandler(
-      new A2AHandler(env, store, new OrderLoopExecutor(env, store)),
+      new A2AHandler(env, this.store, new OrderLoopExecutor(env, this.store), pushStore, this.push),
     );
+  }
+
+  /**
+   * An order this caller's tasks follow has moved (OrderAgent.notifyWatchers). Each task it
+   * changed is pushed as a status update; a task already showing that state sends nothing, so a
+   * repeated call is harmless.
+   */
+  async orderChanged(orderId: string): Promise<void> {
+    for (const { task, changed } of await this.store.following(orderId)) {
+      if (!changed || !task.status) continue;
+      await this.push.send(
+        {
+          payload: {
+            $case: 'statusUpdate',
+            value: {
+              taskId: task.id,
+              contextId: task.contextId,
+              status: task.status,
+              metadata: undefined,
+            },
+          },
+        },
+        undefined,
+        task,
+      );
+    }
+  }
+
+  /** Retries push notifications that are due. */
+  override async alarm(): Promise<void> {
+    await this.push.deliver();
   }
 
   override async fetch(request: Request): Promise<Response> {

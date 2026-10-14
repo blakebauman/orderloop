@@ -1,6 +1,6 @@
 /** Request bodies for /api/v1. Shared by the handlers and the OpenAPI document. */
 
-import { OUTBOUND_EVENTS } from '@orderloop/core';
+import { isWebhookUrl, OUTBOUND_EVENTS, WEBHOOK_URL_RULE } from '@orderloop/core';
 import { z } from 'zod';
 
 export const eventSchema = z.object({
@@ -9,16 +9,8 @@ export const eventSchema = z.object({
   payload: z.record(z.string(), z.unknown()).optional(),
 });
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-
 export const subscriptionInput = z.object({
-  url: z
-    .string()
-    .url()
-    .refine((u) => {
-      const { protocol, hostname } = new URL(u);
-      return protocol === 'https:' || (protocol === 'http:' && LOCAL_HOSTS.has(hostname));
-    }, 'Use an https URL (plain http is allowed only for localhost)'),
+  url: z.string().url().refine(isWebhookUrl, WEBHOOK_URL_RULE),
   events: z
     .array(z.enum(['*', ...OUTBOUND_EVENTS]))
     .min(1)

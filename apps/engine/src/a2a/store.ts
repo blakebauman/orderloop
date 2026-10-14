@@ -32,9 +32,14 @@ type Row = { json: string; order_id: string | null };
 const SELECT = 'SELECT t.json, l.order_id FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id';
 
 export class SqlTaskStore implements TaskStore {
+  /**
+   * `watcher` is the owning A2AAgent's name: the OrderAgent of a followed order tells it when the
+   * order moves, so its tasks change (and push) after the request that started them has ended.
+   */
   constructor(
     private readonly sql: SqlStorage,
     private readonly env: Env,
+    private readonly watcher: string,
   ) {
     sql.exec(`CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
@@ -69,7 +74,7 @@ export class SqlTaskStore implements TaskStore {
 
   async load(taskId: string, _context?: ServerCallContext): Promise<Task | undefined> {
     const row = this.sql.exec<Row>(`${SELECT} WHERE t.id = ?`, taskId).toArray()[0];
-    return row ? this.current(row) : undefined;
+    return row ? (await this.read(row)).task : undefined;
   }
 
   async list(params: ListTasksRequest, _context?: ServerCallContext): Promise<ListTasksResponse> {
@@ -97,7 +102,7 @@ export class SqlTaskStore implements TaskStore {
         offset,
       )
       .toArray();
-    const tasks = await Promise.all(rows.map((r) => this.current(r)));
+    const tasks = await Promise.all(rows.map(async (r) => (await this.read(r)).task));
     const next = offset + rows.length;
     return {
       tasks,
@@ -115,14 +120,21 @@ export class SqlTaskStore implements TaskStore {
       .map((r) => Task.fromJSON(JSON.parse(r.json)));
   }
 
-  /** Makes a task follow an order. */
-  follow(taskId: string, orderId: string) {
+  /** Makes a task follow an order, and asks the order to say when it moves. */
+  async follow(taskId: string, orderId: string) {
     this.sql.exec(
       `INSERT INTO task_links (task_id, order_id) VALUES (?, ?)
        ON CONFLICT (task_id) DO UPDATE SET order_id = excluded.order_id`,
       taskId,
       orderId,
     );
+    await this.env.ORDER_AGENT.getByName(orderId).watch(this.watcher);
+  }
+
+  /** The unfinished tasks following an order, each read through it, and whether that changed it. */
+  async following(orderId: string): Promise<{ task: Task; changed: boolean }[]> {
+    const rows = this.sql.exec<Row>(`${SELECT} WHERE l.order_id = ?`, orderId).toArray();
+    return Promise.all(rows.map((r) => this.read(r)));
   }
 
   orderOf(taskId: string): string | null {
@@ -153,17 +165,18 @@ export class SqlTaskStore implements TaskStore {
   }
 
   /** The stored task, with an unfinished order's state read from the order itself. */
-  private async current(row: Row): Promise<Task> {
+  private async read(row: Row): Promise<{ task: Task; changed: boolean }> {
     const task = Task.fromJSON(JSON.parse(row.json));
-    if (!row.order_id || isTerminal(task)) return task;
+    if (!row.order_id || isTerminal(task)) return { task, changed: false };
     const s = await snapshot(this.env, row.order_id);
-    if (!s) return task;
+    if (!s) return { task, changed: false };
     const { state, text } = orderTaskState(s);
     const status = agentStatus(task, state, text);
-    if (status.state === task.status?.state && sameText(status, task.status)) return task;
+    if (status.state === task.status?.state && sameText(status, task.status))
+      return { task, changed: false };
     const updated = { ...task, status };
     await this.save(updated);
-    return updated;
+    return { task: updated, changed: true };
   }
 }
 

@@ -169,7 +169,7 @@ export class OrderLoopExecutor implements AgentExecutor {
     if ('mismatch' in result)
       throw new Refused('This message id already placed a different order. Use a new message id.');
     bus.publish(dataArtifact(ids, 'order', result));
-    this.store.follow(ids.taskId, result.orderId);
+    await this.store.follow(ids.taskId, result.orderId);
     return result.orderId;
   }
 
@@ -193,7 +193,7 @@ export class OrderLoopExecutor implements AgentExecutor {
     const result = await runTool(this.env, p, name, input, { via: 'A2A' });
     bus.publish(dataArtifact(ids, name, result));
     if (target) {
-      this.store.follow(ids.taskId, target);
+      await this.store.follow(ids.taskId, target);
       return target;
     }
     bus.publish(statusEvent(ids, 'TASK_STATE_COMPLETED'));

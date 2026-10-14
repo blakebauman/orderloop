@@ -1,4 +1,4 @@
-import { introspectWorkflow } from 'cloudflare:test';
+import { introspectWorkflow, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { AgentCard } from '@a2a-js/sdk';
 import {
@@ -9,7 +9,7 @@ import {
   PRINCIPAL_HEADER,
   type Principal,
 } from '@orderloop/core';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
@@ -115,6 +115,7 @@ describe('A2A', () => {
       protocolVersion: '1.0',
     });
     expect(card.capabilities?.streaming).toBe(true);
+    expect(card.capabilities?.pushNotifications).toBe(true);
     expect(card.skills.map((s) => s.id)).toEqual(
       expect.arrayContaining(['chat', 'place_order', 'find_orders', 'decide_approval']),
     );
@@ -291,5 +292,177 @@ describe('A2A', () => {
     expect(JSON.stringify(waits)).not.toContain('"nodeId": "approval"');
     expect(events.some((e) => e.result?.statusUpdate)).toBe(true);
     expect(events.every((e) => !e.error)).toBe(true);
+  });
+});
+
+describe('A2A push notifications', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  type Push = { url: string; headers: Headers; body: Json };
+  /** Captures outbound POSTs; `fail` answers 500 for the first N to each URL. */
+  function receiver(fail = 0) {
+    const received: Push[] = [];
+    const tries = new Map<string, number>();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      const n = (tries.get(u) ?? 0) + 1;
+      tries.set(u, n);
+      if (n <= fail) return new Response('nope', { status: 500 });
+      received.push({
+        url: u,
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)) as Json,
+      });
+      return new Response('ok');
+    });
+    return received;
+  }
+  const states = (pushes: Push[], taskId: string) =>
+    pushes
+      .map((p) => p.body.statusUpdate ?? p.body.task)
+      .filter((u) => u && (u.taskId ?? u.id) === taskId)
+      .map((u) => u.status?.state as string);
+
+  it('pushes a task’s updates, including after the request has ended', async () => {
+    const received = receiver();
+    await fastWorkflows();
+    const op = person('operator', 'push@example.com');
+    const placed = (
+      await call(op, 'SendMessage', {
+        ...message([
+          { data: { skill: 'place_order', input: { flowId: 'tpl-b2b-order', input: b2b } } },
+        ]),
+        configuration: {
+          taskPushNotificationConfig: { url: 'https://hooks.example/a2a', token: 'tok_1' },
+        },
+      })
+    ).result!.task as Json;
+    const orderId = placed.artifacts[0].parts[0].data.orderId as string;
+    await until(
+      async () => states(received, placed.id).includes('TASK_STATE_INPUT_REQUIRED'),
+      'the push for the approval',
+    );
+    const first = received.find((p) => p.url === 'https://hooks.example/a2a')!;
+    expect(first.headers.get('x-a2a-notification-token')).toBe('tok_1');
+    expect(first.headers.get('content-type')).toContain('application/a2a+json');
+
+    // The request is over. The approval is decided elsewhere (the order page), and the task's
+    // URL still hears about it.
+    const before = received.length;
+    const wait = (await state(orderId)).waits.find((w) => w.kind === 'approval')!;
+    await env.ORDER_AGENT.getByName(orderId).decide(wait.nodeId, 'approved', 'someone@example.com');
+    await until(
+      async () => received.slice(before).some((p) => p.body.statusUpdate?.taskId === placed.id),
+      'a push after the request ended',
+    );
+    const later = received.slice(before).map((p) => p.body.statusUpdate?.status);
+    expect(JSON.stringify(later)).not.toContain('Approve B2B order');
+    // Every update is pushed once: no state and line repeats back to back.
+    const lines = received
+      .map((p) => p.body.statusUpdate ?? p.body.task)
+      .filter((u) => u && (u.taskId ?? u.id) === placed.id)
+      .map((u) => `${u.status?.state} ${JSON.stringify(u.status?.message?.parts ?? [])}`);
+    expect(lines.filter((l, i) => i > 0 && l === lines[i - 1])).toEqual([]);
+  });
+
+  it('manages push configs with the config methods, and refuses unsafe URLs', async () => {
+    receiver();
+    const viewer = person('viewer', 'cfg@example.com');
+    const task = await send(viewer, [{ data: { skill: 'list_flows' } }]);
+    const created = await call(viewer, 'CreateTaskPushNotificationConfig', {
+      taskId: task.id,
+      url: 'https://hooks.example/cfg',
+      authentication: { scheme: 'Bearer', credentials: 's3cret' },
+    });
+    expect(created.result?.id).toBeTruthy();
+    const listed = await call(viewer, 'ListTaskPushNotificationConfigs', { taskId: task.id });
+    expect(listed.result?.configs).toHaveLength(1);
+    expect(listed.result?.configs[0]).toMatchObject({ url: 'https://hooks.example/cfg' });
+
+    const unsafe = await call(viewer, 'CreateTaskPushNotificationConfig', {
+      taskId: task.id,
+      url: 'http://hooks.example/plain',
+    });
+    expect(unsafe.error?.message).toContain('https');
+
+    await call(viewer, 'DeleteTaskPushNotificationConfig', {
+      taskId: task.id,
+      id: created.result!.id,
+    });
+    const after = await call(viewer, 'ListTaskPushNotificationConfigs', { taskId: task.id });
+    expect(after.result?.configs ?? []).toHaveLength(0);
+  });
+
+  it('sends the configured authentication, and retries a failing receiver', async () => {
+    const received = receiver(1);
+    const viewer = person('viewer', 'retry@example.com');
+    const t = await call(viewer, 'SendMessage', {
+      ...message([{ data: { skill: 'list_flows' } }]),
+      configuration: {
+        taskPushNotificationConfig: {
+          url: 'https://hooks.example/retry',
+          authentication: { scheme: 'Bearer', credentials: 'abc' },
+        },
+      },
+    });
+    const taskId = (t.result!.task as Json).id as string;
+    const stub = env.A2A_AGENT.getByName(`user:${viewer.id}`);
+    // The first try failed; make the retry due now and run the alarm.
+    await until(
+      async () =>
+        runInDurableObject(stub, async (_i, state) => {
+          const rows = state.storage.sql
+            .exec<{ attempts: number }>('SELECT attempts FROM push_outbox WHERE attempts > 0')
+            .toArray();
+          if (!rows.length) return false;
+          state.storage.sql.exec('UPDATE push_outbox SET next_at = 0');
+          return true;
+        }),
+      'a failed first try',
+    );
+    await runDurableObjectAlarm(stub);
+    await until(async () => states(received, taskId).length > 0, 'the retried push');
+    expect(received[0]!.headers.get('authorization')).toBe('Bearer abc');
+    await until(
+      async () =>
+        runInDurableObject(
+          stub,
+          async (_i, state) =>
+            state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM push_outbox').one()
+              .n === 0,
+        ),
+      'the outbox to empty',
+    );
+  });
+
+  it('drops what is still queued when a config is deleted', async () => {
+    const received = receiver(Number.POSITIVE_INFINITY);
+    const viewer = person('viewer', 'drop@example.com');
+    const t = await call(viewer, 'SendMessage', {
+      ...message([{ data: { skill: 'list_flows' } }]),
+      configuration: { taskPushNotificationConfig: { url: 'https://hooks.example/drop' } },
+    });
+    const taskId = (t.result!.task as Json).id as string;
+    const stub = env.A2A_AGENT.getByName(`user:${viewer.id}`);
+    const queued = () =>
+      runInDurableObject(
+        stub,
+        async (_i, state) =>
+          state.storage.sql
+            .exec<{ n: number }>("SELECT count(*) AS n FROM push_outbox WHERE status = 'pending'")
+            .one().n,
+      );
+    await until(async () => (await queued()) === 4, 'every update queued after failing');
+    const [config] = (await call(viewer, 'ListTaskPushNotificationConfigs', { taskId })).result!
+      .configs as Json[];
+    await call(viewer, 'DeleteTaskPushNotificationConfig', { taskId, id: config!.id });
+    expect(await queued()).toBe(0);
+    vi.restoreAllMocks();
+    const after = receiver();
+    await runDurableObjectAlarm(stub);
+    expect(after).toHaveLength(0);
+    expect(received).toHaveLength(0);
   });
 });
