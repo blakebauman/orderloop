@@ -8,14 +8,14 @@ web
 
 ## Users
 
-- **Order-operations staff at B2B sellers and distributors** (primary). They watch live orders, clear approvals, deliver business events, cancel or unstick orders, and draw or adjust the flows that orders run on. Each person has a role: `viewer` reads, `approver` also decides approvals, `operator` does everything else.
-- **Customer service.** Answers buyers' "where is my order" questions from live order state.
+- **Order-operations staff at any business that sells or buys** (primary): B2B sellers and distributors, retailers and direct-to-consumer brands with stores, marketplace operators, subscription businesses, and procurement teams. They watch live orders, clear approvals, deliver business events, cancel or unstick orders, and draw or adjust the flows that orders run on. Each person has a role: `viewer` reads, `approver` also decides approvals, `operator` does everything else.
+- **Customer service and store staff.** Answer buyers' "where is my order" questions from live order state, and hand over pickups and till sales.
 - **Managers.** Oversee throughput, exceptions and what is waiting on whom.
-- **Developers.** Integrate through the REST API (`/api/v1`, bearer tokens with the same roles), webhooks/events and email intake.
+- **Developers.** Integrate storefronts, marketplaces, POS systems and back offices through the REST API (`/api/v1`, bearer tokens with the same roles), signed inbound orders and events, outbound webhooks and email intake.
 
 ## Product Purpose
 
-OrderLoop runs every commerce order (purchase requests, B2B orders, reorders, subscriptions) as a durable agent loop from intake to outcome. Each loop is a flow graph drawn in the editor and interpreted by one generic Workflow on Cloudflare. Success means orders reach their outcome without a person chasing them. People step in only where a flow asks for them (approvals, events, exceptions), and when they do, they can see exactly where an order is and why.
+OrderLoop runs every commerce order, whatever the model (B2B, B2C, direct to consumer, marketplace, subscription, procurement, replenishment) and whatever the channel (web, mobile, POS, marketplace, email, API), as a durable agent loop from intake to outcome. Each loop is a flow graph drawn in the editor and interpreted by one generic Workflow on Cloudflare. Success means orders reach their outcome without a person chasing them. People step in only where a flow asks for them (approvals, events, exceptions), and when they do, they can see exactly where an order is and why.
 
 ## Positioning
 
@@ -23,8 +23,8 @@ Flows are data: an order pins an immutable flow version, and the live order view
 
 ## Operating Context
 
-- The surfaces are the dashboard, the orders list and live order page, the approvals inbox, flows and the flow editor (palette, canvas, inspector, copilot), the back office (mock inventory, payments, shipping, documents, outbox), the team page and the account page.
-- Orders arrive from the dashboard, the REST API, and inbound PO email (`orders@`, `po@`, `purchasing@`).
+- The surfaces are the dashboard, the orders list and live order page, the approvals inbox, flows and the flow editor (palette, canvas, inspector, copilot), the back office (mock inventory and store stock, customers, marketplace sellers, pricing, payments, shipping, documents, outbox), the team page and the account page.
+- Orders arrive from the dashboard, the REST API, signed inbound orders from storefronts, marketplaces and POS systems (`POST /api/v1/webhooks/orders`), and inbound email (`orders@`, `po@`, `purchasing@`). Each order has a commerce model and a channel.
 - Live order state syncs over a WebSocket from each order's agent. Actions (approve, reject, deliver event, cancel, chat) travel on the same socket.
 - AI exists today in two places. The **flow-editor copilot** drafts or edits a flow graph from a prompt and returns an explanation plus validation issues. The **per-order Chat tab** answers from order state through tools and prepares approve, reject and cancel actions, which a person confirms on the order page with the usual undo window.
 
@@ -45,7 +45,7 @@ Flows are data: an order pins an immutable flow version, and the live order view
 
 ## Evidence on Hand
 
-- Seeded flow templates and scenarios (for example `tpl-b2b-order`, customer `cus_northwind`, SKU `WID-100`), plus `meta.simulate` failure paths: `out_of_stock`, `payment_decline`, `charge_fail`, `three_way_mismatch`.
+- Seeded flow templates and scenarios across the models (for example `tpl-storefront-order` with a guest checkout, `tpl-omnichannel-order` with pickup at `loc_soho`, `tpl-pos-sale`, `tpl-marketplace-order` with sellers `sel_brightside` and `sel_kettle`, and `tpl-b2b-order` with customer `cus_northwind` and SKU `WID-100`), plus `meta.simulate` failure paths: `out_of_stock`, `payment_decline`, `charge_fail`, `three_way_mismatch`.
 - No real customers, testimonials or usage metrics exist. Do not fabricate them.
 
 ## Product Principles
