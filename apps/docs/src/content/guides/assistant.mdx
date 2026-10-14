@@ -104,6 +104,13 @@ A reply from the fallback is labelled **Answered without the language model, fro
 It understands plain requests ("what needs attention", "add a risk score after
 credit check"), not open questions. See [AI nodes and the assistant](/guides/ai/).
 
+## Over MCP
+
+The same tools are served to MCP clients such as Claude, Claude Code and Cursor at `/mcp`, with the
+same roles. There is no confirm card: the client asks, using each tool's annotations, and the
+engine still re-checks the role and the state before it acts. Writes are recorded as
+`<email> via MCP`. See [MCP server](/reference/mcp/).
+
 ## Privacy
 
 Each person has one assistant and one conversation, kept in a Durable Object (`AssistantAgent`)

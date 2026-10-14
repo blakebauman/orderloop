@@ -62,6 +62,11 @@ created; they are not configuration.
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
+| `OAUTH_KV` | web | KV namespace for [MCP](/reference/mcp/) OAuth clients, grants and tokens (tokens hashed, grant data encrypted). `wrangler.jsonc` gives no id; the namespace is provisioned on deploy |
+
+The web Worker's compatibility flags are `nodejs_compat` and `global_fetch_strictly_public`. The
+second keeps fetches of an MCP client's Client ID Metadata Document (an https `client_id`) to the
+public internet.
 
 ## Routes and hostnames
 

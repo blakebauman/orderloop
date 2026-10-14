@@ -4,6 +4,8 @@ export default [
   route('login', 'routes/login.tsx'),
   route('login/two-factor', 'routes/login-two-factor.tsx'),
   route('logout', 'routes/logout.ts'),
+  // The consent page MCP clients send people to (lib/oauth.server.ts).
+  route('oauth/authorize', 'routes/oauth-authorize.tsx'),
   layout('routes/shell.tsx', [
     index('routes/dashboard.tsx'),
     route('orders', 'routes/orders.tsx'),

@@ -14,13 +14,18 @@ import type {
 } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { copilot } from './ai';
+import { handleMcp, MCP_PATH } from './mcp';
 import { startOrder, startOrderOnce } from './orders';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
-  /** The web app proxies the order page's OrderAgent WebSocket (`/agents/order-agent/:id`) here. */
+  /**
+   * The web app proxies the agent WebSockets (`/agents/order-agent/:id`,
+   * `/agents/assistant-agent/:id`) and MCP (`/mcp`) here.
+   */
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-engine' });
+    if (url.pathname === MCP_PATH) return handleMcp(request);
     return (
       (await routeAgentRequest(request, this.env)) ?? new Response('Not found', { status: 404 })
     );

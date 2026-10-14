@@ -33,6 +33,8 @@ export const AUDIT_ACTIONS = {
   'api.bearer_failed': 'API: wrong shared password',
   'api.bearer_throttled': 'API refused: too many wrong shared passwords',
   'api.token_expired': 'API refused: expired token',
+  'oauth.app_connected': 'Connected an app over MCP',
+  'oauth.app_disconnected': 'Disconnected an app',
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -43,6 +45,7 @@ export const AUDIT_GROUPS = {
   team: 'Team',
   token: 'API tokens',
   api: 'API access',
+  oauth: 'Connected apps',
 } as const;
 
 export type AuditGroup = keyof typeof AUDIT_GROUPS;

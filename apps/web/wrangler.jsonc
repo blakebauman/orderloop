@@ -3,7 +3,9 @@
   "name": "orderloop-web",
   "main": "./workers/app.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: MCP clients that identify by a Client ID Metadata Document
+  // (an https client_id) are fetched from the public internet only.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
   "upload_source_maps": true,
   "routes": [{ "pattern": "orderloop.io", "custom_domain": true }],
@@ -18,6 +20,9 @@
   // Same bucket as the engine: the web app serves invoices, POs and inbound documents from it.
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
   "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }],
+  // OAuth for MCP clients (@cloudflare/workers-oauth-provider): registered clients, grants and
+  // tokens (hashed; props encrypted). No id: the namespace is created on first deploy.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
   "vars": {
     // Inbound orders: JSON from "model:channel" or "model:*" to a flow id. Anything not routed
     // starts the model's default template.

@@ -1,11 +1,13 @@
-import { ROLE_LABELS } from '@orderloop/core';
+import { isRole, ROLE_LABELS } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { data, Form, useActionData, useFetcher, useLoaderData } from 'react-router';
 import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
 import { PageHeader, Section } from '~/components/page';
+import { audit } from '~/lib/audit.server';
 import { requireUser, sessionId } from '~/lib/auth.server';
+import { oauthApi } from '~/lib/oauth.server';
 import {
   changeOwnPassword,
   endOtherSessions,
@@ -27,11 +29,18 @@ export const meta = () => [{ title: 'Account · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  const [sessions, twoFactor] = await Promise.all([
+  const [sessions, twoFactor, grants] = await Promise.all([
     ownSessions(me, await sessionId(request)),
     twoFactorStatus(me),
+    oauthApi(request).listUserGrants(me.id),
   ]);
-  return { me, sessions, twoFactor };
+  const apps = grants.items.map((g) => ({
+    id: g.id,
+    name: String(g.metadata?.app ?? g.clientId),
+    role: g.scope.find(isRole) ?? 'viewer',
+    createdAt: g.createdAt * 1000,
+  }));
+  return { me, sessions, twoFactor, apps };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -46,6 +55,17 @@ export async function action({ request }: Route.ActionArgs) {
         return { ended: 1 };
       case 'end-others':
         return { ended: await endOtherSessions(request, me, current) };
+      case 'disconnect-app': {
+        const oauth = oauthApi(request);
+        const grant = (await oauth.listUserGrants(me.id)).items.find((g) => g.id === str('ref'));
+        if (!grant) throw new TeamError('That app is no longer connected.');
+        await oauth.revokeGrant(grant.id, me.id);
+        await audit(request, 'oauth.app_disconnected', {
+          actor: me,
+          target: String(grant.metadata?.app ?? grant.clientId),
+        });
+        return { disconnected: 1 };
+      }
       case 'two-factor-start':
         if (me.kind !== 'user')
           throw new TeamError('Only people with their own sign-in can use two-factor sign-in.');
@@ -87,7 +107,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Account() {
-  const { me, sessions, twoFactor } = useLoaderData<typeof loader>();
+  const { me, sessions, twoFactor, apps } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const end = useFetcher<typeof action>();
   const formatTime = useDateTime();
@@ -212,6 +232,34 @@ export default function Account() {
               ) : null}
             </Section>
           ) : null}
+          <Section title="Connected apps" className="mt-6" flush>
+            {apps.length ? (
+              <ul className="divide-y text-sm">
+                {apps.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">{a.name}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
+                      </div>
+                    </div>
+                    <end.Form method="post">
+                      <input type="hidden" name="intent" value="disconnect-app" />
+                      <input type="hidden" name="ref" value={a.id} />
+                      <Button size="sm" variant="ghost" disabled={end.state !== 'idle'}>
+                        Disconnect
+                      </Button>
+                    </end.Form>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="px-4 py-2.5 text-muted-foreground text-sm">
+                No apps are connected. MCP clients such as Claude connect at{' '}
+                <code className="font-mono">/mcp</code> and ask you here to approve them.
+              </p>
+            )}
+          </Section>
         </div>
       </div>
     </>

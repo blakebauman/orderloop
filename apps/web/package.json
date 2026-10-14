@@ -18,6 +18,7 @@
   "dependencies": {
     "@ai-sdk/react": "catalog:",
     "@cloudflare/ai-chat": "catalog:",
+    "@cloudflare/workers-oauth-provider": "^1.2.3",
     "@orderloop/core": "workspace:*",
     "@orderloop/db": "workspace:*",
     "@orderloop/ui": "workspace:*",

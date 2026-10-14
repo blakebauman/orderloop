@@ -2,7 +2,7 @@
  * What the assistant reads and does, independent of the model. Every function takes the caller as
  * they are now and refuses what their role doesn't allow, so a tool can never do more than the
  * person asking could do themselves. Writes go through the same agents and helpers the pages use;
- * the audit trail names the person, "via assistant".
+ * the audit trail names the person and the channel: "via assistant" or "via MCP".
  */
 
 import {
@@ -48,8 +48,11 @@ export function requireRole(p: Principal, tool: AssistantTool) {
   if (!atLeast(p.role, min)) throw new Refused(`This needs the ${ROLE_LABELS[min]} role.`);
 }
 
-/** How the audit trail names an act the assistant took for someone. */
-export const viaAssistant = (p: Principal) => `${p.email ?? p.name} via assistant`;
+/** Where a tool call came from: the workspace assistant, or an MCP client. */
+export type Channel = 'assistant' | 'MCP';
+
+/** How the audit trail names an act taken for someone through a channel. */
+export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
 
 export function money(n: number | null | undefined, currency = BASE_CURRENCY) {
   if (n === null || n === undefined) return '';
@@ -579,11 +582,12 @@ export async function runAction<T extends ActionTool>(
   p: Principal,
   tool: T,
   input: ActionInput[T],
+  channel: Channel = 'assistant',
 ) {
   requireRole(p, tool);
   const preview = await previewAction(env, p, tool, input);
   if (preview.blocked) throw new Refused(preview.blocked);
-  const by = viaAssistant(p);
+  const by = via(p, channel);
   switch (tool) {
     case 'decide_approval': {
       const i = input as ActionInput['decide_approval'];

@@ -122,6 +122,15 @@ old one runs out. Tokens made before expiry existed never expire. A token's role
 decide approvals but not start orders. Approval decisions made with a token are recorded as
 `token:<name>`.
 
+## Connected apps
+
+MCP clients such as Claude connect at `/mcp` and ask you to approve them on a consent page, where
+you sign in (two-factor included) and choose a role. You can grant your own role or a lower one,
+never a higher one. **Account** lists **Connected apps**, each with its role and when it
+connected, and **Disconnect** ends it. Every request from a connected app re-reads you: if you are
+disabled it stops working, and its role is the lower of what you granted and what you have now. What
+it does is recorded as `<email> via MCP`. See [MCP server](/reference/mcp/).
+
 ## Audit log
 
 Operators see security events at **Audit log** (linked from the Team page, `/audit`), newest first,
@@ -133,6 +142,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
 | Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
+| Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
 A person signing in only hears that the email and password didn't match; the reason is for
@@ -143,7 +153,7 @@ not here.
 ## Who decided
 
 An approval's `by` is the person who decided: their email for a signed-in person, `token:<name>`
-for an API token. On the order page's live connection, the agent takes the name from the
+for an API token. Through the [assistant](/guides/assistant/) or MCP it is `<email> via assistant` or `<email> via MCP`. On the order page's live connection, the agent takes the name from the
 connection, never from what the page sends; see
 [OrderAgent](/internals/order-agent/#roles-on-the-socket).
 
