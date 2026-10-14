@@ -1,0 +1,128 @@
+---
+title: Inbound orders
+description: Start orders from a storefront, marketplace, POS or other channel with a signed POST, route them to a flow, and send them safely more than once.
+---
+
+import Values from '../../components/Values.astro';
+
+Systems that take orders elsewhere (a storefront checkout, a marketplace, a till) start them with
+`POST /api/v1/webhooks/orders`. The request is signed with the web Worker's `WEBHOOK_SECRET`
+instead of carrying a token, so the sender needs no admin password. The order starts on a published
+flow and shows up in the dashboard under its channel, with the sender's id as its external id.
+
+## Payload
+
+The body is the order input from [Start an order](/reference/rest-api/#start-an-order) plus the
+fields that identify the order and pick the flow:
+
+```json
+{
+  "model": "b2c",
+  "channel": "web",
+  "externalId": "SHOP-10442",
+  "source": "shopify",
+  "customerId": "cus_ada",
+  "currency": "USD",
+  "lines": [{ "sku": "MON-27", "qty": 1 }],
+  "shipTo": { "line1": "1 Main St", "city": "Austin", "region": "TX", "postalCode": "78701", "country": "US" }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `model` | Required: one of <Values of="order-models" />. See [Commerce models](/guides/commerce-models/) |
+| `channel` | Required (no default here): one of <Values of="order-channels" /> |
+| `externalId` | Required, 1 to 200 characters: the order's id in the sending system. With `channel` it identifies the order |
+| `lines` | `{ sku, name?, qty, unitPrice?, sellerId? }`. Required unless `documentText` is sent for the [Extract order](/reference/nodes/#ai.extract) node |
+| `flowId` | Optional. Runs this flow instead of the routed one |
+| `source` | Optional, up to 60 characters. The sending system, for display (`shopify`); stored in `meta.source` |
+| `shipTo` | Optional. An address string (up to 500 characters) or `{ name?, line1, line2?, city, region?, postalCode, country }`. Stored in `meta.shipTo`, where the `no_po_box` policy rule reads it |
+| `vars` | Optional. Seeds the run's variables |
+
+The rest (`title`, `customerId`, `currency`, `contact`, `fulfillment`, `documentText`,
+`documentKey`, `meta`) are the fields of `input` in the REST API. `currency` defaults to `USD` and
+must have an exchange rate, or the request returns `400`. The server sets `meta.via` to `webhook`.
+The [Webhook trigger](/reference/nodes/#trigger.webhook) summarises the order as
+`<channel label> · <externalId> (<source>)` and outputs `{ channel, externalId, source }`.
+
+## Signing
+
+Sign the raw body exactly as for [signed events](/guides/approvals-and-events/#signed-events):
+`X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>.<raw body>")>`,
+with a timestamp within five minutes. Sign the bytes you send; re-serialising the JSON afterwards
+breaks the signature.
+
+```bash
+BODY='{"model":"b2c","channel":"web","externalId":"SHOP-10442","lines":[{"sku":"MON-27","qty":1}]}'
+T=$(date +%s)
+SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -hex | sed 's/^.* //')
+curl -X POST https://orderloop.io/api/v1/webhooks/orders \
+  -H "X-OrderLoop-Signature: t=$T,v1=$SIG" -H 'content-type: application/json' \
+  -d "$BODY"
+```
+
+From Node, `signWebhook(secret, rawBody)` in `@orderloop/core` builds the header:
+
+```ts
+import { SIGNATURE_HEADER, signWebhook } from '@orderloop/core';
+
+const body = JSON.stringify({
+  model: 'b2c',
+  channel: 'web',
+  externalId: 'SHOP-10442',
+  lines: [{ sku: 'MON-27', qty: 1 }],
+});
+const res = await fetch('https://orderloop.io/api/v1/webhooks/orders', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', [SIGNATURE_HEADER]: await signWebhook(secret, body) },
+  body,
+});
+```
+
+## Routing
+
+The flow that runs is, in order:
+
+1. The body's `flowId`.
+2. The `ORDER_ROUTES` entry for `<model>:<channel>`.
+3. The `ORDER_ROUTES` entry for `<model>:*`.
+4. The model's default [built-in flow](/guides/templates/): `tpl-b2b-order` for `b2b`,
+   `tpl-storefront-order` for `b2c`, `d2c` and `marketplace`, `tpl-subscription`,
+   `tpl-purchase-request` and `tpl-reorder` for the others.
+
+`ORDER_ROUTES` is a `vars` entry on the web Worker (see [Configuration](/reference/configuration/#web-variables)):
+a JSON object from `model:channel` or `model:*` to a flow id. Keys are lowercase; entries that are
+malformed or have an empty flow id are dropped, as is a value that isn't a JSON object.
+
+```json
+{ "b2c:pos": "flow-pos-order", "marketplace:*": "flow-marketplace-order" }
+```
+
+Here a `b2c` order from `pos` runs `flow-pos-order`, any `marketplace` order runs
+`flow-marketplace-order`, and everything else runs its model's default. A new order's flow must have
+a published version, or the request returns `409` and starts nothing. A retry of an order already
+started finds it first, so it still returns `200` after its flow is unpublished.
+
+## Idempotency
+
+`channel` and `externalId` are the idempotency key (`order:<channel>:<externalId>`), so a sender
+can retry freely. A repeat that matches the first request returns `200` with the existing order.
+The match is a fingerprint of the flow, input and `vars`: the same pair with different contents
+returns `422` and starts nothing. To change an accepted order, [deliver events](/guides/approvals-and-events/)
+to it. Changing `ORDER_ROUTES` between a request and its retry changes the flow, so that retry is a
+`422` too.
+
+## Responses
+
+| Status | Meaning |
+|---|---|
+| `201` | Started: `{ orderId, flowId }` |
+| `200` | A replay of an order already started: `{ orderId, replayed: true }` |
+| `400` | Body is not JSON, is not a valid order (with `issues`), or uses a currency with no exchange rate |
+| `401` | Missing, malformed, stale or wrong signature |
+| `409` | A new order's flow has no published version |
+| `422` | The same `channel` and `externalId` already arrived with different contents |
+| `500` | Engine error |
+| `503` | `WEBHOOK_SECRET` is not set |
+
+Errors are `{ "error": "…" }`. Treat `201` and `200` as accepted; retry on `5xx` with the same body.

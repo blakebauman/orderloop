@@ -473,6 +473,36 @@ describe('storefront order', () => {
     expect(row).toMatchObject({ channel: 'web', contactEmail: 'sam.rivera@example.com' });
   });
 
+  it('starts from an inbound order keyed by channel and external id', async () => {
+    await introspect(['window#1']);
+    const { inboundOrderSchema, toStartRequest } = await import('@orderloop/core');
+    const req = toStartRequest(
+      inboundOrderSchema.parse({
+        model: 'b2c',
+        channel: 'mobile',
+        externalId: 'app-5521',
+        source: 'shopify',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'MON-27', qty: 1 }],
+      }),
+      'tpl-storefront-order',
+    );
+    const first = await startOrderOnce(env, req);
+    if ('mismatch' in first) throw new Error('A first start cannot mismatch');
+    expect(await startOrderOnce(env, req)).toEqual({ orderId: first.orderId, replayed: true });
+    const done = await settled(first.orderId);
+    expect(done.nodes.checkout).toMatchObject({
+      status: 'succeeded',
+      summary: 'Mobile app · app-5521 (shopify)',
+    });
+    const row = await db().select().from(orders).where(eq(orders.id, first.orderId)).get();
+    expect(row).toMatchObject({
+      channel: 'mobile',
+      externalId: 'app-5521',
+      idempotencyKey: 'order:mobile:app-5521',
+    });
+  });
+
   it('refunds idempotently per step and never more than was captured', async () => {
     await introspect(['window#1']);
     const { orderId } = await startOrder(env, {

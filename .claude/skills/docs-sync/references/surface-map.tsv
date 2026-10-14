@@ -18,7 +18,8 @@
 ^apps/web/app/lib/approvals\.ts$	guides/approvals-and-events	prose
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api	gen
 ^apps/web/workers/app\.ts$	internals/architecture reference/rest-api guides/team-and-roles	prose
-^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api	gen
+^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders	gen
+^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api reference/configuration	gen
 ^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api reference/configuration start/deploy internals/architecture	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
 ^apps/web/app/lib/scenarios\.ts$	guides/templates start/getting-started	prose

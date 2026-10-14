@@ -1,6 +1,6 @@
 import { encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
-import { handleApi, handleSignedEvent } from '../app/lib/api.server';
+import { handleApi, handleSignedEvent, handleSignedOrder } from '../app/lib/api.server';
 import {
   apiPrincipal,
   principal,
@@ -26,6 +26,9 @@ export default {
     // Signed webhooks authenticate by HMAC, not by the admin password.
     if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
       return handleSignedEvent(request);
+    }
+    if (url.pathname === '/api/v1/webhooks/orders' && request.method === 'POST') {
+      return handleSignedOrder(request);
     }
 
     // A browser's state-changing requests and the order page's socket must come from this origin;

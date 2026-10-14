@@ -18,8 +18,8 @@ session cookie also works, and so does `APP_PASSWORD` as a break-glass operator)
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
 (starting, cancelling, events, webhook subscriptions) `operator`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). An open deployment (no `APP_PASSWORD`, no
-people) needs no token. Two routes are exceptions: `GET /api/v1/openapi.json` is public, and `POST /api/v1/webhooks/events` is
-authenticated by an HMAC signature instead (see [signed events](#signed-events)).
+people) needs no token. Three routes are exceptions: `GET /api/v1/openapi.json` is public, and `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
+authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
 `401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up), `429` too many wrong bearer tokens from one address (more
@@ -43,6 +43,7 @@ than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWOR
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
 | `GET` | `/api/v1/webhook-subscriptions/:id/deliveries` | | `{ deliveries }` |
 | `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }` or `409` |
+| `POST` | `/api/v1/webhooks/orders` | `{ model, channel, externalId, lines, … }` | `201 { orderId, flowId }`, or `200` on a replay |
 
 ## Flows
 
@@ -171,6 +172,16 @@ minutes from now are rejected.
 | `400` | Body is not `{ orderId, event, payload? }` |
 | `401` | Missing, malformed, stale or wrong signature |
 | `503` | `WEBHOOK_SECRET` is not set |
+
+## Signed orders
+
+`POST /api/v1/webhooks/orders` starts an order from a storefront, marketplace, POS or other
+channel, signed the same way as events. The body is `input` plus a required `channel` and
+`externalId` and optional `flowId`, `source`, `shipTo` and `vars`. The flow is `flowId`, else the
+`ORDER_ROUTES` route, else the model's default. `channel` and `externalId` are the idempotency key.
+Statuses: `201` started, `200` replay, `400` invalid body or unsupported currency, `401` bad
+signature, `409` flow not published, `422` same order with different contents, `503`
+`WEBHOOK_SECRET` not set. See [Inbound orders](/guides/inbound-orders/).
 
 ## Audit events
 

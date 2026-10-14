@@ -29,6 +29,14 @@ Set with `pnpm --filter @orderloop/engine exec wrangler secret put <NAME>`.
 |---|---|
 | `INTAKE_ALLOWLIST` | Extra senders allowed to start orders by email: addresses or `@domains`, comma-separated. Customers' own addresses and company domains are always allowed. See [Email intake](/guides/email-intake/#who-may-send) |
 
+## Web variables
+
+Set in `vars` in `apps/web/wrangler.jsonc`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ORDER_ROUTES` | `""` | Inbound orders: JSON object from `model:channel` or `model:*` to a flow id. A route that isn't set starts the model's default flow. See [Inbound orders](/guides/inbound-orders/#routing) |
+
 ## Web secrets
 
 Set with `pnpm --filter @orderloop/web exec wrangler secret put <NAME>`, or in `apps/web/.dev.vars`
@@ -37,7 +45,7 @@ for local dev (copy `apps/web/.dev.vars.example`).
 | Secret | Meaning |
 |---|---|
 | `APP_PASSWORD` | A break-glass operator: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open; see [Team and roles](/guides/team-and-roles/) |
-| `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events`. Unset answers `503` there |
+| `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events` and signed orders at `POST /api/v1/webhooks/orders`. Unset answers `503` there |
 
 Outbound webhook subscriptions each have their own secret, generated when the subscription is
 created; they are not configuration.

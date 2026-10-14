@@ -21,14 +21,19 @@
  *
  * Signed webhooks (no password; see `handleSignedEvent`):
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
+ *   POST /api/v1/webhooks/orders                { model, channel, externalId, lines, … }
  */
 
 import { env } from 'cloudflare:workers';
 import {
   atLeast,
+  flowForOrder,
+  inboundOrderSchema,
   type Principal,
+  parseOrderRoutes,
   type Role,
   SIGNATURE_HEADER,
+  toStartRequest,
   verifyWebhook,
 } from '@orderloop/core';
 import type { z } from 'zod';
@@ -180,15 +185,21 @@ async function handleSubscriptions(
  * WEBHOOK_SECRET (`X-OrderLoop-Signature: t=…,v1=…`), not the admin password. Answers 409 when no
  * node is waiting for the event yet, so a sender's retry policy delivers it later.
  */
-export async function handleSignedEvent(request: Request): Promise<Response> {
+/** The verified body of a signed webhook, or the response refusing it. */
+async function readSigned(request: Request): Promise<{ raw: string } | { refused: Response }> {
   const secret = (env as { WEBHOOK_SECRET?: string }).WEBHOOK_SECRET;
-  if (!secret) return json({ error: 'Webhooks are not configured' }, 503);
+  if (!secret) return { refused: json({ error: 'Webhooks are not configured' }, 503) };
   const raw = await request.text();
   const check = await verifyWebhook(secret, raw, request.headers.get(SIGNATURE_HEADER));
-  if (!check.ok) return json({ error: check.reason }, 401);
+  return check.ok ? { raw } : { refused: json({ error: check.reason }, 401) };
+}
+
+export async function handleSignedEvent(request: Request): Promise<Response> {
+  const signed = await readSigned(request);
+  if ('refused' in signed) return signed.refused;
   let parsed: z.infer<typeof eventSchema>;
   try {
-    parsed = eventSchema.parse(JSON.parse(raw));
+    parsed = eventSchema.parse(JSON.parse(signed.raw));
   } catch {
     return json({ error: 'Body must be { orderId, event, payload? }' }, 400);
   }
@@ -197,5 +208,50 @@ export async function handleSignedEvent(request: Request): Promise<Response> {
     return json(res, res.delivered ? 200 : 409);
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/**
+ * Starts an order from a storefront, marketplace, POS or other channel. The flow comes from the
+ * body's `flowId`, else `ORDER_ROUTES`, else the model's default template. A repeat of the same
+ * channel and external id returns the order it already started.
+ */
+export async function handleSignedOrder(request: Request): Promise<Response> {
+  const signed = await readSigned(request);
+  if ('refused' in signed) return signed.refused;
+  let body: unknown;
+  try {
+    body = JSON.parse(signed.raw);
+  } catch {
+    return json({ error: 'Body must be JSON' }, 400);
+  }
+  const parsed = inboundOrderSchema.safeParse(body);
+  if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
+  const o = parsed.data;
+  if (!(await currencies()).some((c) => c.currency === o.currency))
+    return json(
+      { error: `Unsupported currency ${o.currency}; there is no exchange rate for it` },
+      400,
+    );
+  const routes = parseOrderRoutes((env as { ORDER_ROUTES?: string }).ORDER_ROUTES);
+  const flowId = o.flowId ?? flowForOrder(o.model, o.channel, routes);
+  await ensureSeeded();
+  try {
+    // The engine replays a known channel and id before it looks at the flow, so a retry still
+    // finds its order after the flow is unpublished or the routes change.
+    const res = await engine().startOrderOnce(toStartRequest(o, flowId));
+    if ('mismatch' in res)
+      return json(
+        {
+          error: `Order ${o.externalId} on ${o.channel} was already received with different contents; send events to change it`,
+        },
+        422,
+      );
+    return res.replayed ? json(res) : json({ ...res, flowId }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('has no published version'))
+      return json({ error: `Flow ${flowId} is not published` }, 409);
+    return json({ error: message }, 500);
   }
 }
