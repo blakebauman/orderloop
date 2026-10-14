@@ -38,6 +38,7 @@ import { approvalContext } from '~/lib/approvals';
 import { useAssistant, usePageContext } from '~/lib/assistant';
 import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
+import { eventAction, eventWaiting } from '~/lib/events';
 import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
 import { customerNames, orderRecords } from '~/lib/orders.server';
 import { useDateTime } from '~/lib/use-date-time';
@@ -661,11 +662,11 @@ function Outcome({
   return (
     <div className="space-y-5">
       <section>
-        <h3 className="section-title">Where it ended</h3>
+        <h2 className="section-title">Where it ended</h2>
         <p className="mt-1 text-sm">
           {end ? (
             <>
-              At{' '}
+              <span className="text-muted-foreground">Final step:</span>{' '}
               <button
                 type="button"
                 className="font-medium underline-offset-2 hover:underline"
@@ -686,7 +687,7 @@ function Outcome({
         </p>
       </section>
       <section>
-        <h3 className="section-title">Who was told</h3>
+        <h2 className="section-title">Who was told</h2>
         {messages.length ? (
           <ul className="mt-1.5 divide-y text-sm">
             {messages.map((m) => (
@@ -792,13 +793,26 @@ function Actions({
           ) : (
             <>
               <p className="mt-1 text-muted-foreground text-xs">
-                Resumes when <span className="font-mono text-foreground">{w.event}</span> arrives
-                {w.deadline ? `, or times out ${formatTime(w.deadline)}` : ''}. Systems send it to{' '}
-                <span className="break-all font-mono">
-                  POST /api/v1/orders/{state.orderId}/events
-                </span>
-                .
+                Waiting for {eventWaiting(w.event!)}
+                {w.deadline ? `; times out ${formatTime(w.deadline)}` : ''}.
               </p>
+              {/* Connected systems send the event themselves; the API detail is for developers. */}
+              <details className="group mt-1.5 text-muted-foreground text-xs">
+                <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
+                  <ChevronRight
+                    className="size-3.5 transition-transform group-open:rotate-90"
+                    aria-hidden="true"
+                  />
+                  For developers
+                </summary>
+                <p className="mt-1">
+                  Systems send <span className="font-mono text-foreground">{w.event}</span> to{' '}
+                  <span className="break-all font-mono">
+                    POST /api/v1/orders/{state.orderId}/events
+                  </span>
+                  .
+                </p>
+              </details>
               {canOperate && w.event === 'seller.responded' ? (
                 <div className="mt-3 space-y-1.5">
                   {sellers
@@ -838,7 +852,7 @@ function Actions({
                     ])
                   }
                 >
-                  <Zap /> Simulate {w.event}
+                  {eventAction(w.event!)}
                 </Button>
               ) : null}
             </>
@@ -898,7 +912,7 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
   return (
     <div className="space-y-6 text-sm">
       <section>
-        <h3 className="section-title mb-2">Lines</h3>
+        <h2 className="section-title mb-2">Lines</h2>
         {o.lines.length ? (
           <table className="w-full">
             <thead>
@@ -955,7 +969,7 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
       </section>
       {records.documents.length ? (
         <section>
-          <h3 className="section-title mb-2">Documents</h3>
+          <h2 className="section-title mb-2">Documents</h2>
           <ul className="space-y-1">
             {records.documents.map((d) => (
               <li key={d.id}>
@@ -1029,7 +1043,7 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
   if (!rows.length) return null;
   return (
     <section>
-      <h3 className="section-title mb-2">{title}</h3>
+      <h2 className="section-title mb-2">{title}</h2>
       <table className="w-full">
         <tbody className="divide-y">
           {rows.map((r, i) => (

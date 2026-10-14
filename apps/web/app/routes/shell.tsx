@@ -12,7 +12,7 @@ import {
 } from '@orderloop/ui/dropdown-menu';
 import { cn } from '@orderloop/ui/lib/utils';
 import { eq, sql } from 'drizzle-orm';
-import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun } from 'lucide-react';
+import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun, UserRound } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLoaderData } from 'react-router';
 import { AssistantPanel } from '~/components/assistant/panel';
@@ -171,22 +171,25 @@ function ShellFrame() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="hidden size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:grid"
-                aria-label={`Theme: ${theme.choice}`}
+                aria-label={`Theme: ${THEMES.find((t) => t.value === theme.choice)?.label ?? theme.choice}`}
               >
                 <ThemeIcon className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
                 <ThemeItems value={theme.choice} onChange={theme.setChoice} />
-                {auth ? (
-                  <AccountItems me={me} />
-                ) : (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link to="/team">Set up sign-in</Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* Who is signed in, and the pages that belong to them and the team. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="hidden h-8 items-center gap-2 rounded-md border px-2 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground md:flex"
+                aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
+              >
+                <UserRound className="size-4" aria-hidden="true" />
+                <span className="max-w-32 truncate">{ROLE_LABELS[me.role]}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <AccountItems me={me} auth={auth} />
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
@@ -207,16 +210,8 @@ function ShellFrame() {
                 ))}
                 <DropdownMenuSeparator />
                 <ThemeItems value={theme.choice} onChange={theme.setChoice} />
-                {auth ? (
-                  <AccountItems me={me} />
-                ) : (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link to="/team">Set up sign-in</Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
+                <DropdownMenuSeparator />
+                <AccountItems me={me} auth={auth} />
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -254,28 +249,43 @@ function ThemeItems({
   );
 }
 
-/** Who is signed in, and where they manage their sign-in or the team. */
-function AccountItems({ me }: { me: Principal }) {
+/** How the signed-in principal is named: a person's email, else how this session got in. */
+const who = (me: Principal, auth: boolean) =>
+  me.kind === 'user' ? (me.email ?? me.name) : auth ? 'Workspace password' : 'Sign-in is off';
+
+/** Who is signed in, their account, the team and its audit log, and signing in or out. */
+function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
+  const operator = atLeast(me.role, 'operator');
   return (
     <>
-      <DropdownMenuSeparator />
       <DropdownMenuLabel className="font-normal">
-        <span className="block truncate font-medium text-sm">{me.email ?? me.name}</span>
+        <span className="block truncate font-medium text-sm">{who(me, auth)}</span>
         <span className="text-muted-foreground text-xs">{ROLE_LABELS[me.role]}</span>
       </DropdownMenuLabel>
-      {me.kind === 'user' ? (
-        <DropdownMenuItem asChild>
-          <Link to="/account">Account</Link>
-        </DropdownMenuItem>
-      ) : null}
-      {atLeast(me.role, 'operator') ? (
-        <DropdownMenuItem asChild>
-          <Link to="/team">Team</Link>
-        </DropdownMenuItem>
-      ) : null}
+      <DropdownMenuSeparator />
       <DropdownMenuItem asChild>
-        <a href="/logout">Sign out</a>
+        <Link to="/account">Account</Link>
       </DropdownMenuItem>
+      {operator ? (
+        <>
+          <DropdownMenuItem asChild>
+            <Link to="/team">Team and roles</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to="/audit">Audit log</Link>
+          </DropdownMenuItem>
+        </>
+      ) : null}
+      <DropdownMenuSeparator />
+      {auth ? (
+        <DropdownMenuItem asChild>
+          <a href="/logout">Sign out</a>
+        </DropdownMenuItem>
+      ) : operator ? (
+        <DropdownMenuItem asChild>
+          <Link to="/team">Set up sign-in</Link>
+        </DropdownMenuItem>
+      ) : null}
     </>
   );
 }

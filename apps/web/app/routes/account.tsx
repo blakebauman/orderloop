@@ -114,7 +114,16 @@ export default function Account() {
   const others = sessions.filter((x) => !x.current).length;
   return (
     <>
-      <PageHeader title="Account" subtitle={`${me.email ?? me.name} · ${ROLE_LABELS[me.role]}`} />
+      <PageHeader
+        title="Account"
+        subtitle={`${
+          me.kind === 'user'
+            ? (me.email ?? me.name)
+            : me.kind === 'open'
+              ? 'Sign-in is off'
+              : 'Workspace password'
+        } · ${ROLE_LABELS[me.role]}`}
+      />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="max-w-[560px]">
           {me.twoFactorDue ? (

@@ -650,7 +650,7 @@ function Composer({
           <ArrowUp />
         </Button>
       </div>
-      <p className="mt-1.5 text-[11px] text-muted-foreground">
+      <p className="mt-1.5 text-muted-foreground text-xs">
         Enter sends · Shift+Enter for a new line · ⌘J opens and closes
       </p>
     </form>

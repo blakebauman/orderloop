@@ -19,6 +19,8 @@ import { useEffect, useState } from 'react';
 import { statusLabel } from '~/lib/format';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
+const SHORT_HINT = 32;
+
 export function Field({
   label,
   hint,
@@ -30,11 +32,17 @@ export function Field({
 }) {
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children, inside the label
-    <label className="block">
+    <label className="block min-w-0">
       <span className="mb-1 flex items-baseline justify-between gap-2">
         <span className="caption">{label}</span>
-        {hint ? <span className="truncate text-muted-foreground text-xs">{hint}</span> : null}
+        {hint && hint.length <= SHORT_HINT ? (
+          <span className="truncate text-muted-foreground text-xs">{hint}</span>
+        ) : null}
       </span>
+      {/* A hint too long for the label's line wraps beneath it rather than being cut off. */}
+      {hint && hint.length > SHORT_HINT ? (
+        <span className="mb-1.5 block text-muted-foreground text-xs leading-snug">{hint}</span>
+      ) : null}
       {children}
     </label>
   );
@@ -69,9 +77,13 @@ export function Inspector({
             <NodeIcon name={spec.icon} className="size-4" />
           </span>
         ) : null}
+        {/* The step's own name leads; its type and what the type does sit beneath. */}
         <div className="min-w-0">
-          <div className="font-semibold text-sm">{spec?.label ?? node.type}</div>
-          <p className="text-muted-foreground text-xs leading-snug">{spec?.description}</p>
+          <div className="font-semibold text-sm">{node.label || spec?.label || node.type}</div>
+          <p className="text-muted-foreground text-xs leading-snug">
+            <span className="font-medium text-foreground/80">{spec?.label ?? node.type}</span>
+            {spec?.description ? ` · ${spec.description}` : ''}
+          </p>
         </div>
       </div>
 
@@ -179,10 +191,12 @@ function ConfigInput({
   switch (f.kind) {
     case 'boolean':
       return (
-        <div className="flex items-center justify-between gap-3">
-          <Field label={f.label} hint={f.hint}>
-            <span />
-          </Field>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <Field label={f.label} hint={f.hint}>
+              <span />
+            </Field>
+          </div>
           <Switch
             checked={Boolean(value)}
             disabled={readOnly}

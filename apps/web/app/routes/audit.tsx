@@ -104,7 +104,11 @@ export default function Audit() {
               </table>
             </div>
           ) : (
-            <Empty>Nothing recorded{group ? ' of this kind' : ''} yet.</Empty>
+            <Empty>
+              {group
+                ? 'Nothing of this kind yet.'
+                : 'Sign-ins, changes to people and tokens, and refused API calls appear here as they happen, newest first.'}
+            </Empty>
           )}
         </Section>
         {more && older ? (

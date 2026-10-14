@@ -2,8 +2,10 @@ import { ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { useState } from 'react';
 import { data, Form, Link, redirect, useActionData, useFetcher, useLoaderData } from 'react-router';
 import { Ago } from '~/components/ago';
+import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
 import { setTwoFactorRequirement, twoFactorRequirement } from '~/lib/settings.server';
@@ -108,9 +110,43 @@ export async function action({ request }: Route.ActionArgs) {
   }
 }
 
-function RoleSelect({ name = 'role', value }: { name?: string; value?: string }) {
+/** What each role may do, in the product's words. The role is the boundary for people and tokens. */
+const ROLE_GUIDE: Record<Role, string> = {
+  viewer: 'Sees every order and flow, and asks the assistant. Changes nothing.',
+  approver: 'Also decides approvals. Can’t cancel orders, deliver events or publish flows.',
+  operator:
+    'Also starts, cancels and restarts orders, delivers events, edits and publishes flows, and manages this page.',
+};
+
+function RoleGuide() {
   return (
-    <NativeSelect name={name} defaultValue={value ?? 'viewer'} className="h-8">
+    <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+      {ROLES.map((r) => (
+        <div key={r}>
+          <dt className="font-medium">{ROLE_LABELS[r]}</dt>
+          <dd className="mt-0.5 text-muted-foreground">{ROLE_GUIDE[r]}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function RoleSelect({
+  name = 'role',
+  value,
+  onChange,
+}: {
+  name?: string;
+  value?: string;
+  onChange?: (role: Role) => void;
+}) {
+  return (
+    <NativeSelect
+      name={name}
+      defaultValue={value ?? 'viewer'}
+      className="h-8 w-full"
+      onChange={(e) => onChange?.(e.target.value as Role)}
+    >
       {ROLES.map((r) => (
         <NativeSelectOption key={r} value={r}>
           {ROLE_LABELS[r]}
@@ -128,6 +164,7 @@ export default function Team() {
   const secret = shown && 'secret' in shown ? shown.secret : null;
   const error = shown && 'error' in shown ? shown.error : null;
   const busy = fetcher.state !== 'idle';
+  const [tokenRole, setTokenRole] = useState<Role>('operator');
   if (me.kind === 'open') return <FirstOperator error={error} />;
   return (
     <>
@@ -142,12 +179,9 @@ export default function Team() {
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="max-w-[1000px] space-y-6">
-          <p className="text-muted-foreground text-sm">
-            <b className="font-medium text-foreground">Viewers</b> see everything and use the ops
-            chat. <b className="font-medium text-foreground">Approvers</b> also decide approvals.{' '}
-            <b className="font-medium text-foreground">Operators</b> also start, cancel and restart
-            orders, deliver events, edit and publish flows, and manage this page.
-          </p>
+          <Section title="Roles">
+            <RoleGuide />
+          </Section>
 
           {secret ? (
             <div role="status" className="rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
@@ -259,12 +293,18 @@ export default function Team() {
             )}
             <fetcher.Form
               method="post"
-              className="grid gap-2 border-t p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]"
+              className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem_auto]"
             >
               <input type="hidden" name="intent" value="add-user" />
-              <Input name="email" type="email" required placeholder="Email" aria-label="Email" />
-              <Input name="name" placeholder="Name (optional)" aria-label="Name" />
-              <RoleSelect />
+              <Field label="Email">
+                <Input name="email" type="email" required placeholder="name@company.com" />
+              </Field>
+              <Field label="Name" hint="Optional">
+                <Input name="name" />
+              </Field>
+              <Field label="Role">
+                <RoleSelect />
+              </Field>
               <Button type="submit" disabled={busy}>
                 Add person
               </Button>
@@ -323,31 +363,36 @@ export default function Team() {
             )}
             <fetcher.Form
               method="post"
-              className="grid gap-2 border-t p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
+              className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem_auto]"
             >
               <input type="hidden" name="intent" value="add-token" />
-              <Input
-                name="name"
-                required
-                placeholder="What will use it, e.g. ERP sync"
-                aria-label="Token name"
-              />
-              <RoleSelect value="operator" />
-              <NativeSelect
-                name="lifetime"
-                defaultValue={DEFAULT_LIFETIME}
-                className="h-8"
-                aria-label="Expires after"
-              >
-                {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
-                  <NativeSelectOption key={k} value={k}>
-                    {label}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+              <Field label="Used by">
+                <Input name="name" required placeholder="e.g. ERP sync" />
+              </Field>
+              <Field label="Role">
+                <RoleSelect value="operator" onChange={setTokenRole} />
+              </Field>
+              <Field label="Expires after">
+                <NativeSelect
+                  name="lifetime"
+                  defaultValue={DEFAULT_LIFETIME}
+                  className="h-8 w-full"
+                >
+                  {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
+                    <NativeSelectOption key={k} value={k}>
+                      {label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
               <Button type="submit" disabled={busy}>
                 Create token
               </Button>
+              {/* The role is the boundary: say what this token will be able to do before it exists. */}
+              <p className="text-muted-foreground text-xs sm:col-span-4" aria-live="polite">
+                A token with the {ROLE_LABELS[tokenRole].toLowerCase()} role:{' '}
+                {ROLE_GUIDE[tokenRole].charAt(0).toLowerCase() + ROLE_GUIDE[tokenRole].slice(1)}
+              </p>
             </fetcher.Form>
           </Section>
         </div>
@@ -365,25 +410,28 @@ function FirstOperator({ error }: { error: string | null }) {
         subtitle="Anyone can use this workspace until it has a first operator."
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
-        <div className="max-w-[560px]">
+        <div className="grid max-w-[1000px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <Section title="Create your operator account">
             <Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="first-operator" />
               <p className="text-muted-foreground text-sm">
-                From then on everyone signs in, and you add people and API tokens here. Choose a
-                password of at least 10 characters.
+                From then on everyone signs in, and you add people and API tokens here.
               </p>
-              <Input name="email" type="email" required placeholder="Email" aria-label="Email" />
-              <Input name="name" placeholder="Name (optional)" aria-label="Name" />
-              <Input
-                name="password"
-                type="password"
-                required
-                minLength={10}
-                autoComplete="new-password"
-                placeholder="Password"
-                aria-label="Password"
-              />
+              <Field label="Email">
+                <Input name="email" type="email" required placeholder="name@company.com" />
+              </Field>
+              <Field label="Name" hint="Optional">
+                <Input name="name" />
+              </Field>
+              <Field label="Password" hint="At least 10 characters">
+                <Input
+                  name="password"
+                  type="password"
+                  required
+                  minLength={10}
+                  autoComplete="new-password"
+                />
+              </Field>
               {error ? (
                 <p role="alert" className="text-destructive text-sm">
                   {error}
@@ -391,6 +439,11 @@ function FirstOperator({ error }: { error: string | null }) {
               ) : null}
               <Button type="submit">Create account and sign in</Button>
             </Form>
+          </Section>
+          <Section title="Roles you can give people and tokens">
+            <div className="[&_dl]:sm:grid-cols-1">
+              <RoleGuide />
+            </div>
           </Section>
         </div>
       </div>

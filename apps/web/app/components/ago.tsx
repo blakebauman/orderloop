@@ -8,7 +8,8 @@ import { useNow } from '~/lib/use-now';
  * right after hydration, then refreshed every 30 seconds. The full time is in the tooltip.
  */
 export function Ago({ ms }: { ms: number | null | undefined }) {
-  const now = useNow(30_000);
+  // Seconds matter while something is fresh; after a minute, refresh twice a minute.
+  const now = useNow(ms && Date.now() - ms < 60_000 ? 1000 : 30_000);
   const formatTime = useDateTime();
   if (!ms) return <>{ago(ms)}</>;
   return (
