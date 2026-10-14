@@ -22,7 +22,7 @@ people) needs no token. Three routes are exceptions: `GET /api/v1/openapi.json` 
 authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
-`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up), `429` too many wrong bearer tokens from one address (more
+`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` too many wrong bearer tokens from one address (more
 than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWORD` produce; see
 `Retry-After`), `404` an unknown route or order, and `500` an engine error.
 
@@ -70,10 +70,10 @@ Idempotency-Key: po-NW-7781
 }
 ```
 
-- `flowId` names a flow with a published version. `version` pins one; it defaults to the latest.
+- `flowId` names a flow with a published version. `version` (a positive integer) pins one; it defaults to the latest.
 - `input.model` is required: one of <Values of="order-models" />. `input.channel` is one of
   <Values of="order-channels" /> and defaults to `api`. See [Commerce models](/guides/commerce-models/).
-- `input.externalId` is the order's id in its channel; `input.contact` is `{ email, name?, phone? }` for a
+- `input.title` (up to 140 characters) and `input.customerId` are optional. `input.externalId` (up to 200) is the order's id in its channel; `input.contact` is `{ email, name?, phone? }` for a
   buyer without a customer account; `input.fulfillment` is `{ method, locationId? }`.
 - `input.currency` defaults to `USD` and must have an exchange rate (`EUR`, `GBP` and `CAD` are
   seeded); another code returns `400`. See [Currency](/reference/expressions/#currency).
@@ -86,7 +86,7 @@ Idempotency-Key: po-NW-7781
   connectors; see [Built-in flows](/guides/templates/)).
 - `vars` seeds the run's variables.
 
-**Idempotency.** With an `Idempotency-Key` header (at most 255 characters), a repeat of the key
+**Idempotency.** With an `Idempotency-Key` header (at most 255 characters; longer returns `400`), a repeat of the key
 returns `200` and the order the first request created, even when two requests race. If the first
 request failed after recording the order, the repeat finishes starting it. The key is bound to a
 SHA-256 fingerprint of the body (flow, version, input and vars, ignoring property order): a repeat
@@ -117,6 +117,7 @@ renders:
 | `timeline` | Entries with `at`, `kind`, `message`, `nodeId`, `data` |
 | `instanceId`, `generation` | The Workflow instance driving the order, and its generation |
 | `rollback` | `{ outcome, error }` once a rollback has run |
+| `updatedAt` | When the state last changed (epoch milliseconds) |
 
 Node statuses are <Values of="node-statuses" />.
 
@@ -141,7 +142,7 @@ POST /api/v1/orders/ord_…/approvals/approval
 { "decision": "approved", "by": "dana@example.com", "note": "Paid down last week" }
 ```
 
-`decision` is `approved` or `rejected`; `by` defaults to `api`. The decision takes effect at once;
+`decision` is `approved` or `rejected`. A person or an API token decides as themselves (`by` is ignored); only `APP_PASSWORD` may name `by`, which defaults to `api`. The decision takes effect at once;
 the dashboard's undo window does not apply to the API.
 
 ## Cancel
@@ -169,7 +170,7 @@ minutes from now are rejected.
 |---|---|
 | `200` | Delivered: `{ delivered: true, nodeId }` |
 | `409` | No node is waiting for that event yet: `{ delivered: false }`. Retry later |
-| `400` | Body is not `{ orderId, event, payload? }` |
+| `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters) |
 | `401` | Missing, malformed, stale or wrong signature |
 | `503` | `WEBHOOK_SECRET` is not set |
 
@@ -177,16 +178,16 @@ minutes from now are rejected.
 
 `POST /api/v1/webhooks/orders` starts an order from a storefront, marketplace, POS or other
 channel, signed the same way as events. The body is `input` plus a required `channel` and
-`externalId` and optional `flowId`, `source`, `shipTo` and `vars`. The flow is `flowId`, else the
+`externalId` and optional `flowId`, `source`, `shipTo` and `vars`; it needs at least one line or `documentText`. The flow is `flowId`, else the
 `ORDER_ROUTES` route, else the model's default. `channel` and `externalId` are the idempotency key.
-Statuses: `201` started, `200` replay, `400` invalid body or unsupported currency, `401` bad
+Statuses: `201 { orderId, flowId }` started, `200 { orderId, replayed: true }` replay, `400` invalid body or unsupported currency, `401` bad
 signature, `409` flow not published, `422` same order with different contents, `503`
 `WEBHOOK_SECRET` not set. See [Inbound orders](/guides/inbound-orders/).
 
 ## Audit events
 
 `GET /api/v1/audit-events` returns the security audit log, newest first, for feeding a log
-system; it needs the `operator` role. `type` filters to `auth`, `team`, `token` or `api`; `limit` is
+system; it needs the `operator` role. `type` filters to `auth`, `team`, `token`, `api` or `oauth`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
 (an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions.
@@ -199,6 +200,20 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
   `127.0.0.1` and `[::1]`) and `events`: any of <Values of="outbound-events" />, or `["*"]`
   (the default). It returns the subscription and its `secret`, once.
 - `GET` lists subscriptions without their secrets.
-- `GET /api/v1/webhook-subscriptions/:id/deliveries` returns the latest 50 deliveries: `id`, `event`,
+- `DELETE /api/v1/webhook-subscriptions/:id` deletes one (`404` if it doesn't exist).
+- `GET /api/v1/webhook-subscriptions/:id/deliveries` returns the latest 50 deliveries, newest first: `id`, `event`,
   `orderId`, `payload`, `status` (`pending`, `delivered` or `failed`), `attempts`, `responseStatus`,
   `lastError`, `createdAt` and `deliveredAt`.
+
+## Other endpoints on the web Worker
+
+These aren't part of `/api/v1`.
+
+- `GET /health` answers `{ ok: true, service: "orderloop-web" }`, with no authentication.
+- `/mcp`, `/oauth/*` (except the `/oauth/authorize` consent page) and `/.well-known/oauth-*` are the
+  [MCP server](/reference/mcp/) and its OAuth endpoints.
+- `/agents/order-agent/:id` and `/agents/assistant-agent/:name` are the dashboard's live sockets,
+  proxied to the engine for a signed-in person. They are not a public API; the assistant route always
+  reaches the caller's own assistant.
+- `GET /docs/orders/…` serves an order's stored documents (invoices, POs, inbound documents) from R2 to
+  a signed-in person.

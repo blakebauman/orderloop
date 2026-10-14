@@ -36,7 +36,7 @@ The synced state is `OrderState` from `packages/core/src/api.ts`, plus a private
 `validateStateChange` throws for any change whose source is not the server: browsers may read
 state and call methods, never write state.
 
-`init(order, flow, instanceId)` is called once by `startOrder`: status `queued`, every node
+`init(order, flow, instanceId)` is called by `startOrder` (a repeat call with the same instance id is ignored, so a replayed start never resets a run): status `queued`, every node
 `pending`, generation 1, and a first timeline entry naming the flow and version.
 
 ## Reports
@@ -54,7 +54,7 @@ state and call methods, never write state.
 - Timeline entries with a `key` replace the entry with the same key rather than appending.
 
 After a status change or an order patch the agent writes the index row (`syncIndex`). When the
-status becomes `failed` it schedules `checkInstance`.
+status becomes `failed` it schedules `checkInstance` to run 5 seconds later.
 
 ### Node timing
 
@@ -71,7 +71,7 @@ replayed snapshots, deduped keys, new generations and sticky terminal statuses.
 ## The orders index
 
 `syncIndex` updates the order's D1 `orders` row from state: `status`, `total`, `customer_id`,
-`title`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `) and
+`title`, `fx_rate`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `) and
 `updated_at`. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
 the agent.
 
@@ -135,7 +135,7 @@ until a node is waiting for the event.
 ## Cancel
 
 `cancel` terminates the Workflow instance (logging, not failing, if that throws), runs
-`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, revoke issued digital codes), marks
+`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, cancel seller orders, reverse scheduled payouts, revoke issued digital codes), marks
 every pending approval row `cancelled`, sets status `cancelled` with the reason and clears the
 waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
 `emitWebhook` for `order.cancelled`.

@@ -25,8 +25,8 @@ authorization server, registers itself and opens OrderLoop's consent page in you
 1. Sign in as usual. Two-factor sign-in applies.
 2. Check which app is asking and where access will be sent. An app that registered itself is
    marked as unverified; an app on your own computer gets an extra warning.
-3. Choose a role. You are offered your own role and the roles below it, and the first is
-   selected. That role is the grant's scope.
+3. Choose a role. You are offered your own role and the roles below it, lowest first, and the
+   lowest (`viewer`) is selected. That role is the grant's scope.
 4. Select **Connect**. **Cancel** refuses the app.
 
 ### Claude Code

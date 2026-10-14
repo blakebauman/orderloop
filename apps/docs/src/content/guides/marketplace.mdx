@@ -6,7 +6,8 @@ description: Sellers, splitting an order by seller, seller acceptance, partial c
 import Values from '../../components/Values.astro';
 
 A `marketplace` order is sold by the operator and by third-party sellers at once. The built-in
-`tpl-marketplace-order` flow (see [Built-in flows](/guides/templates/)) splits the order into one
+`tpl-marketplace-order` flow (see [Built-in flows](/guides/templates/)) scores the order's fraud risk (a high score goes to a
+Trust & safety approval, and a refusal declines the order), authorizes the card, splits the order into one
 part per seller, waits for the sellers that must accept, ships and captures what was accepted, and
 schedules each seller's payout net of commission. The nodes are in the [node reference](/reference/nodes/):
 `commerce.split_by_seller`, `commerce.seller_accept` and `commerce.payout`.

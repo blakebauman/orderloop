@@ -43,6 +43,7 @@ inbound mail ── Email Routing ──email()───────────
 | Method | What it does |
 |---|---|
 | `startOrder(input)` | Inserts the order row, initialises its `OrderAgent`, creates generation 1 of `OrderLoop`. Honours `idempotencyKey` |
+| `startOrderOnce(input)` | Starts an order at most once per idempotency key (`POST /api/v1/orders` with an `Idempotency-Key`, signed inbound orders and email intake use it); a replay returns the existing order, or `{ mismatch: true }` for a different request |
 | `sendEvent(orderId, event, payload?)` | Delivers a business event to the node waiting for it; returns `{ delivered, nodeId? }` |
 | `decide(orderId, nodeId, decision, by, note?)` | Approves or rejects the approval a node waits on |
 | `cancel(orderId, reason)` | Terminates the Workflow and compensates |
@@ -51,7 +52,7 @@ inbound mail ── Email Routing ──email()───────────
 | `runReplenish()` | Creates a `Replenish` instance now |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `copilot` and `runReplenish` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot` and `runReplenish` forwards to the order's agent via
 `ORDER_AGENT.getByName(orderId)`. `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
@@ -66,7 +67,7 @@ engine source.
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
 | `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](/guides/inbound-orders/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
-| `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie), then `handleApi(request, caller)`, which checks each route's role |
+| `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `/mcp`, `/.well-known/oauth-*`, `/oauth/*` | `oauthProvider(origin)` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
@@ -110,6 +111,7 @@ code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<em
 | Binding | Worker | Resource |
 |---|---|---|
 | `ORDER_AGENT` | engine | Durable Object class `OrderAgent` (SQLite, migration tag `v1`) |
+| `ASSISTANT_AGENT` | engine | Durable Object class `AssistantAgent` (SQLite, migration tag `v2`) |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order`, class `OrderLoop`, `limits.steps: 10000` |
 | `REPLENISH` | engine | Workflow `orderloop-replenish`, class `Replenish`, schedule `0 6 * * *` |
 | `DB` | both | D1 `orderloop`, migrations in `packages/db/migrations` |

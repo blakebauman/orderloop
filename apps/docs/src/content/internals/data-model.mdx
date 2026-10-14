@@ -36,7 +36,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0015_session_activity.sql` | `sessions.last_seen_at`, `ip`, `user_agent` |
 | `0016_two_factor.sql` | `users.totp_secret`, `totp_enabled_at`, `totp_last_step`; `recovery_codes` and `sign_in_challenges` |
 | `0017_workspace_settings.sql` | `workspace_settings`, settings operators change in the app |
-| `0018_order_models.sql` | `flows.model` and `channels`, `orders.model`, `channel`, `external_id` and `contact_email`, `customers.kind` (replacing the single order type) |
+| `0018_order_models.sql` | Renames `flows.order_type`, `orders.type` and `node_runs.order_type` to `model`; adds `flows.channels`, `orders.channel`, `external_id` and `contact_email`, and `customers.kind`; replaces index `orders_type` with `orders_model` and adds `orders_channel_external` |
 | `0019_marketplace.sql` | `sellers`, `seller_orders`, `payouts` and `products.seller_id` |
 | `0020_fulfillment.sql` | `locations`, `location_stock`, `entitlements`; `products.kind`, `reservations.location_id`, `stock_movements.location_id`; two demo stores, digital products and store stock |
 | `0021_balance_entries.sql` | `balance_entries`, the receivables ledger |
@@ -48,7 +48,7 @@ deploying code that needs them. The engine's tests apply the same directory to t
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `model`, `channels` (JSON array), `published_version` |
+| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `description`, `model`, `channels` (JSON array), `published_version` |
 | `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at` |
 
 `publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version.
@@ -61,10 +61,11 @@ published as version 1 the first time they are needed (`ensureTemplates` in the 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
-Indexes: `orders_status (status, updated_at)`, `orders_type (type, updated_at)`, and
+Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)`,
+`orders_channel_external (channel, external_id)` where `external_id` is not null, and
 `orders_idempotency`, unique on `idempotency_key` where it is not null. `startOrder` inserts the
 row before creating anything else, so when two requests race with the same `Idempotency-Key` the
 unique index decides which one creates the order and the other returns it as `replayed`.
@@ -103,7 +104,7 @@ writes embeds its step key.
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
 
 `reservations`, `stock_movements`, `entitlements`, `payments`, `shipments`, `documents`, `messages`, `seller_orders` and `payouts` are each indexed by
-`order_id` (`<table>_order`), which is how compensation and the order page find an order's rows.
+`order_id` (`<table>_order`), which is how compensation and the order page find an order's rows. `payouts` also has `payouts_seller (seller_id, created_at)`, `balance_entries` is indexed by `balance_entries_customer (customer_id, created_at)` (it has no `order_id` index), and `price_rules` by `price_rules_source (source_id)`.
 
 ## Metrics
 

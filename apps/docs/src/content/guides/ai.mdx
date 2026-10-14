@@ -35,12 +35,12 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 
 | Node | Model task | Fallback | Result |
 |---|---|---|---|
-| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the R2 document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` by name match when the order had none; titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through |
+| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the R2 document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` by name match when the order had none; titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
 | [Classify](/reference/nodes/#ai.classify) | Pick one of `labels` with a confidence | Keyword match on the title and lines; the first label otherwise | Sets `vars.<into>` (default `category`). A label outside the list becomes the first label |
 | [Risk score](/reference/nodes/#ai.risk_score) | Score fraud and credit risk 0–100 with up to three reasons | 10, +15 for a guest (a `contact`, no customer), +30 with neither, +30 over 20,000, +20 for a line over 1,000 units | Takes `high` at or above `threshold` (default 70), else `low`; sets `vars.risk` |
-| [Demand forecast](/reference/nodes/#ai.forecast) | Suggest quantities for SKUs at or below their reorder point, over `horizonDays` | Each low SKU's `reorderQty` | Replaces the order's lines; sets `vars.supplier` from the first SKU. With nothing low it reports "Stock is healthy" without calling the model |
-| [Summarize](/reference/nodes/#ai.summarize) | Two sentences on the order and its progress | `<type> <id>: N lines, total …` | Sets `vars.<into>` (default `summary`) |
-| [Agent router](/reference/nodes/#ai.router) | Follow `instructions` and choose exactly one of `routes`, with a one-sentence reason | No lines → `ask_customer`; total over 10,000 → `needs_approval`; else the first route (each falling back to a route that exists) | Takes the chosen route as its branch; a route outside the list becomes the first route |
+| [Demand forecast](/reference/nodes/#ai.forecast) | Suggest quantities for SKUs whose available stock (stock minus reserved) is at or below their reorder point, over `horizonDays` | Each low SKU's `reorderQty` | Replaces the order's lines; sets `vars.supplier` from the first SKU. With nothing low it reports "Stock is healthy" without calling the model |
+| [Summarize](/reference/nodes/#ai.summarize) | Two sentences on the order and its progress | `<model label> order <id>: N lines, total … <currency>` | Sets `vars.<into>` (default `summary`) |
+| [Agent router](/reference/nodes/#ai.router) | Follow `instructions` and choose exactly one of `routes`, with a one-sentence reason | No lines → `ask_customer` (the last route if there is none by that name); total over 10,000 USD → `needs_approval` (the first route if none); else the first route | Takes the chosen route as its branch; a route outside the list becomes the first route |
 
 The router's routes are its outputs, so editing `routes` changes the handles on the canvas.
 The model sees the order, the customer record, the run variables and the outputs of completed
@@ -65,8 +65,7 @@ edges.
 
 ## The assistant
 
-The [workspace assistant](/guides/assistant/) is the chat panel that replaced the per-order chat
-and the editor's copilot bar. It does not use `runJson`. `AssistantAgent`
+The [workspace assistant](/guides/assistant/) is the chat panel available on every page. It does not use `runJson`. `AssistantAgent`
 (`apps/engine/src/assistant/`) streams a multi-turn, tool-calling conversation from
 `ASSISTANT_MODEL` with up to 6 steps per message, through `workers-ai-provider`, and through AI
 Gateway when `AI_GATEWAY_ID` is set.
