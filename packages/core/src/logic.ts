@@ -15,7 +15,17 @@ export type RunContext = {
   /** The payload of the trigger. */
   input: Record<string, unknown>;
   now: number;
+  /** How the customer knows the order: see `orderReference`. */
+  ref: string;
 };
+
+/**
+ * The reference a customer recognises: the number their own system gave the order, else its title
+ * ("PO CT-2209"), else its id. Customer notices use it instead of the internal id.
+ */
+export function orderReference(order: Pick<Order, 'id' | 'externalId' | 'title'>): string {
+  return order.externalId || order.title || order.id;
+}
 
 jsonLogic.add_operation('now', () => Date.now());
 jsonLogic.add_operation('days', (n: number) => n * 86_400_000);

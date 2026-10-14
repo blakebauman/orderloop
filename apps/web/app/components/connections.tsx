@@ -47,7 +47,7 @@ export function Connections({
 
   return (
     <div>
-      <h3 className="section-title">Connections</h3>
+      <h2 className="section-title">Connections</h2>
       <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
         Where each output goes next. Same as dragging between dots on the canvas.
       </p>

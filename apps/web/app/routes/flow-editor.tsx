@@ -25,7 +25,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useBlocker, useFetcher, useLoaderData, useNavigate } from 'react-router';
 import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
@@ -111,6 +111,7 @@ export default function FlowEditor() {
 
   const dirty = JSON.stringify(flow) !== baseline;
   const issues = useMemo(() => validateGraph(flow), [flow]);
+  const publishStatusId = useId();
   const nodeIssues = useMemo(
     () =>
       Object.fromEntries(issues.errors.filter((e) => e.nodeId).map((e) => [e.nodeId!, e.message])),
@@ -286,7 +287,7 @@ export default function FlowEditor() {
               {ORDER_CHANNELS.map((c) => (
                 <label
                   key={c}
-                  className="cursor-pointer rounded-sm border px-1.5 py-0.5 text-muted-foreground has-[:checked]:border-primary has-[:checked]:text-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
+                  className="cursor-pointer rounded-sm border px-1.5 py-0.5 text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:checked]:font-medium has-[:checked]:text-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
                 >
                   <input
                     type="checkbox"
@@ -305,10 +306,16 @@ export default function FlowEditor() {
                 </label>
               ))}
             </fieldset>
-            <span className="text-muted-foreground text-xs">
-              {published
-                ? `Published v${published}${unpublished ? ' · changes not published' : ''}`
-                : 'Not published'}
+            {/* Also why Publish is off: disabled buttons show no tooltip. */}
+            <span id={publishStatusId} className="text-muted-foreground text-xs">
+              {published ? `Published v${published}` : 'Not published'}
+              {issues.errors.length
+                ? ' · fix the checks to publish'
+                : published
+                  ? unpublished
+                    ? ' · changes not published'
+                    : ' · up to date'
+                  : ''}
             </span>
             {dirty ? (
               <span className="rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
@@ -407,7 +414,7 @@ export default function FlowEditor() {
                 size="sm"
                 disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
                 onClick={() => setConfirm('publish')}
-                title={unpublished ? undefined : `Nothing to publish: v${published} is current`}
+                aria-describedby={publishStatusId}
               >
                 <Rocket /> Publish
               </Button>

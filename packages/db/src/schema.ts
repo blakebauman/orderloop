@@ -57,6 +57,10 @@ export const orders = sqliteTable(
     currency: text('currency').notNull().default('USD'),
     total: real('total').notNull().default(0),
     waitingOn: text('waiting_on'),
+    /** The labels of the steps holding the order's open waits, joined with ` · `. */
+    waitingAt: text('waiting_at'),
+    /** When the oldest open wait began. */
+    waitingSince: integer('waiting_since'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     idempotencyKey: text('idempotency_key'),

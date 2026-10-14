@@ -1,7 +1,7 @@
 import { ORDER_MODEL_LABELS, type OrderModel, type OrderState } from '@orderloop/core';
 import { ArrowRight, ChevronRight, Play } from 'lucide-react';
 import { Form, Link, redirect, useLoaderData, useNavigation } from 'react-router';
-import { Ago } from '~/components/ago';
+import { Ago, WaitingAt } from '~/components/ago';
 import { DecisionContext } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { Performance } from '~/components/performance';
@@ -89,127 +89,173 @@ export default function Dashboard() {
   const count = (s: string[]) =>
     stats.byStatus.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
   const completedValue = stats.byStatus.find((r) => r.status === 'completed')?.total ?? 0;
-  const register = [
-    { label: 'In flight', n: count(['queued', 'running']), status: 'running' },
-    { label: 'Waiting', n: count(['waiting']), status: 'waiting' },
+  // The status register in three groups, so the strip reads as open work, good endings and the
+  // rest rather than seven equal figures.
+  const groups: {
+    label: string;
+    cols: string;
+    rows: { label: string; n: number; status: string; note?: string }[];
+  }[] = [
     {
-      label: 'Completed',
-      n: count(['completed']),
-      status: 'completed',
-      note: money(completedValue),
+      label: 'Open',
+      cols: 'grid-cols-2',
+      rows: [
+        { label: 'In flight', n: count(['queued', 'running']), status: 'running' },
+        { label: 'Waiting', n: count(['waiting']), status: 'waiting' },
+      ],
     },
-    // Older policy declines were stored as cancelled; count them where they belong.
-    { label: 'Declined', n: count(['declined']) + declined.length, status: 'declined' },
-    { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
-    { label: 'Failed', n: count(['failed']), status: 'failed' },
-    { label: 'Cancelled', n: count(['cancelled']) - declined.length, status: 'cancelled' },
+    {
+      label: 'Ended well',
+      cols: 'grid-cols-1',
+      rows: [
+        {
+          label: 'Completed',
+          n: count(['completed']),
+          status: 'completed',
+          note: money(completedValue),
+        },
+      ],
+    },
+    {
+      label: 'Ended otherwise',
+      cols: 'grid-cols-2 sm:grid-cols-4',
+      rows: [
+        // Older policy declines were stored as cancelled; count them where they belong.
+        { label: 'Declined', n: count(['declined']) + declined.length, status: 'declined' },
+        { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
+        { label: 'Failed', n: count(['failed']), status: 'failed' },
+        { label: 'Cancelled', n: count(['cancelled']) - declined.length, status: 'cancelled' },
+      ],
+    },
   ];
   return (
     <>
       <PageHeader title="Overview" subtitle="Where every order stands, and what needs you." />
       <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-10 sm:px-6">
-        {/* The status register: one ruled line, each figure opens the matching orders. */}
+        {/* The status register: each figure opens the matching orders. */}
         <nav
           aria-label="Orders by status"
-          className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-[var(--rule)] sm:grid-cols-4 lg:grid-cols-7"
+          className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_1fr_4fr]"
         >
-          {register.map((r) => (
-            <Link
-              key={r.status}
-              to={`/orders?status=${r.status}`}
-              className="min-w-0 bg-card px-4 py-3 last:col-span-2 hover:bg-muted lg:last:col-span-1"
-            >
-              <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-                <span
-                  aria-hidden="true"
-                  className="size-1.5 rounded-full"
-                  style={{ background: STATUS_COLOR[r.status as keyof typeof STATUS_COLOR] }}
-                />
-                {r.label}
-              </span>
-              <span className="mt-0.5 flex items-baseline gap-2">
-                <span className="font-semibold text-xl tabular">{r.n}</span>
-                {r.note ? (
-                  <span className="truncate text-muted-foreground text-xs tabular">{r.note}</span>
-                ) : null}
-              </span>
-            </Link>
+          {groups.map((g) => (
+            <section key={g.label} aria-label={g.label} className="min-w-0">
+              <h2 className="caption mb-1.5">{g.label}</h2>
+              <div
+                className={`grid ${g.cols} gap-px overflow-hidden rounded-md border bg-[var(--rule)]`}
+              >
+                {g.rows.map((r) => (
+                  <Link
+                    key={r.status}
+                    to={`/orders?status=${r.status}`}
+                    className="min-w-0 bg-card px-4 py-3 hover:bg-muted"
+                  >
+                    <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-full"
+                        style={{ background: STATUS_COLOR[r.status as keyof typeof STATUS_COLOR] }}
+                      />
+                      {r.label}
+                    </span>
+                    <span className="mt-0.5 flex items-baseline gap-2">
+                      <span className="font-semibold text-xl tabular">{r.n}</span>
+                      {r.note ? (
+                        <span className="truncate text-muted-foreground text-xs tabular">
+                          {r.note}
+                        </span>
+                      ) : null}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
           ))}
         </nav>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
-            <Section
-              title={
-                <span className="flex items-center gap-2">
-                  Needs a decision
-                  {decisions.length ? (
-                    <span className="rounded-sm bg-wait/15 px-1.5 py-px font-medium text-[11px] text-wait tabular">
-                      {decisions.length + moreDecisions}
-                    </span>
-                  ) : null}
-                </span>
-              }
-              actions={
-                decisions.length ? (
-                  <Link to="/approvals" className="text-link text-xs hover:underline">
-                    Open the queue
-                  </Link>
-                ) : null
-              }
-              flush
-            >
-              {decisions.length ? (
-                <ul className="divide-y">
-                  {decisions.map((d) => (
-                    <li key={d.id}>
-                      <Link
-                        to={`/orders/${d.orderId}`}
-                        className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-baseline gap-x-2">
-                            <span className="font-medium">
-                              {d.orderTitle ||
-                                (d.orderModel
-                                  ? ORDER_MODEL_LABELS[d.orderModel as OrderModel]
-                                  : '')}
-                            </span>
-                            <span className="font-mono font-normal text-muted-foreground text-xs">
-                              {orderRef(d.orderId)}
-                            </span>
-                            <span className="text-muted-foreground text-sm">
-                              {d.customerName ?? d.customerId}
-                            </span>
+            {decisions.length ? (
+              <Section
+                title={
+                  <span className="flex items-center gap-2">
+                    Needs a decision
+                    {decisions.length ? (
+                      <span className="rounded-sm bg-wait/15 px-1.5 py-px font-medium text-[11px] text-wait tabular">
+                        {decisions.length + moreDecisions}
+                      </span>
+                    ) : null}
+                  </span>
+                }
+                actions={
+                  decisions.length ? (
+                    <Link to="/approvals" className="text-link text-xs hover:underline">
+                      Open the queue
+                    </Link>
+                  ) : null
+                }
+                flush
+              >
+                {decisions.length ? (
+                  <ul className="divide-y">
+                    {decisions.map((d) => (
+                      <li key={d.id}>
+                        <Link
+                          to={`/orders/${d.orderId}`}
+                          className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-baseline gap-x-2">
+                              <span className="font-medium">
+                                {d.orderTitle ||
+                                  (d.orderModel
+                                    ? ORDER_MODEL_LABELS[d.orderModel as OrderModel]
+                                    : '')}
+                              </span>
+                              <span className="font-mono font-normal text-muted-foreground text-xs">
+                                {orderRef(d.orderId)}
+                              </span>
+                              <span className="text-muted-foreground text-sm">
+                                {d.customerName ?? d.customerId}
+                              </span>
+                            </div>
+                            <DecisionContext ctx={d.ctx} className="mt-1" />
+                            <p className="mt-1 text-muted-foreground text-xs">
+                              For {humanize(d.assignee) || 'anyone'} · requested{' '}
+                              <Ago ms={d.requestedAt} />
+                            </p>
                           </div>
-                          <DecisionContext ctx={d.ctx} className="mt-1" />
-                          <p className="mt-1 text-muted-foreground text-xs">
-                            For {humanize(d.assignee) || 'anyone'} · requested{' '}
-                            <Ago ms={d.requestedAt} />
-                          </p>
-                        </div>
-                        <span className="font-semibold tabular">
-                          {money(d.amount, d.currency ?? undefined)}
-                        </span>
-                        <ChevronRight
-                          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                  {moreDecisions ? (
-                    <li className="px-4 py-2.5 text-sm">
-                      <Link to="/approvals" className="text-link hover:underline">
-                        {moreDecisions} more in the queue
-                      </Link>
-                    </li>
-                  ) : null}
-                </ul>
-              ) : (
-                <Empty>Nothing is waiting on a person.</Empty>
-              )}
-            </Section>
+                          <span className="font-semibold tabular">
+                            {money(d.amount, d.currency ?? undefined)}
+                          </span>
+                          <ChevronRight
+                            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                        </Link>
+                      </li>
+                    ))}
+                    {moreDecisions ? (
+                      <li className="px-4 py-2.5 text-sm">
+                        <Link to="/approvals" className="text-link hover:underline">
+                          {moreDecisions} more in the queue
+                        </Link>
+                      </li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </Section>
+            ) : (
+              <p className="flex items-center gap-2 rounded-md border bg-card px-4 py-2.5 text-muted-foreground text-sm">
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-idle" />
+                Nothing is waiting on a person.
+                <Link
+                  to="/approvals?status=all"
+                  className="ml-auto text-link text-xs hover:underline"
+                >
+                  Past approvals
+                </Link>
+              </p>
+            )}
 
             <Section
               title="Recently updated"
@@ -241,7 +287,17 @@ export default function Dashboard() {
                           <span className="block truncate text-muted-foreground text-xs">
                             {(o.customerId && names[o.customerId]) || o.customerId || 'No customer'}{' '}
                             · {ORDER_MODEL_LABELS[o.model as OrderModel]}
-                            {o.waitingOn ? ` · waiting on ${waitLabel(o.waitingOn)}` : ''}
+                            {o.waitingOn ? (
+                              <>
+                                {' · '}
+                                <WaitingAt
+                                  prefix
+                                  at={o.waitingAt}
+                                  since={o.waitingSince}
+                                  on={o.waitingOn}
+                                />
+                              </>
+                            ) : null}
                           </span>
                         </span>
                         <span className="text-right">

@@ -55,8 +55,9 @@ export function AssistantPanel() {
         // Phones and tablets: a sheet over the page, below the top bar.
         'fixed inset-x-0 top-12 bottom-0 transition-[opacity,translate] duration-200 ease-out',
         open ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
-        // Wide screens: a column beside the page, which narrows to make room.
-        'lg:sticky lg:inset-auto lg:top-12 lg:h-[calc(100dvh-3rem)] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-[width] lg:duration-200',
+        // Wide screens: a column beside the page. It opens without animating its width, which would
+        // reflow the whole page (the graph canvas included) on every frame.
+        'lg:sticky lg:inset-auto lg:top-12 lg:h-[calc(100dvh-3rem)] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-none',
         open ? 'lg:w-[400px] lg:border-l' : 'lg:w-0',
       )}
       onKeyDown={(e) => {
@@ -405,8 +406,12 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
       >
         <span className="font-medium text-foreground">Needs attention</span>
         {approvals ? <span className="text-wait">{plural(approvals, 'approval')}</span> : null}
-        {failedN ? <span className="text-bad">{failedN} failed</span> : null}
-        {stalled ? <span className="text-muted-foreground">{stalled} stalled</span> : null}
+        {/* The same words as the overview: these counts cover failed and rolled-back orders, and
+            orders waiting on an outside event. */}
+        {failedN ? <span className="text-bad">{failedN} failed or rolled back</span> : null}
+        {stalled ? (
+          <span className="text-muted-foreground">{stalled} waiting on events</span>
+        ) : null}
         <ChevronDown
           className={cn(
             'ml-auto size-3.5 text-muted-foreground transition-transform',
@@ -443,7 +448,7 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
               key={x.id}
               to={`/orders/${x.id}`}
               tone="idle"
-              what={`Waiting on ${x.waitingOn ?? 'an event'}`}
+              what={x.waitingOn ?? 'Waiting on an event'}
               id={x.id}
             />
           ))}

@@ -94,6 +94,11 @@ export class OrderAgent extends Agent<Env, State> {
         instanceId: s.instanceId,
         generation: s.generation,
         waitingOn: s.waits.map((w) => w.title).join(' · ') || null,
+        waitingAt:
+          s.waits
+            .map((w) => s.flow?.nodes.find((n) => n.id === w.nodeId)?.label ?? w.nodeId)
+            .join(' · ') || null,
+        waitingSince: s.waits.length ? Math.min(...s.waits.map((w) => w.since)) : null,
         updatedAt: Date.now(),
       })
       .where(eq(orders.id, s.orderId));
@@ -287,7 +292,7 @@ export class OrderAgent extends Agent<Env, State> {
         nodeId: w?.nodeId,
         kind: w?.kind === 'approval' ? 'approval' : 'event',
         message: w
-          ? `${w.title}: ${outcome}${payload.by ? ` by ${String(payload.by)}` : ''}${payload.note ? ` — “${String(payload.note)}”` : ''}`
+          ? `${w.title}: ${outcome === 'escalated' || outcome === 'timeout' ? 'timed out' : outcome}${payload.by ? ` by ${String(payload.by)}` : ''}${payload.note ? ` — “${String(payload.note)}”` : ''}`
           : outcome,
         key: `close:${eventType}`,
       }),

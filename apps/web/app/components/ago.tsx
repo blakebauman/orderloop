@@ -1,4 +1,4 @@
-import { ago } from '~/lib/format';
+import { ago, duration, waitLabel } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
 
@@ -15,5 +15,42 @@ export function Ago({ ms }: { ms: number | null | undefined }) {
     <time dateTime={new Date(ms).toISOString()} title={formatTime(ms)} suppressHydrationWarning>
       {ago(ms, now)}
     </time>
+  );
+}
+
+/**
+ * Where an order is held and for how long: "Sales approval · 24h". Orders indexed before steps were
+ * recorded fall back to what they wait for.
+ */
+export function WaitingAt({
+  at,
+  since,
+  on,
+  prefix,
+}: {
+  at: string | null | undefined;
+  since: number | null | undefined;
+  on: string | null | undefined;
+  /** Lead with "waiting at" (a step) or "waiting on" (what an older row records). */
+  prefix?: boolean;
+}) {
+  const now = useNow(30_000);
+  const formatTime = useDateTime();
+  if (!at) return <>{`${prefix ? 'waiting on ' : ''}${waitLabel(on)}`}</>;
+  return (
+    <>
+      {prefix ? 'waiting at ' : ''}
+      {at}
+      {since ? (
+        <time
+          dateTime={new Date(since).toISOString()}
+          title={`Waiting since ${formatTime(since)}`}
+          suppressHydrationWarning
+        >
+          {' '}
+          · {duration(Math.max(0, now - since))}
+        </time>
+      ) : null}
+    </>
   );
 }

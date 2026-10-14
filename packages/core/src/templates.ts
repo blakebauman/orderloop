@@ -170,7 +170,7 @@ export function b2bOrderFlow(): Flow {
     })
     .n('clarify', 'commerce.notify', 'Ask customer', {
       to: 'customer',
-      subject: 'Question about your PO {{order.id}}',
+      subject: 'Question about {{ref}}',
       body: '{{nodes.router.reason}}',
     })
     .n('reply', 'control.wait_event', 'Customer replies', {
@@ -195,7 +195,7 @@ export function b2bOrderFlow(): Flow {
     .n('dunning', 'control.loop', 'Dunning', { while: true, maxIterations: 3 })
     .n('remind', 'commerce.notify', 'Payment reminder', {
       to: 'customer',
-      subject: 'Invoice for {{order.id}} is overdue',
+      subject: 'Invoice for {{ref}} is overdue',
     })
     .n('paid_late', 'control.wait_event', 'Payment received', {
       event: 'payment.received',
@@ -209,12 +209,12 @@ export function b2bOrderFlow(): Flow {
     .n('unpaid', 'control.end', 'Unpaid', { outcome: 'cancelled', reason: 'Sent to collections' })
     .n('decline', 'commerce.notify', 'Decline order', {
       to: 'customer',
-      subject: 'We could not accept PO {{order.id}}',
+      subject: 'We could not accept {{ref}}',
     })
     .n('declined', 'control.end', 'Declined', { outcome: 'declined', reason: 'Not approved' })
     .n('expire', 'commerce.notify', 'Decline order', {
       to: 'customer',
-      subject: 'We could not accept PO {{order.id}}',
+      subject: 'We could not accept {{ref}}',
     })
     .n('expired', 'control.end', 'No decision', {
       outcome: 'declined',
@@ -222,7 +222,7 @@ export function b2bOrderFlow(): Flow {
     })
     .n('unanswered', 'commerce.notify', 'Decline order', {
       to: 'customer',
-      subject: 'We could not accept PO {{order.id}}',
+      subject: 'We could not accept {{ref}}',
     })
     .n('no_reply', 'control.end', 'No reply', {
       outcome: 'declined',
@@ -425,7 +425,7 @@ export function storefrontOrderFlow(): Flow {
       })
       .n('reject', 'commerce.notify', 'Explain rejection', {
         to: 'customer',
-        subject: 'We couldn’t accept order {{order.id}}',
+        subject: 'We couldn’t accept {{ref}}',
         body: '{{vars.policyFailures}}',
       })
       .n('rejected', 'control.end', 'Rejected', {
@@ -438,7 +438,7 @@ export function storefrontOrderFlow(): Flow {
       .n('capture', 'commerce.capture_payment', 'Capture payment')
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
-        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+        subject: '{{ref}} is on its way ({{vars.tracking}})',
       })
       .n('window', 'control.wait_event', 'Return window', {
         event: 'return.requested',
@@ -447,7 +447,7 @@ export function storefrontOrderFlow(): Flow {
       .n('rma', 'commerce.return_label', 'Return label', { carrier: 'ups' })
       .n('send_label', 'commerce.notify', 'Send return label', {
         to: 'customer',
-        subject: 'Your return label for {{order.id}}: {{vars.returnTracking}}',
+        subject: 'Your return label for {{ref}}: {{vars.returnTracking}}',
       })
       .n('back', 'control.wait_event', 'Return received', {
         event: 'return.received',
@@ -464,7 +464,7 @@ export function storefrontOrderFlow(): Flow {
       })
       .n('refunded', 'commerce.notify', 'Refund confirmation', {
         to: 'customer',
-        subject: 'We refunded {{vars.refunded}} for {{order.id}}',
+        subject: 'We refunded {{vars.refunded}} for {{ref}}',
       })
       .n('review', 'commerce.notify', 'Refund needs review', {
         to: 'team',
@@ -554,7 +554,7 @@ export function marketplaceOrderFlow(): Flow {
       .n('capture', 'commerce.capture_payment', 'Capture payment')
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
-        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+        subject: '{{ref}} is on its way ({{vars.tracking}})',
       })
       .n('window', 'control.wait_event', 'Return window', {
         event: 'return.requested',
@@ -661,13 +661,13 @@ export function omnichannelOrderFlow(): Flow {
       .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
-        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+        subject: '{{ref}} is on its way ({{vars.tracking}})',
       })
       .n('reserve_pickup', 'commerce.reserve_inventory', 'Hold at store')
       .n('ready', 'commerce.pickup_ready', 'Ready for pickup')
       .n('ready_note', 'commerce.notify', 'Pickup ready', {
         to: 'customer',
-        subject: 'Order {{order.id}} is ready at {{vars.fulfillmentLocation}}',
+        subject: '{{ref}} is ready at {{vars.fulfillmentLocation}}',
         body: 'Show code {{vars.pickupCode}} at the counter.',
       })
       .n('collect', 'control.wait_event', 'Customer collects', {
@@ -678,7 +678,7 @@ export function omnichannelOrderFlow(): Flow {
       .n('deliver', 'commerce.deliver_digital', 'Deliver digital goods')
       .n('delivered', 'commerce.notify', 'Download ready', {
         to: 'customer',
-        subject: 'Your downloads for {{order.id}}',
+        subject: 'Your downloads for {{ref}}',
       })
       .n('capture', 'commerce.capture_payment', 'Capture payment')
       .n('done', 'control.end', 'Fulfilled', { outcome: 'completed' })
@@ -758,7 +758,7 @@ export function posSaleFlow(): Flow {
     })
     .n('receipt', 'commerce.notify', 'Email receipt', {
       to: 'customer',
-      subject: 'Your receipt for {{order.id}}',
+      subject: 'Your receipt for {{ref}}',
     })
     .n('done', 'control.end', 'Sold', { outcome: 'completed' })
     .n('declined', 'control.end', 'Payment declined', {

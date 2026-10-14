@@ -71,8 +71,9 @@ replayed snapshots, deduped keys, new generations and sticky terminal statuses.
 ## The orders index
 
 `syncIndex` updates the order's D1 `orders` row from state: `status`, `total`, `customer_id`,
-`title`, `fx_rate`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `) and
-`updated_at`. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
+`title`, `fx_rate`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `),
+`waiting_at` (the labels of the steps holding them), `waiting_since` (when the oldest began) and
+`updated_at`. The orders list shows `waiting_at` and how long the order has waited. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
 the agent.
 
 ## Waits

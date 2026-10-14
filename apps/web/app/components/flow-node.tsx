@@ -33,7 +33,7 @@ const CATEGORY_NAME: Record<NodeCategory, string> = {
   ai: 'AI',
 };
 
-function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
+function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) {
   const spec = nodeSpec(data.type);
   const category = (spec?.category ?? 'control') as NodeCategory;
   const outputs = nodeOutputs(data.type, data.config);
@@ -157,7 +157,8 @@ function FlowNodeCard({ id, data, selected }: NodeProps<FlowRfNode>) {
                   {taken ? (
                     <span className="size-1.5 rounded-full bg-[var(--ink)]" aria-hidden="true" />
                   ) : null}
-                  {o}
+                  {/* On a running order a timeout reads as one; the editor keeps the output's name. */}
+                  {!draggable && o === 'escalated' ? 'timed out' : o}
                   {taken ? <span className="sr-only"> (taken)</span> : null}
                 </span>
                 <Handle

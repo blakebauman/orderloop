@@ -25,7 +25,7 @@ The node takes one of three branches:
 |---|---|
 | `approved` | The decision is `approved` |
 | `rejected` | The decision is `rejected` |
-| `escalated` | Nobody decided before the timeout |
+| `escalated` | Nobody decided before the timeout. The app shows this as **Timed out** |
 
 The node's output (`nodes.<id>`) is the decision payload: `decision`, `by`, `note` and
 `outcome`. The `approvals` row is updated with the outcome, `decidedBy` (`timeout` for an
@@ -39,9 +39,13 @@ and a 5-second undo window. Nothing is sent until the window closes, so **Undo**
 Workflow never hears about a decision that was taken back. If you leave the page during the
 window, the pending decision is sent then.
 
-The inbox filters by `pending`, `approved`, `rejected`, `escalated` or `all`. For a pending row it
+The undo window never runs past the approval's timeout. When less than five seconds are left it is
+shortened so the decision still arrives in time, and in the last moments the buttons give way to
+"Too late to decide here", so a decision can't silently lose the race with the timeout.
+
+The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`. For a pending row it
 shows why a person is being asked (for a credit check: how far over the limit, the limit and the
-balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval escalates and to which step. Keyboard: `j`/`k` (or the arrow keys)
+balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval times out and to which step. Keyboard: `j`/`k` (or the arrow keys)
 move between rows, `a` approves, `r` rejects and `z` undoes.
 
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`operator` for

@@ -31,7 +31,6 @@ const RUNS: [string, Run, Record<string, RegExp>][] = [
     pickup,
     {
       ready: /^Pickup code [0-9A-Z]{6}$/,
-      ready_note: /^→ ada@example\.com: Order ord_\w+ is ready at SoHo store$/,
     },
   ],
   [

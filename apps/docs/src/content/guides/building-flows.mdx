@@ -121,6 +121,7 @@ for example `Approve order {{order.id}}`. Both read the run context:
 | `vars` | Run variables: set by Set variables, AI nodes (`into`), event payloads, and the `vars` passed when the order starts |
 | `input` | The order's `meta` |
 | `now` | When the instance started, epoch ms |
+| `ref` | How the customer knows the order: its outside number (`externalId`), else its title, else its id. The built-in flows use it in customer emails |
 
 The [expressions reference](/reference/expressions/) has the operators and the policy rules.
 
