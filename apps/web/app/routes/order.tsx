@@ -26,7 +26,7 @@ import {
   Undo2,
   Zap,
 } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
@@ -53,13 +53,14 @@ export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  const snapshot = await engine().snapshot(params.orderId);
+  // The live state and the D1 records are independent: read them together.
+  const [snapshot, records] = await Promise.all([
+    engine().snapshot(params.orderId),
+    orderRecords(params.orderId),
+  ]);
   if (!snapshot) throw data('Order not found', { status: 404 });
   const customerId = snapshot.order?.customerId;
-  const [records, names] = await Promise.all([
-    orderRecords(params.orderId),
-    customerNames([customerId]),
-  ]);
+  const names = await customerNames([customerId]);
   return {
     snapshot,
     records,
@@ -182,6 +183,11 @@ export default function OrderPage() {
     setSelected(id);
     setTab('node');
   };
+  // Stable, so the canvas doesn't see a new handler on every live update.
+  const selectOnCanvas = useCallback((id: string | null) => {
+    setSelected(id);
+    if (id) setTab('node');
+  }, []);
   const assistant = useAssistant();
   const title = order.title || ORDER_MODEL_LABELS[order.model as OrderModel];
   const awaitingApproval = state.waits.some((w) => w.kind === 'approval');
@@ -403,10 +409,7 @@ export default function OrderPage() {
             edgeStates={state.edges}
             issues={issues}
             selectedId={selected}
-            onSelect={(id) => {
-              setSelected(id);
-              if (id) setTab('node');
-            }}
+            onSelect={selectOnCanvas}
           />
         </div>
       </div>
