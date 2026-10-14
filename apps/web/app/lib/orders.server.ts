@@ -20,7 +20,8 @@ import {
   sellers,
   shipments,
 } from '@orderloop/db';
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import type { OrderCursor } from './cursor';
 import { db } from './env.server';
 
 export type OrderFilters = {
@@ -30,10 +31,18 @@ export type OrderFilters = {
   q?: string;
   /** Newest first by default; "updated" and "total" sort descending too. */
   sort?: 'created' | 'updated' | 'total';
+  /** Newest-first paging: only orders created before the previous page's last row. */
+  after?: OrderCursor;
 };
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
   const where = and(
+    f.after
+      ? or(
+          lt(orders.createdAt, f.after.createdAt),
+          and(eq(orders.createdAt, f.after.createdAt), lt(orders.id, f.after.id)),
+        )
+      : undefined,
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
     f.status ? eq(orders.status, f.status) : undefined,
@@ -49,7 +58,7 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
   );
   const order =
     f.sort === 'total' ? orders.total : f.sort === 'updated' ? orders.updatedAt : orders.createdAt;
-  return db().select().from(orders).where(where).orderBy(desc(order)).limit(limit);
+  return db().select().from(orders).where(where).orderBy(desc(order), desc(orders.id)).limit(limit);
 }
 
 export async function dashboardStats() {
@@ -211,9 +220,16 @@ export async function publishedFlows() {
     .orderBy(flows.name);
 }
 
-/** Customer display names by id, for lists that only carry the id. */
-export async function customerNames(): Promise<Record<string, string>> {
-  const rows = await db().select({ id: customers.id, name: customers.name }).from(customers);
+/** Display names for the given customer ids, for lists that only carry the id. */
+export async function customerNames(
+  ids: (string | null | undefined)[],
+): Promise<Record<string, string>> {
+  const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+  if (!wanted.length) return {};
+  const rows = await db()
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(inArray(customers.id, wanted));
   return Object.fromEntries(rows.map((r) => [r.id, r.name]));
 }
 
@@ -221,16 +237,31 @@ export async function customerNames(): Promise<Record<string, string>> {
  * Cancelled orders that were declined by policy (their approval was rejected or escalated) rather
  * than cancelled by a person. The index keeps one status; the approvals table says which.
  */
-export async function declinedOrderIds(): Promise<Set<string>> {
+export async function declinedOrderIds(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
   const rows = await db()
     .selectDistinct({ id: approvals.orderId })
     .from(approvals)
     .innerJoin(orders, eq(orders.id, approvals.orderId))
-    .where(
-      and(inArray(approvals.status, ['escalated', 'rejected']), eq(orders.status, 'cancelled')),
-    );
+    .where(and(declinedWhere, inArray(approvals.orderId, ids)));
   return new Set(rows.map((r) => r.id));
 }
+
+/** How many cancelled orders were declined by policy, for the overview's counts. */
+export async function declinedCount(): Promise<number> {
+  const row = await db()
+    .select({ n: sql<number>`count(distinct ${approvals.orderId})` })
+    .from(approvals)
+    .innerJoin(orders, eq(orders.id, approvals.orderId))
+    .where(declinedWhere)
+    .get();
+  return row?.n ?? 0;
+}
+
+const declinedWhere = and(
+  inArray(approvals.status, ['escalated', 'rejected']),
+  eq(orders.status, 'cancelled'),
+);
 
 /** The email intake log: every message the engine's email() entrypoint saw, newest first. */
 export async function recentInboundEmails(limit = 20) {

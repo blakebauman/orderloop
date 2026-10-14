@@ -9,6 +9,7 @@ import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
 import { receiveEmail } from './email';
 import { handleMcp, MCP_PATH } from './mcp';
+import { sweep } from './retention';
 
 export { A2AAgent } from './a2a/agent';
 export { OrderAgent } from './agent';
@@ -24,6 +25,11 @@ export default {
     if (url.pathname === MCP_PATH) return handleMcp(request);
     if (url.pathname === A2A_PATH) return handleA2A(request, env);
     return (await routeAgentRequest(request, env)) ?? new Response('Not found', { status: 404 });
+  },
+
+  // The daily retention sweep (`triggers.crons` in wrangler.jsonc).
+  async scheduled(_controller, env) {
+    console.log('retention sweep', JSON.stringify(await sweep(env)));
   },
 
   async email(message, env) {

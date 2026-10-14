@@ -61,8 +61,22 @@ export function openApiDocument(serverUrl: string) {
             { name: 'channel', in: 'query', schema: { type: 'string', enum: [...ORDER_CHANNELS] } },
             { name: 'status', in: 'query', schema: { type: 'string', enum: [...ORDER_STATUSES] } },
             { name: 'q', in: 'query', schema: { type: 'string' } },
+            {
+              name: 'limit',
+              in: 'query',
+              schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+            },
+            {
+              name: 'cursor',
+              in: 'query',
+              schema: { type: 'string' },
+              description: 'The `nextCursor` of the previous page; omit for the newest orders.',
+            },
           ],
-          responses: { '200': ok('Orders'), ...errors },
+          responses: {
+            '200': ok('{ orders, nextCursor }: newest first; nextCursor is null on the last page'),
+            ...errors,
+          },
         },
         post: {
           summary: 'Start an order',

@@ -55,8 +55,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await requireUser(request);
   const snapshot = await engine().snapshot(params.orderId);
   if (!snapshot) throw data('Order not found', { status: 404 });
-  const [records, names] = await Promise.all([orderRecords(params.orderId), customerNames()]);
   const customerId = snapshot.order?.customerId;
+  const [records, names] = await Promise.all([
+    orderRecords(params.orderId),
+    customerNames([customerId]),
+  ]);
   return {
     snapshot,
     records,

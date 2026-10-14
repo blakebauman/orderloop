@@ -38,6 +38,8 @@ sender's mail server returns a bounce with the reason:
 
 A sender is recognised, in this order, by:
 
+The engine loads only the customers that could match: those with the sender's exact address or an address at the sender's domain.
+
 1. **Customer address.** The envelope sender equals a `customers.email`; the order gets that
    `customerId`.
 2. **Company domain.** The sender's domain matches exactly one customer's email domain, unless it is
@@ -91,7 +93,7 @@ sender's server retries. The retry maps to the same order through the idempotenc
 ## The intake log
 
 Every message is recorded in `inbound_emails` with `status` set to `accepted`, `duplicate` or
-`rejected`, along with the reason, the order id and the number of attachments read. The Back
+`rejected`, along with the reason, the order id and the number of attachments read. Rows older than 180 days are deleted by the daily [retention sweep](/internals/data-model/#retention). The Back
 office page shows the latest twenty under **Email intake**, next to the mailbox addresses, which it
 reads from the engine's `INTAKE_MAILBOXES` (so a custom mapping shows as configured).
 
