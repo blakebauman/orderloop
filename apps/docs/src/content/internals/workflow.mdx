@@ -33,7 +33,7 @@ suffixed steps around their main one:
 
 | Step | Node types | Purpose |
 |---|---|---|
-| `${key}` | executors, `control.loop`, `control.continue_as_new` | The node's effect, memoized |
+| `${key}` | executors, `control.loop`, and the batch's `control.continue_as_new` | The node's effect, memoized |
 | `${key}:open` | approval, wait for event | Registers the wait with the agent (`openWait`) |
 | `${key}` (waitForEvent) | approval, wait for event | `step.waitForEvent` with the node's timeout |
 | `${key}:close` | approval, wait for event | Clears the wait (`closeWait`) with the outcome |
@@ -47,7 +47,14 @@ that would change the step names of a published flow: an in-flight instance repl
 renamed step runs again.
 :::
 
-Wait event types are derived from the key: `approval-${key}` or `event-${key}`, with characters
+Effects use a separate key. `effectKey(generation, key)` is `${nodeId}#${run}` in generation 1 and
+`${nodeId}#${run}@g${generation}` after a continue-as-new, because run counts restart in every
+generation and the step names repeat while their effects must not (a second generation's `charge#1`
+charges again). The effect key is what executors receive as `stepKey` (so connector write ids
+embed it), what `emit` keys webhook deliveries on, what the wait event types below derive from, and
+the `key` of the node's timeline entries. Step names themselves are always the plain key.
+
+Wait event types are derived from the effect key: `approval-${key}` or `event-${key}`, with characters
 outside `[a-zA-Z0-9_-]` replaced by `-` (so `mgr#1` becomes `approval-mgr-1`), truncated to 100.
 
 ## Executor nodes
@@ -111,12 +118,13 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 | `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization |
 | `commerce.split_by_seller` | `cancelSellerOrders`: cancels every pending or accepted seller order |
 | `commerce.payout` | `reversePayouts`: reverses every scheduled payout |
-| `commerce.ship` | `cancelShipment` for every shipment id in the step's output (`shipments`; one per source location on a split) |
+| `commerce.ship` | `cancelShipment` for every shipment id in the step's output (`shipments`; one per source location on a split), then `restoreShippedStock`: once none of the order's shipments is live (`label_created`, `ready_for_pickup`, `collected`), stock its shipments consumed goes back, each reservation once |
 | `commerce.pickup_ready` | `cancelShipment` for the staged pickup's shipment id in the step's output |
 | `commerce.deliver_digital` | `revokeEntitlements`: revokes every issued code |
+| `commerce.invoice` | `reverseBalance`: reverses each on-account balance entry once, with a negative `rev_` entry |
 
 Each runs with `{ retries: { limit: 3, delay: '10 seconds', backoff: 'linear' }, timeout: '2 minutes' }`
-and reports the node `rolled_back`. When the instance fails (an End node with outcome `failed`, or a
+and reports the node `rolled_back`. A failed report is logged, not thrown, so Workflows never reruns a compensation that already ran. When the instance fails (an End node with outcome `failed`, or a
 thrown node) Workflows runs the compensations in reverse order. The agent then polls the instance
 to record the rollback outcome (see [OrderAgent](/internals/order-agent/#rollback-outcome)).
 
@@ -138,9 +146,14 @@ Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`; see
 ## Continue as new
 
 A long-lived flow (the subscription template) would otherwise grow its step history without bound.
-`control.continue_as_new` runs one step that creates a new instance with id
-`${orderId}-g${generation + 1}` and params carrying the current `order` and `vars`, then calls
-`agent.continuedAs(id, generation)`. The current run returns `{ continuedAs }`.
+`control.continue_as_new` only returns `{ kind: 'continue' }` from its node; the next generation
+starts after the whole batch is applied, so the outputs of its siblings in the batch carry over in
+`order` and `vars`. `continueAsNew` then runs one step, named by the node's key, that creates a new
+instance with id `${orderId}-g${generation + 1}` and params carrying the current `order` and `vars`,
+then calls `agent.continuedAs(id, generation)`. It is retry-safe: if `create` threw but the
+instance exists (a retry after it succeeded), the step goes on to `continuedAs`. If the batch also
+reached an End node, the end wins and no new generation starts. The current run returns
+`{ continuedAs }`.
 
 Generation 1's instance id is `${orderId}-g1` (set by `startOrder` in `apps/engine/src/orders.ts`).
 Each generation starts its own `seq` from zero, and the agent accepts any report from a newer

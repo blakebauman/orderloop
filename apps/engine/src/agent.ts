@@ -412,10 +412,23 @@ export class OrderAgent extends Agent<Env, State> {
     return { delivered: true, nodeId: w.nodeId };
   }
 
+  /** Set while a cancel runs, so a second cancel arriving during its awaits does nothing. */
+  private cancelling = false;
+
   @callable()
   async cancel(reason = 'Cancelled by operator') {
     await this.authorize('operator');
-    if (TERMINAL_ORDER_STATUSES.includes(this.state.status)) return { ok: false };
+    if (this.cancelling || TERMINAL_ORDER_STATUSES.includes(this.state.status))
+      return { ok: false };
+    this.cancelling = true;
+    try {
+      return await this.cancelOrder(reason);
+    } finally {
+      this.cancelling = false;
+    }
+  }
+
+  private async cancelOrder(reason: string) {
     if (this.state.instanceId) {
       try {
         await (await this.env.ORDER_LOOP.get(this.state.instanceId)).terminate();
@@ -436,7 +449,7 @@ export class OrderAgent extends Agent<Env, State> {
       waits: [],
       timeline: this.log({
         kind: 'order',
-        message: `Cancelled: ${reason}${undone ? ` (released ${undone.released}, voided ${undone.voided}, cancelled ${undone.cancelled} shipments${undone.sellerOrdersCancelled ? `, ${undone.sellerOrdersCancelled} seller orders` : ''}${undone.payoutsReversed ? `, reversed ${undone.payoutsReversed} payouts` : ''}${undone.revoked ? `, revoked ${undone.revoked} codes` : ''})` : ''}`,
+        message: `Cancelled: ${reason}${undone ? ` (released ${undone.released}, voided ${undone.voided}, cancelled ${undone.cancelled} shipments${undone.restored ? `, restocked ${undone.restored} lines` : ''}${undone.unbilled ? `, reversed ${undone.unbilled} account charges` : ''}${undone.sellerOrdersCancelled ? `, ${undone.sellerOrdersCancelled} seller orders` : ''}${undone.payoutsReversed ? `, reversed ${undone.payoutsReversed} payouts` : ''}${undone.revoked ? `, revoked ${undone.revoked} codes` : ''})` : ''}`,
       }),
     });
     await this.syncIndex();

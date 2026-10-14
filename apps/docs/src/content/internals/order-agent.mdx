@@ -136,10 +136,10 @@ until a node is waiting for the event.
 ## Cancel
 
 `cancel` terminates the Workflow instance (logging, not failing, if that throws), runs
-`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, cancel seller orders, reverse scheduled payouts, revoke issued digital codes), marks
+`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, cancel seller orders, reverse scheduled payouts, revoke issued digital codes, restock consumed stock once no shipment is live, reverse on-account invoice charges), marks
 every pending approval row `cancelled`, sets status `cancelled` with the reason and clears the
 waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
-`emitWebhook` for `order.cancelled`.
+`emitWebhook` for `order.cancelled`. A second `cancel` that arrives while the first is still running returns `{ ok: false }` without doing anything.
 
 ## A2A watchers
 

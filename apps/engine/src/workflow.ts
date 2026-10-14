@@ -8,6 +8,10 @@
  *
  * Steps per node: `${nodeId}#${run}` (run counts make loop iterations distinct). Waiting nodes
  * add `:open` / `:close` steps around `step.waitForEvent`.
+ *
+ * Effects (connector writes, webhook deliveries, wait event types, timeline entries) are keyed by
+ * `effectKey`, which adds the generation after a continue-as-new: run counts restart in every
+ * generation, so step names repeat across generations while their effects must not.
  */
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
@@ -37,6 +41,7 @@ import {
 import type { Report } from './agent';
 import { loadFlowVersion } from './flows';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
+import { instanceExists } from './orders';
 import { emit, orderSummary } from './outbox';
 
 export type OrderLoopParams = {
@@ -57,6 +62,10 @@ type Outcome =
 /** Workflow event types allow only [a-zA-Z0-9_-]. */
 const eventTypeFor = (prefix: string, stepKey: string) =>
   `${prefix}-${stepKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100);
+
+/** The key a node's effects are idempotent on: its step name, plus the generation after the first. */
+export const effectKey = (generation: number, stepKey: string) =>
+  generation > 1 ? `${stepKey}@g${generation}` : stepKey;
 
 /** "goods.received" → "goods_received": where an event's payload lands in vars. */
 export const eventVar = (event: string) => event.replace(/[^a-zA-Z0-9]+/g, '_');
@@ -111,10 +120,11 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       );
 
       const outcomes = await Promise.all(
-        nodes.map((n, i) => this.runNode(step, flow, plan, ctx, n, keys[i]!, p, report)),
+        nodes.map((n, i) => this.runNode(step, plan, ctx, n, keys[i]!, p, report)),
       );
 
       // Apply in graph order so the plan is identical on replay.
+      let continueKey: string | null = null;
       for (const [i, out] of outcomes.entries()) {
         const n = nodes[i]!;
         if (out.kind === 'end') {
@@ -124,12 +134,18 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         }
         if (out.kind === 'continue') {
           completeNode(flow, plan, n.id, []);
-          await snapshot('running');
-          return { continuedAs: p.generation + 1 };
+          continueKey = keys[i]!;
+          continue;
         }
         applyResult(ctx, n.id, out.result);
         if (out.kind === 'loop') completeLoop(flow, plan, n.id, out.next);
         else completeNode(flow, plan, n.id, out.result.branches ?? ['out']);
+      }
+      // Continue only once the whole batch is applied, so its siblings' outputs carry over.
+      if (continueKey && !end) {
+        await this.continueAsNew(step, p, ctx, continueKey);
+        await snapshot('running');
+        return { continuedAs: p.generation + 1 };
       }
       await snapshot('running');
     }
@@ -144,9 +160,30 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     return { outcome, total: ctx.order.total };
   }
 
+  /** Starts the next generation. Retry-safe: a retry after `create` succeeded finds the instance. */
+  private async continueAsNew(
+    step: WorkflowStep,
+    p: OrderLoopParams,
+    ctx: RunContext,
+    key: string,
+  ) {
+    const env = this.env;
+    await step.do(key, async () => {
+      const generation = p.generation + 1;
+      const id = `${p.orderId}-g${generation}`;
+      const params: OrderLoopParams = { ...p, generation, order: ctx.order, vars: ctx.vars };
+      try {
+        await env.ORDER_LOOP.create({ id, params });
+      } catch (err) {
+        if (!(await instanceExists(env, id))) throw err;
+      }
+      await env.ORDER_AGENT.getByName(p.orderId).continuedAs(id, generation);
+      return id;
+    });
+  }
+
   private async runNode(
     step: WorkflowStep,
-    flow: FlowVersion,
     plan: PlanState,
     ctx: RunContext,
     node: FlowNode,
@@ -159,12 +196,13 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     const spec = nodeSpec(node.type);
     const config = withDefaults(node.type, node.config);
     const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    const fx = effectKey(p.generation, key);
 
     switch (node.type) {
       case 'control.approval':
       case 'control.wait_event': {
         const approval = node.type === 'control.approval';
-        const eventType = eventTypeFor(approval ? 'approval' : 'event', key);
+        const eventType = eventTypeFor(approval ? 'approval' : 'event', fx);
         const timeout = str(config.timeout) || '7 days';
         const wait: PendingWait = {
           nodeId: node.id,
@@ -280,7 +318,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
           { node: { id: node.id, summary: reason || outcome, endedAt: Date.now() } },
           true,
         );
-        await emitStep(step, env, key, p.orderId, `order.${outcome}`, {
+        await emitStep(step, env, key, fx, p.orderId, `order.${outcome}`, {
           order: orderSummary(ctx.order),
           outcome,
           reason,
@@ -288,17 +326,9 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         return { kind: 'end', outcome, reason };
       }
 
-      case 'control.continue_as_new': {
-        await step.do(key, async () => {
-          const generation = p.generation + 1;
-          const id = `${p.orderId}-g${generation}`;
-          const params: OrderLoopParams = { ...p, generation, order: ctx.order, vars: ctx.vars };
-          await env.ORDER_LOOP.create({ id, params });
-          await agent.continuedAs(id, generation);
-          return id;
-        });
+      case 'control.continue_as_new':
+        // Started by `continueAsNew` after the batch is applied.
         return { kind: 'continue' };
-      }
     }
 
     const exec = EXECUTORS[node.type];
@@ -323,13 +353,13 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
                       nodeId: node.id,
                       kind: 'node',
                       message: `${node.label}: attempt ${sctx.attempt}`,
-                      key: `${key}:a${sctx.attempt}`,
+                      key: `${fx}:a${sctx.attempt}`,
                     }
                   : undefined,
             },
             true,
           );
-          const r = await exec({ env, node, config, ctx, stepKey: key });
+          const r = await exec({ env, node, config, ctx, stepKey: fx });
           await report(
             {
               node: {
@@ -344,7 +374,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
                 nodeId: node.id,
                 kind: node.type.startsWith('ai.') ? 'ai' : 'node',
                 message: `${node.label}: ${r.summary ?? 'done'}`,
-                key,
+                key: fx,
               },
             },
             true,
@@ -359,17 +389,22 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
                   p.orderId,
                   (output as NodeResult | undefined)?.output,
                 );
-                await agent.report({
-                  generation: p.generation,
-                  node: { id: node.id, status: 'rolled_back', summary: message },
-                  log: {
-                    at: Date.now(),
-                    nodeId: node.id,
-                    kind: 'rollback',
-                    message: `${node.label}: ${message} (${error.message})`,
-                    key: `${key}:rollback`,
-                  },
-                });
+                // The compensation already ran: a failed report must not make Workflows retry it.
+                try {
+                  await agent.report({
+                    generation: p.generation,
+                    node: { id: node.id, status: 'rolled_back', summary: message },
+                    log: {
+                      at: Date.now(),
+                      nodeId: node.id,
+                      kind: 'rollback',
+                      message: `${node.label}: ${message} (${error.message})`,
+                      key: `${fx}:rollback`,
+                    },
+                  });
+                } catch (err) {
+                  console.warn('rollback report failed', err);
+                }
               },
               rollbackConfig: {
                 retries: { limit: 3, delay: '10 seconds', backoff: 'linear' },
@@ -380,7 +415,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       )) as NodeResult;
       const emits = NODE_EVENTS[node.type];
       if (emits && (!emits.branch || (result.branches ?? ['out']).includes(emits.branch))) {
-        await emitStep(step, env, key, p.orderId, emits.event, {
+        await emitStep(step, env, key, fx, p.orderId, emits.event, {
           order: orderSummary({ ...ctx.order, ...result.order }),
           node: { id: node.id, type: node.type, output: result.output ?? null },
         });
@@ -396,7 +431,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
             nodeId: node.id,
             kind: 'node',
             message: `${node.label} failed: ${message}`,
-            key: `${key}:failed`,
+            key: `${fx}:failed`,
           },
         },
         true,
@@ -404,7 +439,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       const reason = `${node.label}: ${message}`;
       await report({ status: 'failed', reason });
       // A thrown node fails the instance without reaching an End node, so announce it here.
-      await emitStep(step, env, key, p.orderId, 'order.failed', {
+      await emitStep(step, env, key, fx, p.orderId, 'order.failed', {
         order: orderSummary(ctx.order),
         outcome: 'failed',
         reason,
@@ -416,7 +451,8 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
 }
 
 /**
- * Delivers an outbound webhook in its own step (`${key}:emit`). The step throws while deliveries
+ * Delivers an outbound webhook in its own step (`${key}:emit`), keyed by the node's effect key
+ * `fx`. The step throws while deliveries
  * are pending so Workflows retries it with backoff; once retries run out the error is swallowed,
  * because a subscriber being down must never fail the order. Undelivered rows stay `failed`.
  */
@@ -424,6 +460,7 @@ async function emitStep(
   step: WorkflowStep,
   env: Env,
   key: string,
+  fx: string,
   orderId: string,
   event: OutboundEvent,
   data: Record<string, unknown>,
@@ -433,7 +470,7 @@ async function emitStep(
       `${key}:emit`,
       { retries: { limit: 5, delay: '10 seconds', backoff: 'exponential' }, timeout: '1 minute' },
       async () => {
-        const r = await emit(env, key, orderId, event, data);
+        const r = await emit(env, fx, orderId, event, data);
         if (r.pending) throw new Error(`${r.pending} ${event} deliveries pending`);
         return r;
       },

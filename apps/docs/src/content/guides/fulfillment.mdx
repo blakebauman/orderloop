@@ -157,8 +157,8 @@ hand-over) and the codes are all done. On the till flow, the digital branch join
 
 | Event | Undone |
 |---|---|
-| A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the location it was held at); `commerce.ship` cancels every shipment it booked; `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization |
-| A cancel | `compensateOrder` does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, revokes codes, plus seller orders and payouts |
+| A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the location it was held at); `commerce.ship` cancels every shipment it booked and, once none of the order's shipments is live, restocks what they consumed (reservation `restored`); `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization; `commerce.invoice` takes an on-account invoice back off the customer's balance |
+| A cancel | `compensateOrder` does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, restocks shipped stock, reverses account charges, revokes codes, plus seller orders and payouts |
 
 Codes issued for a mixed cart are revoked when its physical part later fails, for example when the
 store runs out between routing and reserving. A completed hand-over has consumed its stock and has no

@@ -152,7 +152,7 @@ isn't waiting for an approval (already decided, or never reached) is `409`.
 ## Cancel
 
 `POST /api/v1/orders/:id/cancel` terminates the order's Workflow, releases reserved stock, voids
-payment authorizations, cancels shipments and staged pickups, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
+payment authorizations, cancels shipments and staged pickups, restocks shipped stock, reverses on-account invoice charges, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
 `Cancelled via API`. Cancelling an order that has already finished changes nothing and returns
 `409` `{ error: "The order has already finished" }`; an unknown order is `404`.
 

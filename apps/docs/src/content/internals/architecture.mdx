@@ -175,13 +175,16 @@ Two rules hold for every connector:
   instead of writing a second one. `refund` returns the refund its step already made, and never
   refunds more than was captured or charged. Stock changes (`reserveInventory`'s holds and
   `restock`) go through the `stock_movements` ledger, which records each change and applies it to
-  `products` (or, with a `location_id`, a store's `location_stock` row) in one batch, once.
-- **Compensations are idempotent.** `releaseInventory` releases only `held` reservations,
-  `voidAuthorizations` voids only `authorized` payments, `cancelShipment` sets one shipment
-  `cancelled`, `revokeEntitlements` revokes only `issued` codes. Running one twice changes nothing.
+  `products` (or, with a `location_id`, a store's `location_stock` row) in one batch, once. A hold is written only while the stock is still free. Capture flips its authorization to `captured` and records the capture in one batch, and a retried capture returns the one already recorded.
+- **After a continue-as-new, keys gain the generation.** The ids above embed the effect key, `${nodeId}#${run}@g${generation}` from generation 2 on (see [OrderLoop Workflow](/internals/workflow/#step-names)).
+- **Compensations are idempotent.** `releaseInventory` releases only `held` reservations (each
+  release is a ledger movement, so a cancel racing a rollback releases once),
+  `voidAuthorizations` voids only `authorized` payments (a void racing a capture leaves exactly
+  one of them), `cancelShipment` sets one shipment
+  `cancelled`, `revokeEntitlements` revokes only `issued` codes, `restoreShippedStock` restores a `consumed` reservation once, `reverseBalance` reverses a balance entry once. Running one twice changes nothing.
 
 The saga compensations a failed order runs are `ROLLBACKS` in `apps/engine/src/nodes.ts`; a
-cancel runs `compensateOrder`, which releases, voids, cancels open shipments and staged pickups, revokes issued digital codes, cancels seller orders and reverses scheduled payouts in one pass. A node
+cancel runs `compensateOrder`, which releases, voids, cancels open shipments and staged pickups, revokes issued digital codes, restocks shipped stock once no shipment is live, reverses on-account charges, cancels seller orders and reverses scheduled payouts in one pass. A node
 type with `rollback: true` in the catalog must have a `ROLLBACKS` entry.
 
 To exercise failure paths, set `meta.simulate` on the order input:
@@ -202,7 +205,7 @@ the `documents` table (see [Data model](/internals/data-model/#r2-documents)).
 `scan stock` step lists SKUs where `stock - reserved <= reorder_point`; if there are any, its
 `start reorder` step seeds the templates and starts one order on `tpl-reorder` (or
 `payload.flowId`) for customer `cus_internal`, with the SKUs in `meta.skus`. The reorder flow's
-`ai.forecast` node decides the quantities. `EngineRpc.runReplenish` creates an instance on demand.
+`ai.forecast` node decides the quantities. The order starts through `startOrderOnce` with the idempotency key `replenish:${instanceId}`, so a retry of the step finishes the order it already wrote. `EngineRpc.runReplenish` creates an instance on demand.
 
 ## Where state lives
 

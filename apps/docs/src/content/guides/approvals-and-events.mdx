@@ -141,11 +141,11 @@ inbox show is the scaled one.
 
 Cancel from the order page, the API (`POST /api/v1/orders/:id/cancel` with an optional `reason`),
 or the [assistant](/guides/assistant/) (after the person confirms). Cancelling an order that has already
-ended does nothing. Otherwise the agent:
+ended, or one that is already being cancelled, does nothing. Otherwise the agent:
 
 1. terminates the Workflow instance;
 2. compensates the order: releases its inventory reservations, voids its payment authorizations,
-   cancels its open shipments and staged store pickups, revokes its issued digital codes, cancels its seller orders and reverses its scheduled payouts (`compensateOrder` in `apps/engine/src/connectors.ts`);
+   cancels its open shipments and staged store pickups, restocks stock those shipments consumed once none is live, reverses its on-account invoice charges, revokes its issued digital codes, cancels its seller orders and reverses its scheduled payouts (`compensateOrder` in `apps/engine/src/connectors.ts`);
 3. marks pending approvals `cancelled` and clears the order's waits;
 4. sets the status to `cancelled`, with the reason and the counts in the timeline;
 5. sends the `order.cancelled` [outbound webhook](/guides/outbound-webhooks/).

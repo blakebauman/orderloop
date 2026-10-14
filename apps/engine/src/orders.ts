@@ -149,7 +149,7 @@ async function launch(
   }
 }
 
-async function instanceExists(env: Env, id: string) {
+export async function instanceExists(env: Env, id: string) {
   try {
     await env.ORDER_LOOP.get(id);
     return true;
