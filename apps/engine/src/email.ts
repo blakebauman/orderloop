@@ -23,6 +23,7 @@ import {
 } from '@orderloop/core';
 import { createDb, customers, documents, inboundEmails } from '@orderloop/db';
 import PostalMime, { type Attachment } from 'postal-mime';
+import { withTimeout } from './ai';
 import { loadFlowVersion } from './flows';
 import { startOrderOnce } from './orders';
 
@@ -32,6 +33,10 @@ const TEXT_TYPES = /^(text\/(plain|csv|tab-separated-values)|application\/(json|
 const CONVERT_TYPES =
   /^(application\/(pdf|vnd\.openxmlformats|vnd\.ms-excel|vnd\.oasis\.opendocument)|text\/html|image\/(png|jpe?g|webp))/i;
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** Attachments read per message; the rest are skipped. */
+const MAX_ATTACHMENTS = 10;
+/** How long one `toMarkdown` conversion may take before the attachment is skipped. */
+const CONVERT_TIMEOUT_MS = 20_000;
 
 export type IntakeOutcome =
   | { status: 'accepted'; orderId: string; replayed: boolean }
@@ -72,7 +77,7 @@ export async function receiveEmail(
   if (message.rawSize > MAX_INTAKE_BYTES) return reject('Message too large');
   if (
     String(env.INTAKE_REQUIRE_AUTH) !== 'false' &&
-    !authenticated(message.headers.get('authentication-results'))
+    !authenticated(message.headers.get('authentication-results'), message.from)
   ) {
     return reject('Message failed SPF, DKIM and DMARC');
   }
@@ -170,7 +175,7 @@ export async function receiveEmail(
 
 async function readAttachments(env: Env, atts: Attachment[]): Promise<IntakeAttachment[]> {
   const out: IntakeAttachment[] = [];
-  for (const a of atts) {
+  for (const a of atts.slice(0, MAX_ATTACHMENTS)) {
     const filename = a.filename || 'attachment';
     const bytes =
       typeof a.content === 'string'
@@ -181,10 +186,10 @@ async function readAttachments(env: Env, atts: Attachment[]): Promise<IntakeAtta
       out.push({ filename, text: new TextDecoder().decode(bytes) });
     } else if (CONVERT_TYPES.test(a.mimeType) && String(env.AI_MODE) !== 'mock') {
       try {
-        const res = await env.AI.toMarkdown({
-          name: filename,
-          blob: new Blob([bytes], { type: a.mimeType }),
-        });
+        const res = await withTimeout(
+          env.AI.toMarkdown({ name: filename, blob: new Blob([bytes], { type: a.mimeType }) }),
+          CONVERT_TIMEOUT_MS,
+        );
         if (res.format !== 'error') out.push({ filename, text: res.data });
       } catch (err) {
         console.warn('toMarkdown failed', filename, err instanceof Error ? err.message : err);

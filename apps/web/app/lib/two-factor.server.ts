@@ -7,7 +7,7 @@ import type { Principal } from '@orderloop/core';
 import { recoveryCodes, users } from '@orderloop/db';
 import { count, eq } from 'drizzle-orm';
 import { audit } from './audit.server';
-import { verifyPassword } from './credentials';
+import { reauthenticate } from './auth.server';
 import { db } from './env.server';
 import { twoFactorRequirement } from './settings.server';
 import { TeamError } from './team.server';
@@ -35,7 +35,7 @@ async function confirmPassword(by: Principal, given: string) {
   if (by.kind !== 'user')
     throw new TeamError('Only people with their own sign-in can use two-factor sign-in.');
   const user = await db().select().from(users).where(eq(users.id, by.id)).get();
-  if (!user?.passwordHash || !(await verifyPassword(given, user.passwordHash)))
+  if (!user?.passwordHash || !(await reauthenticate(user.id, given, user.passwordHash)))
     throw new TeamError('Your password is not right.');
   return user;
 }

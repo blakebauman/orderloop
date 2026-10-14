@@ -9,6 +9,7 @@ through one function, `runJson` (`apps/engine/src/ai.ts`), with the same guarant
 
 - **JSON mode with a schema.** Every call asks for `response_format: json_schema`, so the result
   has a known shape (temperature `0.2`, at most 2048 tokens).
+- **Answers are checked.** The parsed answer must conform to the JSON Schema it was asked for (`conforms` in `packages/core/src/json-schema.ts`); one that doesn't is treated like an error, so the fallback below applies.
 - **A 20-second cap.** A slower call is abandoned.
 - **A deterministic fallback.** When `AI_MODE` is `mock`, or the model errors, times out or returns
   nothing, a heuristic produces the result instead. An order never stalls on the model.
@@ -36,7 +37,7 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 
 | Node | Model task | Fallback | Result |
 |---|---|---|---|
-| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the R2 document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` by name match when the order had none; titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
+| [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the R2 document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them; sets `customerId` when the order had none and `customerName` matches exactly one customer's name, ignoring case and punctuation (a near match or several matches attach nobody); titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
 | [Classify](/reference/nodes/#ai.classify) | Pick one of `labels` with a confidence | Keyword match on the title and lines; the first label otherwise | Sets `vars.<into>` (default `category`). A label outside the list becomes the first label |
 | [Risk score](/reference/nodes/#ai.risk_score) | Score fraud and credit risk 0–100 with up to three reasons | 10, +15 for a guest (a `contact`, no customer), +30 with neither, +30 over 20,000, +20 for a line over 1,000 units | Takes `high` at or above `threshold` (default 70), else `low`; sets `vars.risk` |
 | [Demand forecast](/reference/nodes/#ai.forecast) | Suggest quantities for SKUs whose available stock (stock minus reserved) is at or below their reorder point, over `horizonDays` | Each low SKU's `reorderQty` | Replaces the order's lines; sets `vars.supplier` from the first SKU. With nothing low it reports "Stock is healthy" without calling the model |

@@ -35,6 +35,11 @@ export async function sha256Hex(input: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Compares two secrets in constant time, length included: it compares their SHA-256 digests. */
+export async function secretEqual(a: string, b: string): Promise<boolean> {
+  return safeEqual(await sha256Hex(a), await sha256Hex(b));
+}
+
 /** Constant time for equal-length inputs; different lengths fail fast, which leaks only length. */
 export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

@@ -23,6 +23,15 @@
   // OAuth for MCP clients (@cloudflare/workers-oauth-provider): registered clients, grants and
   // tokens (hashed; props encrypted). No id: the namespace is created on first deploy.
   "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  // Per-address limits on OAuth client registration and token requests, which need no sign-in.
+  "ratelimits": [
+    {
+      "name": "OAUTH_REGISTER_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    { "name": "OAUTH_TOKEN_LIMIT", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }
+  ],
   "vars": {
     // Inbound orders: JSON from "model:channel" or "model:*" to a flow id. Anything not routed
     // starts the model's default template.

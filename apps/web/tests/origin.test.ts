@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { crossOrigin } from '../app/lib/origin';
+import { crossOrigin, isLocalHost } from '../app/lib/origin';
 
 const ORIGIN = 'https://orderloop.io';
 const req = (method: string, headers: Record<string, string> = {}) =>
@@ -30,5 +30,23 @@ describe('crossOrigin', () => {
     expect(crossOrigin(req('POST', { 'sec-fetch-site': 'same-site' }), ORIGIN)).toBe(true);
     expect(crossOrigin(req('POST', { 'sec-fetch-site': 'cross-site' }), ORIGIN)).toBe(true);
     expect(crossOrigin(req('POST'), ORIGIN)).toBe(false);
+  });
+});
+
+describe('isLocalHost', () => {
+  it('is true only for local development hosts', () => {
+    for (const u of [
+      'http://localhost:5173/',
+      'http://127.0.0.1/',
+      'http://[::1]:8787/',
+      'http://app.localhost/',
+    ])
+      expect(isLocalHost(new URL(u))).toBe(true);
+    for (const u of [
+      'https://orderloop.io/',
+      'https://orderloop-web.example.workers.dev/',
+      'http://localhost.evil.example/',
+    ])
+      expect(isLocalHost(new URL(u))).toBe(false);
   });
 });

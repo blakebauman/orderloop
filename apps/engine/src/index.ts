@@ -27,7 +27,13 @@ export default {
   },
 
   async email(message, env) {
-    const outcome = await receiveEmail(message, env);
-    console.log('email intake', JSON.stringify({ to: message.to, ...outcome }));
+    try {
+      const outcome = await receiveEmail(message, env);
+      console.log('email intake', JSON.stringify({ to: message.to, ...outcome }));
+    } catch (err) {
+      // Thrown on, so Email Routing answers with a temporary failure and the sender retries.
+      console.error('email intake failed', JSON.stringify({ to: message.to }), err);
+      throw err;
+    }
   },
 } satisfies ExportedHandler<Env>;

@@ -32,7 +32,7 @@ sender's mail server returns a bounce with the reason:
 |---|---|
 | The recipient is a configured mailbox | `No mailbox <local>@ here` |
 | The raw message is at most 10 MiB (`MAX_INTAKE_BYTES`) | `Message too large` |
-| `Authentication-Results` records `dmarc=pass`, `dkim=pass` or `spf=pass` | `Message failed SPF, DKIM and DMARC` |
+| The first `Authentication-Results` header, and only if its authserv-id is `mx.cloudflare.net` (Email Routing's own), records `dmarc=pass` with `header.from` equal to the `From` domain, or `dkim=pass` (`header.d`) or `spf=pass` (`smtp.mailfrom`) for a domain aligned with it: the same domain, or one a subdomain of the other. Later headers came with the message and are ignored; a pass for an unrelated domain doesn't count (`authenticated` in `packages/core/src/intake.ts`) | `Message failed SPF, DKIM and DMARC` |
 | The sender is recognised (below) | `Sender is not a known customer` |
 | The mailbox's flow has a published version | `Mailbox is not configured` |
 
@@ -62,9 +62,9 @@ anyone who forges a customer's From address start orders.
 `lines` start empty: the flow's `ai.extract` node reads them from `documentText`, as it does for an
 order whose input carries a document.
 
-Attachments up to 5 MiB are read. Plain text, CSV, TSV, JSON and XML are decoded directly. PDF,
+At most 10 attachments per message are read, each up to 5 MiB. Plain text, CSV, TSV, JSON and XML are decoded directly. PDF,
 Office documents, HTML and PNG, JPEG or WebP images are converted with Workers AI `toMarkdown`;
-that conversion is skipped when `AI_MODE` is `mock`. Anything else is ignored.
+that conversion is skipped when `AI_MODE` is `mock`, and an attachment whose conversion takes longer than 20 seconds is skipped. Anything else is ignored.
 
 The raw message is stored in R2 at `orders/<orderId>/inbound/message.eml` and listed in the
 order's documents as kind `email`.
@@ -81,6 +81,12 @@ with `Message-ID reused for a different message`.
 After starting the order, the engine replies to the sender from the mailbox address with the order
 reference. Set `INTAKE_REPLY` to `"false"` to turn this off. Email Routing only allows a reply to a
 message that passed DMARC, so a failed reply is logged and never fails the intake.
+
+## Failures
+
+If `email()` throws (D1, R2 or the engine failing, rather than a rejection above), it logs
+`email intake failed` and rethrows, so Email Routing answers with a temporary failure and the
+sender's server retries. The retry maps to the same order through the idempotency key above.
 
 ## The intake log
 

@@ -17,6 +17,8 @@ export const LIMITS = {
   'api-ip': 20,
   /** Wrong two-factor codes for one person, after a correct password. */
   'two-factor': 5,
+  /** Wrong current passwords from someone already signed in (Account page re-checks). */
+  reauth: 5,
 } as const;
 
 export type ThrottleKind = keyof typeof LIMITS;

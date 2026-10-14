@@ -42,7 +42,7 @@ Every role can read. The tools are `needs_attention`, `find_orders` (by status, 
 text, total, age), `get_order` (status, what it waits on, steps run, recent activity),
 `assess_order` (typed questions about one order, answered with a probability for every option; up to 4 images),
 `find_products` (stock, reserved, available, reorder points), `list_flows` and `get_flow` (a saved
-draft with its validation problems). Reads run without asking, and each shows as a row in the
+draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a row in the
 conversation.
 
 ## Actions that ask first

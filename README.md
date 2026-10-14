@@ -72,7 +72,7 @@ Open the dashboard and run one of the scenarios. `TIME_SCALE` (default `1440`) c
 
 ## REST API
 
-Authenticate with `Authorization: Bearer ol_live_…`, an API token an operator creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` does everything else. `APP_PASSWORD`, when set, is a break-glass operator sign-in and bearer token. With no `APP_PASSWORD` and no people, the dashboard and API are open (local development).
+Authenticate with `Authorization: Bearer ol_live_…`, an API token an operator creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` does everything else. `APP_PASSWORD`, when set, is a break-glass operator sign-in and bearer token. With no `APP_PASSWORD` and no people, the dashboard and API are open on localhost only (local development); any other host answers `503` until you set `APP_PASSWORD`.
 
 ```
 GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)

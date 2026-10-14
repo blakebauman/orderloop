@@ -66,6 +66,16 @@ export const EMPTY_ORDER_STATE: OrderState = {
   updatedAt: 0,
 };
 
+/** The largest event payload (JSON) an order accepts; it lands in the order's variables. */
+export const MAX_EVENT_PAYLOAD_BYTES = 32 * 1024;
+
+/** True when a payload fits `MAX_EVENT_PAYLOAD_BYTES` once serialized. */
+export function payloadFits(payload: unknown): boolean {
+  return (
+    new TextEncoder().encode(JSON.stringify(payload ?? {})).byteLength <= MAX_EVENT_PAYLOAD_BYTES
+  );
+}
+
 export type StartOrderInput = {
   flowId: string;
   /** Published version to run; defaults to the latest. */

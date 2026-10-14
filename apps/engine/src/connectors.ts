@@ -57,12 +57,21 @@ export async function getCustomer(env: Env, id: string | undefined) {
   return db(env).query.customers.findFirst({ where: eq(customers.id, id) });
 }
 
+/**
+ * The one customer whose name is exactly `name`, ignoring case, spacing and punctuation. The name
+ * comes from a model reading a document anyone can write, so a near match or one of several
+ * matches attaches nobody: the order then waits for a person to choose the customer.
+ */
 export async function findCustomerByName(env: Env, name: string) {
-  const all = await db(env).select().from(customers);
-  const needle = name.toLowerCase();
-  return all.find(
-    (c) => c.name.toLowerCase().includes(needle) || needle.includes(c.name.toLowerCase()),
-  );
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  const needle = norm(name);
+  if (!needle) return undefined;
+  const matches = (await db(env).select().from(customers)).filter((c) => norm(c.name) === needle);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export async function getProducts(env: Env, skus?: string[]) {

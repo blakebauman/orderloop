@@ -21,3 +21,9 @@ export function crossOrigin(request: Request, origin: string): boolean {
   if (site) return site !== 'same-origin' && site !== 'none';
   return false;
 }
+
+/** Local development, the only place a deployment with no sign-in may run open. */
+export function isLocalHost(url: URL): boolean {
+  const h = url.hostname;
+  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost');
+}

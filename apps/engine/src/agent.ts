@@ -11,6 +11,7 @@ import {
   type EdgeState,
   EMPTY_ORDER_STATE,
   type FlowVersion,
+  MAX_EVENT_PAYLOAD_BYTES,
   type NodeRun,
   newId,
   type Order,
@@ -22,6 +23,7 @@ import {
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
+  payloadFits,
   ROLE_LABELS,
   type Role,
   TERMINAL_ORDER_STATUSES,
@@ -392,8 +394,13 @@ export class OrderAgent extends Agent<Env, State> {
   @callable()
   async decide(nodeId: string, decision: 'approved' | 'rejected', by = 'operator', note?: string) {
     const caller = await this.authorize('approver');
+    if (decision !== 'approved' && decision !== 'rejected')
+      throw new Error('decision must be approved or rejected');
+    if (note !== undefined && (typeof note !== 'string' || note.length > 2000))
+      throw new Error('note must be at most 2000 characters');
     // On a socket the audit trail names the signed-in person, never what the page sent.
     if (caller) by = caller.email ?? caller.name;
+    by = String(by).slice(0, 200);
     const w = this.state.waits.find((x) => x.kind === 'approval' && x.nodeId === nodeId);
     if (!w || !this.state.instanceId) throw new Error('That node is not waiting for an approval');
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
@@ -405,6 +412,11 @@ export class OrderAgent extends Agent<Env, State> {
   @callable()
   async deliver(event: string, payload: Record<string, unknown> = {}) {
     await this.authorize('operator');
+    // The payload lands in the order's variables, every broadcast and the next generation.
+    if (typeof event !== 'string' || !event || event.length > 100)
+      throw new Error('event must be a name of at most 100 characters');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !payloadFits(payload))
+      throw new Error(`payload must be an object of at most ${MAX_EVENT_PAYLOAD_BYTES} bytes`);
     const w = this.state.waits.find((x) => x.kind === 'event' && x.event === event);
     if (!w || !this.state.instanceId) return { delivered: false };
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
@@ -418,6 +430,7 @@ export class OrderAgent extends Agent<Env, State> {
   @callable()
   async cancel(reason = 'Cancelled by operator') {
     await this.authorize('operator');
+    reason = String(reason).slice(0, 500);
     if (this.cancelling || TERMINAL_ORDER_STATUSES.includes(this.state.status))
       return { ok: false };
     this.cancelling = true;

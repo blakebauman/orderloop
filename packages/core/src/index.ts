@@ -8,6 +8,7 @@ export * from './channels/shopify';
 export * from './channels/x12';
 export * from './fulfillment';
 export * from './graph';
+export * from './json-schema';
 export * from './layout';
 export * from './lines';
 export * from './logic';

@@ -28,6 +28,7 @@ import {
   type Principal,
   ROLES,
 } from '@orderloop/core';
+import { clientIp } from './audit.server';
 import {
   apiPrincipal,
   type Caller,
@@ -142,8 +143,24 @@ const PROTECTED_RESOURCE = '/.well-known/oauth-protected-resource';
  * Serves an OAuth path (see `isOAuthPath`): an endpoint or its resource metadata goes to that
  * resource server, everything else (discovery, registration, tokens) to the authorization server.
  */
-export function oauthFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+export async function oauthFetch(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const url = new URL(request.url);
+  // Registration and tokens are open to anyone on the internet: limit each address.
+  const limiter =
+    url.pathname === '/oauth/register'
+      ? env.OAUTH_REGISTER_LIMIT
+      : url.pathname === '/oauth/token'
+        ? env.OAUTH_TOKEN_LIMIT
+        : undefined;
+  if (limiter && !(await limiter.limit({ key: clientIp(request) })).success)
+    return Response.json(
+      { error: 'slow_down', error_description: 'Too many requests; try again in a minute.' },
+      { status: 429, headers: { 'retry-after': '60' } },
+    );
   const { as, endpoints } = rolesFor(url.origin);
   const path = url.pathname.startsWith(`${PROTECTED_RESOURCE}/`)
     ? url.pathname.slice(PROTECTED_RESOURCE.length)

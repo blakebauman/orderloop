@@ -25,7 +25,7 @@ pnpm web:dev               # web + engine in one Vite session
 
 Open the URL Vite prints (`http://localhost:5173` by default). With `APP_PASSWORD` unset, which is
 the default in `apps/web/.dev.vars.example`, and no people added, the dashboard and the API are
-open; **Set up sign-in** in the account menu creates the first operator and turns sign-in on (see
+open (on localhost only; a deployed host answers `503` until `APP_PASSWORD` is set); **Set up sign-in** in the account menu creates the first operator and turns sign-in on (see
 [Team and roles](/guides/team-and-roles/)).
 
 The first request that needs a flow seeds the [built-in flows](/guides/templates/) and publishes

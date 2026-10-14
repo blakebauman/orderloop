@@ -116,14 +116,15 @@ X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>
 ```
 
 The timestamp is part of the signed message and must be within 5 minutes of the server's clock,
-so a captured request can't be replayed later. `signWebhook(secret, rawBody)` in
+so a captured request can't be replayed later. The signature of a delivered event is also recorded, so replaying it within the window returns `200 { "delivered": true, "duplicate": true }` and delivers nothing; a `409` is not recorded and may be retried. `signWebhook(secret, rawBody)` in
 `@orderloop/core` produces the header; `verifyWebhook` checks it.
 
 | Status | Meaning |
 |---|---|
 | `200` | `{ "delivered": true, "nodeId": "…" }` |
 | `409` | `{ "delivered": false }`: no node is waiting for that event yet, so retry later |
-| `400` | The body isn't `{ orderId, event, payload? }` |
+| `400` | The body isn't `{ orderId, event, payload? }`, or `payload` is over 32 KiB of JSON |
+| `413` | The body is over 1 MiB |
 | `401` | Missing or malformed header, stale timestamp, or wrong signature |
 | `503` | `WEBHOOK_SECRET` isn't set |
 
