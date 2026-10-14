@@ -16,7 +16,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `ASSESS_MODEL` | `@cf/cloudflare/clef` | Workers AI decision model for [Assess](https://docs.orderloop.io/guides/ai/#assess) and the assistant's `assess_order` |
 | `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
 | `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
-| `TIME_SCALE` | `1440` | Divides every wait and timeout, so `1440` turns a day into a minute. Use `"1"` in production |
+| `TIME_SCALE` | `1` | Divides every wait and timeout. `"1"` is real time; `pnpm web:dev` overrides it to `"1440"` (a day becomes a minute) in `apps/web/vite.config.ts`, and the engine tests use `"1"` |
 | `INTAKE_MAILBOXES` | `""` | Email intake: JSON object of mailbox local part to flow id. Empty uses `orders@` and `po@` → `tpl-b2b-order`, `purchasing@` → `tpl-purchase-request` |
 | `INTAKE_REQUIRE_AUTH` | `true` | `"false"` accepts mail without a passing DMARC, DKIM or SPF result. Never in production: it lets anyone who forges a customer's From address start orders |
 | `INTAKE_REPLY` | `true` | `"false"` turns off the acknowledgement reply to accepted email |

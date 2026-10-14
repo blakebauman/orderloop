@@ -41,8 +41,9 @@ order page opens: the flow graph colours each node as it runs, waits and finishe
 records every step. Below the queues, the dashboard's **Last 30 days** section shows, in USD, completion rate
 by model, revenue per day, refund rate and the slowest steps by p95 duration.
 
-Waits are compressed in development. `TIME_SCALE` (default `1440`) divides every wait and timeout,
-so a day becomes a minute and a 30-day return window closes in about half an hour.
+Waits are compressed in development. `pnpm web:dev` sets the engine's `TIME_SCALE` to `1440`
+(`apps/web/vite.config.ts`; deployed, it is `1`), which divides every wait and timeout, so a day
+becomes a minute and a 30-day return window closes in about half an hour.
 
 Some orders stop at an approval or wait for an event. Decide approvals from the order page or the
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
