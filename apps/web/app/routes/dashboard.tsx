@@ -117,7 +117,7 @@ export default function Dashboard() {
             <Link
               key={r.status}
               to={`/orders?status=${r.status}`}
-              className="min-w-0 bg-card px-4 py-3 hover:bg-muted"
+              className="min-w-0 bg-card px-4 py-3 last:col-span-2 hover:bg-muted lg:last:col-span-1"
             >
               <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
                 <span

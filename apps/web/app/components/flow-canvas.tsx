@@ -239,6 +239,29 @@ function Inner({
     },
     [fitView],
   );
+  // The sheet settles its size after the first frame (panels load, a phone stacks the layout,
+  // the canvas expands). Until someone pans or zooms, keep the framing true to the new size.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const handled = useRef(false);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let t: number | undefined;
+    const ro = new ResizeObserver(() => {
+      setNarrow(el.clientWidth < 480);
+      window.clearTimeout(t);
+      t = window.setTimeout(() => {
+        if (!handled.current) frame();
+      }, 60);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
+  }, [frame]);
+
   // Fit when the graph first appears and whenever its shape changes (template load, copilot).
   const topo = topologyKey(graph);
   // Refit on topology only.
@@ -347,9 +370,16 @@ function Inner({
   };
 
   return (
-    <div className={cn(surface, expanded && 'fixed inset-3 z-50 h-auto w-auto', className)}>
+    <div
+      ref={wrapRef}
+      className={cn(surface, expanded && 'fixed inset-3 z-50 h-auto w-auto', className)}
+    >
       <ReactFlow
         nodes={nodes}
+        onMoveStart={(e) => {
+          // Only a person's pan or zoom carries an event; programmatic framing doesn't.
+          if (e) handled.current = true;
+        }}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
@@ -378,7 +408,8 @@ function Inner({
           color="var(--sheet-grid)"
         />
         <Controls showInteractive={false} position="bottom-left" />
-        {graph.nodes.length > 10 ? (
+        {/* On a narrow sheet the map would cover the steps it summarises. */}
+        {graph.nodes.length > 10 && !narrow ? (
           <MiniMap
             pannable
             zoomable
@@ -390,7 +421,14 @@ function Inner({
         ) : null}
         <Panel position="top-right" className="flex gap-1.5">
           {!editable && liveIds.length ? (
-            <button type="button" className={toolbarButton} onClick={() => frame(true)}>
+            <button
+              type="button"
+              className={toolbarButton}
+              onClick={() => {
+                handled.current = false;
+                frame(true);
+              }}
+            >
               <Crosshair className="size-3.5" aria-hidden="true" /> Live step
             </button>
           ) : null}

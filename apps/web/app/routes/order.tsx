@@ -17,7 +17,15 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
-import { CircleSlash, FileText, MessageSquareText, RotateCcw, Undo2, Zap } from 'lucide-react';
+import {
+  ChevronRight,
+  CircleSlash,
+  FileText,
+  MessageSquareText,
+  RotateCcw,
+  Undo2,
+  Zap,
+} from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -191,7 +199,9 @@ export default function OrderPage() {
   return (
     <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
-        <div className="min-w-0 flex-1">
+        {/* A real basis, so the totals and actions wrap below the title on a phone instead of
+            squeezing it to a column. */}
+        <div className="min-w-0 flex-1 basis-72">
           <div className="caption">
             <Link to="/orders" className="hover:text-foreground hover:underline">
               Orders
@@ -900,7 +910,11 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
         rows={records.messages.map((m) => [m.subject, m.recipient, ''])}
       />
       <details className="group">
-        <summary className="caption cursor-pointer hover:text-foreground">
+        <summary className="caption flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
+          <ChevronRight
+            className="size-3.5 transition-transform group-open:rotate-90"
+            aria-hidden="true"
+          />
           Flow variables (for debugging)
         </summary>
         <pre className="mt-2 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
