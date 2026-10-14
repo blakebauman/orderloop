@@ -10,7 +10,13 @@ import type { FlowGraph } from './types';
 /** What the assistant is looking at: everything, or the order or flow open on the page. */
 export type AssistantContext =
   | { kind: 'workspace' }
-  | { kind: 'order'; id: string; label: string }
+  | {
+      kind: 'order';
+      id: string;
+      label: string;
+      /** Whether it waits on an approval, so the panel only suggests asking about one then. */
+      awaitingApproval?: boolean;
+    }
   | {
       kind: 'flow';
       id: string;

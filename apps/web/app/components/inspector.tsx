@@ -11,12 +11,10 @@ import {
   nodeSpec,
   withDefaults,
 } from '@orderloop/core';
-import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
-import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { statusLabel } from '~/lib/format';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
@@ -46,12 +44,10 @@ export function Inspector({
   node,
   run,
   onChange,
-  onDelete,
 }: {
   node: FlowNode;
   run?: NodeRun;
   onChange?: (n: FlowNode) => void;
-  onDelete?: () => void;
 }) {
   const spec = nodeSpec(node.type);
   const config = withDefaults(node.type, node.config);
@@ -164,12 +160,6 @@ export function Inspector({
             </pre>
           ) : null}
         </div>
-      ) : null}
-
-      {onDelete ? (
-        <Button variant="ghost" size="sm" className="text-bad hover:text-bad" onClick={onDelete}>
-          <Trash2 /> Delete node
-        </Button>
       ) : null}
     </div>
   );

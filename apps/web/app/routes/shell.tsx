@@ -114,8 +114,9 @@ function ShellFrame() {
       >
         Skip to content
       </a>
+      {/* 3rem tall with its rule: full-height pages and the assistant subtract exactly 3rem. */}
       <header className="sticky top-0 z-40 border-b bg-background">
-        <div className="flex h-12 items-center gap-3 px-4 sm:gap-6 sm:px-5">
+        <div className="flex h-[calc(3rem-1px)] items-center gap-3 px-4 sm:gap-6 sm:px-5">
           <Link
             to="/"
             className="flex shrink-0 items-center gap-2 font-semibold tracking-title text-[16px]"

@@ -168,7 +168,9 @@ export default function Account() {
               </Form>
             ) : (
               <p className="text-muted-foreground text-sm">
-                You are signed in with the workspace password, which has no account of its own.
+                {me.kind === 'open'
+                  ? 'Sign-in is off: there is no workspace password and nobody has their own sign-in yet.'
+                  : 'You are signed in with the workspace password, which has no account of its own.'}
               </p>
             )}
           </Section>

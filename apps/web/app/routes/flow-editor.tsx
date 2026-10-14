@@ -22,6 +22,7 @@ import {
   Redo2,
   Rocket,
   Save,
+  Trash2,
   Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -536,8 +537,19 @@ export default function FlowEditor() {
         >
           {node ? (
             <div className="space-y-6">
-              <Inspector node={node} onChange={updateNode} onDelete={() => deleteNode(node.id)} />
+              <Inspector node={node} onChange={updateNode} />
               <Connections node={node} graph={flow} onChange={setGraph} />
+              {/* The one destructive action, last and apart from the settings above it. */}
+              <div className="border-t pt-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-bad hover:text-bad"
+                  onClick={() => deleteNode(node.id)}
+                >
+                  <Trash2 /> Delete node
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="space-y-5">
