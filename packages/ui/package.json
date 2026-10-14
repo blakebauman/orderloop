@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared React UI primitives (shadcn/ui) for Raisin web apps.",
+  "description": "Shared React UI primitives (shadcn/ui) for the OrderLoop web app.",
   "exports": {
     "./*": "./src/*.tsx",
     "./lib/utils": "./src/lib/utils.ts"

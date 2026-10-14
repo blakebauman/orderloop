@@ -5,18 +5,24 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a pull request supersedes its last run; a push to main never cancels one that
+# is already on its way to production.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The default GITHUB_TOKEN only needs to read the repository.
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -43,13 +49,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm test
 
+      # Known high or critical advisories in anything that ships (dev tooling excluded).
+      - name: Audit dependencies
+        if: ${{ !cancelled() }}
+        run: pnpm audit --prod --audit-level high
+
   deploy:
-    # Ships main to orderloop.io once the repository has CLOUDFLARE_API_TOKEN and
-    # CLOUDFLARE_ACCOUNT_ID secrets; without them the steps are skipped.
+    # Ships main to orderloop.io. The `production` environment holds CLOUDFLARE_API_TOKEN and
+    # CLOUDFLARE_ACCOUNT_ID (repository secrets work too) and is where a required reviewer goes.
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: production
+      url: https://orderloop.io
     concurrency:
       group: deploy-production
       cancel-in-progress: false
@@ -63,19 +77,21 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-        if: env.CLOUDFLARE_API_TOKEN != ''
-      - uses: pnpm/action-setup@v6
-        if: env.CLOUDFLARE_API_TOKEN != ''
-      - uses: actions/setup-node@v7
-        if: env.CLOUDFLARE_API_TOKEN != ''
+      # A merge that silently skips its deploy looks like a deploy: fail instead.
+      - name: Check deploy credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set to deploy"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
-      - if: env.CLOUDFLARE_API_TOKEN != ''
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Install retry helper
-        if: env.CLOUDFLARE_API_TOKEN != ''
         run: |
           mkdir -p "$HOME/.local/bin"
           cat > "$HOME/.local/bin/retry" <<'SH'
@@ -89,20 +105,31 @@ jobs:
           SH
           chmod +x "$HOME/.local/bin/retry"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Migrations run before the new code, and old code runs against the new schema until the
+      # Workers below are live: a migration must be additive (expand), and a destructive one
+      # (contract) ships in a later change, once no deployed code needs what it removes.
       - name: Migrate D1
-        if: env.CLOUDFLARE_API_TOKEN != ''
         run: retry pnpm --filter @orderloop/web db:migrate:remote
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
-        if: env.CLOUDFLARE_API_TOKEN != ''
+        id: engine
         run: retry pnpm --filter @orderloop/engine run deploy
       - name: Deploy web
-        if: env.CLOUDFLARE_API_TOKEN != ''
+        id: web
         run: retry pnpm --filter @orderloop/web run deploy
       - name: Smoke test
-        if: env.CLOUDFLARE_API_TOKEN != ''
-        run: curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health
+        id: smoke
+        run: |
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 https://orderloop.io/health
+          # The app itself, not just the health route: the sign-in page renders.
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /dev/null https://orderloop.io/login
+      # A failed smoke test puts both Workers back on their previous versions. D1 migrations are
+      # not rolled back, which is why they must be additive.
+      - name: Roll back on a failed smoke test
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: |
+          retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "Smoke test failed for ${GITHUB_SHA::7}"
+          retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "Smoke test failed for ${GITHUB_SHA::7}"
       # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
       - name: Deploy docs
-        if: env.CLOUDFLARE_API_TOKEN != ''
         run: retry pnpm docs:deploy
