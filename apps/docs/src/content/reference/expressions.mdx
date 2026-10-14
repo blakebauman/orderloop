@@ -15,7 +15,7 @@ Every expression and template sees one object:
 
 | Path | Contents |
 |---|---|
-| `order` | The order: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `contact`, `fulfillment`, `currency`, `lines`, `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
+| `order` | The order: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `contact`, `fulfillment`, `currency`, `lines` (each may carry `locationId`, the store it ships from on a split), `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
 | `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
 | `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
 | `input` | The order's `meta` |
@@ -67,8 +67,8 @@ Order {{order.id}} is on its way ({{vars.tracking}})
 | `refunded` | Refund, on `ok`: the amount refunded |
 | `invoiceKey`, `dueDate` | Generate invoice |
 | `poKey`, `supplier` | Generate PO (Demand forecast may also set `supplier`) |
-| `tracking` | Create shipment |
-| `fulfillmentLocation` | Route fulfillment: the chosen store's name, or `null` |
+| `tracking` | Create shipment: the tracking number, or every shipment's joined with `, ` on a split |
+| `fulfillmentLocation` | Route fulfillment: the chosen store's name (a split joins its sources' names with ` and `), or `null` for central stock |
 | `pickupCode` | Ready for pickup: the six-character code the customer shows |
 | `entitlements` | Deliver digital goods: `[{ sku, code }]`, one per unit |
 | `returnTracking` | Return label |

@@ -761,6 +761,17 @@ describe('omnichannel and point of sale', () => {
         { sku: 'TEE-01', qty: 2 },
         { sku: 'EBK-101', qty: 1 },
       ],
+      meta: {
+        shipTo: {
+          line1: '200 Lafayette St',
+          city: 'New York',
+          region: 'NY',
+          postalCode: '10012',
+          country: 'US',
+          latitude: 40.7215,
+          longitude: -73.9977,
+        },
+      },
     });
     const done = await settled(orderId);
     expect(done.status).toBe('completed');
@@ -773,6 +784,63 @@ describe('omnichannel and point of sale', () => {
       (p) => p.kind === 'capture',
     )!;
     expect(capture.amount).toBe(done.order!.total);
+  });
+
+  it('ships from the store nearest the customer', async () => {
+    await introspect();
+    const before = await storeStock('loc_mission', 'TEE-01');
+    const { orderId } = await omni({
+      lines: [{ sku: 'TEE-01', qty: 1 }],
+      meta: {
+        shipTo: {
+          line1: '1 Market St',
+          city: 'San Francisco',
+          region: 'CA',
+          postalCode: '94105',
+          country: 'US',
+          latitude: 37.7946,
+          longitude: -122.3947,
+        },
+      },
+    });
+    const done = await settled(orderId);
+    expect(done.nodes.route!.summary).toBe('Ship from Mission store');
+    expect((await storeStock('loc_mission', 'TEE-01')).stock).toBe(before.stock - 1);
+  });
+
+  it('splits a shipment across the warehouse and the nearest store when no one place has it all', async () => {
+    await introspect();
+    const tees = await storeStock('loc_mission', 'TEE-01');
+    const monitors = await central('MON-27');
+    const { orderId } = await omni({
+      lines: [
+        { sku: 'MON-27', qty: 8 },
+        { sku: 'TEE-01', qty: 3 },
+      ],
+      meta: {
+        shipTo: {
+          line1: '1 Market St',
+          city: 'San Francisco',
+          region: 'CA',
+          postalCode: '94105',
+          country: 'US',
+          latitude: 37.7946,
+          longitude: -122.3947,
+        },
+      },
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.route!.summary).toBe('Ship from Warehouse and Mission store');
+    expect(done.order!.lines.map((l) => [l.sku, l.locationId ?? null])).toEqual([
+      ['MON-27', null],
+      ['TEE-01', 'loc_mission'],
+    ]);
+    expect(done.nodes.ship!.summary).toMatch(/^2 UPS shipments: UPS\d+, UPS\d+$/);
+    const ships = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect(ships.map((s) => s.status)).toEqual(['label_created', 'label_created']);
+    expect(await central('MON-27')).toBe(monitors - 8);
+    expect((await storeStock('loc_mission', 'TEE-01')).stock).toBe(tees.stock - 3);
   });
 
   it('revokes delivered codes when the physical part cannot be fulfilled', async () => {

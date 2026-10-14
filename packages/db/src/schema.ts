@@ -134,6 +134,9 @@ export const locations = sqliteTable('locations', {
   postalCode: text('postal_code').notNull().default(''),
   pickup: integer('pickup', { mode: 'boolean' }).notNull().default(true),
   ships: integer('ships', { mode: 'boolean' }).notNull().default(false),
+  /** Where the store is, for shipping from the store nearest the customer. */
+  latitude: real('latitude'),
+  longitude: real('longitude'),
 });
 
 export const locationStock = sqliteTable(

@@ -17,6 +17,9 @@ const shipAddressSchema = z.object({
   region: z.string().max(100).optional(),
   postalCode: z.string().min(1).max(20),
   country: z.string().min(2).max(60),
+  /** Optional; lets route fulfillment ship from the nearest store. */
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 
 export const inboundOrderSchema = orderInputSchema

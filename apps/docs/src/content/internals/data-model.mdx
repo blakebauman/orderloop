@@ -40,6 +40,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0019_marketplace.sql` | `sellers`, `seller_orders`, `payouts` and `products.seller_id` |
 | `0020_fulfillment.sql` | `locations`, `location_stock`, `entitlements`; `products.kind`, `reservations.location_id`, `stock_movements.location_id`; two demo stores, digital products and store stock |
 | `0021_balance_entries.sql` | `balance_entries`, the receivables ledger |
+| `0022_store_coordinates.sql` | `locations.latitude` and `longitude`, seeded for both demo stores; `loc_mission` now ships |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -92,10 +93,10 @@ writes embeds its step key.
 | `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
 | `fx_rates` | Units of each `currency` per one USD, with `updated_at`. See [Currency](/reference/expressions/#currency) |
 | `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
-| `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` (pickup, ships) and `loc_mission` (pickup only). See [Fulfillment](/guides/fulfillment/) |
+| `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `latitude` and `longitude` (nullable; for shipping from the nearest store), `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` and `loc_mission`, both pickup and ships. See [Fulfillment](/guides/fulfillment/) |
 | `location_stock` | A store's stock per SKU, primary key `(location_id, sku)`: `stock` and `reserved` |
 | `entitlements` | A code per unit of a digital line (licence key, download, gift card): `order_id`, `sku`, `code`, `status` (`issued` or `revoked`), `created_at` |
-| `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping or a hand-over). `location_id` is `NULL` for central stock (`products`) and the store's id otherwise |
+| `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released` or `consumed` (by shipping or a hand-over). `location_id` is `NULL` for central stock (`products`) and the store's id otherwise; each line holds at its own location, so a split shipment has holds at several |
 | `stock_movements` | The inventory ledger: one row per step, line and `kind` (`hold` or `restock`), with `qty` and `applied`. A movement is recorded and applied to `products`, or to `location_stock` when its `location_id` is set, in one D1 batch, and only while `applied` is false, so a retried step changes stock once |
 | `balance_entries` | The receivables ledger: one row per order and step that billed a customer on account, with `amount` (base currency) and `applied`. Recorded and applied to `customers.balance` in one D1 batch, only while `applied` is false, so a retried invoice step bills once |
 | `payments` | Authorizations (`kind` `authorization:<method>`), captures, charges and refunds, with `status` and `ref` |

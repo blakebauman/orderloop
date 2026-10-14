@@ -36,7 +36,7 @@ fields that identify the order and pick the flow:
 | `lines` | `{ sku, name?, qty, unitPrice?, sellerId? }`. Required unless `documentText` is sent for the [Extract order](/reference/nodes/#ai.extract) node |
 | `flowId` | Optional. Runs this flow instead of the routed one |
 | `source` | Optional, up to 60 characters. The sending system, for display (`shopify`); stored in `meta.source` |
-| `shipTo` | Optional. An address string (up to 500 characters) or `{ name?, line1, line2?, city, region?, postalCode, country }`. Stored in `meta.shipTo`, where the `no_po_box` policy rule reads it |
+| `shipTo` | Optional. An address string (up to 500 characters) or `{ name?, line1, line2?, city, region?, postalCode, country, latitude?, longitude? }`. Stored in `meta.shipTo`, where the `no_po_box` policy rule reads it. `latitude` (-90 to 90) and `longitude` (-180 to 180) let route fulfillment [ship from the nearest store](/guides/fulfillment/#nearest-store) |
 | `vars` | Optional. Seeds the run's variables |
 
 The rest (`title`, `customerId`, `currency`, `contact`, `fulfillment`, `documentText`,

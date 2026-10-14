@@ -28,8 +28,8 @@ warehouse. See [Data model](/internals/data-model/).
 A product has a `kind`, `physical` or `digital`. Digital products hold no stock: reserving skips
 them, and the back office shows them as "Digital, no stock".
 
-The migration seeds two stores. `loc_soho` offers pickup and ships; `loc_mission` offers pickup and
-doesn't ship. `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
+The migrations seed two stores, both offering pickup and shipping, with coordinates: `loc_soho`
+(40.7233, -74.0030) and `loc_mission` (37.7599, -122.4148). `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
 stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Stores** table lists
 each store's flags and available over on-hand stock per SKU.
 
@@ -45,15 +45,15 @@ only reads stock; reserving is a separate node. It takes these branches:
 
 | Branch | Taken when |
 |---|---|
-| `ship` | `method` is `ship` and central stock covers every physical line, or else the first store (by id) that ships and covers every line |
+| `ship` | `method` is `ship` and some combination of the warehouse and shipping stores covers every physical line: central stock if it covers them all, else the nearest shipping store that does, else a [split](#split-shipments) with each line at one place |
 | `pickup` | The order's store offers pickup and has every physical line |
 | `carry_out` | The order's store has every physical line |
 | `digital` | The order has a digital line. It is taken in addition to the physical branch, so a mixed cart takes two |
-| `unavailable` | No warehouse or store can fulfil the physical lines, or the order has no store (or one without pickup) for `pickup` and `carry_out`. The node's summary says why |
+| `unavailable` | Shipping: no warehouse or store holds the full quantity of some line (the reason is `No warehouse or store has enough <SKUs>`). For `pickup` and `carry_out`: the order has no store, the store lacks a line, or (pickup) it doesn't offer pickup. The node's summary says why |
 
 An order of only digital lines takes `digital` alone. On a routed branch the node writes the chosen
 `method` and `locationId` back onto `order.fulfillment` (for ship-from-store, the store it picked) and
-sets `vars.fulfillmentLocation` to the store's name, or `null`. Later reserve, hand-over and
+sets `vars.fulfillmentLocation` to the store's name (the sources' names joined with ` and ` on a split), or `null` for central stock. Later reserve, hand-over and
 notification steps read them.
 
 ## Buy online, pick up in store
@@ -85,11 +85,46 @@ failure runs the rollbacks.
 
 ## Ship from store
 
-`method: ship` looks at central stock first. When the warehouse can't cover every physical line, it
-takes the first store with `ships` set that can, and sets `order.fulfillment.locationId` to it. The
-ship branch then reserves at that store and the carrier label is created as usual; the store's stock,
-not the warehouse's, is consumed. The **Ship from store, with an e-book** scenario shows it: the
-warehouse has no `TEE-01`, so the tees ship from the SoHo store.
+`method: ship` prefers the warehouse, then the shipping stores (`ships` set) nearest the customer. The
+sources are tried in that order, and the first one that holds every physical line ships the whole
+order. A store winner is written to `order.fulfillment.locationId`; the ship branch then reserves at
+that store and the carrier label is created as usual, and the store's stock, not the warehouse's, is
+consumed.
+
+### Nearest store
+
+The ship-to comes from `meta.shipTo` when it is an address object (a plain string is ignored). Stores
+rank by:
+
+1. **Distance**, when the ship-to has `latitude` and `longitude` and the store has coordinates:
+   great-circle distance. Stores without coordinates go after those with.
+2. **Postal code**, otherwise: the longest shared prefix with the ship-to's `postalCode`, then the
+   smallest numeric difference.
+
+Ties, and orders with no ship-to, keep store id order. Send coordinates on the address with the order
+(see [Inbound orders](/guides/inbound-orders/#payload)); the ranking is `rankStores` in
+`packages/core/src/fulfillment.ts`, which is unit tested there.
+
+### Split shipments
+
+When no single source holds every line, each line goes to the first source (in the same order) that
+holds its full quantity. A line is never split across sources, and two lines of one SKU don't count the
+same units twice. If a line fits nowhere the branch is `unavailable`, naming the short SKUs.
+
+A split writes `locationId` on each line that ships from a store (`order.lines[].locationId`); a line
+shipping from the warehouse has none. The summary names every source (`Ship from Warehouse and Mission
+store`) and `vars.fulfillmentLocation` is the same names joined. Then:
+
+- `commerce.reserve_inventory` holds each line at its own location.
+- `commerce.ship` books one shipment per source location. The first keeps the step's id
+  (`shp_<order>_<step>`), the others take `_2`, `_3`, and so on. The output has `shipments`
+  (`[{ shipmentId, tracking, locationId }]`), `vars.tracking` is every tracking number joined with
+  `, `, and the summary reads `2 UPS shipments: …`. Its rollback cancels all of them.
+
+The **Ship from store, with an e-book** scenario ships to New York with coordinates, so the tees,
+missing from the warehouse, ship from the nearest store, SoHo. **Split shipment, nearest store** sends
+eight monitors and three tees to San Francisco: the monitors ship from the warehouse and the tees from
+the Mission store.
 
 ## Carry-out and point of sale
 
@@ -122,7 +157,7 @@ hand-over) and the codes are all done. On the till flow, the digital branch join
 
 | Event | Undone |
 |---|---|
-| A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the store it was held at); `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization |
+| A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the location it was held at); `commerce.ship` cancels every shipment it booked; `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization |
 | A cancel | `compensateOrder` does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, revokes codes, plus seller orders and payouts |
 
 Codes issued for a mixed cart are revoked when its physical part later fails, for example when the

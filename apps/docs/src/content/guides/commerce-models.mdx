@@ -53,6 +53,7 @@ Besides `customerId`, `currency`, `lines` and `meta`, the input takes:
 | `contact` | `{ email, name?, phone? }` for a buyer without a customer account, such as guest checkout or a POS receipt. `email` is searchable with `q` |
 | `fulfillment` | `{ method, locationId? }`. `method` is one of <Values of="fulfillment-methods" />; `locationId` is the store to fulfil from or hand over at. See [Fulfillment](/guides/fulfillment/) |
 | `lines[].sellerId` | The marketplace seller for a line; otherwise the product's seller, or first party |
+| `lines[].locationId` | Set by route fulfillment on a split shipment: the store a line ships from. Unset means `fulfillment.locationId`, or central stock |
 
 All of these are on the run context's `order` (see [Expressions](/reference/expressions/#the-run-context)),
 so a condition can branch on `order.model`, `order.channel` or `order.fulfillment.method`. The

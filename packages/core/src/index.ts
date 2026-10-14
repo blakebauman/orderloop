@@ -3,6 +3,7 @@ export * from './address';
 export * from './api';
 export * from './assistant';
 export * from './catalog';
+export * from './fulfillment';
 export * from './graph';
 export * from './layout';
 export * from './lines';

@@ -117,6 +117,11 @@ export const orderLineSchema = z.object({
   unitPrice: z.number().nonnegative().optional(),
   /** Marketplace seller for this line; otherwise the product's seller, or first party. */
   sellerId: z.string().optional(),
+  /**
+   * The store this line ships from when route fulfillment splits a shipment. Unset lines use
+   * `fulfillment.locationId`, or central stock.
+   */
+  locationId: z.string().optional(),
 });
 export type OrderLine = z.infer<typeof orderLineSchema>;
 
