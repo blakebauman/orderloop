@@ -6,10 +6,10 @@ hero:
   title: Every order is a loop that runs to its outcome.
   tagline: >-
     Draw a flow from catalog nodes: pricing, payments, approvals, shipping, store pickup, digital
-    delivery, marketplace sellers, AI triage. OrderLoop runs each order, from any channel, through it as a durable Workflow with its own live agent, on Workers, Workflows,
-    Durable Objects, Workers AI, D1 and R2.
+    delivery, marketplace sellers, AI triage. OrderLoop runs each order, from any channel, through it
+    durably, waits for people and partners, and rolls back what it did when the order fails.
   actions:
-    - text: Run it locally
+    - text: Get started
       link: /start/getting-started/
       icon: right-arrow
     - text: How it works
@@ -34,8 +34,8 @@ import pickupRun from '../data/runs/pickup-order.json';
   </TabItem>
   <TabItem label="Purchase order by email">
     <OrderRun run={b2bRun}>
-      on the dashboard's “B2B PO by email” scenario, with <code>AI_MODE=mock</code> (hence
-      “heuristic” on the extract step, which found <code>cus_northwind</code> from the email's{' '}
+      on the dashboard's “B2B PO by email” scenario, recorded without a model (hence “heuristic” on
+      the extract step, which found <code>cus_northwind</code> from the email's{' '}
       <code>From:</code> line)
     </OrderRun>
   </TabItem>
@@ -49,19 +49,19 @@ you can open in the editor, change and republish.
 
 - **Flows are data.** A flow is a JSON graph of [catalog nodes](/reference/nodes/). Publishing makes an
   immutable version, and each order pins the version it started on.
-- **One Workflow interprets every flow.** Each node is a memoized `step.do`, so an order survives
-  restarts, waits days for a person or a payment, and rolls back its reservations, holds and shipments
-  when it fails.
-- **Each order has an agent.** A Durable Object holds the order's live state, delivers approvals and
-  events to the waiting node, and streams every change to the order page.
+- **Orders are durable.** Each node runs once and its result is kept, so an order survives
+  restarts, waits days for a person or a payment, and rolls back its reservations, holds and
+  shipments when it fails.
+- **Every order is live.** The order page shows each node as it runs, and approvals and events
+  reach the waiting node from the dashboard, the API, a signed webhook or the assistant.
 - **AI never blocks an order.** Every model call has a schema, a 20-second cap and a deterministic
   fallback.
 
 ## Where next
 
 <CardGrid>
-  <LinkCard title="Getting started" href="/start/getting-started/" description="Install, migrate D1, run web and engine together, start a scenario." />
+  <LinkCard title="Getting started" href="/start/getting-started/" description="Sign in, run a scenario, start an order over the API." />
   <LinkCard title="Building flows" href="/guides/building-flows/" description="Nodes, branches, joins, loops, expressions and publishing." />
   <LinkCard title="Node catalog" href="/reference/nodes/" description="Every node type, its config fields and its output branches." />
-  <LinkCard title="Architecture" href="/internals/architecture/" description="How the web app, the engine, the Workflow and the agent fit together." />
+  <LinkCard title="REST API" href="/reference/rest-api/" description="Start orders, deliver events, decide approvals and subscribe to webhooks." />
 </CardGrid>

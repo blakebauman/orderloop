@@ -19,7 +19,7 @@ a page has to be added or moved, and **`docs-audit`** when asked to sweep a whol
 
 ## What you may change
 
-- `apps/docs/src/content/**`, `apps/docs/astro.config.mjs` (the sidebar), `apps/docs/src/components/`
+- `apps/docs/src/content/**`, `docs/*.md` (the unpublished maintainer docs), `apps/docs/astro.config.mjs` (the sidebar), `apps/docs/src/components/`
   (only to expose more values from `@orderloop/core`), `apps/docs/src/styles/brand.css`,
   `apps/docs/DESIGN.md` and `apps/docs/src/data/runs/*.json`.
 - `packages/design/src/tokens.ts`, only to mirror a token change already made in

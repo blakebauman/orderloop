@@ -1,7 +1,6 @@
----
-title: Data model
-description: The D1 tables, the migrations that create them, and where order documents live in R2.
----
+# Data model
+
+The D1 tables, the migrations that create them, and where order documents live in R2.
 
 Both Workers bind the same D1 database (`orderloop`, binding `DB`) and R2 bucket
 (`orderloop-docs`, binding `DOCS`). The Drizzle schema is `packages/db/src/schema.ts`; the SQL that
@@ -13,7 +12,7 @@ migration and update `schema.ts` to match; never edit a migration that has been 
 :::
 
 D1 holds indexes and the back office. An order's live run state is not in D1: it lives in its
-[OrderAgent](/internals/order-agent/), and its durable progress in its Workflow instance.
+[OrderAgent](order-agent.md), and its durable progress in its Workflow instance.
 
 ## Migrations
 
@@ -61,7 +60,7 @@ deploying code that needs them. The engine's tests apply the same directory to t
 start, so editing or republishing never changes a running order. The built-in templates are
 published as a new version whenever their content has not been published before: version 1 the
 first time they are needed, the next version after a template changes (`ensureTemplates` in the
-engine, `ensureSeeded` in the web app; see [Templates](/guides/templates/#seeding)).
+engine, `ensureSeeded` in the web app; see [Templates](https://docs.orderloop.io/guides/templates/#seeding)).
 
 ## Orders and approvals
 
@@ -85,21 +84,21 @@ Rows from before `0005` have none and replay without the check.
 
 ## Back office
 
-The tables the [connectors](/internals/architecture/#connectors) read and write. Every id a step
+The tables the [connectors](architecture.md#connectors) read and write. Every id a step
 writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order, once per step through `balance_entries`), payment `terms` |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock) |
-| `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](/guides/marketplace/) |
+| `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](https://docs.orderloop.io/guides/marketplace/) |
 | `seller_orders` | One row per order and seller, id `so_${orderId}_${sellerId}` (first party is `first_party`): `status` (`pending`, `accepted`, `rejected` or `cancelled`), `lines` (JSON), `subtotal`, `reason`, `decided_at` |
 | `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
 | `contract_prices` | Negotiated prices, primary key `(customer_id, sku)`: the pricing chain's contract source |
-| `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](/reference/expressions/#pricing-chain) |
-| `fx_rates` | Units of each `currency` per one USD, with `updated_at`. See [Currency](/reference/expressions/#currency) |
+| `price_sources` | The pricing chain: `id` (`price_book`, `contract`, `volume`), `label`, `priority` (lowest runs first), `stop_processing`, `active`. See [Pricing chain](https://docs.orderloop.io/reference/expressions/#pricing-chain) |
+| `fx_rates` | Units of each `currency` per one USD (`BASE_CURRENCY` in `@orderloop/core`), with `updated_at`. Seeded with demo rates: EUR 0.92, GBP 0.79, CAD 1.37. No UI edits them yet. See [Currency](https://docs.orderloop.io/reference/expressions/#currency) |
 | `price_rules` | Price-book and volume entries: `source_id`, `name`, optional scope (`sku`, `customer_id`, `customer_tier`, `min_qty`, `starts_at`, `ends_at`), and a fixed `price` or `discount_pct` off list |
-| `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `latitude` and `longitude` (nullable; for shipping from the nearest store), `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` and `loc_mission`, both pickup and ships. See [Fulfillment](/guides/fulfillment/) |
+| `locations` | Stores that hold their own stock: `name`, `kind` (`store`), `postal_code`, `latitude` and `longitude` (nullable; for shipping from the nearest store), `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders). Seeded: `loc_soho` and `loc_mission`, both pickup and ships. See [Fulfillment](https://docs.orderloop.io/guides/fulfillment/) |
 | `location_stock` | A store's stock per SKU, primary key `(location_id, sku)`: `stock` and `reserved` |
 | `entitlements` | A code per unit of a digital line (licence key, download, gift card): `order_id`, `sku`, `code`, `status` (`issued` or `revoked`), `created_at` |
 | `reservations` | Stock holds, id `res_${orderId}_${stepKey}_${line}_${sku}`; `status` is `held`, `released`, `consumed` (by shipping or a hand-over) or `restored` (the shipment was cancelled and the consumed stock returned). `location_id` is `NULL` for central stock (`products`) and the store's id otherwise; each line holds at its own location, so a split shipment has holds at several |
@@ -117,7 +116,7 @@ writes embeds its step key.
 
 | Table | Purpose |
 |---|---|
-| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](/internals/order-agent/#node-timing)) and indexed by `(node_type, ended_at)` and `ended_at`; rows older than 180 days are deleted by the [retention sweep](#retention) |
+| `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](order-agent.md#node-timing)) and indexed by `(node_type, ended_at)` and `ended_at`; rows older than 180 days are deleted by the [retention sweep](#retention) |
 
 The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at
 request time: completion rate by model from `orders` (completed over finished, by
@@ -130,18 +129,18 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 
 | Table | Purpose |
 |---|---|
-| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at`, and for [two-factor sign-in](/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), and `password_change_due` (the password was set by an operator; see [temporary passwords](/guides/team-and-roles/#temporary-passwords)) |
+| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at`, and for [two-factor sign-in](https://docs.orderloop.io/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), and `password_change_due` (the password was set by an operator; see [temporary passwords](https://docs.orderloop.io/guides/team-and-roles/#temporary-passwords)) |
 | `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page). Expired sessions are deleted by the [retention sweep](#retention) |
 | `recovery_codes` | One-use two-factor recovery codes: `code_hash` (SHA-256 of the code, lowercased without the dash), `user_id`. A row is deleted when its code is used |
 | `sign_in_challenges` | A correct password waiting for its two-factor code: `token_hash` (SHA-256 of the `__Host-ol_2fa` cookie), `user_id`, `expires_at` (10 minutes). Deleted on success; expired rows are dropped at the next sign-in |
 | `api_tokens` | `name`, `prefix` (the first 12 characters, for lists), `token_hash` (SHA-256 of the `ol_live_` token, unique), `role`, `created_by`, `last_used_at` (updated at most every 5 minutes), `revoked_at`, `expires_at` (null never expires). For an expired token, `last_used_at` limits its `api.token_expired` audit events to one an hour |
-| `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `api-ip:` for shared-password bearers; `two-factor:<user id>` for wrong codes; `reauth:<user id>` for wrong current passwords on the Account page) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](/guides/team-and-roles/#failed-sign-ins) |
-| `webhook_receipts` | Delivered signed events: `id` (`event:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written (and by the [retention sweep](#retention)). See [Signed events](/reference/rest-api/#signed-events) |
-| `workspace_settings` | Settings operators change in the app: `key`, `value`, `updated_at`, `updated_by`. `two_factor_required` is `off`, `operator`, `approver` or `viewer`, the lowest role that must use [two-factor sign-in](/guides/team-and-roles/#requiring-it) |
-| `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
+| `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `api-ip:` for shared-password bearers; `two-factor:<user id>` for wrong codes; `reauth:<user id>` for wrong current passwords on the Account page) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](https://docs.orderloop.io/guides/team-and-roles/#failed-sign-ins) |
+| `webhook_receipts` | Delivered signed events: `id` (`event:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written (and by the [retention sweep](#retention)). See [Signed events](https://docs.orderloop.io/reference/rest-api/#signed-events) |
+| `workspace_settings` | Settings operators change in the app: `key`, `value`, `updated_at`, `updated_by`. `two_factor_required` is `off`, `operator`, `approver` or `viewer`, the lowest role that must use [two-factor sign-in](https://docs.orderloop.io/guides/team-and-roles/#requiring-it) |
+| `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](https://docs.orderloop.io/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
 
 No password, token or recovery code is stored in the clear; the two-factor secret is, because
-checking a code needs it. See [Team and roles](/guides/team-and-roles/).
+checking a code needs it. See [Team and roles](https://docs.orderloop.io/guides/team-and-roles/).
 
 ## Webhooks
 
@@ -151,7 +150,7 @@ checking a code needs it. See [Team and roles](/guides/team-and-roles/).
 | `webhook_deliveries` | The outbox: one row per event per subscription, id `whd_${orderId}_${stepKey}_${subscriptionId}`. `status` is `pending`, `delivered` or `failed`; with `attempts`, `response_status`, `last_error`, `delivered_at` |
 
 Deliveries are indexed by `order_id`, `created_at` and `(subscription_id, created_at)`; delivered or failed ones older than 90 days are deleted by the [retention sweep](#retention). See
-[Outbound webhooks](/guides/outbound-webhooks/).
+[Outbound webhooks](https://docs.orderloop.io/guides/outbound-webhooks/).
 
 ## Email intake
 
@@ -159,7 +158,7 @@ Deliveries are indexed by `order_id`, `created_at` and `(subscription_id, create
 |---|---|
 | `inbound_emails` | One row per message the `email()` entrypoint saw: `message_id` (unique), `mailbox`, `sender`, `subject`, `status` (`accepted`, `duplicate`, `rejected`), `reason`, `order_id`, `r2_key`, `attachments`, `received_at`. Rows older than 180 days are deleted by the [retention sweep](#retention) |
 
-See [Email intake](/guides/email-intake/#the-intake-log).
+See [Email intake](https://docs.orderloop.io/guides/email-intake/#the-intake-log).
 
 ## R2 documents
 

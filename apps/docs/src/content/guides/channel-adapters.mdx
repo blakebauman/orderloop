@@ -7,30 +7,26 @@ import Values from '../../components/Values.astro';
 
 [Inbound orders](/guides/inbound-orders/) takes a payload in OrderLoop's own shape. A channel
 adapter takes a platform's native payload instead and maps it onto that shape, so the platform can
-post straight to OrderLoop. Both adapters then share the inbound start: the same routing
-(`ORDER_ROUTES`, else the model's default flow), the same `order:<channel>:<externalId>` key and the
-same payload fingerprint, so a retry never starts a second order.
+post straight to OrderLoop. Both adapters then share the inbound start: the same
+[routing](/guides/inbound-orders/#routing) (the workspace's order routes, else the model's default
+flow), the same `order:<channel>:<externalId>` key and the same payload fingerprint, so a retry
+never starts a second order.
 
 | Adapter | Route | Authentication |
 |---|---|---|
 | [Shopify](#shopify) | `POST /api/v1/channels/shopify/orders` | `X-Shopify-Hmac-Sha256`, no token |
 | [EDI X12 850](#edi-x12-850) | `POST /api/v1/channels/edi/850` | An API token with the `operator` role |
 
-The mapping lives in `packages/core/src/channels/` (`shopify.ts`, `x12.ts`) and is pure; the web
-Worker verifies, looks up the customer and starts the order.
-
 ## Shopify
 
-1. Set the Shopify app's client secret on the web Worker:
-   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
-   `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`).
-2. In the app, create an `orders/create` webhook with the format JSON, pointing at
-   `https://<your host>/api/v1/channels/shopify/orders`.
+1. In your Shopify app, create an `orders/create` webhook with the format JSON, pointing at
+   `https://orderloop.io/api/v1/channels/shopify/orders`.
+2. Give the app's client secret (the key Shopify signs webhooks with) to your OrderLoop
+   administrator, who adds it to the workspace. Until they do, the route answers `503`.
 
-The route sits in front of authentication, because Shopify can't send a bearer token. It verifies
-`X-Shopify-Hmac-Sha256`, the base64 HMAC-SHA256 of the raw body keyed with the client secret
-(`verifyShopifyHmac` in `@orderloop/core`, compared in constant time). Topics other than
-`orders/create` are acknowledged and ignored so Shopify stops retrying them.
+Shopify can't send a bearer token, so the route needs none. It verifies `X-Shopify-Hmac-Sha256`,
+the base64 HMAC-SHA256 of the raw body keyed with the client secret, compared in constant time.
+Topics other than `orders/create` are acknowledged and ignored so Shopify stops retrying them.
 
 ### Field mapping
 
@@ -60,7 +56,7 @@ stock and prices; an order with none returns `400` `Line items without a SKU: �
 | `401` | Missing or wrong HMAC |
 | `409` | The routed flow has no published version |
 | `422` | The same Shopify order id already arrived with different contents |
-| `503` | `SHOPIFY_WEBHOOK_SECRET` is not set |
+| `503` | The workspace hasn't enabled Shopify (no client secret is set) |
 
 Shopify retries on any non-`2xx`, which suits `409` (publish the flow and the retry starts the
 order) and not `400`.
@@ -70,18 +66,13 @@ order) and not `400`.
 A trading partner (or its EDI provider or VAN) posts an interchange of purchase orders; each 850
 becomes a `b2b` order for the partner's customer.
 
-1. Map each partner's ISA sender id (`ISA06`) to a customer id in the web variable `EDI_PARTNERS`
-   in `apps/web/wrangler.jsonc`:
-
-   ```json
-   { "NORTHWIND": "cus_northwind" }
-   ```
-
-   Anything else, including a sender that isn't listed, is refused. See
-   [Configuration](/reference/configuration/#web-variables).
+1. Ask your OrderLoop administrator to add the partner to the workspace's EDI partner list, which
+   maps each partner's ISA sender id (`ISA06`) to the customer it orders for, for example
+   `NORTHWIND` → `cus_northwind`. A sender that isn't listed is refused.
 2. Have the provider `POST` the raw X12 to `/api/v1/channels/edi/850` with
    `Content-Type: application/edi-x12` (or `text/plain`) and
-   `Authorization: Bearer ol_live_…`, a token from the Team page with the `operator` role.
+   `Authorization: Bearer ol_live_…`, an [API token](/guides/team-and-roles/#api-tokens) with the
+   `operator` role.
 
 ```bash
 curl -X POST https://orderloop.io/api/v1/channels/edi/850 \
@@ -89,7 +80,7 @@ curl -X POST https://orderloop.io/api/v1/channels/edi/850 \
   --data-binary @po-nw-9001.x12
 ```
 
-`parseX12` reads the delimiters from the ISA header: the element separator is its 4th character and
+OrderLoop reads the delimiters from the ISA header: the element separator is its 4th character and
 the segment terminator its 106th. Transactions run from `ST` to `SE`, and `SE01` must equal the
 segment count.
 
@@ -97,7 +88,7 @@ segment count.
 
 | Segment | Inbound order |
 |---|---|
-| `ISA06` | The sender: looked up in `EDI_PARTNERS` for `customerId`, and the first half of `externalId` |
+| `ISA06` | The sender: looked up in the EDI partner list for `customerId`, and the first half of `externalId` |
 | `BEG03` | The PO number: `externalId` is `<ISA sender>:<PO>` and `title` is `PO <n>`. Required |
 | `BEG05` | `meta.edi.date` |
 | `CUR02` | `currency`, `USD` when absent |
@@ -136,7 +127,7 @@ different contents). The whole request fails instead when:
 |---|---|
 | `400` | Not an X12 interchange: no 106-character ISA, an `ST` without its `SE`, a wrong `SE01` count, or no transactions |
 | `401` | No valid token |
-| `403` | The caller is below `operator`, or the sender isn't in `EDI_PARTNERS` |
+| `403` | The caller is below `operator`, or the sender isn't in the workspace's EDI partner list |
 
 A transaction that isn't an 850 is reported in `results` with `status: 400`.
 

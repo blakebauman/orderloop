@@ -1,6 +1,6 @@
 ---
 title: Team and roles
-description: Who can sign in, what viewers, approvers and operators may do, setting up the first operator, and API tokens.
+description: Who can sign in, what viewers, approvers and operators may do, the workspace password, two-factor sign-in, API tokens and the audit log.
 ---
 
 Each person signs in with their own email and password, and has one role. API tokens carry a role
@@ -12,24 +12,15 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 | `approver` | Also approve and reject approvals, including through the assistant |
 | `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, have the assistant do those and draft flow changes, manage webhook subscriptions, and manage the team and API tokens |
 
-The roles and the order are `ROLES` in `packages/core/src/roles.ts`. Every route checks the role on
-the server; the dashboard also hides controls a role can't use.
+Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
-## Setting up sign-in
+## The workspace password
 
-A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an operator, which is
-the local development default. Open mode runs only on `localhost`, `127.0.0.1`, `[::1]` and
-`*.localhost`; any other host answers every request except `/health` with `503` and the text
-"Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first operator on
-the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`, `isLocalHost` in
-`origin.ts`). To turn sign-in on, open **Set up sign-in** in the account menu (the Team
-page) and create your operator account with a password you choose. You are signed in as it, and
-from then on everyone signs in.
-
-With `APP_PASSWORD` set, sign-in is on from the start. On the sign-in page, choose **Use the
-workspace password instead** and enter it to reach the Team page as an operator. (The form sends no
-email; the REST API's equivalent is the password as a bearer token.) The password stays a break-glass operator sign-in
-and API credential; it has no identity, so its decisions are recorded as `operator`.
+Besides each person's own sign-in, a workspace can have a workspace password, set by your OrderLoop
+administrator. It is a break-glass operator sign-in: on the sign-in page, choose **Use the
+workspace password instead** and enter it to reach the Team page as an operator (the REST API's
+equivalent is the password as a bearer token). It has no identity, so its decisions are recorded as
+`operator`. Use it to add the first operator, then sign in as yourself.
 
 ## The Team page
 
@@ -46,16 +37,14 @@ Operators manage people and tokens at `/team`:
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. You can't reset your own.
-- Without `APP_PASSWORD`, the last active operator can't be demoted or disabled, so someone can
-  always manage the team.
+- In a workspace without a workspace password, the last active operator can't be demoted or
+  disabled, so someone can always manage the team.
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
-They are stored as PBKDF2-SHA256 (100,000 iterations, the Workers limit) as
-`pbkdf2:<iterations>:<salt>:<hash>`.
+They are stored only as salted PBKDF2-SHA256 hashes.
 
-A session is a `__Host-ol_session` cookie holding a random token; D1 stores only its SHA-256. It
-ends 30 days after sign-in, or after 7 days without use, whichever comes first
-(`SESSION_MAX_MS` and `SESSION_IDLE_MS` in `packages/core/src/roles.ts`). Pages and the order page's
+A session is a `__Host-ol_session` cookie holding a random token, of which only a hash is stored.
+It ends 30 days after sign-in, or after 7 days without use, whichever comes first. Pages and the order page's
 live connection both count as use, recorded at most every 5 minutes. Signing out deletes the
 session.
 
@@ -65,7 +54,7 @@ A password an operator sets (a new person's, or a reset) is temporary. Signing i
 but until the person chooses their own on the **Account** page, every other page sends them there,
 and the REST API, MCP, A2A, the order page's live connection and order documents answer `403`.
 Choosing a new password ends it, and the Team page marks people still on one with
-"temporary password". It is `users.password_change_due` in D1.
+"temporary password".
 
 ### Your sessions
 
@@ -92,8 +81,7 @@ codes left, an operator can **Reset two-factor** on the Team page.
 
 Codes are time-based one-time passwords (RFC 6238: HMAC-SHA1, 30-second steps, 6 digits). The code
 for the step before or after the current one is accepted too, in case the phone's clock is a little
-off, and each step's code works once. Recovery codes are stored as SHA-256 and deleted when used.
-The app's secret has to be readable to check codes, so it is stored as is, in `users.totp_secret`.
+off, and each step's code works once. Recovery codes are stored as hashes and deleted when used.
 The workspace password and API tokens don't use two-factor sign-in.
 
 #### Requiring it
@@ -103,8 +91,7 @@ nobody (the default), operators, approvers and operators, or everyone. The secti
 covered who haven't set it up. Until they do, those people can only use their Account page: every
 other page sends them there, and the REST API, the order page's live connection and order documents
 answer `403`. They can't turn it off while it is required, but can make new recovery codes. Changing
-the setting takes effect at once on the isolate that saved it and within 30 seconds everywhere else.
-It is stored in D1 `workspace_settings`. Turn it on for your own role after setting up your own
+the setting takes effect within 30 seconds. Turn it on for your own role after setting up your own
 two-factor sign-in, or you'll be sent to your Account page to do it first.
 
 ### Failed sign-ins
@@ -121,8 +108,9 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 | Person, on the Account page | 5 | Guessing the current password from a signed-in browser left open: changing the password, turning off two-factor sign-in, new recovery codes (`429`) |
 
 A successful sign-in clears its email-and-address count. The workspace password counts as one
-email. Separately, 20 wrong guesses at the shared password as an API bearer token from one address in 15 minutes are refused with `429`. Addresses come from `cf-connecting-ip`, which Cloudflare sets. The limits are `LIMITS` in
-`apps/web/app/lib/throttle.ts`, and the counts are D1 `auth_failures`.
+email. Separately, after 20 wrong guesses at the workspace password as an API bearer token from one
+address in 15 minutes, further attempts are refused with `429`. The address is the client's IP as
+Cloudflare sees it.
 
 ## API tokens
 
@@ -133,7 +121,7 @@ curl https://orderloop.io/api/v1/orders -H "Authorization: Bearer ol_live_…"
 ```
 
 Create one on the Team page with a name (what will use it), a role and how long it lasts: 30 days,
-90 days (the default), 1 year or never. The token is shown once and stored only as a SHA-256; the
+90 days (the default), 1 year or never. The token is shown once and stored only as a hash; the
 list shows its first 12 characters, who created it, when it was last used and when it expires,
 highlighting tokens that expire within 14 days. Revoke it there. An expired token gets `401` with
 `This API token expired on <date>…`; create a new one and switch the integration over before the
@@ -167,7 +155,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
-| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the shared password; `api.token_expired`, at most hourly per token, when an expired token is used |
+| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the workspace password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
 A person signing in only hears that the email and password didn't match; the reason is for
 operators. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
@@ -177,9 +165,8 @@ not here.
 ## Who decided
 
 An approval's `by` is the person who decided: their email for a signed-in person, `token:<name>`
-for an API token. Through the [assistant](/guides/assistant/), MCP or A2A it is `<email> via assistant`, `<email> via MCP` or `<email> via A2A`. On the order page's live connection, the agent takes the name from the
-connection, never from what the page sends; see
-[OrderAgent](/internals/order-agent/#roles-on-the-socket).
+for an API token. Through the [assistant](/guides/assistant/), MCP or A2A it is `<email> via assistant`, `<email> via MCP` or `<email> via A2A`. On the order page's live connection, the name comes from the
+signed-in session, never from what the page sends.
 
 Changes reach pages that are already open. Each action on the order page's live connection checks
 the person's session again, so a lower role applies to the next action, and signing out, a
@@ -187,27 +174,18 @@ password reset, being disabled or the session going idle ends it.
 
 ## Cross-site requests
 
-Every `*.orderloop.io` host counts as the same site, so the `SameSite=Lax` cookie would still be
-sent with a form post from a sibling subdomain. The web Worker therefore refuses a browser request
-that changes something (any method but `GET`, `HEAD` and `OPTIONS`), or opens the order page's
-WebSocket, unless its `Origin` is the app's own; without `Origin` it reads `Sec-Fetch-Site`, and
-accepts only `same-origin` or `none`. The answer is `403 { "error": "Cross-site request refused" }`.
-Requests with a bearer token are exempt, since they carry no cookie, and so are clients that send
-neither header. The check is `crossOrigin` in `apps/web/app/lib/origin.ts`.
+A browser request that changes something (any method but `GET`, `HEAD` and `OPTIONS`), or opens the
+order page's live connection, is refused unless its `Origin` is the app's own; without `Origin`,
+its `Sec-Fetch-Site` must be `same-origin` or `none`. This holds for other `*.orderloop.io`
+subdomains too. The answer is `403 { "error": "Cross-site request refused" }`. Requests with a
+bearer token are exempt, since they carry no cookie, and so are clients that send neither header.
 
 ## Response headers
 
-`withSecurityHeaders` (`apps/web/app/lib/csp.ts`) adds these to every response from the web Worker
-unless the route already set them: `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy:
 strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, a `Permissions-Policy` that disables
-camera, microphone, geolocation and payment, and, over HTTPS only, `Strict-Transport-Security:
-max-age=31536000; includeSubDomains`. HTML pages also get a `Content-Security-Policy`, set in
-`app/entry.server.tsx` with a fresh nonce per response: scripts run only from the app's own origin
-or with that nonce, `style-src` and `font-src` limited to the app's own origin (IBM Plex is self-hosted, so no font CDN is allowed), `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`. It is
-not sent by the Vite dev server, whose inline scripts carry no nonce, so it applies to production builds.
-
-## Outside identity providers
-
-`users.external_sub` is reserved for linking an outside identity. Signing in through an OpenID
-Connect provider would match a person by that subject and start the same kind of session, keeping
-roles and tokens in OrderLoop.
+camera, microphone, geolocation and payment, and `Strict-Transport-Security: max-age=31536000;
+includeSubDomains`. HTML pages also get a `Content-Security-Policy` with a fresh nonce per
+response: scripts run only from the app's own origin or with that nonce, styles and fonts load only
+from the app's own origin (IBM Plex is served by OrderLoop itself), `frame-ancestors 'none'`,
+`form-action 'self'`, `connect-src 'self'`. OrderLoop can't be embedded in another site's frame.

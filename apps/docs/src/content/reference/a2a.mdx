@@ -7,7 +7,7 @@ import A2aSkills from '../../components/A2aSkills.astro';
 import A2aTaskStates from '../../components/A2aTaskStates.astro';
 
 OrderLoop answers [Agent2Agent](https://a2a-protocol.org) (A2A) 1.0 requests at
-`https://orderloop.io/a2a` (your own host, if you deploy it yourself). Another agent can ask about
+`https://orderloop.io/a2a`. Another agent can ask about
 orders, stock and flows, place an order and follow it, and decide an approval, all within the role
 it connects with. The skills are the tools of [the assistant](/guides/assistant/) and the
 [MCP server](/reference/mcp/), plus `place_order` and `chat`. An A2A **task** is a request that
@@ -22,8 +22,7 @@ The Agent Card is public at `https://orderloop.io/.well-known/agent-card.json` (
 minutes). It lists the interfaces (`/a2a`, `JSONRPC`, protocols `1.0` and `0.3`), the two security
 schemes below and every skill. Request it with `A2A-Version: 1.0` for the 1.0 card; without the
 header you get the 0.3 card (top-level `url` and `protocolVersion`, OpenAPI-style security
-schemes), which still embeds the 1.0 interfaces as `supportedInterfaces`. Both are built in
-`packages/core/src/a2a.ts` (`agentCard` and `legacyAgentCard`), so they always name the host they
+schemes), which still embeds the 1.0 interfaces as `supportedInterfaces`. Both name the host they
 are served from.
 
 ## Authentication
@@ -31,7 +30,7 @@ are served from.
 Send `Authorization: Bearer …` with every request, one of:
 
 - An [API token](/guides/team-and-roles/#api-tokens) (`ol_live_…`). It carries the role it was
-  created with and its expiry. `APP_PASSWORD` works as a break-glass operator.
+  created with and its expiry. The workspace password works as a break-glass operator.
 - An OAuth access token, from the authorization-code flow with PKCE. Request the resource
   `https://orderloop.io/a2a`; the scope is the role to act with. The person signs in on
   OrderLoop's consent page with their own account (not the workspace password), sees that the
@@ -49,8 +48,8 @@ other version gets a JSON-RPC error.
 
 `/a2a` also answers clients still on A2A 0.3, recognised by their method names: `message/send`,
 `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe` and
-`tasks/pushNotificationConfig/{set,get,list,delete}`. They need no header. `@a2a-js/sdk`'s 0.3
-transport translates each call to the same handler and its answer back to 0.3 shapes (`kind` on
+`tasks/pushNotificationConfig/{set,get,list,delete}`. They need no header. Each call
+goes to the same handler and its answer back to 0.3 shapes (`kind` on
 every object, `input-required`-style state names), so everything on this page applies: the same
 skills, replies, order following and roles. Tasks are shared across versions; a task created over
 0.3 reads in 1.0 shapes over `GetTask`.
@@ -60,7 +59,6 @@ A push URL registered over 0.3 receives 0.3 notifications: the whole task (`kind
 
 ## Skills
 
-The table is rendered from `A2A_SKILLS` in `packages/core/src/a2a.ts` when the docs are built.
 Every assistant tool is a skill at the same role. A skill the caller's role can't use is refused:
 the task ends `TASK_STATE_REJECTED` with the reason.
 
@@ -73,7 +71,7 @@ only text goes to `chat`.
 
 ## Task states
 
-An order's status reads as a task state, in `ORDER_TASK_STATES`:
+An order's status reads as a task state:
 
 <A2aTaskStates />
 
@@ -105,10 +103,8 @@ caller needs no open request and no polling. Register a URL in either of two way
   notification still queued for it, so nothing more is sent to that URL.
 
 A `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`
-(the rule is `isWebhookUrl` in `packages/core/src/webhooks.ts`, the one
-[webhook subscriptions](/guides/outbound-webhooks/) use). Anything else, or a sixth URL, is
-refused with an invalid-request error. The engine's outbound `fetch` runs with
-`global_fetch_strictly_public`, so only public addresses are reached.
+(the same rule as [webhook subscriptions](/guides/outbound-webhooks/)). Anything else, or a sixth
+URL, is refused with an invalid-request error. Notifications reach public addresses only.
 
 **Payload.** The body is an A2A 1.0 `StreamResponse` as JSON, with content type
 `application/a2a+json`: a `statusUpdate` (`taskId`, `contextId`, `status`), or the `task`,
@@ -124,10 +120,10 @@ order waits for. These arrive after the request has ended, for example when the 
 decided on the order page, the payment event arrives or the order completes. The same status
 (state and text) is never pushed twice in a row for a task.
 
-**Delivery.** Each notification is a row in the caller's `A2AAgent` SQLite, tried at once with a
-5-second timeout. A non-`2xx` answer, a timeout or a connection error is retried 5 more times on
-the object's alarm, after 10 seconds doubling each time (10s, 20s, 40s, 80s, 160s). After that the
-row is kept as `failed` for 7 days, then removed. Delivery is at least once: dedupe on your side
+**Delivery.** Each notification is stored, then tried at once with a 5-second timeout. A
+non-`2xx` answer, a timeout or a connection error is retried 5 more times, after 10 seconds
+doubling each time (10s, 20s, 40s, 80s, 160s). After that it is kept as failed for 7 days, then
+dropped. Delivery is at least once: dedupe on your side
 if a receiver acknowledges slowly.
 
 ```bash
@@ -249,26 +245,14 @@ does for [MCP](/reference/mcp/#who-did-it). A caller using an API token acts as 
 
 ## Security
 
-- **Role cap and live checks.** As for MCP: a grant is never higher than its approver's role, the
-  web Worker re-reads the person on every request, and the role is the lower of granted and
+- **Role cap and live checks.** As for MCP: a grant is never higher than its approver's role,
+  OrderLoop re-reads the person on every request, and the role is the lower of granted and
   current. A person whose two-factor setup is due, or who is still on a temporary password, gets
   `403`.
-- **Credentials stay in the web Worker.** It resolves the caller and forwards to the engine with
-  the `x-orderloop-principal` header, removing `Authorization` and cookies. The engine has no public
-  route and answers `401` without the header.
-- **Your tasks only.** Each caller, a token or a person through a grant, has its own `A2AAgent`
-  object named `<kind>:<id>`, so `GetTask`, `ListTasks` and the stream show only their own tasks.
+- **Credentials stay at the edge.** OrderLoop resolves the caller before the request reaches the
+  agent; `Authorization` and cookies go no further, and the model never sees a token.
+- **Your tasks only.** Each caller, a token or a person through a grant, has its own task store, so `GetTask`, `ListTasks` and the stream show only their own tasks.
   A token and the person who made it keep separate tasks.
 - **One endpoint per token.** An OAuth token is issued for one resource and refused at the other.
 - **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
 
-## How it works
-
-The web Worker serves the card, and hands `/a2a`, the protected-resource metadata and `/oauth/*`
-to `apps/web/app/lib/oauth.server.ts`, which resolves the caller and forwards to the engine. The
-engine's `handleA2A` (`apps/engine/src/a2a/route.ts`) sends the request to the caller's `A2AAgent`
-Durable Object (`apps/engine/src/a2a/agent.ts`), which speaks JSON-RPC with `@a2a-js/sdk`. Tasks
-and their order links live in the object's SQLite (`store.ts`); `executor.ts` maps messages to the
-assistant's tools. `push.ts` holds the push configs (`SqlPushStore`) and the outbox
-(`PushSender`). Following an order registers the caller's `A2AAgent` with the `OrderAgent`, which
-calls `orderChanged` on it when the order moves. See [Architecture](/internals/architecture/#a2a).

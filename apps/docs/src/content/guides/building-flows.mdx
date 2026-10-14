@@ -6,7 +6,7 @@ description: Draw a flow in the editor, wire branches, joins and loops, validate
 import Values from '../../components/Values.astro';
 
 A flow is a JSON graph of [catalog nodes](/reference/nodes/) and the edges between them. The
-editor at `/flows/:flowId` saves it to D1 as a draft. Publishing snapshots the draft as an
+editor at `/flows/:flowId` saves it as a draft. Publishing snapshots the draft as an
 immutable, numbered version, and every order pins the version it started on.
 
 ## Creating a flow
@@ -26,7 +26,7 @@ The flow id is a slug of the name plus a short suffix. A new flow is a draft unt
 
 - **Palette.** Every node type in the catalog, grouped as Triggers, Commerce, Control and AI.
   Drag one onto the canvas.
-- **Canvas.** React Flow. Each output branch of a node is its own handle; an edge leaves from
+- **Canvas.** Each output branch of a node is its own handle; an edge leaves from
   the branch it belongs to. A `control.loop` node has a second input, `next`, for its back-edge.
 - **Inspector.** The selected node's label and config fields, generated from the node's catalog
   entry, plus its per-node `retries` and `timeout`. Validation messages appear beside the field.
@@ -48,8 +48,7 @@ here (see [Seeding](/guides/templates/#seeding)). To customise one, make your ow
 
 ## Validation
 
-`validateGraph` (`packages/core/src/graph.ts`) runs in the editor as you edit, on save, and
-before publishing. Publishing is refused while there are errors.
+Validation runs in the editor as you edit, on save, and before publishing. Publishing is refused while there are errors.
 
 Errors:
 
@@ -67,8 +66,6 @@ outgoing edge ("the run ends there").
 
 ## How a run moves through the graph
 
-The rules below are the [planner's](/internals/planner/); the Workflow only makes them durable.
-
 - **Branches.** A node finishes by choosing its output branches: `true`/`false` for a
   Condition, `approved`/`rejected`/`escalated` for an Approval, one route for the Agent router,
   `out` for single-output nodes. Edges on the chosen branches become active; the rest become
@@ -81,11 +78,11 @@ The rules below are the [planner's](/internals/planner/); the Workflow only make
 - **Loops.** A Loop node evaluates `while` each time it is entered, up to `maxIterations`. On
   `body` it runs the nodes reachable from its `body` output; the last of them connects back to the
   loop's `next` input. When the condition is false (or the limit is reached) it takes `done`. Each
-  iteration gets new step names (`${nodeId}#${run}`), so iterations never replay one another.
-- **Continue as new.** `control.continue_as_new` ends the current Workflow instance and starts a
-  new one on the same flow version, with the order and variables carried over. The order keeps its
-  id; its `generation` goes up by one. Use it for long-lived loops such as subscriptions, so the
-  step history stays bounded.
+  iteration runs afresh; an iteration never reuses an earlier one's results.
+- **Continue as new.** `control.continue_as_new` ends the current run and starts a new one on the
+  same flow version, with the order and variables carried over. The order keeps its id; its
+  `generation` goes up by one. Use it for long-lived loops such as subscriptions, so the run's
+  history stays bounded.
 
 ## Ending a run
 
@@ -96,14 +93,14 @@ A `control.end` node finishes the order with an outcome:
 | `completed` | `completed` | The normal ending |
 | `declined` | `declined` | A policy or approval "no": not a person cancelling |
 | `cancelled` | `cancelled` | Ends the run as cancelled |
-| `failed` | `failed`, then `rolled_back` | Throws `NonRetryableError`; Workflows runs every registered compensation in reverse order |
+| `failed` | `failed`, then `rolled_back` | Runs every completed step's rollback, in reverse order |
 
 `reason` is a template and becomes the order's reason. Every End node also sends the matching
 `order.<outcome>` [outbound webhook](/guides/outbound-webhooks/). A run whose remaining nodes
 are all skipped, with no End node reached, finishes as `completed`.
 
-A commerce node that throws after its retries fails the order the same way, without reaching an
-End node. Only nodes with `rollback: true` in the catalog register compensations: reserve inventory
+A commerce node that still fails after its retries fails the order the same way, without reaching an
+End node. Only nodes tagged **undo** in the [node catalog](/reference/nodes/) have rollbacks: reserve inventory
 (releases the reservation), authorize payment (voids the hold), create shipment and ready for
 pickup (cancel the shipment or staged pickup, and restock what it consumed), generate invoice (takes an on-account charge back off the balance), deliver digital goods (revokes the codes), split by
 seller (cancels the seller orders) and seller payouts (reverses scheduled payouts).
@@ -120,25 +117,21 @@ for example `Approve order {{order.id}}`. Both read the run context:
 | `nodes.<id>` | The output of each node that has run (latest iteration) |
 | `vars` | Run variables: set by Set variables, AI nodes (`into`), event payloads, and the `vars` passed when the order starts |
 | `input` | The order's `meta` |
-| `now` | When the instance started, epoch ms |
+| `now` | When the current run started, epoch ms |
 | `ref` | How the customer knows the order: its outside number (`externalId`), else its title, else its id. The built-in flows use it in customer emails |
 
 The [expressions reference](/reference/expressions/) has the operators and the policy rules.
 
 ## Retries and timeouts
 
-Each commerce, AI, Condition and Set node runs as one `step.do`. Its retry limit is the node's
+Each commerce, AI, Condition and Set node runs as one durable step. Its retry limit is the node's
 `retries`, else the node type's default (`commerce.charge` has `0`), else `3`, with a 5-second
 exponential backoff. Its timeout is the node's `timeout`, else `"5 minutes"`. Approval,
 Wait-for-event and Wait nodes don't use these; their waits have their own `timeout` field.
 
-Waits and timeouts are divided by `TIME_SCALE` (default `1440`, so a day takes a minute); see
-[Configuration](/reference/configuration/).
-
 ## Publishing and versions
 
-Publishing saves the draft, inserts the next row in `flow_versions` and points the flow at it.
-Versions are immutable. An order started through the API runs the latest published version
+Publishing saves the draft and stores it as the flow's next version. Versions are immutable. An order started through the API runs the latest published version
 unless the request names one (`version`); a running order keeps its version even after you
 publish again. Restarting an order from its page starts a new order on the flow's current
 version, with the same customer and lines and without `meta.simulate`.

@@ -5,19 +5,19 @@ description: Every node type a flow can use, with its config fields, defaults an
 
 import NodeCatalog from '../../components/NodeCatalog.astro';
 
-This page is rendered from `NODE_SPECS` in `packages/core/src/catalog.ts` when the docs are built,
-the same objects the editor's palette, the inspector's forms and the engine's validation read. Each
-node's anchor is its type, for example [`#commerce.policy`](#commerce.policy).
+These are the node types the editor's palette offers, with the fields its inspector shows and
+validates. Each node's anchor is its type, for example [`#commerce.policy`](#commerce.policy).
 
 A node's **outputs** are the branches it can take. An edge leaves a node from one output (its
-`sourceHandle`; none means `out`), and the edges on the branches a node did not take are skipped
-(see [Planner](/internals/planner/)). Field **kinds** decide how the inspector edits a value and how
+`sourceHandle`; none means `out`), and the edges on the branches a node did not take are skipped, along with any node that only they
+lead to (see [How a run moves through the graph](/guides/building-flows/#how-a-run-moves-through-the-graph)). Field **kinds** decide how the inspector edits a value and how
 it is validated: `duration` is a string like `"2 days"`, `logic` is a
 [JSON Logic expression](/reference/expressions/), `list` is a non-empty list of strings, and text
 fields interpolate `{{path}}` templates.
 
 Every node also takes two optional settings outside its config: `retries` (0–10, default 3 unless
-the node type sets its own) and `timeout` (default `"5 minutes"`), applied to its step.
+the node type sets its own) and `timeout` (default `"5 minutes"`); see
+[Retries and timeouts](/guides/building-flows/#retries-and-timeouts).
 
 ## Triggers
 
@@ -27,8 +27,9 @@ A flow has exactly one trigger. Triggers pass the order through; they mark how t
 
 ## Commerce
 
-Commerce nodes call the [connectors](/internals/architecture/#connectors). Every write is keyed by
-its step, so a retried step never reserves, charges or ships twice.
+Commerce nodes act on stock, payments, shipments, documents and the other systems an order
+touches. Every write is made once per step, so a retried step never reserves, charges or ships
+twice.
 
 <NodeCatalog category="commerce" />
 

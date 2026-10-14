@@ -1,9 +1,6 @@
----
-title: OrderAgent
-description: The per-order Durable Object that holds live state, owns waits and approvals, and cancels.
----
+# OrderAgent
 
-import Values from '../../components/Values.astro';
+The per-order Durable Object that holds live state, owns waits and approvals, and cancels.
 
 `OrderAgent` (`apps/engine/src/agent.ts`) is an Agents SDK `Agent`, one Durable Object per order,
 named by the order id (`orderAgentName` in `@orderloop/core`). It:
@@ -13,7 +10,7 @@ named by the order id (`orderAgentName` in `@orderloop/core`). It:
 - owns the order's waits and delivers approvals and events to the right instance;
 - cancels with compensation.
 
-Questions about an order go to the person's [workspace assistant](/guides/assistant/), which reads
+Questions about an order go to the person's [workspace assistant](https://docs.orderloop.io/guides/assistant/), which reads
 and acts on the order through this agent.
 
 ## State
@@ -23,7 +20,7 @@ The synced state is `OrderState` from `packages/core/src/api.ts`, plus a private
 | Field | Meaning |
 |---|---|
 | `orderId`, `order`, `flow` | The order and the pinned `FlowVersion` |
-| `status` | One of <Values of="order-statuses" /> |
+| `status` | One of `ORDER_STATUSES` (`packages/core/src/types.ts`) |
 | `nodes` | `NodeRun` per node: status, runs, summary, output, error, branches, `startedAt`, `endedAt` |
 | `edges` | `EdgeState` per edge, from the latest plan |
 | `waits` | Open `PendingWait`s: node, event type, kind, title, event, amount, assignee, deadline |
@@ -42,14 +39,14 @@ state and call methods, never write state.
 ## Reports
 
 `report(r)` merges a report from the Workflow (see
-[OrderLoop Workflow](/internals/workflow/#reports-to-the-agent)):
+[OrderLoop Workflow](workflow.md#reports-to-the-agent)):
 
 - **Sequenced** reports (with `seq`) are fresh if they come from a newer generation, or the same
   generation with a higher `seq`. Only fresh ones update `plan`, `order` and `vars`. A plan never
   clears a node already `rolled_back` or `failed`; those come from their own reports.
 - **Unsequenced** detail reports always apply their `node` patch and `log` entry.
 - A `status` applies only if the order is not already terminal
-  (<Values of="terminal-order-statuses" />), so a late report cannot reopen a finished order. A
+  (`TERMINAL_ORDER_STATUSES` in `packages/core/src/types.ts`), so a late report cannot reopen a finished order. A
   status change adds a timeline entry keyed `status:${generation}:${status}`.
 - Timeline entries with a `key` replace the entry with the same key rather than appending.
 
@@ -110,7 +107,7 @@ session's id (the SHA-256 that keys `sessions`), which never reaches the browser
 
 Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from
 D1 (`livePrincipal` in `apps/engine/src/principal.ts`, shared with the
-[AssistantAgent](/internals/architecture/#the-assistant)), so a page that is already open follows changes made since it connected: a lower role applies
+[AssistantAgent](architecture.md#the-assistant)), so a page that is already open follows changes made since it connected: a lower role applies
 at once, and once the session has been signed out, reset, expired or idle for `SESSION_IDLE_MS`,
 or the user disabled, the
 call fails with `Your sign-in has ended. Reload the page to sign in again.` and the connection
@@ -143,7 +140,7 @@ waits. Terminating means no End node runs, so the agent announces the ending its
 
 ## A2A watchers
 
-An [A2A](/reference/a2a/) task that follows this order calls `watch(name)`, which records the
+An [A2A](https://docs.orderloop.io/reference/a2a/) task that follows this order calls `watch(name)`, which records the
 caller's `A2AAgent` name in `a2a_watchers` (repeats are ignored). `onStateChanged` computes a key
 from the status and the event types the order waits on; when it differs from the last one stored
 (`a2a_watch_state`) and someone watches, it schedules `notifyWatchers({ names, attempt })` at once.

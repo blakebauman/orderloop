@@ -15,20 +15,18 @@ the built-in `tpl-omnichannel-order` and `tpl-pos-sale` flows are built around i
 
 Stock lives in one of two places:
 
-- **Central stock** is `products.stock` and `products.reserved`: the warehouse.
-- **Store stock** is a row in `location_stock` per store and SKU (`stock`, `reserved`), for a store in
-  `locations`. A store has `pickup` (customers can collect there) and `ships` (it can fulfil
-  shipped orders) flags.
+- **Central stock** is each product's stock and reserved count: the warehouse.
+- **Store stock** is held per store and SKU, with its own stock and reserved counts. A store has
+  `pickup` (customers can collect there) and `ships` (it can fulfil shipped orders) flags.
 
-Reservations and the stock ledger record which: `reservations.location_id` and
-`stock_movements.location_id` are `NULL` for central stock, and the store's id otherwise. Holds,
-releases and consumption move the row they were made against, so a hold at a store never touches the
-warehouse. See [Data model](/internals/data-model/).
+Every reservation and stock movement records whether it was central or at which store. Holds,
+releases and consumption move the stock they were made against, so a hold at a store never touches
+the warehouse.
 
 A product has a `kind`, `physical` or `digital`. Digital products hold no stock: reserving skips
 them, and the back office shows them as "Digital, no stock".
 
-The migrations seed two stores, both offering pickup and shipping, with coordinates: `loc_soho`
+The workspace starts with two stores, both offering pickup and shipping, with coordinates: `loc_soho`
 (40.7233, -74.0030) and `loc_mission` (37.7599, -122.4148). `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
 stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Stores** table lists
 each store's flags and available over on-hand stock per SKU.
@@ -63,12 +61,11 @@ On `tpl-omnichannel-order`, the `pickup` branch is:
 1. **Hold at store**: `commerce.reserve_inventory` holds the lines at `order.fulfillment.locationId`. A
    line the store can't cover takes `backorder`, and the order fails with its payment voided.
 2. **Ready for pickup**: [`commerce.pickup_ready`](/reference/nodes/#commerce.pickup_ready) stages the
-   hold as a `shipments` row with carrier `pickup`, status `ready_for_pickup`, and the six-character
-   pickup code as its `tracking`. The code is `vars.pickupCode`.
+   hold as a shipment with carrier `pickup`, status `ready_for_pickup`, and the six-character
+   pickup code as its tracking number. The code is `vars.pickupCode`.
 3. **Pickup ready**: a notification to the customer with the store (`vars.fulfillmentLocation`) and
    the code.
-4. **Customer collects**: waits for the `pickup.collected` event, with a 5-day timeout (divided by
-   `TIME_SCALE`, like every wait).
+4. **Customer collects**: waits for the `pickup.collected` event, with a 5-day timeout.
 5. **Hand over**: [`commerce.handover`](/reference/nodes/#commerce.handover) marks the staged pickup
    `collected` and consumes the held store stock.
 
@@ -102,8 +99,7 @@ rank by:
    smallest numeric difference.
 
 Ties, and orders with no ship-to, keep store id order. Send coordinates on the address with the order
-(see [Inbound orders](/guides/inbound-orders/#payload)); the ranking is `rankStores` in
-`packages/core/src/fulfillment.ts`, which is unit tested there.
+(see [Inbound orders](/guides/inbound-orders/#payload)).
 
 ### Split shipments
 
@@ -116,8 +112,8 @@ shipping from the warehouse has none. The summary names every source (`Ship from
 store`) and `vars.fulfillmentLocation` is the same names joined. Then:
 
 - `commerce.reserve_inventory` holds each line at its own location.
-- `commerce.ship` books one shipment per source location. The first keeps the step's id
-  (`shp_<order>_<step>`), the others take `_2`, `_3`, and so on. The output has `shipments`
+- `commerce.ship` books one shipment per source location. The first has the usual
+  shipment id, the others add `_2`, `_3`, and so on. The output has `shipments`
   (`[{ shipmentId, tracking, locationId }]`), `vars.tracking` is every tracking number joined with
   `, `, and the summary reads `2 UPS shipments: …`. Its rollback cancels all of them.
 
@@ -131,11 +127,11 @@ the Mission store.
 `carry_out` is a sale where the customer leaves with the goods. The order's store must have every
 physical line (pickup isn't required). `tpl-pos-sale` is the flow for it: take payment with
 `card_present`, route `carry_out` at the till's store, reserve from the store's stock, hand over
-(which records a `shipments` row with carrier `carry_out`, status `collected`, and consumes the
+(which records a shipment with carrier `carry_out`, status `collected`, and consumes the
 stock), capture, and email a receipt only when `order.contact.email` is set.
 
-Till sales arrive on the `pos` channel. Inbound routing sends `b2c:pos` and `d2c:pos` to
-`tpl-pos-sale` by default; see [Inbound orders](/guides/inbound-orders/#routing). The payment methods
+Till sales arrive on the `pos` channel. The default order routes send `b2c:pos` and `d2c:pos` to
+`tpl-pos-sale`; see [Inbound orders](/guides/inbound-orders/#routing). The payment methods
 a flow can authorize with include `card_present`, `wallet`, `gift_card` and `cash` besides
 `card`, `ach` and `terms`.
 
@@ -144,10 +140,9 @@ a flow can authorize with include `card_present`, `wallet`, `gift_card` and `cas
 ## Digital delivery
 
 [`commerce.deliver_digital`](/reference/nodes/#commerce.deliver_digital) issues one code per unit of
-each digital line (a licence key, download or gift card code) into `entitlements`, as
+each digital line (a licence key, download or gift card code), as
 `<SKU>-XXXX-XXXX`, status `issued`. The codes are `vars.entitlements` as `[{ sku, code }]`, so a
-notification can include them. The id embeds the step key, line and unit, so a retried step issues
-nothing twice.
+notification can include them. A retried step issues nothing twice.
 
 On the omnichannel flow the digital branch runs in parallel with the physical one, and **Capture
 payment** joins every branch the order took: a mixed cart is captured once the shipment (or pickup
@@ -158,7 +153,7 @@ hand-over) and the codes are all done. On the till flow, the digital branch join
 | Event | Undone |
 |---|---|
 | A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the location it was held at); `commerce.ship` cancels every shipment it booked and, once none of the order's shipments is live, restocks what they consumed (reservation `restored`); `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization; `commerce.invoice` takes an on-account invoice back off the customer's balance |
-| A cancel | `compensateOrder` does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, restocks shipped stock, reverses account charges, revokes codes, plus seller orders and payouts |
+| A cancel | Does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, restocks shipped stock, reverses account charges, revokes codes, plus seller orders and payouts |
 
 Codes issued for a mixed cart are revoked when its physical part later fails, for example when the
 store runs out between routing and reserving. A completed hand-over has consumed its stock and has no
