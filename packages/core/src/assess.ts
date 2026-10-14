@@ -121,6 +121,10 @@ const unit = (v: unknown): number => {
   return Math.min(1, Math.max(0, n));
 };
 
+/** Clef reports 4 decimals; renormalising shouldn't add float noise to vars and logs. Stored
+ * values are rounded; the choice and score are computed before rounding. */
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+
 /** Probabilities over exactly `keys`, summing to 1 (uniform when the model gave none). */
 function normalise(keys: string[], raw: unknown): Record<string, number> {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -128,6 +132,9 @@ function normalise(keys: string[], raw: unknown): Record<string, number> {
   const sum = ps.reduce((a, b) => a + b, 0);
   return Object.fromEntries(keys.map((k, i) => [k, sum > 0 ? ps[i]! / sum : 1 / keys.length]));
 }
+
+const rounded = (p: Record<string, number>) =>
+  Object.fromEntries(Object.entries(p).map(([k, v]) => [k, round4(v)]));
 
 const argmax = (p: Record<string, number>) =>
   Object.entries(p).reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
@@ -144,7 +151,7 @@ export function clampAnswers(questions: AssessQuestions, raw: unknown): AssessAn
   for (const [id, q] of Object.entries(questions)) {
     const a = src[id] && typeof src[id] === 'object' ? src[id] : {};
     const conf = (p: Record<string, number>) =>
-      typeof a.confidence === 'number' ? unit(a.confidence) : Math.max(...Object.values(p));
+      round4(typeof a.confidence === 'number' ? unit(a.confidence) : Math.max(...Object.values(p)));
     if (q.type === 'noul') {
       out[id] = { type: 'noul', noul: typeof a.noul === 'number' ? unit(a.noul) : 0.5 };
     } else if (q.type === 'choice') {
@@ -152,7 +159,7 @@ export function clampAnswers(questions: AssessQuestions, raw: unknown): AssessAn
       out[id] = {
         type: 'choice',
         choice: argmax(probabilities),
-        probabilities,
+        probabilities: rounded(probabilities),
         confidence: conf(probabilities),
       };
     } else {
@@ -160,9 +167,9 @@ export function clampAnswers(questions: AssessQuestions, raw: unknown): AssessAn
       const probabilities = normalise(levels, a.probabilities);
       out[id] = {
         type: 'score',
-        score: levels.reduce((s, l) => s + Number(l) * probabilities[l]!, 0),
+        score: round4(levels.reduce((s, l) => s + Number(l) * probabilities[l]!, 0)),
         legend: Object.fromEntries(q.criteria.map((c, i) => [String(i), c])),
-        probabilities,
+        probabilities: rounded(probabilities),
         confidence: conf(probabilities),
       };
     }

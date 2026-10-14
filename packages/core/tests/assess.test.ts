@@ -123,6 +123,21 @@ describe('clampAnswers', () => {
     expect(Object.values(p).reduce((x, y) => x + y)).toBeCloseTo(1);
   });
 
+  it('keeps Clef’s 4 decimals without float noise', () => {
+    // Live Clef output, which sums to 1 only approximately.
+    const a = clampAnswers(questions, {
+      route: {
+        probabilities: { approve: 0.0084, review: 0.9559, ask: 0.0357 },
+        confidence: 0.8727,
+      },
+    });
+    expect(a.route).toMatchObject({
+      choice: 'review',
+      probabilities: { approve: 0.0084, review: 0.9559, ask: 0.0357 },
+      confidence: 0.8727,
+    });
+  });
+
   it('scores are the probability-weighted level', () => {
     const a = clampAnswers(questions, { damage: { probabilities: { 1: 0.5, 2: 0.5 } } });
     expect(a.damage).toMatchObject({ score: 1.5 });

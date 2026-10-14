@@ -178,11 +178,10 @@ export async function assess(
         env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined,
       ),
       AI_TIMEOUT_MS,
-    )) as { answers?: unknown; usage?: Assessment['usage']; result?: Assessment };
-    const body = res.answers ? res : (res.result ?? res);
-    if (!body.answers || typeof body.answers !== 'object') throw new Error('no answers');
+    )) as { answers?: unknown; usage?: Assessment['usage'] };
+    if (!res.answers || typeof res.answers !== 'object') throw new Error('no answers');
     return {
-      value: { answers: clampAnswers(input.questions, body.answers), usage: body.usage },
+      value: { answers: clampAnswers(input.questions, res.answers), usage: res.usage },
       source: 'model',
     };
   } catch (err) {
