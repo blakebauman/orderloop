@@ -115,6 +115,7 @@ describe('MCP', () => {
         .tools;
     const viewer = await tools(person('viewer', 'vic@example.com'));
     expect(viewer.map((t) => t.name).sort()).toEqual([
+      'assess_order',
       'find_orders',
       'find_products',
       'get_flow',
@@ -128,7 +129,7 @@ describe('MCP', () => {
       inputSchema: { type: 'object' },
     });
     const operator = await tools(person('operator', 'ops@example.com'));
-    expect(operator).toHaveLength(12);
+    expect(operator).toHaveLength(13);
     expect(operator.find((t) => t.name === 'cancel_order')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: true },
     });
@@ -141,6 +142,26 @@ describe('MCP', () => {
     const found = await call(viewer, 'get_order', { orderId });
     expect(found.isError).toBeFalsy();
     expect(found.structuredContent).toMatchObject({ id: orderId });
+
+    const assessed = await call(viewer, 'assess_order', {
+      orderId,
+      questions: {
+        next: {
+          type: 'choice',
+          instructions: 'What should happen next?',
+          criteria: { approve: null, hold: null },
+        },
+      },
+      images: ['orders/ord_someone_else/x.png'],
+    });
+    expect(assessed.isError).toBeFalsy();
+    expect(assessed.structuredContent).toMatchObject({
+      id: orderId,
+      answers: { next: { type: 'choice', choice: 'approve' } },
+      images: 0,
+      source: 'heuristic',
+    });
+    expect((assessed.structuredContent!.notes as string[])[0]).toMatch(/not one of this order/);
 
     // Not offered to a viewer, so there is nothing to call.
     const refused = await rpc(viewer, 'tools/call', {

@@ -42,6 +42,7 @@ export type AssistantTool =
   | 'needs_attention'
   | 'find_orders'
   | 'get_order'
+  | 'assess_order'
   | 'find_products'
   | 'list_flows'
   | 'get_flow'
@@ -87,6 +88,14 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Get an order',
     description:
       'One order: status, what it waits on (with where each decision leads), steps run so far and recent activity.',
+  },
+  assess_order: {
+    role: 'viewer',
+    confirm: false,
+    label: 'Assessed the order',
+    title: 'Assess an order',
+    description:
+      'Ask typed questions about one order and get a probability for every option: noul (yes/no, the probability of yes), choice (pick one of 2–255 options) or score (an ordered rubric of 2–10 levels, lowest first). Optionally pass up to 4 images (the order’s R2 document keys, https or data URLs; PNG, JPEG or WebP).',
   },
   find_products: {
     role: 'viewer',

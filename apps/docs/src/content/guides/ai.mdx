@@ -4,8 +4,8 @@ description: The AI nodes, the heuristic each falls back to, the flow copilot, t
 ---
 
 OrderLoop uses Workers AI in three places: the AI nodes in a flow, the flow copilot, and the
-[workspace assistant](#the-assistant). The nodes and the copilot go through one function,
-`runJson` (`apps/engine/src/ai.ts`), with the same guarantees:
+[workspace assistant](#the-assistant). The nodes (except [Assess](#assess)) and the copilot go
+through one function, `runJson` (`apps/engine/src/ai.ts`), with the same guarantees:
 
 - **JSON mode with a schema.** Every call asks for `response_format: json_schema`, so the result
   has a known shape (temperature `0.2`, at most 2048 tokens).
@@ -24,7 +24,8 @@ Set in `apps/engine/wrangler.jsonc` under `vars` (see [Configuration](/reference
 | `AI_MODE` | `live` | `mock` skips the models and always uses the heuristics (tests, offline dev) |
 | `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | The text model for every AI node and the copilot |
 | `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | The model for the assistant, which needs multi-turn tool calling |
-| `AI_GATEWAY_ID` | `""` | When set, every call, the assistant's included, goes through that AI Gateway (caching, rate limits, logs) |
+| `ASSESS_MODEL` | `@cf/cloudflare/clef` | The decision model behind [Assess](#assess) and the assistant's `assess_order`; its request body is fixed (`model: "clef"`, `state`, `questions`, `images`) |
+| `AI_GATEWAY_ID` | `""` | When set, every call, the assistant's and Assess's included, goes through that AI Gateway (caching, rate limits, logs) |
 
 Workers AI always calls your Cloudflare account, even in local dev. The engine's tests run with
 `AI_MODE=mock`, so they need no network.
@@ -45,6 +46,68 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 The router's routes are its outputs, so editing `routes` changes the handles on the canvas.
 The model sees the order, the customer record, the run variables and the outputs of completed
 nodes.
+
+## Assess
+
+[Assess](/reference/nodes/#ai.assess) (`ai.assess`) asks Workers AI Clef (`ASSESS_MODEL`), a
+multimodal decision model, typed questions about the order and gets a probability for every allowed
+option, not just a pick. It reads a state (the order as text/JSON) and up to 4 images. It does not
+go through `runJson`, but keeps the same guarantees: a 20-second cap, AI Gateway when
+`AI_GATEWAY_ID` is set, and a heuristic when `AI_MODE` is `mock` or the call fails. Clef has no
+video input, so video can't be assessed.
+
+`questions` maps a question id (letters, digits, `_ . -`, up to 100 characters) to one of three
+types, with 1 to 64 questions per node:
+
+| Type | `criteria` | Answer |
+|---|---|---|
+| `noul` | Optional | `noul`: the probability of yes |
+| `choice` | Option id → description, 2 to 255 options | `choice` (the most probable option), `probabilities` per option and `confidence` |
+| `score` | An ordered list of 2 to 10 levels, lowest first | `score` (the probability-weighted level, from 0), `legend`, `probabilities` per level and `confidence` |
+
+`instructions` is text, or an object or list that holds the question with data it refers to.
+Answers are held to the questions asked (`clampAnswers`): unknown ids and options are dropped,
+probabilities are renormalised to sum to 1, the chosen option and the score are recomputed from
+them, and a question the model skipped gets an uninformed answer (`noul` 0.5, uniform
+probabilities).
+
+The node's other fields:
+
+- **`branchOn`** names one `noul` or `choice` question (`score` can't branch; saving a flow with
+  such a name is a validation error). A choice's options become the node's outputs, a `noul` gives
+  `yes` (at or above 0.5) and `no`. Empty `branchOn` gives one `out` output.
+- **`minConfidence`** (0 to 1, default 0). Above 0 adds an `unsure` output, taken when the branch
+  question's confidence is below it. A `noul`'s confidence is `|2p − 1|`.
+- **`state`**: `order` sends the order alone; `order_and_context` (default) adds the customer,
+  `vars` and the outputs of completed nodes.
+- **`images`**: up to 4 references. An entry that is exactly `{{path}}` takes the value there
+  as is, a string or a list (`{{order.meta.photos}}`); any other entry is interpolated.
+- **`into`** (default `assessment`): `vars.<into>` holds the answers by question id.
+
+Images are embedded by the engine, inside the step. A reference is one of:
+
+- an R2 key under `orders/<orderId>/`, this order's own documents only;
+- an `https` URL (10-second fetch);
+- a base64 `data:` URL.
+
+`http` and any other scheme are refused. Only PNG, JPEG and WebP are accepted, up to 4 MiB each and
+8 MiB in all. A reference that can't be used is skipped and reported in the output's `notes`
+instead of failing the node.
+
+The output, in `nodes.<id>`, is `{ answers, images, notes, usage, source }`, where `images` is the
+number used. Later nodes can read the answers, for example in a
+[Condition](/reference/nodes/#control.condition) expression:
+
+```json
+{ ">": [{ "var": "vars.assessment.urgent.noul" }, 0.8] }
+```
+
+```json
+{ ">=": [{ "var": "vars.assessment.route.probabilities.needs_approval" }, 0.3] }
+```
+
+Without the model, a `noul` is 0.5, a `score` is uniform over its levels, and a `choice` leans
+toward the option whose id and description share the most words (4 letters or more) with the state.
 
 ## The flow copilot
 
@@ -75,7 +138,7 @@ may use it and whether it stops for a confirm:
 
 | Tool | Role | Confirm |
 |---|---|---|
-| `needs_attention`, `find_orders`, `get_order`, `find_products`, `list_flows`, `get_flow` | `viewer` | no |
+| `needs_attention`, `find_orders`, `get_order`, `assess_order`, `find_products`, `list_flows`, `get_flow` | `viewer` | no |
 | `propose_flow_change` | `operator` | no; drafts through the copilot, never saves |
 | `decide_approval` | `approver` | yes |
 | `deliver_event`, `cancel_order`, `publish_flow`, `run_stock_review` | `operator` | yes |
@@ -85,6 +148,9 @@ again, as the person is when it runs. The same 20-second cap applies: when `AI_M
 the model errors or produces nothing in time, a deterministic heuristic model takes the turn, calls
 the same tools through the same confirms, and the reply is labelled as answered without the
 model.
+
+`assess_order` runs the same Assess call as the node on one order (`questions`, optional `images`)
+and returns the probabilities.
 
 `propose_flow_change` and the Flows page's **Describe it** both call the copilot above
 (`EngineRpc.copilot`).

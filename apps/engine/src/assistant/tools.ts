@@ -9,6 +9,7 @@
 import {
   type AssistantContext,
   type AssistantTool,
+  assessQuestionsSchema,
   ORDER_CHANNELS,
   ORDER_MODELS,
   ORDER_STATUSES,
@@ -18,6 +19,7 @@ import { z } from 'zod';
 import {
   type ActionInput,
   type ActionTool,
+  assessOrder,
   attention,
   type Channel,
   findOrders,
@@ -48,6 +50,17 @@ export const TOOL_INPUTS = {
     limit: z.number().int().min(1).max(50).optional(),
   }),
   get_order: z.object({ orderId }),
+  assess_order: z.object({
+    orderId,
+    questions: assessQuestionsSchema.describe(
+      'Question id → { type: "noul", instructions } | { type: "choice", instructions, criteria: { optionId: description } } | { type: "score", instructions, criteria: [levels, lowest first] }',
+    ),
+    images: z
+      .array(z.string())
+      .max(4)
+      .optional()
+      .describe("Up to 4 images: the order's R2 document keys, https or data URLs"),
+  }),
   find_products: z.object({
     q: z.string().optional().describe('SKU or name'),
     belowReorder: z.boolean().optional().describe('Only SKUs at or below their reorder point'),
@@ -104,6 +117,10 @@ export async function runTool<T extends AssistantTool>(
       return findOrders(env, input as ToolInput<'find_orders'>);
     case 'get_order':
       return getOrder(env, (input as ToolInput<'get_order'>).orderId);
+    case 'assess_order': {
+      const i = input as ToolInput<'assess_order'>;
+      return assessOrder(env, i.orderId, i.questions, i.images);
+    }
     case 'find_products': {
       const i = input as ToolInput<'find_products'>;
       return findProducts(env, i.q, i.belowReorder);

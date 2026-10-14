@@ -1,6 +1,7 @@
 export * from './a2a';
 export * from './address';
 export * from './api';
+export * from './assess';
 export * from './assistant';
 export * from './catalog';
 export * from './channels/shopify';

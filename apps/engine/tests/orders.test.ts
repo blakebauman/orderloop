@@ -39,6 +39,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { EngineApi } from '../src/api';
+import { resolveImages } from '../src/clef';
 import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
@@ -1806,5 +1807,158 @@ describe('copilot (offline)', () => {
     const risk = graph.nodes.find((n) => n.type === 'ai.risk_score')!;
     expect(graph.edges.some((e) => e.source === 'credit' && e.target === risk.id)).toBe(true);
     expect(validateGraph(graph).errors).toEqual([]);
+  });
+});
+
+describe('assess', () => {
+  const node = (id: string, type: string, config: Record<string, unknown> = {}) => ({
+    id,
+    type,
+    label: id,
+    config,
+    position: { x: 0, y: 0 },
+  });
+  const edge = (source: string, target: string, sourceHandle: string | null = null) => ({
+    id: `${source}.${sourceHandle ?? 'out'}-${target}`,
+    source,
+    target,
+    sourceHandle,
+    targetHandle: null,
+  });
+  const questions = {
+    handling: {
+      type: 'choice',
+      instructions: 'How should this order be packed?',
+      criteria: { gift_wrap: 'Wrap it as a birthday gift', standard: 'Ship in a plain box' },
+    },
+    fragile: { type: 'noul', instructions: 'Is anything fragile?' },
+  };
+  const assessNode = (config: Record<string, unknown>) => ({
+    id: 'assess',
+    type: 'ai.assess',
+    label: 'Assess',
+    config,
+    position: { x: 0, y: 0 },
+  });
+  const order = (id: string) => ({
+    ...input({ model: 'b2c', meta: { note: 'Birthday gift for my sister' } }),
+    id,
+    createdAt: 0,
+    subtotal: 0,
+    tax: 0,
+    total: 0,
+  });
+  const exec = (id: string, config: Record<string, unknown>) =>
+    EXECUTORS['ai.assess']!({
+      env,
+      node: assessNode(config),
+      config: withDefaults('ai.assess', config),
+      ctx: { order: order(id), nodes: {}, vars: {}, input: {}, now: Date.now() },
+      stepKey: 'assess#1',
+    });
+
+  beforeAll(async () => {
+    await publishFlow(db(), {
+      id: 'test-assess',
+      name: 'Assess',
+      description: '',
+      model: 'b2c',
+      channels: [],
+      nodes: [
+        node('start', 'trigger.manual'),
+        node('assess', 'ai.assess', { questions, branchOn: 'handling', images: [] }),
+        node('gift', 'control.end', { outcome: 'completed', reason: 'gift' }),
+        node('plain', 'control.end', { outcome: 'completed', reason: 'plain' }),
+      ],
+      edges: [
+        edge('start', 'assess'),
+        edge('assess', 'gift', 'gift_wrap'),
+        edge('assess', 'plain', 'standard'),
+      ],
+    });
+  });
+
+  it('branches on the chosen option and stores every answer', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'test-assess',
+      input: input({ model: 'b2c', meta: { note: 'Birthday gift for my sister' } }),
+    });
+    const s = await settled(orderId);
+    expect([s.status, s.reason]).toEqual(['completed', 'gift']);
+    expect(s.nodes.plain!.status).toBe('skipped');
+    const answers = s.vars.assessment as Record<string, Record<string, unknown>>;
+    expect(answers.handling).toMatchObject({ type: 'choice', choice: 'gift_wrap' });
+    expect(answers.fragile).toEqual({ type: 'noul', noul: 0.5 });
+  });
+
+  it('takes “unsure” below the confidence floor', async () => {
+    const r = await exec('ord_unsure', { questions, branchOn: 'handling', minConfidence: 0.9 });
+    expect(r.branches).toEqual(['unsure']);
+    const sure = await exec('ord_sure', { questions, branchOn: 'handling', minConfidence: 0.5 });
+    expect(sure.branches).toEqual(['gift_wrap']);
+  });
+
+  it('embeds images from the order’s documents, https and data URLs, and skips the rest', async () => {
+    const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const b64 = btoa(String.fromCharCode(...png));
+    const put = (key: string, type = 'image/png') =>
+      env.DOCS.put(key, png, { httpMetadata: { contentType: type } });
+    await put('orders/ord_img/photo/a.png');
+    await put('orders/ord_img/photo/notes.txt', 'text/plain');
+    await put('orders/ord_other/photo/b.png');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        async () => new Response(png, { headers: { 'content-type': 'image/png' } }),
+      );
+    try {
+      const { images, notes } = await resolveImages(
+        env,
+        [
+          'orders/ord_img/photo/a.png',
+          'orders/ord_img/photo/notes.txt',
+          'orders/ord_other/photo/b.png',
+          'http://example.com/c.png',
+          'https://example.com/d.png',
+          `data:image/png;base64,${b64}`,
+          'https://example.com/e.png',
+          'https://example.com/f.png',
+        ],
+        'ord_img',
+      );
+      expect(images).toHaveLength(4);
+      expect(images[0]).toEqual({ content_type: 'image/png', base64: b64 });
+      expect(notes).toEqual([
+        'orders/ord_img/photo/notes.txt: text/plain is not PNG, JPEG or WebP',
+        "orders/ord_other/photo/b.png: not one of this order's documents",
+        'http://example.com/c.png: only https, data URLs or R2 keys',
+        'Only the first 4 images are used',
+      ]);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('reads image references from the run context', async () => {
+    await env.DOCS.put('orders/ord_ctx/photo/a.png', new Uint8Array([1, 2, 3]), {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+    const r = await EXECUTORS['ai.assess']!({
+      env,
+      node: assessNode({}),
+      config: withDefaults('ai.assess', { images: ['{{order.meta.photos}}'] }),
+      ctx: {
+        order: { ...order('ord_ctx'), meta: { photos: ['orders/ord_ctx/photo/a.png'] } },
+        nodes: {},
+        vars: {},
+        input: {},
+        now: Date.now(),
+      },
+      stepKey: 'assess#1',
+    });
+    expect(r.output).toMatchObject({ images: 1, notes: [], source: 'heuristic' });
+    expect(Object.keys(r.vars!.assessment as object)).toEqual(['route', 'urgent', 'damage']);
   });
 });

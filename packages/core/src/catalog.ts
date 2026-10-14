@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { assessConfigErrors, assessOutputs, assessQuestionsSchema } from './assess';
 import { policyRulesSchema } from './policy';
 
 export type NodeCategory = 'trigger' | 'commerce' | 'control' | 'ai';
@@ -57,6 +58,8 @@ export type NodeSpec = {
   /** `control.loop` only: has the extra "next" input for back-edges. */
   loop?: boolean;
   retries?: number;
+  /** Errors that span fields, after each field passes its own schema. */
+  validate?: (config: Record<string, unknown>) => string[];
 };
 
 const OUT = ['out'];
@@ -717,6 +720,72 @@ export const NODE_SPECS = [
     ],
     outputs: (config) => stringList(config.routes, ['auto_approve', 'needs_approval']),
   }),
+  node({
+    type: 'ai.assess',
+    category: 'ai',
+    label: 'Assess',
+    description:
+      'A multimodal decision model reads the order (and any images) and returns a probability for every option of every question. Branches on one question.',
+    icon: 'Gauge',
+    fields: [
+      {
+        key: 'questions',
+        label: 'Questions',
+        kind: 'json',
+        hint: 'Question id → { type: noul | choice | score, instructions, criteria }. 1 to 64.',
+        schema: assessQuestionsSchema,
+        default: {
+          route: {
+            type: 'choice',
+            instructions: 'How should this order be handled?',
+            criteria: {
+              auto_approve: 'Routine order from a known customer, nothing unusual',
+              needs_approval: 'Large, unusual or risky; a person should review it',
+              ask_customer: 'Missing or ambiguous details the customer must clarify',
+            },
+          },
+          urgent: { type: 'noul', instructions: 'Is this order time-sensitive?' },
+          damage: {
+            type: 'score',
+            instructions: 'If photos are attached, how damaged is the item?',
+            criteria: ['No damage', 'Cosmetic', 'Functional', 'Destroyed'],
+          },
+        },
+      },
+      {
+        key: 'branchOn',
+        label: 'Branch on',
+        kind: 'text',
+        hint: 'A yes/no or choice question id. Empty: one output.',
+        default: 'route',
+      },
+      {
+        key: 'minConfidence',
+        label: 'Unsure below',
+        kind: 'number',
+        hint: 'Confidence 0–1. Above 0 adds an “unsure” output.',
+        default: 0,
+      },
+      {
+        key: 'state',
+        label: 'State',
+        kind: 'select',
+        options: ['order', 'order_and_context'],
+        default: 'order_and_context',
+      },
+      {
+        key: 'images',
+        label: 'Images',
+        kind: 'list',
+        hint: 'Up to 4: R2 keys, https or data URLs, or {{paths}} to them (e.g. {{order.meta.photos}}).',
+        schema: z.array(z.string()),
+        default: [],
+      },
+      { key: 'into', label: 'Store as var', kind: 'text', default: 'assessment' },
+    ],
+    outputs: (config) => assessOutputs(config.questions, config.branchOn, config.minConfidence),
+    validate: assessConfigErrors,
+  }),
 ] as const satisfies readonly NodeSpec[];
 
 export type NodeType = (typeof NODE_SPECS)[number]['type'];
@@ -779,6 +848,7 @@ export function validateConfig(type: string, config: Record<string, unknown>): s
     const r = fieldSchema(f).safeParse(v);
     if (!r.success) errors.push(`${f.label}: ${r.error.issues[0]?.message ?? 'invalid'}`);
   }
+  if (!errors.length && spec.validate) errors.push(...spec.validate(merged));
   return errors;
 }
 
