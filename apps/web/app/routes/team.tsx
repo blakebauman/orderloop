@@ -1,6 +1,7 @@
 import { ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -172,7 +173,7 @@ function RoleSelect({
       aria-label={label}
       name={name}
       defaultValue={value ?? 'viewer'}
-      className="h-8 w-full"
+      className="h-8 w-full min-w-28"
       onChange={(e) => onChange?.(e.target.value as Role)}
     >
       {ROLES.map((r) => (
@@ -207,11 +208,15 @@ export default function Team() {
     <>
       <PageHeader
         title="Team"
-        subtitle="Who can sign in, what each role may do, and the tokens other systems use."
-        actions={
-          <Link to="/audit" className="text-link text-sm hover:underline">
-            Audit log
-          </Link>
+        subtitle={
+          <>
+            Who can sign in, what each role may do, and the tokens other systems use. Every change
+            here is recorded in the{' '}
+            <Link to="/audit" className="text-link hover:underline">
+              audit log
+            </Link>
+            .
+          </>
         }
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
@@ -248,9 +253,11 @@ export default function Team() {
 
           <Section title="People" flush>
             {people.length ? (
-              <div className="overflow-x-auto">
+              <div>
+                {/* A table on wide screens; on a phone each person stacks into a block, so the
+                    role select keeps its width and nothing pushes the page sideways. */}
                 <table className="w-full text-sm">
-                  <thead className="border-b text-left">
+                  <thead className="hidden border-b text-left sm:table-header-group">
                     <tr>
                       <th scope="col" className="caption px-4 py-2 font-medium">
                         Person
@@ -268,8 +275,14 @@ export default function Team() {
                   </thead>
                   <tbody className="divide-y">
                     {people.map((p) => (
-                      <tr key={p.id} className={p.disabledAt ? 'text-muted-foreground' : undefined}>
-                        <td className="px-4 py-2">
+                      <tr
+                        key={p.id}
+                        className={cn(
+                          'block space-y-2 px-4 py-3 sm:table-row sm:space-y-0 sm:p-0',
+                          p.disabledAt && 'text-muted-foreground',
+                        )}
+                      >
+                        <td className="block sm:table-cell sm:px-4 sm:py-2">
                           {p.name}
                           {p.id === me.id ? (
                             <span className="ml-1.5 text-muted-foreground text-xs">you</span>
@@ -281,7 +294,7 @@ export default function Team() {
                             {p.disabledAt ? ' · disabled' : ''}
                           </div>
                         </td>
-                        <td className="px-2 py-2">
+                        <td className="block sm:table-cell sm:px-2 sm:py-2">
                           <fetcher.Form method="post" className="flex items-center gap-1.5">
                             <input type="hidden" name="intent" value="role" />
                             <input type="hidden" name="id" value={p.id} />
@@ -291,11 +304,12 @@ export default function Team() {
                             </Button>
                           </fetcher.Form>
                         </td>
-                        <td className="px-2 py-2 text-muted-foreground text-xs">
+                        <td className="block text-muted-foreground text-xs sm:table-cell sm:px-2 sm:py-2">
+                          <span className="sm:hidden">Last sign-in: </span>
                           {p.lastLoginAt ? <Ago ms={p.lastLoginAt} /> : 'Never'}
                         </td>
-                        <td className="px-4 py-2">
-                          <div className="flex justify-end gap-1.5">
+                        <td className="block sm:table-cell sm:px-4 sm:py-2">
+                          <div className="-ml-3 flex flex-wrap gap-1.5 sm:ml-0 sm:justify-end">
                             <Confirmed
                               fetcher={fetcher}
                               intent="reset"
@@ -512,7 +526,7 @@ function FirstOperator({ error }: { error: string | null }) {
             <Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="first-operator" />
               <p className="text-muted-foreground text-sm">
-                From then on everyone signs in, and you add people and API tokens here.
+                Once it exists, everyone signs in, and you add people and API tokens here.
               </p>
               <Field label="Email">
                 <Input
