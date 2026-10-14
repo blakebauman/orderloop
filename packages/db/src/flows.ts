@@ -3,7 +3,7 @@
  * so these helpers take and return plain JSON-able objects.
  */
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from './index';
 import { flows, flowVersions } from './schema';
 
@@ -89,8 +89,26 @@ export async function saveDraft(db: Db, flow: StoredFlow, now = Date.now()) {
     });
 }
 
-/** Publishes each flow that doesn't exist yet. Safe to call on every request. */
+/**
+ * Publishes each template whose exact content has never been published: a new template as version
+ * 1, a changed one as the next version (replacing edits made since). A template that matches any
+ * earlier version is left alone, so code still running from before a change can't republish its
+ * older copy over the newer one. Safe to call on every request.
+ */
 export async function seedFlows(db: Db, all: StoredFlow[]) {
-  const existing = new Set((await db.select({ id: flows.id }).from(flows)).map((r) => r.id));
-  for (const f of all) if (!existing.has(f.id)) await publishFlow(db, f);
+  if (!all.length) return;
+  const published = new Set(
+    (
+      await db
+        .select({ flowJson: flowVersions.flowJson })
+        .from(flowVersions)
+        .where(
+          inArray(
+            flowVersions.flowId,
+            all.map((f) => f.id),
+          ),
+        )
+    ).map((r) => r.flowJson),
+  );
+  for (const f of all) if (!published.has(JSON.stringify(f))) await publishFlow(db, f);
 }

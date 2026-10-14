@@ -55,8 +55,9 @@ deploying code that needs them. The engine's tests apply the same directory to t
 `publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version.
 `getFlowVersionJson` loads a given version or the latest. Orders pin `(flow_id, flow_version)` at
 start, so editing or republishing never changes a running order. The built-in templates are
-published as version 1 the first time they are needed (`ensureTemplates` in the engine,
-`ensureSeeded` in the web app).
+published as a new version whenever their content has not been published before: version 1 the
+first time they are needed, the next version after a template changes (`ensureTemplates` in the
+engine, `ensureSeeded` in the web app; see [Templates](/guides/templates/#seeding)).
 
 ## Orders and approvals
 

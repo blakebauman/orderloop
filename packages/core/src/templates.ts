@@ -127,6 +127,7 @@ export function purchaseRequestFlow(): Flow {
     });
 }
 
+/** Assess fast-tracks an order it is confident is routine; anything less certain goes to triage. */
 export function b2bOrderFlow(): Flow {
   return new Builder()
     .n('po_in', 'trigger.email_po', 'PO received')
@@ -135,6 +136,24 @@ export function b2bOrderFlow(): Flow {
     .n('price', 'commerce.price', 'Contract pricing', { useContracts: true })
     .n('tax', 'commerce.tax', 'Tax', { rate: 0.0825 })
     .n('credit', 'commerce.credit_check', 'Credit check')
+    .n('assess', 'ai.assess', 'Assess: routine?', {
+      questions: {
+        routine: {
+          type: 'noul',
+          instructions:
+            'Is this a routine repeat order from an established customer in good standing: SKUs they usually buy, normal quantities and a total under $10,000?',
+        },
+        ambiguous: {
+          type: 'noul',
+          instructions:
+            'Is anything in the PO ambiguous or missing: lines that could not be matched, unclear quantities or delivery details?',
+        },
+        urgent: { type: 'noul', instructions: 'Is the customer asking for this order urgently?' },
+      },
+      branchOn: 'routine',
+      minConfidence: 0.6,
+      state: 'order_and_context',
+    })
     .n('router', 'ai.router', 'Agent: triage', {
       instructions:
         'You triage B2B orders. Choose auto_approve for routine orders from customers in good standing; needs_approval for unusual quantities, new SKUs, big jumps versus their history or totals above $10,000; ask_customer if the PO is ambiguous or lines could not be matched.',
@@ -193,7 +212,10 @@ export function b2bOrderFlow(): Flow {
     .e('validate', 'price')
     .e('price', 'tax')
     .e('tax', 'credit')
-    .e('credit.ok', 'router')
+    .e('credit.ok', 'assess')
+    .e('assess.yes', 'reserve')
+    .e('assess.no', 'router')
+    .e('assess.unsure', 'router')
     .e('credit.over_limit', 'approval')
     .e('router.auto_approve', 'reserve')
     .e('router.needs_approval', 'approval')
@@ -222,7 +244,7 @@ export function b2bOrderFlow(): Flow {
       id: 'tpl-b2b-order',
       name: 'B2B order',
       description:
-        'Inbound PO by email: AI extraction, contract pricing, credit check, an agent that triages to auto-approve / approval / clarify, stock reservation, net-30 invoice, shipment and a dunning loop.',
+        'Inbound PO by email: AI extraction, contract pricing, credit check, an assessment that fast-tracks confidently routine orders, an agent that triages the rest to auto-approve / approval / clarify, stock reservation, net-30 invoice, shipment and a dunning loop.',
       model: 'b2b',
       channels: ['email', 'edi', 'api', 'manual'],
     });
