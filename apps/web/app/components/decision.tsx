@@ -15,6 +15,8 @@ import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
 
 const UNDO_MS = 5000;
+/** Time a decision needs to reach the order before its step times out. */
+const SEND_MS = 1500;
 
 export type Decision = 'approved' | 'rejected';
 
@@ -41,8 +43,8 @@ export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; clas
                   ? `Going to ${ctx.onTimeout} now`
                   : `If no one decides ${until(ctx.deadline, now)}: ${ctx.onTimeout}`
                 : until(ctx.deadline, now) === 'overdue'
-                  ? 'Escalation due now'
-                  : `Escalates ${until(ctx.deadline, now)}`}
+                  ? 'Times out now'
+                  : `Times out ${until(ctx.deadline, now)}`}
             </span>
           ) : null}
         </p>
@@ -53,6 +55,8 @@ export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; clas
 
 export function DecisionControls({
   onDecide,
+  deadline,
+  onTimeout,
   disabled,
   busy,
   compact,
@@ -62,6 +66,10 @@ export function DecisionControls({
   defaultNote = '',
 }: {
   onDecide: (decision: Decision, note: string) => void;
+  /** When the step times out. The undo window never runs past it. */
+  deadline?: number;
+  /** What the flow does on timeout, e.g. "Decline order". */
+  onTimeout?: string;
   disabled?: boolean;
   /** The decision has been sent and is being recorded. */
   busy?: boolean;
@@ -78,8 +86,26 @@ export function DecisionControls({
   defaultNote?: string;
 }) {
   const [note, setNote] = useState(defaultNote);
-  const [pending, setPending] = useState<{ decision: Decision; at: number } | null>(null);
-  const now = useNow(pending ? 250 : null);
+  // `ms` is this decision's undo window: shorter than usual when the step is about to time out.
+  const [pending, setPending] = useState<{ decision: Decision; at: number; ms: number } | null>(
+    null,
+  );
+  // Near the deadline, tick so the controls lock before a decision could arrive too late.
+  const nearDeadline = deadline !== undefined && deadline - Date.now() < UNDO_MS + 60_000;
+  const now = useNow(pending ? 250 : nearDeadline ? 1000 : null);
+  /** The undo window a decision made at `at` gets, or null when it could no longer arrive in time. */
+  const windowFor = (at: number) => {
+    if (deadline === undefined) return UNDO_MS;
+    const ms = Math.min(UNDO_MS, deadline - at - SEND_MS);
+    return ms >= 500 ? ms : null;
+  };
+  const decide = (decision: Decision) => {
+    const at = Date.now();
+    const ms = windowFor(at);
+    if (ms !== null) setPending({ decision, at, ms });
+  };
+  const decideRef = useRef(decide);
+  decideRef.current = decide;
   const noteId = useId();
   const commit = useRef(onDecide);
   commit.current = onDecide;
@@ -114,7 +140,7 @@ export function DecisionControls({
       latest.current.pending = null;
       commit.current(pending.decision, note.trim());
       setPending(null);
-    }, UNDO_MS);
+    }, pending.ms);
     return () => window.clearTimeout(t);
   }, [pending, note]);
 
@@ -129,7 +155,7 @@ export function DecisionControls({
         setPending(null);
       } else if (!pending && !disabled && !busy && (k === 'a' || k === 'r')) {
         e.preventDefault();
-        setPending({ decision: k === 'a' ? 'approved' : 'rejected', at: Date.now() });
+        decideRef.current(k === 'a' ? 'approved' : 'rejected');
       }
     };
     el.addEventListener('keydown', onKey);
@@ -145,7 +171,7 @@ export function DecisionControls({
   }
 
   if (pending) {
-    const left = Math.max(0, Math.ceil((pending.at + UNDO_MS - now) / 1000));
+    const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
     return (
       <div
         className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/50 px-3 py-2 text-sm"
@@ -155,6 +181,9 @@ export function DecisionControls({
           {pending.decision === 'approved' ? 'Approving' : 'Rejecting'} in{' '}
           <span className="tabular">{left}s</span>
           {note.trim() ? <span className="text-muted-foreground"> · with note</span> : null}
+          {pending.ms < UNDO_MS ? (
+            <span className="text-muted-foreground"> · shorter undo, the step times out soon</span>
+          ) : null}
         </span>
         <Button
           size="sm"
@@ -166,6 +195,15 @@ export function DecisionControls({
           Undo
         </Button>
       </div>
+    );
+  }
+
+  if (windowFor(now) === null) {
+    return (
+      <p className="font-medium text-sm text-wait" role="status">
+        Too late to decide here: the step is timing out
+        {onTimeout ? ` and the order goes to ${onTimeout}` : ''}.
+      </p>
     );
   }
 
@@ -183,19 +221,10 @@ export function DecisionControls({
         disabled={disabled}
       />
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          disabled={disabled}
-          onClick={() => setPending({ decision: 'approved', at: Date.now() })}
-        >
+        <Button size="sm" disabled={disabled} onClick={() => decide('approved')}>
           <Check /> Approve
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() => setPending({ decision: 'rejected', at: Date.now() })}
-        >
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => decide('rejected')}>
           <X /> Reject
         </Button>
       </div>

@@ -28,7 +28,7 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
           if (!items.length) return null;
           return (
             <section key={cat}>
-              <h3 className="caption mb-1.5">{CATEGORY_LABELS[cat]}</h3>
+              <h2 className="caption mb-1.5">{CATEGORY_LABELS[cat]}</h2>
               <div className="space-y-1">
                 {items.map((s) => (
                   <button

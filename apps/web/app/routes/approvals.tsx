@@ -10,7 +10,7 @@ import { ApprovalBadge } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { humanize, money, orderRef } from '~/lib/format';
+import { humanize, money, orderRef, outcomeLabel } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/approvals';
@@ -132,7 +132,7 @@ export default function Approvals() {
                     : 'text-muted-foreground hover:text-foreground',
                 )}
               >
-                {humanize(s)}
+                {outcomeLabel(s)}
               </button>
             ))}
           </fieldset>
@@ -268,7 +268,11 @@ function Row({
         <p className="mt-1 text-muted-foreground text-xs">
           {ctx?.step ? `${ctx.step} · ` : ''}
           for {humanize(r.assignee) || 'anyone'} · requested <Ago ms={r.requestedAt} />
-          {r.decidedBy ? ` · ${r.status} by ${r.decidedBy}` : ''}
+          {r.status === 'escalated'
+            ? ' · nobody decided in time'
+            : r.decidedBy
+              ? ` · ${r.status} by ${r.decidedBy}`
+              : ''}
           {r.note ? ` · “${r.note}”` : ''}
         </p>
         {fetcher.data?.error ? (
@@ -284,6 +288,8 @@ function Row({
         {open && canApprove ? (
           <DecisionControls
             compact
+            deadline={ctx?.deadline}
+            onTimeout={ctx?.onTimeout}
             shortcuts={ref}
             onPendingChange={onHold}
             onFlush={(decision, note) => sendDecision(r.orderId, r.nodeId, decision, note)}

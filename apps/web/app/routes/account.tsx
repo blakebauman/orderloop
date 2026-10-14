@@ -225,7 +225,9 @@ export default function Account() {
                 ))}
               </ul>
               <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-                A session ends 30 days after sign-in, or after 7 days without use.
+                <span className="block max-w-[75ch]">
+                  A session ends 30 days after sign-in, or after 7 days without use.
+                </span>
               </p>
               {end.data && 'error' in end.data ? (
                 <p role="alert" className="px-4 pb-2.5 text-destructive text-sm">

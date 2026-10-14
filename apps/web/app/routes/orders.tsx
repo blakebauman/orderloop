@@ -13,11 +13,11 @@ import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { ArrowDown } from 'lucide-react';
 import { useEffect } from 'react';
 import { Form, Link, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
-import { Ago } from '~/components/ago';
+import { Ago, WaitingAt } from '~/components/ago';
 import { Empty, PageHeader } from '~/components/page';
 import { StatusBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
-import { money, orderRef, orderStatus, statusLabel, waitLabel } from '~/lib/format';
+import { money, orderRef, orderStatus, statusLabel } from '~/lib/format';
 import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
 import type { Route } from './+types/orders';
 
@@ -144,7 +144,7 @@ export default function Orders() {
                     Status
                   </th>
                   <th scope="col" className="caption px-3 py-2 font-medium">
-                    Waiting on
+                    Waiting at
                   </th>
                   <th scope="col" className="caption px-3 py-2 font-medium">
                     Customer
@@ -187,8 +187,10 @@ export default function Orders() {
                     <td className="col-span-2 mt-1 truncate text-muted-foreground text-xs md:max-w-64 md:px-3 md:py-2">
                       {o.waitingOn ? (
                         <>
-                          <span className="md:hidden">Waiting on </span>
-                          {waitLabel(o.waitingOn)}
+                          <span className="md:hidden">
+                            {o.waitingAt ? 'Waiting at ' : 'Waiting on '}
+                          </span>
+                          <WaitingAt at={o.waitingAt} since={o.waitingSince} on={o.waitingOn} />
                         </>
                       ) : (
                         <span className="hidden md:inline">—</span>

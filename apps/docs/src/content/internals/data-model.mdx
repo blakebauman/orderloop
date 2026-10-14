@@ -63,7 +63,7 @@ engine, `ensureSeeded` in the web app; see [Templates](/guides/templates/#seedin
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)`,

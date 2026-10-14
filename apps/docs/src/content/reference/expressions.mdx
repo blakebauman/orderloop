@@ -55,8 +55,11 @@ value becomes an empty string and an object is written as JSON. Templates apply 
 `supplier`.
 
 ```text
-Order {{order.id}} is on its way ({{vars.tracking}})
+{{ref}} is on its way ({{vars.tracking}})
 ```
+
+`{{ref}}` is the reference the customer knows: the order's outside number, else its title, else its
+id. Use it in anything a customer reads; `{{order.id}}` is the internal id.
 
 ## Variables nodes set
 

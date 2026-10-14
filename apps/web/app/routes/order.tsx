@@ -153,7 +153,7 @@ export default function OrderPage() {
       const detail = e instanceof Error ? e.message : String(e);
       setError(
         /not waiting/i.test(detail)
-          ? 'That step is no longer waiting. It was decided elsewhere or escalated.'
+          ? 'That step is no longer waiting: someone else decided it, or it timed out.'
           : `That did not go through. ${detail}`,
       );
     } finally {
@@ -194,7 +194,13 @@ export default function OrderPage() {
   const tabs: { id: Tab; label: string; count?: number }[] = [
     {
       id: 'actions',
-      label: rolledBack(state) && !state.waits.length ? 'Rollback' : 'Actions',
+      label: state.waits.length
+        ? 'Actions'
+        : rolledBack(state)
+          ? 'Rollback'
+          : TERMINAL_ORDER_STATUSES.includes(state.status)
+            ? 'Outcome'
+            : 'Actions',
       count: state.waits.length || undefined,
     },
     { id: 'activity', label: 'Activity' },
@@ -371,6 +377,8 @@ export default function OrderPage() {
                 by={by}
                 onSelect={select}
                 sellers={records.sellers}
+                messages={records.messages}
+                onActivity={() => setTab('activity')}
               />
             </div>
             {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
@@ -626,6 +634,84 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
   );
 }
 
+/**
+ * A finished order's ending. The banner above says how it ended and why; this says where, the path
+ * it took, and who was told, so the last thing an operator sees is a summary rather than a gap.
+ */
+function Outcome({
+  state,
+  messages,
+  onSelect,
+  onActivity,
+}: {
+  state: OrderState;
+  messages: Records['messages'];
+  onSelect: (id: string) => void;
+  onActivity: () => void;
+}) {
+  const formatTime = useDateTime();
+  const flow = state.flow!;
+  const end = flow.nodes
+    .filter((n) => n.type.startsWith('control.end') && state.nodes[n.id]?.status === 'succeeded')
+    .sort((a, b) => (state.nodes[b.id]?.endedAt ?? 0) - (state.nodes[a.id]?.endedAt ?? 0))[0];
+  const endedAt = end ? state.nodes[end.id]?.endedAt : undefined;
+  const runs = Object.values(state.nodes);
+  const ran = runs.filter((r) => !['pending', 'skipped'].includes(r.status)).length;
+  const skipped = runs.filter((r) => r.status === 'skipped').length;
+  return (
+    <div className="space-y-5">
+      <section>
+        <h3 className="section-title">Where it ended</h3>
+        <p className="mt-1 text-sm">
+          {end ? (
+            <>
+              At{' '}
+              <button
+                type="button"
+                className="font-medium underline-offset-2 hover:underline"
+                onClick={() => onSelect(end.id)}
+              >
+                {end.label}
+              </button>
+              {endedAt ? (
+                <span className="text-muted-foreground"> · {formatTime(endedAt)}</span>
+              ) : null}
+            </>
+          ) : (
+            'Stopped before reaching an end step.'
+          )}
+        </p>
+        <p className="mt-0.5 text-muted-foreground text-xs tabular">
+          {plural(ran, 'step')} ran, {skipped} skipped on {flow.name} v{flow.version}
+        </p>
+      </section>
+      <section>
+        <h3 className="section-title">Who was told</h3>
+        {messages.length ? (
+          <ul className="mt-1.5 divide-y text-sm">
+            {messages.map((m) => (
+              <li key={m.id} className="py-1.5">
+                <div>{m.subject}</div>
+                <div className="text-muted-foreground text-xs">{m.recipient}</div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-muted-foreground text-sm">No one was sent a notice.</p>
+        )}
+      </section>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={onActivity}>
+          See every step
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <Link to={`/flows/${flow.id}`}>Open the flow</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function Actions({
   state,
   busy,
@@ -633,6 +719,8 @@ function Actions({
   by,
   onSelect,
   sellers,
+  messages,
+  onActivity,
 }: {
   state: OrderState;
   busy: string | null;
@@ -640,17 +728,21 @@ function Actions({
   by: string;
   onSelect: (id: string) => void;
   sellers: Records['sellers'];
+  messages: Records['messages'];
+  onActivity: () => void;
 }) {
   const canApprove = useCan('approver');
   const canOperate = useCan('operator');
   const formatTime = useDateTime();
   if (!state.waits.length) {
     if (rolledBack(state)) return null;
+    if (TERMINAL_ORDER_STATUSES.includes(state.status))
+      return (
+        <Outcome state={state} messages={messages} onSelect={onSelect} onActivity={onActivity} />
+      );
     return (
       <Empty>
-        {TERMINAL_ORDER_STATUSES.includes(state.status)
-          ? 'This order has finished. Its history is under Activity.'
-          : 'Nothing is waiting on a person or an outside event. The flow is running on its own.'}
+        Nothing is waiting on a person or an outside event. The flow is running on its own.
       </Empty>
     );
   }
@@ -681,6 +773,8 @@ function Actions({
               <div className="mt-3">
                 {canApprove ? (
                   <DecisionControls
+                    deadline={w.deadline}
+                    onTimeout={approvalContext(state, w.nodeId).onTimeout}
                     busy={busy === 'decide'}
                     disabled={!!busy}
                     onDecide={(decision, note) =>

@@ -1082,7 +1082,7 @@ describe('pricing chain', () => {
       env,
       node,
       config: withDefaults('commerce.price', config),
-      ctx: { order, nodes: {}, vars: {}, input: {}, now: Date.now() },
+      ctx: { order, nodes: {}, vars: {}, input: {}, now: Date.now(), ref: 'test-order' },
       stepKey: 'price#1',
     });
     return {
@@ -1179,6 +1179,7 @@ describe('pricing chain', () => {
           vars: {},
           input: {},
           now: Date.now(),
+          ref: 'test-order',
         },
         stepKey: 'credit#1',
       });
@@ -1214,6 +1215,7 @@ describe('pricing chain', () => {
         vars: {},
         input: {},
         now: Date.now(),
+        ref: 'test-order',
       },
       stepKey: 'n#1',
     });
@@ -1870,7 +1872,7 @@ describe('assess', () => {
       env,
       node: assessNode(config),
       config: withDefaults('ai.assess', config),
-      ctx: { order: order(id), nodes: {}, vars: {}, input: {}, now: Date.now() },
+      ctx: { order: order(id), nodes: {}, vars: {}, input: {}, now: Date.now(), ref: 'test-order' },
       stepKey: 'assess#1',
     });
 
@@ -1972,6 +1974,7 @@ describe('assess', () => {
         vars: {},
         input: {},
         now: Date.now(),
+        ref: 'test-order',
       },
       stepKey: 'assess#1',
     });

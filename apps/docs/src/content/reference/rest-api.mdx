@@ -99,7 +99,8 @@ with a different body returns `422` and starts nothing.
 `GET /api/v1/orders` returns up to 200 rows from the D1 order index, newest first. Filter with
 `model`, `channel`, `status` (one of <Values of="order-statuses" />) and `q`, which matches the order id, title,
 customer id, contact email or external id. Each row has `id`, `model`, `channel`, `externalId`, `contactEmail`, `status`, `title`, `flowId`, `flowVersion`, `instanceId`,
-`generation`, `customerId`, `currency`, `total`, `waitingOn`, `createdAt` and `updatedAt`
+`generation`, `customerId`, `currency`, `total`, `waitingOn` (the open waits' titles),
+`waitingAt` (the labels of the steps holding them), `waitingSince`, `createdAt` and `updatedAt`
 (epoch milliseconds).
 
 ## Read an order

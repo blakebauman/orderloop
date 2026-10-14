@@ -152,6 +152,21 @@ function Inner({
     });
   }, [fromProps]);
 
+  // On a running order a step grows as its results arrive (a summary, the branch it took). The
+  // flow's positions assume the empty card, so once sizes are measured, move each step clear of a
+  // taller one above it in its column. Display only; the flow keeps its positions.
+  const heightKey = nodes.map((n) => `${n.id}:${Math.round(n.measured?.height ?? 0)}`).join(',');
+  useEffect(() => {
+    if (editable) return;
+    setNodes((prev) => {
+      const heights = new Map(prev.map((n) => [n.id, n.measured?.height]));
+      if ([...heights.values()].some((h) => !h)) return prev;
+      const placed = spreadColumns(graphRef.current.nodes, heights as Map<string, number>);
+      const moved = prev.some((n) => placed.get(n.id)?.y !== n.position.y);
+      return moved ? prev.map((n) => ({ ...n, position: placed.get(n.id) ?? n.position })) : prev;
+    });
+  }, [heightKey, editable, fromProps]);
+
   const edges: Edge[] = useMemo(
     () =>
       graph.edges.map((e) => {
@@ -470,6 +485,28 @@ export function makeNode(graph: FlowGraph, type: string, position: { x: number; 
     config: withDefaults(type),
     position,
   };
+}
+
+/** Steps are 220px wide; a step overlaps another in its column when their x is closer than that. */
+const NODE_WIDTH = 220;
+const NODE_GAP = 16;
+
+/** Each step's position, moved down below any step above it in its column that it would overlap. */
+function spreadColumns(
+  steps: { id: string; position: { x: number; y: number } }[],
+  heights: Map<string, number>,
+) {
+  const placed = new Map(steps.map((n) => [n.id, { ...n.position }]));
+  const order = [...steps].sort((a, b) => a.position.y - b.position.y).map((n) => n.id);
+  for (let i = 0; i < order.length; i++) {
+    const me = placed.get(order[i]!)!;
+    for (let j = 0; j < i; j++) {
+      const above = placed.get(order[j]!)!;
+      const bottom = above.y + (heights.get(order[j]!) ?? 0) + NODE_GAP;
+      if (Math.abs(above.x - me.x) < NODE_WIDTH && above.y <= me.y && bottom > me.y) me.y = bottom;
+    }
+  }
+  return placed;
 }
 
 /** The focus steps plus what leads into and out of them, so a framed step keeps its context. */

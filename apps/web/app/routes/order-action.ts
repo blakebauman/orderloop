@@ -94,7 +94,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 function friendlyError(intent: string, err: unknown) {
   const detail = err instanceof Error ? err.message : String(err);
   if (/not waiting/i.test(detail))
-    return 'This approval was already decided or has escalated. Refresh to see where the order is now.';
+    return 'This approval was already decided or has timed out. Refresh to see where the order is now.';
   const what =
     intent === 'event'
       ? 'Could not deliver the event'

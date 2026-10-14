@@ -36,6 +36,14 @@ export function humanize(s: string | null | undefined) {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/**
+ * How an approval or wait ended, in operator words. The flow's output stays `escalated` (or
+ * `timeout`); what a person sees is that the step timed out.
+ */
+export function outcomeLabel(s: string | null | undefined) {
+  return s === 'escalated' || s === 'timeout' ? 'Timed out' : humanize(s);
+}
+
 /** Whole quantities with thousands separators: 25000 → "25,000". */
 export const count = (n: number) => new Intl.NumberFormat('en-US').format(n);
 

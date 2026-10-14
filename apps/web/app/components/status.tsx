@@ -1,8 +1,10 @@
 import { cn } from '@orderloop/ui/lib/utils';
-import { humanize, statusColor, statusLabel } from '~/lib/format';
+import { outcomeLabel, statusColor, statusLabel } from '~/lib/format';
 
+// Only running work pulses in badges and dots. A wait pulses once, on its step in the graph;
+// pulsing it everywhere for days is noise.
 export function StatusDot({ status, className }: { status?: string; className?: string }) {
-  const live = status === 'running' || status === 'waiting';
+  const live = status === 'running';
   return (
     <span
       aria-hidden="true"
@@ -35,11 +37,7 @@ function Stamp({ color, label, live }: { color: string; label: string; live?: bo
 /** Order or step status: a small tinted stamp in the status colour. */
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <Stamp
-      color={statusColor(status)}
-      label={statusLabel(status)}
-      live={status === 'running' || status === 'waiting'}
-    />
+    <Stamp color={statusColor(status)} label={statusLabel(status)} live={status === 'running'} />
   );
 }
 
@@ -52,11 +50,5 @@ const APPROVAL_COLOR: Record<string, string> = {
 
 /** Approval decisions have their own vocabulary; never borrow order statuses for them. */
 export function ApprovalBadge({ status }: { status: string }) {
-  return (
-    <Stamp
-      color={APPROVAL_COLOR[status] ?? 'var(--idle)'}
-      label={humanize(status)}
-      live={status === 'pending'}
-    />
-  );
+  return <Stamp color={APPROVAL_COLOR[status] ?? 'var(--idle)'} label={outcomeLabel(status)} />;
 }

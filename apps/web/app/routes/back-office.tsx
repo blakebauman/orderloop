@@ -462,12 +462,14 @@ function Pricing({ pricing, customers }: Pick<Office, 'pricing' | 'customers'>) 
         </li>
       </ol>
       <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-        Prices are in {BASE_CURRENCY}. Orders in another currency convert at{' '}
-        {pricing.rates
-          .filter((r) => r.currency !== BASE_CURRENCY)
-          .map((r) => `${r.rate} ${r.currency}`)
-          .join(', ')}{' '}
-        per {BASE_CURRENCY}, fixed when the order is priced.
+        <span className="block max-w-[75ch]">
+          Prices are in {BASE_CURRENCY}. Orders in another currency convert at{' '}
+          {pricing.rates
+            .filter((r) => r.currency !== BASE_CURRENCY)
+            .map((r) => `${r.rate} ${r.currency}`)
+            .join(', ')}{' '}
+          per {BASE_CURRENCY}, fixed when the order is priced.
+        </span>
       </p>
     </Section>
   );

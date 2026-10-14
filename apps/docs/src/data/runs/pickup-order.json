@@ -86,7 +86,7 @@
     },
     "ready_note": {
       "status": "succeeded",
-      "summary": "→ ada@example.com: Order ord_mv7h3haa8hcwu9 is ready at SoHo store",
+      "summary": "→ ada@example.com: Web order #10655 (pickup) is ready at SoHo store",
       "branches": ["out"]
     },
     "collect": {

@@ -122,7 +122,7 @@ export function Inspector({
       ) : null}
 
       <div>
-        <h3 className="section-title mb-1.5">Outputs</h3>
+        <h2 className="section-title mb-1.5">Outputs</h2>
         <div className="flex flex-wrap gap-1">
           {nodeOutputs(node.type, config).map((o) => (
             <span key={o} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
@@ -144,7 +144,7 @@ export function Inspector({
 
       {run && run.status !== 'pending' ? (
         <div className="rounded-md border bg-muted/30 p-3">
-          <h3 className="section-title">Last run</h3>
+          <h2 className="section-title">Last run</h2>
           <div className="mt-1 text-sm">
             {statusLabel(run.status)}
             {run.runs > 1 ? ` · ${run.runs} runs` : ''}

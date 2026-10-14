@@ -26,6 +26,7 @@ import {
   type Order,
   type OrderStatus,
   type OutboundEvent,
+  orderReference,
   type PendingWait,
   type PlanState,
   type RunContext,
@@ -79,6 +80,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       vars: { ...p.vars },
       input: p.order.meta ?? {},
       now: event.timestamp.getTime(),
+      ref: orderReference(p.order),
     };
     let seq = 0;
     const report = async (r: Omit<Report, 'seq' | 'generation'>, durable = false) => {
@@ -212,7 +214,9 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
           branches: [branch],
           output: { ...payload, outcome: branch },
           summary: approval
-            ? `${branch}${payload.by ? ` by ${String(payload.by)}` : ''}`
+            ? branch === 'escalated'
+              ? 'Timed out'
+              : `${branch}${payload.by ? ` by ${String(payload.by)}` : ''}`
             : branch === 'received'
               ? `${str(config.event)} received`
               : 'Timed out',
