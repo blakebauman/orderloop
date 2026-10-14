@@ -62,8 +62,9 @@
     "ASSISTANT_MODEL": "@cf/moonshotai/kimi-k2.6",
     // Multimodal decision model for Assess (probabilities per option); Clef's request body is fixed.
     "ASSESS_MODEL": "@cf/cloudflare/clef",
-    // Optional AI Gateway id for caching, rate limits and logs. Empty = call Workers AI directly.
-    "AI_GATEWAY_ID": "",
+    // AI Gateway for every model call: logs, analytics and a rate limit (120 a minute, sliding).
+    // Empty calls Workers AI directly; local dev does, so it never shares production's limit.
+    "AI_GATEWAY_ID": "orderloop",
     // "live" calls Workers AI; "mock" uses deterministic heuristics (tests, offline dev).
     "AI_MODE": "live",
     // Divides every wait and timeout. "1" is real time; local dev overrides it to "1440" (a day

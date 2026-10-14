@@ -14,7 +14,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI text model for every structured AI call (JSON mode) |
 | `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | Workers AI model for the [assistant](https://docs.orderloop.io/guides/assistant/); it needs multi-turn tool calling |
 | `ASSESS_MODEL` | `@cf/cloudflare/clef` | Workers AI decision model for [Assess](https://docs.orderloop.io/guides/ai/#assess) and the assistant's `assess_order` |
-| `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
+| `AI_GATEWAY_ID` | `"orderloop"` | AI Gateway every model call goes through: logs, analytics and a rate limit of 120 requests a minute (sliding). `pnpm web:dev` overrides it to `""` in `apps/web/vite.config.ts`, so local calls go to Workers AI directly. Empty calls Workers AI directly. A rate-limited call falls back to the node's heuristic like any other failed call |
 | `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
 | `TIME_SCALE` | `1` | Divides every wait and timeout. `"1"` is real time; `pnpm web:dev` overrides it to `"1440"` (a day becomes a minute) in `apps/web/vite.config.ts`, and the engine tests use `"1"` |
 | `INTAKE_MAILBOXES` | `""` | Email intake: JSON object of mailbox local part to flow id. Empty uses `orders@` and `po@` → `tpl-b2b-order`, `purchasing@` → `tpl-purchase-request` |
