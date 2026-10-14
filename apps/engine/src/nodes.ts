@@ -93,11 +93,14 @@ export const EXECUTORS: Record<string, Exec> = {
   },
   'trigger.schedule': passthrough,
   'trigger.inventory_threshold': passthrough,
-  'trigger.email_po': async ({ ctx }) => ({
-    summary: ctx.order.documentKey
-      ? `Document ${ctx.order.documentKey.split('/').pop()}`
-      : 'Email received',
-  }),
+  'trigger.email_po': async ({ ctx }) => {
+    const { channel, documentKey, externalId } = ctx.order;
+    if (documentKey) return { summary: `Document ${documentKey.split('/').pop()}` };
+    // The same flow takes EDI and API orders; say where this one came from.
+    if (channel !== 'email')
+      return { summary: `${ORDER_CHANNEL_LABELS[channel]}${externalId ? ` · ${externalId}` : ''}` };
+    return { summary: 'Email received' };
+  },
 
   'commerce.validate': async ({ env, ctx }) => {
     const skus = ctx.order.lines.map((l) => l.sku);
