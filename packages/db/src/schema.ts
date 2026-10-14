@@ -292,7 +292,6 @@ export const priceRules = sqliteTable(
   (t) => [index('price_rules_source').on(t.sourceId)],
 );
 
-/** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
 /** One change to a customer's balance, keyed by the step that made it. */
 export const balanceEntries = sqliteTable(
   'balance_entries',
@@ -307,6 +306,7 @@ export const balanceEntries = sqliteTable(
   (t) => [index('balance_entries_customer').on(t.customerId, t.createdAt)],
 );
 
+/** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */
 export const stockMovements = sqliteTable(
   'stock_movements',
   {

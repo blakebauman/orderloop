@@ -1,4 +1,4 @@
-import { BASE_CURRENCY, DEFAULT_INTAKE_MAILBOXES, type OrderState } from '@orderloop/core';
+import { BASE_CURRENCY, type OrderState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Mail, RefreshCw, Zap } from 'lucide-react';
 import { Form, Link, useFetcher, useLoaderData, useNavigation } from 'react-router';
@@ -15,13 +15,15 @@ export const meta = () => [{ title: 'Back office · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const [office, waiting, emails] = await Promise.all([
+  const [office, waiting, emails, configured] = await Promise.all([
     backOffice(),
     waitingOrders(),
     recentInboundEmails(),
+    // The engine owns INTAKE_MAILBOXES; ask it rather than assume the defaults.
+    engine().intakeMailboxes(),
   ]);
   const host = new URL(request.url).hostname;
-  const mailboxes = Object.entries(DEFAULT_INTAKE_MAILBOXES).map(([local, flowId]) => ({
+  const mailboxes = Object.entries(configured).map(([local, flowId]) => ({
     address: `${local}@${host === 'localhost' ? 'orderloop.io' : host}`,
     flowId,
   }));

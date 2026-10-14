@@ -124,17 +124,23 @@ export interface EngineRpc {
     orderId: string,
     event: string,
     payload?: Record<string, unknown>,
-  ): Promise<{ delivered: boolean; nodeId?: string }>;
+  ): Promise<{ delivered: boolean; nodeId?: string; notFound?: true }>;
   decide(
     orderId: string,
     nodeId: string,
     decision: 'approved' | 'rejected',
     by: string,
     note?: string,
-  ): Promise<void>;
-  cancel(orderId: string, reason: string): Promise<void>;
+  ): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'not_waiting' }>;
+  /** `finished` when the order had already ended, so there was nothing to cancel. */
+  cancel(
+    orderId: string,
+    reason: string,
+  ): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'finished' }>;
   snapshot(orderId: string): Promise<OrderState | null>;
   copilot(req: CopilotRequest): Promise<CopilotResult>;
+  /** Email intake: mailbox local part → flow id, from the engine's INTAKE_MAILBOXES. */
+  intakeMailboxes(): Promise<Record<string, string>>;
   /** Runs the stock review now (normally a daily cron on the Replenish Workflow). */
   runReplenish(): Promise<{ instanceId: string }>;
 }

@@ -14,13 +14,24 @@ export async function action({ request, params }: Route.ActionArgs) {
   );
   try {
     if (intent === 'approve' || intent === 'reject') {
-      await engine().decide(
+      const res = await engine().decide(
         params.orderId,
         String(f.get('nodeId')),
         intent === 'approve' ? 'approved' : 'rejected',
         actor(me),
         String(f.get('note') ?? '') || undefined,
       );
+      if (!res.ok)
+        return data(
+          {
+            ok: false,
+            error:
+              res.reason === 'not_found'
+                ? 'That order no longer exists'
+                : 'That step is no longer waiting for a decision',
+          },
+          { status: res.reason === 'not_found' ? 404 : 409 },
+        );
       return { ok: true };
     }
     if (intent === 'event') {
@@ -56,7 +67,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       return { ok: true, orderId };
     }
     if (intent === 'cancel') {
-      await engine().cancel(params.orderId, String(f.get('reason') ?? 'Cancelled by operator'));
+      const res = await engine().cancel(
+        params.orderId,
+        String(f.get('reason') ?? 'Cancelled by operator'),
+      );
+      if (!res.ok)
+        return data(
+          {
+            ok: false,
+            error:
+              res.reason === 'not_found'
+                ? 'That order no longer exists'
+                : 'The order has already finished',
+          },
+          { status: res.reason === 'not_found' ? 404 : 409 },
+        );
       return { ok: true };
     }
   } catch (err) {

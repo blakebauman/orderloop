@@ -42,7 +42,7 @@ than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWOR
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
 | `GET` | `/api/v1/webhook-subscriptions/:id/deliveries` | | `{ deliveries }` |
-| `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }` or `409` |
+| `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }`, `404` or `409` |
 | `POST` | `/api/v1/webhooks/orders` | `{ model, channel, externalId, lines, … }` | `201 { orderId, flowId }`, or `200` on a replay |
 
 ## Flows
@@ -132,7 +132,7 @@ POST /api/v1/orders/ord_…/events
 The event goes to the node waiting for it, and its payload lands in `vars` under the event name
 with every run of non-alphanumerics replaced by `_` (`payment.received` → `vars.payment_received`).
 The response is `{ delivered: true, nodeId }`, or `{ delivered: false }` when no node is waiting for
-that event yet. See [Approvals and events](/guides/approvals-and-events/).
+that event yet. An unknown order is `404`. See [Approvals and events](/guides/approvals-and-events/).
 
 ## Decide an approval
 
@@ -143,13 +143,15 @@ POST /api/v1/orders/ord_…/approvals/approval
 ```
 
 `decision` is `approved` or `rejected`. A person or an API token decides as themselves (`by` is ignored); only `APP_PASSWORD` may name `by`, which defaults to `api`. The decision takes effect at once;
-the dashboard's undo window does not apply to the API.
+the dashboard's undo window does not apply to the API. An unknown order is `404`, and a node that
+isn't waiting for an approval (already decided, or never reached) is `409`.
 
 ## Cancel
 
 `POST /api/v1/orders/:id/cancel` terminates the order's Workflow, releases reserved stock, voids
 payment authorizations, cancels shipments and staged pickups, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
-`Cancelled via API`. Cancelling a finished order does nothing.
+`Cancelled via API`. Cancelling an order that has already finished changes nothing and returns
+`409` `{ error: "The order has already finished" }`; an unknown order is `404`.
 
 ## Signed events
 
@@ -169,6 +171,7 @@ minutes from now are rejected.
 | Status | Meaning |
 |---|---|
 | `200` | Delivered: `{ delivered: true, nodeId }` |
+| `404` | No such order |
 | `409` | No node is waiting for that event yet: `{ delivered: false }`. Retry later |
 | `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters) |
 | `401` | Missing, malformed, stale or wrong signature |

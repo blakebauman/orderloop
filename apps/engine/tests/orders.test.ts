@@ -1,4 +1,4 @@
-import { introspectWorkflow } from 'cloudflare:test';
+import { createExecutionContext, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   encodePrincipal,
@@ -38,6 +38,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
+import { EngineApi } from '../src/api';
 import { refund, reserveInventory, restock } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
@@ -286,6 +287,37 @@ describe('cancel', () => {
     expect(done.waits).toEqual([]);
     const a = await db().select().from(approvals).where(eq(approvals.orderId, orderId)).get();
     expect(a!.status).toBe('cancelled');
+  });
+
+  it('tells the API what happened: unknown order, a step not waiting, an order already over', async () => {
+    await introspect();
+    const api = new EngineApi(createExecutionContext(), env);
+    expect(await api.cancel('ord_doesnotexist', 'x')).toEqual({ ok: false, reason: 'not_found' });
+    expect(await api.decide('ord_doesnotexist', 'mgr', 'approved', 'api')).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+    expect(await api.sendEvent('ord_doesnotexist', 'payment.received')).toEqual({
+      delivered: false,
+      notFound: true,
+    });
+
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        model: 'procurement',
+        customerId: 'cus_internal',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+    expect(await api.decide(orderId, 'fin', 'approved', 'api')).toEqual({
+      ok: false,
+      reason: 'not_waiting',
+    });
+    expect(await api.cancel(orderId, 'Changed our mind')).toEqual({ ok: true });
+    expect(await api.cancel(orderId, 'Again')).toEqual({ ok: false, reason: 'finished' });
+    expect(await api.intakeMailboxes()).toMatchObject({ orders: 'tpl-b2b-order' });
   });
 });
 

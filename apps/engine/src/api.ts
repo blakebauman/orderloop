@@ -4,13 +4,14 @@
  */
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import type {
-  CopilotRequest,
-  CopilotResult,
-  EngineRpc,
-  OrderState,
-  StartOrderInput,
-  StartOrderOnceInput,
+import {
+  type CopilotRequest,
+  type CopilotResult,
+  type EngineRpc,
+  type OrderState,
+  parseMailboxes,
+  type StartOrderInput,
+  type StartOrderOnceInput,
 } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { copilot } from './ai';
@@ -44,6 +45,7 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   }
 
   async sendEvent(orderId: string, event: string, payload?: Record<string, unknown>) {
+    if (!(await this.snapshot(orderId))) return { delivered: false, notFound: true as const };
     return this.agent(orderId).deliver(event, payload ?? {});
   }
 
@@ -54,11 +56,23 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     by: string,
     note?: string,
   ) {
+    const s = await this.snapshot(orderId);
+    if (!s) return { ok: false as const, reason: 'not_found' as const };
+    if (!s.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
+      return { ok: false as const, reason: 'not_waiting' as const };
     await this.agent(orderId).decide(nodeId, decision, by, note);
+    return { ok: true as const };
   }
 
   async cancel(orderId: string, reason: string) {
-    await this.agent(orderId).cancel(reason);
+    if (!(await this.snapshot(orderId)))
+      return { ok: false as const, reason: 'not_found' as const };
+    const r = (await this.agent(orderId).cancel(reason)) as { ok: boolean };
+    return r.ok ? { ok: true as const } : { ok: false as const, reason: 'finished' as const };
+  }
+
+  async intakeMailboxes() {
+    return parseMailboxes(this.env.INTAKE_MAILBOXES);
   }
 
   async snapshot(orderId: string): Promise<OrderState | null> {

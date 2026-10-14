@@ -86,7 +86,8 @@ message that passed DMARC, so a failed reply is logged and never fails the intak
 
 Every message is recorded in `inbound_emails` with `status` set to `accepted`, `duplicate` or
 `rejected`, along with the reason, the order id and the number of attachments read. The Back
-office page shows the latest twenty under **Email intake**, next to the mailbox addresses.
+office page shows the latest twenty under **Email intake**, next to the mailbox addresses, which it
+reads from the engine's `INTAKE_MAILBOXES` (so a custom mapping shows as configured).
 
 ## Setting up Email Routing
 

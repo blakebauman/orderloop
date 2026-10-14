@@ -1,7 +1,7 @@
 /**
  * Who may do what. Roles are ordered: each one can do everything the roles before it can.
  *
- * - `viewer` reads orders, flows, approvals and the back office, and uses the ops chat.
+ * - `viewer` reads orders, flows, approvals and the back office, and asks the workspace assistant.
  * - `approver` also decides approvals.
  * - `operator` also starts, cancels and restarts orders, delivers events, edits and publishes
  *   flows, runs the stock review, and manages the team, API tokens and webhooks.
