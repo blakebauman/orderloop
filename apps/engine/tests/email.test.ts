@@ -49,7 +49,8 @@ function inbound(opts: {
     'message-id': opts.messageId,
     subject: opts.subject,
     'authentication-results':
-      opts.auth ?? 'mx.cloudflare.net; dkim=pass header.d=example; spf=pass',
+      opts.auth ??
+      `mx.cloudflare.net; dkim=pass header.d=${opts.from.replace(/^.*@|>.*$/g, '')}; spf=pass`,
   });
   const message = {
     from: opts.from,

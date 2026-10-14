@@ -71,7 +71,7 @@ engine source.
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
-| `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
+| `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
@@ -84,7 +84,7 @@ WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/orig
 
 `apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
 row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
-is an open operator, which is the local dev default. See [Team and roles](/guides/team-and-roles/). The engine's own
+is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see

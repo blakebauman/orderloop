@@ -31,15 +31,17 @@ import {
 } from '@orderloop/core';
 import {
   approvals,
+  contains,
   createDb,
   customers,
+  endsWith,
   flows,
   getFlowVersionJson,
   orders,
   products,
   publishFlow,
 } from '@orderloop/db';
-import { and, asc, desc, eq, gte, inArray, isNotNull, like, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { copilot, orderBrief } from '../ai';
 import { assess, resolveImages } from '../clef';
 
@@ -157,14 +159,10 @@ export async function findOrders(env: Env, f: FindOrders) {
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
     f.customer
-      ? or(like(customers.name, `%${f.customer}%`), eq(orders.customerId, f.customer))
+      ? or(contains(customers.name, f.customer), eq(orders.customerId, f.customer))
       : undefined,
     f.q
-      ? or(
-          like(orders.id, `%${f.q}%`),
-          like(orders.title, `%${f.q}%`),
-          like(customers.name, `%${f.q}%`),
-        )
+      ? or(contains(orders.id, f.q), contains(orders.title, f.q), contains(customers.name, f.q))
       : undefined,
     f.minTotal !== undefined ? gte(base, f.minTotal) : undefined,
     f.maxTotal !== undefined ? lte(base, f.maxTotal) : undefined,
@@ -227,7 +225,7 @@ export async function resolveOrderId(env: Env, ref: string): Promise<string | nu
   const tail = await db
     .select({ id: orders.id })
     .from(orders)
-    .where(like(orders.id, `%${id}`))
+    .where(endsWith(orders.id, id))
     .limit(2);
   return tail.length === 1 ? tail[0]!.id : null;
 }
@@ -340,7 +338,7 @@ export async function findProducts(env: Env, q?: string, belowReorder?: boolean)
     .from(products)
     .where(
       and(
-        q ? or(like(products.sku, `%${q}%`), like(products.name, `%${q}%`)) : undefined,
+        q ? or(contains(products.sku, q), contains(products.name, q)) : undefined,
         belowReorder ? lte(available, products.reorderPoint) : undefined,
       ),
     )

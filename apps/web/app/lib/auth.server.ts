@@ -42,10 +42,12 @@ import {
   normalizeEmail,
   randomToken,
   safeEqual,
+  secretEqual,
   sha256Hex,
   verifyPassword,
 } from './credentials';
 import { db } from './env.server';
+import { isLocalHost } from './origin';
 import { twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
 import { hashRecoveryCode, looksLikeTotp, verifyTotp } from './totp';
@@ -106,6 +108,15 @@ export const forgetUserCount = () => {
 
 export async function authEnabled(): Promise<boolean> {
   return !!password() || (await anyUsers());
+}
+
+/**
+ * Why the request is refused because sign-in isn't set up, or null. With no APP_PASSWORD and no
+ * people every caller would be an operator, which only local development may be.
+ */
+export async function openModeRefused(url: URL): Promise<string | null> {
+  if (isLocalHost(url) || (await authEnabled())) return null;
+  return 'Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first operator on the Team page.';
 }
 
 /**
@@ -213,6 +224,20 @@ async function recordFailure(keys: string[]) {
 }
 
 /**
+ * Re-checks a signed-in person's current password (changing it, turning off two-factor sign-in,
+ * new recovery codes). Wrong answers are throttled per person, so a left-open browser can't be
+ * used to guess it. Throws `Throttled` while blocked; false for a wrong password.
+ */
+export async function reauthenticate(userId: string, given: string, hash: string) {
+  const key = [throttleKey('reauth', userId)];
+  const wait = await waitFor(key);
+  if (wait) throw new Throttled(wait);
+  if (await verifyPassword(given, hash)) return true;
+  await recordFailure(key);
+  return false;
+}
+
+/**
  * The caller of a REST request: a bearer token, else the browser session. Guesses at the shared
  * APP_PASSWORD are throttled per address (throws `Throttled`); `ol_live_` tokens are random
  * 192-bit values, so they aren't, and a busy address can't lock out working integrations.
@@ -228,7 +253,7 @@ export async function apiPrincipal(request: Request): Promise<Caller | null> {
       throw new Throttled(wait);
     }
     const pw = password();
-    if (pw && safeEqual(bearer, pw)) return SHARED_PRINCIPAL;
+    if (pw && (await secretEqual(bearer, pw))) return SHARED_PRINCIPAL;
     await recordFailure(key);
     await audit(request, 'api.bearer_failed');
     return null;
@@ -395,7 +420,7 @@ async function checkCredentials(
   if (!email.trim()) {
     const pw = password();
     if (!pw) return { reason: 'no workspace password is set' };
-    if (!safeEqual(given, pw)) return { reason: 'wrong workspace password' };
+    if (!(await secretEqual(given, pw))) return { reason: 'wrong workspace password' };
     return {
       cookie: `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
       principal: SHARED_PRINCIPAL,

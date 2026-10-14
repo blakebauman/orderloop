@@ -18,7 +18,11 @@ the server; the dashboard also hides controls a role can't use.
 ## Setting up sign-in
 
 A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an operator, which is
-the local development default. To turn sign-in on, open **Set up sign-in** in the account menu (the Team
+the local development default. Open mode runs only on `localhost`, `127.0.0.1`, `[::1]` and
+`*.localhost`; any other host answers every request except `/health` with `503` and the text
+"Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first operator on
+the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`, `isLocalHost` in
+`origin.ts`). To turn sign-in on, open **Set up sign-in** in the account menu (the Team
 page) and create your operator account with a password you choose. You are signed in as it, and
 from then on everyone signs in.
 
@@ -114,6 +118,7 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 | Address | 30 | One place trying many accounts |
 | Email | 50 | Many places trying one account; high, so nobody can easily lock a person out |
 | Person, at the code step | 5 | Guessing two-factor codes after a correct password |
+| Person, on the Account page | 5 | Guessing the current password from a signed-in browser left open: changing the password, turning off two-factor sign-in, new recovery codes (`429`) |
 
 A successful sign-in clears its email-and-address count. The workspace password counts as one
 email. Separately, 20 wrong guesses at the shared password as an API bearer token from one address in 15 minutes are refused with `429`. Addresses come from `cf-connecting-ip`, which Cloudflare sets. The limits are `LIMITS` in
@@ -189,6 +194,17 @@ WebSocket, unless its `Origin` is the app's own; without `Origin` it reads `Sec-
 accepts only `same-origin` or `none`. The answer is `403 { "error": "Cross-site request refused" }`.
 Requests with a bearer token are exempt, since they carry no cookie, and so are clients that send
 neither header. The check is `crossOrigin` in `apps/web/app/lib/origin.ts`.
+
+## Response headers
+
+`withSecurityHeaders` (`apps/web/app/lib/csp.ts`) adds these to every response from the web Worker
+unless the route already set them: `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, a `Permissions-Policy` that disables
+camera, microphone, geolocation and payment, and, over HTTPS only, `Strict-Transport-Security:
+max-age=31536000; includeSubDomains`. HTML pages also get a `Content-Security-Policy`, set in
+`app/entry.server.tsx` with a fresh nonce per response: scripts run only from the app's own origin
+or with that nonce, `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`. It is
+not sent by the Vite dev server, whose inline scripts carry no nonce, so it applies to production builds.
 
 ## Outside identity providers
 

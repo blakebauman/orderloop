@@ -3,8 +3,32 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const engine = { decide: vi.fn(), cancel: vi.fn(), sendEvent: vi.fn() };
 
-vi.mock('cloudflare:workers', () => ({ env: {} }));
-vi.mock('~/lib/env.server', () => ({ engine: () => engine }));
+const receipts = new Set<string>();
+/** Just enough of drizzle for the webhook receipts: claim with insert, release with delete. */
+const fakeDb = {
+  insert: () => ({
+    values: (v: { id: string }) => ({
+      onConflictDoNothing: () => ({
+        returning: async () => (receipts.has(v.id) ? [] : (receipts.add(v.id), [v])),
+      }),
+    }),
+  }),
+  delete: () => ({
+    where: async (cond: { eq?: string }) => {
+      if (cond.eq) receipts.delete(cond.eq);
+    },
+  }),
+};
+// The release deletes by id (`eq`); the prune by age (`lt`) leaves fresh receipts alone.
+vi.mock('drizzle-orm', async (actual) => ({
+  ...(await actual<typeof import('drizzle-orm')>()),
+  eq: (_col: unknown, value: string) => ({ eq: value }),
+  lt: () => ({}),
+}));
+const env: Record<string, string> = {};
+
+vi.mock('cloudflare:workers', () => ({ env }));
+vi.mock('~/lib/env.server', () => ({ engine: () => engine, db: () => fakeDb }));
 vi.mock('~/lib/flows.server', () => ({ ensureSeeded: async () => {}, listFlows: async () => [] }));
 vi.mock('~/lib/orders.server', () => ({ currencies: async () => [], listOrders: async () => [] }));
 vi.mock('~/lib/audit.server', () => ({ listAudit: async () => [] }));
@@ -14,7 +38,8 @@ vi.mock('~/lib/auth.server', () => ({
 }));
 vi.mock('~/lib/webhooks.server', () => ({}));
 
-const { handleApi } = await import('~/lib/api.server');
+const { handleApi, handleSignedEvent } = await import('~/lib/api.server');
+const { signWebhook } = await import('@orderloop/core');
 
 const operator: Principal = { kind: 'token', id: 'tok_1', name: 'ci', role: 'operator' };
 const post = (path: string, body: unknown) =>
@@ -61,5 +86,62 @@ describe('order actions over REST', () => {
     const early = await post('orders/ord_x/events', { event: 'payment.received' });
     expect(early.status).toBe(200);
     expect(await early.json()).toEqual({ delivered: false });
+  });
+});
+
+describe('request validation', () => {
+  beforeEach(() => {
+    for (const fn of Object.values(engine)) fn.mockReset();
+  });
+
+  it('refuses malformed and oversized bodies before reaching the engine', async () => {
+    expect((await post('orders/ord_x/approvals/mgr', { decision: 'maybe' })).status).toBe(400);
+    expect((await post('orders/ord_x/events', { event: 42 })).status).toBe(400);
+    expect(
+      (await post('orders/ord_x/events', { event: 'x', payload: { blob: 'a'.repeat(40_000) } }))
+        .status,
+    ).toBe(400);
+    expect((await post('orders/ord_x/cancel', { reason: 'r'.repeat(501) })).status).toBe(400);
+    const huge = await post('orders/ord_x/cancel', { reason: 'r'.repeat(2 * 1024 * 1024) });
+    expect(huge.status).toBe(413);
+    expect(engine.decide).not.toHaveBeenCalled();
+    expect(engine.sendEvent).not.toHaveBeenCalled();
+    expect(engine.cancel).not.toHaveBeenCalled();
+  });
+
+  it('answers an engine failure without its internals', async () => {
+    engine.cancel.mockRejectedValueOnce(new Error('D1_ERROR: no such table: orders'));
+    const res = await post('orders/ord_x/cancel', {});
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Internal error' });
+  });
+});
+
+describe('signed events', () => {
+  const send = async (raw: string, signature: string) =>
+    handleSignedEvent(
+      new Request('https://app.test/api/v1/webhooks/events', {
+        method: 'POST',
+        headers: { 'x-orderloop-signature': signature },
+        body: raw,
+      }),
+    );
+
+  beforeEach(() => {
+    env.WEBHOOK_SECRET = 'whsec_test';
+    receipts.clear();
+    engine.sendEvent.mockReset();
+  });
+
+  it('delivers a signed event once, and lets a sender retry one nothing was waiting for', async () => {
+    const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+    const signature = await signWebhook('whsec_test', raw);
+    engine.sendEvent.mockResolvedValueOnce({ delivered: false });
+    expect((await send(raw, signature)).status).toBe(409);
+    engine.sendEvent.mockResolvedValueOnce({ delivered: true, nodeId: 'pay' });
+    expect((await send(raw, signature)).status).toBe(200);
+    const replay = await send(raw, signature);
+    expect(await replay.json()).toEqual({ delivered: true, duplicate: true });
+    expect(engine.sendEvent).toHaveBeenCalledTimes(2);
   });
 });

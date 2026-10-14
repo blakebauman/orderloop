@@ -12,7 +12,13 @@ import {
   startOrderSchema,
 } from '@orderloop/core';
 import { z } from 'zod';
-import { eventSchema, subscriptionInput } from './api-schemas';
+import {
+  cancelInput,
+  decisionInput,
+  eventSchema,
+  orderEventInput,
+  subscriptionInput,
+} from './api-schemas';
 
 import { AUDIT_GROUPS } from './audit';
 
@@ -95,7 +101,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Deliver a business event to the node waiting for it',
           parameters: [orderId],
-          requestBody: body(eventSchema.omit({ orderId: true })),
+          requestBody: body(orderEventInput),
           responses: {
             '200': ok('{ delivered, nodeId? }; delivered is false when nothing is waiting for it'),
             ...errors,
@@ -109,13 +115,7 @@ export function openApiDocument(serverUrl: string) {
             orderId,
             { name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } },
           ],
-          requestBody: body(
-            z.object({
-              decision: z.enum(['approved', 'rejected']),
-              by: z.string().optional(),
-              note: z.string().optional(),
-            }),
-          ),
+          requestBody: body(decisionInput),
           responses: {
             '200': ok('Recorded'),
             '409': ok('That node is not waiting for an approval', '#/components/schemas/Error'),
@@ -127,7 +127,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Cancel an order and release everything it holds',
           parameters: [orderId],
-          requestBody: body(z.object({ reason: z.string().optional() })),
+          requestBody: body(cancelInput),
           responses: {
             '200': ok('Cancelled'),
             '409': ok('The order has already finished', '#/components/schemas/Error'),

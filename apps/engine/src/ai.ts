@@ -8,6 +8,7 @@ import {
   autoLayout,
   type CopilotRequest,
   type CopilotResult,
+  conforms,
   type FlowGraph,
   flowGraphSchema,
   isBuySide,
@@ -61,6 +62,8 @@ export async function runJson<T>(
     const raw = res.response;
     const value = (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
     if (value === undefined || value === null) throw new Error('empty response');
+    // A malformed answer would fail the step and call the model again on every retry.
+    if (!conforms(value, schema)) throw new Error('response does not match the schema');
     return { value, source: 'model' };
   } catch (err) {
     console.warn('ai fallback', err instanceof Error ? err.message : err);

@@ -94,13 +94,44 @@ export function resolveSender(
   return { allowed: false };
 }
 
+/** The authserv-id Cloudflare Email Routing writes on the `Authentication-Results` it adds. */
+export const EMAIL_ROUTING_AUTHSERV_ID = 'mx.cloudflare.net';
+
 /**
- * True when the receiving MTA recorded a passing DMARC, DKIM or SPF result, so the From address is
- * not trivially spoofed. Email Routing adds `Authentication-Results` before the Worker runs.
+ * True when Email Routing recorded a passing result *for the From domain*: DMARC passing for it,
+ * or DKIM or SPF passing for a domain aligned with it (the same domain, or one a subdomain of the
+ * other). A pass for some other domain proves nothing about who wrote From.
+ *
+ * Only the first `Authentication-Results` counts, and only when Email Routing wrote it: Email
+ * Routing prepends its own, and any further ones came with the message from the sender.
  */
-export function authenticated(authResults: string | null): boolean {
+export function authenticated(authResults: string | null, from: string): boolean {
   if (!authResults) return false;
-  return /\b(dmarc|dkim|spf)=pass\b/i.test(authResults);
+  const fromDomain = splitAddress(from).domain;
+  if (!fromDomain) return false;
+  // `Headers.get` joins repeated headers with ", ", and a result never starts with an authserv-id.
+  const [first] = authResults.split(/,\s*(?=[\w.-]+\s*;)/);
+  const [authserv, ...results] = first!.split(';').map((r) => r.trim().toLowerCase());
+  if (authserv?.split(/\s+/)[0] !== EMAIL_ROUTING_AUTHSERV_ID) return false;
+  return results.some((r) => {
+    const [method, ...props] = r.split(/\s+/);
+    const prop = (key: string) => {
+      const v = props.find((p) => p.startsWith(`${key}=`))?.slice(key.length + 1) ?? '';
+      return v.includes('@') ? splitAddress(v).domain : v;
+    };
+    if (method === 'dmarc=pass') return prop('header.from') === fromDomain;
+    if (method === 'dkim=pass') return aligned(prop('header.d'), fromDomain);
+    if (method === 'spf=pass') return aligned(prop('smtp.mailfrom'), fromDomain);
+    return false;
+  });
+}
+
+/** Relaxed alignment: the same domain, or one a subdomain of the other (never a bare TLD). */
+function aligned(domain: string, fromDomain: string) {
+  if (!domain.includes('.')) return false;
+  return (
+    domain === fromDomain || fromDomain.endsWith(`.${domain}`) || domain.endsWith(`.${fromDomain}`)
+  );
 }
 
 export type IntakeAttachment = { filename: string; text: string };

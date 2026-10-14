@@ -53,7 +53,7 @@ for local dev (copy `apps/web/.dev.vars.example`).
 
 | Secret | Meaning |
 |---|---|
-| `APP_PASSWORD` | A break-glass operator: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open; see [Team and roles](/guides/team-and-roles/) |
+| `APP_PASSWORD` | A break-glass operator: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open on localhost only (any other host answers `503`); see [Team and roles](/guides/team-and-roles/) |
 | `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events` and signed orders at `POST /api/v1/webhooks/orders`. Unset answers `503` there |
 | `SHOPIFY_WEBHOOK_SECRET` | The Shopify app's client secret; enables `POST /api/v1/channels/shopify/orders`, which verifies `X-Shopify-Hmac-Sha256` with it. Unset answers `503`. See [Channel adapters](/guides/channel-adapters/#shopify) |
 
@@ -73,6 +73,7 @@ created; they are not configuration.
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
+| `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |
 | `OAUTH_KV` | web | KV namespace for [MCP](/reference/mcp/) and [A2A](/reference/a2a/) OAuth clients, grants and tokens (tokens hashed, grant data encrypted). `wrangler.jsonc` gives no id; the namespace is provisioned on deploy |
 
 The web Worker's compatibility flags are `nodejs_compat` and `global_fetch_strictly_public`. The

@@ -534,6 +534,16 @@ export const workspaceSettings = sqliteTable('workspace_settings', {
   updatedBy: text('updated_by').notNull(),
 });
 
+/** Signed webhook events already delivered, by signature; pruned after the signature window. */
+export const webhookReceipts = sqliteTable(
+  'webhook_receipts',
+  {
+    id: text('id').primaryKey(),
+    receivedAt: integer('received_at').notNull(),
+  },
+  (t) => [index('webhook_receipts_received').on(t.receivedAt)],
+);
+
 /** Failed authentication attempts per key in a fixed window; see `throttle.ts` in the web app. */
 export const authFailures = sqliteTable('auth_failures', {
   key: text('key').primaryKey(),

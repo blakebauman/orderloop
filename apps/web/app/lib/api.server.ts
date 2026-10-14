@@ -49,12 +49,21 @@ import {
   verifyWebhook,
   x12850ToInbound,
 } from '@orderloop/core';
+import { webhookReceipts } from '@orderloop/db';
+import { eq, lt } from 'drizzle-orm';
 import type { z } from 'zod';
-import { eventSchema, subscriptionInput } from './api-schemas';
+import {
+  cancelInput,
+  decisionInput,
+  eventSchema,
+  orderEventInput,
+  subscriptionInput,
+} from './api-schemas';
 import { isAuditGroup } from './audit';
 import { listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
-import { engine } from './env.server';
+import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
+import { db, engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
 import {
@@ -75,8 +84,15 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     .replace(/^\/api\/v1\/?/, '')
     .split('/')
     .filter(Boolean);
-  const body = async () =>
-    request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+  const body = async (): Promise<unknown> => {
+    if (request.method !== 'POST') return {};
+    try {
+      return JSON.parse(await readText(request));
+    } catch (err) {
+      if (err instanceof BodyTooLarge) throw err;
+      return {};
+    }
+  };
   try {
     if (parts[0] === 'flows' && parts.length === 1 && request.method === 'GET') {
       return json({ flows: await listFlows() });
@@ -96,7 +112,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     }
     if (parts[0] === 'channels' && parts[1] === 'edi' && parts[2] === '850') {
       if (request.method !== 'POST') return json({ error: 'Not found' }, 404);
-      return need('operator') ?? (await handleEdi850(await request.text()));
+      return need('operator') ?? (await handleEdi850(await readText(request, MAX_EDI_BYTES)));
     }
     if (parts[0] === 'webhook-subscriptions')
       return need('operator') ?? (await handleSubscriptions(request, parts, body));
@@ -148,17 +164,18 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     if (parts[2] === 'events' && request.method === 'POST') {
       const denied = need('operator');
       if (denied) return denied;
-      const b = (await body()) as { event?: string; payload?: Record<string, unknown> };
-      if (!b.event) return json({ error: '`event` is required' }, 400);
-      const res = await engine().sendEvent(orderId, b.event, b.payload ?? {});
+      const b = orderEventInput.safeParse(await body());
+      if (!b.success) return json({ error: 'Invalid event', issues: b.error.issues }, 400);
+      const res = await engine().sendEvent(orderId, b.data.event, b.data.payload ?? {});
       return res.notFound ? json({ error: 'Not found' }, 404) : json(res);
     }
     if (parts[2] === 'approvals' && parts[3] && request.method === 'POST') {
       const denied = need('approver');
       if (denied) return denied;
-      const b = (await body()) as { decision?: string; by?: string; note?: string };
-      if (b.decision !== 'approved' && b.decision !== 'rejected')
-        return json({ error: '`decision` must be approved or rejected' }, 400);
+      const parsed = decisionInput.safeParse(await body());
+      if (!parsed.success)
+        return json({ error: 'Invalid decision', issues: parsed.error.issues }, 400);
+      const b = parsed.data;
       // A person or a named token decides; only the shared password may name someone else.
       const by = caller.kind === 'password' ? (b.by ?? 'api') : actor(caller);
       const res = await engine().decide(orderId, parts[3], b.decision, by, b.note);
@@ -170,8 +187,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     if (parts[2] === 'cancel' && request.method === 'POST') {
       const denied = need('operator');
       if (denied) return denied;
-      const b = (await body()) as { reason?: string };
-      const res = await engine().cancel(orderId, b.reason ?? 'Cancelled via API');
+      const b = cancelInput.safeParse(await body());
+      if (!b.success) return json({ error: 'Invalid cancel', issues: b.error.issues }, 400);
+      const res = await engine().cancel(orderId, b.data.reason ?? 'Cancelled via API');
       if (res.ok) return json(res);
       return res.reason === 'not_found'
         ? json({ error: 'Not found' }, 404)
@@ -179,8 +197,15 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     }
     return json({ error: 'Not found' }, 404);
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    return failure(err);
   }
+}
+
+/** A 413 for an oversized body; anything else is logged and answered without its internals. */
+function failure(err: unknown): Response {
+  if (err instanceof BodyTooLarge) return tooLarge(err);
+  console.error('api error', err);
+  return json({ error: 'Internal error' }, 500);
 }
 
 async function handleSubscriptions(
@@ -210,12 +235,22 @@ async function handleSubscriptions(
  * node is waiting for the event yet, so a sender's retry policy delivers it later.
  */
 /** The verified body of a signed webhook, or the response refusing it. */
-async function readSigned(request: Request): Promise<{ raw: string } | { refused: Response }> {
+async function readSigned(
+  request: Request,
+): Promise<{ raw: string; signature: string } | { refused: Response }> {
   const secret = (env as { WEBHOOK_SECRET?: string }).WEBHOOK_SECRET;
   if (!secret) return { refused: json({ error: 'Webhooks are not configured' }, 503) };
-  const raw = await request.text();
-  const check = await verifyWebhook(secret, raw, request.headers.get(SIGNATURE_HEADER));
-  return check.ok ? { raw } : { refused: json({ error: check.reason }, 401) };
+  let raw: string;
+  try {
+    raw = await readText(request);
+  } catch (err) {
+    if (err instanceof BodyTooLarge) return { refused: tooLarge(err) };
+    throw err;
+  }
+  const header = request.headers.get(SIGNATURE_HEADER);
+  const check = await verifyWebhook(secret, raw, header);
+  if (!check.ok) return { refused: json({ error: check.reason }, 401) };
+  return { raw, signature: /v1=([0-9a-f]+)/i.exec(header ?? '')?.[1] ?? '' };
 }
 
 export async function handleSignedEvent(request: Request): Promise<Response> {
@@ -227,13 +262,42 @@ export async function handleSignedEvent(request: Request): Promise<Response> {
   } catch {
     return json({ error: 'Body must be { orderId, event, payload? }' }, 400);
   }
+  // Claim the signature first, so a replay of this exact request (even a concurrent one) delivers
+  // nothing. The claim is dropped unless the event was delivered, so a sender may retry a 409.
+  const receipt = `event:${signed.signature}`;
+  if (!(await claimReceipt(receipt))) return json({ delivered: true, duplicate: true });
+  let delivered = false;
   try {
     const res = await engine().sendEvent(parsed.orderId, parsed.event, parsed.payload ?? {});
+    delivered = !!res.delivered;
     if (res.notFound) return json({ error: 'Not found' }, 404);
     return json(res, res.delivered ? 200 : 409);
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    return failure(err);
+  } finally {
+    if (!delivered) await releaseReceipt(receipt);
   }
+}
+
+/** Seconds a signature stays valid (`verifyWebhook`'s tolerance), plus slack for clock skew. */
+const RECEIPT_TTL_MS = 10 * 60_000;
+
+/** Records a delivered signature; false when it was already recorded. */
+async function claimReceipt(id: string): Promise<boolean> {
+  const now = Date.now();
+  const [row] = await db()
+    .insert(webhookReceipts)
+    .values({ id, receivedAt: now })
+    .onConflictDoNothing()
+    .returning();
+  await db()
+    .delete(webhookReceipts)
+    .where(lt(webhookReceipts.receivedAt, now - RECEIPT_TTL_MS));
+  return !!row;
+}
+
+async function releaseReceipt(id: string) {
+  await db().delete(webhookReceipts).where(eq(webhookReceipts.id, id));
 }
 
 /**
@@ -292,7 +356,8 @@ async function startInbound(o: InboundOrder): Promise<InboundOutcome> {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('has no published version'))
       return { status: 409, body: { error: `Flow ${flowId} is not published` } };
-    return { status: 500, body: { error: message } };
+    console.error('inbound order failed', err);
+    return { status: 500, body: { error: 'Internal error' } };
   }
 }
 
@@ -303,7 +368,13 @@ async function startInbound(o: InboundOrder): Promise<InboundOutcome> {
 export async function handleShopifyOrder(request: Request): Promise<Response> {
   const secret = (env as { SHOPIFY_WEBHOOK_SECRET?: string }).SHOPIFY_WEBHOOK_SECRET;
   if (!secret) return json({ error: 'Shopify is not configured' }, 503);
-  const raw = await request.text();
+  let raw: string;
+  try {
+    raw = await readText(request);
+  } catch (err) {
+    if (err instanceof BodyTooLarge) return tooLarge(err);
+    throw err;
+  }
   if (!(await verifyShopifyHmac(secret, raw, request.headers.get('x-shopify-hmac-sha256'))))
     return json({ error: 'Bad signature' }, 401);
   const topic = request.headers.get('x-shopify-topic');

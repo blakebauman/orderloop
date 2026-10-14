@@ -18,13 +18,13 @@ session cookie also works, and so does `APP_PASSWORD` as a break-glass operator)
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
 (starting, cancelling, events, webhook subscriptions) `operator`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). An open deployment (no `APP_PASSWORD`, no
-people) needs no token. Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
+people) needs no token, but runs only on localhost: any other host answers `503`. Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
 authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)), and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (zod issues) on a `400` for an invalid body.
 `401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` too many wrong bearer tokens from one address (more
 than 20 non-`ol_live_` bearers in 15 minutes, which only guesses at `APP_PASSWORD` produce; see
-`Retry-After`), `404` an unknown route or order, and `500` an engine error.
+`Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details (they are logged).
 
 ## Routes
 
@@ -169,14 +169,25 @@ X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(WEBHOOK_SECRET, "<t>
 ```
 
 `signWebhook(secret, rawBody)` in `@orderloop/core` builds the header. Signatures more than five
-minutes from now are rejected.
+minutes from now are rejected. A delivered event's signature is recorded (D1 `webhook_receipts`), so
+the same signed request sent again inside that window is not delivered twice. A `409` is not
+recorded and may be retried.
+
+The order routes validate their bodies with zod: `POST /api/v1/orders/{id}/events` takes `event`
+(1 to 100 characters) and an optional `payload` of at most 32 KiB of JSON
+(`MAX_EVENT_PAYLOAD_BYTES`), `POST …/approvals/{nodeId}` takes `decision`, `by` (at most 200
+characters) and `note` (at most 2000), and `POST …/cancel` takes `reason` (at most 500). Anything
+else is a `400` with `issues`. The OrderAgent's `deliver`, `decide` and `cancel` enforce the same
+bounds on the live socket.
 
 | Status | Meaning |
 |---|---|
 | `200` | Delivered: `{ delivered: true, nodeId }` |
 | `404` | No such order |
 | `409` | No node is waiting for that event yet: `{ delivered: false }`. Retry later |
-| `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters) |
+| `200` | A replay: `{ delivered: true, duplicate: true }`, delivering nothing |
+| `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters, `payload` at most 32 KiB of JSON) |
+| `413` | Body over 1 MiB |
 | `401` | Missing, malformed, stale or wrong signature |
 | `503` | `WEBHOOK_SECRET` is not set |
 

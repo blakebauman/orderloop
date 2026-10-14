@@ -67,12 +67,51 @@ describe('senders', () => {
 });
 
 describe('authentication', () => {
-  it('requires a passing DMARC, DKIM or SPF result', () => {
-    expect(authenticated('mx.cloudflare.net; dkim=pass header.d=northwind.example; spf=fail')).toBe(
+  const from = 'Buyer <buyer@northwind.example>';
+
+  it('accepts a pass for the From domain recorded by Email Routing', () => {
+    expect(
+      authenticated('mx.cloudflare.net; dkim=pass header.d=northwind.example; spf=fail', from),
+    ).toBe(true);
+    expect(authenticated('mx.cloudflare.net; dmarc=pass header.from=northwind.example', from)).toBe(
       true,
     );
-    expect(authenticated('mx.cloudflare.net; dmarc=fail; spf=softfail')).toBe(false);
-    expect(authenticated(null)).toBe(false);
+    expect(
+      authenticated(
+        'mx.cloudflare.net; spf=pass smtp.mailfrom=bounce@mail.northwind.example',
+        from,
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses a pass for another domain', () => {
+    expect(authenticated('mx.cloudflare.net; dkim=pass header.d=attacker.example', from)).toBe(
+      false,
+    );
+    expect(authenticated('mx.cloudflare.net; dmarc=pass header.from=attacker.example', from)).toBe(
+      false,
+    );
+    expect(
+      authenticated('mx.cloudflare.net; spf=pass smtp.mailfrom=x@evilnorthwind.example', from),
+    ).toBe(false);
+    expect(authenticated('mx.cloudflare.net; dkim=pass header.d=example', from)).toBe(false);
+  });
+
+  it('reads only the first header, and only when Email Routing wrote it', () => {
+    expect(
+      authenticated(
+        'mx.cloudflare.net; dmarc=fail; spf=softfail, mx.cloudflare.net; dkim=pass header.d=northwind.example',
+        from,
+      ),
+    ).toBe(false);
+    expect(authenticated('mx.attacker.example; dkim=pass header.d=northwind.example', from)).toBe(
+      false,
+    );
+  });
+
+  it('refuses failures and missing results', () => {
+    expect(authenticated('mx.cloudflare.net; dmarc=fail; spf=softfail', from)).toBe(false);
+    expect(authenticated(null, from)).toBe(false);
   });
 });
 

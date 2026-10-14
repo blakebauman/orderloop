@@ -1,5 +1,6 @@
 import { data } from 'react-router';
 import { requireUser } from '~/lib/auth.server';
+import { BodyTooLarge, readText } from '~/lib/body';
 import { engine } from '~/lib/env.server';
 import { getFlow, parseFlow, publish, sameGraph, saveFlow } from '~/lib/flows.server';
 import { SCENARIOS } from '~/lib/scenarios';
@@ -8,7 +9,13 @@ import type { Route } from './+types/flow-action';
 /** JSON actions from the flow editor: save, publish, test. */
 export async function action({ request, params }: Route.ActionArgs) {
   await requireUser(request, 'operator');
-  const body = (await request.json()) as { intent: string; flow?: unknown };
+  let body: { intent: string; flow?: unknown };
+  try {
+    body = JSON.parse(await readText(request));
+  } catch (err) {
+    if (err instanceof BodyTooLarge) return data({ error: err.message }, { status: 413 });
+    return data({ error: 'Body must be JSON' }, { status: 400 });
+  }
   try {
     const flow = parseFlow({ ...(body.flow as object), id: params.flowId });
     if (body.intent === 'save') return { saved: true, ...(await saveFlow(flow)) };

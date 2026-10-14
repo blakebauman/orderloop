@@ -5,10 +5,10 @@
 
 import { env } from 'cloudflare:workers';
 import { isRole, newId, type Principal, type Role, SESSION_IDLE_MS } from '@orderloop/core';
-import { apiTokens, sessions, users } from '@orderloop/db';
-import { and, count, desc, eq, gt, isNull, like, ne } from 'drizzle-orm';
+import { apiTokens, sessions, startsWith, users } from '@orderloop/db';
+import { and, count, desc, eq, gt, isNull, ne } from 'drizzle-orm';
 import { audit } from './audit.server';
-import { actor, forgetUserCount } from './auth.server';
+import { actor, forgetUserCount, reauthenticate } from './auth.server';
 import {
   generatePassword,
   hashPassword,
@@ -16,7 +16,6 @@ import {
   newApiToken,
   normalizeEmail,
   passwordProblem,
-  verifyPassword,
 } from './credentials';
 import { db } from './env.server';
 import { describeAgent, sessionRef } from './sessions';
@@ -256,7 +255,7 @@ export async function changeOwnPassword(
   if (by.kind !== 'user')
     throw new TeamError('Only people with their own sign-in have a password.');
   const user = await db().select().from(users).where(eq(users.id, by.id)).get();
-  if (!user?.passwordHash || !(await verifyPassword(current, user.passwordHash)))
+  if (!user?.passwordHash || !(await reauthenticate(user.id, current, user.passwordHash)))
     throw new TeamError('Your current password is not right.');
   const problem = passwordProblem(next, user.email);
   if (problem) throw new TeamError(problem);
@@ -303,7 +302,7 @@ export async function endOwnSession(
   const row = await db()
     .select()
     .from(sessions)
-    .where(and(eq(sessions.userId, by.id), like(sessions.tokenHash, `${ref}%`)))
+    .where(and(eq(sessions.userId, by.id), startsWith(sessions.tokenHash, ref)))
     .get();
   if (!row) throw new TeamError('That session is no longer active.');
   await db().delete(sessions).where(eq(sessions.tokenHash, row.tokenHash));

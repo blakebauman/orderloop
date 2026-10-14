@@ -1,5 +1,6 @@
 import {
   approvals,
+  contains,
   contractPrices,
   customers,
   documents,
@@ -19,7 +20,7 @@ import {
   sellers,
   shipments,
 } from '@orderloop/db';
-import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { db } from './env.server';
 
 export type OrderFilters = {
@@ -38,11 +39,11 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
     f.status ? eq(orders.status, f.status) : undefined,
     f.q
       ? or(
-          like(orders.id, `%${f.q}%`),
-          like(orders.title, `%${f.q}%`),
-          like(orders.customerId, `%${f.q}%`),
-          like(orders.contactEmail, `%${f.q}%`),
-          like(orders.externalId, `%${f.q}%`),
+          contains(orders.id, f.q),
+          contains(orders.title, f.q),
+          contains(orders.customerId, f.q),
+          contains(orders.contactEmail, f.q),
+          contains(orders.externalId, f.q),
         )
       : undefined,
   );

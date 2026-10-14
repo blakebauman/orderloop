@@ -1,5 +1,15 @@
-/** Where to go after signing in: the `next` query parameter when it is a path on this site. */
+/**
+ * Where to go after signing in: the `next` query parameter when it resolves to a path on this
+ * site, else `/`. Resolving it the way a browser would catches `//host`, `/\host` and the like.
+ */
 export function nextPath(request: Request): string {
-  const next = new URL(request.url).searchParams.get('next');
-  return next?.startsWith('/') && !next.startsWith('//') ? next : '/';
+  const url = new URL(request.url);
+  const next = url.searchParams.get('next');
+  if (!next?.startsWith('/') || next.includes('\\')) return '/';
+  try {
+    const target = new URL(next, url.origin);
+    return target.origin === url.origin ? `${target.pathname}${target.search}${target.hash}` : '/';
+  } catch {
+    return '/';
+  }
 }

@@ -18,7 +18,7 @@ import { Ago } from '~/components/ago';
 import { CopyButton } from '~/components/copy-button';
 import { PageHeader, Section } from '~/components/page';
 import { audit } from '~/lib/audit.server';
-import { requireUser, sessionId } from '~/lib/auth.server';
+import { requireUser, sessionId, Throttled } from '~/lib/auth.server';
 import { oauthApi } from '~/lib/oauth.server';
 import {
   changeOwnPassword,
@@ -126,6 +126,7 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true as const, welcome: !!me.passwordChangeDue, ended };
   } catch (err) {
     if (err instanceof TeamError) return data({ error: err.message }, { status: 400 });
+    if (err instanceof Throttled) return data({ error: err.message }, { status: 429 });
     throw err;
   }
 }

@@ -1,3 +1,4 @@
+import { useContext } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -8,6 +9,7 @@ import {
 } from 'react-router';
 import type { Route } from './+types/root';
 import './app.css';
+import { NonceContext } from './lib/csp';
 
 export const links: Route.LinksFunction = () => [
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
@@ -28,19 +30,20 @@ export const meta: Route.MetaFunction = () => [{ title: 'OrderLoop' }];
 const THEME_SCRIPT = `(function(){var d=document.documentElement,m=window.matchMedia('(prefers-color-scheme: dark)');function a(){var c='light';try{c=localStorage.getItem('ol-theme')||'light'}catch(e){c=d.dataset.themeChoice||'light'}d.dataset.themeChoice=c;d.dataset.theme=c==='system'?(m.matches?'dark':'light'):c}a();m.addEventListener('change',a);window.addEventListener('ol-theme',a)})()`;
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const nonce = useContext(NonceContext);
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Meta />
         <Links />
       </head>
       <body>
         {children}
-        <ScrollRestoration />
-        <Scripts />
+        <ScrollRestoration nonce={nonce} />
+        <Scripts nonce={nonce} />
       </body>
     </html>
   );
