@@ -9,7 +9,10 @@
 
 import { NonRetryableError } from 'cloudflare:workflows';
 import {
+  assessBranch,
+  assessQuestionsSchema,
   BASE_CURRENCY,
+  describeAnswers,
   durationMs,
   evaluate,
   evaluatePolicy,
@@ -17,6 +20,7 @@ import {
   FULFILLMENT_METHOD_LABELS,
   type FulfillmentMethod,
   fromBase,
+  getPath,
   interpolate,
   isBuySide,
   money,
@@ -33,6 +37,7 @@ import {
   truthy,
 } from '@orderloop/core';
 import * as ai from './ai';
+import * as clef from './clef';
 import * as cx from './connectors';
 
 export type NodeResult = {
@@ -726,7 +731,52 @@ export const EXECUTORS: Record<string, Exec> = {
     );
     return { branches: [value.route], output: { ...value, source }, summary: `→ ${value.route}` };
   },
+
+  'ai.assess': async ({ env, ctx, config }) => {
+    const parsed = assessQuestionsSchema.safeParse(config.questions);
+    if (!parsed.success) throw new NonRetryableError('Assess: the questions are not valid');
+    const questions = parsed.data;
+    const order = ai.orderBrief(ctx.order);
+    const state =
+      config.state === 'order'
+        ? { order }
+        : {
+            order,
+            customer: await cx.getCustomer(env, ctx.order.customerId),
+            vars: ctx.vars,
+            completed: ctx.nodes,
+          };
+    const { images, notes } = await clef.resolveImages(
+      env,
+      imageRefs(config.images, ctx),
+      ctx.order.id,
+    );
+    const { value, source } = await clef.assess(env, { state, questions, images });
+    const branchOn = str(config.branchOn).trim();
+    const branch = assessBranch(value.answers[branchOn], num(config.minConfidence, 0));
+    return {
+      branches: [branch],
+      vars: { [str(config.into, 'assessment')]: value.answers },
+      output: { answers: value.answers, images: images.length, notes, usage: value.usage, source },
+      summary: `${describeAnswers(value.answers)} (${source})`.slice(0, 160),
+    };
+  },
 };
+
+/**
+ * Image references for Assess. An entry that is exactly `{{path}}` takes the value there as is (a
+ * string or a list of them, e.g. `{{order.meta.photos}}`); anything else is interpolated.
+ */
+function imageRefs(v: unknown, ctx: RunContext): string[] {
+  const out: string[] = [];
+  for (const entry of stringList(v, [])) {
+    const whole = /^\{\{\s*([\w.]+)\s*\}\}$/.exec(entry);
+    const value = whole ? getPath(ctx, whole[1]!) : interpolate(entry, ctx);
+    for (const ref of Array.isArray(value) ? value : [value])
+      if (typeof ref === 'string' && ref.trim()) out.push(ref.trim());
+  }
+  return out;
+}
 
 /** Saga compensations, registered on the step when the node type declares `rollback`. */
 export const ROLLBACKS: Record<

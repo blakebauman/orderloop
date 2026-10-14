@@ -160,6 +160,25 @@ describe('assistant heuristics (no model)', () => {
         counts: { approvals: 1, failed: 0, stalled: 0 },
       }),
     ).toContain('[#987654](/orders/ord_xyz987654)');
+    expect(
+      describeResult('assess_order', {
+        id: 'ord_xyz987654',
+        ref: '#987654',
+        answers: {
+          urgent: { type: 'noul', noul: 0.91 },
+          route: {
+            type: 'choice',
+            choice: 'review',
+            probabilities: { review: 0.82, approve: 0.18 },
+            confidence: 0.6,
+          },
+        },
+        notes: ['http://x/y.png: only https, data URLs or R2 keys'],
+        source: 'model',
+      }),
+    ).toBe(
+      '[#987654](/orders/ord_xyz987654): urgent 0.91 · route → review (82%).\n- Skipped http://x/y.png: only https, data URLs or R2 keys',
+    );
   });
 
   it('treats a malformed page context as the workspace', () => {

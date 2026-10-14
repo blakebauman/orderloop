@@ -8,6 +8,7 @@
 import {
   type ActionPreview,
   ASSISTANT_TOOLS,
+  type AssessQuestions,
   type AssistantTool,
   type Attention,
   atLeast,
@@ -39,7 +40,8 @@ import {
   publishFlow,
 } from '@orderloop/db';
 import { and, asc, desc, eq, gte, inArray, isNotNull, like, lte, or, sql } from 'drizzle-orm';
-import { copilot } from '../ai';
+import { copilot, orderBrief } from '../ai';
+import { assess, resolveImages } from '../clef';
 
 export class Refused extends Error {}
 
@@ -240,6 +242,26 @@ async function loadOrder(env: Env, ref: string) {
   const s = id ? await snapshot(env, id) : null;
   if (!id || !s) throw new Refused(`No order matches ${ref}.`);
   return { id, s };
+}
+
+/**
+ * Typed questions about one order, answered with a probability per option. Images are limited to
+ * this order's documents (or https and data URLs), as for the Assess node.
+ */
+export async function assessOrder(
+  env: Env,
+  ref: string,
+  questions: AssessQuestions,
+  imageRefs: string[] = [],
+) {
+  const { id, s } = await loadOrder(env, ref);
+  const { images, notes } = await resolveImages(env, imageRefs, id);
+  const { value, source } = await assess(env, {
+    state: { order: orderBrief(s.order!), status: s.status, vars: s.vars },
+    questions,
+    images,
+  });
+  return { id, ref: orderRef(id), answers: value.answers, images: images.length, notes, source };
 }
 
 const label = (s: OrderState, nodeId: string) =>

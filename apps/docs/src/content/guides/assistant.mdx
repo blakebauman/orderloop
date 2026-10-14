@@ -40,6 +40,7 @@ after each reply, with links to each item:
 
 Every role can read. The tools are `needs_attention`, `find_orders` (by status, model, channel, customer,
 text, total, age), `get_order` (status, what it waits on, steps run, recent activity),
+`assess_order` (typed questions about one order, answered with a probability for every option; up to 4 images),
 `find_products` (stock, reserved, available, reorder points), `list_flows` and `get_flow` (a saved
 draft with its validation problems). Reads run without asking, and each shows as a row in the
 conversation.

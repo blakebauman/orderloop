@@ -27,7 +27,7 @@ type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 /** A slow model must not hold an order step (or the editor) hostage; fall back instead. */
 const AI_TIMEOUT_MS = 20_000;
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     p,
@@ -68,20 +68,22 @@ export async function runJson<T>(
   }
 }
 
-const brief = (order: Order) =>
-  JSON.stringify({
-    id: order.id,
-    model: order.model,
-    channel: order.channel,
-    customerId: order.customerId,
-    title: order.title,
-    lines: order.lines,
-    subtotal: order.subtotal,
-    tax: order.tax,
-    total: order.total,
-    currency: order.currency,
-    meta: order.meta,
-  });
+/** The parts of an order a model needs, without internal bookkeeping. */
+export const orderBrief = (order: Order) => ({
+  id: order.id,
+  model: order.model,
+  channel: order.channel,
+  customerId: order.customerId,
+  title: order.title,
+  lines: order.lines,
+  subtotal: order.subtotal,
+  tax: order.tax,
+  total: order.total,
+  currency: order.currency,
+  meta: order.meta,
+});
+
+const brief = (order: Order) => JSON.stringify(orderBrief(order));
 
 // ── Extract ────────────────────────────────────────────────────────────────
 

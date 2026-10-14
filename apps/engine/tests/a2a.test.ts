@@ -137,6 +137,20 @@ describe('A2A', () => {
     expect(found.status.state).toBe('TASK_STATE_COMPLETED');
     expect(found.artifacts[0].parts[0].data).toHaveProperty('orders');
 
+    const orderId = await waitingOrder();
+    const assessed = await send(viewer, [
+      {
+        data: {
+          skill: 'assess_order',
+          input: { orderId, questions: { late: { type: 'noul', instructions: 'Is it late?' } } },
+        },
+      },
+    ]);
+    expect(assessed.status.state).toBe('TASK_STATE_COMPLETED');
+    expect(assessed.artifacts[0].parts[0].data.answers).toEqual({
+      late: { type: 'noul', noul: 0.5 },
+    });
+
     const refused = await send(viewer, [
       { data: { skill: 'cancel_order', input: { orderId: 'ord_x', reason: 'x' } } },
     ]);

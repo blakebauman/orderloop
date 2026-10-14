@@ -14,6 +14,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 |---|---|---|
 | `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI text model for every structured AI call (JSON mode) |
 | `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | Workers AI model for the [assistant](/guides/assistant/); it needs multi-turn tool calling |
+| `ASSESS_MODEL` | `@cf/cloudflare/clef` | Workers AI decision model for [Assess](/guides/ai/#assess) and the assistant's `assess_order` |
 | `AI_GATEWAY_ID` | `""` | AI Gateway id for caching, rate limits and logs. Empty calls Workers AI directly |
 | `AI_MODE` | `live` | `live` calls the model; `mock` uses the deterministic heuristics only (tests, offline dev) |
 | `TIME_SCALE` | `1440` | Divides every wait and timeout, so `1440` turns a day into a minute. Use `"1"` in production |

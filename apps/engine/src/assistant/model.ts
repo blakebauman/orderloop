@@ -12,7 +12,12 @@ import type {
   LanguageModelV4StreamPart,
   LanguageModelV4Usage,
 } from '@ai-sdk/provider';
-import type { AssistantContext, AssistantTool } from '@orderloop/core';
+import {
+  type AssessAnswers,
+  type AssistantContext,
+  type AssistantTool,
+  describeAnswers,
+} from '@orderloop/core';
 import { createWorkersAI } from 'workers-ai-provider';
 import { orderRef } from './data';
 
@@ -288,6 +293,13 @@ export function describeResult(tool: string, output: unknown): string {
       ]
         .filter(Boolean)
         .join(' ');
+    }
+    case 'assess_order': {
+      const notes = list<string>(o.notes);
+      return [
+        `[${o.ref}](/orders/${o.id}): ${describeAnswers((o.answers ?? {}) as AssessAnswers)}${o.source === 'heuristic' ? ' (estimated without the model)' : ''}.`,
+        ...notes.map((n) => `- Skipped ${n}`),
+      ].join('\n');
     }
     case 'find_products': {
       const rows = list<{ sku: string; name: string; available: number; reorderPoint: number }>(
