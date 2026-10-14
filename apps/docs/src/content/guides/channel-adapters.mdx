@@ -1,0 +1,154 @@
+---
+title: Channel adapters
+description: Take orders from Shopify webhooks and EDI X12 850 purchase orders without writing a sender, with the field mappings, responses and what isn't covered.
+---
+
+import Values from '../../components/Values.astro';
+
+[Inbound orders](/guides/inbound-orders/) takes a payload in OrderLoop's own shape. A channel
+adapter takes a platform's native payload instead and maps it onto that shape, so the platform can
+post straight to OrderLoop. Both adapters then share the inbound start: the same routing
+(`ORDER_ROUTES`, else the model's default flow), the same `order:<channel>:<externalId>` key and the
+same payload fingerprint, so a retry never starts a second order.
+
+| Adapter | Route | Authentication |
+|---|---|---|
+| [Shopify](#shopify) | `POST /api/v1/channels/shopify/orders` | `X-Shopify-Hmac-Sha256`, no token |
+| [EDI X12 850](#edi-x12-850) | `POST /api/v1/channels/edi/850` | An API token with the `operator` role |
+
+The mapping lives in `packages/core/src/channels/` (`shopify.ts`, `x12.ts`) and is pure; the web
+Worker verifies, looks up the customer and starts the order.
+
+## Shopify
+
+1. Set the Shopify app's client secret on the web Worker:
+   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
+   `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`).
+2. In the app, create an `orders/create` webhook with the format JSON, pointing at
+   `https://<your host>/api/v1/channels/shopify/orders`.
+
+The route sits in front of authentication, because Shopify can't send a bearer token. It verifies
+`X-Shopify-Hmac-Sha256`, the base64 HMAC-SHA256 of the raw body keyed with the client secret
+(`verifyShopifyHmac` in `@orderloop/core`, compared in constant time). Topics other than
+`orders/create` are acknowledged and ignored so Shopify stops retrying them.
+
+### Field mapping
+
+| Shopify | Inbound order |
+|---|---|
+| `id` | `externalId`, as a string. `source` is `shopify` |
+| `source_name` | `channel`: `pos` for `pos`, `mobile` for `iphone` and `android`, else `web` |
+| `company` | `model`: `b2b` when the order has a company, else `b2c` |
+| `currency` | `currency` |
+| `line_items[]` | `lines`: `{ sku, name: title, qty: quantity, unitPrice: Number(price) }`. Shopify's price is kept by the [price node](/reference/nodes/), not replaced by a price-book price |
+| `email`, `customer.first_name`, `customer.last_name` | `contact.email` and `contact.name` |
+| `shipping_address` | `shipTo`: `name`, `address1`, `address2`, `city`, `province_code`, `zip`, `country_code`, plus `latitude` and `longitude` when both are present |
+| `name` | `title`: `Shopify order #1001` |
+| `id`, `name` | `meta.shopify` |
+
+The order's customer is the one whose email matches `email` (case-insensitive); with no match the
+order starts without a `customerId`. Every line item needs a SKU, since that is how OrderLoop finds
+stock and prices; an order with none returns `400` `Line items without a SKU: …` and nothing starts.
+
+### Responses
+
+| Status | Meaning |
+|---|---|
+| `201` | Started: `{ orderId, flowId }` |
+| `200` | A replay: `{ orderId, replayed: true }`; or a topic other than `orders/create`: `{ ignored: true, topic }` |
+| `400` | Not JSON, an order that can't be mapped (for example a line item without a SKU), an invalid order, or a currency with no exchange rate |
+| `401` | Missing or wrong HMAC |
+| `409` | The routed flow has no published version |
+| `422` | The same Shopify order id already arrived with different contents |
+| `503` | `SHOPIFY_WEBHOOK_SECRET` is not set |
+
+Shopify retries on any non-`2xx`, which suits `409` (publish the flow and the retry starts the
+order) and not `400`.
+
+## EDI X12 850
+
+A trading partner (or its EDI provider or VAN) posts an interchange of purchase orders; each 850
+becomes a `b2b` order for the partner's customer.
+
+1. Map each partner's ISA sender id (`ISA06`) to a customer id in the web variable `EDI_PARTNERS`
+   in `apps/web/wrangler.jsonc`:
+
+   ```json
+   { "NORTHWIND": "cus_northwind" }
+   ```
+
+   Anything else, including a sender that isn't listed, is refused. See
+   [Configuration](/reference/configuration/#web-variables).
+2. Have the provider `POST` the raw X12 to `/api/v1/channels/edi/850` with
+   `Content-Type: application/edi-x12` (or `text/plain`) and
+   `Authorization: Bearer ol_live_…`, a token from the Team page with the `operator` role.
+
+```bash
+curl -X POST https://orderloop.io/api/v1/channels/edi/850 \
+  -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/edi-x12' \
+  --data-binary @po-nw-9001.x12
+```
+
+`parseX12` reads the delimiters from the ISA header: the element separator is its 4th character and
+the segment terminator its 106th. Transactions run from `ST` to `SE`, and `SE01` must equal the
+segment count.
+
+### Segment mapping
+
+| Segment | Inbound order |
+|---|---|
+| `ISA06` | The sender: looked up in `EDI_PARTNERS` for `customerId`, and the first half of `externalId` |
+| `BEG03` | The PO number: `externalId` is `<ISA sender>:<PO>` and `title` is `PO <n>`. Required |
+| `BEG05` | `meta.edi.date` |
+| `CUR02` | `currency`, `USD` when absent |
+| `PO1` | One line. `PO102` is `qty` (positive) and `PO104` the `unitPrice`, which is optional |
+| `PO106`, `PO108`, … | Qualifier and value pairs; the SKU is the first present of `VP`, `SK`, `BP`, `IN`, in that order. A line with none is an error |
+| `PID05` after a `PO1` | The line's `name` |
+| `CTT01` | Checked against the number of `PO1` lines |
+| `N1*ST`, `N3`, `N4` | `shipTo`: `N102` name, `N301` and `N302` street, `N401` city, `N402` region, `N403` postal code, `N404` country (default `US`). Omitted unless there is a street, city and postal code |
+
+The order is `model: b2b`, `channel: edi`, `source: x12-850`, with `meta.edi`
+`{ sender, poNumber, control, date }`. Lines without a `PO104` are priced by the flow's price node;
+with one, that price is kept. A re-sent PO with the same contents is a replay; with different
+contents it is refused (`422`).
+
+### Results
+
+The request answers `200 { sender, results }` with one entry per transaction, so one bad PO doesn't
+hold back the rest:
+
+```json
+{
+  "sender": "NORTHWIND",
+  "results": [
+    { "control": "0001", "poNumber": "NW-9001", "status": 201, "orderId": "ord_…", "flowId": "tpl-b2b-order" },
+    { "control": "0002", "poNumber": "NW-9002", "status": 200, "orderId": "ord_…", "replayed": true },
+    { "control": "0003", "status": 400, "error": "PO NW-9003 line 1 has no VP, SK, BP or IN part number" }
+  ]
+}
+```
+
+Each `status` is what the inbound start would return alone: `201`, `200` (a replay), `400`
+(unmappable, invalid or unsupported currency), `409` (flow not published) or `422` (same PO,
+different contents). The whole request fails instead when:
+
+| Status | Meaning |
+|---|---|
+| `400` | Not an X12 interchange: no 106-character ISA, an `ST` without its `SE`, a wrong `SE01` count, or no transactions |
+| `401` | No valid token |
+| `403` | The caller is below `operator`, or the sender isn't in `EDI_PARTNERS` |
+
+A transaction that isn't an 850 is reported in `results` with `status: 400`.
+
+## Not covered
+
+- 997 functional acknowledgements are not generated; the response is the only receipt.
+- Transport: no AS2, SFTP or VAN connection. The provider posts over HTTPS.
+- Other X12 transactions (855, 856, 810) and other EDI standards.
+- Amazon and other marketplaces. [Marketplace](/guides/marketplace/) covers sellers inside
+  OrderLoop; an outside marketplace can use the signed [inbound orders](/guides/inbound-orders/)
+  endpoint.
+- Shopify updates and cancellations: only `orders/create` starts an order. To change one, [deliver
+  events](/guides/approvals-and-events/) to it.
+
+Channels an order can carry: <Values of="order-channels" />.

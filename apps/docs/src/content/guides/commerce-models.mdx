@@ -24,7 +24,7 @@ routing and the UI use the channels; they do not restrict which orders run on th
 Channels: <Values of="order-channels" />. `input.channel` defaults to `api`. The dashboard starts
 orders as `manual`, [email intake](/guides/email-intake/) as `email`, and the Replenish Workflow as
 `schedule`. Storefronts, marketplaces and POS systems send orders with a signed webhook; see
-[Inbound orders](/guides/inbound-orders/). Orders on `pos` run the point-of-sale flow, `tpl-pos-sale`, for the `b2c` and `d2c` models. `GET /api/v1/orders` filters on `model` and `channel`
+[Inbound orders](/guides/inbound-orders/), and Shopify webhooks and EDI X12 850 purchase orders (channel `edi`, label EDI, `b2b`) arrive through [Channel adapters](/guides/channel-adapters/). Orders on `pos` run the point-of-sale flow, `tpl-pos-sale`, for the `b2c` and `d2c` models. `GET /api/v1/orders` filters on `model` and `channel`
 (see [REST API](/reference/rest-api/#list-orders)).
 
 ## Pricing

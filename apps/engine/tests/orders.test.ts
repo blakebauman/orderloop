@@ -557,6 +557,60 @@ describe('storefront order', () => {
     });
   });
 
+  it('runs orders mapped from Shopify and from an X12 850', async () => {
+    await introspect(['window#1']);
+    const { inboundOrderSchema, parseX12, shopifyToInbound, toStartRequest, x12850ToInbound } =
+      await import('@orderloop/core');
+    const fromShopify = shopifyToInbound({
+      id: 5001,
+      name: '#5001',
+      email: 'ada@example.com',
+      currency: 'USD',
+      source_name: 'web',
+      line_items: [{ sku: 'MON-27', title: 'Monitor', quantity: 1, price: '329.00' }],
+    });
+    if (!fromShopify.ok) throw new Error(fromShopify.error);
+    const shop = await startOrder(
+      env,
+      toStartRequest(inboundOrderSchema.parse(fromShopify.order), 'tpl-storefront-order'),
+    );
+    const sold = await settled(shop.orderId);
+    expect(sold.status).toBe('completed');
+    // Shopify's price is kept, not replaced by the list price.
+    expect(sold.order!.lines[0]!.unitPrice).toBe(329);
+    expect(sold.nodes.checkout!.summary).toBe('Web · 5001 (shopify)');
+
+    const x12 = parseX12(
+      'ISA*00*          *00*          *ZZ*NORTHWIND      *ZZ*ORDERLOOP      *261014*1200*U*00401*000000001*0*P*>~' +
+        'GS*PO*NORTHWIND*ORDERLOOP*20261014*1200*1*X*004010~ST*850*0001~BEG*00*SA*NW-9001**20261014~' +
+        'PO1*1*10*EA*21.50**VP*WID-100~CTT*1~SE*5*0001~GE*1*1~IEA*1*000000001~',
+    );
+    if (!x12.ok) throw new Error(x12.error);
+    const po = x12850ToInbound(x12.interchange.transactions[0]!, {
+      sender: 'NORTHWIND',
+      customerId: 'cus_northwind',
+    });
+    if (!po.ok) throw new Error(po.error);
+    const b2b = await startOrder(
+      env,
+      toStartRequest(inboundOrderSchema.parse(po.order), 'tpl-b2b-order'),
+    );
+    const waiting = await waitingOn(
+      b2b.orderId,
+      (x) => x.waits.length > 0,
+      'the B2B order to wait',
+    );
+    expect(waiting.order).toMatchObject({
+      channel: 'edi',
+      customerId: 'cus_northwind',
+      title: 'PO NW-9001',
+    });
+    expect(waiting.nodes.extract!.summary).toBe('No document; using order as given');
+    expect(waiting.order!.lines).toEqual([
+      expect.objectContaining({ sku: 'WID-100', qty: 10, unitPrice: 21.5 }),
+    ]);
+  });
+
   it('refunds idempotently per step and never more than was captured', async () => {
     await introspect(['window#1']);
     const { orderId } = await startOrder(env, {

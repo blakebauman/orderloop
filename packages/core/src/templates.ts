@@ -224,7 +224,7 @@ export function b2bOrderFlow(): Flow {
       description:
         'Inbound PO by email: AI extraction, contract pricing, credit check, an agent that triages to auto-approve / approval / clarify, stock reservation, net-30 invoice, shipment and a dunning loop.',
       model: 'b2b',
-      channels: ['email', 'api', 'manual'],
+      channels: ['email', 'edi', 'api', 'manual'],
     });
 }
 

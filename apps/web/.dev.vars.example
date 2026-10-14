@@ -1,2 +1,3 @@
 APP_PASSWORD=
 WEBHOOK_SECRET=whsec_local_dev
+SHOPIFY_WEBHOOK_SECRET=shpss_local_dev

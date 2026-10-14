@@ -15,6 +15,7 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               └─ /a2a (OAuth, A2A agents) ─────────────────►├─ A2AAgent DO (one per caller): A2A tasks that follow orders
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
 storefront, marketplace, POS ── POST /api/v1/webhooks/orders (signed, on apps/web)
+Shopify, EDI X12 850 ── POST /api/v1/channels/shopify/orders, /api/v1/channels/edi/850
 inbound order email ── Cloudflare Email Routing ── email() ─►├─ Email intake: orders@ / po@ / purchasing@ start orders
                                                             └─ Workers AI (extract, classify, risk, forecast, router,
                                                                copilot, assistant), R2 (POs, invoices, inbound docs)
@@ -127,6 +128,13 @@ X-OrderLoop-Signature: t=…,v1=…
 ```
 
 The flow is `flowId` when given, else the `ORDER_ROUTES` entry for `model:channel` or `model:*` (a JSON var on the web Worker), else the model's default template. The channel and `externalId` identify the order: a repeat returns `200` and the same order, the same pair with a different body returns `422`, and a new order returns `201 { orderId, flowId }`.
+
+### Channel adapters
+
+Two channels connect without producing that payload themselves:
+
+- **Shopify:** point an `orders/create` webhook at `POST /api/v1/channels/shopify/orders` and set the app's client secret as `SHOPIFY_WEBHOOK_SECRET` on the web Worker. The order is verified by `X-Shopify-Hmac-Sha256`, mapped (Shopify's SKUs, prices and shipping address) and started once per Shopify order.
+- **EDI X12 850:** an EDI provider posts the raw interchange to `POST /api/v1/channels/edi/850` with an operator API token. `EDI_PARTNERS` maps each partner's ISA sender id to a customer; every purchase order in the interchange becomes a B2B order on the `edi` channel, and the response lists each one.
 
 ### Email intake
 

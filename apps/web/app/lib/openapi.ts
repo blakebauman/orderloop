@@ -157,6 +157,66 @@ export function openApiDocument(serverUrl: string) {
           },
         },
       },
+      '/api/v1/channels/shopify/orders': {
+        post: {
+          summary: 'Shopify orders/create webhook (no bearer token)',
+          description:
+            'Point a Shopify `orders/create` webhook here. Verified with `X-Shopify-Hmac-Sha256` (base64 HMAC-SHA256 of the raw body with SHOPIFY_WEBHOOK_SECRET); other topics are acknowledged and ignored. The order is mapped to an inbound order (channel from `source_name`, model `b2b` when it has a company) and started once per Shopify order id.',
+          security: [],
+          parameters: [
+            {
+              name: 'X-Shopify-Hmac-Sha256',
+              in: 'header',
+              required: true,
+              schema: { type: 'string' },
+            },
+            { name: 'X-Shopify-Topic', in: 'header', required: true, schema: { type: 'string' } },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          responses: {
+            ...errors,
+            '200': ok(
+              'Already received, or a topic other than orders/create (`{ ignored: true }`)',
+            ),
+            '201': ok('Order started'),
+            '400': ok('Not JSON, or a line item without a SKU', '#/components/schemas/Error'),
+            '409': ok('The routed flow is not published', '#/components/schemas/Error'),
+            '422': ok(
+              'This Shopify order was already received with different contents',
+              '#/components/schemas/Error',
+            ),
+            '503': ok('SHOPIFY_WEBHOOK_SECRET is not set', '#/components/schemas/Error'),
+          },
+        },
+      },
+      '/api/v1/channels/edi/850': {
+        post: {
+          summary: 'EDI X12 850 purchase orders (operator)',
+          description:
+            'A raw X12 interchange of one or more 850 transactions from a trading partner listed in EDI_PARTNERS (ISA sender id → customer). Each PO starts at most once (key `order:edi:<sender>:<PO>`); the response lists the outcome per transaction.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/edi-x12': { schema: { type: 'string' } },
+              'text/plain': { schema: { type: 'string' } },
+            },
+          },
+          responses: {
+            ...errors,
+            '200': ok(
+              '`{ sender, results: [{ control, poNumber?, status, orderId?, flowId?, replayed?, error? }] }`',
+            ),
+            '400': ok('Not a valid X12 interchange', '#/components/schemas/Error'),
+            '403': ok(
+              'The sender is not a configured trading partner, or the caller is not an operator',
+              '#/components/schemas/Error',
+            ),
+          },
+        },
+      },
       '/api/v1/webhooks/orders': {
         post: {
           summary: 'Signed inbound order (no bearer token)',

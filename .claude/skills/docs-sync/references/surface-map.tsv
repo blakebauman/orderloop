@@ -71,3 +71,4 @@
 ^apps/engine/src/a2a/	reference/a2a internals/architecture guides/assistant internals/testing	prose
 ^packages/core/src/a2a\.ts$	reference/a2a internals/architecture	gen
 ^apps/docs/src/components/A2a(Skills|TaskStates)\.astro$	reference/a2a	gen
+^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api reference/configuration	prose

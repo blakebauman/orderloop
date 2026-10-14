@@ -22,21 +22,32 @@
  * Signed webhooks (no password; see `handleSignedEvent`):
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  *   POST /api/v1/webhooks/orders                { model, channel, externalId, lines, … }
+ *
+ * Channel adapters:
+ *   POST /api/v1/channels/shopify/orders         Shopify orders/create webhook (X-Shopify-Hmac-Sha256)
+ *   POST /api/v1/channels/edi/850                raw X12 850 interchange (operator; EDI_PARTNERS)
  */
 
 import { env } from 'cloudflare:workers';
 import {
   atLeast,
   flowForOrder,
+  type InboundOrder,
   inboundFingerprint,
   inboundOrderSchema,
   type Principal,
+  parseEdiPartners,
   parseOrderRoutes,
+  parseX12,
   type Role,
+  type ShopifyOrder,
   SIGNATURE_HEADER,
+  shopifyToInbound,
   startOrderSchema,
   toStartRequest,
+  verifyShopifyHmac,
   verifyWebhook,
+  x12850ToInbound,
 } from '@orderloop/core';
 import type { z } from 'zod';
 import { eventSchema, subscriptionInput } from './api-schemas';
@@ -45,7 +56,7 @@ import { listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
-import { currencies, listOrders } from './orders.server';
+import { currencies, customerIdByEmail, listOrders } from './orders.server';
 import {
   createSubscription,
   deleteSubscription,
@@ -82,6 +93,10 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
           limit: Number(q.get('limit')) || 100,
         }),
       });
+    }
+    if (parts[0] === 'channels' && parts[1] === 'edi' && parts[2] === '850') {
+      if (request.method !== 'POST') return json({ error: 'Not found' }, 404);
+      return need('operator') ?? (await handleEdi850(await request.text()));
     }
     if (parts[0] === 'webhook-subscriptions')
       return need('operator') ?? (await handleSubscriptions(request, parts, body));
@@ -237,12 +252,22 @@ export async function handleSignedOrder(request: Request): Promise<Response> {
   }
   const parsed = inboundOrderSchema.safeParse(body);
   if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
-  const o = parsed.data;
+  const r = await startInbound(parsed.data);
+  return json(r.body, r.status);
+}
+
+type InboundOutcome = { status: number; body: Record<string, unknown> };
+
+/**
+ * Starts an inbound order, however it arrived (the signed endpoint or a channel adapter): checks
+ * the currency, routes it, and starts it once per channel and external id.
+ */
+async function startInbound(o: InboundOrder): Promise<InboundOutcome> {
   if (!(await currencies()).some((c) => c.currency === o.currency))
-    return json(
-      { error: `Unsupported currency ${o.currency}; there is no exchange rate for it` },
-      400,
-    );
+    return {
+      status: 400,
+      body: { error: `Unsupported currency ${o.currency}; there is no exchange rate for it` },
+    };
   const routes = parseOrderRoutes((env as { ORDER_ROUTES?: string }).ORDER_ROUTES);
   const flowId = o.flowId ?? flowForOrder(o.model, o.channel, routes);
   await ensureSeeded();
@@ -254,17 +279,79 @@ export async function handleSignedOrder(request: Request): Promise<Response> {
       fingerprint: await inboundFingerprint(o),
     });
     if ('mismatch' in res)
-      return json(
-        {
+      return {
+        status: 422,
+        body: {
           error: `Order ${o.externalId} on ${o.channel} was already received with different contents; send events to change it`,
         },
-        422,
-      );
-    return res.replayed ? json(res) : json({ ...res, flowId }, 201);
+      };
+    return res.replayed
+      ? { status: 200, body: { ...res } }
+      : { status: 201, body: { ...res, flowId } };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('has no published version'))
-      return json({ error: `Flow ${flowId} is not published` }, 409);
-    return json({ error: message }, 500);
+      return { status: 409, body: { error: `Flow ${flowId} is not published` } };
+    return { status: 500, body: { error: message } };
   }
+}
+
+/**
+ * Shopify's orders/create webhook, signed with the app's client secret. Other topics are
+ * acknowledged and ignored so Shopify stops retrying them.
+ */
+export async function handleShopifyOrder(request: Request): Promise<Response> {
+  const secret = (env as { SHOPIFY_WEBHOOK_SECRET?: string }).SHOPIFY_WEBHOOK_SECRET;
+  if (!secret) return json({ error: 'Shopify is not configured' }, 503);
+  const raw = await request.text();
+  if (!(await verifyShopifyHmac(secret, raw, request.headers.get('x-shopify-hmac-sha256'))))
+    return json({ error: 'Bad signature' }, 401);
+  const topic = request.headers.get('x-shopify-topic');
+  if (topic !== 'orders/create') return json({ ignored: true, topic });
+  let order: ShopifyOrder;
+  try {
+    order = JSON.parse(raw) as ShopifyOrder;
+  } catch {
+    return json({ error: 'Body must be JSON' }, 400);
+  }
+  const mapped = shopifyToInbound(order, { customerId: await customerIdByEmail(order.email) });
+  if (!mapped.ok) return json({ error: mapped.error }, 400);
+  const parsed = inboundOrderSchema.safeParse(mapped.order);
+  if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
+  const r = await startInbound(parsed.data);
+  return json(r.body, r.status);
+}
+
+/**
+ * An X12 interchange of 850 purchase orders from a configured trading partner (EDI_PARTNERS maps
+ * its ISA sender id to a customer). Each PO starts at most once; the response lists every PO.
+ */
+async function handleEdi850(text: string): Promise<Response> {
+  const parsed = parseX12(text);
+  if (!parsed.ok) return json({ error: parsed.error }, 400);
+  const { sender, transactions } = parsed.interchange;
+  const customerId = parseEdiPartners((env as { EDI_PARTNERS?: string }).EDI_PARTNERS)[sender];
+  if (!customerId)
+    return json({ error: `${sender || 'The sender'} is not a configured trading partner` }, 403);
+  const results = [];
+  for (const tx of transactions) {
+    const mapped = x12850ToInbound(tx, { sender, customerId });
+    if (!mapped.ok) {
+      results.push({ control: tx.control, status: 400, error: mapped.error });
+      continue;
+    }
+    const valid = inboundOrderSchema.safeParse(mapped.order);
+    if (!valid.success) {
+      results.push({ control: tx.control, status: 400, error: valid.error.issues[0]?.message });
+      continue;
+    }
+    const r = await startInbound(valid.data);
+    results.push({
+      control: tx.control,
+      poNumber: (mapped.order.meta.edi as { poNumber: string }).poNumber,
+      status: r.status,
+      ...r.body,
+    });
+  }
+  return json({ sender, results });
 }
