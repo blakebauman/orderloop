@@ -10,6 +10,17 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # The AI SDK stack moves in lockstep (most of it is pinned exactly in the catalog, and
+      # @cloudflare/ai-chat tracks agents), so its bumps, majors included, arrive together in
+      # their own PR. Listed first: a dependency joins the first group that matches it.
+      ai-sdk:
+        patterns:
+          - agents
+          - ai
+          - "@ai-sdk/*"
+          - "@cloudflare/ai-chat"
+          - workers-ai-provider
+          - streamdown
       # Minor and patch bumps land as one weekly PR. Majors stay one PR each so a breaking
       # change can be reviewed (and reverted) on its own.
       minor-and-patch:
