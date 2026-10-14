@@ -19,6 +19,34 @@ import { applyEdits, modify, type ParseError, parse, printParseErrorCode } from 
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RINGS = ['staging', 'internal', 'canary', 'general'] as const;
+/** Ids a customer can't have: their `<id>.orderloop.app` would read as part of OrderLoop. */
+const RESERVED = new Set([
+  'admin',
+  'api',
+  'app',
+  'auth',
+  'billing',
+  'blog',
+  'cdn',
+  'console',
+  'dashboard',
+  'dev',
+  'docs',
+  'help',
+  'internal',
+  'login',
+  'mail',
+  'mcp',
+  'preview',
+  'prod',
+  'production',
+  'sandbox',
+  'staging',
+  'status',
+  'support',
+  'test',
+  'www',
+]);
 type Ring = (typeof RINGS)[number];
 
 /** Each app's secrets, read from the deploy job's environment (a GitHub environment's secrets). */
@@ -32,9 +60,9 @@ export type Deployment = {
   ring: Ring;
   /** Unique per deployment: keeps each one's rate-limit counters apart. */
   slot: number;
-  /** Defaults to `<id>.orderloop.io`. */
+  /** Defaults to `<id>.orderloop.app`. */
   domain: string;
-  /** Appended to every resource name. Defaults to `-<id>`; orderloop.io's own is `""`. */
+  /** Appended to every resource name. Defaults to `-<id>`; orderloop.app's own is `""`. */
   suffix: string;
   /** The GitHub environment holding this deployment's secrets. Defaults to `deploy-<id>`. */
   environment: string;
@@ -44,7 +72,7 @@ export type Deployment = {
   jurisdiction?: 'eu' | 'fedramp';
   /** Skipped by CI: stays on what it runs now. */
   hold: boolean;
-  /** Deploys the docs site after it (orderloop.io only). */
+  /** Deploys the docs site after it (orderloop.app only). */
   docs: boolean;
 };
 
@@ -62,6 +90,9 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   const id = raw.id;
   if (typeof id !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(id))
     throw new Error(`${file}: id must be lowercase letters, digits and dashes`);
+  // OrderLoop's own deployments name their domain; a customer's comes from the id.
+  if (RESERVED.has(id) && typeof raw.domain !== 'string')
+    throw new Error(`${file}: "${id}" is reserved for OrderLoop; choose another id or set domain`);
   const ring = raw.ring as Ring;
   if (!RINGS.includes(ring)) throw new Error(`${file}: ring must be one of ${RINGS.join(', ')}`);
   if (!Number.isInteger(raw.slot) || (raw.slot as number) < 1 || (raw.slot as number) > 999)
@@ -74,7 +105,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     id,
     ring,
     slot: raw.slot as number,
-    domain: typeof raw.domain === 'string' ? raw.domain : `${id}.orderloop.io`,
+    domain: typeof raw.domain === 'string' ? raw.domain : `${id}.orderloop.app`,
     suffix: typeof raw.suffix === 'string' ? raw.suffix : `-${id}`,
     environment: typeof raw.environment === 'string' ? raw.environment : `deploy-${id}`,
     ...(raw.d1Id ? { d1Id: raw.d1Id as string } : {}),

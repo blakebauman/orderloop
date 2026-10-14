@@ -112,14 +112,16 @@ jobs:
           secrets=()
           [ "$(cat "$RUNNER_TEMP/web-secrets.json")" != "{}" ] && secrets=(--secrets-file "$RUNNER_TEMP/web-secrets.json")
           retry pnpm --filter @orderloop/web exec wrangler deploy "${secrets[@]}"
+      # A new domain's certificate can take a few minutes to issue, so each check retries for up
+      # to five minutes before it counts as failed.
       - name: Smoke test
         id: smoke
         run: |
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 "https://$DOMAIN/health"
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health"
           # D1, R2 and the engine (over the service binding) all answer.
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 "https://$DOMAIN/health/deep"
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health/deep"
           # The app itself, not just the health route: the sign-in page renders.
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /dev/null "https://$DOMAIN/login"
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
       # Any failure once the engine has shipped puts each Worker that deployed back on its
       # previous version, so the deployment never runs a new engine behind an old web app (or the
       # reverse). D1 migrations are not rolled back, which is why they must be additive.

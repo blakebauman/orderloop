@@ -20,7 +20,7 @@ never starts a second order.
 ## Shopify
 
 1. In your Shopify app, create an `orders/create` webhook with the format JSON, pointing at
-   `https://orderloop.io/api/v1/channels/shopify/orders`.
+   `https://orderloop.app/api/v1/channels/shopify/orders`.
 2. Give the app's client secret (the key Shopify signs webhooks with) to your OrderLoop
    administrator, who adds it to the workspace. Until they do, the route answers `503`.
 
@@ -75,7 +75,7 @@ becomes a `b2b` order for the partner's customer.
    `operator` role.
 
 ```bash
-curl -X POST https://orderloop.io/api/v1/channels/edi/850 \
+curl -X POST https://orderloop.app/api/v1/channels/edi/850 \
   -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/edi-x12' \
   --data-binary @po-nw-9001.x12
 ```

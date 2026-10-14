@@ -3,7 +3,7 @@ title: Getting started
 description: Sign in to your workspace, run a scenario, watch an order move through its flow, and start an order over the API.
 ---
 
-OrderLoop runs at [orderloop.io](https://orderloop.io). Each person in a workspace signs in with
+OrderLoop runs at [orderloop.app](https://orderloop.app). Each person in a workspace signs in with
 their own email and password and has a role: a **viewer** reads, an **approver** also decides
 approvals, and an **operator** also starts and cancels orders, edits and publishes flows, and
 manages the team. See [Team and roles](/guides/team-and-roles/).
@@ -38,7 +38,7 @@ Other systems call the [REST API](/reference/rest-api/) with an API token. An op
 on the **Team** page with a name, a role and an expiry; it is shown once.
 
 ```bash
-curl -s https://orderloop.io/api/v1/orders \
+curl -s https://orderloop.app/api/v1/orders \
   -H 'authorization: Bearer ol_live_…' \
   -H 'content-type: application/json' \
   -H 'Idempotency-Key: demo-1' \

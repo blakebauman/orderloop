@@ -17,7 +17,7 @@ const acme = toDeployment({
 });
 
 test('a customer gets its own domain, names and environment by default', () => {
-  assert.equal(acme.domain, 'acme.orderloop.io');
+  assert.equal(acme.domain, 'acme.orderloop.app');
   assert.equal(acme.suffix, '-acme');
   assert.equal(acme.environment, 'deploy-acme');
 });
@@ -43,7 +43,7 @@ test('the engine config carries the deployment everywhere a name is account-wide
 test('the web config binds its own engine, domain and rate-limit namespaces', () => {
   const c = renderWeb(base('web'), acme);
   assert.equal(c.name, 'orderloop-web-acme');
-  assert.deepEqual(c.routes, [{ pattern: 'acme.orderloop.io', custom_domain: true }]);
+  assert.deepEqual(c.routes, [{ pattern: 'acme.orderloop.app', custom_domain: true }]);
   assert.equal(c.services[0].service, 'orderloop-engine-acme');
   assert.deepEqual(
     c.ratelimits.map((r: { namespace_id: string }) => r.namespace_id),
@@ -52,7 +52,7 @@ test('the web config binds its own engine, domain and rate-limit namespaces', ()
   assert.equal(c.d1_databases[0].migrations_dir, '../../packages/db/migrations');
 });
 
-test("orderloop.io's own deployment renders the base configs unchanged", () => {
+test("orderloop.app's own deployment renders the base configs unchanged", () => {
   const d = loadDeployments().find((x) => x.id === 'orderloop')!;
   assert.deepEqual(renderEngine(base('engine'), d), base('engine'));
   assert.deepEqual(renderWeb(base('web'), d), base('web'));
@@ -61,6 +61,12 @@ test("orderloop.io's own deployment renders the base configs unchanged", () => {
 test('bad entries are refused', () => {
   assert.throws(() => toDeployment({ id: 'Acme', ring: 'canary', slot: 2, d1Id: 'x' }), /id must/);
   assert.throws(() => toDeployment({ id: 'acme', ring: 'beta', slot: 2, d1Id: 'x' }), /ring/);
+  assert.throws(() => toDeployment({ id: 'api', ring: 'general', slot: 2 }), /reserved/);
+  // OrderLoop's own staging deployment may use the name, with its domain set.
+  assert.equal(
+    toDeployment({ id: 'staging', ring: 'staging', slot: 3, domain: 'staging.orderloop.app' }).id,
+    'staging',
+  );
   assert.throws(
     () => renderEngine(base('engine'), toDeployment({ id: 'acme', ring: 'canary', slot: 2 })),
     /provision/,

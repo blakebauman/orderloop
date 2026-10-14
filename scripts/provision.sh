@@ -27,7 +27,7 @@ echo "Recorded d1Id $uuid in deployments/$id.jsonc"
 
 wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already exists"
 
-# The AI Gateway every model call goes through: the same settings as orderloop.io's own
+# The AI Gateway every model call goes through: the same settings as orderloop's own
 # (docs/deploy.md, "Settings for production").
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai-gateway/gateways"

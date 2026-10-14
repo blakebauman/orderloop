@@ -30,7 +30,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   ]);
   const host = new URL(request.url).hostname;
   const mailboxes = Object.entries(configured).map(([local, flowId]) => ({
-    address: `${local}@${host === 'localhost' ? 'orderloop.io' : host}`,
+    address: `${local}@${host === 'localhost' ? 'orderloop.app' : host}`,
     flowId,
   }));
   const states = await Promise.all(waiting.slice(0, 20).map((o) => engine().snapshot(o.id)));

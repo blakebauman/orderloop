@@ -83,7 +83,7 @@ To test without a mail server, call `receiveEmail` from a test with a fake
   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
   `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`). Until it is set the route answers `503`. The
   integrator creates the `orders/create` webhook in Shopify, pointing at
-  `https://orderloop.io/api/v1/channels/shopify/orders`.
+  `https://orderloop.app/api/v1/channels/shopify/orders`.
 - **EDI X12 850** ([Channel adapters](https://docs.orderloop.io/guides/channel-adapters/#edi-x12-850)):
   map each trading partner's ISA sender id (`ISA06`) to a customer id in `EDI_PARTNERS`, in `vars`
   in `apps/web/wrangler.jsonc`, for example `{ "NORTHWIND": "cus_northwind" }`. A sender that isn't
@@ -131,7 +131,7 @@ deployment before its migration. If anything fails once the engine has deployed 
 the smoke test), the job runs `wrangler rollback` for each Worker that deployed. D1 is not rolled
 back, which is why migrations only add; see [Restoring D1](#restoring-d1).
 
-Each deployment's job runs in its GitHub environment (`production` for orderloop.io, `deploy-<id>`
+Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
 them it fails rather than skipping. The environment's `APP_PASSWORD`, `WEBHOOK_SECRET`,

@@ -17,14 +17,14 @@ const customers = [
 
 describe('mailboxes', () => {
   it('maps local parts to flows, ignoring case and +tags', () => {
-    expect(flowForMailbox('Orders@orderloop.io', DEFAULT_INTAKE_MAILBOXES)).toBe('tpl-b2b-order');
-    expect(flowForMailbox('orders+acme@orderloop.io', DEFAULT_INTAKE_MAILBOXES)).toBe(
+    expect(flowForMailbox('Orders@orderloop.app', DEFAULT_INTAKE_MAILBOXES)).toBe('tpl-b2b-order');
+    expect(flowForMailbox('orders+acme@orderloop.app', DEFAULT_INTAKE_MAILBOXES)).toBe(
       'tpl-b2b-order',
     );
-    expect(flowForMailbox('purchasing@orderloop.io', DEFAULT_INTAKE_MAILBOXES)).toBe(
+    expect(flowForMailbox('purchasing@orderloop.app', DEFAULT_INTAKE_MAILBOXES)).toBe(
       'tpl-purchase-request',
     );
-    expect(flowForMailbox('hello@orderloop.io', DEFAULT_INTAKE_MAILBOXES)).toBeUndefined();
+    expect(flowForMailbox('hello@orderloop.app', DEFAULT_INTAKE_MAILBOXES)).toBeUndefined();
   });
 
   it('parses configured mailboxes and falls back on bad config', () => {
