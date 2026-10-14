@@ -77,7 +77,14 @@ export type StartOrderInput = {
 export type StartOrderResult = { orderId: string; replayed?: boolean };
 
 /** A repeat of the same key and request returns the order it already created. */
-export type StartOrderOnceInput = StartOrderInput & { idempotencyKey: string };
+export type StartOrderOnceInput = StartOrderInput & {
+  idempotencyKey: string;
+  /**
+   * What a replay must match, when the caller knows better than the start request: an inbound
+   * order fingerprints the sender's payload, so a retry still matches after the routing changes.
+   */
+  fingerprint?: string;
+};
 
 export type StartOrderOnceResult =
   | StartOrderResult
@@ -88,13 +95,21 @@ export type StartOrderOnceResult =
  * SHA-256 of what an order start asked for, with object keys sorted so property order doesn't
  * matter. A replayed idempotency key must carry the same fingerprint.
  */
-export async function startFingerprint(req: StartOrderInput): Promise<string> {
-  const canonical = JSON.stringify(
-    { flowId: req.flowId, version: req.version ?? null, input: req.input, vars: req.vars ?? {} },
-    (_key, value: unknown) =>
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-        : value,
+export function startFingerprint(req: StartOrderInput): Promise<string> {
+  return fingerprintOf({
+    flowId: req.flowId,
+    version: req.version ?? null,
+    input: req.input,
+    vars: req.vars ?? {},
+  });
+}
+
+/** SHA-256 of any JSON value, with object keys sorted so property order doesn't matter. */
+export async function fingerprintOf(value: unknown): Promise<string> {
+  const canonical = JSON.stringify(value, (_key, value: unknown) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value,
   );
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');

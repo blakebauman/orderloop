@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import type { StartOrderOnceInput } from './api';
+import { fingerprintOf, type StartOrderOnceInput } from './api';
 import { DEFAULT_TEMPLATE } from './templates';
 import { ORDER_CHANNELS, type OrderChannel, type OrderModel, orderInputSchema } from './types';
 
@@ -78,6 +78,14 @@ export function flowForOrder(
 
 export function inboundIdempotencyKey(o: Pick<InboundOrder, 'channel' | 'externalId'>): string {
   return `order:${o.channel}:${o.externalId}`;
+}
+
+/**
+ * What a retry of an inbound order must match: the sender's payload, not the flow it was routed to,
+ * so changing ORDER_ROUTES between a request and its retry still returns the original order.
+ */
+export function inboundFingerprint(o: InboundOrder): Promise<string> {
+  return fingerprintOf(o);
 }
 
 export function toStartRequest(o: InboundOrder, flowId: string): StartOrderOnceInput {

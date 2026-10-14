@@ -28,12 +28,18 @@ export async function startOrder(env: Env, req: StartOrderInput): Promise<StartO
  * part-way finishes it. A replay must match the original request's fingerprint, or it is refused.
  */
 export function startOrderOnce(env: Env, req: StartOrderOnceInput): Promise<StartOrderOnceResult> {
-  return start(env, req, req.idempotencyKey);
+  const { idempotencyKey, fingerprint, ...request } = req;
+  return start(env, request, idempotencyKey, fingerprint);
 }
 
-async function start(env: Env, req: StartOrderInput, key?: string): Promise<StartOrderOnceResult> {
+async function start(
+  env: Env,
+  req: StartOrderInput,
+  key?: string,
+  given?: string,
+): Promise<StartOrderOnceResult> {
   const db = createDb(env.DB);
-  const fingerprint = key ? await startFingerprint(req) : null;
+  const fingerprint = key ? (given ?? (await startFingerprint(req))) : null;
   const existing = async () =>
     key
       ? await db

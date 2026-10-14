@@ -112,10 +112,10 @@ started finds it first, so it still returns `200` after its flow is unpublished.
 
 `channel` and `externalId` are the idempotency key (`order:<channel>:<externalId>`), so a sender
 can retry freely. A repeat that matches the first request returns `200` with the existing order.
-The match is a fingerprint of the flow, input and `vars`: the same pair with different contents
-returns `422` and starts nothing. To change an accepted order, [deliver events](/guides/approvals-and-events/)
-to it. Changing `ORDER_ROUTES` between a request and its retry changes the flow, so that retry is a
-`422` too.
+The match is a fingerprint of the body you sent (`inboundFingerprint` in `@orderloop/core`), not of
+the flow it was routed to, so a retry still finds its order after `ORDER_ROUTES` changes. The same
+pair with different contents returns `422` and starts nothing. To change an accepted order,
+[deliver events](/guides/approvals-and-events/) to it.
 
 ## Responses
 

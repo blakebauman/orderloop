@@ -513,21 +513,37 @@ describe('storefront order', () => {
 
   it('starts from an inbound order keyed by channel and external id', async () => {
     await introspect(['window#1']);
-    const { inboundOrderSchema, toStartRequest } = await import('@orderloop/core');
-    const req = toStartRequest(
-      inboundOrderSchema.parse({
-        model: 'b2c',
-        channel: 'mobile',
-        externalId: 'app-5521',
-        source: 'shopify',
-        customerId: 'cus_ada',
-        lines: [{ sku: 'MON-27', qty: 1 }],
-      }),
-      'tpl-storefront-order',
+    const { inboundFingerprint, inboundOrderSchema, toStartRequest } = await import(
+      '@orderloop/core'
     );
+    const inbound = inboundOrderSchema.parse({
+      model: 'b2c',
+      channel: 'mobile',
+      externalId: 'app-5521',
+      source: 'shopify',
+      customerId: 'cus_ada',
+      lines: [{ sku: 'MON-27', qty: 1 }],
+    });
+    const fingerprint = await inboundFingerprint(inbound);
+    const req = { ...toStartRequest(inbound, 'tpl-storefront-order'), fingerprint };
     const first = await startOrderOnce(env, req);
     if ('mismatch' in first) throw new Error('A first start cannot mismatch');
     expect(await startOrderOnce(env, req)).toEqual({ orderId: first.orderId, replayed: true });
+    // ORDER_ROUTES changed before the retry: it routes elsewhere but is still the same order.
+    expect(
+      await startOrderOnce(env, {
+        ...toStartRequest(inbound, 'tpl-omnichannel-order'),
+        fingerprint,
+      }),
+    ).toEqual({ orderId: first.orderId, replayed: true });
+    // Different contents under the same channel and id are still refused.
+    const changed = inboundOrderSchema.parse({ ...inbound, lines: [{ sku: 'MON-27', qty: 2 }] });
+    expect(
+      await startOrderOnce(env, {
+        ...toStartRequest(changed, 'tpl-storefront-order'),
+        fingerprint: await inboundFingerprint(changed),
+      }),
+    ).toEqual({ mismatch: true });
     const done = await settled(first.orderId);
     expect(done.nodes.checkout).toMatchObject({
       status: 'succeeded',

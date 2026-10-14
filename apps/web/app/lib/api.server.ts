@@ -28,6 +28,7 @@ import { env } from 'cloudflare:workers';
 import {
   atLeast,
   flowForOrder,
+  inboundFingerprint,
   inboundOrderSchema,
   type Principal,
   parseOrderRoutes,
@@ -248,7 +249,10 @@ export async function handleSignedOrder(request: Request): Promise<Response> {
   try {
     // The engine replays a known channel and id before it looks at the flow, so a retry still
     // finds its order after the flow is unpublished or the routes change.
-    const res = await engine().startOrderOnce(toStartRequest(o, flowId));
+    const res = await engine().startOrderOnce({
+      ...toStartRequest(o, flowId),
+      fingerprint: await inboundFingerprint(o),
+    });
     if ('mismatch' in res)
       return json(
         {
