@@ -209,6 +209,22 @@ describe('B2B order', () => {
     expect(decided).toMatchObject({ status: 'rejected', decidedBy: 'dana', note: 'Over limit' });
   });
 
+  it('ends on its own reason when nobody decides the approval in time', async () => {
+    await introspect(['approval#1']);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-b2b-order',
+      input: input({
+        model: 'b2b',
+        customerId: 'cus_contoso',
+        lines: [{ sku: 'WID-200', qty: 100 }],
+      }),
+    });
+    const done = await settled(orderId);
+    expect([done.status, done.reason]).toEqual(['declined', 'No approval decision in time']);
+    expect(done.nodes.approval!.branches).toEqual(['escalated']);
+    expect(done.nodes.declined!.status).toBe('skipped');
+  });
+
   it('runs the dunning loop three times, then sends the invoice to collections', async () => {
     await introspect(['paid#1', 'paid_late#1', 'paid_late#2', 'paid_late#3']);
     const { orderId } = await startOrder(env, {
