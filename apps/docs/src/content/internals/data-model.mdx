@@ -70,7 +70,8 @@ Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)
 `orders_idempotency`, unique on `idempotency_key` where it is not null. `startOrder` inserts the
 row before creating anything else, so when two requests race with the same `Idempotency-Key` the
 unique index decides which one creates the order and the other returns it as `replayed`.
-`idempotency_fingerprint` is the SHA-256 of the request; a replay with a different one is refused.
+`idempotency_fingerprint` is the SHA-256 of the request (for a signed inbound order, of the sender's
+payload, so routing changes don't affect it); a replay with a different one is refused.
 Rows from before `0005` have none and replay without the check.
 
 `approvals.status` is `pending`, then the outcome (`approved`, `rejected`, `escalated`) or

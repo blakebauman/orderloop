@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   flowForOrder,
+  inboundFingerprint,
   inboundIdempotencyKey,
   inboundOrderSchema,
   parseOrderRoutes,
@@ -74,5 +75,19 @@ describe('inbound orders', () => {
     });
     expect(req.input).not.toHaveProperty('shipTo');
     expect(req.input).not.toHaveProperty('source');
+  });
+
+  it('fingerprints the payload, not where it was routed', async () => {
+    const a = order();
+    const reordered = inboundOrderSchema.parse({
+      lines: [{ qty: 1, sku: 'MON-27' }],
+      externalId: 'shop-1001',
+      channel: 'web',
+      model: 'b2c',
+    });
+    expect(await inboundFingerprint(a)).toBe(await inboundFingerprint(reordered));
+    expect(await inboundFingerprint(a)).not.toBe(
+      await inboundFingerprint(order({ lines: [{ sku: 'MON-27', qty: 2 }] })),
+    );
   });
 });

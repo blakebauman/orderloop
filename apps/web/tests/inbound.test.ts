@@ -54,6 +54,7 @@ describe('POST /api/v1/webhooks/orders', () => {
       expect.objectContaining({
         flowId: 'tpl-storefront-order',
         idempotencyKey: 'order:web:shop-1001',
+        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
         input: expect.objectContaining({ channel: 'web', meta: { via: 'webhook' } }),
       }),
     );
