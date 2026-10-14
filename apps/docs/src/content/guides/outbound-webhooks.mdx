@@ -67,7 +67,7 @@ x-orderloop-delivery: whd_ord_…_ship_1_whs_…
 
 `data` depends on what sent the event:
 
-- **A node** (`order.paid`, `order.invoiced`, `order.shipped`, `order.refunded`, `order.payout_scheduled`):
+- **A node** (`order.paid`, `order.invoiced`, `order.shipped`, `order.ready_for_pickup`, `order.delivered`, `order.refunded`, `order.payout_scheduled`):
   `{ order, node: { id, type, output } }`, where `output` is the node's output.
 - **An End node**: `{ order, outcome, reason }`.
 - **A node that threw**: `{ order, outcome: "failed", reason, node: { id, type, error } }`.

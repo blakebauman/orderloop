@@ -6,6 +6,7 @@
  */
 
 import {
+  FULFILLMENT_METHOD_LABELS,
   ORDER_CHANNEL_LABELS,
   ORDER_MODEL_LABELS,
   type OrderModel,
@@ -210,7 +211,11 @@ export default function OrderPage() {
             {customerName ??
               order.customerId ??
               (order.contact ? `Guest · ${order.contact.email}` : 'No customer')}{' '}
-            · {ORDER_CHANNEL_LABELS[order.channel] ?? order.channel} · {flow.name} v{flow.version}
+            · {ORDER_CHANNEL_LABELS[order.channel] ?? order.channel}
+            {order.fulfillment
+              ? ` · ${FULFILLMENT_METHOD_LABELS[order.fulfillment.method]}${typeof state.vars.fulfillmentLocation === 'string' ? ` (${state.vars.fulfillmentLocation})` : ''}`
+              : ''}{' '}
+            · {flow.name} v{flow.version}
             {state.generation > 1 ? ` · run ${state.generation}` : ''} ·{' '}
             <span className="select-all font-mono">{order.id}</span>
           </p>

@@ -55,3 +55,4 @@
 ^apps/engine/src/mcp\.ts$	reference/mcp guides/assistant internals/architecture	prose
 ^apps/web/app/(lib/oauth\.server|routes/oauth-authorize)\.tsx?$	reference/mcp guides/team-and-roles internals/architecture reference/configuration	prose
 ^apps/docs/src/components/McpTools\.astro$	reference/mcp	gen
+^(packages/core/src/(catalog|templates|inbound|webhooks)\.ts|apps/engine/src/(connectors|nodes)\.ts|packages/db/(src/schema\.ts|migrations/0020_fulfillment\.sql)|apps/web/app/routes/order-new\.tsx)$	guides/fulfillment	gen

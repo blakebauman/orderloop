@@ -1,0 +1,136 @@
+---
+title: Fulfillment
+description: Stores that hold their own stock, how an order is routed to shipping, pickup, carry-out or digital delivery, and what each path undoes when it fails.
+---
+
+import Values from '../../components/Values.astro';
+
+An order's physical lines can ship from the warehouse, ship from a store, wait for the customer at a
+store, or leave the till in a bag; its digital lines are delivered as codes. The
+[`commerce.route_fulfillment`](/reference/nodes/#commerce.route_fulfillment) node decides which, and
+the built-in `tpl-omnichannel-order` and `tpl-pos-sale` flows are built around it (see
+[Built-in flows](/guides/templates/)).
+
+## Locations and stock
+
+Stock lives in one of two places:
+
+- **Central stock** is `products.stock` and `products.reserved`: the warehouse.
+- **Store stock** is a row in `location_stock` per store and SKU (`stock`, `reserved`), for a store in
+  `locations`. A store has `pickup` (customers can collect there) and `ships` (it can fulfil
+  shipped orders) flags.
+
+Reservations and the stock ledger record which: `reservations.location_id` and
+`stock_movements.location_id` are `NULL` for central stock, and the store's id otherwise. Holds,
+releases and consumption move the row they were made against, so a hold at a store never touches the
+warehouse. See [Data model](/internals/data-model/).
+
+A product has a `kind`, `physical` or `digital`. Digital products hold no stock: reserving skips
+them, and the back office shows them as "Digital, no stock".
+
+The migration seeds two stores. `loc_soho` offers pickup and ships; `loc_mission` offers pickup and
+doesn't ship. `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
+stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Stores** table lists
+each store's flags and available over on-hand stock per SKU.
+
+An order names its store in `fulfillment`: `{ method, locationId? }`, where `method` is one of
+<Values of="fulfillment-methods" />. The **New order** form has **Fulfillment** and **Store**
+selects, and the order header shows the method and the store once the order is routed.
+
+## Routing
+
+`commerce.route_fulfillment` has a `method` field: `from_order` (the default; uses
+`order.fulfillment.method`, or `ship` when the order has none), `ship`, `pickup` or `carry_out`. It
+only reads stock; reserving is a separate node. It takes these branches:
+
+| Branch | Taken when |
+|---|---|
+| `ship` | `method` is `ship` and central stock covers every physical line, or else the first store (by id) that ships and covers every line |
+| `pickup` | The order's store offers pickup and has every physical line |
+| `carry_out` | The order's store has every physical line |
+| `digital` | The order has a digital line. It is taken in addition to the physical branch, so a mixed cart takes two |
+| `unavailable` | No warehouse or store can fulfil the physical lines, or the order has no store (or one without pickup) for `pickup` and `carry_out`. The node's summary says why |
+
+An order of only digital lines takes `digital` alone. On a routed branch the node writes the chosen
+`method` and `locationId` back onto `order.fulfillment` (for ship-from-store, the store it picked) and
+sets `vars.fulfillmentLocation` to the store's name, or `null`. Later reserve, hand-over and
+notification steps read them.
+
+## Buy online, pick up in store
+
+On `tpl-omnichannel-order`, the `pickup` branch is:
+
+1. **Hold at store**: `commerce.reserve_inventory` holds the lines at `order.fulfillment.locationId`. A
+   line the store can't cover takes `backorder`, and the order fails with its payment voided.
+2. **Ready for pickup**: [`commerce.pickup_ready`](/reference/nodes/#commerce.pickup_ready) stages the
+   hold as a `shipments` row with carrier `pickup`, status `ready_for_pickup`, and the six-character
+   pickup code as its `tracking`. The code is `vars.pickupCode`.
+3. **Pickup ready**: a notification to the customer with the store (`vars.fulfillmentLocation`) and
+   the code.
+4. **Customer collects**: waits for the `pickup.collected` event, with a 5-day timeout (divided by
+   `TIME_SCALE`, like every wait).
+5. **Hand over**: [`commerce.handover`](/reference/nodes/#commerce.handover) marks the staged pickup
+   `collected` and consumes the held store stock.
+
+Send `pickup.collected` when the customer has the goods, the way any
+[wait event](/guides/approvals-and-events/#waiting-for-events) is sent: the **Deliver** button on the back office
+page, `POST /api/v1/orders/:id/events` with `{ "event": "pickup.collected" }`, or a
+[signed event](/guides/approvals-and-events/#signed-events) from the store's system. The payload is
+optional.
+
+If nobody collects within the timeout, the wait takes `timeout` to the failed end **Not collected**.
+A failed end rolls back, so the store's hold is released, the staged pickup is cancelled and the
+payment authorization is voided. The end is `failed` rather than `cancelled` for that reason: only a
+failure runs the rollbacks.
+
+## Ship from store
+
+`method: ship` looks at central stock first. When the warehouse can't cover every physical line, it
+takes the first store with `ships` set that can, and sets `order.fulfillment.locationId` to it. The
+ship branch then reserves at that store and the carrier label is created as usual; the store's stock,
+not the warehouse's, is consumed. The **Ship from store, with an e-book** scenario shows it: the
+warehouse has no `TEE-01`, so the tees ship from the SoHo store.
+
+## Carry-out and point of sale
+
+`carry_out` is a sale where the customer leaves with the goods. The order's store must have every
+physical line (pickup isn't required). `tpl-pos-sale` is the flow for it: take payment with
+`card_present`, route `carry_out` at the till's store, reserve from the store's stock, hand over
+(which records a `shipments` row with carrier `carry_out`, status `collected`, and consumes the
+stock), capture, and email a receipt only when `order.contact.email` is set.
+
+Till sales arrive on the `pos` channel. Inbound routing sends `b2c:pos` and `d2c:pos` to
+`tpl-pos-sale` by default; see [Inbound orders](/guides/inbound-orders/#routing). The payment methods
+a flow can authorize with include `card_present`, `wallet`, `gift_card` and `cash` besides
+`card`, `ach` and `terms`.
+
+`tpl-omnichannel-order` doesn't sell at a till: its `carry_out` branch ends in **Cannot fulfil**.
+
+## Digital delivery
+
+[`commerce.deliver_digital`](/reference/nodes/#commerce.deliver_digital) issues one code per unit of
+each digital line (a licence key, download or gift card code) into `entitlements`, as
+`<SKU>-XXXX-XXXX`, status `issued`. The codes are `vars.entitlements` as `[{ sku, code }]`, so a
+notification can include them. The id embeds the step key, line and unit, so a retried step issues
+nothing twice.
+
+On the omnichannel flow the digital branch runs in parallel with the physical one, and **Capture
+payment** joins every branch the order took: a mixed cart is captured once the shipment (or pickup
+hand-over) and the codes are all done. On the till flow, the digital branch joins capture directly.
+
+## Undoing fulfillment
+
+| Event | Undone |
+|---|---|
+| A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the store it was held at); `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization |
+| A cancel | `compensateOrder` does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, revokes codes, plus seller orders and payouts |
+
+Codes issued for a mixed cart are revoked when its physical part later fails, for example when the
+store runs out between routing and reserving. A completed hand-over has consumed its stock and has no
+rollback; returns go through the return steps.
+
+## Events
+
+`order.ready_for_pickup` is sent when `commerce.pickup_ready` finishes. `order.delivered` is sent
+when `commerce.handover` or `commerce.deliver_digital` finishes, so a mixed cart can send it twice.
+See [Outbound webhooks](/guides/outbound-webhooks/).

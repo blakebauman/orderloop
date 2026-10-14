@@ -156,6 +156,62 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
+    id: 'pickup',
+    label: 'Buy online, pick up in store',
+    blurb:
+      'A monitor held at the SoHo store with a pickup code; the order waits for pickup.collected, then hands it over and captures payment.',
+    flowId: 'tpl-omnichannel-order',
+    input: {
+      model: 'd2c',
+      channel: 'web',
+      currency: 'USD',
+      customerId: 'cus_ada',
+      title: 'Web order #10655 (pickup)',
+      fulfillment: { method: 'pickup', locationId: 'loc_soho' },
+      lines: [{ sku: 'MON-27', qty: 1 }],
+      meta: {},
+    },
+  },
+  {
+    id: 'ship-from-store',
+    label: 'Ship from store, with an e-book',
+    blurb:
+      'The warehouse has no tees, so they ship from the SoHo store; the e-book is delivered as a code, and payment is captured once both parts are done.',
+    flowId: 'tpl-omnichannel-order',
+    input: {
+      model: 'd2c',
+      channel: 'mobile',
+      currency: 'USD',
+      contact: { email: 'jo.park@example.com', name: 'Jo Park' },
+      title: 'App order #A-2291',
+      lines: [
+        { sku: 'TEE-01', qty: 2 },
+        { sku: 'EBK-101', qty: 1 },
+      ],
+      meta: {},
+    },
+  },
+  {
+    id: 'pos-sale',
+    label: 'Till sale with a gift card',
+    blurb:
+      'A tee and a gift card sold at the Mission store: card present, the tee leaves store stock, the gift card gets a code, and the receipt is emailed.',
+    flowId: 'tpl-pos-sale',
+    input: {
+      model: 'b2c',
+      channel: 'pos',
+      currency: 'USD',
+      contact: { email: 'walk.in@example.com' },
+      title: 'Till 3 · sale 0419',
+      fulfillment: { method: 'carry_out', locationId: 'loc_mission' },
+      lines: [
+        { sku: 'TEE-01', qty: 1 },
+        { sku: 'GFT-25', qty: 1 },
+      ],
+      meta: {},
+    },
+  },
+  {
     id: 'storefront-return',
     label: 'Storefront order, returned',
     blurb:

@@ -1,5 +1,7 @@
 import {
   BASE_CURRENCY,
+  FULFILLMENT_METHOD_LABELS,
+  FULFILLMENT_METHODS,
   ORDER_CHANNEL_LABELS,
   ORDER_CHANNELS,
   ORDER_MODEL_LABELS,
@@ -33,6 +35,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     flows,
     customers: office.customers,
     products: office.products,
+    stores: office.stores.map(({ id, name }) => ({ id, name })),
     currencies: office.pricing.rates.map((r) => r.currency),
   };
 }
@@ -54,6 +57,14 @@ function parseLines(text: string): { lines: OrderLine[]; unreadable: string[] } 
 
 const channelOf = (v: FormDataEntryValue | null): OrderChannel =>
   ORDER_CHANNELS.find((c) => c === v) ?? 'manual';
+
+/** Only when the form asks for one; a flow without a routing step ships by default. */
+function fulfillmentOf(f: FormData) {
+  const method = FULFILLMENT_METHODS.find((m) => m === f.get('fulfillment'));
+  if (!method) return undefined;
+  const locationId = String(f.get('locationId') ?? '') || undefined;
+  return { method, ...(locationId ? { locationId } : {}) };
+}
 
 export async function action({ request }: Route.ActionArgs) {
   await requireUser(request, 'operator');
@@ -88,6 +99,7 @@ export async function action({ request }: Route.ActionArgs) {
         contact: contactEmail
           ? { email: contactEmail, name: String(f.get('contactName') ?? '') || undefined }
           : undefined,
+        fulfillment: fulfillmentOf(f),
         currency,
         lines: parsed.lines,
         documentText: String(f.get('documentText') ?? '') || undefined,
@@ -103,7 +115,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function NewOrder() {
-  const { flows, customers, products, currencies: codes } = useLoaderData<typeof loader>();
+  const { flows, customers, products, stores, currencies: codes } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
   const nav = useNavigation();
   const [preset, setPreset] = useState(SCENARIOS[0]!);
@@ -182,6 +194,36 @@ export default function NewOrder() {
             </Field>
             <Field label="Guest name" hint="Optional">
               <Input name="contactName" defaultValue={preset.input.contact?.name ?? ''} />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Fulfillment" hint="For flows that route fulfillment">
+              <NativeSelect
+                name="fulfillment"
+                defaultValue={preset.input.fulfillment?.method ?? ''}
+                className="h-9 w-full"
+              >
+                <NativeSelectOption value="">Not set (ship)</NativeSelectOption>
+                {FULFILLMENT_METHODS.filter((m) => m !== 'digital').map((m) => (
+                  <NativeSelectOption key={m} value={m}>
+                    {FULFILLMENT_METHOD_LABELS[m]}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label="Store" hint="For pickup and carry-out">
+              <NativeSelect
+                name="locationId"
+                defaultValue={preset.input.fulfillment?.locationId ?? ''}
+                className="h-9 w-full"
+              >
+                <NativeSelectOption value="">None</NativeSelectOption>
+                {stores.map((l) => (
+                  <NativeSelectOption key={l.id} value={l.id}>
+                    {l.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
             </Field>
           </div>
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">

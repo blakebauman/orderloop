@@ -84,11 +84,16 @@ const res = await fetch('https://orderloop.io/api/v1/webhooks/orders', {
 The flow that runs is, in order:
 
 1. The body's `flowId`.
-2. The `ORDER_ROUTES` entry for `<model>:<channel>`.
-3. The `ORDER_ROUTES` entry for `<model>:*`.
+2. The `<model>:<channel>` entry, from `ORDER_ROUTES` or else the built-in routes.
+3. The `<model>:*` entry, likewise.
 4. The model's default [built-in flow](/guides/templates/): `tpl-b2b-order` for `b2b`,
-   `tpl-storefront-order` for `b2c` and `d2c`, `tpl-marketplace-order` for `marketplace`, `tpl-subscription`,
+   `tpl-storefront-order` for `b2c`, `tpl-omnichannel-order` for `d2c`, `tpl-marketplace-order` for `marketplace`, `tpl-subscription`,
    `tpl-purchase-request` and `tpl-reorder` for the others.
+
+The built-in routes (`DEFAULT_ORDER_ROUTES` in `packages/core/src/inbound.ts`) send till sales to
+the point-of-sale flow: `b2c:pos` and `d2c:pos` run `tpl-pos-sale` (see
+[Fulfillment](/guides/fulfillment/#carry-out-and-point-of-sale)). `ORDER_ROUTES` entries override
+them, key by key.
 
 `ORDER_ROUTES` is a `vars` entry on the web Worker (see [Configuration](/reference/configuration/#web-variables)):
 a JSON object from `model:channel` or `model:*` to a flow id. Keys are lowercase; entries that are
@@ -98,8 +103,8 @@ malformed or have an empty flow id are dropped, as is a value that isn't a JSON 
 { "b2c:pos": "flow-pos-order", "marketplace:*": "flow-marketplace-order" }
 ```
 
-Here a `b2c` order from `pos` runs `flow-pos-order`, any `marketplace` order runs
-`flow-marketplace-order`, and everything else runs its model's default. A new order's flow must have
+Here a `b2c` order from `pos` runs `flow-pos-order` instead of `tpl-pos-sale`, any `marketplace` order runs
+`flow-marketplace-order`, and everything else runs its built-in route or its model's default. A new order's flow must have
 a published version, or the request returns `409` and starts nothing. A retry of an order already
 started finds it first, so it still returns `200` after its flow is unpublished.
 

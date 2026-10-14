@@ -428,7 +428,7 @@ export class OrderAgent extends Agent<Env, State> {
       waits: [],
       timeline: this.log({
         kind: 'order',
-        message: `Cancelled: ${reason}${undone ? ` (released ${undone.released}, voided ${undone.voided}, cancelled ${undone.cancelled} shipments${undone.sellerOrdersCancelled ? `, ${undone.sellerOrdersCancelled} seller orders` : ''}${undone.payoutsReversed ? `, reversed ${undone.payoutsReversed} payouts` : ''})` : ''}`,
+        message: `Cancelled: ${reason}${undone ? ` (released ${undone.released}, voided ${undone.voided}, cancelled ${undone.cancelled} shipments${undone.sellerOrdersCancelled ? `, ${undone.sellerOrdersCancelled} seller orders` : ''}${undone.payoutsReversed ? `, reversed ${undone.payoutsReversed} payouts` : ''}${undone.revoked ? `, revoked ${undone.revoked} codes` : ''})` : ''}`,
       }),
     });
     await this.syncIndex();

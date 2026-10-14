@@ -6,6 +6,8 @@ import {
   flows,
   fxRates,
   inboundEmails,
+  locationStock,
+  locations,
   messages,
   orders,
   payments,
@@ -161,17 +163,24 @@ export async function getOrderRow(orderId: string) {
 }
 
 export async function backOffice() {
-  const [cust, prods, sources, rules, contracts, sellerRows] = await Promise.all([
-    db().select().from(customers).orderBy(customers.name),
-    db().select().from(products).orderBy(products.sku),
-    db().select().from(priceSources).orderBy(priceSources.priority),
-    db().select().from(priceRules).orderBy(priceRules.sourceId, priceRules.sku, priceRules.minQty),
-    db().select().from(contractPrices).orderBy(contractPrices.customerId, contractPrices.sku),
-    db().select().from(sellers).orderBy(sellers.name),
-  ]);
+  const [cust, prods, sources, rules, contracts, sellerRows, stores, storeStock] =
+    await Promise.all([
+      db().select().from(customers).orderBy(customers.name),
+      db().select().from(products).orderBy(products.sku),
+      db().select().from(priceSources).orderBy(priceSources.priority),
+      db()
+        .select()
+        .from(priceRules)
+        .orderBy(priceRules.sourceId, priceRules.sku, priceRules.minQty),
+      db().select().from(contractPrices).orderBy(contractPrices.customerId, contractPrices.sku),
+      db().select().from(sellers).orderBy(sellers.name),
+      db().select().from(locations).orderBy(locations.name),
+      db().select().from(locationStock).orderBy(locationStock.sku),
+    ]);
   return {
     customers: cust,
     sellers: sellerRows,
+    stores: stores.map((l) => ({ ...l, stock: storeStock.filter((s) => s.locationId === l.id) })),
     products: prods,
     pricing: { sources, rules, contracts, rates: await currencies() },
   };

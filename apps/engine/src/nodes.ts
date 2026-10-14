@@ -14,6 +14,8 @@ import {
   evaluate,
   evaluatePolicy,
   type FlowNode,
+  FULFILLMENT_METHOD_LABELS,
+  type FulfillmentMethod,
   fromBase,
   interpolate,
   isBuySide,
@@ -402,6 +404,65 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: { ref }, vars: { erpRef: ref }, summary: ref };
   },
 
+  'commerce.route_fulfillment': async ({ env, ctx, config }) => {
+    const chosen = str(config.method, 'from_order');
+    const method = (chosen === 'from_order' ? (ctx.order.fulfillment?.method ?? 'ship') : chosen) as
+      | 'ship'
+      | 'pickup'
+      | 'carry_out'
+      | 'digital';
+    const r = await cx.routeFulfillment(env, ctx.order, method === 'digital' ? 'ship' : method);
+    const where = r.locationName ? ` from ${r.locationName}` : '';
+    return {
+      branches: r.branches,
+      output: r,
+      ...(r.method && r.branches[0] !== 'unavailable'
+        ? {
+            order: {
+              fulfillment: {
+                method: r.method,
+                ...(r.locationId ? { locationId: r.locationId } : {}),
+              },
+            },
+          }
+        : {}),
+      vars: { fulfillmentLocation: r.locationName ?? null },
+      summary:
+        r.branches[0] === 'unavailable'
+          ? (r.reason ?? 'Unavailable')
+          : r.branches
+              .map((b) =>
+                b === 'digital'
+                  ? 'digital'
+                  : `${FULFILLMENT_METHOD_LABELS[b as FulfillmentMethod]}${where}`,
+              )
+              .join(' + '),
+    };
+  },
+
+  'commerce.pickup_ready': async ({ env, ctx, stepKey }) => {
+    const r = await cx.stagePickup(env, ctx.order, stepKey);
+    return {
+      output: r,
+      vars: { pickupCode: r.pickupCode },
+      summary: `Pickup code ${r.pickupCode}`,
+    };
+  },
+
+  'commerce.handover': async ({ env, ctx, stepKey }) => {
+    const r = await cx.handOver(env, ctx.order, stepKey);
+    return { output: r, summary: r.collected === 'pickup' ? 'Collected' : 'Carried out' };
+  },
+
+  'commerce.deliver_digital': async ({ env, ctx, stepKey }) => {
+    const codes = await cx.issueEntitlements(env, ctx.order, stepKey);
+    return {
+      output: { entitlements: codes },
+      vars: { entitlements: codes },
+      summary: `${codes.length} ${codes.length === 1 ? 'code' : 'codes'} issued`,
+    };
+  },
+
   'commerce.split_by_seller': async ({ env, ctx }) => {
     const res = await cx.splitBySeller(env, ctx.order);
     if (!res.ok) throw new NonRetryableError(res.error);
@@ -646,6 +707,13 @@ export const ROLLBACKS: Record<
     `Released ${await cx.releaseInventory(env, orderId)} reservations`,
   'commerce.authorize_payment': async (env, orderId) =>
     `Voided ${await cx.voidAuthorizations(env, orderId)} authorizations`,
+  'commerce.pickup_ready': async (env, _orderId, output) => {
+    const id = (output as { shipmentId?: string } | undefined)?.shipmentId;
+    if (id) await cx.cancelShipment(env, id);
+    return id ? `Cancelled pickup ${id}` : 'No pickup to cancel';
+  },
+  'commerce.deliver_digital': async (env, orderId) =>
+    `Revoked ${await cx.revokeEntitlements(env, orderId)} codes`,
   'commerce.split_by_seller': async (env, orderId) =>
     `Cancelled ${await cx.cancelSellerOrders(env, orderId)} seller orders`,
   'commerce.payout': async (env, orderId) =>

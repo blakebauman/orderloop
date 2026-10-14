@@ -167,6 +167,52 @@ describe('planner', () => {
     expect(ended).toBe('unanswered');
   });
 
+  it('captures a mixed cart once both the shipment and the digital delivery are done', () => {
+    const { ran, ended, state } = simulate(tpl('tpl-omnichannel-order'), (id) =>
+      id === 'route' ? ['ship', 'digital'] : undefined,
+    );
+    expect(ended).toBe('done');
+    expect(ran.indexOf('capture')).toBeGreaterThan(ran.indexOf('shipped'));
+    expect(ran.indexOf('capture')).toBeGreaterThan(ran.indexOf('delivered'));
+    expect(state.nodes.reserve_pickup!.status).toBe('skipped');
+  });
+
+  it('cancels a pickup that is never collected, without capturing', () => {
+    const { ran, ended } = simulate(tpl('tpl-omnichannel-order'), (id) => {
+      if (id === 'route') return ['pickup'];
+      if (id === 'collect') return ['timeout'];
+    });
+    expect(ran).toContain('ready');
+    expect(ran).not.toContain('capture');
+    expect(ended).toBe('uncollected');
+  });
+
+  it('sells at the till and emails a receipt only when there is an address', () => {
+    const withEmail = simulate(tpl('tpl-pos-sale'), (id) =>
+      id === 'route' ? ['carry_out'] : undefined,
+    );
+    expect(withEmail.ran).toEqual([
+      'sale',
+      'validate',
+      'price',
+      'tax',
+      'authorize',
+      'route',
+      'reserve',
+      'handover',
+      'capture',
+      'has_email',
+      'receipt',
+      'done',
+    ]);
+    const without = simulate(tpl('tpl-pos-sale'), (id) => {
+      if (id === 'route') return ['carry_out'];
+      if (id === 'has_email') return ['false'];
+    });
+    expect(without.ended).toBe('done');
+    expect(without.state.nodes.receipt!.status).toBe('skipped');
+  });
+
   it('runs subscription periods with distinct step runs, then continues as new', () => {
     const flow = tpl('tpl-subscription');
     const { ran, state, ended } = simulate(flow, (id, run) => {

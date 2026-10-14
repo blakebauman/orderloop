@@ -47,6 +47,8 @@ describe('inbound orders', () => {
     expect(flowForOrder('b2c', 'pos', routes)).toBe('pos-sale');
     expect(flowForOrder('b2c', 'web', routes)).toBe('shop');
     expect(flowForOrder('b2b', 'web', routes)).toBe('tpl-b2b-order');
+    expect(flowForOrder('d2c', 'pos', {})).toBe('tpl-pos-sale');
+    expect(flowForOrder('d2c', 'web', {})).toBe('tpl-omnichannel-order');
     expect(parseOrderRoutes('not json')).toEqual({});
     expect(parseOrderRoutes(undefined)).toEqual({});
   });

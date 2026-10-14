@@ -16,6 +16,8 @@ import {
   approvals,
   createDb,
   customers,
+  entitlements,
+  locationStock,
   messages,
   nodeRuns,
   orders,
@@ -33,7 +35,7 @@ import {
   webhookDeliveries,
   webhookSubscriptions,
 } from '@orderloop/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { refund, reserveInventory, restock } from '../src/connectors';
@@ -639,6 +641,147 @@ describe('marketplace order', () => {
     // Cancelling the seller order is a rollback too, so it can land after the `failed` report.
     await until(async () => (await parts(orderId)).sel_brightside === 'cancelled', 'the cancel');
     expect(await parts(orderId)).toEqual({ sel_brightside: 'cancelled' });
+  });
+});
+
+describe('omnichannel and point of sale', () => {
+  const storeStock = async (locationId: string, sku: string) => {
+    const r = await db()
+      .select()
+      .from(locationStock)
+      .where(and(eq(locationStock.locationId, locationId), eq(locationStock.sku, sku)))
+      .get();
+    return { stock: r!.stock, reserved: r!.reserved };
+  };
+  const central = async (sku: string) =>
+    (await db().select().from(products).where(eq(products.sku, sku)).get())!.stock;
+  const omni = (o: Partial<OrderInput>) =>
+    startOrder(env, {
+      flowId: 'tpl-omnichannel-order',
+      input: input({ model: 'd2c', channel: 'web', customerId: 'cus_ada', ...o }),
+    });
+
+  it('holds stock at the pickup store, then hands it over when collected', async () => {
+    await introspect();
+    const before = await storeStock('loc_soho', 'MON-27');
+    const { orderId } = await omni({
+      lines: [{ sku: 'MON-27', qty: 1 }],
+      fulfillment: { method: 'pickup', locationId: 'loc_soho' },
+    });
+    const ready = await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'pickup.collected'),
+      'pickup wait',
+    );
+    expect(ready.vars.pickupCode).toMatch(/^[0-9A-Z]{6}$/);
+    expect(await storeStock('loc_soho', 'MON-27')).toEqual({
+      stock: before.stock,
+      reserved: before.reserved + 1,
+    });
+    await agent(orderId).deliver('pickup.collected', {});
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(await storeStock('loc_soho', 'MON-27')).toEqual({
+      stock: before.stock - 1,
+      reserved: before.reserved,
+    });
+    const ships = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect(ships.map((s) => [s.carrier, s.status])).toEqual([['pickup', 'collected']]);
+  });
+
+  it('releases the store’s stock and voids payment when a pickup is not collected', async () => {
+    await introspect(['collect#1']);
+    const before = await storeStock('loc_soho', 'MON-27');
+    const { orderId } = await omni({
+      lines: [{ sku: 'MON-27', qty: 2 }],
+      fulfillment: { method: 'pickup', locationId: 'loc_soho' },
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('failed');
+    expect(done.nodes.uncollected!.status).toBe('succeeded');
+    // Releasing, cancelling and voiding are rollbacks, which can land after the `failed` report.
+    await until(async () => {
+      const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+      const ships = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+      const stock = await storeStock('loc_soho', 'MON-27');
+      return (
+        pays.every((p) => p.status === 'voided') &&
+        ships.every((s) => s.status === 'cancelled') &&
+        stock.reserved === before.reserved
+      );
+    }, 'the rollback');
+    expect(await storeStock('loc_soho', 'MON-27')).toEqual(before);
+    const ships = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect(ships.map((s) => s.status)).toEqual(['cancelled']);
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    expect(pays.map((p) => p.status)).toEqual(['voided']);
+  });
+
+  it('ships from a store when the warehouse has none, and delivers a mixed cart’s codes', async () => {
+    await introspect();
+    const before = await storeStock('loc_soho', 'TEE-01');
+    expect(await central('TEE-01')).toBe(0);
+    const { orderId } = await omni({
+      lines: [
+        { sku: 'TEE-01', qty: 2 },
+        { sku: 'EBK-101', qty: 1 },
+      ],
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.route!.summary).toBe('Ship from SoHo store + digital');
+    expect(done.order!.fulfillment).toEqual({ method: 'ship', locationId: 'loc_soho' });
+    expect((await storeStock('loc_soho', 'TEE-01')).stock).toBe(before.stock - 2);
+    const codes = await db().select().from(entitlements).where(eq(entitlements.orderId, orderId));
+    expect(codes.map((c) => [c.sku, c.status])).toEqual([['EBK-101', 'issued']]);
+    const capture = (await db().select().from(payments).where(eq(payments.orderId, orderId))).find(
+      (p) => p.kind === 'capture',
+    )!;
+    expect(capture.amount).toBe(done.order!.total);
+  });
+
+  it('revokes delivered codes when the physical part cannot be fulfilled', async () => {
+    await introspect();
+    const { orderId } = await omni({
+      lines: [
+        { sku: 'TEE-01', qty: 500 },
+        { sku: 'GFT-25', qty: 2 },
+      ],
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('failed');
+    // Revoking is a rollback, so it can land after the `failed` report.
+    const codes = await until(async () => {
+      const rows = await db().select().from(entitlements).where(eq(entitlements.orderId, orderId));
+      return rows.length === 2 && rows.every((c) => c.status === 'revoked') && rows;
+    }, 'the revoke');
+    expect(codes.map((c) => c.status)).toEqual(['revoked', 'revoked']);
+  });
+
+  it('sells at the till from the store’s stock and emails a receipt', async () => {
+    await introspect();
+    const before = await storeStock('loc_mission', 'TEE-01');
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-pos-sale',
+      input: input({
+        model: 'b2c',
+        channel: 'pos',
+        contact: { email: 'walk.in@example.com' },
+        fulfillment: { method: 'carry_out', locationId: 'loc_mission' },
+        lines: [{ sku: 'TEE-01', qty: 1 }],
+      }),
+    });
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.handover!.summary).toBe('Carried out');
+    expect(await storeStock('loc_mission', 'TEE-01')).toEqual({
+      stock: before.stock - 1,
+      reserved: before.reserved,
+    });
+    const sent = await db().select().from(messages).where(eq(messages.orderId, orderId));
+    expect(sent.map((m) => m.recipient)).toEqual(['walk.in@example.com']);
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    expect(pays.map((p) => p.kind).sort()).toEqual(['authorization:card_present', 'capture']);
   });
 });
 

@@ -599,6 +599,159 @@ export function marketplaceOrderFlow(): Flow {
   );
 }
 
+export function omnichannelOrderFlow(): Flow {
+  return (
+    new Builder()
+      .n('checkout', 'trigger.webhook', 'Checkout', { source: 'web' })
+      .n('validate', 'commerce.validate', 'Validate')
+      .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('tax', 'commerce.tax', 'Tax')
+      .n('authorize', 'commerce.authorize_payment', 'Authorize payment', { method: 'card' })
+      .n('route', 'commerce.route_fulfillment', 'Route fulfillment')
+      .n('reserve_ship', 'commerce.reserve_inventory', 'Reserve stock')
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('shipped', 'commerce.notify', 'Shipping confirmation', {
+        to: 'customer',
+        subject: 'Order {{order.id}} is on its way ({{vars.tracking}})',
+      })
+      .n('reserve_pickup', 'commerce.reserve_inventory', 'Hold at store')
+      .n('ready', 'commerce.pickup_ready', 'Ready for pickup')
+      .n('ready_note', 'commerce.notify', 'Pickup ready', {
+        to: 'customer',
+        subject: 'Order {{order.id}} is ready at {{vars.fulfillmentLocation}}',
+        body: 'Show code {{vars.pickupCode}} at the counter.',
+      })
+      .n('collect', 'control.wait_event', 'Customer collects', {
+        event: 'pickup.collected',
+        timeout: '5 days',
+      })
+      .n('handover', 'commerce.handover', 'Hand over')
+      .n('deliver', 'commerce.deliver_digital', 'Deliver digital goods')
+      .n('delivered', 'commerce.notify', 'Download ready', {
+        to: 'customer',
+        subject: 'Your downloads for {{order.id}}',
+      })
+      .n('capture', 'commerce.capture_payment', 'Capture payment')
+      .n('done', 'control.end', 'Fulfilled', { outcome: 'completed' })
+      .n('declined', 'control.end', 'Payment declined', {
+        outcome: 'failed',
+        reason: 'Payment declined',
+      })
+      .n('unavailable', 'control.end', 'Cannot fulfil', {
+        outcome: 'failed',
+        reason: 'No location can fulfil the order; authorization voided',
+      })
+      .n('short', 'control.end', 'Out of stock', {
+        outcome: 'failed',
+        reason: 'Insufficient stock; authorization voided',
+      })
+      // Failed, not cancelled: a failed end rolls back, releasing the store's stock and the payment.
+      .n('uncollected', 'control.end', 'Not collected', {
+        outcome: 'failed',
+        reason: 'Not collected in time; stock released and authorization voided',
+      })
+      .n('uncaptured', 'control.end', 'Capture failed', {
+        outcome: 'failed',
+        reason: 'Payment capture failed',
+      })
+      .e('checkout', 'validate')
+      .e('validate', 'price')
+      .e('price', 'tax')
+      .e('tax', 'authorize')
+      .e('authorize.ok', 'route')
+      .e('authorize.declined', 'declined')
+      .e('route.ship', 'reserve_ship')
+      .e('route.pickup', 'reserve_pickup')
+      .e('route.carry_out', 'unavailable')
+      .e('route.digital', 'deliver')
+      .e('route.unavailable', 'unavailable')
+      .e('reserve_ship.ok', 'ship')
+      .e('reserve_ship.backorder', 'short')
+      .e('ship', 'shipped')
+      .e('reserve_pickup.ok', 'ready')
+      .e('reserve_pickup.backorder', 'short')
+      .e('ready', 'ready_note')
+      .e('ready_note', 'collect')
+      .e('collect.received', 'handover')
+      .e('collect.timeout', 'uncollected')
+      .e('deliver', 'delivered')
+      // Capture joins every branch the order took: a mixed cart waits for both.
+      .e('shipped', 'capture')
+      .e('handover', 'capture')
+      .e('delivered', 'capture')
+      .e('capture.ok', 'done')
+      .e('capture.failed', 'uncaptured')
+      .build({
+        id: 'tpl-omnichannel-order',
+        name: 'Omnichannel order',
+        description:
+          'A brand’s own store: authorize, then route each order to shipping (from the warehouse or a store), pickup in store with a code, or digital delivery, and capture once every part is fulfilled.',
+        model: 'd2c',
+        channels: ['web', 'mobile', 'api'],
+      })
+  );
+}
+
+export function posSaleFlow(): Flow {
+  return new Builder()
+    .n('sale', 'trigger.webhook', 'Till sale', { source: 'pos' })
+    .n('validate', 'commerce.validate', 'Validate')
+    .n('price', 'commerce.price', 'List price', { useContracts: false })
+    .n('tax', 'commerce.tax', 'Tax')
+    .n('authorize', 'commerce.authorize_payment', 'Take payment', { method: 'card_present' })
+    .n('route', 'commerce.route_fulfillment', 'Store stock', { method: 'carry_out' })
+    .n('reserve', 'commerce.reserve_inventory', 'Take from store stock')
+    .n('handover', 'commerce.handover', 'Hand over')
+    .n('deliver', 'commerce.deliver_digital', 'Issue codes')
+    .n('capture', 'commerce.capture_payment', 'Capture payment')
+    .n('has_email', 'control.condition', 'Email receipt?', {
+      expression: { '!!': [{ var: 'order.contact.email' }] },
+    })
+    .n('receipt', 'commerce.notify', 'Email receipt', {
+      to: 'customer',
+      subject: 'Your receipt for {{order.id}}',
+    })
+    .n('done', 'control.end', 'Sold', { outcome: 'completed' })
+    .n('declined', 'control.end', 'Payment declined', {
+      outcome: 'failed',
+      reason: 'Payment declined',
+    })
+    .n('unavailable', 'control.end', 'Not in stock here', {
+      outcome: 'failed',
+      reason: 'The store does not have every item; payment voided',
+    })
+    .n('uncaptured', 'control.end', 'Capture failed', {
+      outcome: 'failed',
+      reason: 'Payment capture failed',
+    })
+    .e('sale', 'validate')
+    .e('validate', 'price')
+    .e('price', 'tax')
+    .e('tax', 'authorize')
+    .e('authorize.ok', 'route')
+    .e('authorize.declined', 'declined')
+    .e('route.carry_out', 'reserve')
+    .e('route.digital', 'deliver')
+    .e('route.unavailable', 'unavailable')
+    .e('reserve.ok', 'handover')
+    .e('reserve.backorder', 'unavailable')
+    .e('handover', 'capture')
+    .e('deliver', 'capture')
+    .e('capture.ok', 'has_email')
+    .e('capture.failed', 'uncaptured')
+    .e('has_email.true', 'receipt')
+    .e('has_email.false', 'done')
+    .e('receipt', 'done')
+    .build({
+      id: 'tpl-pos-sale',
+      name: 'Point-of-sale sale',
+      description:
+        'A sale at the till: take payment, hand the goods over from the store’s own stock (or issue gift card and download codes), capture, and email a receipt when the buyer gives an address.',
+      model: 'b2c',
+      channels: ['pos'],
+    });
+}
+
 export const TEMPLATES = {
   'tpl-purchase-request': purchaseRequestFlow,
   'tpl-b2b-order': b2bOrderFlow,
@@ -606,6 +759,8 @@ export const TEMPLATES = {
   'tpl-subscription': subscriptionFlow,
   'tpl-storefront-order': storefrontOrderFlow,
   'tpl-marketplace-order': marketplaceOrderFlow,
+  'tpl-omnichannel-order': omnichannelOrderFlow,
+  'tpl-pos-sale': posSaleFlow,
 } satisfies Record<string, () => Flow>;
 export type TemplateId = keyof typeof TEMPLATES;
 
@@ -613,7 +768,7 @@ export type TemplateId = keyof typeof TEMPLATES;
 export const DEFAULT_TEMPLATE: Record<OrderModel, TemplateId> = {
   b2b: 'tpl-b2b-order',
   b2c: 'tpl-storefront-order',
-  d2c: 'tpl-storefront-order',
+  d2c: 'tpl-omnichannel-order',
   marketplace: 'tpl-marketplace-order',
   subscription: 'tpl-subscription',
   procurement: 'tpl-purchase-request',

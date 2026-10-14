@@ -58,12 +58,19 @@ export function parseOrderRoutes(raw: string | undefined): Record<string, string
   return {};
 }
 
+/** Built-in routes `ORDER_ROUTES` can override: till sales run the point-of-sale flow. */
+export const DEFAULT_ORDER_ROUTES: Record<string, string> = {
+  'b2c:pos': 'tpl-pos-sale',
+  'd2c:pos': 'tpl-pos-sale',
+};
+
 export function flowForOrder(
   model: OrderModel,
   channel: OrderChannel,
   routes: Record<string, string>,
 ): string {
-  return routes[`${model}:${channel}`] ?? routes[`${model}:*`] ?? DEFAULT_TEMPLATE[model];
+  const all = { ...DEFAULT_ORDER_ROUTES, ...routes };
+  return all[`${model}:${channel}`] ?? all[`${model}:*`] ?? DEFAULT_TEMPLATE[model];
 }
 
 export function inboundIdempotencyKey(o: Pick<InboundOrder, 'channel' | 'externalId'>): string {
