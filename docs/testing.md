@@ -4,8 +4,8 @@ What pnpm test runs in each package, how the engine runs real Workflows in worke
 
 `pnpm test` runs `turbo run test`, which runs `vitest run` in every package that has tests. The
 `test` task has no `dependsOn`, so a failing dependency never silently skips a package's tests.
-CI runs it after lint, type-check and build (`.github/workflows/ci.yml`), each step running even
-when an earlier one failed.
+CI runs it after lint, type-check and build, then audits production dependencies
+(`.github/workflows/ci.yml`), each step running even when an earlier one failed.
 
 | Package | Environment | Config |
 |---|---|---|

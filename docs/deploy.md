@@ -31,7 +31,9 @@ something else entirely.
 ### Order matters
 
 1. **Migrations before code.** Apply remote D1 migrations before deploying code that reads a new
-   table or column.
+   table or column. Until the new Workers are live, the old code runs against the new schema, so a
+   migration only adds (expand); dropping or renaming waits for a later change once nothing
+   deployed uses it (contract).
 2. **Engine before web.** The web Worker's service binding needs the engine to exist.
 
 Workflow names (`orderloop-order`, `orderloop-replenish`) must be unique in the account.
@@ -114,10 +116,17 @@ All settings are listed in [Configuration](configuration.md).
 ## CI
 
 Production deploys from CI: merging to `main` is the release. `.github/workflows/ci.yml` runs lint,
-type-check, build and tests on every push and pull request. On `main` it then migrates D1, deploys
-the engine, deploys the web app, smoke-tests `/health` and deploys these docs, in that order, so a
-change never reaches production before its migration. The deploy job needs the repository secrets
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; without them it does nothing.
+type-check, build, tests and `pnpm audit --prod --audit-level high` on every push and pull request.
+On `main` it then migrates D1, deploys the engine, deploys the web app, smoke-tests `/health` and
+`/login` and deploys these docs, in that order, so a change never reaches production before its
+migration. If the smoke test fails, the job runs `wrangler rollback` for the web app and the engine
+(D1 is not rolled back, which is why migrations only add).
+
+The deploy job runs in the `production` GitHub environment (add a required reviewer there to gate
+releases) and needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository
+secrets; without them it fails rather than skipping. The workflow's token is read-only
+(`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
+push to `main` never cancels a run already on its way to production.
 
 Each deploy step runs through a small `retry` helper (three attempts, 15 then 30 seconds apart),
 because the Cloudflare API occasionally fails a request outright (codes `7403`, `10013`) and every
