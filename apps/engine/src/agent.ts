@@ -1,19 +1,16 @@
 /**
  * OrderAgent: one Agents SDK Durable Object per order. It holds the live run state that syncs to
  * every browser on the order page, records what the Workflow reports, owns the order's waits
- * (approvals and external events) and their delivery, cancels with compensation, and answers the
- * ops chat with tools over the same state.
+ * (approvals and external events) and their delivery, and cancels with compensation. Questions
+ * about an order go to the workspace assistant (./assistant), which reads and acts on it here.
  */
 
 import {
   atLeast,
-  type ChatMessage,
-  type ChatProposal,
   decodePrincipal,
   type EdgeState,
   EMPTY_ORDER_STATE,
   type FlowVersion,
-  isRole,
   type NodeRun,
   newId,
   type Order,
@@ -27,17 +24,15 @@ import {
   type ProxiedPrincipal,
   ROLE_LABELS,
   type Role,
-  SESSION_IDLE_MS,
-  SESSION_TOUCH_MS,
   TERMINAL_ORDER_STATUSES,
   type TimelineEntry,
 } from '@orderloop/core';
-import { approvals, createDb, nodeRuns, orders, sessions, users } from '@orderloop/db';
+import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import { runJson } from './ai';
+import { and, eq } from 'drizzle-orm';
 import { compensateOrder } from './connectors';
 import { emit, orderSummary } from './outbox';
+import { livePrincipal, SESSION_ENDED } from './principal';
 
 export type Report = {
   /** Plan snapshots are sequenced per generation; stale ones are dropped. */
@@ -368,49 +363,21 @@ export class OrderAgent extends Agent<Env, State> {
     const { connection } = getCurrentAgent();
     if (!connection) return null;
     const stored = (connection.state as ConnectionState | null)?.principal ?? null;
-    const p = stored ? await this.current(stored) : null;
+    const p = stored ? await livePrincipal(this.env, stored) : null;
     if (!p) {
       // Close once the refusal has gone out, so the page can show why.
       setTimeout(() => connection.close(4401, 'Session ended'), 100);
-      throw new Error('Your sign-in has ended. Reload the page to sign in again.');
+      throw new Error(SESSION_ENDED);
     }
     if (!atLeast(p.role, min)) throw new Error(`This needs the ${ROLE_LABELS[min]} role.`);
     return p;
   }
 
-  /**
-   * A person's principal from their live session: null once it has expired or been deleted, or the
-   * user is disabled; otherwise with their current role, name and email. The shared password and
-   * open local dev have no session to check.
-   */
-  private async current(p: ProxiedPrincipal): Promise<Principal | null> {
-    const { session, ...principal } = p;
-    if (p.kind !== 'user') return principal;
-    if (!session) return null;
-    const now = Date.now();
-    const seen = sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`;
-    const row = await this.db()
-      .select({ id: users.id, email: users.email, name: users.name, role: users.role, seen })
-      .from(sessions)
-      .innerJoin(users, eq(users.id, sessions.userId))
-      .where(
-        and(
-          eq(sessions.tokenHash, session),
-          gt(sessions.expiresAt, now),
-          gt(seen, now - SESSION_IDLE_MS),
-          isNull(users.disabledAt),
-        ),
-      )
-      .get();
-    if (!row || !isRole(row.role)) return null;
-    // Working on an order page counts as activity, so it keeps the session from going idle.
-    if (now - row.seen > SESSION_TOUCH_MS)
-      await this.db()
-        .update(sessions)
-        .set({ lastSeenAt: now })
-        .where(eq(sessions.tokenHash, session));
-    const { seen: _seen, ...person } = row;
-    return { kind: 'user', ...person, role: row.role };
+  /** The caller as this agent sees them now: their current role, or a refusal if signed out. */
+  @callable()
+  async whoami() {
+    const p = await this.authorize('viewer');
+    return p ? { name: p.name, role: p.role } : null;
   }
 
   /** Approve or reject the approval a node is waiting on. */
@@ -499,164 +466,4 @@ export class OrderAgent extends Agent<Env, State> {
     if (pending && p.attempt < WEBHOOK_RETRIES)
       await this.schedule(10 * 2 ** p.attempt, 'emitWebhook', { ...p, attempt: p.attempt + 1 });
   }
-
-  /** Ops chat: the model answers from the order state and may act through tools. */
-  @callable()
-  async chat(text: string) {
-    await this.authorize('viewer');
-    const user: ChatMessage = {
-      id: newId('msg'),
-      role: 'user',
-      content: text.slice(0, 4000),
-      at: Date.now(),
-    };
-    this.patch({ chat: [...this.state.chat, user] });
-    const tools: ChatMessage['tools'] = [];
-    let proposal: ChatProposal | undefined;
-    let reply = '';
-    for (let turn = 0; turn < 4 && !reply; turn++) {
-      const { value } = await runJson<{
-        action: 'reply' | 'tool';
-        tool?: string;
-        args?: Record<string, unknown>;
-        reply?: string;
-      }>(
-        this.env,
-        [
-          {
-            role: 'system',
-            content: `You are the operations agent for order ${this.state.orderId}. Answer briefly from the order state. Tools: get_state {}, approve {nodeId, note?}, reject {nodeId, note?}, deliver_event {event}, cancel {reason}. approve, reject and cancel only prepare the action; a person confirms it on the order page. Only use them when the user clearly asks. Reply with {"action":"tool",...} to call a tool, or {"action":"reply","reply":"..."} to answer.`,
-          },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              summary: this.brief(),
-              tools_called: tools,
-              history: this.state.chat.slice(-8).map((m) => ({ role: m.role, content: m.content })),
-            }),
-          },
-        ],
-        {
-          type: 'object',
-          properties: {
-            action: { type: 'string', enum: ['reply', 'tool'] },
-            tool: {
-              type: 'string',
-              enum: ['get_state', 'approve', 'reject', 'deliver_event', 'cancel'],
-            },
-            args: { type: 'object' },
-            reply: { type: 'string' },
-          },
-          required: ['action'],
-        },
-        () => this.chatHeuristic(text, tools.length > 0),
-      );
-      if (value.action === 'tool' && value.tool) {
-        const result = await this.runTool(value.tool, value.args ?? {}).catch((e: Error) => ({
-          error: e.message,
-        }));
-        tools.push({ name: value.tool, args: value.args ?? {}, result });
-        if (result && typeof result === 'object' && 'proposal' in result) {
-          proposal = result.proposal as ChatProposal;
-          reply = proposalText(proposal, this.state);
-        }
-      } else {
-        reply = value.reply || 'Done.';
-      }
-    }
-    const answer: ChatMessage = {
-      id: newId('msg'),
-      role: 'assistant',
-      content: reply || 'I took the requested action.',
-      at: Date.now(),
-      tools,
-      ...(proposal ? { proposal } : {}),
-    };
-    this.patch({ chat: [...this.state.chat, answer].slice(-100) });
-    return answer;
-  }
-
-  private brief() {
-    const s = this.state;
-    return {
-      status: s.status,
-      reason: s.reason,
-      order: s.order,
-      waits: s.waits,
-      vars: s.vars,
-      nodes: Object.fromEntries(
-        Object.entries(s.nodes)
-          .filter(([, n]) => n.status !== 'pending')
-          .map(([id, n]) => [id, { status: n.status, summary: n.summary, error: n.error }]),
-      ),
-      recent: s.timeline.slice(-10).map((t) => t.message),
-    };
-  }
-
-  private async runTool(tool: string, args: Record<string, unknown>) {
-    const note = typeof args.note === 'string' ? args.note : undefined;
-    const nodeId =
-      typeof args.nodeId === 'string'
-        ? args.nodeId
-        : this.state.waits.find((w) => w.kind === 'approval')?.nodeId;
-    switch (tool) {
-      case 'get_state':
-        return this.brief();
-      // Decisions and cancellations are prepared here and confirmed by a person on the order page.
-      case 'approve':
-      case 'reject': {
-        if (!nodeId || !this.state.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
-          return { error: 'Nothing is waiting for approval' };
-        const proposal: ChatProposal = {
-          kind: 'decide',
-          nodeId,
-          decision: tool === 'approve' ? 'approved' : 'rejected',
-          ...(note ? { note } : {}),
-        };
-        return { proposal };
-      }
-      case 'deliver_event':
-        return this.deliver(String(args.event ?? ''));
-      case 'cancel': {
-        if (TERMINAL_ORDER_STATUSES.includes(this.state.status))
-          return { error: 'The order has already finished' };
-        const proposal: ChatProposal = {
-          kind: 'cancel',
-          reason: String(args.reason ?? 'Cancelled via chat'),
-        };
-        return { proposal };
-      }
-      default:
-        return { error: `Unknown tool ${tool}` };
-    }
-  }
-
-  private chatHeuristic(text: string, acted: boolean) {
-    const t = text.toLowerCase();
-    if (!acted) {
-      if (/\bapprove\b/.test(t)) return { action: 'tool' as const, tool: 'approve', args: {} };
-      if (/\breject\b/.test(t)) return { action: 'tool' as const, tool: 'reject', args: {} };
-      if (/\bcancel\b/.test(t))
-        return { action: 'tool' as const, tool: 'cancel', args: { reason: text } };
-      const ev = /\b([a-z]+\.[a-z_]+)\b/.exec(t)?.[1];
-      if (ev && /\b(send|deliver|mark|fire)\b/.test(t))
-        return { action: 'tool' as const, tool: 'deliver_event', args: { event: ev } };
-    }
-    const s = this.state;
-    const waiting = s.waits.map((w) => w.title).join('; ');
-    return {
-      action: 'reply' as const,
-      reply: acted
-        ? 'Done — the order will continue from there.'
-        : `Order is ${s.status}${s.reason ? ` (${s.reason})` : ''}. Total ${s.order?.total.toFixed(2)} ${s.order?.currency}.${waiting ? ` Waiting on: ${waiting}.` : ''}`,
-    };
-  }
-}
-
-/** What the assistant says when it has prepared an action for a person to confirm. */
-function proposalText(p: ChatProposal, s: OrderState) {
-  if (p.kind === 'cancel')
-    return `Ready to cancel this order (“${p.reason}”). Confirm below to go ahead.`;
-  const step = s.flow?.nodes.find((n) => n.id === p.nodeId)?.label ?? p.nodeId;
-  return `Ready to ${p.decision === 'approved' ? 'approve' : 'reject'} ${step}${p.note ? ` with the note “${p.note}”` : ''}. Confirm below to send it.`;
 }

@@ -1,11 +1,11 @@
 ---
-title: AI nodes and the copilot
-description: The AI nodes, the heuristic each falls back to, the flow copilot and the order chat, and how to configure the model.
+title: AI nodes and the assistant
+description: The AI nodes, the heuristic each falls back to, the flow copilot, the workspace assistant, and how to configure the models.
 ---
 
-OrderLoop uses Workers AI in three places: the AI nodes in a flow, the copilot in the flow
-editor, and the chat on each order page. All three go through one function, `runJson`
-(`apps/engine/src/ai.ts`), with the same guarantees:
+OrderLoop uses Workers AI in three places: the AI nodes in a flow, the flow copilot, and the
+[workspace assistant](#the-assistant). The nodes and the copilot go through one function,
+`runJson` (`apps/engine/src/ai.ts`), with the same guarantees:
 
 - **JSON mode with a schema.** Every call asks for `response_format: json_schema`, so the result
   has a known shape (temperature `0.2`, at most 2048 tokens).
@@ -21,9 +21,10 @@ Set in `apps/engine/wrangler.jsonc` under `vars` (see [Configuration](/reference
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AI_MODE` | `live` | `mock` skips the model and always uses the heuristics (tests, offline dev) |
-| `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | The text model for every call |
-| `AI_GATEWAY_ID` | `""` | When set, calls go through that AI Gateway (caching, rate limits, logs) |
+| `AI_MODE` | `live` | `mock` skips the models and always uses the heuristics (tests, offline dev) |
+| `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | The text model for every AI node and the copilot |
+| `ASSISTANT_MODEL` | `@cf/moonshotai/kimi-k2.6` | The model for the assistant, which needs multi-turn tool calling |
+| `AI_GATEWAY_ID` | `""` | When set, every call, the assistant's included, goes through that AI Gateway (caching, rate limits, logs) |
 
 Workers AI always calls your Cloudflare account, even in local dev. The engine's tests run with
 `AI_MODE=mock`, so they need no network.
@@ -47,41 +48,44 @@ nodes.
 
 ## The flow copilot
 
-The copilot proposes a whole graph. It is reachable from the flow editor's prompt bar and from
-**Describe it** when creating a flow. The model gets the node catalog (types, outputs, config
+The copilot proposes a whole graph. It is reachable from **Describe it** when creating a flow and,
+in the editor, through the [assistant](/guides/assistant/#flow-changes). The model gets the node catalog (types, outputs, config
 fields) and the graph rules, and returns a complete graph plus an explanation. The engine then:
 
 1. fills each node's missing config from its catalog defaults and gives edges ids;
 2. keeps existing nodes' positions, and lays the graph out again only when nodes were added;
 3. runs `validateGraph` and returns the errors and warnings with the graph.
 
-In the editor the result is a proposal: it shows the explanation and how many nodes it adds and
-removes, and the graph changes only if you accept it. Accepting doesn't publish.
+In the editor the result is a proposal: it shows the explanation and what it adds, removes, edits
+and rewires, and the graph changes only if you accept it. Accepting doesn't publish.
 
 The offline fallback understands one sentence shape, "add a *node label* after *node id or
-label*" ("fraud" or "risk" mean Risk score), and splices the node into that node's outgoing
+label*" ("fraud" or "risk" mean Risk score; "the", "a" and "an" are ignored), and splices the node into that node's outgoing
 edges.
 
-## Order chat
+## The assistant
 
-Each order page has a chat with an operations agent that answers from the order's live state:
-status, totals, waits, variables, recent timeline and each node's status and summary. It may call
-tools:
+The [workspace assistant](/guides/assistant/) is the chat panel that replaced the per-order chat
+and the editor's copilot bar. It does not use `runJson`. `AssistantAgent`
+(`apps/engine/src/assistant/`) streams a multi-turn, tool-calling conversation from
+`ASSISTANT_MODEL` with up to 6 steps per message, through `workers-ai-provider`, and through AI
+Gateway when `AI_GATEWAY_ID` is set.
 
-| Tool | Does |
-|---|---|
-| `get_state` | Reads the order summary |
-| `approve`, `reject` | Prepare a decision for a waiting approval |
-| `cancel` | Prepares a cancellation with a reason |
-| `deliver_event` | Delivers a business event to the waiting node |
+Its tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`, each with the lowest role that
+may use it and whether it stops for a confirm:
 
-**Approvals, rejections and cancellations are only prepared.** The reply carries a proposal, and
-nothing happens until a person confirms it on the order page; a confirmed decision still gets the
-[5-second undo window](/guides/approvals-and-events/#deciding). Dismissing it sends nothing, and a
-proposal for a step that has stopped waiting can't be confirmed. Delivering an event is not
-gated this way.
+| Tool | Role | Confirm |
+|---|---|---|
+| `needs_attention`, `find_orders`, `get_order`, `find_products`, `list_flows`, `get_flow` | `viewer` | no |
+| `propose_flow_change` | `operator` | no; drafts through the copilot, never saves |
+| `decide_approval` | `approver` | yes |
+| `deliver_event`, `cancel_order`, `publish_flow`, `run_stock_review` | `operator` | yes |
 
-The agent takes up to four model turns per message and keeps the last 100 messages. The
-fallback reads "approve", "reject" and "cancel" in the message, and a `name.event` together with
-"send", "deliver", "mark" or "fire"; otherwise it replies with the status, total and what the
-order is waiting on.
+A tool the caller's role can't use is not offered to the model, and each tool checks the role
+again, as the person is when it runs. The same 20-second cap applies: when `AI_MODE` is `mock`, or
+the model errors or produces nothing in time, a deterministic heuristic model takes the turn, calls
+the same tools through the same confirms, and the reply is labelled as answered without the
+model.
+
+`propose_flow_change` and the Flows page's **Describe it** both call the copilot above
+(`EngineRpc.copilot`).

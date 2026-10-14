@@ -1,7 +1,8 @@
 /**
  * The live order page. The loader renders a snapshot; in the browser, `useAgent` connects to the
  * order's OrderAgent (proxied by workers/app.ts) and every state change it broadcasts re-renders
- * the graph, waits, timeline and chat. Actions are agent RPC calls over the same socket.
+ * the graph, waits and timeline. Actions are agent RPC calls over the same socket. Questions about
+ * the order go to the assistant panel, which this page tells which order it is on.
  */
 
 import {
@@ -14,7 +15,7 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
-import { Bot, CircleSlash, FileText, RotateCcw, Send, Undo2, Wrench, Zap } from 'lucide-react';
+import { CircleSlash, FileText, MessageSquareText, RotateCcw, Undo2, Zap } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -22,9 +23,9 @@ import { DecisionContext, DecisionControls, sendDecision } from '~/components/de
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Empty } from '~/components/page';
-import { Proposal } from '~/components/proposal';
 import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
+import { useAssistant, usePageContext } from '~/lib/assistant';
 import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
@@ -54,7 +55,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 }
 
-type Tab = 'actions' | 'activity' | 'details' | 'chat' | 'node';
+type Tab = 'actions' | 'activity' | 'details' | 'node';
 type Records = Awaited<ReturnType<typeof orderRecords>>;
 
 /** Engine reasons arrive without a full stop; banners read as sentences. */
@@ -167,6 +168,12 @@ export default function OrderPage() {
     setSelected(id);
     setTab('node');
   };
+  const assistant = useAssistant();
+  const title = order.title || ORDER_TYPE_LABELS[order.type as OrderType];
+  usePageContext(
+    () => ({ kind: 'order', id: orderId, label: `${title} ${orderRef(orderId)}` }),
+    [orderId, title],
+  );
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     {
@@ -176,7 +183,6 @@ export default function OrderPage() {
     },
     { id: 'activity', label: 'Activity' },
     { id: 'details', label: 'Details' },
-    { id: 'chat', label: 'Chat' },
     { id: 'node', label: 'Node' },
   ];
 
@@ -214,6 +220,17 @@ export default function OrderPage() {
               {plural(order.lines.length, 'line')} · tax {money(order.tax, order.currency)}
             </div>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              assistant.setScope('page');
+              assistant.focus();
+            }}
+            title="Ask the assistant about this order"
+          >
+            <MessageSquareText /> Ask
+          </Button>
           {!terminal && canOperate ? (
             <Button
               variant="outline"
@@ -326,7 +343,6 @@ export default function OrderPage() {
             </div>
             {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
             {tab === 'details' ? <Details state={state} records={records} /> : null}
-            {tab === 'chat' ? <Chat state={state} busy={busy} call={call} by={by} /> : null}
             {tab === 'node' ? (
               node ? (
                 <Inspector node={node} run={state.nodes[node.id]} />
@@ -852,96 +868,5 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
         </tbody>
       </table>
     </section>
-  );
-}
-
-function Chat({
-  state,
-  busy,
-  call,
-  by,
-}: {
-  state: OrderState;
-  busy: string | null;
-  call: Call;
-  by: string;
-}) {
-  const [text, setText] = useState('');
-  const end = useRef<HTMLDivElement>(null);
-  // Scroll when messages arrive. Block body: scrollIntoView now returns a Promise in Chrome, and
-  // React would call a returned value as the effect's cleanup.
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' });
-  }, [state.chat.length]);
-  const send = async () => {
-    const t = text.trim();
-    if (!t) return;
-    setText('');
-    await call('chat', 'chat', [t]);
-  };
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3" aria-live="polite">
-        {state.chat.length === 0 ? (
-          <Empty>
-            Ask this order’s agent: “why is this waiting?”, “approve it with a note”, “mark payment
-            received”.
-          </Empty>
-        ) : null}
-        {state.chat.map((m) => (
-          <div key={m.id} className={cn('flex gap-2', m.role === 'user' && 'justify-end')}>
-            {m.role === 'assistant' ? (
-              <Bot className="mt-1 size-4 shrink-0 text-ai" aria-label="Agent" />
-            ) : null}
-            <div
-              className={cn(
-                'max-w-[85%] rounded-md px-3 py-2 text-sm',
-                m.role === 'user' ? 'bg-link/12' : 'bg-muted/60',
-              )}
-            >
-              <div className="whitespace-pre-wrap">{m.content}</div>
-              {m.tools?.length ? (
-                <ul className="mt-1.5 space-y-0.5">
-                  {m.tools.map((t, i) => (
-                    <li
-                      key={`${m.id}-${i}`}
-                      className="flex items-start gap-1.5 font-mono text-muted-foreground text-xs"
-                    >
-                      <Wrench className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-                      <span className="min-w-0 break-all">
-                        {t.name}({JSON.stringify(t.args)})
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {m.proposal ? (
-                <Proposal p={m.proposal} state={state} busy={busy} call={call} by={by} />
-              ) : null}
-            </div>
-          </div>
-        ))}
-        {busy === 'chat' ? <div className="text-muted-foreground text-sm">Thinking…</div> : null}
-        <div ref={end} />
-      </div>
-      <form
-        className="sticky bottom-0 mt-3 flex gap-2 bg-background pt-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send();
-        }}
-      >
-        <Input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Message the order agent"
-          aria-label="Message the order agent"
-          className="h-9"
-        />
-        <Button type="submit" size="icon" disabled={!!busy || !text.trim()} aria-label="Send">
-          <Send />
-        </Button>
-      </form>
-    </div>
   );
 }

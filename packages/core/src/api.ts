@@ -28,24 +28,6 @@ export type NodeRun = {
   endedAt?: number;
 };
 
-export type ChatMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  at: number;
-  /** Tools the assistant called while answering. */
-  tools?: { name: string; args: unknown; result: unknown }[];
-  /**
-   * An action the assistant prepared but did not take. Decisions and cancellations from chat are
-   * confirmed by a person on the order page, with the same undo window as any other decision.
-   */
-  proposal?: ChatProposal;
-};
-
-export type ChatProposal =
-  | { kind: 'decide'; nodeId: string; decision: 'approved' | 'rejected'; note?: string }
-  | { kind: 'cancel'; reason: string };
-
 /** The OrderAgent's synced state: everything the order page renders. */
 export type OrderState = {
   orderId: string | null;
@@ -57,7 +39,6 @@ export type OrderState = {
   waits: PendingWait[];
   vars: Record<string, unknown>;
   timeline: TimelineEntry[];
-  chat: ChatMessage[];
   /** Workflow instance currently driving the order. */
   instanceId: string | null;
   /** 1 for the first run; increments on each "continue as new". */
@@ -78,7 +59,6 @@ export const EMPTY_ORDER_STATE: OrderState = {
   waits: [],
   vars: {},
   timeline: [],
-  chat: [],
   instanceId: null,
   generation: 0,
   rollback: null,

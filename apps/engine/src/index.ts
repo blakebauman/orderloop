@@ -9,6 +9,7 @@ import { receiveEmail } from './email';
 
 export { OrderAgent } from './agent';
 export { EngineApi } from './api';
+export { AssistantAgent } from './assistant/agent';
 export { Replenish } from './replenish';
 export { OrderLoop } from './workflow';
 

@@ -1,0 +1,115 @@
+---
+title: The assistant
+description: The workspace assistant — opening it, what it can read, which actions wait for your confirmation, how roles apply, flow proposals, and what happens without the model.
+---
+
+The assistant is a chat panel for the whole workspace. Ask what needs attention, find orders,
+check stock, read a flow, or have it decide an approval, deliver an event, cancel an order, publish
+a flow or run the stock review. It answers from live data through tools, and anything that changes
+something stops for your confirmation first.
+
+It replaces the per-order chat and the flow editor's copilot bar. One assistant serves every page.
+
+## Opening it
+
+- The **Assistant** button in the top bar, or <kbd>⌘J</kbd> (<kbd>Ctrl</kbd>+<kbd>J</kbd>) anywhere,
+  which also closes it. On wide screens the panel reopens on your next visit if you left it open.
+- The **Ask** button on an order page or in the flow editor opens the panel about that order or flow.
+
+Enter sends, Shift+Enter starts a new line. **Stop** ends a reply in progress. A message written
+while a reply is still streaming is held, shown above the prompt where you can edit or remove it,
+and sent when the reply ends.
+
+### The context chip
+
+The chip in the panel's header says what "this" means: the order or flow open on the page, or
+**Everything** when you are elsewhere. Open the chip to switch between the page and the whole
+workspace. The page's context travels with each message you send. In the flow editor it includes
+the graph on screen, unsaved changes included.
+
+### The attention line
+
+The top of the panel always shows what is waiting on people, refreshed while the panel is open and
+after each reply, with links to each item:
+
+- open approvals, oldest first;
+- orders that failed or rolled back in the last 3 days;
+- orders that have waited on a business event for over a day.
+
+## What it can read
+
+Every role can read. The tools are `needs_attention`, `find_orders` (by status, type, customer,
+text, total, age), `get_order` (status, what it waits on, steps run, recent activity),
+`find_products` (stock, reserved, available, reorder points), `list_flows` and `get_flow` (a saved
+draft with its validation problems). Reads run without asking, and each shows as a row in the
+conversation.
+
+## Actions that ask first
+
+These tools never run on the model's say-so. The panel shows a confirm card for each; nothing is
+sent until you press the confirm button, and declining leaves everything as it was.
+
+| Action | Needs | Does |
+|---|---|---|
+| `decide_approval` | `approver` | Approves or rejects the approval an order waits on, with an optional note |
+| `deliver_event` | `operator` | Delivers a business event to the order waiting for it |
+| `cancel_order` | `operator` | Cancels the order and undoes what it did, as [Cancelling](/guides/approvals-and-events/#cancelling) |
+| `publish_flow` | `operator` | Publishes the flow's saved draft as the next version |
+| `run_stock_review` | `operator` | Starts the stock review now |
+
+The card is not the model's summary. It is resolved against live data when it appears, and states
+the consequence: for a decision, the order, its total and which step it goes on to; for a cancel,
+the effects it will undo and the reason; for a publish, what changed since the live version and
+that unsaved editor changes are not included; for the stock review, which SKUs are at or below
+their reorder point. When the action can't go ahead (already decided, nothing waiting for that
+event, the order has finished, the draft has errors, nothing to publish, or your role is too low)
+the card says why and offers no confirm.
+
+Confirming runs the action as you, after the engine re-checks your role and the order or flow
+again. The state can have changed since the card appeared, in which case the action is refused with
+the reason. An approval decided here has no 5-second undo window, because the confirm is the
+check. The audit trail names the actor as `<email> via assistant`: that string is the approval's
+`by`, or ends the cancel reason.
+
+## Roles
+
+The assistant works within your role (`viewer`, `approver`, `operator`, in order). A tool your role can't use is
+not offered to the model, and is refused if it is called anyway; the assistant says which role can.
+Every role can use the read tools. The role is re-read from your session when a tool runs, so a
+role change, a sign-out or a disabled account applies to an open panel at once. See
+[Team and roles](/guides/team-and-roles/).
+
+## Flow changes
+
+Ask for a change to a flow ("add a fraud check after credit"). The `propose_flow_change` tool
+(`operator`) drafts a whole new graph with the same copilot that creates flows, validates it, and
+returns the explanation, a count of what it adds, removes, edits and rewires, and any problems. It
+never saves anything. **Review in editor** opens the flow's editor with the proposal, where
+accepting it is one undoable edit that you can still save and publish. In the editor the draft
+builds on the graph on screen. A request that changes nothing says so, with no card.
+
+Creating a flow from a description still happens on the Flows page.
+
+## Without the model
+
+The assistant uses the model in `ASSISTANT_MODEL` (default `@cf/moonshotai/kimi-k2.6`) through
+Workers AI, and through AI Gateway when `AI_GATEWAY_ID` is set. It falls back to a deterministic
+rule-based model, which calls the same tools through the same confirm cards, when:
+
+- `AI_MODE` is `mock`;
+- the model errors; or
+- nothing useful arrives within 20 seconds.
+
+A reply from the fallback is labelled **Answered without the language model, from fixed rules**.
+It understands plain requests ("what needs attention", "add a risk score after
+credit check"), not open questions. See [AI nodes and the assistant](/guides/ai/).
+
+## Privacy
+
+Each person has one assistant and one conversation, kept in a Durable Object (`AssistantAgent`)
+named after their user id. The web app sets that name from your session, whatever the browser
+asks for, so nobody can open another person's thread. The conversation keeps the last 200 messages. **Conversation options** in the panel
+clears it. A reply that is in progress when the tab closes keeps streaming and is there when you
+come back. The shared workspace password and open local development each use a single shared
+assistant. Orders, flows and approvals are read from the same data the dashboard shows, so the
+assistant tells you nothing your role couldn't see.

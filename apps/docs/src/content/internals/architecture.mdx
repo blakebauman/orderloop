@@ -13,7 +13,8 @@ browser ──► orderloop-web (apps/web, React Router on Workers)
               │  R2: order documents
               ├── ENGINE service binding ──RPC──► orderloop-engine (apps/engine)
               │                                     ├─ EngineApi      WorkerEntrypoint (RPC)
-              └── /agents/order-agent/:id ─fetch──►  ├─ OrderAgent     Durable Object, one per order
+              ├── /agents/order-agent/:id ─fetch─►  ├─ OrderAgent     Durable Object, one per order
+              └── /agents/assistant-agent/* ─────►  ├─ AssistantAgent Durable Object, one per person
                                                     ├─ OrderLoop      Workflow, one instance per generation
                                                     ├─ Replenish      Workflow, daily cron
 inbound mail ── Email Routing ──email()────────────►├─ receiveEmail   email intake (email.ts)
@@ -27,7 +28,7 @@ inbound mail ── Email Routing ──email()───────────
 | `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations with seed data, flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
-| `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
+| `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, back office, `/api/v1` |
 | `apps/docs` (`@orderloop/docs`) | This site |
 
@@ -65,7 +66,7 @@ engine source.
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by HMAC with `WEBHOOK_SECRET`, not the password |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie), then `handleApi(request, caller)`, which checks each route's role |
-| `/agents/order-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket |
+| `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent), carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
 | everything else | React Router (UI routes guard themselves with `requireUser(request, role)`) |
 
@@ -148,10 +149,29 @@ the `documents` table (see [Data model](/internals/data-model/#r2-documents)).
 
 | State | Owner |
 |---|---|
-| Live run state of one order (nodes, edges, waits, vars, timeline, chat) | Its `OrderAgent` |
+| Live run state of one order (nodes, edges, waits, vars, timeline) | Its `OrderAgent` |
+| A person's assistant conversation | Their `AssistantAgent` |
 | Durable progress (memoized step results, sleeps, waits) | Its `OrderLoop` instance |
 | Order index for lists and filters (`orders` row) | D1, written by the agent's `syncIndex` |
 | Flows, versions, approvals, back office, webhook outbox, email intake log | D1 |
 | Invoices, POs, inbound documents and raw inbound email | R2 |
+
+## The assistant
+
+`AssistantAgent` (`apps/engine/src/assistant/agent.ts`) is an `AIChatAgent` from
+`@cloudflare/ai-chat`, one Durable Object per person (binding `ASSISTANT_AGENT`, migration `v2`).
+The panel in the web app talks to it over the proxied `/agents/assistant-agent/*` socket, never
+through `EngineRpc`. `onConnect` closes with `4403` unless the proxied principal's id is the
+instance name, and keeps the principal. The `@callable()` methods are `attention()`, the data for
+the top of the panel, and `preview(tool, input)`, which resolves an action against live data for
+its confirm card. Tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`. Reads run
+directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
+`run_stock_review` use `needsApproval`, and after the confirm `runAction`
+(`apps/engine/src/assistant/data.ts`) re-checks the role and the state and calls the order's
+`OrderAgent` (`decide`, `deliver`, `cancel`) or the `REPLENISH` Workflow as `<email> via
+assistant`. Every tool re-reads the person's session first (`livePrincipal` in
+`apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
+with the copilot and never saves. The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
+deterministic fallback in `assistant/model.ts`. See [The assistant](/guides/assistant/).
 
 See [OrderLoop Workflow](/internals/workflow/) and [OrderAgent](/internals/order-agent/).

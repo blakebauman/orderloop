@@ -12,9 +12,12 @@ import {
 } from '@orderloop/ui/dropdown-menu';
 import { cn } from '@orderloop/ui/lib/utils';
 import { eq, sql } from 'drizzle-orm';
-import { Menu, Monitor, Moon, Plus, Sun } from 'lucide-react';
+import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun } from 'lucide-react';
+import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLoaderData } from 'react-router';
+import { AssistantPanel } from '~/components/assistant/panel';
 import { Mark } from '~/components/mark';
+import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
 import { db } from '~/lib/env.server';
 import { type ThemeChoice, useTheme } from '~/lib/theme';
@@ -56,6 +59,48 @@ function PendingCount({ n }: { n: number }) {
 }
 
 export default function Shell() {
+  return (
+    <AssistantProvider>
+      <ShellFrame />
+    </AssistantProvider>
+  );
+}
+
+/** Opens and closes the assistant, from the top bar or with ⌘J anywhere. */
+function AssistantToggle() {
+  const { open, setOpen, focus } = useAssistant();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        if (open) setOpen(false);
+        else focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, setOpen, focus]);
+  return (
+    <button
+      type="button"
+      onClick={() => (open ? setOpen(false) : focus())}
+      aria-pressed={open}
+      title={open ? 'Close the assistant (⌘J)' : 'Ask the assistant (⌘J)'}
+      className={cn(
+        'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors',
+        open
+          ? 'border-foreground/25 bg-accent font-medium text-foreground'
+          : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
+      )}
+    >
+      <MessageSquareText className="size-3.5" aria-hidden="true" />
+      <span className="sr-only sm:not-sr-only">Assistant</span>
+      <kbd className="hidden font-sans text-[11px] text-muted-foreground lg:inline">⌘J</kbd>
+    </button>
+  );
+}
+
+function ShellFrame() {
   const { pending, auth, me, nav: showNav } = useLoaderData<typeof loader>();
   const operator = showNav && atLeast(me.role, 'operator');
   const nav = showNav ? NAV : [];
@@ -112,6 +157,7 @@ export default function Shell() {
             </NavLink>
           ) : null}
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+            {showNav ? <AssistantToggle /> : null}
             {operator ? (
               <Link
                 to="/orders/new"
@@ -175,9 +221,12 @@ export default function Shell() {
           </div>
         </div>
       </header>
-      <main id="main" className="min-w-0 flex-1">
-        <Outlet />
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 outline-none">
+          <Outlet />
+        </main>
+        {showNav ? <AssistantPanel /> : null}
+      </div>
     </div>
   );
 }

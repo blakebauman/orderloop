@@ -10,9 +10,16 @@
   "observability": { "enabled": true },
   "upload_source_maps": true,
   "durable_objects": {
-    "bindings": [{ "name": "ORDER_AGENT", "class_name": "OrderAgent" }]
+    "bindings": [
+      { "name": "ORDER_AGENT", "class_name": "OrderAgent" },
+      // The workspace assistant: one per person, holding their conversation.
+      { "name": "ASSISTANT_AGENT", "class_name": "AssistantAgent" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OrderAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["OrderAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] }
+  ],
   "workflows": [
     {
       // Interprets a pinned flow version for one order. One instance per order "generation".
@@ -43,6 +50,8 @@
   "vars": {
     // Text model for every structured AI call (JSON mode).
     "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    // Model for the workspace assistant: needs multi-turn tool calling.
+    "ASSISTANT_MODEL": "@cf/moonshotai/kimi-k2.6",
     // Optional AI Gateway id for caching, rate limits and logs. Empty = call Workers AI directly.
     "AI_GATEWAY_ID": "",
     // "live" calls Workers AI; "mock" uses deterministic heuristics (tests, offline dev).

@@ -1,7 +1,6 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
-  type ChatMessage,
   encodePrincipal,
   type OrderInput,
   type OrderState,
@@ -200,32 +199,6 @@ describe('B2B order', () => {
     expect(done.nodes.reserve!.status).toBe('skipped');
     const decided = await db().select().from(approvals).where(eq(approvals.orderId, orderId)).get();
     expect(decided).toMatchObject({ status: 'rejected', decidedBy: 'dana', note: 'Over limit' });
-  });
-
-  it('prepares chat approvals and cancels for a person to confirm, without acting', async () => {
-    await introspect();
-    const { orderId } = await startOrder(env, {
-      flowId: 'tpl-b2b-order',
-      input: input({
-        type: 'b2b_order',
-        customerId: 'cus_contoso',
-        lines: [{ sku: 'WID-200', qty: 100 }],
-      }),
-    });
-    await waitingOn(orderId, (x) => x.waits.some((w) => w.kind === 'approval'), 'approval');
-
-    // The DO stub types chat() loosely; the agent returns the assistant's ChatMessage.
-    const approve = (await agent(orderId).chat('approve it')) as ChatMessage;
-    expect(approve.proposal).toEqual({ kind: 'decide', nodeId: 'approval', decision: 'approved' });
-    const cancel = (await agent(orderId).chat('cancel this order')) as ChatMessage;
-    expect(cancel.proposal).toMatchObject({ kind: 'cancel' });
-
-    // Nothing was decided or cancelled: the order still waits on the same approval.
-    const s = await state(orderId);
-    expect(s.status).toBe('waiting');
-    expect(s.waits.map((w) => w.nodeId)).toEqual(['approval']);
-    const pending = await db().select().from(approvals).where(eq(approvals.orderId, orderId));
-    expect(pending).toMatchObject([{ status: 'pending' }]);
   });
 
   it('runs the dunning loop three times, then sends the invoice to collections', async () => {
@@ -851,7 +824,7 @@ describe('agent socket roles', () => {
     // Opened as an approver, then demoted: the open page gets the new role.
     const pat = await who('approver', 'pat@example.com');
     const page = await socket(orderId, pat);
-    expect((await page.call('chat', ['status?'])).success).toBe(true);
+    expect((await page.call('whoami', [])).success).toBe(true);
     await db().update(users).set({ role: 'viewer' }).where(eq(users.id, pat.id));
     expect(await page.call('decide', ['mgr', 'approved'])).toMatchObject({
       success: false,
@@ -859,7 +832,7 @@ describe('agent socket roles', () => {
     });
     // Disabled: the session no longer counts, so even reading through the socket stops.
     await db().update(users).set({ disabledAt: Date.now() }).where(eq(users.id, pat.id));
-    expect(await page.call('chat', ['status?'])).toMatchObject({
+    expect(await page.call('whoami', [])).toMatchObject({
       success: false,
       error: 'Your sign-in has ended. Reload the page to sign in again.',
     });
@@ -873,7 +846,7 @@ describe('agent socket roles', () => {
     other.close();
     // A forged session id can't stand in for a real one.
     const forged = await socket(orderId, { ...sam, session: 'made-up' });
-    expect((await forged.call('chat', ['hi'])).success).toBe(false);
+    expect((await forged.call('whoami', [])).success).toBe(false);
     forged.close();
     expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
     await agent(orderId).cancel('Cleanup');
@@ -902,7 +875,7 @@ describe('agent socket roles', () => {
       .set({ lastSeenAt: Date.now() - 10 * 60_000 })
       .where(eq(sessions.tokenHash, kim.session!));
     const page = await socket(orderId, kim);
-    expect((await page.call('chat', ['status?'])).success).toBe(true);
+    expect((await page.call('whoami', [])).success).toBe(true);
     expect(Date.now() - (await seen())!).toBeLessThan(60_000);
 
     // Idle for longer than the limit: refused, although the session hasn't reached its expiry.
@@ -910,7 +883,7 @@ describe('agent socket roles', () => {
       .update(sessions)
       .set({ lastSeenAt: Date.now() - SESSION_IDLE_MS - 1 })
       .where(eq(sessions.tokenHash, kim.session!));
-    expect(await page.call('chat', ['status?'])).toMatchObject({
+    expect(await page.call('whoami', [])).toMatchObject({
       success: false,
       error: 'Your sign-in has ended. Reload the page to sign in again.',
     });

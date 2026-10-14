@@ -13,11 +13,15 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/provider": "catalog:",
+    "@cloudflare/ai-chat": "catalog:",
     "@orderloop/core": "workspace:*",
     "@orderloop/db": "workspace:*",
     "agents": "catalog:",
+    "ai": "catalog:",
     "drizzle-orm": "catalog:",
     "postal-mime": "^4.0.5",
+    "workers-ai-provider": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
