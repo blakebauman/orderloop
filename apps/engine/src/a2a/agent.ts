@@ -16,6 +16,8 @@ import {
   SSE_HEADERS,
   type Task,
 } from '@a2a-js/sdk';
+import { isLegacyJsonRpcMethod } from '@a2a-js/sdk/compat/v0_3';
+import { LegacyJsonRpcTransportHandler } from '@a2a-js/sdk/compat/v0_3/server';
 import { TaskNotCancelableError } from '@a2a-js/sdk/errors';
 import {
   DefaultExecutionEventBusManager,
@@ -25,6 +27,7 @@ import {
   validateVersion,
 } from '@a2a-js/sdk/server';
 import {
+  A2A_LEGACY_PROTOCOL_VERSION,
   A2A_PROTOCOL_VERSION,
   agentCard,
   decodePrincipal,
@@ -75,6 +78,7 @@ class A2AHandler extends DefaultRequestHandler {
 
 export class A2AAgent extends DurableObject<Env> {
   private readonly transport: JsonRpcTransportHandler;
+  private readonly legacy: LegacyJsonRpcTransportHandler;
   private readonly store: SqlTaskStore;
   private readonly push: PushSender;
 
@@ -86,9 +90,15 @@ export class A2AAgent extends DurableObject<Env> {
     this.store = new SqlTaskStore(ctx.storage.sql, env, name);
     const pushStore = new SqlPushStore(ctx.storage.sql);
     this.push = new PushSender(ctx.storage, pushStore);
-    this.transport = new JsonRpcTransportHandler(
-      new A2AHandler(env, this.store, new OrderLoopExecutor(env, this.store), pushStore, this.push),
+    const handler = new A2AHandler(
+      env,
+      this.store,
+      new OrderLoopExecutor(env, this.store),
+      pushStore,
+      this.push,
     );
+    this.transport = new JsonRpcTransportHandler(handler);
+    this.legacy = new LegacyJsonRpcTransportHandler(handler);
   }
 
   /**
@@ -133,23 +143,29 @@ export class A2AAgent extends DurableObject<Env> {
     const { session: _session, ...principal } = proxied;
     const body = await request.text();
 
-    // No header means a 1.0 client that didn't say; anything else must be a version we speak.
-    const version = request.headers.get('a2a-version') || A2A_PROTOCOL_VERSION;
-    try {
-      validateVersion(version, CARD);
-    } catch (err) {
-      return Response.json({
-        jsonrpc: '2.0',
-        id: rpcId(body),
-        error: JsonRpcTransportHandler.mapToJSONRPCError(err),
-      });
-    }
+    // A 0.3 client is known by its method names (message/send, tasks/get, …); the SDK's 0.3
+    // transport translates them to the same handler. Anyone else must speak a version we do; no
+    // header with 1.0 method names is a 1.0 client that didn't say.
+    const legacy = isLegacyJsonRpcMethod(rpcMethod(body));
+    const version = legacy
+      ? A2A_LEGACY_PROTOCOL_VERSION
+      : request.headers.get('a2a-version') || A2A_PROTOCOL_VERSION;
+    if (!legacy)
+      try {
+        validateVersion(version, CARD);
+      } catch (err) {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: rpcId(body),
+          error: JsonRpcTransportHandler.mapToJSONRPCError(err),
+        });
+      }
 
     const context = new ServerCallContext({
       user: new PrincipalUser(principal),
       requestedVersion: version,
     });
-    const result = await this.transport.handle(body, context);
+    const result = await (legacy ? this.legacy : this.transport).handle(body, context);
     if (!(Symbol.asyncIterator in result)) return Response.json(result);
 
     const encoder = new TextEncoder();
@@ -167,6 +183,14 @@ export class A2AAgent extends DurableObject<Env> {
       },
     });
     return new Response(stream, { headers: SSE_HEADERS });
+  }
+}
+
+function rpcMethod(body: string): unknown {
+  try {
+    return (JSON.parse(body) as { method?: unknown }).method;
+  } catch {
+    return undefined;
   }
 }
 

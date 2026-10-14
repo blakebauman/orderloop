@@ -1,4 +1,11 @@
-import { AGENT_CARD_PATH, agentCard, encodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
+import {
+  AGENT_CARD_PATH,
+  agentCard,
+  encodePrincipal,
+  isLegacyA2AVersion,
+  legacyAgentCard,
+  PRINCIPAL_HEADER,
+} from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import {
   handleApi,
@@ -29,10 +36,12 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
 
-    // A2A discovery: the Agent Card is public, like the OpenAPI document.
+    // A2A discovery: the Agent Card is public, like the OpenAPI document. A 1.0 client says so
+    // (A2A-Version: 1.0); anyone else gets the 0.3 shape, which embeds the 1.0 interfaces.
     if (url.pathname === AGENT_CARD_PATH && request.method === 'GET') {
-      return Response.json(agentCard(url.origin), {
-        headers: { 'cache-control': 'public, max-age=300' },
+      const legacy = isLegacyA2AVersion(request.headers.get('a2a-version'));
+      return Response.json(legacy ? legacyAgentCard(url.origin) : agentCard(url.origin), {
+        headers: { 'cache-control': 'public, max-age=300', vary: 'A2A-Version' },
       });
     }
 
