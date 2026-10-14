@@ -501,7 +501,9 @@ function FirstRun({ onAsk }: { onAsk: (text: string) => void }) {
     ctx === 'order'
       ? [
           'Why is this order where it is?',
-          'What happens if it’s approved?',
+          ...(page.kind === 'order' && page.awaitingApproval
+            ? ['What happens if it’s approved?']
+            : []),
           'Summarize its activity',
         ]
       : ctx === 'flow'

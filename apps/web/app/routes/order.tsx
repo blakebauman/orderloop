@@ -180,9 +180,15 @@ export default function OrderPage() {
   };
   const assistant = useAssistant();
   const title = order.title || ORDER_MODEL_LABELS[order.model as OrderModel];
+  const awaitingApproval = state.waits.some((w) => w.kind === 'approval');
   usePageContext(
-    () => ({ kind: 'order', id: orderId, label: `${title} ${orderRef(orderId)}` }),
-    [orderId, title],
+    () => ({
+      kind: 'order',
+      id: orderId,
+      label: `${title} ${orderRef(orderId)}`,
+      awaitingApproval,
+    }),
+    [orderId, title, awaitingApproval],
   );
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
