@@ -2,9 +2,19 @@ import { ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
-import { useState } from 'react';
-import { data, Form, Link, redirect, useActionData, useFetcher, useLoaderData } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import {
+  data,
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+} from 'react-router';
 import { Ago } from '~/components/ago';
+import { CopyButton } from '~/components/copy-button';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
@@ -41,7 +51,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /** One-time secrets come back from the action and are shown once, never stored in the clear. */
-type Secret = { label: string; value: string };
+type Secret = { kind: 'password' | 'token'; label: string; value: string };
 
 export async function action({ request }: Route.ActionArgs) {
   const me = await requireUser(request, 'operator');
@@ -68,14 +78,26 @@ export async function action({ request }: Route.ActionArgs) {
           name: str('name'),
           role: str('role'),
         });
-        return { secret: { label: `Password for ${r.email}`, value: r.password } as Secret };
+        return {
+          secret: {
+            kind: 'password',
+            label: `Password for ${r.email}`,
+            value: r.password,
+          } as Secret,
+        };
       }
       case 'role':
         await setRole(request, me, str('id'), str('role'));
         return { ok: true };
       case 'reset': {
         const r = await resetPassword(request, me, str('id'));
-        return { secret: { label: `New password for ${r.email}`, value: r.password } as Secret };
+        return {
+          secret: {
+            kind: 'password',
+            label: `New password for ${r.email}`,
+            value: r.password,
+          } as Secret,
+        };
       }
       case 'two-factor-requirement': {
         const next = str('required');
@@ -97,7 +119,9 @@ export async function action({ request }: Route.ActionArgs) {
           role: str('role'),
           lifetime: str('lifetime'),
         });
-        return { secret: { label: `API token “${r.name}”`, value: r.token } as Secret };
+        return {
+          secret: { kind: 'token', label: `API token “${r.name}”`, value: r.token } as Secret,
+        };
       }
       case 'revoke':
         await revokeToken(request, me, str('id'));
@@ -135,13 +159,17 @@ function RoleSelect({
   name = 'role',
   value,
   onChange,
+  label,
 }: {
   name?: string;
   value?: string;
   onChange?: (role: Role) => void;
+  /** For a select with no visible label of its own, such as one per table row. */
+  label?: string;
 }) {
   return (
     <NativeSelect
+      aria-label={label}
       name={name}
       defaultValue={value ?? 'viewer'}
       className="h-8 w-full"
@@ -165,6 +193,15 @@ export default function Team() {
   const error = shown && 'error' in shown ? shown.error : null;
   const busy = fetcher.state !== 'idle';
   const [tokenRole, setTokenRole] = useState<Role>('operator');
+  const secretRef = useRef<HTMLDivElement>(null);
+  const addPerson = useRef<HTMLFormElement>(null);
+  const addToken = useRef<HTMLFormElement>(null);
+  // A new secret takes focus (it's what to act on next) and the form that made it starts fresh.
+  useEffect(() => {
+    if (!secret) return;
+    secretRef.current?.focus();
+    (secret.kind === 'token' ? addToken : addPerson).current?.reset();
+  }, [secret]);
   if (me.kind === 'open') return <FirstOperator error={error} />;
   return (
     <>
@@ -184,14 +221,23 @@ export default function Team() {
           </Section>
 
           {secret ? (
-            <div role="status" className="rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
+            <div
+              ref={secretRef}
+              tabIndex={-1}
+              className="rounded-md border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+            >
               <p className="font-medium">{secret.label}</p>
-              <p className="mt-0.5 text-muted-foreground text-xs">
-                Copy it now. It is shown once and stored only as a hash.
+              <p className="mt-0.5 max-w-[75ch] text-muted-foreground text-xs">
+                {secret.kind === 'password'
+                  ? 'Send it to them privately. It is temporary: they choose their own when they first sign in. It is shown once.'
+                  : 'Copy it now. It is shown once and stored only as a hash.'}
               </p>
-              <code className="mt-2 block select-all break-all rounded-sm bg-card px-2 py-1.5 font-mono text-sm">
-                {secret.value}
-              </code>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <code className="min-w-0 flex-1 select-all break-all rounded-sm bg-card px-2 py-1.5 font-mono text-sm">
+                  {secret.value}
+                </code>
+                <CopyButton text={secret.value} />
+              </div>
             </div>
           ) : null}
           {error ? (
@@ -231,6 +277,7 @@ export default function Team() {
                           <div className="text-muted-foreground text-xs">
                             {p.email}
                             {p.twoFactorAt ? ' · two-factor' : ''}
+                            {p.passwordChangeDue ? ' · temporary password' : ''}
                             {p.disabledAt ? ' · disabled' : ''}
                           </div>
                         </td>
@@ -238,7 +285,7 @@ export default function Team() {
                           <fetcher.Form method="post" className="flex items-center gap-1.5">
                             <input type="hidden" name="intent" value="role" />
                             <input type="hidden" name="id" value={p.id} />
-                            <RoleSelect value={p.role as Role} />
+                            <RoleSelect value={p.role as Role} label={`Role for ${p.name}`} />
                             <Button size="sm" variant="outline" type="submit" disabled={busy}>
                               Save
                             </Button>
@@ -249,21 +296,23 @@ export default function Team() {
                         </td>
                         <td className="px-4 py-2">
                           <div className="flex justify-end gap-1.5">
-                            <fetcher.Form method="post">
-                              <input type="hidden" name="intent" value="reset" />
-                              <input type="hidden" name="id" value={p.id} />
-                              <Button size="sm" variant="ghost" type="submit" disabled={busy}>
-                                Reset password
-                              </Button>
-                            </fetcher.Form>
+                            <Confirmed
+                              fetcher={fetcher}
+                              intent="reset"
+                              id={p.id}
+                              busy={busy}
+                              label="Reset password"
+                              question={`Give ${p.name} a temporary password and sign them out everywhere?`}
+                            />
                             {p.twoFactorAt && p.id !== me.id ? (
-                              <fetcher.Form method="post">
-                                <input type="hidden" name="intent" value="reset-two-factor" />
-                                <input type="hidden" name="id" value={p.id} />
-                                <Button size="sm" variant="ghost" type="submit" disabled={busy}>
-                                  Reset two-factor
-                                </Button>
-                              </fetcher.Form>
+                              <Confirmed
+                                fetcher={fetcher}
+                                intent="reset-two-factor"
+                                id={p.id}
+                                busy={busy}
+                                label="Reset two-factor"
+                                question={`Turn off ${p.name}’s two-factor sign-in so they can set it up again?`}
+                              />
                             ) : null}
                             {p.id !== me.id ? (
                               <fetcher.Form method="post">
@@ -292,6 +341,7 @@ export default function Team() {
               </Empty>
             )}
             <fetcher.Form
+              ref={addPerson}
               method="post"
               className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem_auto]"
             >
@@ -362,6 +412,7 @@ export default function Team() {
               <Empty>No API tokens. Systems that call the REST API need one.</Empty>
             )}
             <fetcher.Form
+              ref={addToken}
               method="post"
               className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem_auto]"
             >
@@ -389,7 +440,10 @@ export default function Team() {
                 Create token
               </Button>
               {/* The role is the boundary: say what this token will be able to do before it exists. */}
-              <p className="text-muted-foreground text-xs sm:col-span-4" aria-live="polite">
+              <p
+                className="max-w-[75ch] text-muted-foreground text-xs sm:col-span-4"
+                aria-live="polite"
+              >
                 A token with the {ROLE_LABELS[tokenRole].toLowerCase()} role:{' '}
                 {ROLE_GUIDE[tokenRole].charAt(0).toLowerCase() + ROLE_GUIDE[tokenRole].slice(1)}
               </p>
@@ -401,8 +455,51 @@ export default function Team() {
   );
 }
 
+/** An action that can't be taken back, confirmed in place before it runs. */
+function Confirmed({
+  fetcher,
+  intent,
+  id,
+  busy,
+  label,
+  question,
+}: {
+  fetcher: ReturnType<typeof useFetcher<typeof action>>;
+  intent: string;
+  id: string;
+  busy: boolean;
+  label: string;
+  question: string;
+}) {
+  const [asking, setAsking] = useState(false);
+  if (!asking)
+    return (
+      <Button size="sm" variant="ghost" type="button" onClick={() => setAsking(true)}>
+        {label}…
+      </Button>
+    );
+  return (
+    <fetcher.Form
+      method="post"
+      className="flex flex-wrap items-center justify-end gap-1.5"
+      onSubmit={() => setAsking(false)}
+    >
+      <input type="hidden" name="intent" value={intent} />
+      <input type="hidden" name="id" value={id} />
+      <span className="max-w-64 text-right text-xs">{question}</span>
+      <Button size="sm" variant="destructive" type="submit" disabled={busy} autoFocus>
+        {label}
+      </Button>
+      <Button size="sm" variant="ghost" type="button" onClick={() => setAsking(false)}>
+        Keep
+      </Button>
+    </fetcher.Form>
+  );
+}
+
 /** An open deployment: whoever sets it up creates the first operator account, which turns sign-in on. */
 function FirstOperator({ error }: { error: string | null }) {
+  const creating = useNavigation().state === 'submitting';
   return (
     <>
       <PageHeader
@@ -418,7 +515,13 @@ function FirstOperator({ error }: { error: string | null }) {
                 From then on everyone signs in, and you add people and API tokens here.
               </p>
               <Field label="Email">
-                <Input name="email" type="email" required placeholder="name@company.com" />
+                <Input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="username"
+                  placeholder="name@company.com"
+                />
               </Field>
               <Field label="Name" hint="Optional">
                 <Input name="name" />
@@ -437,7 +540,9 @@ function FirstOperator({ error }: { error: string | null }) {
                   {error}
                 </p>
               ) : null}
-              <Button type="submit">Create account and sign in</Button>
+              <Button type="submit" disabled={creating}>
+                {creating ? 'Creating…' : 'Create account and sign in'}
+              </Button>
             </Form>
           </Section>
           <Section title="Roles you can give people and tokens">
@@ -495,7 +600,7 @@ function TwoFactorRequirementForm({
           Save
         </Button>
       </fetcher.Form>
-      <p className="mt-2 text-muted-foreground text-xs">
+      <p className="mt-2 max-w-[75ch] text-muted-foreground text-xs">
         People in these roles without two-factor sign-in can only use their Account page until they
         set it up, and can’t turn it off. The workspace password and API tokens aren’t affected.
         {required !== 'off' && missing

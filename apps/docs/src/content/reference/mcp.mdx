@@ -97,7 +97,9 @@ using an API token acts as `token:<name>`.
 
 ## Disconnecting
 
-**Account** lists **Connected apps** (MCP clients and A2A agents alike): the app's name, the role you granted and when it connected.
+**Account** lists **Connected apps** (MCP clients and A2A agents alike): the app's name, whether it
+connected over MCP or A2A, the address its access goes to, the role you granted and when it
+connected.
 **Disconnect** revokes the grant, and the app has to be connected again. Connecting and
 disconnecting are recorded in the [audit log](/guides/team-and-roles/#audit-log) as
 `oauth.app_connected` and `oauth.app_disconnected`. Access tokens last one hour and refresh
@@ -115,7 +117,8 @@ tokens 30 days.
 - **Checked on every request.** The web Worker re-reads the person each time. A disabled or deleted
   person's grants stop working at once. The role is the lower of the one granted and the
   person's current role, so demoting someone narrows the apps they connected. A person whose role
-  must use two-factor sign-in and hasn't set it up gets `403`.
+  must use two-factor sign-in and hasn't set it up, or who is still on a temporary password, gets
+  `403`.
 - **Credentials stay in the web Worker.** It resolves the caller, then forwards the request to
   the engine over the service binding with the `x-orderloop-principal` header; `Authorization`
   and cookies are removed first. The engine has no public route, answers `401` without that

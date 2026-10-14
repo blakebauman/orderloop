@@ -26,7 +26,7 @@ import type { Route } from './+types/shell';
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
   // Until their two-factor sign-in is set up, a person sees only their Account page.
-  if (me.twoFactorDue) return { pending: 0, auth: true, me, nav: false };
+  if (me.twoFactorDue || me.passwordChangeDue) return { pending: 0, auth: true, me, nav: false };
   const pending = await db()
     .select({ n: sql<number>`count(*)` })
     .from(approvals)
@@ -186,7 +186,9 @@ function ShellFrame() {
                 aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
               >
                 <UserRound className="size-4" aria-hidden="true" />
-                <span className="max-w-32 truncate">{ROLE_LABELS[me.role]}</span>
+                <span className="max-w-32 truncate">
+                  {me.kind === 'user' ? me.name : ROLE_LABELS[me.role]}
+                </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <AccountItems me={me} auth={auth} />

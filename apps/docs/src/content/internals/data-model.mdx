@@ -41,6 +41,8 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0020_fulfillment.sql` | `locations`, `location_stock`, `entitlements`; `products.kind`, `reservations.location_id`, `stock_movements.location_id`; two demo stores, digital products and store stock |
 | `0021_balance_entries.sql` | `balance_entries`, the receivables ledger |
 | `0022_store_coordinates.sql` | `locations.latitude` and `longitude`, seeded for both demo stores; `loc_mission` now ships |
+| `0023_order_waiting_at.sql` | `orders.waiting_at` and `waiting_since`, where an order waits and since when |
+| `0024_password_change_due.sql` | `users.password_change_due`, set while a person is on a temporary password |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -126,7 +128,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 
 | Table | Purpose |
 |---|---|
-| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at`, and for [two-factor sign-in](/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once) |
+| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; reserved for an outside identity provider's subject), `last_login_at`, `disabled_at`, and for [two-factor sign-in](/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), and `password_change_due` (the password was set by an operator; see [temporary passwords](/guides/team-and-roles/#temporary-passwords)) |
 | `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page) |
 | `recovery_codes` | One-use two-factor recovery codes: `code_hash` (SHA-256 of the code, lowercased without the dash), `user_id`. A row is deleted when its code is used |
 | `sign_in_challenges` | A correct password waiting for its two-factor code: `token_hash` (SHA-256 of the `__Host-ol_2fa` cookie), `user_id`, `expires_at` (10 minutes). Deleted on success; expired rows are dropped at the next sign-in |

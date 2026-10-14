@@ -36,6 +36,7 @@ export async function listTeam() {
         lastLoginAt: users.lastLoginAt,
         disabledAt: users.disabledAt,
         twoFactorAt: users.totpEnabledAt,
+        passwordChangeDue: users.passwordChangeDue,
       })
       .from(users)
       .orderBy(users.email),
@@ -137,6 +138,7 @@ export async function addUser(
       name: input.name.trim() || email.split('@')[0]!,
       role: r,
       passwordHash: await hashPassword(password),
+      passwordChangeDue: true,
       createdAt: Date.now(),
     });
   forgetUserCount();
@@ -175,7 +177,7 @@ export async function resetPassword(request: Request, by: Principal, id: string)
   const password = generatePassword();
   await db()
     .update(users)
-    .set({ passwordHash: await hashPassword(password) })
+    .set({ passwordHash: await hashPassword(password), passwordChangeDue: true })
     .where(eq(users.id, id));
   await db().delete(sessions).where(eq(sessions.userId, id));
   await audit(request, 'team.password_reset', { actor: by, target: user.email });
@@ -260,7 +262,7 @@ export async function changeOwnPassword(
   if (problem) throw new TeamError(problem);
   await db()
     .update(users)
-    .set({ passwordHash: await hashPassword(next) })
+    .set({ passwordHash: await hashPassword(next), passwordChangeDue: false })
     .where(eq(users.id, by.id));
   await audit(request, 'auth.password_changed', { actor: by, target: user.email });
 }

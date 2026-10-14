@@ -22,20 +22,24 @@ the local development default. To turn sign-in on, open **Set up sign-in** in th
 page) and create your operator account with a password you choose. You are signed in as it, and
 from then on everyone signs in.
 
-With `APP_PASSWORD` set, sign-in is on from the start. Sign in with no email and the workspace
-password to reach the Team page as an operator. The password stays a break-glass operator sign-in
+With `APP_PASSWORD` set, sign-in is on from the start. On the sign-in page, choose **Use the
+workspace password instead** and enter it to reach the Team page as an operator. (The form sends no
+email; the REST API's equivalent is the password as a bearer token.) The password stays a break-glass operator sign-in
 and API credential; it has no identity, so its decisions are recorded as `operator`.
 
 ## The Team page
 
 Operators manage people and tokens at `/team`:
 
-- **Add person:** email, optional name and role. The page shows a generated 20-character password
-  once; hand it over and ask them to change it on their **Account** page.
+- **Add person:** email, optional name and role. The page shows a generated 20-character
+  [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
+  privately.
 - **Role:** change and save. You can't lower your own role.
-- **Reset password:** shows a new one-time password and signs the person out everywhere.
+- **Reset password:** after you confirm, gives the person a new temporary password and signs them
+  out everywhere.
 - **Disable / Enable:** a disabled person can't sign in, and their sessions end. You can't disable yourself.
-- **Reset two-factor:** for someone who has lost their phone and their recovery codes. It turns
+- **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
+  confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. You can't reset your own.
 - Without `APP_PASSWORD`, the last active operator can't be demoted or disabled, so someone can
@@ -50,6 +54,14 @@ ends 30 days after sign-in, or after 7 days without use, whichever comes first
 (`SESSION_MAX_MS` and `SESSION_IDLE_MS` in `packages/core/src/roles.ts`). Pages and the order page's
 live connection both count as use, recorded at most every 5 minutes. Signing out deletes the
 session.
+
+### Temporary passwords
+
+A password an operator sets (a new person's, or a reset) is temporary. Signing in with it works,
+but until the person chooses their own on the **Account** page, every other page sends them there,
+and the REST API, MCP, A2A, the order page's live connection and order documents answer `403`.
+Choosing a new password ends it, and the Team page marks people still on one with
+"temporary password". It is `users.password_change_due` in D1.
 
 ### Your sessions
 
@@ -67,10 +79,12 @@ the code the app shows and your password to turn it on. From then on, after a co
 sign-in goes to `/login/two-factor` and asks for the app's current 6-digit code. You have 10
 minutes to enter it.
 
-Turning it on shows 10 recovery codes once, like `k7mqp-3xw9d`. Each one signs you in once instead
-of an app code, for a lost or broken phone; the Account page shows how many are left. **New recovery
-codes** replaces them all, and **Turn off** removes two-factor sign-in; both ask for your password.
-If you have no phone and no codes left, an operator can **Reset two-factor** on the Team page.
+Turning it on shows 10 recovery codes once, like `k7mqp-3xw9d`, with **Copy** and **Download**;
+**I've saved them** moves on. Each code signs you in once instead of an app code, for a lost or
+broken phone (on the sign-in step, **Use a recovery code**); the Account page shows how many are
+left and warns at three. **New recovery codes** replaces them all, and **Turn off** removes
+two-factor sign-in after a confirmation; each asks for your password. If you have no phone and no
+codes left, an operator can **Reset two-factor** on the Team page.
 
 Codes are time-based one-time passwords (RFC 6238: HMAC-SHA1, 30-second steps, 6 digits). The code
 for the step before or after the current one is accepted too, in case the phone's clock is a little
@@ -126,8 +140,9 @@ decide approvals but not start orders. Approval decisions made with a token are 
 
 MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
 you sign in (two-factor included) and choose a role. You can grant your own role or a lower one,
-never a higher one. **Account** lists **Connected apps**, each with its role and when it
-connected, and **Disconnect** ends it. Every request from a connected app re-reads you: if you are
+never a higher one. **Account** lists **Connected apps**, each with whether it is an AI client
+(MCP) or an agent (A2A), the address its access goes to, its role and when it connected;
+**Disconnect** ends it after a confirmation. Every request from a connected app re-reads you: if you are
 disabled it stops working, and its role is the lower of what you granted and what you have now. What
 it does is recorded as `<email> via MCP` or `<email> via A2A`. A grant is for one endpoint, so
 an app that uses both is connected twice. See [MCP server](/reference/mcp/) and

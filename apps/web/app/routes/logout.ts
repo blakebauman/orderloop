@@ -1,9 +1,12 @@
 import { redirect } from 'react-router';
 import { signOut } from '~/lib/auth.server';
+import { nextPath } from '~/lib/next-path';
 import type { Route } from './+types/logout';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const headers = new Headers();
   for (const c of await signOut(request)) headers.append('set-cookie', c);
-  return redirect('/login', { headers });
+  // "Not you?" on the consent page signs out and comes back to it as someone else.
+  const next = nextPath(request);
+  return redirect(next === '/' ? '/login' : `/login?next=${encodeURIComponent(next)}`, { headers });
 }

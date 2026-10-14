@@ -1,6 +1,15 @@
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { data, Form, Link, redirect, useActionData, useLoaderData } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import {
+  data,
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from 'react-router';
 import { Mark } from '~/components/mark';
 import {
   clearChallengeCookie,
@@ -56,45 +65,64 @@ export async function action({ request }: Route.ActionArgs) {
 export default function LoginTwoFactor() {
   const { email } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
+  const busy = useNavigation().state === 'submitting';
+  // Authenticator codes are digits (a number keypad on phones); recovery codes have letters.
+  const [recovery, setRecovery] = useState(false);
+  const code = useRef<HTMLInputElement>(null);
+  const error = result?.error;
+  useEffect(() => {
+    if (error) code.current?.select();
+  }, [error]);
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4">
       <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">Two-factor sign-in</h1>
         <p className="mt-1 text-muted-foreground text-sm">
-          Enter the 6-digit code from your authenticator app for {email}.
+          {recovery
+            ? `Enter one of your recovery codes for ${email}. Each works once.`
+            : `Enter the 6-digit code from your authenticator app for ${email}.`}
         </p>
         <label className="mt-5 block text-sm" htmlFor="code">
-          Code
+          {recovery ? 'Recovery code' : 'Code'}
         </label>
         <Input
+          ref={code}
+          key={recovery ? 'recovery' : 'app'}
           id="code"
           name="code"
           required
           autoFocus
-          autoComplete="one-time-code"
+          inputMode={recovery ? 'text' : 'numeric'}
+          autoComplete={recovery ? 'off' : 'one-time-code'}
           spellCheck={false}
           className="mt-1 font-mono"
-          aria-invalid={result?.error ? true : undefined}
-          aria-describedby="code-hint"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'code-error' : undefined}
         />
-        <p id="code-hint" className="mt-1.5 text-muted-foreground text-xs">
-          Lost your phone? Enter one of your recovery codes instead. Each works once.
-        </p>
-        {result?.error ? (
-          <p className="mt-2 text-destructive text-sm" role="alert">
-            {result.error}
+        {error ? (
+          <p id="code-error" className="mt-2 text-destructive text-sm" role="alert">
+            {error}
           </p>
         ) : null}
-        <Button type="submit" className="mt-4 w-full">
-          Verify
+        <Button type="submit" className="mt-4 w-full" disabled={busy}>
+          {busy ? 'Verifying…' : 'Verify'}
         </Button>
-        <p className="mt-3 text-muted-foreground text-xs">
-          No codes left? Ask an operator to reset your two-factor sign-in.{' '}
-          <Link to="/logout" className="text-link hover:underline">
-            Start over
-          </Link>
-        </p>
+        <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
+          <button
+            type="button"
+            className="text-link hover:underline"
+            onClick={() => setRecovery((r) => !r)}
+          >
+            {recovery ? 'Use a code from your app instead' : 'Lost your phone? Use a recovery code'}
+          </button>
+          <p>
+            No codes left? Ask an operator to reset your two-factor sign-in.{' '}
+            <Link to="/logout" className="text-link hover:underline">
+              Use a different account
+            </Link>
+          </p>
+        </div>
       </Form>
     </main>
   );

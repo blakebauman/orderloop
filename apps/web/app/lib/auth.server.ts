@@ -119,9 +119,10 @@ export async function sessionId(request: Request): Promise<string | undefined> {
 
 /**
  * A browser caller. `twoFactorDue` marks a person whose role must use two-factor sign-in but who
- * hasn't set it up: until they do, they may only use their Account page.
+ * hasn't set it up; `passwordChangeDue`, one still on a password an operator set. Until they put it
+ * right, they may only use their Account page.
  */
-export type Caller = Principal & { twoFactorDue?: true };
+export type Caller = Principal & { twoFactorDue?: true; passwordChangeDue?: true };
 
 /** The signed-in person (or shared-password operator) for a browser request, or null. */
 export async function principal(request: Request): Promise<Caller | null> {
@@ -137,6 +138,7 @@ export async function principal(request: Request): Promise<Caller | null> {
         name: users.name,
         role: users.role,
         totpEnabledAt: users.totpEnabledAt,
+        passwordChangeDue: users.passwordChangeDue,
         seen: sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`,
       })
       .from(sessions)
@@ -152,7 +154,7 @@ export async function principal(request: Request): Promise<Caller | null> {
       )
       .get();
     if (row) {
-      const { seen, totpEnabledAt, ...person } = row;
+      const { seen, totpEnabledAt, passwordChangeDue, ...person } = row;
       if (now - seen > SESSION_TOUCH_MS)
         await db()
           .update(sessions)
@@ -160,7 +162,13 @@ export async function principal(request: Request): Promise<Caller | null> {
           .where(eq(sessions.tokenHash, hash));
       const role = person.role as Role;
       const due = !totpEnabledAt && mustUseTwoFactor(role, await twoFactorRequirement());
-      return { kind: 'user', ...person, role, ...(due ? { twoFactorDue: true as const } : {}) };
+      return {
+        kind: 'user',
+        ...person,
+        role,
+        ...(due ? { twoFactorDue: true as const } : {}),
+        ...(passwordChangeDue ? { passwordChangeDue: true as const } : {}),
+      };
     }
   }
   const pw = password();
@@ -271,12 +279,13 @@ export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
         name: users.name,
         role: users.role,
         totpEnabledAt: users.totpEnabledAt,
+        passwordChangeDue: users.passwordChangeDue,
       })
       .from(users)
       .where(and(eq(users.id, g.id), isNull(users.disabledAt)))
       .get();
     if (!row) return null;
-    const { totpEnabledAt, ...person } = row;
+    const { totpEnabledAt, passwordChangeDue, ...person } = row;
     const own = person.role as Role;
     const due = !totpEnabledAt && mustUseTwoFactor(own, await twoFactorRequirement());
     return {
@@ -284,6 +293,7 @@ export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
       ...person,
       role: lower(g.role, own),
       ...(due ? { twoFactorDue: true as const } : {}),
+      ...(passwordChangeDue ? { passwordChangeDue: true as const } : {}),
     };
   }
   if (g.kind === 'password')
@@ -307,7 +317,14 @@ export const forbidden = (min: Role) =>
 export const TWO_FACTOR_DUE =
   'Your role needs two-factor sign-in. Set it up on your Account page first.';
 
-/** The page someone whose two-factor sign-in is due may still use, to set it up. */
+export const PASSWORD_CHANGE_DUE =
+  'You are signed in with a temporary password. Choose your own on your Account page first.';
+
+/** Why a caller may use only their Account page for now, or null when nothing is due. */
+export const setupDue = (c: Caller): string | null =>
+  c.passwordChangeDue ? PASSWORD_CHANGE_DUE : c.twoFactorDue ? TWO_FACTOR_DUE : null;
+
+/** The page someone whose two-factor sign-in or own password is due may still use, to set it up. */
 const SETUP_PATH = '/account';
 
 /**
@@ -320,7 +337,7 @@ export async function requireUser(request: Request, min: Role = 'viewer'): Promi
   const url = new URL(request.url);
   if (!p) throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
   // Client navigations fetch loader data from `<path>.data`.
-  if (p.twoFactorDue && url.pathname.replace(/\.data$/, '') !== SETUP_PATH)
+  if ((p.twoFactorDue || p.passwordChangeDue) && url.pathname.replace(/\.data$/, '') !== SETUP_PATH)
     throw redirect(SETUP_PATH);
   if (!atLeast(p.role, min)) throw data({ ok: false, error: forbidden(min) }, { status: 403 });
   return p;
