@@ -35,6 +35,7 @@ import { Agent, type Connection, type ConnectionContext, callable, getCurrentAge
 import { and, eq } from 'drizzle-orm';
 import { recordAudit } from './audit';
 import { compensateOrder } from './connectors';
+import { a2aAgent } from './namespaces';
 import { emit, orderSummary } from './outbox';
 import { livePrincipal, SESSION_ENDED } from './principal';
 import { separationRefusal } from './separation';
@@ -572,7 +573,7 @@ export class OrderAgent extends Agent<Env, State> {
     const missed: string[] = [];
     for (const name of p.names) {
       try {
-        await this.env.A2A_AGENT.getByName(name).orderChanged(orderId);
+        await a2aAgent(this.env, name).orderChanged(orderId);
       } catch (err) {
         console.warn('a2a watcher', name, err);
         missed.push(name);

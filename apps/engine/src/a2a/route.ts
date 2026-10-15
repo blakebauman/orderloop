@@ -1,4 +1,5 @@
 import { A2A_PATH, decodePrincipal, PRINCIPAL_HEADER } from '@orderloop/core';
+import { a2aAgent } from '../namespaces';
 
 export { A2A_PATH };
 
@@ -9,5 +10,5 @@ export { A2A_PATH };
 export function handleA2A(request: Request, env: Env): Promise<Response> {
   const p = decodePrincipal(request.headers.get(PRINCIPAL_HEADER));
   if (!p) return Promise.resolve(new Response('Unauthorized', { status: 401 }));
-  return env.A2A_AGENT.getByName(`${p.kind}:${p.id}`).fetch(request);
+  return a2aAgent(env, `${p.kind}:${p.id}`).fetch(request);
 }

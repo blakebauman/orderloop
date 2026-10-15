@@ -99,7 +99,10 @@
     // Days after an order finishes that the daily sweep erases its buyer's personal data (the
     // commercial record stays). Empty keeps it; at least 30. The registry's
     // personalDataRetentionDays sets it per deployment.
-    "PERSONAL_DATA_RETENTION_DAYS": ""
+    "PERSONAL_DATA_RETENTION_DAYS": "",
+    // Where Durable Objects (orders, assistants, A2A tasks) live: "eu" or "fedramp", from the
+    // registry's jurisdiction, like D1 and R2. Empty: anywhere. Set before the first order only.
+    "DATA_JURISDICTION": ""
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).

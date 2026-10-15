@@ -145,3 +145,12 @@ test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days"
   assert.throws(() => toDeployment({ ...acme, personalDataRetentionDays: 7 }), /at least 30/);
   assert.throws(() => toDeployment({ ...acme, auditArchiveDays: 0 }), /auditArchiveDays/);
 });
+
+test("an EU customer's Durable Objects are in the EU, like their D1 and R2", () => {
+  const eu = toDeployment({ ...acme, jurisdiction: 'eu' });
+  const c = renderEngine(base('engine'), eu);
+  assert.equal(c.vars.DATA_JURISDICTION, 'eu');
+  assert.equal(c.r2_buckets[0].jurisdiction, 'eu');
+  const anywhere = toDeployment({ ...acme, jurisdiction: undefined });
+  assert.equal(renderEngine(base('engine'), anywhere).vars.DATA_JURISDICTION, '');
+});

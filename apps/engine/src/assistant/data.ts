@@ -46,6 +46,7 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizz
 import { copilot, modelView } from '../ai';
 import { recordAudit } from '../audit';
 import { assess, resolveImages } from '../clef';
+import { orderAgent } from '../namespaces';
 import { separationRefusal } from '../separation';
 
 export class Refused extends Error {}
@@ -237,7 +238,7 @@ export async function resolveOrderId(env: Env, ref: string): Promise<string | nu
 }
 
 export async function snapshot(env: Env, orderId: string): Promise<OrderState | null> {
-  const s = (await env.ORDER_AGENT.getByName(orderId).snapshot()) as OrderState;
+  const s = (await orderAgent(env, orderId).snapshot()) as OrderState;
   return s.orderId ? s : null;
 }
 
@@ -622,7 +623,7 @@ export async function runAction<T extends ActionTool>(
       const i = input as ActionInput['decide_approval'];
       const { id, s } = await loadOrder(env, i.orderId);
       const w = approvalWait(s, i.nodeId)!;
-      await env.ORDER_AGENT.getByName(id).decide(w.nodeId, i.decision, by, i.note, p.id);
+      await orderAgent(env, id).decide(w.nodeId, i.decision, by, i.note, p.id);
       await recordAudit(env, 'approval.decided', {
         actor: p,
         target: id,
@@ -638,7 +639,7 @@ export async function runAction<T extends ActionTool>(
     case 'deliver_event': {
       const i = input as ActionInput['deliver_event'];
       const { id } = await loadOrder(env, i.orderId);
-      const r = await env.ORDER_AGENT.getByName(id).deliver(i.event, { by });
+      const r = await orderAgent(env, id).deliver(i.event, { by });
       if (!r.delivered) throw new Refused(`Nothing on ${orderRef(id)} was waiting for ${i.event}.`);
       await recordAudit(env, 'order.event_delivered', {
         actor: p,
@@ -650,7 +651,7 @@ export async function runAction<T extends ActionTool>(
     case 'cancel_order': {
       const i = input as ActionInput['cancel_order'];
       const { id } = await loadOrder(env, i.orderId);
-      await env.ORDER_AGENT.getByName(id).cancel(`${i.reason} (${by})`);
+      await orderAgent(env, id).cancel(`${i.reason} (${by})`);
       await recordAudit(env, 'order.cancelled', {
         actor: p,
         target: id,

@@ -56,7 +56,7 @@ inbound mail ── Email Routing ──email()───────────
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
 `startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject` and `runReplenish` forwards to the order's agent via
-`ORDER_AGENT.getByName(orderId)`. `EngineApi` trusts its caller: authorization happens in the web
+`orderAgent(env, orderId)` (`apps/engine/src/namespaces.ts`). `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
 
@@ -146,7 +146,7 @@ webhook subscriptions.
 `/a2a` is the same tools, plus `place_order` and `chat`, for Agent2Agent clients. `forward` is the
 same function as for MCP, aimed at `/a2a`. The engine's `fetch` and `EngineApi.fetch` hand it to
 `handleA2A` (`apps/engine/src/a2a/route.ts`), which sends it to
-`env.A2A_AGENT.getByName` named `<kind>:<id>` after the principal, so each caller has an `A2AAgent` Durable Object
+`a2aAgent(env, "<kind>:<id>")` (named after the principal), so each caller has an `A2AAgent` Durable Object
 (`agent.ts`, migration `v3`). A 0.3 method name (`message/send`, …) goes to the SDK's
 `LegacyJsonRpcTransportHandler`; otherwise it checks the `A2A-Version` header (absent means 1.0).
 Both run JSON-RPC through the same `@a2a-js/sdk` `DefaultRequestHandler`, with SSE for `SendStreamingMessage` and
@@ -256,6 +256,8 @@ the `documents` table (see [Data model](data-model.md#r2-documents)).
 `ai.forecast` node decides the quantities. The order starts through `startOrderOnce` with the idempotency key `replenish:${instanceId}`, so a retry of the step finishes the order it already wrote. `EngineRpc.runReplenish` creates an instance on demand.
 
 ## Where state lives
+
+Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `orderAgent` and `a2aAgent` for stubs, and `scopedEnv` for `routeAgentRequest`, which looks namespaces up on the `env` it is given. They put each namespace in the deployment's jurisdiction (`DATA_JURISDICTION`); an object reached without it is a different, empty one. Never call `env.ORDER_AGENT.getByName` and the like directly: `tests/namespaces.test.ts` fails if engine source does. See [Data residency](data-model.md#data-residency).
 
 | State | Owner |
 |---|---|

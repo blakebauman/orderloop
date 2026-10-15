@@ -37,6 +37,7 @@ import {
   type SQLWrapper,
   sql,
 } from 'drizzle-orm';
+import { orderAgent } from './namespaces';
 
 /** Orders erased per call; the caller repeats until `done`. */
 const ERASE_BATCH = 100;
@@ -90,7 +91,7 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
   const orderIds = list.map((o) => o.id);
   const withState = await Promise.all(
     list.map(async (o) => {
-      const state = (await env.ORDER_AGENT.getByName(o.id).snapshot()) as OrderState;
+      const state = (await orderAgent(env, o.id).snapshot()) as OrderState;
       const order = state.order;
       return {
         id: o.id,
@@ -229,7 +230,7 @@ export async function eraseOrders(
   };
   const done: string[] = [];
   for (const o of list) {
-    const erased = (await env.ORDER_AGENT.getByName(o.id).erasePersonalData(terms)) as {
+    const erased = (await orderAgent(env, o.id).erasePersonalData(terms)) as {
       held: boolean;
       title: string;
     } | null;

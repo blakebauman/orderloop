@@ -3,7 +3,7 @@
 The per-order Durable Object that holds live state, owns waits and approvals, and cancels.
 
 `OrderAgent` (`apps/engine/src/agent.ts`) is an Agents SDK `Agent`, one Durable Object per order,
-named by the order id (`orderAgentName` in `@orderloop/core`). It:
+named by the order id (`orderAgentName` in `@orderloop/core`) and reached through `orderAgent(env, orderId)` in `apps/engine/src/namespaces.ts`, which applies the deployment's `DATA_JURISDICTION` (see [Data residency](data-model.md#data-residency)). It:
 
 - holds the order's live state, synced to every browser on the order page through `useAgent`;
 - records what the Workflow reports;
