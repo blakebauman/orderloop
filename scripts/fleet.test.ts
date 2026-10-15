@@ -117,3 +117,11 @@ test('a demo mocks models, speeds up time and turns on demo sign-in', () => {
   assert.equal(renderWeb(base('web'), demo).vars.DEMO_MODE, 'true');
   assert.equal(renderWeb(base('web'), acme).vars.DEMO_MODE, '');
 });
+
+test("a customer's auditRetentionDays sets the engine's retention, at least 90 days", () => {
+  const long = toDeployment({ ...acme, auditRetentionDays: 2555 });
+  assert.equal(renderEngine(base('engine'), long).vars.AUDIT_RETENTION_DAYS, '2555');
+  assert.equal(renderEngine(base('engine'), toDeployment(acme)).vars.AUDIT_RETENTION_DAYS, '400');
+  assert.throws(() => toDeployment({ ...acme, auditRetentionDays: 30 }), /at least 90/);
+  assert.throws(() => toDeployment({ ...acme, auditRetentionDays: '400' }), /auditRetentionDays/);
+});

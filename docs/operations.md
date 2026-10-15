@@ -27,6 +27,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
+| `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -126,7 +127,7 @@ registry file. Compared with a customer's deployment:
   faster (`TIME_SCALE`), as in local development.
 - **Nightly reset.** `.github/workflows/demo-reset.yml` runs at 04:00 UTC (and from the Actions
   tab): it stops the orders still running, applies `packages/db/reset/demo.sql` (everything
-  visitors made, the audit log and the demo visitor's sessions; people, settings, integrations,
+  visitors made, the audit log (`demo.sql` drops the `audit_events_keep_90_days` trigger around the delete and recreates it) and the demo visitor's sessions; people, settings, integrations,
   `cus_internal`, `USD` and the price sources stay) and loads the demo data again. Durable Object
   state of old orders stays behind, unreachable once their rows are gone.
 
@@ -159,7 +160,7 @@ needed. The setup code is the last resort.
 A deployment holds only that customer's data, so removing it is the erasure:
 
 1. Export what the contract requires first (a D1 export with
-   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents).
+   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes).
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, which removes their Durable
    Objects and Workflow instances), the D1 database, the R2 bucket (empty it first), the AI

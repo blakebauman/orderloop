@@ -20,6 +20,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `INTAKE_MAILBOXES` | `""` | Email intake: JSON object of mailbox local part to flow id. Empty uses `orders@` and `po@` → `tpl-b2b-order`, `purchasing@` → `tpl-purchase-request` |
 | `INTAKE_REQUIRE_AUTH` | `true` | `"false"` accepts mail without a passing DMARC, DKIM or SPF result. Never in production: it lets anyone who forges a customer's From address start orders |
 | `INTAKE_REPLY` | `true` | `"false"` turns off the acknowledgement reply to accepted email |
+| `AUDIT_RETENTION_DAYS` | `400` | Days audit events are kept before the daily sweep archives them to R2 and deletes them. Below 90 is raised to 90 (`auditRetentionDays`); the database refuses to delete younger events. The registry's `auditRetentionDays` sets it per deployment |
 | `PAYMENTS_MODE` | `mock` | The payment gateway for new payments (`apps/engine/src/payments.ts`). `mock` records payments in D1 only, and `meta.simulate` drives declines and failed charges. `stripe` authorizes, captures, charges, voids and refunds through Stripe with `STRIPE_SECRET_KEY`, and `commerce.invoice` with provider `stripe` issues Stripe invoices (`apps/engine/src/billing.ts`; in `mock` it records them only); without the key every payment step fails with a `NonRetryableError`. Any other value fails payment steps too. Voids, captures and refunds follow each payment row's own `provider`, so rows made before a switch are settled where they were made. See [Payments](https://docs.orderloop.app/guides/payments/) |
 
 ## Compatibility flags
@@ -107,3 +108,5 @@ and traces on); lower the rate once traffic makes the volume or cost matter. `li
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
 waits, such as model calls, don't count against it. The web app also sets `placement.mode` to `smart`, so
 it runs near D1 and the engine rather than near the visitor.
+
+Each audit write logs one JSON line, `{"type":"audit_event", …}` with the sealed row, to Workers Logs, where Logpush can carry it to a SIEM; a failed write logs `{"type":"audit_write_failed","action":…,"error":…}` instead, to alert on. Writing still never throws.

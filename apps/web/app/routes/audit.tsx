@@ -29,7 +29,7 @@ export default function Audit() {
     <>
       <PageHeader
         title="Audit log"
-        subtitle="Sign-ins, team and token changes, and refused API attempts, newest first. Kept 180 days."
+        subtitle="Sign-ins, team and token changes, and what was done to orders, flows and webhooks, newest first. Kept 400 days unless your contract sets another period."
         crumbs={<Link to="/team">Team</Link>}
       />
       <div className="mx-auto max-w-[1400px] space-y-4 px-4 pb-10 sm:px-6">

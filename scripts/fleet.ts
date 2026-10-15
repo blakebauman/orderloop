@@ -82,6 +82,8 @@ export type Deployment = {
   demo: boolean;
   /** Requests a minute per caller, where this customer needs other than the base budgets. */
   limits?: Partial<Record<LimitKey, number>>;
+  /** Days audit events are kept before they're archived to R2 and deleted (at least 90). */
+  auditRetentionDays?: number;
 };
 
 /** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
@@ -126,6 +128,9 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
         );
     }
   }
+  const retention = raw.auditRetentionDays;
+  if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
+    throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
   return {
     id,
     ring,
@@ -139,6 +144,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     docs: raw.docs === true,
     demo: raw.demo === true,
     ...(limits ? { limits: limits as Deployment['limits'] } : {}),
+    ...(retention !== undefined ? { auditRetentionDays: retention as number } : {}),
   };
 }
 
@@ -197,6 +203,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
   storage(config, d);
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
+  if (d.auditRetentionDays)
+    config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
   if (d.demo)
     config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };

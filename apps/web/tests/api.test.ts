@@ -297,7 +297,12 @@ describe('integrations over REST', () => {
       'integration.revoked',
     ]);
     // Operators run orders and flows; keys, webhooks and the audit log are an admin's.
-    for (const path of ['integrations', 'webhook-subscriptions', 'audit-events'])
+    for (const path of [
+      'integrations',
+      'webhook-subscriptions',
+      'audit-events',
+      'audit-events/verify',
+    ])
       expect(
         (await handleApi(new Request(`https://app.test/api/v1/${path}`), operator)).status,
       ).toBe(403);

@@ -686,7 +686,13 @@ export const authFailures = sqliteTable('auth_failures', {
   windowStart: integer('window_start').notNull(),
 });
 
-/** Security audit log, written by the web app (`audit.server.ts`); kept 180 days. */
+/**
+ * The audit log, written by the web app (`audit.server.ts`) and the engine (`audit.ts`) through
+ * `appendAudit`. Append-only: the database refuses updates, and deletes of events younger than 90
+ * days (triggers in migration 0034). The engine's daily sweep archives events past the retention
+ * to R2 and then deletes them. Each event is sealed into a hash chain (`seq`, `prevHash`, `hash`;
+ * `sealAuditRow` in core); events from before migration 0034 have none.
+ */
 export const auditEvents = sqliteTable(
   'audit_events',
   {
@@ -702,6 +708,15 @@ export const auditEvents = sqliteTable(
     /** JSON with action-specific fields, e.g. `{ "from": "viewer", "to": "approver" }`. */
     detail: text('detail'),
     ip: text('ip'),
+    /** Its place in the chain, from 1; unique. */
+    seq: integer('seq'),
+    /** The hash of the event before it, or `genesis` for the first. */
+    prevHash: text('prev_hash'),
+    hash: text('hash'),
   },
-  (t) => [index('audit_events_at').on(t.at), index('audit_events_action').on(t.action, t.at)],
+  (t) => [
+    index('audit_events_at').on(t.at),
+    index('audit_events_action').on(t.action, t.at),
+    uniqueIndex('audit_events_seq').on(t.seq),
+  ],
 );

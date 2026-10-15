@@ -62,7 +62,7 @@
   ],
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
   // Daily retention sweep (src/retention.ts): expired sessions, old webhook deliveries, node
-  // timings and the intake log.
+  // timings and the intake log, and archiving old audit events to R2.
   "triggers": { "crons": ["30 3 * * *"] },
   "ai": { "binding": "AI" },
   "vars": {
@@ -88,7 +88,10 @@
     "INTAKE_REPLY": "true",
     // "mock" records payments in D1 only (meta.simulate drives declines); "stripe" authorizes,
     // captures, charges, voids and refunds through Stripe and needs STRIPE_SECRET_KEY.
-    "PAYMENTS_MODE": "mock"
+    "PAYMENTS_MODE": "mock",
+    // Days audit events are kept before the daily sweep archives them to R2 and deletes them.
+    // At least 90; the registry's auditRetentionDays sets it per deployment.
+    "AUDIT_RETENTION_DAYS": "400"
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).
