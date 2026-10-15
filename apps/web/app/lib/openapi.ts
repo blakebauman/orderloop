@@ -309,7 +309,7 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: 'Security audit log, newest first (admin)',
           description:
-            'Sign-ins, failed and throttled sign-ins, team and token changes, and refused shared-password API attempts. Kept 180 days.',
+            'Sign-ins, failed and throttled sign-ins, setup and recovery, team and token changes. Kept 180 days.',
           parameters: [
             {
               name: 'type',
@@ -407,7 +407,7 @@ export function openApiDocument(serverUrl: string) {
         bearer: {
           type: 'http',
           scheme: 'bearer',
-          description: 'An API token (`ol_live_…`, created on the Team page) or APP_PASSWORD',
+          description: 'An API token (`ol_live_…`, created on the Team page)',
         },
       },
       schemas: {

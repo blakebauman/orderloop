@@ -56,7 +56,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, logs kept, no cache, authentication on), and the GitHub environment.
-   It writes `d1Id` into the registry file and sets the environment's `APP_PASSWORD`. New values are generated and saved in `.secrets/<id>/` (gitignored); a secret
+   It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
@@ -66,8 +66,10 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    environment.
 4. Commit the registry file and merge. CI deploys the customer in its ring, and the custom domain
    creates its DNS record in the `orderloop.app` zone.
-5. Give the customer their URL and the workspace password from `.secrets/<id>/app-password`, so
-   they can sign in and add their team.
+5. Send the customer's first admin `https://<domain>/setup` and the code from
+   `.secrets/<id>/setup-code`. They enter it with their email and a password of their own, which
+   creates their admin account and signs them in; they add their team from there. The code works
+   once. Until then the workspace refuses every request but `/setup`.
 
 A deployment without `d1Id` stops the whole CI plan, so provision a customer before merging their
 file, or merge it with `"hold": true`.
@@ -128,7 +130,28 @@ registry file. Compared with a customer's deployment:
   state of old orders stays behind, unreachable once their rows are gone.
 
 To bring it up: `./scripts/provision.sh demo`, then set `"hold": false` in `deployments/demo.jsonc`
-and merge. The demo's own `APP_PASSWORD` (in `.secrets/demo/`) is for you, not visitors.
+and merge. The demo's own setup code (`.secrets/demo/setup-code`) is for you, not visitors: it creates an admin account for managing the demo.
+
+## Recovering admin access
+
+When no admin can sign in (everyone forgot their password, or the admins are disabled), issue a new
+setup code:
+
+```bash
+./scripts/setup-code.sh <id>
+```
+
+Logged in to `wrangler` and `gh`. It writes a new code to `.secrets/<id>/setup-code` (never
+printed), sets it as `SETUP_TOKEN` on the deployment's GitHub environment, so the next deploy keeps
+it, and on the web Worker with `wrangler secret put`, so it works now. Send the person recovering
+`https://<domain>/setup` and the code. They create a new admin account with an email not already on
+the team, which is audited as `team.recovery_admin` (a wrong code as `team.setup_refused`), and
+they can then reset the others. The code works once; the last active admin can never be demoted or
+disabled, so recovery is only needed when the admins can't sign in.
+
+Break-glass: recommend that each customer keeps a second admin account with two-factor sign-in on,
+its credentials and recovery codes stored offline. It can be disabled any time and enabled when
+needed. The setup code is the last resort.
 
 ## Removing a customer
 

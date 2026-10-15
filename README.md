@@ -73,7 +73,7 @@ Open the dashboard and run one of the scenarios (they appear once the demo data 
 
 ## REST API
 
-Authenticate with `Authorization: Bearer ol_live_…`, an API token an admin creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` also starts and cancels orders, delivers events and edits flows, `admin` also manages the team, tokens, webhooks, integrations and the audit log. `APP_PASSWORD`, when set, is a break-glass admin sign-in and bearer token. With no `APP_PASSWORD` and no people, the dashboard and API are open on localhost only (local development); any other host answers `503` until you set `APP_PASSWORD`.
+Authenticate with `Authorization: Bearer ol_live_…`, an API token an admin creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` also starts and cancels orders, delivers events and edits flows, `admin` also manages the team, tokens, webhooks, integrations and the audit log. A new deployment's first admin is created at `/setup` with a one-time setup code (`SETUP_TOKEN`); until then a deployed host refuses everything else (browsers are redirected to `/setup`, other requests get `503`). With no people the dashboard and API are open on localhost only (local development).
 
 ```
 GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)
@@ -85,7 +85,7 @@ POST /api/v1/orders                          { "flowId": "tpl-storefront-order",
 GET  /api/v1/orders?model=&channel=&status=&q=
 GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
-POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "by": "…", "note": "…" }
+POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "note": "…" }
 POST /api/v1/orders/:id/cancel               { "reason": "…" }
 GET  /api/v1/audit-events?type=&before=     security audit log (admin)
 ```
@@ -164,7 +164,6 @@ pnpm docs:deploy     # build and deploy the orderloop-docs Worker
 pnpm exec wrangler login
 ./scripts/provision.sh orderloop               # D1, R2, AI Gateway, GitHub environment
 pnpm --filter @orderloop/web db:migrate:remote
-pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 

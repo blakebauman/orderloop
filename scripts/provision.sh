@@ -50,7 +50,7 @@ else
 fi
 
 # The GitHub environment the deploy job runs in, and its secrets. A secret already set is left
-# alone; new ones are generated and kept in .secrets/<id>/ (gitignored) for the first sign-in.
+# alone; the setup code is generated and kept in .secrets/<id>/ (gitignored) for the first admin.
 gh api --method PUT "repos/{owner}/{repo}/environments/$ENVIRONMENT" >/dev/null
 # A Worker that already runs has its own secrets, set by hand or by an earlier deploy: a new
 # generated one would replace them on the next deploy, so only a new deployment gets them.
@@ -61,15 +61,16 @@ fi
 existing=$(gh secret list --env "$ENVIRONMENT" --json name -q '.[].name')
 mkdir -p ".secrets/$id"
 chmod 700 ".secrets/$id"
-file=".secrets/$id/app-password"
-if grep -qx APP_PASSWORD <<<"$existing"; then
-  echo "$ENVIRONMENT already has APP_PASSWORD"
+file=".secrets/$id/setup-code"
+if grep -qx SETUP_TOKEN <<<"$existing"; then
+  echo "$ENVIRONMENT already has SETUP_TOKEN"
 else
-  [ -s "$file" ] || (umask 077 && openssl rand -base64 32 | tr -d '\n' >"$file")
-  gh secret set APP_PASSWORD --env "$ENVIRONMENT" <"$file"
-  echo "Set APP_PASSWORD on $ENVIRONMENT (value in $file)"
+  [ -s "$file" ] || (umask 077 && openssl rand -hex 16 | tr -d '\n' >"$file")
+  gh secret set SETUP_TOKEN --env "$ENVIRONMENT" <"$file"
+  echo "Set SETUP_TOKEN on $ENVIRONMENT (value in $file)"
 fi
 
 echo
 echo "Next: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to $ENVIRONMENT if they aren't"
 echo "repository secrets, commit deployments/$id.jsonc, and merge: CI deploys it in its ring."
+echo "Then send the customer's first admin https://$DOMAIN/setup and the setup code in $file."

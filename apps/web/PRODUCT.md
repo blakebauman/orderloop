@@ -34,7 +34,7 @@ Flows are data: an order pins an immutable flow version, and the live order view
 - Models run on Workers AI.
 - Decisions have an undo window. Publishing a flow creates an immutable version, and orders pin the version they started on.
 - The web app talks to the engine only through `EngineRpc` and the order-agent socket.
-- Roles are enforced for people and API tokens alike. `APP_PASSWORD` is a break-glass operator sign-in.
+- Roles are enforced for people and API tokens alike. A new workspace's first admin is created with a one-time setup code; a new code recovers admin access.
 - Not planned: multi-tenancy, billing, plan gating.
 
 ## Brand Commitments

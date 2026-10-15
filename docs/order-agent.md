@@ -114,7 +114,7 @@ call fails with `Your sign-in has ended. Reload the page to sign in again.` and 
 closes with code `4401` just after. A successful check also records the session's activity
 (`last_seen_at`, at most every `SESSION_TOUCH_MS`), so working on an order page keeps it from
 going idle. A caller without at least `min` gets `This needs the <Role>
-role.`; a socket with no principal is refused. The shared password and open local dev have no
+role.`; a socket with no principal is refused. API tokens and open local dev have no
 session to re-check. Calls over RPC have no connection and are trusted, because the web app's
 routes already checked the role.
 

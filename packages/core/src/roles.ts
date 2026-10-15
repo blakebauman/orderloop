@@ -27,11 +27,10 @@ export function atLeast(role: Role | null | undefined, min: Role): boolean {
 }
 
 /**
- * Who is acting. `id` is stable (`usr_…`, `tok_…`, or a fixed id for the shared password and open
- * local dev); `name` is what the audit trail shows, such as an approval's `by`.
+ * Who is acting. `id` is stable (`usr_…`, `tok_…`, or a fixed id for open local dev); `name` is what the audit trail shows, such as an approval's `by`.
  */
 export type Principal = {
-  kind: 'user' | 'token' | 'password' | 'open';
+  kind: 'user' | 'token' | 'open';
   id: string;
   name: string;
   email?: string;

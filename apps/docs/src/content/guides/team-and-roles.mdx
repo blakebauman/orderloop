@@ -1,6 +1,6 @@
 ---
 title: Team and roles
-description: Who can sign in, what viewers, approvers, operators and admins may do, the workspace password, two-factor sign-in, who may approve their own orders, API tokens and the audit log.
+description: Who can sign in, what viewers, approvers, operators and admins may do, setting up the first admin, recovering admin access, two-factor sign-in, who may approve their own orders, API tokens and the audit log.
 ---
 
 Each person signs in with their own email and password, and has one role. API tokens carry a role
@@ -15,13 +15,28 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
-## The workspace password
+## The first admin
 
-Besides each person's own sign-in, a workspace can have a workspace password, set by your OrderLoop
-administrator. It is a break-glass admin sign-in: on the sign-in page, choose **Use the
-workspace password instead** and enter it to reach the Team page as an admin (the REST API's
-equivalent is the password as a bearer token). It has no identity, so its decisions are recorded as
-`admin`. Use it to add the first admin, then sign in as yourself.
+A new workspace has nobody on it, and until it does, every page and API route except the setup page
+refuses requests: a browser is sent to `/setup`, anything else gets `503` with "This workspace is
+not set up yet." Whoever runs your workspace sends you the link to `/setup` and a **setup code**.
+Enter the code, your email, an optional name and a password of your own (10 or more characters).
+That creates an admin account, signs you in and takes you to the Team page, where you add everyone
+else.
+
+The code works once. If creating the account fails (for example because the email isn't valid) the
+code still works. A wrong code is refused, counted per address (10 wrong codes in 15 minutes, then
+`429` and a wait) and recorded in the [audit log](#audit-log).
+
+## Recovering admin access
+
+If no admin can sign in, ask whoever runs your workspace for a new setup code. It opens `/setup`
+once more, and the person who uses it creates a new admin account (with an email not already on the
+team), recorded as `team.recovery_admin`. From there they can reset anyone else's password.
+
+To avoid needing that, keep a second admin account with [two-factor sign-in](#two-factor-sign-in)
+turned on, and store its credentials and recovery codes offline. Disable it when you don't want it
+to be able to sign in; you can enable it again later. The setup code is the last resort.
 
 ## The Team page
 
@@ -38,8 +53,7 @@ Admins manage people and tokens at `/team`:
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. You can't reset your own.
-- In a workspace without a workspace password, the last active admin can't be demoted or
-  disabled, so someone can always manage the team.
+- The last active admin can't be demoted or disabled, so someone can always manage the team.
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
 They are stored only as salted PBKDF2-SHA256 hashes.
@@ -83,7 +97,7 @@ codes left, an admin can **Reset two-factor** on the Team page.
 Codes are time-based one-time passwords (RFC 6238: HMAC-SHA1, 30-second steps, 6 digits). The code
 for the step before or after the current one is accepted too, in case the phone's clock is a little
 off, and each step's code works once. Recovery codes are stored as hashes and deleted when used.
-The workspace password and API tokens don't use two-factor sign-in.
+API tokens don't use two-factor sign-in.
 
 #### Requiring it
 
@@ -106,12 +120,12 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 | Address | 30 | One place trying many accounts |
 | Email | 50 | Many places trying one account; high, so nobody can easily lock a person out |
 | Person, at the code step | 5 | Guessing two-factor codes after a correct password |
+| Address, at the setup page | 10 | Guessing the setup code (`429`) |
 | Person, on the Account page | 5 | Guessing the current password from a signed-in browser left open: changing the password, turning off two-factor sign-in, new recovery codes (`429`) |
 
-A successful sign-in clears its email-and-address count. The workspace password counts as one
-email. Separately, after 20 wrong guesses at the workspace password as an API bearer token from one
-address in 15 minutes, further attempts are refused with `429`. The address is the client's IP as
-Cloudflare sees it.
+A successful sign-in clears its email-and-address count. A sign-in with no email counts against
+`(no email)`. API tokens aren't throttled: they are long random values, so a busy address can't lock
+out working integrations. The address is the client's IP as Cloudflare sees it.
 
 ## Approvals
 
@@ -148,9 +162,7 @@ decide approvals but not start orders. Approval decisions made with a token are 
 ## Connected apps
 
 MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
-you sign in (two-factor included) and choose a role. Connecting needs your own account: the
-workspace password belongs to no one, so it can't stand behind an app, and the consent page asks
-whoever is signed in with it to sign in as themselves. You can grant your own role or a lower one, never a higher one, and never `admin`: MCP and A2A have no admin tools, so an app is at most an `operator`. **Account** lists **Connected apps**, each with whether it is an AI client
+you sign in (two-factor included) and choose a role. An app acts for the person who connected it. You can grant your own role or a lower one, never a higher one, and never `admin`: MCP and A2A have no admin tools, so an app is at most an `operator`. **Account** lists **Connected apps**, each with whether it is an AI client
 (MCP) or an agent (A2A), the address its access goes to, its role and when it connected;
 **Disconnect** ends it after a confirmation. Every request from a connected app re-reads you: if you are
 disabled it stops working, and its role is the lower of what you granted and what you have now. What
@@ -166,12 +178,12 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
-| Team | `team.first_admin`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
+| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
-| API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the workspace password; `api.token_expired`, at most hourly per token, when an expired token is used |
+| API access | `api.token_expired`, at most hourly per token, when an expired token is used |
 
 A person signing in only hears that the email and password didn't match; the reason is for
 admins. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event

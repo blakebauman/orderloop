@@ -454,10 +454,7 @@ export default function Team() {
                 </table>
               </div>
             ) : (
-              <Empty>
-                Nobody has their own sign-in yet. Add the first person below; until then the
-                workspace password is the only way in.
-              </Empty>
+              <Empty>Nobody is on the team yet. Add the first person below.</Empty>
             )}
             <fetcher.Form
               ref={addPerson}
@@ -763,7 +760,7 @@ function TwoFactorRequirementForm({
       </fetcher.Form>
       <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
         People in these roles without two-factor sign-in can only use their Account page until they
-        set it up, and can’t turn it off. The workspace password and API tokens aren’t affected.
+        set it up, and can’t turn it off. API tokens aren’t affected.
         {required !== 'off' && missing
           ? ` ${missing} ${missing === 1 ? 'person hasn’t' : 'people haven’t'} set it up yet.`
           : ''}

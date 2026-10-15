@@ -56,7 +56,7 @@ for local dev (copy `apps/web/.dev.vars.example`).
 
 | Secret | Meaning |
 |---|---|
-| `APP_PASSWORD` | A break-glass admin: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open on localhost only (any other host answers `503`); see [Sign-in setup and open mode](deploy.md#sign-in-setup-and-open-mode) |
+| `SETUP_TOKEN` | The deployment's one-time setup code: on `/setup` it creates an admin account, once (its SHA-256 is recorded in `workspace_settings` as `setup_code_used`). `scripts/provision.sh` generates it into `.secrets/<id>/setup-code` and `scripts/setup-code.sh` replaces it to recover admin access. Unset, `/setup` creates nobody. See [Sign-in setup and open mode](deploy.md#sign-in-setup-and-open-mode) |
 | `SHOPIFY_WEBHOOK_SECRET` | The Shopify app's client secret; enables `POST /api/v1/channels/shopify/orders`, which verifies `X-Shopify-Hmac-Sha256` with it. Unset answers `503`. See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#shopify) |
 
 Outbound webhook subscriptions and inbound integrations (the keys that sign

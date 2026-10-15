@@ -25,7 +25,6 @@ export const orderEventInput = eventSchema.omit({ orderId: true });
 
 export const decisionInput = z.object({
   decision: z.enum(['approved', 'rejected']),
-  by: z.string().max(200).optional(),
   note: z.string().max(2000).optional(),
 });
 

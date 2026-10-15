@@ -17,7 +17,6 @@ Both bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`).
 pnpm exec wrangler login
 ./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
-pnpm --filter @orderloop/web exec wrangler secret put APP_PASSWORD
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
@@ -96,24 +95,34 @@ verifies, looks up the customer and starts the order.
 - `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses
   waits; don't raise it on a deployment that real orders use.
 - Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`): logs kept up to 100,000 entries (oldest deleted first), no caching, authentication on, 120 requests a minute (sliding). It is created once per account, in the dashboard (**AI** > **AI Gateway**) or with the AI Gateway API; change its limits there.
-- After the first deploy, sign in with no email and `APP_PASSWORD` (users see it as "the workspace
-  password"), open **Team** and add people with their roles, and create API tokens for other
-  systems. `APP_PASSWORD` stays as a break-glass admin sign-in. See
+- After the first deploy, open `/setup`, enter the setup code (`SETUP_TOKEN`; `provision.sh` saved
+  it in `.secrets/<id>/setup-code`), and create the first admin. Then open **Team**, add people
+  with their roles, and create API tokens for other systems. See
   [Team and roles](https://docs.orderloop.app/guides/team-and-roles/).
 
 ## Sign-in setup and open mode
 
-With `APP_PASSWORD` set, sign-in is required from the start; the form sends no email, and the REST
-API's equivalent is the password as a bearer token.
+There is no shared password. A deployed workspace with no people is waiting for its first admin:
+every request except `/setup`, `/assets/*` and `/health*` is refused (`awaitingSetup` in
+`apps/web/app/lib/auth.server.ts`, checked in `apps/web/workers/app.ts`). A browser `GET` that
+accepts HTML is redirected (`302`) to `/setup`; anything else gets `503
+{ "error": "This workspace is not set up yet." }`.
 
-A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an admin, which is
-the local development default. Open mode runs only on `localhost`, `127.0.0.1`, `[::1]` and
-`*.localhost`; any other host answers every request except `/health` and `/health/deep` with `503`
-and the text "Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the
-first admin on the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`,
-`isLocalHost` in `apps/web/app/lib/origin.ts`). To turn sign-in on locally, open **Set up sign-in** in the account
-menu (the Team page) and create an admin account with a password you choose; from then on
-everyone signs in. Without `APP_PASSWORD`, the last active admin can't be demoted or disabled.
+`/setup` (`apps/web/app/routes/setup.tsx`, `apps/web/app/lib/setup.server.ts`) takes the setup code
+(`SETUP_TOKEN`), an email, an optional name and a password (10 or more characters), creates an
+**admin** and signs them in, redirecting to `/team`. The code works once: its SHA-256 is recorded
+in `workspace_settings` under `setup_code_used`, claimed atomically before the account is created
+and released if creation fails (a bad email or password, or an email already on the team). A wrong
+code is throttled per address (throttle kind `setup-ip`, 10 per 15 minutes) and audited as
+`team.setup_refused`. The first admin is audited `team.first_admin`; with people already on the
+team, a new code creates another admin, audited `team.recovery_admin`. See
+[Recovering admin access](operations.md#recovering-admin-access).
+
+On `localhost`, `127.0.0.1`, `[::1]` and `*.localhost` (`isLocalHost` in
+`apps/web/app/lib/origin.ts`) a workspace with no people is still open as an admin, which is the
+local development default. To turn sign-in on locally, open **Set up sign-in** in the account menu
+(the Team page) and create an admin account with a password you choose; from then on everyone signs
+in. The last active admin can never be demoted or disabled.
 
 All settings are listed in [Configuration](configuration.md).
 
@@ -136,7 +145,7 @@ If it fails, only the docs Worker is rolled back; the app has already passed.
 Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
-them it fails rather than skipping. The environment's `APP_PASSWORD`,
+them it fails rather than skipping. The environment's `SETUP_TOKEN`,
 `SHOPIFY_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.

@@ -4,6 +4,8 @@ export default [
   route('login', 'routes/login.tsx'),
   route('login/two-factor', 'routes/login-two-factor.tsx'),
   route('logout', 'routes/logout.ts'),
+  // A new deployment's first admin, from its one-time setup code (lib/setup.server.ts).
+  route('setup', 'routes/setup.tsx'),
   // The consent page MCP clients send people to (lib/oauth.server.ts).
   route('oauth/authorize', 'routes/oauth-authorize.tsx'),
   layout('routes/shell.tsx', [

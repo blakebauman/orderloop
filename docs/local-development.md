@@ -23,9 +23,8 @@ pnpm db:seed:local         # loads the demo data from packages/db/seed (optional
 pnpm web:dev               # web + engine in one Vite session
 ```
 
-Open the URL Vite prints (`http://localhost:5173` by default). With `APP_PASSWORD` unset, which is
-the default in `apps/web/.dev.vars.example`, and no people added, the dashboard and the API are
-open (on localhost only; a deployed host answers `503` until `APP_PASSWORD` is set); **Set up sign-in** in the account menu creates the first admin and turns sign-in on (see
+Open the URL Vite prints (`http://localhost:5173` by default). With no people added, the dashboard and the API are
+open (on localhost only; a deployed host redirects to `/setup` until its first admin exists); **Set up sign-in** in the account menu creates the first admin and turns sign-in on (see
 [Team and roles](https://docs.orderloop.app/guides/team-and-roles/)).
 
 The first request that needs a flow seeds the [built-in flows](https://docs.orderloop.app/guides/templates/) and publishes

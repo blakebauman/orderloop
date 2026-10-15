@@ -10,7 +10,7 @@ describe('throttle', () => {
       'ip:203.0.113.7',
       'email:ada@example.com',
     ]);
-    expect(signInKeys('', '203.0.113.7')[2]).toBe('email:(workspace password)');
+    expect(signInKeys('', '203.0.113.7')[2]).toBe('email:(no email)');
   });
 
   it('blocks a key that reached its limit inside the window, until the window ends', () => {
@@ -28,7 +28,7 @@ describe('throttle', () => {
     const rows = [
       { key: 'ip:203.0.113.7', count: LIMITS.ip - 1, windowStart: now - 60_000 },
       { key: 'email:ada@example.com', count: LIMITS.email, windowStart: now - 2 * 60_000 },
-      { key: 'api-ip:203.0.113.7', count: LIMITS['api-ip'], windowStart: now - 14 * 60_000 },
+      { key: 'setup-ip:203.0.113.7', count: LIMITS['setup-ip'], windowStart: now - 14 * 60_000 },
     ];
     expect(blockedFor(rows, now)).toBe(13 * 60_000);
     expect(blockedFor([{ key: 'unknown:x', count: 1e6, windowStart: now }], now)).toBe(0);

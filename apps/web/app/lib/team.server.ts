@@ -3,7 +3,6 @@
  * once to show the operator, and stored only as a hash.
  */
 
-import { env } from 'cloudflare:workers';
 import { isRole, newId, type Principal, type Role, SESSION_IDLE_MS } from '@orderloop/core';
 import { apiTokens, sessions, startsWith, users } from '@orderloop/db';
 import { and, count, desc, eq, gt, isNull, ne } from 'drizzle-orm';
@@ -62,12 +61,8 @@ function role(v: unknown): Role {
   return v;
 }
 
-/**
- * Without APP_PASSWORD, the last active admin is the only way in to manage the team, so they
- * can't be demoted or disabled.
- */
+/** The last active admin is the only way in to manage the team, so they can't be demoted or disabled. */
 async function keepAnAdmin(exceptId: string) {
-  if ((env as { APP_PASSWORD?: string }).APP_PASSWORD) return;
   const other = await db()
     .select({ id: users.id })
     .from(users)
@@ -79,20 +74,32 @@ async function keepAnAdmin(exceptId: string) {
     );
 }
 
+export type NewAdmin = { email: string; name: string; password: string };
+
 /**
- * The first account on an open deployment (no APP_PASSWORD, no users): the person setting it up,
- * as an admin with a password they choose. Adding it turns sign-in on.
+ * The first account on an open local deployment (no users): the person setting it up, as an
+ * admin with a password they choose. Adding it turns sign-in on. A deployed workspace gets its
+ * first admin from its setup code instead (`setup.server.ts`).
  */
-export async function createFirstAdmin(
+export async function createFirstAdmin(request: Request, input: NewAdmin) {
+  const any = await db().select({ id: users.id }).from(users).get();
+  if (any) throw new TeamError('The team already has people; sign in instead.');
+  return insertAdmin(request, input, 'team.first_admin');
+}
+
+/** Adds an admin with the password they chose, and records how they came in. */
+export async function insertAdmin(
   request: Request,
-  input: { email: string; name: string; password: string },
+  input: NewAdmin,
+  action: 'team.first_admin' | 'team.recovery_admin',
 ) {
   const email = normalizeEmail(input.email);
   if (!isEmail(email)) throw new TeamError('Enter a valid email address.');
   const problem = passwordProblem(input.password, email);
   if (problem) throw new TeamError(problem);
-  const any = await db().select({ id: users.id }).from(users).get();
-  if (any) throw new TeamError('The team already has people; sign in instead.');
+  const taken = await db().select({ id: users.id }).from(users).where(eq(users.email, email)).get();
+  if (taken)
+    throw new TeamError(`${email} is already on the team; sign in, or use another address.`);
   const id = newId('usr');
   const name = input.name.trim() || email.split('@')[0]!;
   await db()
@@ -106,7 +113,7 @@ export async function createFirstAdmin(
       createdAt: Date.now(),
     });
   forgetUserCount();
-  await audit(request, 'team.first_admin', {
+  await audit(request, action, {
     actor: { kind: 'user', id, email, name, role: 'admin' },
     target: email,
   });

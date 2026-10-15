@@ -70,7 +70,7 @@ engine source.
 | `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, the integration's scope (`allowsOrder`: it may start orders, on its channel, naming only its `flows`), a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.app/guides/inbound-orders/) |
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
-| `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
+| `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
@@ -83,8 +83,7 @@ WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/orig
 [Cross-site requests](https://docs.orderloop.app/guides/team-and-roles/#cross-site-requests).
 
 `apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
-row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
-is an open admin, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/). The engine's own
+row) or a bearer token. With no `users` on localhost it is an open admin, which is the local dev default; on any other host `awaitingSetup` makes the Worker redirect browsers to `/setup` and answer everything else `503` until the first admin is created from the setup code (`setup.server.ts`). See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see
@@ -110,8 +109,8 @@ before A2A) and one `OAuthResourceServer` per endpoint, which publishes
 authorization server does dynamic client registration, Client ID Metadata Documents, tokens of
 1 hour (access) and 30 days (refresh), and keeps grants in KV `OAUTH_KV`. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
 the approver and the role they chose. A bearer that is not an issued
-token (one not shaped `<user>:<grant>:<secret>`) is checked as `ol_live_` or `APP_PASSWORD` by
-`apiPrincipal`, with its throttling and expiry, on either endpoint.
+token (one not shaped `<user>:<grant>:<secret>`) is checked as an `ol_live_` token by
+`apiPrincipal`, with its expiry (anything else is `401`), on either endpoint.
 
 `forward` resolves the caller (for a grant, `grantPrincipal` re-reads the person: disabled means
 refused, and the role is the lower of granted and current), refuses a pending two-factor setup,
@@ -265,8 +264,8 @@ with the copilot and never saves. The model is `workers-ai-provider` over `ASSIS
 deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.app/guides/assistant/).
 
 The `AssistantAgent` instance is named after the person's user id, which the web app sets from the
-session whatever the browser asks for. Everyone signed in with the shared `APP_PASSWORD` shares one
-instance (as does open local development).
+session whatever the browser asks for. Open local development
+shares one instance.
 
 ## AI calls
 
