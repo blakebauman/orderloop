@@ -19,7 +19,12 @@ import { CopyButton } from '~/components/copy-button';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
-import { setTwoFactorRequirement, twoFactorRequirement } from '~/lib/settings.server';
+import {
+  approvalSeparation,
+  setApprovalSeparation,
+  setTwoFactorRequirement,
+  twoFactorRequirement,
+} from '~/lib/settings.server';
 import {
   addUser,
   createFirstAdmin,
@@ -47,10 +52,14 @@ export const meta = () => [{ title: 'Team · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
-  const [team, twoFactorRequired] = await Promise.all([listTeam(), twoFactorRequirement()]);
+  const [team, twoFactorRequired, separated] = await Promise.all([
+    listTeam(),
+    twoFactorRequirement(),
+    approvalSeparation(),
+  ]);
   // The address a new person signs in at, to send along with their temporary password.
   const signInUrl = new URL('/login', request.url).href;
-  return { ...team, twoFactorRequired, me, now: Date.now(), signInUrl };
+  return { ...team, twoFactorRequired, separated, me, now: Date.now(), signInUrl };
 }
 
 /** One-time secrets come back from the action and are shown once, never stored in the clear. */
@@ -111,6 +120,16 @@ export async function action({ request }: Route.ActionArgs) {
           throw new TeamError('Pick who must use two-factor sign-in.');
         await setTwoFactorRequirement(request, me, next);
         return { ok: true, done: 'Two-factor requirement saved.' };
+      }
+      case 'approval-separation': {
+        const on = str('separated') === 'on';
+        await setApprovalSeparation(request, me, on);
+        return {
+          ok: true,
+          done: on
+            ? 'Saved: no one may approve an order they started.'
+            : 'Saved: anyone with the Approver role may approve any order.',
+        };
       }
       case 'reset-two-factor':
         await resetTwoFactor(request, me, str('id'));
@@ -205,7 +224,8 @@ function RoleSelect({
 }
 
 export default function Team() {
-  const { people, tokens, me, now, twoFactorRequired, signInUrl } = useLoaderData<typeof loader>();
+  const { people, tokens, me, now, twoFactorRequired, separated, signInUrl } =
+    useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
@@ -479,6 +499,8 @@ export default function Team() {
             }
           />
 
+          <ApprovalSeparationForm separated={separated} />
+
           <Section title="API tokens" flush>
             {tokens.length ? (
               <ul className="divide-y text-sm">
@@ -677,6 +699,38 @@ function TokenExpiry({ state, expiresAt }: { state: TokenState; expiresAt: numbe
     >
       expires {formatTime(expiresAt)}
     </span>
+  );
+}
+
+/** Separation of duties: whether whoever started an order may also decide its approvals. */
+function ApprovalSeparationForm({ separated }: { separated: boolean }) {
+  const fetcher = useFetcher();
+  return (
+    <Section title="Approvals">
+      <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="intent" value="approval-separation" />
+        <label htmlFor="separated" className="text-sm">
+          Who started an order
+        </label>
+        <NativeSelect
+          id="separated"
+          name="separated"
+          defaultValue={separated ? 'on' : 'off'}
+          className="h-8"
+        >
+          <NativeSelectOption value="off">May approve it</NativeSelectOption>
+          <NativeSelectOption value="on">Can’t approve it</NativeSelectOption>
+        </NativeSelect>
+        <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+          Save
+        </Button>
+      </fetcher.Form>
+      <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+        Separates duties: the person or API token that started an order can’t approve or reject its
+        steps, so a second person always decides. Orders from channels, email and the stock review
+        have no starter, and anyone with the Approver role may decide them.
+      </p>
+    </Section>
   );
 }
 

@@ -9,7 +9,7 @@ import type { Route } from './+types/flow-action';
 
 /** JSON actions from the flow editor: save, publish, test. */
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request, 'operator');
+  const me = await requireUser(request, 'operator');
   let body: { intent: string; flow?: unknown };
   try {
     body = JSON.parse(await readText(request));
@@ -41,6 +41,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         flowId: flow.id,
         version: res.version,
         input: sample?.input ?? { model: flow.model, channel: 'manual' },
+        startedBy: me.id,
       });
       return { ...res, orderId };
     }

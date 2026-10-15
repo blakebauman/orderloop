@@ -3,7 +3,7 @@
  * rarely, so each isolate keeps what it read for a short while.
  */
 
-import type { Principal } from '@orderloop/core';
+import { APPROVAL_SEPARATION_KEY, type Principal } from '@orderloop/core';
 import { workspaceSettings } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { audit } from './audit.server';
@@ -45,4 +45,39 @@ export async function setTwoFactorRequirement(
     });
   cached = { value: next, at: Date.now() };
   await audit(request, 'team.two_factor_requirement', { actor: by, detail: { from, to: next } });
+}
+
+let separation: { value: boolean; at: number } | null = null;
+
+/**
+ * Whether whoever started an order is kept from deciding its approvals (`ownOrderRefusal`); off
+ * until an admin turns it on. The engine reads the same row when a decision arrives.
+ */
+export async function approvalSeparation(): Promise<boolean> {
+  if (separation && Date.now() - separation.at < CACHE_MS) return separation.value;
+  const row = await db()
+    .select({ value: workspaceSettings.value })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY))
+    .get();
+  separation = { value: row?.value === 'on', at: Date.now() };
+  return separation.value;
+}
+
+export async function setApprovalSeparation(request: Request, by: Principal, on: boolean) {
+  if ((await approvalSeparation()) === on) return;
+  const value = on ? 'on' : 'off';
+  const updatedBy = by.email ?? by.name;
+  await db()
+    .insert(workspaceSettings)
+    .values({ key: APPROVAL_SEPARATION_KEY, value, updatedAt: Date.now(), updatedBy })
+    .onConflictDoUpdate({
+      target: workspaceSettings.key,
+      set: { value, updatedAt: Date.now(), updatedBy },
+    });
+  separation = { value: on, at: Date.now() };
+  await audit(request, 'team.approval_separation', {
+    actor: by,
+    detail: { from: on ? 'off' : 'on', to: value },
+  });
 }

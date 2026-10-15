@@ -99,6 +99,7 @@ async function start(
       updatedAt: now,
       idempotencyKey: key ?? null,
       idempotencyFingerprint: fingerprint,
+      startedBy: req.startedBy ?? null,
     });
   } catch (err) {
     const raced = await existing();

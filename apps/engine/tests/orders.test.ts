@@ -1,9 +1,11 @@
 import { createExecutionContext, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
+  APPROVAL_SEPARATION_KEY,
   encodePrincipal,
   type OrderInput,
   type OrderState,
+  OWN_ORDER_REFUSAL,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
@@ -34,6 +36,7 @@ import {
   users,
   webhookDeliveries,
   webhookSubscriptions,
+  workspaceSettings,
 } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -319,7 +322,7 @@ describe('cancel', () => {
     await introspect();
     const api = new EngineApi(createExecutionContext(), env);
     expect(await api.cancel('ord_doesnotexist', 'x')).toEqual({ ok: false, reason: 'not_found' });
-    expect(await api.decide('ord_doesnotexist', 'mgr', 'approved', 'api')).toEqual({
+    expect(await api.decide('ord_doesnotexist', 'mgr', 'approved', 'api', 'tok_api')).toEqual({
       ok: false,
       reason: 'not_found',
     });
@@ -337,13 +340,64 @@ describe('cancel', () => {
       }),
     });
     await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
-    expect(await api.decide(orderId, 'fin', 'approved', 'api')).toEqual({
+    expect(await api.decide(orderId, 'fin', 'approved', 'api', 'tok_api')).toEqual({
       ok: false,
       reason: 'not_waiting',
     });
     expect(await api.cancel(orderId, 'Changed our mind')).toEqual({ ok: true });
     expect(await api.cancel(orderId, 'Again')).toEqual({ ok: false, reason: 'finished' });
     expect(await api.intakeMailboxes()).toMatchObject({ orders: 'tpl-b2b-order' });
+  });
+
+  it('keeps whoever started an order from deciding it, once the workspace separates duties', async () => {
+    await introspect();
+    const api = new EngineApi(createExecutionContext(), env);
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        model: 'procurement',
+        customerId: 'cus_internal',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+      startedBy: 'usr_maker',
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+    const row = await db()
+      .select({ startedBy: orders.startedBy })
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .get();
+    expect(row!.startedBy).toBe('usr_maker');
+
+    await db().insert(workspaceSettings).values({
+      key: APPROVAL_SEPARATION_KEY,
+      value: 'on',
+      updatedAt: Date.now(),
+      updatedBy: 'test',
+    });
+    try {
+      expect(await api.decide(orderId, 'mgr', 'approved', 'maker', 'usr_maker')).toEqual({
+        ok: false,
+        reason: 'own_order',
+        error: OWN_ORDER_REFUSAL,
+      });
+      // The agent itself refuses too, whichever way the decision arrives.
+      const refused = await agent(orderId)
+        .decide('mgr', 'approved', 'maker', undefined, 'usr_maker')
+        .then(
+          () => null,
+          (err: Error) => err.message,
+        );
+      expect(refused).toBe(OWN_ORDER_REFUSAL);
+      expect(await api.decide(orderId, 'mgr', 'approved', 'checker', 'usr_checker')).toEqual({
+        ok: true,
+      });
+    } finally {
+      await db()
+        .delete(workspaceSettings)
+        .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY));
+      await agent(orderId).cancel('Test over');
+    }
   });
 });
 

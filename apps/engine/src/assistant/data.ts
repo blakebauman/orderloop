@@ -44,6 +44,7 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { copilot, orderBrief } from '../ai';
 import { assess, resolveImages } from '../clef';
+import { separationRefusal } from '../separation';
 
 export class Refused extends Error {}
 
@@ -471,6 +472,7 @@ export async function previewAction<T extends ActionTool>(
         const { id, s } = await loadOrder(env, i.orderId);
         const w = approvalWait(s, i.nodeId);
         const o = s.order!;
+        const own = await separationRefusal(env, id, p.id);
         const verb = i.decision === 'approved' ? 'Approve' : 'Reject';
         const next = w ? nextStep(s, w.nodeId, i.decision) : null;
         return {
@@ -483,6 +485,7 @@ export async function previewAction<T extends ActionTool>(
           ],
           blocked:
             roleBlock ??
+            own ??
             (w
               ? undefined
               : s.waits.some((x) => x.kind === 'approval')
@@ -613,7 +616,7 @@ export async function runAction<T extends ActionTool>(
       const i = input as ActionInput['decide_approval'];
       const { id, s } = await loadOrder(env, i.orderId);
       const w = approvalWait(s, i.nodeId)!;
-      await env.ORDER_AGENT.getByName(id).decide(w.nodeId, i.decision, by, i.note);
+      await env.ORDER_AGENT.getByName(id).decide(w.nodeId, i.decision, by, i.note, p.id);
       return { done: preview.title, href: preview.href };
     }
     case 'deliver_event': {

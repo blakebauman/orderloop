@@ -155,7 +155,7 @@ part:
 
 The status text of a waiting order names the approval's `nodeId` and the event to send. Replies
 run the `decide_approval` and `deliver_event` skills as the caller, so the same role and live-state
-checks apply, and the task follows the order again. A reply on a task that is waiting for nothing
+checks apply (including [separation of approvals](/guides/team-and-roles/#approvals): an order the caller placed can't be decided by them when it is on), and the task follows the order again. A reply on a task that is waiting for nothing
 is refused.
 
 ### Chat

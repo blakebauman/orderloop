@@ -92,7 +92,7 @@ the same methods over RPC.
 
 | Method | Behaviour |
 |---|---|
-| `decide(nodeId, decision, by = 'operator', note?)` | Finds the approval wait for `nodeId` (throws if none) and sends its event type to the instance with `{ decision, by, note }` |
+| `decide(nodeId, decision, by = 'operator', note?, deciderId?)` | First checks separation of duties: `separationRefusal` (`apps/engine/src/separation.ts`) reads `approval_separation` and `orders.started_by` and throws `OWN_ORDER_REFUSAL` when `ownOrderRefusal` (core) says the decider started the order. `deciderId` comes from RPC callers (the REST route, the order action, the assistant); on a socket it is the signed-in caller's id. Without one (no principal), nothing is checked. Then finds the approval wait for `nodeId` (throws if none) and sends its event type to the instance with `{ decision, by, note }` |
 | `deliver(event, payload = {})` | Finds the event wait for `event`. If none is open, returns `{ delivered: false }`; otherwise sends `{ ...payload, event, at }` and returns `{ delivered: true, nodeId }` |
 | `cancel(reason = 'Cancelled by operator')` | See below. Returns `{ ok: false }` for an order that has already ended |
 | `whoami()` | The caller as the agent sees them now, `{ name, role }`; fails once their sign-in has ended |
@@ -121,7 +121,7 @@ routes already checked the role.
 | Method | Socket role |
 |---|---|
 | `whoami` | `viewer` |
-| `decide` | `approver`; `by` is replaced by the caller's email (or name) |
+| `decide` | `approver`; `by` is replaced by the caller's email (or name) and `deciderId` by the caller's id |
 | `deliver`, `cancel` | `operator` |
 
 Readonly connections (`shouldConnectionBeReadonly`) aren't used: they would also block the agent's

@@ -80,13 +80,17 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request, 'operator');
+  const me = await requireUser(request, 'operator');
   const form = await request.formData();
   const sc = SCENARIOS.find((s) => s.id === form.get('scenario'));
   if (!sc || !(await demoAvailable()))
     return { error: 'That demo scenario no longer exists. Reload the page.' };
   await ensureSeeded();
-  const { orderId } = await engine().startOrder({ flowId: sc.flowId, input: sc.input });
+  const { orderId } = await engine().startOrder({
+    flowId: sc.flowId,
+    input: sc.input,
+    startedBy: me.id,
+  });
   return redirect(`/orders/${orderId}`);
 }
 

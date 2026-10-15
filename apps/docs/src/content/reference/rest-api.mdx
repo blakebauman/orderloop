@@ -43,7 +43,7 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `GET` | `/api/v1/orders?model=&channel=&status=&q=&limit=&cursor=` | | `{ orders, nextCursor }` |
 | `GET` | `/api/v1/orders/:id` | | The order's live state |
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
-| `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }` |
+| `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }`, `403 { error }` if the caller started the order and the workspace separates [approvals](/guides/team-and-roles/#approvals) |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
 | `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (admin) |
 | `GET` | `/api/v1/integrations` | | `{ integrations }` (admin) |

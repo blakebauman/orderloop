@@ -19,6 +19,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         String(f.get('nodeId')),
         intent === 'approve' ? 'approved' : 'rejected',
         actor(me),
+        me.id,
         String(f.get('note') ?? '') || undefined,
       );
       if (!res.ok)
@@ -26,11 +27,13 @@ export async function action({ request, params }: Route.ActionArgs) {
           {
             ok: false,
             error:
-              res.reason === 'not_found'
-                ? 'That order no longer exists'
-                : 'That step is no longer waiting for a decision',
+              res.reason === 'own_order'
+                ? res.error
+                : res.reason === 'not_found'
+                  ? 'That order no longer exists'
+                  : 'That step is no longer waiting for a decision',
           },
-          { status: res.reason === 'not_found' ? 404 : 409 },
+          { status: { own_order: 403, not_found: 404, not_waiting: 409 }[res.reason] },
         );
       return { ok: true };
     }
@@ -63,6 +66,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           documentKey: prev.order.documentKey,
           meta: { ...meta, restartedFrom: params.orderId },
         },
+        startedBy: me.id,
       });
       return { ok: true, orderId };
     }

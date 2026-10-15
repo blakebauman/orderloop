@@ -137,6 +137,10 @@ export function openApiDocument(serverUrl: string) {
           requestBody: body(decisionInput),
           responses: {
             '200': ok('Recorded'),
+            '403': ok(
+              'The caller lacks the approver role, or started this order and the workspace separates approvals',
+              '#/components/schemas/Error',
+            ),
             '409': ok('That node is not waiting for an approval', '#/components/schemas/Error'),
             ...errors,
           },
