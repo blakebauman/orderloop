@@ -128,7 +128,10 @@ D1, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/dee
 and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
 deployment before its migration. If anything fails once the engine has deployed (the web deploy or
 the smoke test), the job runs `wrangler rollback` for each Worker that deployed. D1 is not rolled
-back, which is why migrations only add; see [Restoring D1](#restoring-d1).
+back, which is why migrations only add; see [Restoring D1](#restoring-d1). The docs then get their
+own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with its canonical URL, a
+reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.
+If it fails, only the docs Worker is rolled back; the app has already passed.
 
 Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
