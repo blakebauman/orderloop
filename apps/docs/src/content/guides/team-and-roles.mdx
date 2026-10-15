@@ -53,7 +53,8 @@ Admins manage people and tokens at `/team`:
 - **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
-  can set it up again. You can't reset your own.
+  can set it up again. It also removes their [passkeys](#passkeys), in case the lost device holds
+  one, and applies even if they had passkeys but no authenticator app. You can't reset your own.
 - The last active admin can't be demoted or disabled, so someone can always manage the team.
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
@@ -100,6 +101,29 @@ for the step before or after the current one is accepted too, in case the phone'
 off, and each step's code works once. Recovery codes are stored as hashes and deleted when used.
 API tokens don't use two-factor sign-in.
 
+### Passkeys
+
+Once your password is your own, the **Account** page has a **Passkeys** section listing each
+passkey's name, whether it is synced (backed up across your devices) or on this device only, when it
+was added and when it was last used. **Add a passkey** takes an optional name (up to 60 characters)
+and your current password, then your browser or device asks you to confirm. Each authenticator can
+be registered once. **Remove** also asks for your password. Passkeys are not available on the shared
+demo, whose Account page is read-only.
+
+On the sign-in page, **Sign in with a passkey** (shown when the browser supports WebAuthn) opens the
+browser's passkey prompt. A verified passkey, with the device's user verification (a fingerprint,
+face or PIN), signs you in fully: no password and no two-factor code. It keeps the page you were
+heading to. Each deployment's passkeys are its own: a passkey is bound to the host you are on.
+OrderLoop stores only the passkey's public key.
+
+The challenge behind each attempt works once and expires after 5 minutes. A failure (an expired
+challenge, an unknown passkey, a disabled person, or an answer that doesn't verify, including a
+signature counter that goes backwards) counts against the address's sign-in limit and is audited as
+`auth.sign_in_failed`.
+
+A passkey does not count toward the [two-factor requirement](#requiring-it), which only an
+authenticator app meets, so password sign-in stays protected for everyone the requirement covers.
+
 #### Requiring it
 
 Admins choose who must use two-factor sign-in under **Two-factor sign-in** on the Team page:
@@ -124,7 +148,7 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 | Address, at the setup page | 10 | Guessing the setup code (`429`) |
 | Person, on the Account page | 5 | Guessing the current password from a signed-in browser left open: changing the password, turning off two-factor sign-in, new recovery codes (`429`) |
 
-A successful sign-in clears its email-and-address count. A sign-in with no email counts against
+Failed passkey sign-ins count against the address. A successful sign-in clears its email-and-address count. A sign-in with no email counts against
 `(no email)`. API tokens aren't throttled: they are long random values, so a busy address can't lock
 out working integrations. The address is the client's IP as Cloudflare sees it.
 
@@ -179,8 +203,8 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
-| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
+| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |

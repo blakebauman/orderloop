@@ -9,6 +9,7 @@ import { count, eq } from 'drizzle-orm';
 import { audit } from './audit.server';
 import { reauthenticate } from './auth.server';
 import { db } from './env.server';
+import { clearPasskeys } from './passkeys.server';
 import { twoFactorRequirement } from './settings.server';
 import { TeamError } from './team.server';
 import {
@@ -31,7 +32,7 @@ export async function twoFactorStatus(by: Principal) {
   return { enabledAt: user?.enabledAt ?? null, recoveryLeft: left?.n ?? 0 };
 }
 
-async function confirmPassword(by: Principal, given: string) {
+export async function confirmPassword(by: Principal, given: string) {
   if (by.kind !== 'user')
     throw new TeamError('Only people with their own sign-in can use two-factor sign-in.');
   const user = await db().select().from(users).where(eq(users.id, by.id)).get();
@@ -118,9 +119,15 @@ export async function resetTwoFactor(request: Request, by: Principal, id: string
     .where(eq(users.id, id))
     .get();
   if (!user) throw new TeamError('That person is no longer on the team.');
-  if (!user.enabledAt) return;
-  await clear(id);
-  await audit(request, 'team.two_factor_reset', { actor: by, target: user.email });
+  // A lost phone or laptop: its passkeys go too, so whoever has it can't sign in.
+  const hadPasskeys = await clearPasskeys(id);
+  if (!user.enabledAt && !hadPasskeys) return;
+  if (user.enabledAt) await clear(id);
+  await audit(request, 'team.two_factor_reset', {
+    actor: by,
+    target: user.email,
+    ...(hadPasskeys ? { detail: { passkeys: 'removed' } } : {}),
+  });
 }
 
 async function clear(userId: string) {

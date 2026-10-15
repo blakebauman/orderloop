@@ -17,9 +17,11 @@ import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
 import { CopyButton } from '~/components/copy-button';
 import { PageHeader, Section } from '~/components/page';
+import { Passkeys } from '~/components/passkeys';
 import { audit } from '~/lib/audit.server';
 import { requireUser, sessionId, Throttled } from '~/lib/auth.server';
 import { oauthApi } from '~/lib/oauth.server';
+import { listPasskeys } from '~/lib/passkeys.server';
 import {
   changeOwnPassword,
   endOtherSessions,
@@ -41,10 +43,11 @@ export const meta = () => [{ title: 'Account · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  const [sessions, twoFactor, grants] = await Promise.all([
+  const [sessions, twoFactor, grants, passkeys] = await Promise.all([
     ownSessions(me, await sessionId(request)),
     twoFactorStatus(me),
     oauthApi(request).listUserGrants(me.id),
+    me.kind === 'user' ? listPasskeys(me.id) : [],
   ]);
   const apps = grants.items.map((g) => ({
     id: g.id,
@@ -55,7 +58,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     role: g.scope.find(isRole) ?? 'viewer',
     createdAt: g.createdAt * 1000,
   }));
-  return { me, sessions, twoFactor, apps };
+  return { me, sessions, twoFactor, apps, passkeys };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -132,7 +135,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Account() {
-  const { me, sessions, twoFactor, apps } = useLoaderData<typeof loader>();
+  const { me, sessions, twoFactor, apps, passkeys } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const end = useFetcher<typeof action>();
   const formatTime = useDateTime();
@@ -160,11 +163,7 @@ export default function Account() {
       <PageHeader
         title="Account"
         subtitle={`${
-          me.kind === 'user'
-            ? (me.email ?? me.name)
-            : me.kind === 'open'
-              ? 'Sign-in is off'
-              : 'Workspace password'
+          me.kind === 'user' ? (me.email ?? me.name) : 'Sign-in is off'
         } · ${ROLE_LABELS[me.role]}`}
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
@@ -274,6 +273,7 @@ export default function Account() {
           {twoFactor && (!me.passwordChangeDue || me.twoFactorDue) ? (
             <TwoFactor status={twoFactor} />
           ) : null}
+          {me.kind === 'user' && !me.passwordChangeDue ? <Passkeys passkeys={passkeys} /> : null}
           {me.kind === 'user' && !me.passwordChangeDue ? (
             <Section
               title="Where you're signed in"

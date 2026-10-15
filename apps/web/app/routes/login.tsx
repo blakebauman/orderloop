@@ -1,6 +1,7 @@
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
-import { useEffect, useRef } from 'react';
+import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser';
+import { useEffect, useRef, useState } from 'react';
 import {
   data,
   Form,
@@ -71,7 +72,8 @@ export default function Login() {
   const [params] = useSearchParams();
   const busy = useNavigation().state === 'submitting';
   const password = useRef<HTMLInputElement>(null);
-  const error = result?.error;
+  const passkey = usePasskeySignIn();
+  const error = passkey.error ?? result?.error;
   // After a refusal, the password is ready to retype.
   useEffect(() => {
     if (error) password.current?.select();
@@ -140,13 +142,65 @@ export default function Login() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" className="mt-4 w-full" disabled={busy}>
+        <Button type="submit" className="mt-4 w-full" disabled={busy || passkey.busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
+        {passkey.supported ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            disabled={busy || passkey.busy}
+            onClick={() => void passkey.start(params.toString())}
+          >
+            {passkey.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+          </Button>
+        ) : null}
         <p className="mt-3 text-muted-foreground text-xs">
           Forgot your password? Ask an admin to reset it on the Team page.
         </p>
       </Form>
     </main>
   );
+}
+
+/** Signing in with a passkey: ask the server for a challenge, let the browser answer, check it. */
+function usePasskeySignIn() {
+  const [supported, setSupported] = useState(false);
+  useEffect(() => setSupported(browserSupportsWebAuthn()), []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const call = async (search: string, body: Record<string, unknown>) => {
+    const res = await fetch(`/login/passkey${search ? `?${search}` : ''}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) throw new Error(String(json.error ?? 'That did not go through. Try again.'));
+    return json;
+  };
+  const start = async (search: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { options } = await call(search, { step: 'options' });
+      let response: Awaited<ReturnType<typeof startAuthentication>>;
+      try {
+        response = await startAuthentication({
+          optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'],
+        });
+      } catch {
+        // The person closed the prompt, or has no passkey here: nothing to report as a failure.
+        return;
+      }
+      const { location } = await call(search, { step: 'verify', response });
+      window.location.assign(String(location ?? '/'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { supported, busy, error, start };
 }

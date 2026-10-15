@@ -559,6 +559,42 @@ export const signInChallenges = sqliteTable('sign_in_challenges', {
   expiresAt: integer('expires_at').notNull(),
 });
 
+/**
+ * Passkeys (WebAuthn credentials): signing in with one, with user verification, takes the place of
+ * a password and code. `id` is the credential id and `public_key` its COSE key, both base64url.
+ */
+export const passkeys = sqliteTable(
+  'passkeys',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    publicKey: text('public_key').notNull(),
+    /** The authenticator's signature counter; a lower one than stored means a cloned key. */
+    counter: integer('counter').notNull().default(0),
+    /** JSON array of transports (usb, nfc, ble, internal, hybrid), as the browser reported. */
+    transports: text('transports').notNull().default('[]'),
+    name: text('name').notNull(),
+    /** Synced by a password manager or platform, rather than bound to one device. */
+    backedUp: integer('backed_up', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+  },
+  (t) => [index('passkeys_user').on(t.userId)],
+);
+
+/**
+ * The challenge a passkey registration or sign-in must answer, used once. A sign-in's id is the
+ * SHA-256 of its cookie; a registration's is `reg:<user id>`.
+ */
+export const passkeyChallenges = sqliteTable('passkey_challenges', {
+  id: text('id').primaryKey(),
+  challenge: text('challenge').notNull(),
+  userId: text('user_id'),
+  expiresAt: integer('expires_at').notNull(),
+});
+
 /** REST API bearer tokens (`ol_live_…`), stored as SHA-256, each with a role. */
 export const apiTokens = sqliteTable(
   'api_tokens',

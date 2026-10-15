@@ -60,7 +60,7 @@ const EXPIRED_AUDIT_MS = 60 * 60_000;
 
 const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'admin' };
 
-function cookie(request: Request, name: string): string | undefined {
+export function cookie(request: Request, name: string): string | undefined {
   return (request.headers.get('cookie') ?? '')
     .split(/;\s*/)
     .find((c) => c.startsWith(`${name}=`))
