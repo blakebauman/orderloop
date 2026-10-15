@@ -157,7 +157,7 @@ pnpm docs:deploy     # build and deploy the orderloop-docs Worker
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs lint, type-check, build, tests, the fleet tests and a dependency audit on every push and PR. Production deploys from CI: each customer has a dedicated deployment listed in `deployments/` (at `<id>.orderloop.app`; OrderLoop's own is `orderloop.app`), and on `main` CI deploys them ring by ring (staging, internal, canary, general). For each one it records a D1 restore point, migrates D1, deploys the engine and the web app, smoke-tests `/health/deep`, and rolls back any Worker it deployed if a later step fails; see [docs/operations.md](docs/operations.md). Each deployment's job runs in its GitHub environment, which holds its secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
+`.github/workflows/ci.yml` runs lint, type-check, build, tests, the fleet tests and a dependency audit on every push and PR. Production deploys from CI: each customer has a dedicated deployment listed in `deployments/` (at `<id>.orderloop.app`; OrderLoop's own is `console.orderloop.app`), and on `main` CI deploys them ring by ring (staging, internal, canary, general). For each one it records a D1 restore point, migrates D1, deploys the engine and the web app, smoke-tests `/health/deep`, and rolls back any Worker it deployed if a later step fails; see [docs/operations.md](docs/operations.md). Each deployment's job runs in its GitHub environment, which holds its secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
 
 ## Deploy
 

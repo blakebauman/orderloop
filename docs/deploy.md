@@ -81,7 +81,7 @@ To test without a mail server, call `receiveEmail` from a test with a fake
   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
   `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`). Until it is set the route answers `503`. The
   integrator creates the `orders/create` webhook in Shopify, pointing at
-  `https://orderloop.app/api/v1/channels/shopify/orders`.
+  `https://console.orderloop.app/api/v1/channels/shopify/orders`.
 - **EDI X12 850** ([Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#edi-x12-850)):
   map each trading partner's ISA sender id (`ISA06`) to a customer id in `EDI_PARTNERS`, in `vars`
   in `apps/web/wrangler.jsonc`, for example `{ "NORTHWIND": "cus_northwind" }`. A sender that isn't
@@ -95,8 +95,8 @@ verifies, looks up the customer and starts the order.
 A deployment with `PAYMENTS_MODE` `stripe` whose flows issue invoices through Stripe
 (`commerce.invoice` with provider `stripe`) needs Stripe's events to settle them and resume orders.
 In the Stripe Dashboard (Developers → Webhooks), add an endpoint at
-`https://<domain>/api/v1/webhooks/stripe` (orderloop.app's is
-`https://orderloop.app/api/v1/webhooks/stripe`) on the same account and mode (live or test) as
+`https://<domain>/api/v1/webhooks/stripe` (OrderLoop's own is
+`https://console.orderloop.app/api/v1/webhooks/stripe`) on the same account and mode (live or test) as
 `STRIPE_SECRET_KEY`, and enable these events:
 
 - `invoice.paid`: settles the invoice and delivers `payment.received`
@@ -162,7 +162,7 @@ own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with it
 reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.
 If it fails, only the docs Worker is rolled back; the app has already passed.
 
-Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
+Each deployment's job runs in its GitHub environment (`production` for console.orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
 them it fails rather than skipping. The environment's `SETUP_TOKEN`,

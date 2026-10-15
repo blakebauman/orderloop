@@ -4,13 +4,13 @@ Run the fleet: one OrderLoop deployment per customer, each with its own Workers,
 bucket, AI Gateway, domain and secrets, all in OrderLoop's Cloudflare account and all deployed by
 CI.
 
-The product lives on its own zone, `orderloop.app`, with the docs at `docs.orderloop.app`;
-`orderloop.io` is for the marketing site. Every customer workspace is a subdomain of
-`orderloop.app`, so nothing outside the product can set cookies for it.
+The product lives on its own zone, `orderloop.app`: the marketing site at the apex,
+OrderLoop's own workspace at `console.orderloop.app` and the docs at `docs.orderloop.app`. Every customer workspace is a subdomain of `orderloop.app`, so nothing
+outside the product can set cookies for it.
 
 A deployment shares nothing with another: not data, not secrets, not rate-limit counters. Isolating
 a customer, choosing where their data lives and removing them are all per-deployment operations.
-OrderLoop itself (`orderloop.app`) is a deployment like the others, the one in the `internal` ring.
+OrderLoop itself (`console.orderloop.app`) is a deployment like the others, the one in the `internal` ring.
 
 ## The registry
 

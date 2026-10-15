@@ -64,7 +64,7 @@ test("a customer's limits replace the base budgets they name", () => {
   assert.throws(() => toDeployment({ ...acme, limits: { api: 0 } }), /positive/);
 });
 
-test("orderloop.app's own deployment renders the base configs unchanged", () => {
+test("OrderLoop's own deployment renders the base configs unchanged", () => {
   const d = loadDeployments().find((x) => x.id === 'orderloop')!;
   assert.deepEqual(renderEngine(base('engine'), d), base('engine'));
   assert.deepEqual(renderWeb(base('web'), d), base('web'));

@@ -54,7 +54,7 @@ If an admin has set **Who started an order** to **Can't approve it**, the person
 From the **API**:
 
 ```bash
-curl -X POST https://orderloop.app/api/v1/orders/ord_…/approvals/approval \
+curl -X POST https://console.orderloop.app/api/v1/orders/ord_…/approvals/approval \
   -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
   -d '{ "decision": "approved", "note": "Paid last invoice" }'
 ```
@@ -93,7 +93,7 @@ waiting.
 - **REST API**, with an API token of the `operator` role:
 
   ```bash
-  curl -X POST https://orderloop.app/api/v1/orders/ord_…/events \
+  curl -X POST https://console.orderloop.app/api/v1/orders/ord_…/events \
     -H "Authorization: Bearer $ORDERLOOP_TOKEN" -H 'content-type: application/json' \
     -d '{ "event": "payment.received", "payload": { "amount": 3106.78 } }'
   ```

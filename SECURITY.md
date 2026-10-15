@@ -24,8 +24,9 @@ In scope:
 
 - This repository's code: the web app, the engine, the shared packages and the CI that deploys
   them.
-- The hosted service at `orderloop.app` and its customer workspaces at `*.orderloop.app`, within
-  the rules below.
+- The hosted service at `console.orderloop.app` and its customer workspaces at `*.orderloop.app`,
+  within the rules below.
+- The marketing site at `orderloop.app`.
 - The documentation site at `docs.orderloop.app`.
 
 Out of scope: other projects on the `orderloop.io` domain, denial of service and load testing,

@@ -1,10 +1,10 @@
-// OrderLoop's own deployment at orderloop.app. Its resources keep the base names (suffix ""),
+// OrderLoop's own deployment at console.orderloop.app. Its resources keep the base names (suffix ""),
 // which are the values in apps/*/wrangler.jsonc. See docs/operations.md for every field.
 {
   "id": "orderloop",
   "ring": "internal",
   "slot": 1,
-  "domain": "orderloop.app",
+  "domain": "console.orderloop.app",
   "suffix": "",
   "environment": "production",
   "d1Id": "958e09f6-63a9-4634-ac1e-18ae3b7ce044",

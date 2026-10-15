@@ -21,11 +21,11 @@
   // each.
   "placement": { "mode": "smart" },
   "upload_source_maps": true,
-  // Served only at orderloop.app, so the zone's rules apply to every request: no workers.dev or
+  // Served only at console.orderloop.app, so the zone's rules apply to every request: no workers.dev or
   // preview URL as a second way in.
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "orderloop.app", "custom_domain": true }],
+  "routes": [{ "pattern": "console.orderloop.app", "custom_domain": true }],
   "d1_databases": [
     {
       "binding": "DB",

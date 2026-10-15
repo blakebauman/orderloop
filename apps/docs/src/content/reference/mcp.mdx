@@ -6,7 +6,7 @@ description: Connect Claude, Claude Code, Cursor or any MCP client to OrderLoop 
 import McpTools from '../../components/McpTools.astro';
 
 OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
-clients at `https://orderloop.app/mcp`. They are the
+clients at `https://console.orderloop.app/mcp`. They are the
 tools of [the assistant](/guides/assistant/), so a client can check what needs attention, find and
 read orders, and, with the right role, decide approvals or cancel orders. Each person is limited to
 what their role allows.
@@ -20,7 +20,7 @@ connects at `/a2a`; see [A2A endpoint](/reference/a2a/).
 
 ### Claude and Claude Desktop
 
-Add a custom connector with the URL `https://orderloop.app/mcp`. The client discovers the
+Add a custom connector with the URL `https://console.orderloop.app/mcp`. The client discovers the
 authorization server, registers itself and opens OrderLoop's consent page in your browser:
 
 1. Sign in with your own account. Two-factor sign-in applies.
@@ -33,14 +33,14 @@ authorization server, registers itself and opens OrderLoop's consent page in you
 ### Claude Code
 
 ```bash
-claude mcp add --transport http orderloop https://orderloop.app/mcp
+claude mcp add --transport http orderloop https://console.orderloop.app/mcp
 ```
 
 Claude Code runs the same browser flow the first time you use the server. To skip the browser, pass
 an [API token](/guides/team-and-roles/#api-tokens):
 
 ```bash
-claude mcp add --transport http orderloop https://orderloop.app/mcp \
+claude mcp add --transport http orderloop https://console.orderloop.app/mcp \
   --header "Authorization: Bearer ol_live_…"
 ```
 
@@ -53,7 +53,7 @@ request. In Cursor's `mcp.json`:
 {
   "mcpServers": {
     "orderloop": {
-      "url": "https://orderloop.app/mcp",
+      "url": "https://console.orderloop.app/mcp",
       "headers": { "Authorization": "Bearer ol_live_…" }
     }
   }
@@ -111,7 +111,7 @@ tokens 30 days.
 ## Security
 
 - **One endpoint per token.** `/mcp` and `/a2a` are separate OAuth resources of one authorization
-  server. A client requests `https://orderloop.app/mcp` (a client that names no resource, and grants
+  server. A client requests `https://console.orderloop.app/mcp` (a client that names no resource, and grants
   made before A2A existed, are for MCP), and the access token it gets is refused at `/a2a`; an
   A2A token is likewise refused here. Each endpoint publishes its own metadata at
   `/.well-known/oauth-protected-resource/<path>`.

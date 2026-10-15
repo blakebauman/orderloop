@@ -119,7 +119,7 @@ type Roles = {
   endpoints: Record<Endpoint, OAuthResourceServer<Env, Props>>;
 };
 
-// One set per origin (orderloop.app, or localhost in development), made once per isolate.
+// One set per origin (console.orderloop.app, or localhost in development), made once per isolate.
 const roles = new Map<string, Roles>();
 
 function rolesFor(origin: string): Roles {
