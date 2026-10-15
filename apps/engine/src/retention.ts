@@ -2,21 +2,30 @@
  * Retention: a daily sweep (the Worker's cron trigger) that deletes rows nothing reads once they
  * are old. Orders and everything that is part of an order's record (payments, shipments, the stock
  * and balance ledgers, flow versions) are kept. Audit events past the deployment's retention
- * (`AUDIT_RETENTION_DAYS`, 400 days unless set) are archived to R2 first, then deleted.
+ * (`AUDIT_RETENTION_DAYS`, 400 days unless set) are archived to R2 first, then deleted. Where a
+ * deployment sets `PERSONAL_DATA_RETENTION_DAYS`, orders finished longer ago than that lose their
+ * buyer's personal data, as an erasure request would remove it (`eraseOrders`); the commercial
+ * record stays.
  */
 
-import { auditRetentionDays } from '@orderloop/core';
+import {
+  auditRetentionDays,
+  personalDataRetentionDays,
+  TERMINAL_ORDER_STATUSES,
+} from '@orderloop/core';
 import {
   auditEvents,
   createDb,
   inboundEmails,
   nodeRuns,
+  orders,
   paymentEvents,
   sessions,
   webhookDeliveries,
   webhookReceipts,
 } from '@orderloop/db';
-import { and, asc, eq, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
+import { eraseOrders } from './subjects';
 
 const DAY = 86_400_000;
 
@@ -67,6 +76,7 @@ export async function sweep(env: Env, now = Date.now()) {
   ]);
   return {
     auditArchived: await archiveAudit(env, now),
+    personalDataErased: await expirePersonalData(env, now),
     sessions: expiredSessions.length,
     webhookDeliveries: deliveries.length,
     nodeRuns: runs.length,
@@ -141,4 +151,30 @@ export async function archiveAudit(env: Env, now = Date.now()) {
     if (rows.length < batch.length || batch.length < ARCHIVE_BATCH) break;
   }
   return moved;
+}
+
+/** Orders whose buyer one sweep erases; the rest wait for the next day's. */
+const EXPIRE_MAX = 500;
+
+/** Erases the buyer from orders finished before the deployment's retention. Returns how many. */
+export async function expirePersonalData(env: Env, now = Date.now()) {
+  const days = personalDataRetentionDays(env.PERSONAL_DATA_RETENTION_DAYS);
+  if (days === null) return 0;
+  const due = await createDb(env.DB)
+    .select({ id: orders.id, title: orders.title })
+    .from(orders)
+    .where(
+      and(
+        isNull(orders.erasedAt),
+        inArray(orders.status, TERMINAL_ORDER_STATUSES),
+        lt(orders.updatedAt, now - days * DAY),
+      ),
+    )
+    .orderBy(asc(orders.updatedAt))
+    .limit(EXPIRE_MAX);
+  const r = await eraseOrders(env, due, []);
+  // Terminal in the index but running in its agent: skipped, and tried again tomorrow.
+  if (r.refused.length)
+    console.warn(JSON.stringify({ type: 'personal_data_retention_skipped', orders: r.refused }));
+  return r.orders;
 }

@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { storeDocument } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
+import { expirePersonalData } from '../src/retention';
 import { eraseDataSubject, exportDataSubject } from '../src/subjects';
 
 const db = () => createDb(env.DB);
@@ -175,5 +176,30 @@ describe('data subject requests', () => {
       reason: 'active_orders',
       orders: ['ord_busy'],
     });
+  });
+
+  it('erases the buyer from orders finished longer ago than the retention, and only those', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const contact = { email: 'old@example.com', name: 'Olive Oldham' };
+    const old = await finished(order({ title: 'For Olive Oldham', contact }));
+    const recent = await finished(order({ title: 'For Olive Oldham', contact }));
+    const now = Date.now();
+    await db()
+      .update(orders)
+      .set({ updatedAt: now - 400 * 86_400_000 })
+      .where(eq(orders.id, old));
+
+    expect(
+      await expirePersonalData({ ...env, PERSONAL_DATA_RETENTION_DAYS: '' } as unknown as Env, now),
+    ).toBe(0);
+    const swept = { ...env, PERSONAL_DATA_RETENTION_DAYS: '365' } as unknown as Env;
+    expect(await expirePersonalData(swept, now)).toBeGreaterThanOrEqual(1);
+    expect((await state(old)).order).toMatchObject({ title: 'For [erased]', contact: undefined });
+    expect((await state(recent)).order).toMatchObject({ title: 'For Olive Oldham', contact });
+    expect(await expirePersonalData(swept, now)).toBe(0);
   });
 });

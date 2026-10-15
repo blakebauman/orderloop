@@ -161,39 +161,14 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     teamMember: s.teamMember,
   };
 
-  for (const o of list) {
-    const erased = (await env.ORDER_AGENT.getByName(o.id).erasePersonalData(s.terms)) as {
-      held: boolean;
-      title: string;
-    } | null;
-    if (!erased) return { ok: false, reason: 'active_orders', orders: [o.id] };
-    result.documents += await deletePrefix(env, `orders/${o.id}/`);
-    // An order no agent holds (its title is all D1 has) is erased with the subject's terms.
-    const title = erased.held ? erased.title : eraseText(o.title, s.terms);
-    await s.db
-      .update(orders)
-      .set({ contactEmail: null, title, erasedAt: Date.now() })
-      .where(eq(orders.id, o.id));
-    result.orders++;
-  }
-  for (const c of chunks(list.map((o) => o.id))) {
-    await s.db.delete(documents).where(inArray(documents.orderId, c));
-    await s.db.delete(webhookDeliveries).where(inArray(webhookDeliveries.orderId, c));
-    result.messages += (
-      await s.db
-        .update(messages)
-        .set({ recipient: ERASED, subject: ERASED, body: ERASED })
-        .where(inArray(messages.orderId, c))
-        .returning({ id: messages.id })
-    ).length;
-    result.inboundEmails += (
-      await s.db
-        .update(inboundEmails)
-        .set({ sender: ERASED, subject: '', r2Key: null })
-        .where(inArray(inboundEmails.orderId, c))
-        .returning({ id: inboundEmails.id })
-    ).length;
-  }
+  const erased = await eraseOrders(env, list, s.terms);
+  if (erased.refused.length) return { ok: false, reason: 'active_orders', orders: erased.refused };
+  Object.assign(result, {
+    orders: erased.orders,
+    documents: erased.documents,
+    messages: erased.messages,
+    inboundEmails: erased.inboundEmails,
+  });
   if (!result.done) return result;
 
   // No order left: what isn't tied to one, then the accounts themselves.
@@ -227,6 +202,68 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
       })
       .where(eq(customers.id, c.id));
     result.customers++;
+  }
+  return result;
+}
+
+type OrderRow = typeof orders.$inferSelect;
+
+/**
+ * Erases the buyer from finished orders: each order's agent state (`erasePersonalData`), its R2
+ * documents and document rows, its webhook deliveries, and the messages and intake rows that
+ * belong to it. `terms` are the subject's words to erase besides each order's own contact; the
+ * retention sweep passes none. An order running again is skipped and named in `refused`.
+ */
+export async function eraseOrders(
+  env: Env,
+  list: Pick<OrderRow, 'id' | 'title'>[],
+  terms: string[],
+) {
+  const db = createDb(env.DB);
+  const result = {
+    orders: 0,
+    documents: 0,
+    messages: 0,
+    inboundEmails: 0,
+    refused: [] as string[],
+  };
+  const done: string[] = [];
+  for (const o of list) {
+    const erased = (await env.ORDER_AGENT.getByName(o.id).erasePersonalData(terms)) as {
+      held: boolean;
+      title: string;
+    } | null;
+    if (!erased) {
+      result.refused.push(o.id);
+      continue;
+    }
+    result.documents += await deletePrefix(env, `orders/${o.id}/`);
+    // An order no agent holds (its title is all D1 has) is erased with the subject's terms.
+    const title = erased.held ? erased.title : eraseText(o.title, terms);
+    await db
+      .update(orders)
+      .set({ contactEmail: null, title, erasedAt: Date.now() })
+      .where(eq(orders.id, o.id));
+    done.push(o.id);
+    result.orders++;
+  }
+  for (const c of chunks(done)) {
+    await db.delete(documents).where(inArray(documents.orderId, c));
+    await db.delete(webhookDeliveries).where(inArray(webhookDeliveries.orderId, c));
+    result.messages += (
+      await db
+        .update(messages)
+        .set({ recipient: ERASED, subject: ERASED, body: ERASED })
+        .where(inArray(messages.orderId, c))
+        .returning({ id: messages.id })
+    ).length;
+    result.inboundEmails += (
+      await db
+        .update(inboundEmails)
+        .set({ sender: ERASED, subject: '', r2Key: null })
+        .where(inArray(inboundEmails.orderId, c))
+        .returning({ id: inboundEmails.id })
+    ).length;
   }
   return result;
 }

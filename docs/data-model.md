@@ -204,7 +204,7 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 |---|---|---|
 | `customers` | `name`, `email`; `stripe_customer_id`, `stripe_payment_method_id` | Indexed by `lower(email)` |
 | `sellers` | `name`, `email` | Marketplace sellers |
-| `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)); `contact_email` and `title` are cleared by [erasure](#export-and-erasure) |
+| `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)); `contact_email` and `title` are cleared by [erasure](#export-and-erasure), or by the retention sweep where `PERSONAL_DATA_RETENTION_DAYS` is set |
 | OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order. See [OrderAgent](order-agent.md#state) |
 | R2 | `orders/<orderId>/inbound/po.txt` (the inbound document), `inbound/message.eml` (the raw email) | Served at `/docs/<key>` to signed-in users only. See [R2 documents](#r2-documents) |
 | `inbound_emails` | `sender`, `subject` | Deleted after 180 days; the `.eml` in R2 is not |
@@ -212,7 +212,7 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 | `webhook_deliveries` | `payload`, the event JSON sent to a subscriber | Deleted after 90 days once delivered or failed |
 | `users` | `email`, `name`, `password_hash`, `totp_secret` | The team |
 | `sessions` | `ip`, `user_agent` | Deleted when expired |
-| `audit_events` | `actor` (an email, `token:<name>` or `operator`), `target` (can be a person's email), `detail`, `ip` | Archived to R2 after `AUDIT_RETENTION_DAYS`, then deleted |
+| `audit_events` | `actor` (an email, `token:<name>` or `operator`), `target` (can be a person's email), `detail`, `ip` | Archived to R2 after `AUDIT_RETENTION_DAYS`, then deleted; the archive is kept unless `auditArchiveDays` is set |
 | `auth_failures` | `key` (`email-ip:`, `ip:`, `email:` prefixes) | Dropped after a day |
 
 `payments`, `shipments`, `invoices` and the ledgers hold ids, amounts and tracking numbers, not
@@ -239,8 +239,10 @@ Orders with `erased_at` set are no longer part of it. A `users` row with the add
 
 **Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
 has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
-`null` for an order that is still running). Otherwise it takes 100 orders a call (`done: false` means
-call again). For each order:
+`null` for an order that is still running). An order that refuses in the middle of a call is skipped:
+the rest of the batch is fully erased (agent state, R2, and the D1 rows below), and the call returns
+`active_orders` naming the orders that refused. Otherwise it takes 100 orders a call (`done: false` means call again). `eraseOrders`
+(`apps/engine/src/subjects.ts`) does the per-order work and is shared with the [retention sweep](#retention). For each order:
 
 | Place | After |
 |---|---|
@@ -265,7 +267,7 @@ target `subject:` and the first 16 hex characters of the SHA-256 of the normalis
 
 Not reached: the Workflow instance's params and step outputs, which Cloudflare Workflows retains; the
 Stripe customer at Stripe (only the ids here are cleared); AI Gateway and Workers logs, which follow
-their own retention; the R2 audit archives (`audit/…`); `sellers`; and `orders.external_id` and
+their own retention; the R2 audit archives (`audit/…`, which expire only after the deployment's `auditArchiveDays`, if set); `sellers`; and `orders.external_id` and
 `customer_id`, which stay on an erased order.
 
 ### To the model
@@ -331,3 +333,9 @@ A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `s
 Orders and everything in an order's record (payments, invoices, shipments, the stock and balance ledgers, flow versions) are kept.
 
 `audit_events` is not pruned on write. The sweep moves events older than `AUDIT_RETENTION_DAYS` (default 400, at least 90; `auditRetentionDays` in core) to the `DOCS` R2 bucket (`archiveAudit`): one NDJSON object per batch of up to 1,000 events (one event a line, hashes included) at `audit/<yyyy-mm-dd>/<at>-<id>.ndjson`, at most 50,000 events a run, each batch deleted only after its object is written. Events from before the chain go first, by time; sealed events go in `seq` order and stop at the first one still within the retention, so what remains is an unbroken chain. The sweep reports the count as `auditArchived`.
+
+The archive itself is kept unless the deployment's registry sets `auditArchiveDays`: `scripts/provision.sh` then replaces an R2 lifecycle rule named `audit-archive` on the prefix `audit/` that expires objects after that many days (see [Operations](operations.md#the-registry)).
+
+### Personal data on finished orders
+
+`PERSONAL_DATA_RETENTION_DAYS` is empty by default: personal data is kept. Where a deployment sets it (the registry's `personalDataRetentionDays`; `personalDataRetentionDays` in `packages/core/src/erasure.ts` raises anything below 30 to 30 and treats empty, zero or a non-integer as unset), the same sweep calls `expirePersonalData`. It picks up to 500 orders a run, oldest `updated_at` first, that have a status in `TERMINAL_ORDER_STATUSES`, no `erased_at`, and an `updated_at` older than that many days, and passes them to `eraseOrders`. Each order is erased as in an [erasure request](#export-and-erasure) (agent state, R2 `orders/<id>/`, `documents`, `webhook_deliveries`, `messages`, `inbound_emails`, and `orders.contact_email`, `title` and `erased_at`), except that the only terms erased are the order's own contact, and no `customers` row or unlinked intake mail is touched. An order whose agent refuses (running again) is skipped, logged as a `personal_data_retention_skipped` line, and tried again the next day; the rest of the batch goes ahead. Orders left over wait for the next day's run. The sweep reports the count as `personalDataErased`.

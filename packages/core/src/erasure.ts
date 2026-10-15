@@ -104,6 +104,19 @@ export function eraseOrderState<S extends OrderState>(state: S, subjectTerms: st
   };
 }
 
+/** The shortest time a deployment may keep a finished order's personal data. */
+export const MIN_PERSONAL_DATA_RETENTION_DAYS = 30;
+
+/**
+ * Days after an order finishes that the retention sweep erases its buyer, from a deployment's
+ * `PERSONAL_DATA_RETENTION_DAYS`; null (empty or unset) keeps it. Kept to the floor.
+ */
+export function personalDataRetentionDays(value: string | undefined): number | null {
+  const days = Number(value);
+  if (!value || !Number.isInteger(days) || days <= 0) return null;
+  return Math.max(days, MIN_PERSONAL_DATA_RETENTION_DAYS);
+}
+
 /** What an erasure did, or why it stopped. */
 export type ErasureResult =
   | {

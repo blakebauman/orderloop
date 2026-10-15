@@ -27,6 +27,15 @@ echo "Recorded d1Id $uuid in deployments/$id.jsonc"
 
 wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already exists"
 
+# How long the R2 archive keeps audit events (auditArchiveDays): the rule is replaced on each run,
+# so a changed number takes effect; without one, archived events are kept.
+wrangler r2 bucket lifecycle remove "$R2" --name audit-archive ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+if [ -n "$AUDIT_ARCHIVE_DAYS" ]; then
+  wrangler r2 bucket lifecycle add "$R2" audit-archive audit/ --expire-days "$AUDIT_ARCHIVE_DAYS" \
+    --force ${j[@]+"${j[@]}"}
+  echo "Archived audit events in $R2 expire after $AUDIT_ARCHIVE_DAYS days"
+fi
+
 # The AI Gateway every model call goes through: the same settings as orderloop's own
 # (docs/deploy.md, "Settings for production").
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
