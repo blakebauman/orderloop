@@ -24,9 +24,9 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 ## Compatibility flags
 
 `apps/engine/wrangler.jsonc` sets `nodejs_compat` and `global_fetch_strictly_public`. The second
-makes the engine's outbound `fetch` (outbound webhooks and [A2A push
-notifications](https://docs.orderloop.app/reference/a2a/#push-notifications), whose URLs callers supply) reach public
-addresses only, not private or loopback ones.
+makes the engine's outbound `fetch` (outbound webhooks, [A2A push
+notifications](https://docs.orderloop.app/reference/a2a/#push-notifications) and live shipping carriers' quote
+requests, whose URLs callers or flow authors supply) reach public addresses only, not private or loopback ones.
 
 ## Engine secrets
 
@@ -35,6 +35,7 @@ Set with `pnpm --filter @orderloop/engine exec wrangler secret put <NAME>`.
 | Secret | Meaning |
 |---|---|
 | `INTAKE_ALLOWLIST` | Extra senders allowed to start orders by email: addresses or `@domains`, comma-separated. Customers' own addresses and company domains are always allowed. See [Email intake](https://docs.orderloop.app/guides/email-intake/#who-may-send) |
+| `SHIPPING_CARRIER_AUTH` | Credentials for the live carriers in a [Shipping rate](https://docs.orderloop.app/reference/nodes/#commerce.shipping_rate) node's `liveCarriers`: a JSON object from carrier `id` to the `Authorization` header value sent with its quote request, e.g. `{"acme":"Bearer …"}`. A carrier with no entry is called without one; unparseable JSON counts as empty. See [Shipping rates](https://docs.orderloop.app/guides/fulfillment/#shipping-rates) |
 
 ## Web variables
 

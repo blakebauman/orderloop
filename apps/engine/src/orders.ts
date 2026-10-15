@@ -121,7 +121,15 @@ async function launch(
   createdAt: number,
 ) {
   const input = orderInputSchema.parse(req.input);
-  const order: Order = { ...input, id: orderId, createdAt, subtotal: 0, tax: 0, total: 0 };
+  const order: Order = {
+    ...input,
+    id: orderId,
+    createdAt,
+    subtotal: 0,
+    shipping: 0,
+    tax: 0,
+    total: 0,
+  };
   const instanceId = instanceIdFor(orderId);
   if (input.documentText && !input.documentKey) {
     order.documentKey = await storeDocument(

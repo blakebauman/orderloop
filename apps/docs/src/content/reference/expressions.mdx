@@ -15,7 +15,7 @@ Every expression and template sees one object:
 
 | Path | Contents |
 |---|---|
-| `order` | The order: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `contact`, `fulfillment`, `currency`, `lines` (each may carry `locationId`, the store it ships from on a split), `meta`, `subtotal`, `tax`, `total`, `createdAt`, and once priced `fxRate` and `baseTotal` (see [Currency](#currency)). Pricing and tax nodes update the totals as they run |
+| `order` | The order: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `contact`, `fulfillment`, `currency`, `lines` (each may carry `locationId`, the store it ships from on a split), `meta`, `shippingOption`, `subtotal`, `shipping`, `tax`, `total` (`subtotal + shipping + tax`), `createdAt`, once priced `fxRate` and `baseTotal` (see [Currency](#currency)), and once taxed `taxRate` and `taxShipping`. Pricing, shipping-rate and tax nodes update the totals as they run |
 | `vars` | Run variables: seeded by the start request's `vars`, then set by nodes and events (below). Carried across continue-as-new |
 | `nodes` | Each node's latest output, by node id, for example `nodes.risk.score` |
 | `input` | The order's `meta` |

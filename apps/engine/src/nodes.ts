@@ -12,6 +12,7 @@ import {
   assessBranch,
   assessQuestionsSchema,
   BASE_CURRENCY,
+  computeTotals,
   describeAnswers,
   durationMs,
   evaluate,
@@ -28,9 +29,14 @@ import {
   type Order,
   type OrderLine,
   type PricedBy,
+  pickOption,
   policyRulesSchema,
   type RunContext,
   resolvePrice,
+  SHIPPING_SELECTIONS,
+  type ShippingSelection,
+  shippingConfigSchema,
+  shipToCountry,
   stockLines,
   stringList,
   toBase,
@@ -67,18 +73,6 @@ const cash = (n: number, ctx: RunContext) =>
     currency: ctx.order.currency || 'USD',
   }).format(n);
 const lineCount = (n: number) => `${n} ${n === 1 ? 'line' : 'lines'}`;
-
-/** Recompute subtotal/tax/total from lines, keeping the current tax rate if one was applied. */
-export function totals(
-  order: Order,
-  taxRate?: number,
-): Pick<Order, 'subtotal' | 'tax' | 'total' | 'baseTotal'> {
-  const subtotal = money(order.lines.reduce((s, l) => s + l.qty * (l.unitPrice ?? 0), 0));
-  const rate = taxRate ?? (order.subtotal > 0 ? order.tax / order.subtotal : 0);
-  const tax = money(subtotal * rate);
-  const total = money(subtotal + tax);
-  return { subtotal, tax, total, baseTotal: toBase(total, order.fxRate) };
-}
 
 const passthrough: Exec = async () => ({ summary: 'Started' });
 
@@ -165,8 +159,7 @@ export const EXECUTORS: Record<string, Exec> = {
       priced.push({ sku: l.sku, unitPrice, by: r.by.source, rule: r.by.name });
       return { ...l, unitPrice };
     });
-    const order = { ...ctx.order, lines, fxRate: fx };
-    const t = totals(order);
+    const t = computeTotals({ ...ctx.order, lines, fxRate: fx });
     const bySource = (k: string) => priced.filter((x) => x.by === k).length;
     const notes = [
       ['contract', 'contract'],
@@ -189,12 +182,67 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
+  'commerce.shipping_rate': async ({ env, ctx, config }) => {
+    const rates = shippingConfigSchema.safeParse(config.rates);
+    if (!rates.success)
+      throw new NonRetryableError(`Invalid shipping rates: ${rates.error.issues[0]?.message}`);
+    const method = ctx.order.fulfillment?.method ?? 'ship';
+    const units = method === 'ship' ? await cx.physicalUnits(env, ctx.order) : 0;
+    if (!units) {
+      const t = computeTotals({ ...ctx.order, shipping: 0 });
+      return {
+        branches: ['ok'],
+        order: t,
+        output: { method, shipping: 0, option: null },
+        summary:
+          method === 'ship'
+            ? 'Nothing to ship'
+            : `No shipping (${FULFILLMENT_METHOD_LABELS[method].toLowerCase()})`,
+      };
+    }
+    const fx = ctx.order.fxRate;
+    const country = shipToCountry(ctx.order);
+    const { options, source } = await cx.quoteShipping(env, rates.data, {
+      itemCount: units,
+      country,
+      subtotal: toBase(ctx.order.subtotal, fx),
+    });
+    // Rates are in the base currency; the order pays in its own.
+    const offered = options.map((o) => ({ ...o, amount: fromBase(o.amount, fx) }));
+    const select = (SHIPPING_SELECTIONS as readonly string[]).includes(str(config.select))
+      ? (config.select as ShippingSelection)
+      : 'from_order';
+    const wanted = ctx.order.shippingOption;
+    const chosen = pickOption(offered, select, wanted);
+    if (!chosen)
+      return {
+        branches: ['unavailable'],
+        output: {
+          country: country ?? null,
+          units,
+          source,
+          options: offered,
+          wanted: wanted ?? null,
+        },
+        summary: wanted && offered.length ? `“${wanted}” is not offered` : 'No shipping options',
+      };
+    const t = computeTotals({ ...ctx.order, shipping: chosen.amount });
+    return {
+      branches: ['ok'],
+      order: { ...t, shippingOption: chosen.id },
+      output: { country: country ?? null, units, source, option: chosen, options: offered },
+      vars: { shippingCarrier: chosen.carrier },
+      summary: `${chosen.title} (${chosen.carrier.toUpperCase()}) · ${chosen.free ? 'free' : cash(chosen.amount, ctx)}`,
+    };
+  },
+
   'commerce.tax': async ({ ctx, config }) => {
     const rate = num(config.rate, 0.08);
-    const t = totals(ctx.order, rate);
+    const taxShipping = config.includeShipping !== false;
+    const t = computeTotals({ ...ctx.order, taxRate: rate, taxShipping });
     return {
-      order: t,
-      output: { rate, ...t },
+      order: { ...t, taxRate: rate, taxShipping },
+      output: { rate, taxShipping, ...t },
       summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}`,
     };
   },
@@ -353,7 +401,11 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   'commerce.ship': async ({ env, ctx, config, stepKey }) => {
-    const r = await cx.createShipment(env, ctx.order, stepKey, str(config.carrier, 'ups'));
+    // from_order books the carrier of the option a shipping-rate node charged, else UPS.
+    const chosen = str(config.carrier, 'ups');
+    const carrier =
+      chosen === 'from_order' ? str(ctx.vars.shippingCarrier, 'ups').toLowerCase() : chosen;
+    const r = await cx.createShipment(env, ctx.order, stepKey, carrier);
     const tracking = r.shipments.map((s) => s.tracking).join(', ');
     return {
       output: r,
@@ -562,7 +614,8 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       branches: ['partial'],
       output,
-      order: { lines, ...totals({ ...ctx.order, lines }) },
+      // Shipping stays as charged; tax re-applies at the rate the tax node used.
+      order: { lines, ...computeTotals({ ...ctx.order, lines }) },
       vars: { rejectedSellers: rejected.map((p) => p.sellerId) },
       summary: `${accepted.length} accepted, ${rejected.length} rejected (${rejected.map((p) => p.name).join(', ')})`,
     };

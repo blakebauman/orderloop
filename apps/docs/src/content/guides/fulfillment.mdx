@@ -148,6 +148,62 @@ On the omnichannel flow the digital branch runs in parallel with the physical on
 payment** joins every branch the order took: a mixed cart is captured once the shipment (or pickup
 hand-over) and the codes are all done. On the till flow, the digital branch joins capture directly.
 
+## Shipping rates
+
+[`commerce.shipping_rate`](/reference/nodes/#commerce.shipping_rate) charges shipping. It sits
+between pricing and tax on `tpl-storefront-order`, `tpl-marketplace-order`,
+`tpl-omnichannel-order` and `tpl-subscription`. Its `rates` field is JSON:
+
+| Key | Meaning |
+|---|---|
+| `services` | At least one `{ id, title, carrier, base, perItem?, minDays, maxDays }`. A service costs `base + perItem × units`, where units are the quantities of the physical lines |
+| `liveCarriers` | Optional `{ id, carrier, url }` endpoints (https only) that quote rates themselves; see below |
+| `intlMultiplier` | Multiplies every rate when the ship-to country is not domestic (default `1`) |
+| `domesticCountries` | Two-letter country codes (default `["US"]`). The country comes from `order.meta.shipTo.country` (`USA`, `United Kingdom` and similar are normalised); an order without one is domestic |
+| `freeThreshold` | Once the subtotal reaches it, the cheapest option is free |
+
+Amounts in `rates`, like list prices, are in USD; the node converts them at the order's rate. The
+config is pinned with the flow version, so every order on a version is quoted the same rates.
+
+The node rates every option, sorts them cheapest first, applies the free threshold, and picks one by
+its `select` field:
+
+| `select` | Charges |
+|---|---|
+| `from_order` (default) | The option whose `id` is `order.shippingOption`, given when the order starts. Without one, the cheapest |
+| `cheapest` | The cheapest option |
+| `fastest` | The option with the fewest `maxDays`, then the cheaper |
+
+It takes `ok`, writing `order.shipping`, `order.shippingOption` (the chosen id) and the totals, and
+setting `vars.shippingCarrier`. It takes `unavailable` when `order.shippingOption` names an option
+that isn't offered; the built-in flows end there, declined, before payment. Its output lists every
+option offered (`options`), the one charged (`option`) and whether they came from live carriers or
+the configured services (`source`). A pickup, carry-out or digital-only order ships free and takes
+`ok` without rating anything.
+
+[`commerce.tax`](/reference/nodes/#commerce.tax) then taxes the subtotal plus shipping; set its
+`includeShipping` to `false` to tax the subtotal only. The order's `total` is
+`subtotal + shipping + tax`. A [Create shipment](/reference/nodes/#commerce.ship) node with
+`carrier` set to `from_order` (as on the built-in flows) books the charged option's carrier, or UPS
+when no shipping-rate node ran.
+
+### Live carriers
+
+Each live carrier is sent a `POST` to its `url` with
+`{ "itemCount": 3, "country": "DE", "subtotal": 42.5, "currency": "USD" }` (`country` is `null` when
+the order has no ship-to country) and must answer within 5 seconds with:
+
+```json
+{ "options": [{ "id": "ground", "amount": 7.25, "title": "Ground", "carrier": "acme", "minDays": 2, "maxDays": 4 }] }
+```
+
+`amount` is in USD and `id` and `amount` are required; option ids become `<carrier id>_<id>`, and
+options without an `id` or with a negative `amount` are dropped. If any carrier answers with options,
+those are what the node offers; if none does (an error, a timeout, a non-2xx answer), it falls back to
+the configured `services`. The `Authorization` header each carrier is sent is a deployment secret
+your administrator sets per carrier `id`, so credentials never appear in a flow. The request is made
+once, inside the node's step, so a retried or replayed run charges what was quoted.
+
 ## Undoing fulfillment
 
 | Event | Undone |

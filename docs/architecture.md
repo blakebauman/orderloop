@@ -180,7 +180,9 @@ Variables and secrets are listed in [Configuration](configuration.md).
 `shipments`, `messages`)
 and R2. Each function is the seam where a real adapter (Stripe, a WMS, a carrier API, an ERP)
 replaces the mock. `validateAddress` is the seam for an address provider (USPS, Loqate); the mock
-calls `checkAddress` from core.
+calls `checkAddress` from core. `quoteShipping` is the only connector that makes an outbound request: it
+POSTs to a shipping-rate node's live carriers (https, 5 seconds, credentials from
+`SHIPPING_CARRIER_AUTH`) and falls back to the node's configured services.
 
 Two rules hold for every connector:
 

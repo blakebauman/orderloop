@@ -956,7 +956,20 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
               ))}
             </tbody>
             <tfoot>
-              <tr className="border-t">
+              {o.shipping || o.shippingOption ? (
+                <tr className="border-t">
+                  <td colSpan={2} className="pt-1.5 text-muted-foreground">
+                    Shipping
+                    {o.shippingOption ? (
+                      <span className="ml-1.5 font-mono text-xs">{o.shippingOption}</span>
+                    ) : null}
+                  </td>
+                  <td className="pt-1.5 text-right tabular">
+                    {money(o.shipping ?? 0, o.currency)}
+                  </td>
+                </tr>
+              ) : null}
+              <tr className={o.shipping || o.shippingOption ? undefined : 'border-t'}>
                 <td colSpan={2} className="pt-1.5 text-muted-foreground">
                   Tax
                 </td>

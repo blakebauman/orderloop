@@ -23,7 +23,7 @@ inbound order email ── Cloudflare Email Routing ── email() ─►├─ 
 
 - **Flows are data.** A flow is a JSON graph of catalog nodes (`packages/core/src/catalog.ts`):
   - triggers;
-  - commerce steps (validate, address check, policy check, price, tax, credit, reserve, authorize, invoice, ship, route fulfillment, pickup, hand over, digital delivery, split by seller, seller payouts, return label, refund, …);
+  - commerce steps (validate, address check, policy check, price, shipping rate, tax, credit, reserve, authorize, invoice, ship, route fulfillment, pickup, hand over, digital delivery, split by seller, seller payouts, return label, refund, …);
   - control (condition, approval, wait for event, wait, loop, continue-as-new, end);
   - AI (extract, classify, risk score, forecast, summarize, and an LLM **router** that chooses a branch).
 

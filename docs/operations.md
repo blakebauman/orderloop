@@ -60,8 +60,8 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
-   the environment. Add `SHOPIFY_WEBHOOK_SECRET` or `INTAKE_ALLOWLIST` there if the customer uses
-   them. To gate this customer's deploys, add a required reviewer to the environment.
+   the environment. Add `SHOPIFY_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST` or `SHIPPING_CARRIER_AUTH` there if the
+   customer uses them. To gate this customer's deploys, add a required reviewer to the environment.
 4. Commit the registry file and merge. CI deploys the customer in its ring, and the custom domain
    creates its DNS record in the `orderloop.app` zone.
 5. Give the customer their URL and the workspace password from `.secrets/<id>/app-password`, so

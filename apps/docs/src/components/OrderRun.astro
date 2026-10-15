@@ -27,7 +27,7 @@ interface Props {
   /** A file from src/data/runs. The slot is the caption's account of where the run came from. */
   run: {
     flowId: string;
-    order: { customerId?: string; subtotal: number; tax: number; total: number };
+    order: { customerId?: string; subtotal: number; shipping?: number; tax: number; total: number };
     waits: { nodeId: string; event?: string; title?: string }[];
     nodes: Record<string, unknown>;
   };
@@ -84,6 +84,7 @@ const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const totals = [
   ['Subtotal', money.format(run.order.subtotal)],
+  ...(run.order.shipping ? [['Shipping', money.format(run.order.shipping)]] : []),
   ['Tax', money.format(run.order.tax)],
   ['Total', money.format(run.order.total)],
 ];

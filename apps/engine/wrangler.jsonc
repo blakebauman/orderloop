@@ -79,4 +79,6 @@
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).
+  // SHIPPING_CARRIER_AUTH — JSON object of live shipping carrier id → Authorization header value,
+  // e.g. {"acme":"Bearer …"}, for the liveCarriers of a commerce.shipping_rate node.
 }

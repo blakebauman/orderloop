@@ -4,11 +4,13 @@
  */
 
 import {
+  BASE_CURRENCY,
   inboundOrderSchema,
   ORDER_CHANNELS,
   ORDER_MODELS,
   ORDER_STATUSES,
   OUTBOUND_EVENTS,
+  orderInputSchema,
   startOrderSchema,
 } from '@orderloop/core';
 import { z } from 'zod';
@@ -42,6 +44,42 @@ const errors = {
   ),
 };
 const orderId = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+
+/** An order as the engine holds it: its input plus the totals the pricing nodes compute. */
+function orderSchema() {
+  const input = z.toJSONSchema(orderInputSchema, { io: 'output', unrepresentable: 'any' }) as {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  const amount = (description: string) => ({ type: 'number', description });
+  return {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      createdAt: { type: 'integer', description: 'Epoch ms' },
+      ...input.properties,
+      subtotal: amount('Sum of the priced lines'),
+      shipping: amount('Shipping charged by a shipping-rate node; 0 when none ran'),
+      tax: amount('Tax on the subtotal, plus shipping when the tax node taxes it'),
+      total: amount('subtotal + shipping + tax'),
+      taxRate: amount('The rate the tax node applied'),
+      taxShipping: { type: 'boolean', description: 'Whether the tax node taxed shipping' },
+      fxRate: amount(`Units of the order currency per one ${BASE_CURRENCY}, fixed when priced`),
+      baseTotal: amount(`total in ${BASE_CURRENCY}`),
+    },
+    required: [
+      ...new Set([
+        'id',
+        'createdAt',
+        ...(input.required ?? []),
+        'subtotal',
+        'shipping',
+        'tax',
+        'total',
+      ]),
+    ],
+  };
+}
 
 export function openApiDocument(serverUrl: string) {
   return {
@@ -113,7 +151,10 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: 'Live order state from its agent',
           parameters: [orderId],
-          responses: { '200': ok('Order state'), ...errors },
+          responses: {
+            '200': ok('Order state: `status`, `nodes`, `waits`, `vars`, and `order` (an Order)'),
+            ...errors,
+          },
         },
       },
       '/api/v1/orders/{id}/events': {
@@ -371,6 +412,7 @@ export function openApiDocument(serverUrl: string) {
       },
       schemas: {
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+        Order: orderSchema(),
         StartOrderResult: {
           type: 'object',
           properties: { orderId: { type: 'string' }, replayed: { type: 'boolean' } },
@@ -386,7 +428,7 @@ export function openApiDocument(serverUrl: string) {
             data: {
               type: 'object',
               description:
-                '`order` totals; `node` for node events; `outcome` and `reason` for order.completed / cancelled / failed.',
+                '`order` summary with its totals (`subtotal`, `shipping`, `tax`, `total`); `node` for node events; `outcome` and `reason` for order.completed / cancelled / failed.',
             },
           },
           required: ['id', 'event', 'occurredAt', 'orderId', 'data'],

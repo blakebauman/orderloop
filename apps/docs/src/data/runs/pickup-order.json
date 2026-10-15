@@ -23,6 +23,7 @@
   "order": {
     "customerId": "cus_ada",
     "subtotal": 349,
+    "shipping": 0,
     "tax": 27.92,
     "total": 376.92
   },
@@ -49,6 +50,11 @@
       "status": "succeeded",
       "summary": "Subtotal $349.00",
       "branches": ["out"]
+    },
+    "shipping": {
+      "status": "succeeded",
+      "summary": "No shipping (pick up in store)",
+      "branches": ["ok"]
     },
     "tax": {
       "status": "succeeded",
@@ -121,6 +127,9 @@
     },
     "uncaptured": {
       "status": "pending"
+    },
+    "no_shipping": {
+      "status": "skipped"
     }
   }
 }
