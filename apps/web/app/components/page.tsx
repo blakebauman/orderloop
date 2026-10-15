@@ -37,12 +37,15 @@ export function Body({ children, className }: { children: React.ReactNode; class
 }
 
 export function Section({
+  id,
   title,
   children,
   className,
   actions,
   flush,
 }: {
+  /** An in-page link target; it clears the sticky app header when jumped to. */
+  id?: string;
   title: React.ReactNode;
   children: React.ReactNode;
   className?: string;
@@ -51,7 +54,7 @@ export function Section({
   flush?: boolean;
 }) {
   return (
-    <section className={cn('min-w-0 rounded-md border bg-card', className)}>
+    <section id={id} className={cn('min-w-0 scroll-mt-20 rounded-md border bg-card', className)}>
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
         <h2 className="section-title">{title}</h2>
         {actions}

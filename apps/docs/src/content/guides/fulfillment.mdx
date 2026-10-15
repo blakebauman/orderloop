@@ -29,7 +29,7 @@ them, and the back office shows them as "Digital, no stock".
 The workspace starts with two stores, both offering pickup and shipping, with coordinates: `loc_soho`
 (40.7233, -74.0030) and `loc_mission` (37.7599, -122.4148). `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
 stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Stores** table lists
-each store's flags and available over on-hand stock per SKU.
+each store's flags and, per item, its available and on-hand stock.
 
 An order names its store in `fulfillment`: `{ method, locationId? }`, where `method` is one of
 <Values of="fulfillment-methods" />. The **New order** form has **Fulfillment** and **Store**
@@ -70,8 +70,8 @@ On `tpl-omnichannel-order`, the `pickup` branch is:
    `collected` and consumes the held store stock.
 
 Send `pickup.collected` when the customer has the goods, the way any
-[wait event](/guides/approvals-and-events/#waiting-for-events) is sent: the **Send `pickup.collected`** button on the
-back office page, `POST /api/v1/orders/:id/events` with `{ "event": "pickup.collected" }`, or a
+[wait event](/guides/approvals-and-events/#waiting-for-events) is sent: the **Mark as collected** button on the order
+page or the back office page, `POST /api/v1/orders/:id/events` with `{ "event": "pickup.collected" }`, or a
 [signed event](/guides/approvals-and-events/#signed-events) from the store's system. The payload is
 optional.
 
