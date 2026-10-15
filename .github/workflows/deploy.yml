@@ -136,7 +136,26 @@ jobs:
             retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "$msg" --config "$CONFIG"
           fi
           retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg" --config "$CONFIG"
-      # Static docs Worker; independent of the app, so it goes last and can't block a deploy above.
+      # Static docs Worker; independent of the app, so it goes last and can't block a deploy above
+      # (the app's rollback step has already run by now, so a docs failure never rolls the app back).
       - name: Deploy docs
+        id: docs
         if: fromJSON(inputs.deployment).docs
         run: retry pnpm docs:deploy
+      # The docs host is the route in apps/docs/wrangler.jsonc. The home page, a reference page and
+      # the OpenAPI document are served, and an unknown page is a real 404.
+      - name: Smoke test docs
+        id: docs-smoke
+        if: fromJSON(inputs.deployment).docs
+        run: |
+          host=$(node -e "const {parse}=require('jsonc-parser');console.log(parse(require('fs').readFileSync('apps/docs/wrangler.jsonc','utf8')).routes[0].pattern)")
+          get() { curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "$@"; }
+          get -o "$RUNNER_TEMP/docs-home.html" "https://$host/"
+          grep -q "<link rel=\"canonical\" href=\"https://$host/\"" "$RUNNER_TEMP/docs-home.html"
+          get -o /dev/null "https://$host/reference/rest-api/"
+          get "https://$host/openapi.json" | jq -e '.openapi | startswith("3.1")' >/dev/null
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$host/no-such-page-${GITHUB_SHA::7}/")
+          [ "$status" = 404 ] || { echo "::error::an unknown docs page answered $status, not 404"; exit 1; }
+      - name: Roll back docs on a failed smoke test
+        if: failure() && steps.docs.outcome == 'success'
+        run: retry pnpm --filter @orderloop/docs exec wrangler rollback -y -m "Docs smoke test failed for ${GITHUB_SHA::7}"
