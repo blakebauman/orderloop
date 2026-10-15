@@ -12,7 +12,7 @@ OrderLoop POSTs signed order events to the endpoints you subscribe. The events a
 ## Subscribing
 
 Subscriptions are managed through the [REST API](/reference/rest-api/) with an `admin`
-[API token](/guides/team-and-roles/#api-tokens); there is no UI for them.
+[API token](/guides/team-and-roles/#api-tokens); there is no UI for them. Creating and deleting a subscription is recorded in the [audit log](/guides/team-and-roles/#audit-log).
 
 ```bash
 curl -X POST https://orderloop.app/api/v1/webhook-subscriptions \

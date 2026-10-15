@@ -30,7 +30,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0010_fx_rates.sql` | `fx_rates` with demo rates (EUR, GBP and CAD removed by `0027`), and `orders.fx_rate` |
 | `0011_users.sql` | `users`, `sessions` and `api_tokens`, for roles and sign-in |
 | `0012_auth_failures.sql` | `auth_failures`, counts for throttling failed sign-ins |
-| `0013_audit_events.sql` | `audit_events`, the security audit log |
+| `0013_audit_events.sql` | `audit_events`, the audit log |
 | `0014_token_expiry.sql` | `api_tokens.expires_at` |
 | `0015_session_activity.sql` | `sessions.last_seen_at`, `ip`, `user_agent` |
 | `0016_two_factor.sql` | `users.totp_secret`, `totp_enabled_at`, `totp_last_step`; `recovery_codes` and `sign_in_challenges` |
@@ -48,6 +48,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0028_integrations.sql` | `integrations`, one signing key per external system, replacing the single `WEBHOOK_SECRET` |
 | `0029_order_started_by.sql` | `orders.started_by`: the principal id that started the order (null for channels, email and the stock review) |
 | `0030_stripe_payments.sql` | `payments.provider` (default `mock`, so existing rows read as mock), `external_id` (index `payments_external`) and `currency`; `customers.stripe_customer_id` (unique partial index `customers_stripe_customer`) and `stripe_payment_method_id` |
+| `0033_flow_published_by.sql` | `flow_versions.published_by`, who published each version as the audit trail names them (null for built-in templates and older versions) |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -65,9 +66,9 @@ error until its rate is added to `fx_rates`.
 | Table | Purpose | Key columns |
 |---|---|---|
 | `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `description`, `model`, `channels` (JSON array), `published_version` |
-| `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at` |
+| `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at`, `published_by` (nullable: the audit trail's name for who published it) |
 
-`publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version, numbering and inserting it in one statement so racing publishes get consecutive versions; seeding passes `unlessPublished`, which inserts nothing when the identical content is already a version.
+`publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version, numbering and inserting it in one statement so racing publishes get consecutive versions; seeding passes `unlessPublished`, which inserts nothing when the identical content is already a version. It takes `{ publishedBy }`, stored in `flow_versions.published_by`.
 `getFlowVersionJson` loads a given version or the latest. Orders pin `(flow_id, flow_version)` at
 start, so editing or republishing never changes a running order. The built-in templates are
 published as a new version whenever their content has not been published before: version 1 the
@@ -150,7 +151,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 | `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `setup-ip:` for wrong setup codes; `two-factor:<user id>` for wrong codes; `reauth:<user id>` for wrong current passwords on the Account page) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](https://docs.orderloop.app/guides/team-and-roles/#failed-sign-ins) |
 | `webhook_receipts` | Delivered signed events: `id` (`event:<integration id>:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written (and by the [retention sweep](#retention)). See [Signed events](https://docs.orderloop.app/reference/rest-api/#signed-events) |
 | `workspace_settings` | Settings admins change in the app: `key`, `value`, `updated_at`, `updated_by`. `two_factor_required` is `off`, `admin`, `operator`, `approver` or `viewer` (`operator` when the row is absent; `DEFAULT_TWO_FACTOR`), the lowest role that must use [two-factor sign-in](https://docs.orderloop.app/guides/team-and-roles/#requiring-it). `approval_separation` (`APPROVAL_SEPARATION_KEY` in `packages/core/src/roles.ts`) is `on` or `off` (the default, also when the row is absent): with `on`, the principal in `orders.started_by` can't decide that order's approvals (`ownOrderRefusal`) |
-| `audit_events` | The security audit log (`apps/web/app/lib/audit.server.ts`): `at`, `action` (see [Audit log](https://docs.orderloop.app/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target`, `detail` (JSON), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
+| `audit_events` | The audit log, security and business events (`apps/web/app/lib/audit.server.ts` for the web app; `apps/engine/src/audit.ts` writes the same rows through `auditRow` in core for the order socket, assistant, MCP and A2A): `at`, `action` (see [Audit log](https://docs.orderloop.app/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target` (the order, flow or subscription for business events), `detail` (JSON; business events carry `via`), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
 
 No password, token or recovery code is stored in the clear; the two-factor secret is, because
 checking a code needs it. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/).

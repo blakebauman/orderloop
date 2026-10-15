@@ -99,6 +99,14 @@ explorer) are generated from the zod schemas the handlers validate with
 (`MAX_EVENT_PAYLOAD_BYTES`, `packages/core/src/api.ts`); the OrderAgent's `deliver`, `decide` and
 `cancel` enforce the same bounds on the live socket as the REST schemas do.
 
+Business events are audited at the first place that knows the actor: the web app's routes and API
+handlers write them with `audit` (`apps/web/app/lib/audit.server.ts`), the engine writes them with
+`recordAudit` (`apps/engine/src/audit.ts`) for the order socket (`via: 'app'`), the assistant, MCP
+and A2A (`runAction`, A2A `place_order`; `tool` recorded). Both build the row with `auditRow`
+(`packages/core/src/audit.ts`) into `audit_events`; the RPC callers' own rows are written by the
+caller, so nothing is written twice. Replays and no-ops, email intake and the scheduled stock
+review are not recorded.
+
 ## MCP
 
 `/mcp` is the assistant's tools for MCP clients. The web Worker routes it, with the OAuth

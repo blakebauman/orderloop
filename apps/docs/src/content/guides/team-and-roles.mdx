@@ -173,7 +173,7 @@ an app that uses both is connected twice. See [MCP server](/reference/mcp/) and
 
 ## Audit log
 
-Admins see security events at **Audit log** (in the account menu and linked from the Team page, `/audit`), newest first,
+Admins see security and business events at **Audit log** (in the account menu and linked from the Team page, `/audit`), newest first,
 filtered by kind, and through [`GET /api/v1/audit-events`](/reference/rest-api/#audit-events).
 Each event records when, who acted, what they acted on, details and the address:
 
@@ -185,11 +185,35 @@ Each event records when, who acted, what they acted on, details and the address:
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
 | API access | `api.token_expired`, at most hourly per token, when an expired token is used |
+| Orders | `order.started` (the flow, and the version, test run, scenario, restarted-from order, channel and external id where they apply), `order.cancelled` (the reason), `order.event_delivered` (the event and the node that was waiting) |
+| Approvals | `approval.decided` (the node, the decision and the note) |
+| Flows | `flow.saved` (a draft saved on purpose: **Save** or ⌘S, not an autosave), `flow.published` (name and version) |
+| Webhooks | `webhook.subscribed` (the subscription's id and events), `webhook.unsubscribed` |
+| Stock review | `stock.review_run` (the Workflow instance) |
+
+### Business events
+
+The business actions have the target they act on: the order id, the flow id, or the webhook
+subscription. Each detail has `via`, how it came in, shown as "via the app", "via the REST API",
+"via a signed webhook", "via the assistant", "via MCP" or "via A2A". Assistant, MCP and A2A events
+also record the `tool`. The actor is the person or API token; for a signed
+[inbound webhook](/guides/inbound-orders/) it is the integration (kind `integration`, named
+`integration:<name>`), and for a Shopify order the channel (kind `channel`, `shopify:<shop>`).
+
+Recorded: starting orders (New order, demo scenarios, test runs, restarts, `POST /api/v1/orders`,
+each purchase order started from an EDI 850, signed webhooks, Shopify, and the assistant's and
+A2A's place order), cancelling, delivering events, deciding approvals, saving and publishing flows,
+creating and deleting webhook subscriptions, and running the stock review. Read-only assistant and
+MCP tools are not. Neither are replays (a repeated idempotency key or webhook) nor things that
+didn't happen, such as an event nothing was waiting for. Orders from [email intake](/guides/email-intake/)
+and the scheduled stock review belong to no one and are not recorded.
+
+Each published flow version also keeps who published it, as the audit trail names them; versions
+published before this was recorded, and built-in templates, have none.
 
 A person signing in only hears that the email and password didn't match; the reason is for
 admins. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
-never blocks the action it records. Approval decisions are recorded on the approval itself (below),
-not here.
+never blocks the action it records. An approval's decider is also recorded on the approval itself (below).
 
 ## Who decided
 

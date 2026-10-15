@@ -61,6 +61,11 @@ suite('audit vocabulary', () => {
       'api',
       'oauth',
       'integration',
+      'order',
+      'approval',
+      'flow',
+      'webhook',
+      'stock',
     ]);
     expect(isAuditGroup('orders')).toBe(false);
   });

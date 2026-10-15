@@ -132,6 +132,8 @@ Wait-for-event and Wait nodes don't use these; their waits have their own `timeo
 
 ## Publishing and versions
 
+Saving a draft on purpose (**Save** or ⌘S, not an autosave), publishing, and test runs are recorded in the [audit log](/guides/team-and-roles/#audit-log); each version keeps who published it.
+
 Publishing saves the draft and stores it as the flow's next version. Versions are immutable. An order started through the API runs the latest published version
 unless the request names one (`version`); a running order keeps its version even after you
 publish again. Restarting an order from its page starts a new order on the flow's current

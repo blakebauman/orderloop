@@ -333,7 +333,7 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: 'Security audit log, newest first (admin)',
           description:
-            'Sign-ins, failed and throttled sign-ins, setup and recovery, team and token changes. Kept 180 days.',
+            'Sign-ins, failed and throttled sign-ins, setup and recovery, team and token changes, and what was done to orders, approvals, flows and webhooks (through the app, the API, a signed webhook, the assistant, MCP or A2A). Kept 180 days.',
           parameters: [
             {
               name: 'type',

@@ -11,6 +11,7 @@ import {
   type AssessQuestions,
   type AssistantTool,
   type Attention,
+  type AuditVia,
   atLeast,
   BASE_CURRENCY,
   describeDiff,
@@ -43,6 +44,7 @@ import {
 } from '@orderloop/db';
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { copilot, orderBrief } from '../ai';
+import { recordAudit } from '../audit';
 import { assess, resolveImages } from '../clef';
 import { separationRefusal } from '../separation';
 
@@ -58,6 +60,9 @@ export type Channel = 'assistant' | 'MCP' | 'A2A';
 
 /** How the audit trail names an act taken for someone through a channel. */
 export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
+
+/** How the audit log names each channel. */
+const AUDIT_CHANNEL: Record<Channel, AuditVia> = { assistant: 'assistant', MCP: 'mcp', A2A: 'a2a' };
 
 export function money(n: number | null | undefined, currency = BASE_CURRENCY) {
   if (n === null || n === undefined) return '';
@@ -611,12 +616,23 @@ export async function runAction<T extends ActionTool>(
   const preview = await previewAction(env, p, tool, input);
   if (preview.blocked) throw new Refused(preview.blocked);
   const by = via(p, channel);
+  const trail = { via: AUDIT_CHANNEL[channel], tool };
   switch (tool) {
     case 'decide_approval': {
       const i = input as ActionInput['decide_approval'];
       const { id, s } = await loadOrder(env, i.orderId);
       const w = approvalWait(s, i.nodeId)!;
       await env.ORDER_AGENT.getByName(id).decide(w.nodeId, i.decision, by, i.note, p.id);
+      await recordAudit(env, 'approval.decided', {
+        actor: p,
+        target: id,
+        detail: {
+          nodeId: w.nodeId,
+          decision: i.decision,
+          ...(i.note ? { note: i.note } : {}),
+          ...trail,
+        },
+      });
       return { done: preview.title, href: preview.href };
     }
     case 'deliver_event': {
@@ -624,26 +640,46 @@ export async function runAction<T extends ActionTool>(
       const { id } = await loadOrder(env, i.orderId);
       const r = await env.ORDER_AGENT.getByName(id).deliver(i.event, { by });
       if (!r.delivered) throw new Refused(`Nothing on ${orderRef(id)} was waiting for ${i.event}.`);
+      await recordAudit(env, 'order.event_delivered', {
+        actor: p,
+        target: id,
+        detail: { event: i.event, nodeId: r.nodeId, ...trail },
+      });
       return { done: preview.title, href: preview.href };
     }
     case 'cancel_order': {
       const i = input as ActionInput['cancel_order'];
       const { id } = await loadOrder(env, i.orderId);
       await env.ORDER_AGENT.getByName(id).cancel(`${i.reason} (${by})`);
+      await recordAudit(env, 'order.cancelled', {
+        actor: p,
+        target: id,
+        detail: { reason: i.reason, ...trail },
+      });
       return { done: preview.title, href: preview.href };
     }
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);
-      const version = await publishFlow(createDb(env.DB), {
-        ...flow,
-        nodes: flow.nodes,
-        edges: flow.edges,
+      const version = await publishFlow(
+        createDb(env.DB),
+        { ...flow, nodes: flow.nodes, edges: flow.edges },
+        Date.now(),
+        { publishedBy: p.email ?? p.name },
+      );
+      await recordAudit(env, 'flow.published', {
+        actor: p,
+        target: flow.id,
+        detail: { name: flow.name, version, ...trail },
       });
       return { done: `Published ${flow.name} v${version}`, href: `/flows/${flow.id}`, version };
     }
     case 'run_stock_review': {
       const instance = await env.REPLENISH.create({ params: {} });
+      await recordAudit(env, 'stock.review_run', {
+        actor: p,
+        detail: { instanceId: instance.id, ...trail },
+      });
       return { done: 'Started the stock review', href: '/back-office', instanceId: instance.id };
     }
   }

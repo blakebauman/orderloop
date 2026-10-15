@@ -13,7 +13,8 @@ vi.mock('~/lib/orders.server', () => ({
   currencies: async () => [{ currency: 'USD' }, { currency: 'EUR' }],
   listOrders: async () => [],
 }));
-vi.mock('~/lib/audit.server', () => ({ listAudit: async () => [] }));
+const audit = vi.fn();
+vi.mock('~/lib/audit.server', () => ({ audit, listAudit: async () => [] }));
 vi.mock('~/lib/auth.server', () => ({ actor: () => 'api', forbidden: () => 'Forbidden' }));
 vi.mock('~/lib/webhooks.server', () => ({}));
 
@@ -84,6 +85,18 @@ describe('POST /api/v1/webhooks/orders', () => {
     const replay = await post(order);
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual({ orderId: 'ord_1', replayed: true });
+    // The new order is recorded against the integration that signed it; the replay is not.
+    expect(audit.mock.calls.filter((c) => c[1] === 'order.started')).toEqual([
+      [
+        expect.any(Request),
+        'order.started',
+        {
+          actor: expect.objectContaining({ kind: 'integration' }),
+          target: 'ord_1',
+          detail: expect.objectContaining({ flowId: 'tpl-storefront-order', via: 'webhook' }),
+        },
+      ],
+    ]);
     startOrderOnce.mockResolvedValueOnce({ mismatch: true });
     expect((await post({ ...order, lines: [{ sku: 'MON-27', qty: 2 }] })).status).toBe(422);
   });

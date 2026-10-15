@@ -128,6 +128,10 @@ still finds its order after the order routes change. The same
 pair with different contents returns `422` and starts nothing. To change an accepted order,
 [deliver events](/guides/approvals-and-events/) to it.
 
+An order started this way is recorded in the [audit log](/guides/team-and-roles/#audit-log) once,
+against the integration (`integration:<name>`) and `via` a signed webhook, as is an event delivered
+by a signed webhook; a replay is not.
+
 ## Responses
 
 | Status | Meaning |

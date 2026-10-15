@@ -18,6 +18,7 @@ import { useState } from 'react';
 import { Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Field } from '~/components/inspector';
 import { PageHeader } from '~/components/page';
+import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
@@ -112,6 +113,11 @@ export async function action({ request }: Route.ActionArgs) {
         meta: simulate ? { simulate } : {},
       },
       startedBy: me.id,
+    });
+    await audit(request, 'order.started', {
+      actor: me,
+      target: orderId,
+      detail: { flowId, via: 'app' },
     });
     return redirect(`/orders/${orderId}`);
   } catch (err) {

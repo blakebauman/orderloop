@@ -1,4 +1,6 @@
+import type { BusinessAuditAction } from '@orderloop/core';
 import { data } from 'react-router';
+import { audit } from '~/lib/audit.server';
 import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import type { Route } from './+types/order-action';
@@ -12,16 +14,18 @@ export async function action({ request, params }: Route.ActionArgs) {
     request,
     intent === 'approve' || intent === 'reject' ? 'approver' : 'operator',
   );
+  const record = (action: BusinessAuditAction, detail: Record<string, unknown>, target?: string) =>
+    audit(request, action, {
+      actor: me,
+      target: target ?? params.orderId,
+      detail: { ...detail, via: 'app' },
+    });
   try {
     if (intent === 'approve' || intent === 'reject') {
-      const res = await engine().decide(
-        params.orderId,
-        String(f.get('nodeId')),
-        intent === 'approve' ? 'approved' : 'rejected',
-        actor(me),
-        me.id,
-        String(f.get('note') ?? '') || undefined,
-      );
+      const nodeId = String(f.get('nodeId'));
+      const decision = intent === 'approve' ? 'approved' : 'rejected';
+      const note = String(f.get('note') ?? '') || undefined;
+      const res = await engine().decide(params.orderId, nodeId, decision, actor(me), me.id, note);
       if (!res.ok)
         return data(
           {
@@ -35,15 +39,14 @@ export async function action({ request, params }: Route.ActionArgs) {
           },
           { status: { own_order: 403, not_found: 404, not_waiting: 409 }[res.reason] },
         );
+      await record('approval.decided', { nodeId, decision, ...(note ? { note } : {}) });
       return { ok: true };
     }
     if (intent === 'event') {
-      return {
-        ok: true,
-        ...(await engine().sendEvent(params.orderId, String(f.get('event')), {
-          source: 'back-office',
-        })),
-      };
+      const event = String(f.get('event'));
+      const res = await engine().sendEvent(params.orderId, event, { source: 'back-office' });
+      if (res.delivered) await record('order.event_delivered', { event, nodeId: res.nodeId });
+      return { ok: true, ...res };
     }
     if (intent === 'restart') {
       // A fresh order with the same customer and lines, on the flow's current version. Demo
@@ -68,13 +71,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         },
         startedBy: me.id,
       });
+      await record(
+        'order.started',
+        { flowId: prev.flow.id, restartedFrom: params.orderId },
+        orderId,
+      );
       return { ok: true, orderId };
     }
     if (intent === 'cancel') {
-      const res = await engine().cancel(
-        params.orderId,
-        String(f.get('reason') ?? 'Cancelled by operator'),
-      );
+      const reason = String(f.get('reason') ?? 'Cancelled by operator');
+      const res = await engine().cancel(params.orderId, reason);
       if (!res.ok)
         return data(
           {
@@ -86,6 +92,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           },
           { status: res.reason === 'not_found' ? 404 : 409 },
         );
+      await record('order.cancelled', { reason });
       return { ok: true };
     }
   } catch (err) {

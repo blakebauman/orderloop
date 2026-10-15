@@ -9,8 +9,8 @@ import {
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
-import { approvals, createDb, sessions, users } from '@orderloop/db';
-import { eq } from 'drizzle-orm';
+import { approvals, auditEvents, createDb, sessions, users } from '@orderloop/db';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { readContext } from '../src/assistant/agent';
 import { previewAction, Refused, runAction } from '../src/assistant/data';
@@ -231,6 +231,19 @@ describe('assistant actions', () => {
     }, 'the decision');
     // The audit trail names the person and how they acted.
     expect(row).toMatchObject({ decidedBy: 'ann@example.com via assistant', note: 'Over limit' });
+    // And the audit log records it once, as the person, through the assistant.
+    const logged = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'approval.decided'), eq(auditEvents.target, orderId)));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({ actor: 'ann@example.com', actorKind: 'user' });
+    expect(JSON.parse(logged[0]!.detail!)).toMatchObject({
+      decision: 'rejected',
+      note: 'Over limit',
+      via: 'assistant',
+      tool: 'decide_approval',
+    });
 
     // Decided now, so a second try is blocked rather than sent.
     const again = await previewAction(env, approver, 'decide_approval', {
@@ -256,8 +269,14 @@ describe('assistant actions', () => {
       event: 'payment.received',
     });
     expect(event.blocked).toMatch(/Nothing on this order is waiting for payment.received/);
-    await runAction(env, op, 'cancel_order', { orderId, reason: 'Duplicate PO' });
-    expect((await state(orderId)).reason).toBe('Duplicate PO (ops@example.com via assistant)');
+    await runAction(env, op, 'cancel_order', { orderId, reason: 'Duplicate PO' }, 'MCP');
+    expect((await state(orderId)).reason).toBe('Duplicate PO (ops@example.com via MCP)');
+    const logged = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'order.cancelled'), eq(auditEvents.target, orderId)))
+      .get();
+    expect(JSON.parse(logged!.detail!)).toMatchObject({ reason: 'Duplicate PO', via: 'mcp' });
   });
 });
 

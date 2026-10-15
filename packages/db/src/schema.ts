@@ -33,6 +33,8 @@ export const flowVersions = sqliteTable(
     version: integer('version').notNull(),
     flowJson: text('flow_json').notNull(),
     publishedAt: integer('published_at').notNull(),
+    /** Who published it, as the audit trail names them; null for built-in templates. */
+    publishedBy: text('published_by'),
   },
   (t) => [primaryKey({ columns: [t.flowId, t.version] })],
 );
