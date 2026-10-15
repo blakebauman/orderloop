@@ -22,7 +22,8 @@ refuses requests: a browser is sent to `/setup`, anything else gets `503` with "
 not set up yet." Whoever runs your workspace sends you the link to `/setup` and a **setup code**.
 Enter the code, your email, an optional name and a password of your own (10 or more characters).
 That creates an admin account, signs you in and takes you to the Team page, where you add everyone
-else.
+else. Operators and admins must use [two-factor sign-in](#requiring-it) unless an admin chooses otherwise,
+so you are asked to set it up on your Account page right away.
 
 The code works once. If creating the account fails (for example because the email isn't valid) the
 code still works. A wrong code is refused, counted per address (10 wrong codes in 15 minutes, then
@@ -102,12 +103,12 @@ API tokens don't use two-factor sign-in.
 #### Requiring it
 
 Admins choose who must use two-factor sign-in under **Two-factor sign-in** on the Team page:
-nobody (the default), admins, operators and admins, approvers, operators and admins, or everyone. The section counts the people
+nobody, admins, operators and admins (the default until an admin chooses), approvers, operators and admins, or everyone. The section counts the people
 covered who haven't set it up. Until they do, those people can only use their Account page: every
 other page sends them there, and the REST API, the order page's live connection and order documents
 answer `403`. They can't turn it off while it is required, but can make new recovery codes. Changing
-the setting takes effect within 30 seconds. Turn it on for your own role after setting up your own
-two-factor sign-in, or you'll be sent to your Account page to do it first.
+the setting takes effect within 30 seconds. With the default, an operator or admin without it can only use their Account page until they set it up. The shared demo visitor is exempt, and API tokens aren't affected. If you raise the requirement to your own role, set up your own
+two-factor sign-in first, or you'll be sent to your Account page to do it.
 
 ### Failed sign-ins
 
@@ -150,12 +151,12 @@ Systems that call the [REST API](/reference/rest-api/) use a token:
 curl https://orderloop.app/api/v1/orders -H "Authorization: Bearer ol_live_…"
 ```
 
-Create one on the Team page with a name (what will use it), a role and how long it lasts: 30 days,
-90 days (the default), 1 year or never. The token is shown once and stored only as a hash; the
+Create one on the Team page with a name (what will use it), a role (`viewer` is preselected) and how long it lasts: 30 days,
+90 days (the default) or 1 year. Every token expires. The token is shown once and stored only as a hash; the
 list shows its first 12 characters, who created it, when it was last used and when it expires,
 highlighting tokens that expire within 14 days. Revoke it there. An expired token gets `401` with
 `This API token expired on <date>…`; create a new one and switch the integration over before the
-old one runs out. Tokens made before expiry existed never expire. A token's role limits it like a person's: an `approver` token can
+old one runs out. Tokens made before expiry existed still never expire until revoked. A token's role limits it like a person's: an `approver` token can
 decide approvals but not start orders. Approval decisions made with a token are recorded as
 `token:<name>`.
 

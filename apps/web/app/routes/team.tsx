@@ -232,7 +232,7 @@ export default function Team() {
   const secret = shown && 'secret' in shown ? shown.secret : null;
   const error = shown && 'error' in shown ? shown.error : null;
   const busy = fetcher.state !== 'idle';
-  const [tokenRole, setTokenRole] = useState<Role>('operator');
+  const [tokenRole, setTokenRole] = useState<Role>('viewer');
   const secretRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef<HTMLParagraphElement>(null);
   const done = shown && 'done' in shown ? shown.done : null;
@@ -546,7 +546,7 @@ export default function Team() {
                 <Input name="name" required placeholder="e.g. ERP sync" />
               </Field>
               <Field label="Role">
-                <RoleSelect value="operator" onChange={setTokenRole} />
+                <RoleSelect value="viewer" onChange={setTokenRole} />
               </Field>
               <Field label="Expires after">
                 <NativeSelect
