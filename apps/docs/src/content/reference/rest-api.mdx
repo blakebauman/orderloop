@@ -16,9 +16,9 @@ Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a sig
 session cookie also works, and so does the workspace password, a break-glass operator sign-in set
 by your administrator). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
-(starting, cancelling, events, webhook subscriptions) `operator`; a token or person without it gets
+(starting, cancelling, events, webhook subscriptions, integrations) `operator`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
-authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)), and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
+authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid field, with its `path`
 and `message`) on a `400` for an invalid body.
@@ -38,6 +38,10 @@ password produce; see `Retry-After`), `404` an unknown route or order, and `413`
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }` |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
 | `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (operator) |
+| `GET` | `/api/v1/integrations` | | `{ integrations }` (operator) |
+| `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (operator) |
+| `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (operator) |
+| `DELETE` | `/api/v1/integrations/:id` | | `{ ok: true }` (operator) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
@@ -156,14 +160,37 @@ payment authorizations, cancels shipments and staged pickups, restocks shipped s
 `Cancelled via API`. Cancelling an order that has already finished changes nothing and returns
 `409` `{ error: "The order has already finished" }`; an unknown order is `404`.
 
+## Integrations
+
+An integration is one external system's signing key and what it may do. Create one per system, so
+a leaked key is revoked on its own and a payment provider can't start orders. All four routes
+need the `operator` role.
+
+- `POST /api/v1/integrations` takes `name` (1 to 100 characters) and the scope:
+  `events` (event names it may deliver to `/api/v1/webhooks/events`, or `["*"]`; default none),
+  `startOrders` (may post to `/api/v1/webhooks/orders`; default `false`), `flows` (flow ids an
+  order body may name in `flowId`, or `["*"]`; default none) and `channel` (only orders on this
+  channel, both those it starts and those it sends events to; default `null`, any). It returns
+  `201 { integration, secret }`. The `secret` (`whsec_…`) is shown once; `integration.id` goes in
+  the signature as `k=`.
+- `GET /api/v1/integrations` lists integrations, newest first, without secrets. Each has `id`, `name`,
+  the scope, `createdAt`, `createdBy`, `lastUsedAt`, `revokedAt` and `previousExpiresAt`.
+- `POST /api/v1/integrations/:id/rotate` returns a new `secret`. The old secret keeps working for
+  24 hours (`previousExpiresAt` shows when it stops), so the sender can switch without downtime.
+  Rotating again replaces the overlap. `404` for an unknown or revoked integration.
+- `DELETE /api/v1/integrations/:id` revokes it at once, including any secret still in its overlap.
+  Requests signed with it get `401`. `404` if it doesn't exist or is already revoked.
+
+Creating, rotating and revoking are recorded in the [audit log](/guides/team-and-roles/#audit-log).
+
 ## Signed events
 
-External systems resume orders without a token by signing the raw request body with the
-workspace's signing secret (your OrderLoop administrator provides it):
+External systems resume orders without a token by signing the raw request body with their
+[integration's](#integrations) secret:
 
 ```http
 POST /api/v1/webhooks/events
-X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
+X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
 
 { "orderId": "ord_…", "event": "payment.received", "payload": { "amount": 3106.78 } }
 ```
@@ -187,8 +214,10 @@ The order page enforces the same bounds.
 | `200` | A replay: `{ delivered: true, duplicate: true }`, delivering nothing |
 | `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters, `payload` at most 32 KiB of JSON) |
 | `413` | Body over 1 MiB |
-| `401` | Missing, malformed, stale or wrong signature |
-| `503` | The workspace hasn't enabled signed webhooks (no signing secret is set) |
+| `401` | Missing, malformed, stale or wrong signature; no `k=`; an unknown or revoked integration |
+| `403` | The integration may not deliver that event, or is bound to a channel other than the order's |
+
+A channel-bound integration gets `404` for an order that doesn't exist, so it can't probe other channels' ids.
 
 ## Signed orders
 
@@ -197,7 +226,7 @@ channel, signed the same way as events. The body is `input` plus a required `cha
 `externalId` and optional `flowId`, `source`, `shipTo` and `vars`; it needs at least one line or `documentText`. The flow is `flowId`, else the
 workspace's order routes (set by your administrator), else the model's default. `channel` and `externalId` are the idempotency key.
 Statuses: `201 { orderId, flowId }` started, `200 { orderId, replayed: true }` replay, `400` invalid body or unsupported currency, `401` bad
-signature, `409` flow not published, `422` same order with different contents, `503` the workspace hasn't enabled signed webhooks. See [Inbound orders](/guides/inbound-orders/).
+signature or unknown or revoked integration, `403` the integration may not start orders, is bound to another channel, or may not choose that `flowId`, `409` flow not published, `422` same order with different contents. See [Inbound orders](/guides/inbound-orders/).
 
 ## Channel adapters
 
@@ -217,7 +246,7 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 ## Audit events
 
 `GET /api/v1/audit-events` returns the security audit log, newest first, for feeding a log
-system; it needs the `operator` role. `type` filters to `auth`, `team`, `token`, `api` or `oauth`; `limit` is
+system; it needs the `operator` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth` or `integration`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
 (an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions.

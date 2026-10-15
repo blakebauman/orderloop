@@ -45,7 +45,7 @@
     "EDI_PARTNERS": ""
   }
   // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
-  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). WEBHOOK_SECRET — enables
-  // signed events at POST /api/v1/webhooks/events and signed orders at POST /api/v1/webhooks/orders. SHOPIFY_WEBHOOK_SECRET — the
-  // Shopify app's client secret; enables POST /api/v1/channels/shopify/orders.
+  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). SHOPIFY_WEBHOOK_SECRET —
+  // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders. Signed webhooks
+  // use integration keys (/api/v1/integrations), stored in D1, not a secret here.
 }

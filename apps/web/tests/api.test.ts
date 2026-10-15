@@ -31,12 +31,46 @@ vi.mock('cloudflare:workers', () => ({ env }));
 vi.mock('~/lib/env.server', () => ({ engine: () => engine, db: () => fakeDb }));
 vi.mock('~/lib/flows.server', () => ({ ensureSeeded: async () => {}, listFlows: async () => [] }));
 vi.mock('~/lib/orders.server', () => ({ currencies: async () => [], listOrders: async () => [] }));
-vi.mock('~/lib/audit.server', () => ({ listAudit: async () => [] }));
+const audit = vi.fn();
+vi.mock('~/lib/audit.server', () => ({ audit, listAudit: async () => [] }));
 vi.mock('~/lib/auth.server', () => ({
   actor: () => 'ops@example.com',
   forbidden: () => 'Forbidden',
 }));
 vi.mock('~/lib/webhooks.server', () => ({}));
+
+const scope = { events: ['payment.received'], startOrders: false, flows: [], channel: null };
+const keys: Record<string, Record<string, unknown>> = {
+  int_pay: {
+    id: 'int_pay',
+    name: 'Payments',
+    secret: 'whsec_test',
+    previousSecret: null,
+    previousExpiresAt: null,
+    ...scope,
+  },
+  int_web: {
+    id: 'int_web',
+    name: 'Storefront',
+    secret: 'whsec_web',
+    previousSecret: null,
+    previousExpiresAt: null,
+    ...scope,
+    events: ['*'],
+    channel: 'web',
+  },
+};
+const channels: Record<string, string> = { ord_x: 'web', ord_pos: 'pos' };
+const integrations = {
+  findIntegration: async (id: string) => keys[id] ?? null,
+  touchIntegration: async () => {},
+  orderChannel: async (id: string) => channels[id] ?? null,
+  createIntegration: vi.fn(),
+  rotateIntegration: vi.fn(),
+  revokeIntegration: vi.fn(),
+  listIntegrations: vi.fn(),
+};
+vi.mock('~/lib/integrations.server', () => integrations);
 
 const { handleApi, handleSignedEvent } = await import('~/lib/api.server');
 const { signWebhook } = await import('@orderloop/core');
@@ -128,14 +162,16 @@ describe('signed events', () => {
     );
 
   beforeEach(() => {
-    env.WEBHOOK_SECRET = 'whsec_test';
     receipts.clear();
     engine.sendEvent.mockReset();
   });
 
+  const sign = (raw: string, keyId = 'int_pay', secret = 'whsec_test') =>
+    signWebhook(secret, raw, undefined, keyId);
+
   it('delivers a signed event once, and lets a sender retry one nothing was waiting for', async () => {
     const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
-    const signature = await signWebhook('whsec_test', raw);
+    const signature = await sign(raw);
     engine.sendEvent.mockResolvedValueOnce({ delivered: false });
     expect((await send(raw, signature)).status).toBe(409);
     engine.sendEvent.mockResolvedValueOnce({ delivered: true, nodeId: 'pay' });
@@ -143,6 +179,80 @@ describe('signed events', () => {
     const replay = await send(raw, signature);
     expect(await replay.json()).toEqual({ delivered: true, duplicate: true });
     expect(engine.sendEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a key that names no integration, an unknown one, or the wrong secret', async () => {
+    const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+    expect((await send(raw, await signWebhook('whsec_test', raw))).status).toBe(401);
+    expect((await send(raw, await sign(raw, 'int_nope'))).status).toBe(401);
+    expect((await send(raw, await sign(raw, 'int_pay', 'whsec_other'))).status).toBe(401);
+    expect(engine.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("keeps an integration to its events and its channel's orders", async () => {
+    const ship = JSON.stringify({ orderId: 'ord_x', event: 'shipment.delivered' });
+    const refused = await send(ship, await sign(ship));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({
+      error: 'This integration may not deliver shipment.delivered',
+    });
+
+    const pos = JSON.stringify({ orderId: 'ord_pos', event: 'payment.received' });
+    expect((await send(pos, await sign(pos, 'int_web', 'whsec_web'))).status).toBe(403);
+    const missing = JSON.stringify({ orderId: 'ord_missing', event: 'payment.received' });
+    expect((await send(missing, await sign(missing, 'int_web', 'whsec_web'))).status).toBe(404);
+
+    engine.sendEvent.mockResolvedValueOnce({ delivered: true, nodeId: 'pay' });
+    const web = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+    expect((await send(web, await sign(web, 'int_web', 'whsec_web'))).status).toBe(200);
+    expect(engine.sendEvent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('integrations over REST', () => {
+  beforeEach(() => audit.mockReset());
+
+  it('creates a key, shows its secret once, and records who did', async () => {
+    integrations.createIntegration.mockResolvedValueOnce({
+      integration: { id: 'int_new', name: 'Stripe' },
+      secret: 'whsec_abc',
+    });
+    const res = await post('integrations', { name: 'Stripe', events: ['payment.received'] });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ secret: 'whsec_abc' });
+    expect(integrations.createIntegration).toHaveBeenCalledWith(
+      { name: 'Stripe', events: ['payment.received'], startOrders: false, flows: [] },
+      'ops@example.com',
+    );
+    expect(audit).toHaveBeenCalledWith(expect.any(Request), 'integration.created', {
+      actor: operator,
+      target: 'Stripe',
+      detail: { id: 'int_new' },
+    });
+  });
+
+  it('rotates and revokes, 404 for an unknown key, and needs an operator', async () => {
+    integrations.rotateIntegration.mockResolvedValueOnce({
+      integration: { name: 'Stripe' },
+      secret: 'whsec_2',
+    });
+    expect((await post('integrations/int_new/rotate', {})).status).toBe(200);
+    integrations.rotateIntegration.mockResolvedValueOnce(null);
+    expect((await post('integrations/int_nope/rotate', {})).status).toBe(404);
+    integrations.revokeIntegration.mockResolvedValueOnce({ name: 'Stripe' });
+    const del = await handleApi(
+      new Request('https://app.test/api/v1/integrations/int_new', { method: 'DELETE' }),
+      operator,
+    );
+    expect(del.status).toBe(200);
+    expect(audit.mock.calls.map((c) => c[1])).toEqual([
+      'integration.rotated',
+      'integration.revoked',
+    ]);
+    const viewer: Principal = { ...operator, role: 'viewer' };
+    expect(
+      (await handleApi(new Request('https://app.test/api/v1/integrations'), viewer)).status,
+    ).toBe(403);
   });
 });
 

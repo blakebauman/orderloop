@@ -53,11 +53,11 @@ for local dev (copy `apps/web/.dev.vars.example`).
 | Secret | Meaning |
 |---|---|
 | `APP_PASSWORD` | A break-glass operator: sign in with no email and this password (an HttpOnly cookie, 30 days), or send it as `Authorization: Bearer <APP_PASSWORD>`. When set, sign-in is required even before anyone is added. With it unset and no people in `users`, the dashboard and API are open on localhost only (any other host answers `503`); see [Sign-in setup and open mode](deploy.md#sign-in-setup-and-open-mode) |
-| `WEBHOOK_SECRET` | Enables signed inbound events at `POST /api/v1/webhooks/events` and signed orders at `POST /api/v1/webhooks/orders`. Unset answers `503` there |
 | `SHOPIFY_WEBHOOK_SECRET` | The Shopify app's client secret; enables `POST /api/v1/channels/shopify/orders`, which verifies `X-Shopify-Hmac-Sha256` with it. Unset answers `503`. See [Channel adapters](https://docs.orderloop.io/guides/channel-adapters/#shopify) |
 
-Outbound webhook subscriptions each have their own secret, generated when the subscription is
-created; they are not configuration.
+Outbound webhook subscriptions and inbound integrations (the keys that sign
+`POST /api/v1/webhooks/events` and `/orders`) each have their own secret, generated when they are
+created through the API and stored in D1; they are not configuration.
 
 ## Bindings
 

@@ -12,14 +12,19 @@
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }  (409 not waiting)
  *   POST /api/v1/orders/:id/cancel              { reason? }  (409 already finished)
  *
- *   GET    /api/v1/audit-events                 ?type=auth|team|token|api|oauth&before=<ms>&limit=  (operator)
+ *   GET    /api/v1/audit-events                 ?type=auth|team|token|api|oauth|integration&before=<ms>&limit=  (operator)
  *
  *   GET    /api/v1/webhook-subscriptions
  *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
  *   DELETE /api/v1/webhook-subscriptions/:id
  *   GET    /api/v1/webhook-subscriptions/:id/deliveries
  *
- * Signed webhooks (no password; see `handleSignedEvent`):
+ *   GET    /api/v1/integrations                 signing keys for external systems (operator)
+ *   POST   /api/v1/integrations                 { name, events?, startOrders?, flows?, channel? } → secret, once
+ *   POST   /api/v1/integrations/:id/rotate      new secret; the old one works for 24 hours
+ *   DELETE /api/v1/integrations/:id             revoke
+ *
+ * Signed webhooks (an integration's key, no token; see `readSigned`):
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  *   POST /api/v1/webhooks/orders                { model, channel, externalId, lines, … }
  *
@@ -30,6 +35,8 @@
 
 import { env } from 'cloudflare:workers';
 import {
+  allowsEvent,
+  allowsOrder,
   atLeast,
   flowForOrder,
   type InboundOrder,
@@ -43,8 +50,10 @@ import {
   type ShopifyOrder,
   SIGNATURE_HEADER,
   shopifyToInbound,
+  signatureKeyId,
   startOrderSchema,
   toStartRequest,
+  verificationSecrets,
   verifyShopifyHmac,
   verifyWebhook,
   x12850ToInbound,
@@ -56,16 +65,27 @@ import {
   cancelInput,
   decisionInput,
   eventSchema,
+  integrationInput,
   orderEventInput,
   subscriptionInput,
 } from './api-schemas';
 import { isAuditGroup } from './audit';
-import { listAudit } from './audit.server';
+import { audit, listAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
 import { decodeCursor, encodeCursor } from './cursor';
 import { db, engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
+import {
+  createIntegration,
+  findIntegration,
+  type Integration,
+  listIntegrations,
+  orderChannel,
+  revokeIntegration,
+  rotateIntegration,
+  touchIntegration,
+} from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
 import {
   createSubscription,
@@ -123,6 +143,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     }
     if (parts[0] === 'webhook-subscriptions')
       return need('operator') ?? (await handleSubscriptions(request, parts, body));
+    if (parts[0] === 'integrations')
+      return need('operator') ?? (await handleIntegrations(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {
@@ -246,17 +268,58 @@ async function handleSubscriptions(
   return json({ error: 'Not found' }, 404);
 }
 
+async function handleIntegrations(
+  request: Request,
+  caller: Principal,
+  parts: string[],
+  body: () => Promise<unknown>,
+): Promise<Response> {
+  if (parts.length === 1 && request.method === 'GET')
+    return json({ integrations: await listIntegrations() });
+  if (parts.length === 1 && request.method === 'POST') {
+    const parsed = integrationInput.safeParse(await body());
+    if (!parsed.success)
+      return json({ error: 'Invalid integration', issues: parsed.error.issues }, 400);
+    const created = await createIntegration(parsed.data, actor(caller));
+    await audit(request, 'integration.created', {
+      actor: caller,
+      target: created.integration.name,
+      detail: { id: created.integration.id },
+    });
+    return json(created, 201);
+  }
+  const id = parts[1]!;
+  if (parts.length === 3 && parts[2] === 'rotate' && request.method === 'POST') {
+    const rotated = await rotateIntegration(id);
+    if (!rotated) return json({ error: 'Not found' }, 404);
+    await audit(request, 'integration.rotated', {
+      actor: caller,
+      target: rotated.integration.name,
+      detail: { id },
+    });
+    return json(rotated);
+  }
+  if (parts.length === 2 && request.method === 'DELETE') {
+    const revoked = await revokeIntegration(id);
+    if (!revoked) return json({ error: 'Not found' }, 404);
+    await audit(request, 'integration.revoked', {
+      actor: caller,
+      target: revoked.name,
+      detail: { id },
+    });
+    return json({ ok: true });
+  }
+  return json({ error: 'Not found' }, 404);
+}
+
 /**
- * Signed business events from external systems. Authenticated by an HMAC of the raw body with
- * WEBHOOK_SECRET (`X-OrderLoop-Signature: t=…,v1=…`), not the admin password. Answers 409 when no
- * node is waiting for the event yet, so a sender's retry policy delivers it later.
+ * The verified body of a signed webhook and the integration that signed it, or the response
+ * refusing it. The signature (`X-OrderLoop-Signature: t=…,k=<integration>,v1=…`) is an HMAC of
+ * the raw body with that integration's secret, or its previous one during a rotation.
  */
-/** The verified body of a signed webhook, or the response refusing it. */
 async function readSigned(
   request: Request,
-): Promise<{ raw: string; signature: string } | { refused: Response }> {
-  const secret = (env as { WEBHOOK_SECRET?: string }).WEBHOOK_SECRET;
-  if (!secret) return { refused: json({ error: 'Webhooks are not configured' }, 503) };
+): Promise<{ raw: string; signature: string; integration: Integration } | { refused: Response }> {
   let raw: string;
   try {
     raw = await readText(request);
@@ -265,11 +328,20 @@ async function readSigned(
     throw err;
   }
   const header = request.headers.get(SIGNATURE_HEADER);
-  const check = await verifyWebhook(secret, raw, header);
+  const keyId = signatureKeyId(header);
+  if (!keyId) return { refused: json({ error: 'Signature must name its integration (k=)' }, 401) };
+  const integration = await findIntegration(keyId);
+  if (!integration) return { refused: json({ error: 'Unknown or revoked integration' }, 401) };
+  const check = await verifyWebhook(verificationSecrets(integration), raw, header);
   if (!check.ok) return { refused: json({ error: check.reason }, 401) };
-  return { raw, signature: /v1=([0-9a-f]+)/i.exec(header ?? '')?.[1] ?? '' };
+  await touchIntegration(integration.id);
+  return { raw, signature: /v1=([0-9a-f]+)/i.exec(header ?? '')?.[1] ?? '', integration };
 }
 
+/**
+ * Signed business events from external systems, within their integration's scope. Answers 409
+ * when no node is waiting for the event yet, so a sender's retry policy delivers it later.
+ */
 export async function handleSignedEvent(request: Request): Promise<Response> {
   const signed = await readSigned(request);
   if ('refused' in signed) return signed.refused;
@@ -279,9 +351,14 @@ export async function handleSignedEvent(request: Request): Promise<Response> {
   } catch {
     return json({ error: 'Body must be { orderId, event, payload? }' }, 400);
   }
+  // A channel-bound key only reaches its channel's orders; an order it can't see is not found.
+  const channel = signed.integration.channel ? await orderChannel(parsed.orderId) : 'any';
+  if (channel === null) return json({ error: 'Not found' }, 404);
+  const scope = allowsEvent(signed.integration, parsed.event, channel);
+  if (!scope.ok) return json({ error: scope.reason }, 403);
   // Claim the signature first, so a replay of this exact request (even a concurrent one) delivers
   // nothing. The claim is dropped unless the event was delivered, so a sender may retry a 409.
-  const receipt = `event:${signed.signature}`;
+  const receipt = `event:${signed.integration.id}:${signed.signature}`;
   if (!(await claimReceipt(receipt))) return json({ delivered: true, duplicate: true });
   let delivered = false;
   try {
@@ -333,6 +410,8 @@ export async function handleSignedOrder(request: Request): Promise<Response> {
   }
   const parsed = inboundOrderSchema.safeParse(body);
   if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
+  const scope = allowsOrder(signed.integration, parsed.data);
+  if (!scope.ok) return json({ error: scope.reason }, 403);
   const r = await startInbound(parsed.data);
   return json(r.body, r.status);
 }

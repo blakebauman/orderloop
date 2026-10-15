@@ -19,6 +19,7 @@
 ^packages/core/src/pricing\.ts$	reference/expressions docs/data-model.md	prose
 ^apps/web/app/lib/approvals\.ts$	guides/approvals-and-events	prose
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api reference/a2a	gen
+^(packages/core/src/integrations|apps/web/app/lib/integrations\.server)\.ts$	reference/rest-api guides/approvals-and-events guides/inbound-orders guides/marketplace guides/team-and-roles docs/data-model.md docs/configuration.md	prose
 ^apps/web/workers/app\.ts$	docs/architecture.md reference/rest-api guides/team-and-roles reference/a2a	prose
 ^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders	gen
 ^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api docs/configuration.md	gen

@@ -101,21 +101,26 @@ waiting.
   The response is `{ "delivered": true, "nodeId": "…" }` or `{ "delivered": false }`.
 
 - **Signed webhook**, for external systems that shouldn't hold an API token:
-  `POST /api/v1/webhooks/events` with the body signed by the workspace's signing secret.
+  `POST /api/v1/webhooks/events` with the body signed by an [integration's](/reference/rest-api/#integrations) key.
 
 ### Signed events
 
-The signing secret is the workspace's; your OrderLoop administrator provides it.
+Each external system gets its own integration: an operator creates it with
+[`POST /api/v1/integrations`](/reference/rest-api/#integrations), which returns its `id` and a
+signing secret (`whsec_…`) shown once. The integration limits what the system may do: the events it
+may deliver (`events`, or `["*"]` for any), and optionally one `channel`, in which case it reaches
+only orders on that channel. A payment provider's key can deliver `payment.received` and nothing
+else.
 
 ```
 POST /api/v1/webhooks/events
-X-OrderLoop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
+X-OrderLoop-Signature: t=<unix seconds>,k=<integration id>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
 
 { "orderId": "ord_…", "event": "payment.received", "payload": { "amount": 3106.78 } }
 ```
 
 The timestamp is part of the signed message and must be within 5 minutes of the server's clock,
-so a captured request can't be replayed later. The signature of a delivered event is also recorded, so replaying it within the window returns `200 { "delivered": true, "duplicate": true }` and delivers nothing; a `409` is not recorded and may be retried.
+so a captured request can't be replayed later. `k` is the integration's `id`; it tells OrderLoop which secret to check. The signature of a delivered event is also recorded, so replaying it within the window returns `200 { "delivered": true, "duplicate": true }` and delivers nothing; a `409` is not recorded and may be retried.
 
 | Status | Meaning |
 |---|---|
@@ -123,8 +128,9 @@ so a captured request can't be replayed later. The signature of a delivered even
 | `409` | `{ "delivered": false }`: no node is waiting for that event yet, so retry later |
 | `400` | The body isn't `{ orderId, event, payload? }`, or `payload` is over 32 KiB of JSON |
 | `413` | The body is over 1 MiB |
-| `401` | Missing or malformed header, stale timestamp, or wrong signature |
-| `503` | The workspace hasn't enabled signed events (no signing secret) |
+| `401` | Missing or malformed header, no `k=`, an unknown or revoked integration, stale timestamp, or wrong signature |
+| `403` | The integration may not deliver that event, or is bound to a channel other than the order's |
+| `404` | No such order, or (for a channel-bound integration) not one it can see |
 
 Answering `409` lets the sender's own retry policy deliver an event that arrives before the order
 reaches its wait.

@@ -73,7 +73,9 @@ curl -X POST https://orderloop.app/api/v1/orders/ord_…/events \
 ```
 
 A seller's own system should use the [signed event](/guides/approvals-and-events/#signed-events)
-endpoint, `POST /api/v1/webhooks/events`, with the same `event` and `payload`.
+endpoint, `POST /api/v1/webhooks/events`, with the same `event` and `payload`. Give each seller
+its own [integration](/reference/rest-api/#integrations) limited to `seller.responded`, so a
+seller's key can't deliver anything else.
 
 The loop waits for one `seller.responded` per pass. A second response that arrives while the flow is
 between passes (recording the first, or starting the next wait) finds no node waiting: the response

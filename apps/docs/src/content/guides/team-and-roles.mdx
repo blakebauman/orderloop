@@ -10,7 +10,7 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 |---|---|
 | `viewer` | See orders, flows, approvals and the back office; use the [assistant](/guides/assistant/) to read |
 | `approver` | Also approve and reject approvals, including through the assistant |
-| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, have the assistant do those and draft flow changes, manage webhook subscriptions, and manage the team and API tokens |
+| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, have the assistant do those and draft flow changes, manage webhook subscriptions and integration keys, and manage the team and API tokens |
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
@@ -154,6 +154,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
 | Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
+| Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the workspace password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
