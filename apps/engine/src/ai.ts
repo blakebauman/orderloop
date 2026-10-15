@@ -1,7 +1,9 @@
 /**
  * Workers AI calls. Every call uses JSON mode against a schema and has a deterministic heuristic
  * fallback, used when AI_MODE is "mock" (tests, offline dev) or the model errors, so an order never
- * stalls on the model. Results record which path produced them.
+ * stalls on the model. Results record which path produced them. What an order call shows the
+ * model goes through `modelView` (`redact.ts` in core): personal data is left out unless the
+ * deployment's AI_PERSONAL_DATA is "send".
  */
 
 import {
@@ -12,11 +14,14 @@ import {
   type FlowGraph,
   flowGraphSchema,
   isBuySide,
+  type ModelContextInput,
+  modelContext,
   NODE_SPECS,
   nodeOutputs,
   ORDER_MODEL_LABELS,
   type Order,
   type OrderLine,
+  personalDataMode,
   validateGraph,
   withDefaults,
 } from '@orderloop/core';
@@ -71,24 +76,9 @@ export async function runJson<T>(
   }
 }
 
-/** The parts of an order a model needs, without internal bookkeeping. */
-export const orderBrief = (order: Order) => ({
-  id: order.id,
-  model: order.model,
-  channel: order.channel,
-  customerId: order.customerId,
-  title: order.title,
-  lines: order.lines,
-  subtotal: order.subtotal,
-  shipping: order.shipping ?? 0,
-  shippingOption: order.shippingOption,
-  tax: order.tax,
-  total: order.total,
-  currency: order.currency,
-  meta: order.meta,
-});
-
-const brief = (order: Order) => JSON.stringify(orderBrief(order));
+/** An order and what goes with it, as this deployment lets a model see them. */
+export const modelView = (env: Env, c: ModelContextInput) =>
+  modelContext(personalDataMode(env.AI_PERSONAL_DATA), c);
 
 // ── Extract ────────────────────────────────────────────────────────────────
 
@@ -173,7 +163,7 @@ export async function classify(env: Env, order: Order, labels: string[]) {
         role: 'system',
         content: `Classify this order into exactly one of: ${labels.join(', ')}. Reply with the label and a confidence from 0 to 1.`,
       },
-      { role: 'user', content: brief(order) },
+      { role: 'user', content: JSON.stringify(modelView(env, { order }).order) },
     ],
     {
       type: 'object',
@@ -194,7 +184,7 @@ export async function classify(env: Env, order: Order, labels: string[]) {
 
 // ── Risk ───────────────────────────────────────────────────────────────────
 
-export async function riskScore(env: Env, order: Order, customer: unknown) {
+export async function riskScore(env: Env, order: Order, customer: ModelContextInput['customer']) {
   return runJson<{ score: number; reasons: string[] }>(
     env,
     [
@@ -203,7 +193,7 @@ export async function riskScore(env: Env, order: Order, customer: unknown) {
         content:
           'You assess fraud and credit risk for commerce orders. Score 0 (safe) to 100 (block). Give up to three short reasons.',
       },
-      { role: 'user', content: JSON.stringify({ order: JSON.parse(brief(order)), customer }) },
+      { role: 'user', content: JSON.stringify(modelView(env, { order, customer })) },
     ],
     {
       type: 'object',
@@ -294,7 +284,7 @@ export async function route(
   env: Env,
   instructions: string,
   routes: string[],
-  context: Record<string, unknown>,
+  context: ModelContextInput,
 ) {
   return runJson<{ route: string; reason: string }>(
     env,
@@ -303,7 +293,7 @@ export async function route(
         role: 'system',
         content: `${instructions}\n\nChoose exactly one route from: ${routes.join(', ')}. Explain the decision in one sentence a customer could read.`,
       },
-      { role: 'user', content: JSON.stringify(context) },
+      { role: 'user', content: JSON.stringify(modelView(env, context)) },
     ],
     {
       type: 'object',
@@ -311,7 +301,7 @@ export async function route(
       required: ['route', 'reason'],
     },
     () => {
-      const order = context.order as Order;
+      const order = context.order;
       const pick = (want: string, fb: string) => (routes.includes(want) ? want : fb);
       if (!order.lines.length)
         return {
@@ -331,7 +321,7 @@ export async function route(
   }));
 }
 
-export async function summarize(env: Env, context: Record<string, unknown>) {
+export async function summarize(env: Env, context: ModelContextInput) {
   return runJson<{ summary: string }>(
     env,
     [
@@ -339,11 +329,11 @@ export async function summarize(env: Env, context: Record<string, unknown>) {
         role: 'system',
         content: 'Summarize this order and its progress in two sentences for an operations team.',
       },
-      { role: 'user', content: JSON.stringify(context).slice(0, 20_000) },
+      { role: 'user', content: JSON.stringify(modelView(env, context)).slice(0, 20_000) },
     ],
     { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
     () => {
-      const o = context.order as Order;
+      const o = context.order;
       return {
         summary: `${ORDER_MODEL_LABELS[o.model]} order ${o.id}: ${o.lines.length} lines, total ${o.total.toFixed(2)} ${o.currency}.`,
       };

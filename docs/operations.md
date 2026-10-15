@@ -28,6 +28,8 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
+| `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
+| `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -56,7 +58,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    `slot` and, for EU data, `"jurisdiction": "eu"`.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
-   120 requests a minute, logs kept, no cache, authentication on), and the GitHub environment.
+   120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
    It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.

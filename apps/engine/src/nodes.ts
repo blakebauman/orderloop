@@ -790,7 +790,7 @@ export const EXECUTORS: Record<string, Exec> = {
     const { value, source } = await ai.summarize(env, {
       order: ctx.order,
       vars: ctx.vars,
-      nodes: ctx.nodes,
+      completed: ctx.nodes,
     });
     return {
       vars: { [str(config.into, 'summary')]: value.summary },
@@ -820,16 +820,17 @@ export const EXECUTORS: Record<string, Exec> = {
     const parsed = assessQuestionsSchema.safeParse(config.questions);
     if (!parsed.success) throw new NonRetryableError('Assess: the questions are not valid');
     const questions = parsed.data;
-    const order = ai.orderBrief(ctx.order);
-    const state =
+    const state = ai.modelView(
+      env,
       config.state === 'order'
-        ? { order }
+        ? { order: ctx.order }
         : {
-            order,
+            order: ctx.order,
             customer: await cx.getCustomer(env, ctx.order.customerId),
             vars: ctx.vars,
             completed: ctx.nodes,
-          };
+          },
+    );
     const { images, notes } = await clef.resolveImages(
       env,
       imageRefs(config.images, ctx),

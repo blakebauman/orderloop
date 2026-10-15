@@ -43,7 +43,7 @@ import {
   publishFlow,
 } from '@orderloop/db';
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
-import { copilot, orderBrief } from '../ai';
+import { copilot, modelView } from '../ai';
 import { recordAudit } from '../audit';
 import { assess, resolveImages } from '../clef';
 import { separationRefusal } from '../separation';
@@ -261,7 +261,7 @@ export async function assessOrder(
   const { id, s } = await loadOrder(env, ref);
   const { images, notes } = await resolveImages(env, imageRefs, id);
   const { value, source } = await assess(env, {
-    state: { order: orderBrief(s.order!), status: s.status, vars: s.vars },
+    state: { ...modelView(env, { order: s.order!, vars: s.vars }), status: s.status },
     questions,
     images,
   });

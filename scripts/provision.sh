@@ -31,13 +31,17 @@ wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already
 # (docs/deploy.md, "Settings for production").
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai-gateway/gateways"
-  if curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/$AI_GATEWAY" >/dev/null 2>&1; then
+  if existing_gw=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/$AI_GATEWAY" 2>/dev/null); then
     echo "AI Gateway $AI_GATEWAY already exists"
+    if [ "$(jq -r '.result.collect_logs' <<<"$existing_gw")" != "$AI_GATEWAY_LOGS" ]; then
+      echo "  Its request logs don't match aiGatewayLogs ($AI_GATEWAY_LOGS): change them in the"
+      echo "  dashboard (AI > AI Gateway > $AI_GATEWAY > Settings)."
+    fi
   else
     curl -fsS -X POST "$api" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
       -H 'Content-Type: application/json' \
-      --data "$(jq -n --arg id "$AI_GATEWAY" '{
-        id: $id, authentication: true, collect_logs: true,
+      --data "$(jq -n --arg id "$AI_GATEWAY" --argjson logs "$AI_GATEWAY_LOGS" '{
+        id: $id, authentication: true, collect_logs: $logs,
         log_management: 100000, log_management_strategy: "DELETE_OLDEST",
         cache_ttl: 0, cache_invalidate_on_update: false,
         rate_limiting_limit: 120, rate_limiting_interval: 60, rate_limiting_technique: "sliding"
