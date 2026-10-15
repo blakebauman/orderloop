@@ -11,6 +11,7 @@ import {
   ORDER_MODEL_LABELS,
   type OrderModel,
   type OrderState,
+  OWN_ORDER_REFUSAL,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
@@ -159,7 +160,9 @@ export default function OrderPage() {
       setError(
         /not waiting/i.test(detail)
           ? 'That step is no longer waiting: someone else decided it, or it timed out.'
-          : `That did not go through. ${detail}`,
+          : detail.includes(OWN_ORDER_REFUSAL)
+            ? OWN_ORDER_REFUSAL
+            : `That did not go through. ${detail}`,
       );
     } finally {
       setBusy(null);

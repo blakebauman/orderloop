@@ -19,6 +19,7 @@ import { A2A_PATH, handleA2A } from './a2a/route';
 import { copilot } from './ai';
 import { handleMcp, MCP_PATH } from './mcp';
 import { startOrder, startOrderOnce } from './orders';
+import { separationRefusal } from './separation';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   /**
@@ -57,13 +58,16 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     nodeId: string,
     decision: 'approved' | 'rejected',
     by: string,
+    deciderId: string,
     note?: string,
   ) {
     const s = await this.snapshot(orderId);
     if (!s) return { ok: false as const, reason: 'not_found' as const };
     if (!s.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
       return { ok: false as const, reason: 'not_waiting' as const };
-    await this.agent(orderId).decide(nodeId, decision, by, note);
+    const own = await separationRefusal(this.env, orderId, deciderId);
+    if (own) return { ok: false as const, reason: 'own_order' as const, error: own };
+    await this.agent(orderId).decide(nodeId, decision, by, note, deciderId);
     return { ok: true as const };
   }
 

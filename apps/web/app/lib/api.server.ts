@@ -187,9 +187,10 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
             400,
           );
         await ensureSeeded();
+        const start = { ...parsed.data, startedBy: caller.id };
         const res = idempotencyKey
-          ? await engine().startOrderOnce({ ...parsed.data, idempotencyKey })
-          : await engine().startOrder(parsed.data);
+          ? await engine().startOrderOnce({ ...start, idempotencyKey })
+          : await engine().startOrder(start);
         if ('mismatch' in res)
           return json({ error: 'Idempotency-Key was already used with a different request' }, 422);
         return json(res, res.replayed ? 200 : 201);
@@ -218,8 +219,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       const b = parsed.data;
       // A person or a named token decides; only the shared password may name someone else.
       const by = caller.kind === 'password' ? (b.by ?? 'api') : actor(caller);
-      const res = await engine().decide(orderId, parts[3], b.decision, by, b.note);
+      const res = await engine().decide(orderId, parts[3], b.decision, by, caller.id, b.note);
       if (res.ok) return json(res);
+      if (res.reason === 'own_order') return json({ error: res.error }, 403);
       return res.reason === 'not_found'
         ? json({ error: 'Not found' }, 404)
         : json({ error: `${parts[3]} is not waiting for an approval` }, 409);

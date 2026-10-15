@@ -50,6 +50,8 @@ move between rows, `a` approves, `r` rejects and `z` undoes.
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`admin` for
 the shared workspace password); see [Team and roles](/guides/team-and-roles/#who-decided).
 
+If an admin has set **Who started an order** to **Can't approve it**, the person or token that started the order can't decide its approvals: the order page and the inbox show "You started this order, so someone else must decide its approvals." See [Approvals](/guides/team-and-roles/#approvals).
+
 From the **API**:
 
 ```bash
@@ -61,10 +63,10 @@ curl -X POST https://orderloop.app/api/v1/orders/ord_…/approvals/approval \
 `$ORDERLOOP_TOKEN` is an API token with the `approver` role or higher. The decision is recorded
 `by` the token (`token:<name>`) or the signed-in person; a body `by` is used only with the
 workspace password, where it defaults to `api`. A decision for a node that isn't waiting for an approval fails with
-`That node is not waiting for an approval`. See the [REST API](/reference/rest-api/).
+`That node is not waiting for an approval`, and one on an order the caller started, with separation on, fails with `403`. See the [REST API](/reference/rest-api/).
 
 The [assistant](/guides/assistant/) can decide an approval for an `approver`, but only after the
-person confirms a card showing the order and where each decision leads. There is no undo window
+person confirms a card showing the order and where each decision leads (the card is blocked, with the reason, when the person started the order and approvals are separated). There is no undo window
 for a decision made there, and the decision is recorded `by` `<email> via assistant`.
 
 ## Waiting for events

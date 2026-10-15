@@ -66,6 +66,8 @@ export const orders = sqliteTable(
     idempotencyKey: text('idempotency_key'),
     idempotencyFingerprint: text('idempotency_fingerprint'),
     fxRate: real('fx_rate').notNull().default(1),
+    /** The principal id that started it; null for channels, email and the stock review. */
+    startedBy: text('started_by'),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),

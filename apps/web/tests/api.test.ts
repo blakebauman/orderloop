@@ -114,6 +114,27 @@ describe('order actions over REST', () => {
     expect((await post('orders/ord_x/cancel', {})).status).toBe(200);
   });
 
+  it('passes the caller as the decider, and answers 403 when they started the order', async () => {
+    engine.decide.mockResolvedValueOnce({
+      ok: false,
+      reason: 'own_order',
+      error: 'You started this order, so someone else must decide its approvals.',
+    });
+    const res = await post('orders/ord_1/approvals/mgr', { decision: 'approved' });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: 'You started this order, so someone else must decide its approvals.',
+    });
+    expect(engine.decide).toHaveBeenCalledWith(
+      'ord_1',
+      'mgr',
+      'approved',
+      'ops@example.com',
+      'tok_1',
+      undefined,
+    );
+  });
+
   it('answers 404 for an event to an unknown order', async () => {
     engine.sendEvent.mockResolvedValueOnce({ delivered: false, notFound: true });
     expect((await post('orders/ord_x/events', { event: 'payment.received' })).status).toBe(404);

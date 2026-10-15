@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { atLeast, decodePrincipal, encodePrincipal, type Principal } from '../src/roles';
+import {
+  atLeast,
+  decodePrincipal,
+  encodePrincipal,
+  OWN_ORDER_REFUSAL,
+  ownOrderRefusal,
+  type Principal,
+} from '../src/roles';
 
 describe('roles', () => {
   it('orders viewer < approver < operator < admin', () => {
@@ -31,5 +38,16 @@ describe('roles', () => {
     expect(decodePrincipal(null)).toBeNull();
     expect(decodePrincipal('not base64 json')).toBeNull();
     expect(decodePrincipal(btoa(JSON.stringify({ id: 'x', name: 'x', role: 'owner' })))).toBeNull();
+  });
+});
+
+describe('separation of duties', () => {
+  it('refuses only the starter, and only when the workspace separates duties', () => {
+    expect(ownOrderRefusal(true, 'usr_a', 'usr_a')).toBe(OWN_ORDER_REFUSAL);
+    expect(ownOrderRefusal(true, 'usr_a', 'usr_b')).toBeNull();
+    expect(ownOrderRefusal(false, 'usr_a', 'usr_a')).toBeNull();
+    // An order with no starter (a channel, an email, the stock review) is anyone's to decide.
+    expect(ownOrderRefusal(true, null, 'usr_a')).toBeNull();
+    expect(ownOrderRefusal(true, 'usr_a', undefined)).toBeNull();
   });
 });

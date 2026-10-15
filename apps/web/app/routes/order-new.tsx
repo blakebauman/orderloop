@@ -73,7 +73,7 @@ function fulfillmentOf(f: FormData) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request, 'operator');
+  const me = await requireUser(request, 'operator');
   const f = await request.formData();
   const flowId = String(f.get('flowId') ?? '');
   const flows = await publishedFlows();
@@ -111,6 +111,7 @@ export async function action({ request }: Route.ActionArgs) {
         documentText: String(f.get('documentText') ?? '') || undefined,
         meta: simulate ? { simulate } : {},
       },
+      startedBy: me.id,
     });
     return redirect(`/orders/${orderId}`);
   } catch (err) {

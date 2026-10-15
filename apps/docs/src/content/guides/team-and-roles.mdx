@@ -1,6 +1,6 @@
 ---
 title: Team and roles
-description: Who can sign in, what viewers, approvers, operators and admins may do, the workspace password, two-factor sign-in, API tokens and the audit log.
+description: Who can sign in, what viewers, approvers, operators and admins may do, the workspace password, two-factor sign-in, who may approve their own orders, API tokens and the audit log.
 ---
 
 Each person signs in with their own email and password, and has one role. API tokens carry a role
@@ -113,6 +113,21 @@ email. Separately, after 20 wrong guesses at the workspace password as an API be
 address in 15 minutes, further attempts are refused with `429`. The address is the client's IP as
 Cloudflare sees it.
 
+## Approvals
+
+Under **Approvals** on the Team page, **Who started an order** is **May approve it** (the default) or
+**Can't approve it**. With the second, the person or API token that started an order can't approve
+or reject its approvals, so a second person always decides. The order records who started it when it
+is started from **New order**, a dashboard demo scenario, a flow editor test run, a restart,
+`POST /api/v1/orders` or an A2A `place_order`. Orders from inbound channel webhooks, Shopify, EDI,
+email intake and the stock review have no starter, and anyone with the `approver` role may decide
+them. The starter is never taken from a request body.
+
+The rule holds wherever a decision is made: the order page, the approvals inbox, the REST API, the
+[assistant](/guides/assistant/), MCP and A2A. A refused decision says "You started this order, so
+someone else must decide its approvals." Turning it on applies to decisions made from then on,
+including on orders already waiting.
+
 ## API tokens
 
 Systems that call the [REST API](/reference/rest-api/) use a token:
@@ -152,7 +167,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Kind | Actions |
 |---|---|
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
-| Team | `team.first_admin`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
+| Team | `team.first_admin`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |

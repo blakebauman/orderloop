@@ -164,6 +164,7 @@ export class OrderLoopExecutor implements AgentExecutor {
     if (!parsed.success) throw new Refused(`The order is not valid: ${issues(parsed.error)}`);
     const result = await startOrderOnce(this.env, {
       ...parsed.data,
+      startedBy: p.id,
       idempotencyKey: `a2a:${p.id}:${message.messageId}`,
     });
     if ('mismatch' in result)

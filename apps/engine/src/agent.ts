@@ -35,6 +35,7 @@ import { and, eq } from 'drizzle-orm';
 import { compensateOrder } from './connectors';
 import { emit, orderSummary } from './outbox';
 import { livePrincipal, SESSION_ENDED } from './principal';
+import { separationRefusal } from './separation';
 
 export type Report = {
   /** Plan snapshots are sequenced per generation; stale ones are dropped. */
@@ -396,9 +397,18 @@ export class OrderAgent extends Agent<Env, State> {
     return p ? { name: p.name, role: p.role } : null;
   }
 
-  /** Approve or reject the approval a node is waiting on. */
+  /**
+   * Approve or reject the approval a node is waiting on. `deciderId` is the principal deciding,
+   * from an RPC caller; on a socket it is the signed-in caller, whatever the page sent.
+   */
   @callable()
-  async decide(nodeId: string, decision: 'approved' | 'rejected', by = 'operator', note?: string) {
+  async decide(
+    nodeId: string,
+    decision: 'approved' | 'rejected',
+    by = 'operator',
+    note?: string,
+    deciderId?: string,
+  ) {
     const caller = await this.authorize('approver');
     if (decision !== 'approved' && decision !== 'rejected')
       throw new Error('decision must be approved or rejected');
@@ -407,6 +417,11 @@ export class OrderAgent extends Agent<Env, State> {
     // On a socket the audit trail names the signed-in person, never what the page sent.
     if (caller) by = caller.email ?? caller.name;
     by = String(by).slice(0, 200);
+    if (caller) deciderId = caller.id;
+    const own = this.state.orderId
+      ? await separationRefusal(this.env, this.state.orderId, deciderId)
+      : null;
+    if (own) throw new Error(own);
     const w = this.state.waits.find((x) => x.kind === 'approval' && x.nodeId === nodeId);
     if (!w || !this.state.instanceId) throw new Error('That node is not waiting for an approval');
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);

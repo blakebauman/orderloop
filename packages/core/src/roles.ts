@@ -81,3 +81,25 @@ export function decodePrincipal(header: string | null | undefined): ProxiedPrinc
     return null;
   }
 }
+
+/**
+ * The workspace setting (`workspace_settings`) that keeps whoever started an order from deciding
+ * its approvals: `on` or `off` (the default).
+ */
+export const APPROVAL_SEPARATION_KEY = 'approval_separation';
+
+export const OWN_ORDER_REFUSAL =
+  'You started this order, so someone else must decide its approvals.';
+
+/**
+ * Why `deciderId` may not decide an approval on an order that `startedBy` started, or null. Only
+ * with separation on, and only when both are known: an order from a channel, an email or the
+ * stock review has no starter, and anyone with the role may decide it.
+ */
+export function ownOrderRefusal(
+  separate: boolean,
+  startedBy: string | null | undefined,
+  deciderId: string | null | undefined,
+): string | null {
+  return separate && startedBy && startedBy === deciderId ? OWN_ORDER_REFUSAL : null;
+}

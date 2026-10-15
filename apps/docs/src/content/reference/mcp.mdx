@@ -80,7 +80,7 @@ assistant stops to confirm; over MCP the client decides how to ask, using the an
 
 Each tool has a title, a description and a JSON input schema. Results come back as text and as
 `structuredContent`. A refusal from live data (nothing is waiting on that event, the approval is
-already decided, the order has finished) is returned as a tool error the model can read, not a
+already decided, the order has finished, you started the order and the workspace [separates approvals](/guides/team-and-roles/#approvals)) is returned as a tool error the model can read, not a
 protocol error. A tool the role can't use is not listed, and calling it by name fails as unknown.
 
 Annotations tell a client when to confirm:

@@ -83,6 +83,11 @@ export type StartOrderInput = {
   version?: number;
   input: OrderInputDraft;
   vars?: Record<string, unknown>;
+  /**
+   * The principal id starting it, set by the caller's server, never from a request body. Recorded
+   * on the order, and not part of the fingerprint.
+   */
+  startedBy?: string;
 };
 
 export type StartOrderResult = { orderId: string; replayed?: boolean };
@@ -151,13 +156,17 @@ export interface EngineRpc {
     event: string,
     payload?: Record<string, unknown>,
   ): Promise<{ delivered: boolean; nodeId?: string; notFound?: true }>;
+  /** `by` is who the record names; `deciderId` the principal, checked against the order's starter. */
   decide(
     orderId: string,
     nodeId: string,
     decision: 'approved' | 'rejected',
     by: string,
+    deciderId: string,
     note?: string,
-  ): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'not_waiting' }>;
+  ): Promise<
+    { ok: true } | { ok: false; reason: 'not_found' | 'not_waiting' | 'own_order'; error?: string }
+  >;
   /** `finished` when the order had already ended, so there was nothing to cancel. */
   cancel(
     orderId: string,

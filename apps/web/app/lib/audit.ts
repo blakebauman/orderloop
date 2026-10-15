@@ -28,6 +28,7 @@ export const AUDIT_ACTIONS = {
   'team.user_enabled': 'Enabled a person',
   'team.two_factor_reset': 'Reset two-factor sign-in',
   'team.two_factor_requirement': 'Changed who needs two-factor sign-in',
+  'team.approval_separation': 'Changed whether people may approve orders they started',
   'token.created': 'Created an API token',
   'token.revoked': 'Revoked an API token',
   'api.bearer_failed': 'API: wrong shared password',
@@ -74,6 +75,8 @@ export function describe(e: AuditEvent): string {
   if (e.target) parts.push(e.target);
   if (e.action === 'team.role_changed' && d.from && d.to)
     parts.push(`${role(d.from)} → ${role(d.to)}`);
+  else if (e.action === 'team.approval_separation')
+    parts.push(d.to === 'on' ? 'separated: no one approves their own orders' : 'not separated');
   else if (isTwoFactorRequirement(d.from) && isTwoFactorRequirement(d.to))
     parts.push(`${TWO_FACTOR_REQUIREMENTS[d.from]} → ${TWO_FACTOR_REQUIREMENTS[d.to]}`);
   else if (d.role) parts.push(role(d.role));
