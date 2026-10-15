@@ -125,3 +125,12 @@ test("a customer's auditRetentionDays sets the engine's retention, at least 90 d
   assert.throws(() => toDeployment({ ...acme, auditRetentionDays: 30 }), /at least 90/);
   assert.throws(() => toDeployment({ ...acme, auditRetentionDays: '400' }), /auditRetentionDays/);
 });
+
+test('workflow AI nodes see personal data only where the registry says send', () => {
+  assert.equal(renderEngine(base('engine'), toDeployment(acme)).vars.AI_PERSONAL_DATA, 'redact');
+  const send = toDeployment({ ...acme, aiPersonalData: 'send' });
+  assert.equal(renderEngine(base('engine'), send).vars.AI_PERSONAL_DATA, 'send');
+  assert.throws(() => toDeployment({ ...acme, aiPersonalData: 'all' }), /aiPersonalData/);
+  assert.equal(toDeployment(acme).aiGatewayLogs, true);
+  assert.equal(toDeployment({ ...acme, aiGatewayLogs: false }).aiGatewayLogs, false);
+});

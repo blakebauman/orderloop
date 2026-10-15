@@ -288,12 +288,18 @@ shares one instance.
 
 ## AI calls
 
+What an order call shows the model goes through `modelView` (`apps/engine/src/ai.ts`), which applies
+`modelContext` from `packages/core/src/redact.ts` in the mode `AI_PERSONAL_DATA` names (`redact` by
+default; see [Personal data](data-model.md#personal-data)). Classify, Risk score, Agent router and
+Summarize build their prompts from it, as do Assess's `state` and the assistant's `assess_order`.
+Extract order is the exception: it sends the inbound document text whole (first 20,000 characters).
+
 Every AI node except Assess, and the copilot, go through `runJson` (`apps/engine/src/ai.ts`):
 `response_format: json_schema`, temperature `0.2`, `max_tokens` 2048, a 20-second cap
 (`AI_TIMEOUT_MS`), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
 non-conforming answer is treated like an error. On `AI_MODE=mock`, an error, a timeout or an empty
 answer, each node's heuristic runs and the output records `source: "heuristic"`. Extract order and
-Summarize send at most the first 20,000 characters.
+Summarize send at most the first 20,000 characters (Summarize's, after redaction).
 
 Assess calls Clef directly (`assess` in `apps/engine/src/clef.ts`, `ASSESS_MODEL`) with the fixed
 body `model: "clef"`, `state`, `questions`, `images`; same cap and `AI_MODE` fallback. Answers go through `clampAnswers`

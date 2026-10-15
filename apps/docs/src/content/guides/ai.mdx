@@ -34,14 +34,49 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 | [Agent router](/reference/nodes/#ai.router) | Follow `instructions` and choose exactly one of `routes`, with a one-sentence reason | No lines → `ask_customer` (the last route if there is none by that name); total over 10,000 USD → `needs_approval` (the first route if none); else the first route | Takes the chosen route as its branch; a route outside the list becomes the first route |
 
 The router's routes are its outputs, so editing `routes` changes the handles on the canvas.
-The model sees the order, the customer record, the run variables and the outputs of completed
-nodes.
+The model sees the order, the customer's account terms, the run variables and the outputs of
+completed nodes, as described in [What the AI steps see](#what-the-ai-steps-see).
+
+## What the AI steps see
+
+By default the model is not told who the buyer is. Classify, Risk score, Agent router, Summarize
+and [Assess](#assess) see an order's commercial facts:
+
+- the lines (SKU, name, quantity, unit price and seller), the amounts and currency, the channel,
+  the customer's id and the fulfillment method;
+- whether the buyer is a guest (an order with contact details but no customer account) and the
+  ship-to country, but not the address;
+- the title and the order's `meta`, with names, emails, phone numbers and addresses removed, and any
+  email address or phone number inside other text replaced by `[email]` or `[phone]`;
+- the customer's account terms: kind, tier, credit limit, balance and payment terms, but not their
+  name or email;
+- for the steps that read them, the run variables and the outputs of completed nodes, treated the
+  same way.
+
+The inbound document's text, payment details and internal figures such as exchange and tax rates
+are never sent. Redaction is by field name and pattern, so personal data placed in an unexpected
+field name or in a long free-text value can still get through; keep it out of `meta` where you can.
+
+Your OrderLoop administrator can set a workspace to include contact details, the full title and
+`meta`, and the customer's name and email, for a flow that needs them (a router that decides by
+customer name, for example). Ask for it; it is off by default.
+
+Three things are different:
+
+- **Extract order** reads the incoming document (the first 20,000 characters), because finding the
+  buyer in it is its job.
+- **The [assistant](#the-assistant)** shows the order data its tools return to the assistant model,
+  for the person who is asking and what their role may see. Its `assess_order` tool follows the
+  rules above.
+- **The flow copilot** sends flow graphs and the node catalog, not order data.
+
+Instructions you write for the router and for Assess go to the model as written.
 
 ## Assess
 
 [Assess](/reference/nodes/#ai.assess) (`ai.assess`) asks Clef, a multimodal decision model, typed
 questions about the order and gets a probability for every allowed option, not just a pick. It
-reads a state (the order as text/JSON) and up to 4 images. It has the same 20-second cap and
+reads a state (the order as text/JSON, redacted as [described below](#what-the-ai-steps-see)) and up to 4 images. It has the same 20-second cap and
 heuristic fallback as the other AI nodes. Clef has no video input, so video can't be assessed.
 
 `questions` maps a question id (letters, digits, `_ . -`, up to 100 characters) to one of three

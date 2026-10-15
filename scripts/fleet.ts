@@ -84,6 +84,10 @@ export type Deployment = {
   limits?: Partial<Record<LimitKey, number>>;
   /** Days audit events are kept before they're archived to R2 and deleted (at least 90). */
   auditRetentionDays?: number;
+  /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
+  aiPersonalData: 'redact' | 'send';
+  /** Whether the AI Gateway keeps request logs (prompts and responses). Default true. */
+  aiGatewayLogs: boolean;
 };
 
 /** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
@@ -128,6 +132,14 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
         );
     }
   }
+  if (
+    raw.aiPersonalData !== undefined &&
+    raw.aiPersonalData !== 'redact' &&
+    raw.aiPersonalData !== 'send'
+  )
+    throw new Error(`${file}: aiPersonalData must be "redact" or "send"`);
+  if (raw.aiGatewayLogs !== undefined && typeof raw.aiGatewayLogs !== 'boolean')
+    throw new Error(`${file}: aiGatewayLogs must be true or false`);
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
@@ -145,6 +157,8 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     demo: raw.demo === true,
     ...(limits ? { limits: limits as Deployment['limits'] } : {}),
     ...(retention !== undefined ? { auditRetentionDays: retention as number } : {}),
+    aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
+    aiGatewayLogs: raw.aiGatewayLogs !== false,
   };
 }
 
@@ -205,6 +219,7 @@ export function renderEngine(base: Config, d: Deployment): Config {
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
+  config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };
   // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
   if (d.demo)
     config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };
@@ -292,6 +307,7 @@ function shellNames(id: string | undefined) {
     DOMAIN: d.domain,
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',
+    AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
   };
   for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
 }

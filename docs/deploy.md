@@ -114,7 +114,7 @@ during the overlap Stripe signs with both, and either passes.
 
 - `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses
   waits; don't raise it on a deployment that real orders use.
-- Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`): logs kept up to 100,000 entries (oldest deleted first), no caching, authentication on, 120 requests a minute (sliding). It is created once per account, in the dashboard (**AI** > **AI Gateway**) or with the AI Gateway API; change its limits there.
+- Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`): request logs (prompts and responses; `aiGatewayLogs` in the registry, default on) kept up to 100,000 entries (oldest deleted first), no caching, authentication on, 120 requests a minute (sliding). It is created once per account, in the dashboard (**AI** > **AI Gateway**) or with the AI Gateway API; change its limits there. `provision.sh` creates it with the registry's `aiGatewayLogs` and only warns if an existing gateway's setting differs.
 - After the first deploy, open `/setup`, enter the setup code (`SETUP_TOKEN`; `provision.sh` saved
   it in `.secrets/<id>/setup-code`), and create the first admin. Then open **Team**, add people
   with their roles, and create API tokens for other systems. See

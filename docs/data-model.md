@@ -194,6 +194,76 @@ See [Email intake](https://docs.orderloop.app/guides/email-intake/#the-intake-lo
 
 The web app serves them at `/docs/<key>` to signed-in users only.
 
+## Personal data
+
+Where personal data is stored, and where it goes. Order Loop holds no data about anyone beyond what
+a customer's orders, team and mail bring in; a deployment holds only one customer's.
+
+| Where | What | Notes |
+|---|---|---|
+| `customers` | `name`, `email`; `stripe_customer_id`, `stripe_payment_method_id` | Indexed by `lower(email)` |
+| `sellers` | `name`, `email` | Marketplace sellers |
+| `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)) |
+| OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order. See [OrderAgent](order-agent.md#state) |
+| R2 | `orders/<orderId>/inbound/po.txt` (the inbound document), `inbound/message.eml` (the raw email) | Served at `/docs/<key>` to signed-in users only. See [R2 documents](#r2-documents) |
+| `inbound_emails` | `sender`, `subject` | Deleted after 180 days; the `.eml` in R2 is not |
+| `messages` | `recipient`, `subject`, `body` | The `commerce.notify` outbox |
+| `webhook_deliveries` | `payload`, the event JSON sent to a subscriber | Deleted after 90 days once delivered or failed |
+| `users` | `email`, `name`, `password_hash`, `totp_secret` | The team |
+| `sessions` | `ip`, `user_agent` | Deleted when expired |
+| `audit_events` | `actor` (an email, `token:<name>` or `operator`), `target` (can be a person's email), `detail`, `ip` | Archived to R2 after `AUDIT_RETENTION_DAYS`, then deleted |
+| `auth_failures` | `key` (`email-ip:`, `ip:`, `email:` prefixes) | Dropped after a day |
+
+`payments`, `shipments`, `invoices` and the ledgers hold ids, amounts and tracking numbers, not
+names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
+
+### To the model
+
+Workflow AI nodes (Classify, Risk score, Agent router, Summarize, Assess) and the assistant's
+`assess_order` send the model `modelContext(mode, …)` from `packages/core/src/redact.ts`
+(`modelView` in `apps/engine/src/ai.ts`). The mode is the engine's `AI_PERSONAL_DATA`
+(`personalDataMode`): `redact`, the default, or `send`.
+
+With `redact`:
+
+- **Order**: `id`, `model`, `channel`, `customerId`, each line's `sku`, `name`, `qty`, `unitPrice`
+  and `sellerId`, `subtotal`, `shipping`, `shippingOption`, `tax`, `total`, `baseTotal`,
+  `currency`, `fulfillment.method` only, `guest` (no `customerId`, but a `contact`) and
+  `shipToCountry` (two letters, from `meta.shipTo`).
+- **Title** with emails and phone numbers masked as `[email]` and `[phone]` (`maskPersonalText`: a
+  run of at least nine digits, so dates and amounts stay).
+- **`meta`, `vars` and completed steps' outputs** through `scrubPersonal`: values under keys
+  such as `name`, `email`, `phone`, `address`, `shipTo`, `billTo`, `contact`, `buyer`, `city`,
+  `zip`, `postalCode` and `street` (any depth; case, `_` and `-` ignored) are dropped, and emails and
+  phone numbers in other strings are masked. The key list is `PERSONAL_KEYS`.
+- **Customer** (Risk score, Agent router, and Assess with `state` `order_and_context`): `id`,
+  `kind`, `tier`, `creditLimit`, `balance` and `terms`. No name or email.
+
+With `send`, the order also carries `contact`, the unmasked `title` and `meta`, the customer gains
+`name` and `email`, and `vars` and step outputs are sent as they are.
+
+Never sent in either mode: `documentText`, payment ids, Stripe ids, `fxRate`, `taxRate` and other
+bookkeeping. The Agent router's `instructions` and Assess's `instructions` are the flow author's
+text and go as written.
+
+Not covered by the redaction:
+
+- **Extract order** sends the inbound document text (first 20,000 characters) whole; finding the
+  buyer in it is its job.
+- **The assistant's chat tools** return order data to the assistant model for the signed-in person
+  asking, as that person's role may see it.
+- **The copilot** sends flow graphs, not order data.
+
+### To AI Gateway and logs
+
+- **AI Gateway** records every model call. With request logs on (the registry's `aiGatewayLogs`,
+  default `true`) it keeps the prompts and responses, up to 100,000 entries. Turning logs off is
+  set at creation by `provision.sh`; for an existing gateway it is changed in the dashboard.
+- **Workers logs** are on for both Workers (`observability` in `wrangler.jsonc`, invocation logs
+  included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
+  (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines
+  outlive the D1 retention and are subject to Cloudflare's log retention instead.
+
 ## Retention
 
 A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `scheduled()` handler on the cron `30 3 * * *`, UTC) deletes, in one batch (audit events are archived first, see below):
