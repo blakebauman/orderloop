@@ -67,8 +67,8 @@ engine source.
 | `GET /health` | `{ ok: true, service: "orderloop-web" }` |
 | `GET /health/deep` | `runHealthChecks` over this Worker's D1 and R2 and `EngineRpc.health()` (the engine's D1 and R2): `{ ok, service, checks: { db, docs, engine } }`, each `"ok"` or `"fail"`, with `503` when any fails. The deploy smoke test calls it |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by `readSigned`, an HMAC with the secret of the integration the signature names (`k=`, `findIntegration` in `apps/web/app/lib/integrations.server.ts`; the previous secret too during a rotation), then held to its scope (`allowsEvent` in `packages/core/src/integrations.ts`: its events, and its channel's orders only) |
-| `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, the integration's scope (`allowsOrder`: it may start orders, on its channel, naming only its `flows`), a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.io/guides/inbound-orders/) |
-| `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.io/guides/channel-adapters/) |
+| `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, the integration's scope (`allowsOrder`: it may start orders, on its channel, naming only its `flows`), a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.app/guides/inbound-orders/) |
+| `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token, `APP_PASSWORD`, or the session cookie; `401` for none or an expired token, `429` when throttled, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
@@ -80,15 +80,15 @@ engine source.
 Before the API, agent and React Router branches, a browser request that changes state or opens a
 WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/origin.ts`): its
 `Origin`, or failing that `Sec-Fetch-Site`, must show the app's own origin, or it gets `403`. See
-[Cross-site requests](https://docs.orderloop.io/guides/team-and-roles/#cross-site-requests).
+[Cross-site requests](https://docs.orderloop.app/guides/team-and-roles/#cross-site-requests).
 
 `apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
 row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
-is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.io/guides/team-and-roles/). The engine's own
+is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see
-[Email intake](https://docs.orderloop.io/guides/email-intake/).
+[Email intake](https://docs.orderloop.app/guides/email-intake/).
 
 ## REST API
 
@@ -121,7 +121,7 @@ deletes `authorization` and `cookie`, sets `x-orderloop-principal` and fetches t
 `McpServer` (`@modelcontextprotocol/server`) per request, no session. It registers only the
 `ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS` and `runTool` from `assistant/tools.ts`, the
 code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`. See
-[MCP server](https://docs.orderloop.io/reference/mcp/).
+[MCP server](https://docs.orderloop.app/reference/mcp/).
 
 ## A2A
 
@@ -153,7 +153,7 @@ Push notifications (`push.ts`) keep their configs in `push_configs` and a durabl
 request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<A2AAgent name>)`,
 the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
 `A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
-changed. See [A2A endpoint](https://docs.orderloop.io/reference/a2a/#push-notifications).
+changed. See [A2A endpoint](https://docs.orderloop.app/reference/a2a/#push-notifications).
 
 ## Bindings
 
@@ -250,7 +250,7 @@ directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
 assistant`. Every tool re-reads the person's session first (`livePrincipal` in
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
-deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.io/guides/assistant/).
+deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.app/guides/assistant/).
 
 The `AssistantAgent` instance is named after the person's user id, which the web app sets from the
 session whatever the browser asks for. Everyone signed in with the shared `APP_PASSWORD` shares one
@@ -274,7 +274,7 @@ The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_cha
 config from catalog defaults, gives edges ids, keeps existing positions and re-runs layout only when
 nodes were added, then returns `validateGraph`'s errors and warnings with the graph. Every model
 call, the assistant's and Assess's included, goes through AI Gateway when `AI_GATEWAY_ID` is set.
-User-facing behaviour: [AI nodes and the assistant](https://docs.orderloop.io/guides/ai/).
+User-facing behaviour: [AI nodes and the assistant](https://docs.orderloop.app/guides/ai/).
 
 ## Template seeding
 
@@ -291,6 +291,6 @@ flow: a new template as version 1, a changed one as the next version. It runs:
 A template that matches any earlier published version is left alone, so code still running from
 before a change can't roll a newer version back, and seeding twice publishes once. The dashboard's
 demo scenarios are `SCENARIOS` in `apps/web/app/lib/scenarios.ts`, shown only where `demoAvailable()` finds their customers and SKUs (the demo data in `packages/db/seed`, never in production); the docs page
-[Built-in flows](https://docs.orderloop.io/guides/templates/) describes them.
+[Built-in flows](https://docs.orderloop.app/guides/templates/) describes them.
 
 See [OrderLoop Workflow](workflow.md) and [OrderAgent](order-agent.md).

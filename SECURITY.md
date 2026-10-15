@@ -26,7 +26,7 @@ In scope:
   them.
 - The hosted service at `orderloop.app` and its customer workspaces at `*.orderloop.app`, within
   the rules below.
-- The documentation site at `docs.orderloop.io`.
+- The documentation site at `docs.orderloop.app`.
 
 Out of scope: other projects on the `orderloop.io` domain, denial of service and load testing,
 social engineering of OrderLoop staff or customers, physical attacks, and reports that only

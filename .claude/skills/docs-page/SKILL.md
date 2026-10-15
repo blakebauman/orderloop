@@ -33,7 +33,7 @@ signing secret"), never by its variable name.
 
 A maintainer page is a `docs/<slug>.md` with an `#` title and a one-line summary under it, a row in
 `docs/README.md`, and relative links between maintainer pages; it links site pages as
-`https://docs.orderloop.io/…/`. Site pages never link into `docs/`.
+`https://docs.orderloop.app/…/`. Site pages never link into `docs/`.
 
 Before adding a page, check whether the content belongs as a section of an existing one. A new
 page earns its place when it has its own reader and its own question.

@@ -148,7 +148,7 @@ export function agentCard(origin: string) {
     supportedInterfaces: interfaces(origin),
     provider: { organization: 'OrderLoop', url: origin },
     version: '1.0.0',
-    documentationUrl: 'https://docs.orderloop.io/reference/a2a/',
+    documentationUrl: 'https://docs.orderloop.app/reference/a2a/',
     capabilities: { streaming: true, pushNotifications: true, extendedAgentCard: false },
     securitySchemes: {
       apiToken: { httpAuthSecurityScheme: { scheme: 'Bearer', description: API_TOKEN_HELP } },
@@ -192,7 +192,7 @@ export function legacyAgentCard(origin: string) {
     protocolVersion: A2A_LEGACY_PROTOCOL_VERSION,
     version: '1.0.0',
     provider: { organization: 'OrderLoop', url: origin },
-    documentationUrl: 'https://docs.orderloop.io/reference/a2a/',
+    documentationUrl: 'https://docs.orderloop.app/reference/a2a/',
     capabilities: { streaming: true, pushNotifications: true },
     supportsAuthenticatedExtendedCard: false,
     securitySchemes: {

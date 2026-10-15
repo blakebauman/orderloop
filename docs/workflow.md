@@ -10,7 +10,7 @@ interprets every flow. One instance runs one order generation; its params are `O
 
 1. **`load-flow`** step: loads the pinned `FlowVersion` from D1 (`loadFlowVersion`). A missing
    version throws `NonRetryableError`.
-2. Builds the plan (`initPlan`) and the [run context](https://docs.orderloop.io/reference/expressions/): `order`, `nodes: {}`,
+2. Builds the plan (`initPlan`) and the [run context](https://docs.orderloop.app/reference/expressions/): `order`, `nodes: {}`,
    `vars` from params, `input` = `order.meta`, and `now` = the event's timestamp, not the wall
    clock, so it replays identically.
 3. Reports a `running` snapshot to the agent.
@@ -140,7 +140,7 @@ for that key not yet `delivered`. The step throws while any are pending, so Work
 when retries run out the error is swallowed, the rows stay `failed`, and the order carries on.
 
 Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`; see
-[Outbound webhooks](https://docs.orderloop.io/guides/outbound-webhooks/).
+[Outbound webhooks](https://docs.orderloop.app/guides/outbound-webhooks/).
 
 ## Continue as new
 

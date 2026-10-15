@@ -3,7 +3,7 @@
 How OrderLoop is built, configured, deployed and tested. These pages are for people who work on
 OrderLoop or run their own deployment. They are not published.
 
-The public site, [docs.orderloop.io](https://docs.orderloop.io) (`apps/docs`), is for the people
+The public site, [docs.orderloop.app](https://docs.orderloop.app) (`apps/docs`), is for the people
 who use a workspace and the developers who integrate with one: flows, orders, approvals, the team,
 the REST API, webhooks, channel adapters, email intake, MCP and A2A. When a passage would only
 matter to someone with the source or a Cloudflare account (file paths, bindings, env vars,
@@ -22,5 +22,5 @@ matter to someone with the source or a Cloudflare account (file paths, bindings,
 | [Data model](data-model.md) | D1 tables and R2 keys |
 | [Testing](testing.md) | The test suites, what each covers, and the recorded runs on the docs home page |
 
-Links to `https://docs.orderloop.io/…` point at the public pages these build on. Keep these files
+Links to `https://docs.orderloop.app/…` point at the public pages these build on. Keep these files
 true to the code in the same change as the code, like the public docs (see the `docs-sync` skill).

@@ -142,7 +142,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <a
-                  href="https://docs.orderloop.io/guides/assistant/"
+                  href="https://docs.orderloop.app/guides/assistant/"
                   target="_blank"
                   rel="noreferrer"
                 >
