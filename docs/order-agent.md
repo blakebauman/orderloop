@@ -118,6 +118,13 @@ role.`; a socket with no principal is refused. API tokens and open local dev hav
 session to re-check. Calls over RPC have no connection and are trusted, because the web app's
 routes already checked the role.
 
+### Audit on the socket
+
+`decide`, `deliver` and `cancel` write a business audit row (`recordAudit`, `apps/engine/src/audit.ts`:
+`approval.decided`, `order.event_delivered`, `order.cancelled`, `via: 'app'`, actor the signed-in person) only when
+there is a socket caller. An RPC caller (the web app's routes, the assistant) records its own, so the row is written
+once. `deliver` records only when an event wait was open. Writing never throws.
+
 | Method | Socket role |
 |---|---|
 | `whoami` | `viewer` |

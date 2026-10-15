@@ -7,6 +7,7 @@ import { Empty, PageHeader, Section } from '~/components/page';
 import { Performance } from '~/components/performance';
 import { StatusBadge } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
+import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
@@ -90,6 +91,11 @@ export async function action({ request }: Route.ActionArgs) {
     flowId: sc.flowId,
     input: sc.input,
     startedBy: me.id,
+  });
+  await audit(request, 'order.started', {
+    actor: me,
+    target: orderId,
+    detail: { flowId: sc.flowId, scenario: sc.id, via: 'app' },
   });
   return redirect(`/orders/${orderId}`);
 }

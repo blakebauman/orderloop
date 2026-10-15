@@ -257,11 +257,11 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 
 ## Audit events
 
-`GET /api/v1/audit-events` returns the security audit log, newest first, for feeding a log
-system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth` or `integration`; `limit` is
+`GET /api/v1/audit-events` returns the audit log (sign-ins, team and token changes, and what was done to orders, approvals, flows and webhooks), newest first, for feeding a log
+system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook` or `stock`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
-(an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions.
+(an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions. Business events carry `via` in `detail` (`app`, `api`, `webhook`, `assistant`, `mcp` or `a2a`).
 
 ## Webhook subscriptions
 

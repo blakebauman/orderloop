@@ -1,10 +1,11 @@
 /**
- * The security audit log: who signed in or failed to, and who changed the team or its tokens.
- * Writing never throws, so a logging problem can't block the action it records. Rows are kept 180
- * days. The vocabulary is `audit.ts`.
+ * The audit log: who signed in or failed to, who changed the team or its tokens, and who did what
+ * to orders, approvals, flows and webhooks (the engine writes the same rows for what the
+ * assistant, MCP, A2A and the order page's socket do). Writing never throws, so a logging problem
+ * can't block the action it records. Rows are kept 180 days. The vocabulary is `audit.ts`.
  */
 
-import { newId, type Principal } from '@orderloop/core';
+import { type AuditActor, auditRow, newId, type Principal } from '@orderloop/core';
 import { auditEvents } from '@orderloop/db';
 import { and, desc, like, lt } from 'drizzle-orm';
 import type { AuditAction, AuditGroup } from './audit';
@@ -20,23 +21,13 @@ export const actorName = (p: Principal) => p.email ?? p.name;
 export async function audit(
   request: Request,
   action: AuditAction,
-  e: { actor?: Principal | null; target?: string | null; detail?: Record<string, unknown> } = {},
+  e: { actor?: AuditActor | null; target?: string | null; detail?: Record<string, unknown> } = {},
 ) {
   const now = Date.now();
   try {
     await db()
       .insert(auditEvents)
-      .values({
-        id: newId('aud'),
-        at: now,
-        action,
-        actor: e.actor ? actorName(e.actor) : null,
-        actorId: e.actor?.id ?? null,
-        actorKind: e.actor?.kind ?? null,
-        target: e.target ?? null,
-        detail: e.detail ? JSON.stringify(e.detail) : null,
-        ip: clientIp(request),
-      });
+      .values(auditRow(newId('aud'), action, { ...e, ip: clientIp(request) }, now));
     await db()
       .delete(auditEvents)
       .where(lt(auditEvents.at, now - KEEP_MS));

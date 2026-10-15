@@ -16,7 +16,7 @@ vi.mock('~/lib/orders.server', () => ({
   listOrders: async () => [],
   customerIdByEmail: async (email: string) => (email === 'jon@example.com' ? 'cus_jon' : undefined),
 }));
-vi.mock('~/lib/audit.server', () => ({ listAudit: async () => [] }));
+vi.mock('~/lib/audit.server', () => ({ audit: vi.fn(), listAudit: async () => [] }));
 vi.mock('~/lib/auth.server', () => ({ actor: () => 'api', forbidden: () => 'Forbidden' }));
 vi.mock('~/lib/webhooks.server', () => ({}));
 

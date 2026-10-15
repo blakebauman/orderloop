@@ -32,6 +32,7 @@ import {
 import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
 import { and, eq } from 'drizzle-orm';
+import { recordAudit } from './audit';
 import { compensateOrder } from './connectors';
 import { emit, orderSummary } from './outbox';
 import { livePrincipal, SESSION_ENDED } from './principal';
@@ -426,13 +427,20 @@ export class OrderAgent extends Agent<Env, State> {
     if (!w || !this.state.instanceId) throw new Error('That node is not waiting for an approval');
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
     await instance.sendEvent({ type: w.eventType, payload: { decision, by, note: note ?? null } });
+    // On the order page's socket; an RPC caller (the web app, the assistant) records its own.
+    if (caller)
+      await recordAudit(this.env, 'approval.decided', {
+        actor: caller,
+        target: this.state.orderId,
+        detail: { nodeId, decision, ...(note ? { note } : {}), via: 'app' },
+      });
     return { ok: true };
   }
 
   /** Deliver a business event (e.g. "payment.received") to whichever node waits for it. */
   @callable()
   async deliver(event: string, payload: Record<string, unknown> = {}) {
-    await this.authorize('operator');
+    const caller = await this.authorize('operator');
     // The payload lands in the order's variables, every broadcast and the next generation.
     if (typeof event !== 'string' || !event || event.length > 100)
       throw new Error('event must be a name of at most 100 characters');
@@ -442,6 +450,12 @@ export class OrderAgent extends Agent<Env, State> {
     if (!w || !this.state.instanceId) return { delivered: false };
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
     await instance.sendEvent({ type: w.eventType, payload: { ...payload, event, at: Date.now() } });
+    if (caller)
+      await recordAudit(this.env, 'order.event_delivered', {
+        actor: caller,
+        target: this.state.orderId,
+        detail: { event, nodeId: w.nodeId, via: 'app' },
+      });
     return { delivered: true, nodeId: w.nodeId };
   }
 
@@ -450,13 +464,20 @@ export class OrderAgent extends Agent<Env, State> {
 
   @callable()
   async cancel(reason = 'Cancelled by operator') {
-    await this.authorize('operator');
+    const caller = await this.authorize('operator');
     reason = String(reason).slice(0, 500);
     if (this.cancelling || TERMINAL_ORDER_STATUSES.includes(this.state.status))
       return { ok: false };
     this.cancelling = true;
     try {
-      return await this.cancelOrder(reason);
+      const done = await this.cancelOrder(reason);
+      if (caller)
+        await recordAudit(this.env, 'order.cancelled', {
+          actor: caller,
+          target: this.state.orderId,
+          detail: { reason, via: 'app' },
+        });
+      return done;
     } finally {
       this.cancelling = false;
     }

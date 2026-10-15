@@ -3,6 +3,7 @@ export * from './address';
 export * from './api';
 export * from './assess';
 export * from './assistant';
+export * from './audit';
 export * from './catalog';
 export * from './channels/shopify';
 export * from './channels/x12';

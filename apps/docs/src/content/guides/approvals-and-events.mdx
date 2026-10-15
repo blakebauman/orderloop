@@ -158,6 +158,10 @@ days) and it resumes the order then. Once the order has ended, the event is sett
 retried. A bad signature answers `400`, and `503` means Stripe webhooks aren't configured on the
 deployment.
 
+Decisions, delivered events and cancellations are recorded in the
+[audit log](/guides/team-and-roles/#audit-log) with how they came in (the app, the REST API, a
+signed webhook, the assistant, MCP or A2A). An event nothing was waiting for is not.
+
 ## Cancelling
 
 Cancel from the order page, the API (`POST /api/v1/orders/:id/cancel` with an optional `reason`),

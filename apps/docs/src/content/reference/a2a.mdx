@@ -243,7 +243,7 @@ curl -N https://orderloop.app/a2a \
 
 An act made over A2A is attributed to the person (or token) behind the credential, with the
 channel: `<email> via A2A`, which is the approval's `by` or ends the cancel reason, as `via MCP`
-does for [MCP](/reference/mcp/#who-did-it). A caller using an API token acts as `token:<name>`.
+does for [MCP](/reference/mcp/#who-did-it). Placing an order, deciding, delivering an event and cancelling are also recorded in the [audit log](/guides/team-and-roles/#audit-log) (`via` A2A, with the `tool`). A caller using an API token acts as `token:<name>`.
 
 ## Security
 

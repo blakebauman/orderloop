@@ -38,6 +38,8 @@
 
 import { env } from 'cloudflare:workers';
 import {
+  type AuditActor,
+  type AuditVia,
   allowsEvent,
   allowsOrder,
   atLeast,
@@ -143,10 +145,17 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     }
     if (parts[0] === 'channels' && parts[1] === 'edi' && parts[2] === '850') {
       if (request.method !== 'POST') return json({ error: 'Not found' }, 404);
-      return need('operator') ?? (await handleEdi850(await readText(request, MAX_EDI_BYTES)));
+      return (
+        need('operator') ??
+        (await handleEdi850(await readText(request, MAX_EDI_BYTES), {
+          request,
+          actor: caller,
+          via: 'api',
+        }))
+      );
     }
     if (parts[0] === 'webhook-subscriptions')
-      return need('admin') ?? (await handleSubscriptions(request, parts, body));
+      return need('admin') ?? (await handleSubscriptions(request, caller, parts, body));
     if (parts[0] === 'integrations')
       return need('admin') ?? (await handleIntegrations(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
@@ -196,6 +205,12 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
           : await engine().startOrder(start);
         if ('mismatch' in res)
           return json({ error: 'Idempotency-Key was already used with a different request' }, 422);
+        if (!res.replayed)
+          await audit(request, 'order.started', {
+            actor: caller,
+            target: res.orderId,
+            detail: { flowId: parsed.data.flowId, via: 'api' },
+          });
         return json(res, res.replayed ? 200 : 201);
       }
     }
@@ -211,7 +226,14 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       const b = orderEventInput.safeParse(await body());
       if (!b.success) return json({ error: 'Invalid event', issues: b.error.issues }, 400);
       const res = await engine().sendEvent(orderId, b.data.event, b.data.payload ?? {});
-      return res.notFound ? json({ error: 'Not found' }, 404) : json(res);
+      if (res.notFound) return json({ error: 'Not found' }, 404);
+      if (res.delivered)
+        await audit(request, 'order.event_delivered', {
+          actor: caller,
+          target: orderId,
+          detail: { event: b.data.event, nodeId: res.nodeId, via: 'api' },
+        });
+      return json(res);
     }
     if (parts[2] === 'approvals' && parts[3] && request.method === 'POST') {
       const denied = need('approver');
@@ -228,7 +250,19 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         caller.id,
         b.note,
       );
-      if (res.ok) return json(res);
+      if (res.ok) {
+        await audit(request, 'approval.decided', {
+          actor: caller,
+          target: orderId,
+          detail: {
+            nodeId: parts[3],
+            decision: b.decision,
+            ...(b.note ? { note: b.note } : {}),
+            via: 'api',
+          },
+        });
+        return json(res);
+      }
       if (res.reason === 'own_order') return json({ error: res.error }, 403);
       return res.reason === 'not_found'
         ? json({ error: 'Not found' }, 404)
@@ -239,8 +273,16 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (denied) return denied;
       const b = cancelInput.safeParse(await body());
       if (!b.success) return json({ error: 'Invalid cancel', issues: b.error.issues }, 400);
-      const res = await engine().cancel(orderId, b.data.reason ?? 'Cancelled via API');
-      if (res.ok) return json(res);
+      const reason = b.data.reason ?? 'Cancelled via API';
+      const res = await engine().cancel(orderId, reason);
+      if (res.ok) {
+        await audit(request, 'order.cancelled', {
+          actor: caller,
+          target: orderId,
+          detail: { reason, via: 'api' },
+        });
+        return json(res);
+      }
       return res.reason === 'not_found'
         ? json({ error: 'Not found' }, 404)
         : json({ error: 'The order has already finished' }, 409);
@@ -260,6 +302,7 @@ function failure(err: unknown): Response {
 
 async function handleSubscriptions(
   request: Request,
+  caller: Principal,
   parts: string[],
   body: () => Promise<unknown>,
 ): Promise<Response> {
@@ -269,11 +312,24 @@ async function handleSubscriptions(
     const parsed = subscriptionInput.safeParse(await body());
     if (!parsed.success)
       return json({ error: 'Invalid subscription', issues: parsed.error.issues }, 400);
-    return json(await createSubscription(parsed.data), 201);
+    const created = await createSubscription(parsed.data);
+    await audit(request, 'webhook.subscribed', {
+      actor: caller,
+      target: parsed.data.url,
+      detail: { id: created.subscription.id, events: parsed.data.events, via: 'api' },
+    });
+    return json(created, 201);
   }
   const id = parts[1]!;
-  if (parts.length === 2 && request.method === 'DELETE')
-    return (await deleteSubscription(id)) ? json({ ok: true }) : json({ error: 'Not found' }, 404);
+  if (parts.length === 2 && request.method === 'DELETE') {
+    if (!(await deleteSubscription(id))) return json({ error: 'Not found' }, 404);
+    await audit(request, 'webhook.unsubscribed', {
+      actor: caller,
+      target: id,
+      detail: { via: 'api' },
+    });
+    return json({ ok: true });
+  }
   if (parts[2] === 'deliveries' && parts.length === 3 && request.method === 'GET')
     return json({ deliveries: await listDeliveries(id) });
   return json({ error: 'Not found' }, 404);
@@ -378,6 +434,12 @@ export async function handleSignedEvent(request: Request): Promise<Response> {
     const res = await engine().sendEvent(parsed.orderId, parsed.event, parsed.payload ?? {});
     delivered = !!res.delivered;
     if (res.notFound) return json({ error: 'Not found' }, 404);
+    if (delivered)
+      await audit(request, 'order.event_delivered', {
+        actor: integrationActor(signed.integration),
+        target: parsed.orderId,
+        detail: { event: parsed.event, nodeId: res.nodeId, via: 'webhook' },
+      });
     return json(res, res.delivered ? 200 : 409);
   } catch (err) {
     return failure(err);
@@ -425,11 +487,24 @@ export async function handleSignedOrder(request: Request): Promise<Response> {
   if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
   const scope = allowsOrder(signed.integration, parsed.data);
   if (!scope.ok) return json({ error: scope.reason }, 403);
-  const r = await startInbound(parsed.data);
+  const r = await startInbound(parsed.data, {
+    request,
+    actor: integrationActor(signed.integration),
+    via: 'webhook',
+  });
   return json(r.body, r.status);
 }
 
 type InboundOutcome = { status: number; body: Record<string, unknown> };
+
+/** Who an inbound order is recorded as starting it: an integration, a channel or an API caller. */
+type InboundTrail = { request: Request; actor: AuditActor; via: AuditVia };
+
+const integrationActor = (i: Integration): AuditActor => ({
+  kind: 'integration',
+  id: i.id,
+  name: `integration:${i.name}`,
+});
 
 /**
  * Starts an inbound order, however it arrived (the signed endpoint or a channel adapter): checks
@@ -437,6 +512,7 @@ type InboundOutcome = { status: number; body: Record<string, unknown> };
  */
 async function startInbound(
   o: InboundOrder,
+  trail: InboundTrail,
   known?: Awaited<ReturnType<typeof currencies>>,
 ): Promise<InboundOutcome> {
   if (!(known ?? (await currencies())).some((c) => c.currency === o.currency))
@@ -461,9 +537,13 @@ async function startInbound(
           error: `Order ${o.externalId} on ${o.channel} was already received with different contents; send events to change it`,
         },
       };
-    return res.replayed
-      ? { status: 200, body: { ...res } }
-      : { status: 201, body: { ...res, flowId } };
+    if (res.replayed) return { status: 200, body: { ...res } };
+    await audit(trail.request, 'order.started', {
+      actor: trail.actor,
+      target: res.orderId,
+      detail: { flowId, channel: o.channel, externalId: o.externalId, via: trail.via },
+    });
+    return { status: 201, body: { ...res, flowId } };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('has no published version'))
@@ -507,7 +587,12 @@ export async function handleShopifyOrder(request: Request): Promise<Response> {
   if (!mapped.ok) return json({ error: mapped.error }, 400);
   const parsed = inboundOrderSchema.safeParse(mapped.order);
   if (!parsed.success) return json({ error: 'Invalid order', issues: parsed.error.issues }, 400);
-  const r = await startInbound(parsed.data);
+  const shop = request.headers.get('x-shopify-shop-domain') ?? '';
+  const r = await startInbound(parsed.data, {
+    request,
+    actor: { kind: 'channel', id: `shopify:${shop}`, name: `shopify:${shop}` },
+    via: 'webhook',
+  });
   return json(r.body, r.status);
 }
 
@@ -515,7 +600,7 @@ export async function handleShopifyOrder(request: Request): Promise<Response> {
  * An X12 interchange of 850 purchase orders from a configured trading partner (EDI_PARTNERS maps
  * its ISA sender id to a customer). Each PO starts at most once; the response lists every PO.
  */
-async function handleEdi850(text: string): Promise<Response> {
+async function handleEdi850(text: string, trail: InboundTrail): Promise<Response> {
   const parsed = parseX12(text);
   if (!parsed.ok) return json({ error: parsed.error }, 400);
   const { sender, transactions } = parsed.interchange;
@@ -529,7 +614,7 @@ async function handleEdi850(text: string): Promise<Response> {
     const valid = inboundOrderSchema.safeParse(mapped.order);
     if (!valid.success)
       return { control: tx.control, status: 400, error: valid.error.issues[0]?.message };
-    const r = await startInbound(valid.data, known);
+    const r = await startInbound(valid.data, trail, known);
     return {
       control: tx.control,
       poNumber: (mapped.order.meta.edi as { poNumber: string }).poNumber,

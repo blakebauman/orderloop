@@ -50,7 +50,10 @@ export async function publishFlow(
   db: Db,
   flow: StoredFlow,
   now = Date.now(),
-  { unlessPublished = false } = {},
+  {
+    unlessPublished = false,
+    publishedBy = null,
+  }: { unlessPublished?: boolean; publishedBy?: string | null } = {},
 ): Promise<number> {
   await saveDraft(db, flow, now);
   const flowJson = JSON.stringify(flow);
@@ -68,6 +71,7 @@ export async function publishFlow(
           version: next.v,
           flowJson: sql<string>`${flowJson}`.as('flow_json'),
           publishedAt: sql<number>`${now}`.as('published_at'),
+          publishedBy: sql<string | null>`${publishedBy}`.as('published_by'),
         })
         .from(next)
         .where(

@@ -3,7 +3,13 @@
  * description of an event. Pure; `audit.server.ts` writes and reads the rows.
  */
 
-import { ROLE_LABELS, type Role } from '@orderloop/core';
+import {
+  AUDIT_VIA,
+  type AuditVia,
+  BUSINESS_AUDIT_ACTIONS,
+  ROLE_LABELS,
+  type Role,
+} from '@orderloop/core';
 import { isTwoFactorRequirement, TWO_FACTOR_REQUIREMENTS } from './two-factor';
 
 export const AUDIT_ACTIONS = {
@@ -39,6 +45,7 @@ export const AUDIT_ACTIONS = {
   'integration.created': 'Created an integration key',
   'integration.rotated': 'Rotated an integration key',
   'integration.revoked': 'Revoked an integration key',
+  ...BUSINESS_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -51,6 +58,11 @@ export const AUDIT_GROUPS = {
   api: 'API access',
   oauth: 'Connected apps',
   integration: 'Integrations',
+  order: 'Orders',
+  approval: 'Approvals',
+  flow: 'Flows',
+  webhook: 'Webhooks',
+  stock: 'Stock review',
 } as const;
 
 export type AuditGroup = keyof typeof AUDIT_GROUPS;
@@ -84,5 +96,10 @@ export function describe(e: AuditEvent): string {
   if (typeof d.twoFactor === 'string') parts.push(`two-factor ${d.twoFactor}`);
   if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
     parts.push(`${d.left} left`);
+  if (typeof d.decision === 'string') parts.push(d.decision);
+  if (typeof d.event === 'string') parts.push(d.event);
+  if (typeof d.version === 'number') parts.push(`v${d.version}`);
+  if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))
+    parts.push(`via ${AUDIT_VIA[d.via as AuditVia]}`);
   return parts.length ? `${label}: ${parts.join(', ')}` : label;
 }

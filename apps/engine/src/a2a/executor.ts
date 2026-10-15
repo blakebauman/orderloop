@@ -47,6 +47,7 @@ import {
 } from '../assistant/data';
 import { assistantModel, type ModelSource } from '../assistant/model';
 import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from '../assistant/tools';
+import { recordAudit } from '../audit';
 import { startOrderOnce } from '../orders';
 import { dataArtifact, newTask, readMessage, statusEvent } from './parts';
 import type { SqlTaskStore } from './store';
@@ -169,6 +170,12 @@ export class OrderLoopExecutor implements AgentExecutor {
     });
     if ('mismatch' in result)
       throw new Refused('This message id already placed a different order. Use a new message id.');
+    if (!result.replayed)
+      await recordAudit(this.env, 'order.started', {
+        actor: p,
+        target: result.orderId,
+        detail: { flowId: parsed.data.flowId, via: 'a2a', tool: 'place_order' },
+      });
     bus.publish(dataArtifact(ids, 'order', result));
     await this.store.follow(ids.taskId, result.orderId);
     return result.orderId;

@@ -122,10 +122,11 @@ export async function saveFlow(flow: Flow) {
   return validateGraph(flow);
 }
 
-export async function publish(flow: Flow) {
+/** Publishes a new version, recording who published it (as the audit trail names them). */
+export async function publish(flow: Flow, publishedBy: string) {
   const issues = validateGraph(flow);
   if (issues.errors.length) return { ...issues, version: null };
-  const version = await publishFlow(db(), flow);
+  const version = await publishFlow(db(), flow, Date.now(), { publishedBy });
   return { ...issues, version };
 }
 
