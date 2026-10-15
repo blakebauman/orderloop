@@ -1,0 +1,216 @@
+---
+/*
+ * One order, two readings: the storefront run as a double-entry page. The spine is the flow; the
+ * left lane is what operations sees, the right lane what engineering sees. The capture outcome and
+ * the phone's reading lane are radio inputs, so the page works without script (`:has()` does the
+ * switching); the page script only holds the rollback until the capture row is on screen.
+ */
+import { node } from '../lib/flow';
+
+const ORDER = 'ord_mf8k2q1x4n';
+const key = (id: string) => `${id}#0`;
+// Set as HTML so the formatter can't indent the inside of a <pre>.
+const asCode = (code: string) =>
+  `<code>${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</code>`;
+const label = (id: string) => node(id).label;
+const rules = JSON.stringify(node('policy').config.rules)
+  .replaceAll('},{', '},\n {')
+  .replace('[{', '[\n {')
+  .replace('}]', '}\n]');
+const returnWindow = node('window').config as { event: string; timeout: string };
+
+type Row = {
+  id: string;
+  nodes: string[];
+  ops: string;
+  eng: string;
+  code?: string;
+  /** The compensation this step registers; shown as undone when capture fails. */
+  undo?: string;
+  undoIndex?: number;
+  /** The compensation's line in the step log. */
+  reversal?: string;
+};
+
+const before: Row[] = [
+  {
+    id: 'checkout',
+    nodes: ['checkout'],
+    ops: 'SHOP-10442 comes in from the storefront: one 27-inch monitor and two cables, a guest checkout. It shows up in Orders with the flow it will run.',
+    eng: 'A signed webhook starts it. The order pins the published flow version it started on, so editing the flow later never changes it.',
+    code: `POST /api/v1/webhooks/orders
+X-OrderLoop-Signature: t=…,k=int_storefront,v1=…
+{"model":"b2c","channel":"web","externalId":"SHOP-10442",
+ "lines":[{"sku":"MON-27","qty":1},{"sku":"CBL-2M","qty":2}]}
+
+201 {"orderId":"${ORDER}","flowId":"tpl-storefront-order"}`,
+  },
+  {
+    id: 'prep',
+    nodes: ['validate', 'price', 'shipping', 'tax'],
+    ops: 'Validated, priced at list, shipping rated, tax added: $390.96. Nobody touched it.',
+    eng: 'Each node is one memoized step. A retry replays the stored result, so nothing is priced, charged or booked twice.',
+    code: `${key('validate')}   ok
+${key('price')}      $353.00
+${key('shipping')}   ok · $9.00
+${key('tax')}        $28.96`,
+  },
+  {
+    id: 'policy',
+    nodes: ['policy'],
+    ops: 'Store policy passes: over $25, at most ten of a SKU, not a PO box. Had it failed, the customer would get the reason and the order would end as Rejected.',
+    eng: `The rules are the node's config. The branch not taken is skipped, along with everything that depends only on it (${label('reject')}, ${label('rejected')}), so nothing waits on it.`,
+    code: `${key('policy')} → pass
+${rules}`,
+  },
+  {
+    id: 'authorize',
+    nodes: ['authorize'],
+    ops: 'Card authorized for $390.96.',
+    eng: 'Registers a compensation on its step: void the authorization.',
+    code: `${key('authorize')} → ok`,
+    undo: 'Authorization voided',
+    undoIndex: 2,
+    reversal: `rollback ${key('authorize')} → voided`,
+  },
+  {
+    id: 'reserve',
+    nodes: ['reserve'],
+    ops: 'Both lines reserved at the warehouse.',
+    eng: 'Compensation: release the reservations.',
+    code: `${key('reserve')} → ok`,
+    undo: 'Stock released',
+    undoIndex: 1,
+    reversal: `rollback ${key('reserve')} → released`,
+  },
+  {
+    id: 'ship',
+    nodes: ['ship'],
+    ops: 'Label bought and the carrier booked.',
+    eng: 'Compensation: cancel the shipment and put the stock back.',
+    code: `${key('ship')} → ok`,
+    undo: 'Shipment cancelled',
+    undoIndex: 0,
+    reversal: `rollback ${key('ship')} → cancelled, restocked`,
+  },
+];
+---
+
+<section id="ledger" class="ledger" aria-labelledby="ledger-title">
+  <div class="section-head">
+    <h2 id="ledger-title">One order, two readings.</h2>
+    <p>
+      Follow SHOP-10442, a demonstration order, through the storefront flow. Operations reads the
+      left page and engineering the right: same entry, same line.
+    </p>
+  </div>
+
+  <fieldset class="lane-switch">
+    <legend class="sr-only">Read the order as</legend>
+    <input type="radio" name="lane" id="lane-ops" value="ops" checked />
+    <label for="lane-ops">Operations</label>
+    <input type="radio" name="lane" id="lane-eng" value="eng" />
+    <label for="lane-eng">Engineering</label>
+  </fieldset>
+
+  <div class="sheet" role="list">
+    <div class="lane-heads" aria-hidden="true">
+      <span>What operations sees</span>
+      <span>The flow</span>
+      <span>What engineering sees</span>
+    </div>
+
+    {
+      before.map((r) => (
+        <article
+          class:list={['row', r.undo && 'undoable']}
+          role="listitem"
+          data-row={r.id}
+          style={r.undo ? `--i:${r.undoIndex}` : undefined}
+        >
+          <div class="ops">
+            <p class="entry">{r.ops}</p>
+            {r.undo && (
+              <p class="stamp" data-undo>
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M2.2 4.2A3.6 3.6 0 1 1 2 6.6" />
+                  <path d="M1 2v2.6h2.6" />
+                </svg>
+                {r.undo}
+              </p>
+            )}
+          </div>
+          <div class="spine">
+            {r.nodes.map((id) => (
+              <span class="pill" data-cat={node(id).type.split('.')[0]}>
+                {label(id)}
+              </span>
+            ))}
+          </div>
+          <div class="eng">
+            <p>{r.eng}</p>
+            {r.code && <pre class="entry" set:html={asCode(r.code)} />}
+            {r.reversal && (
+              <p class="stamp counter" data-undo>
+                <code>{r.reversal}</code>
+              </p>
+            )}
+          </div>
+        </article>
+      ))
+    }
+
+    <article class="row capture" role="listitem" data-row="capture">
+      <div class="ops">
+        <fieldset class="outcome">
+          <legend>Then the capture</legend>
+          <input type="radio" name="capture" id="capture-fails" value="fails" checked />
+          <label for="capture-fails">fails</label>
+          <input type="radio" name="capture" id="capture-ok" value="ok" />
+          <label for="capture-ok">succeeds</label>
+        </fieldset>
+        <p class="when-fails">
+          Nobody chases it. The order ends as <strong>{label('uncaptured')}</strong>, and what it did is
+          undone in reverse: the shipment cancelled, the stock released, the authorization voided. The
+          order page shows each step and why.
+        </p>
+        <p class="when-ok">
+          Captured. The customer gets a shipping confirmation, and the order waits up to {returnWindow.timeout}
+          for a return without anyone watching it.
+        </p>
+      </div>
+      <div class="spine">
+        <span class="pill" data-cat="commerce">{label('capture')}</span>
+        <span class="pill end when-fails" data-cat="control">{label('uncaptured')}</span>
+        <span class="pill when-ok" data-cat="commerce">{label('shipped')}</span>
+        <span class="pill wait when-ok" data-cat="control">{label('window')}</span>
+      </div>
+      <div class="eng">
+        <p class="when-fails">
+          The End node's outcome is <code>failed</code>, so the step throws a{' '}
+          <code>NonRetryableError</code> and Workflows runs the registered compensations, newest first.
+        </p>
+        <pre class="when-fails"><code>{`${key('capture')}     → failed
+${key('uncaptured')}  end · failed
+  rollback ${key('ship')}       cancel shipment, restock
+  rollback ${key('reserve')}    release reservations
+  rollback ${key('authorize')}  void authorization`}</code></pre>
+        <p class="when-ok">
+          The wait is a durable <code>step.waitForEvent</code>: no worker sits idle for a month. A return
+          arrives as an event.
+        </p>
+        <pre class="when-ok"><code>{`${key('window')}  waitForEvent("${returnWindow.event}", ${returnWindow.timeout})
+
+POST /api/v1/orders/${ORDER}/events
+{"event":"${returnWindow.event}",
+ "payload":{"lines":[{"sku":"CBL-2M","qty":2}]}}
+
+200 {"delivered":true,"nodeId":"window"}`}</code></pre>
+      </div>
+    </article>
+  </div>
+  <p class="aside">
+    Demonstration data. The flow, step names, branches and compensations are the shipped{' '}
+    <code>tpl-storefront-order</code> template, read from the source when this page was built.
+  </p>
+</section>

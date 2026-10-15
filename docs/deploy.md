@@ -208,3 +208,19 @@ pnpm docs:deploy    # build, then wrangler deploy
 The reference pages (node catalog, built-in flows, event and status lists) and the
 [OpenAPI explorer](https://docs.orderloop.app/api/) render from the source at build time, so rebuild and redeploy the docs
 whenever those change.
+
+## The marketing page
+
+`orderloop.app` is `apps/site` (`@orderloop/site`), one static Astro page served by a static-assets
+Worker, `orderloop-site`, with no runtime code. Like the docs it deploys after the deployment that
+sets `sites` (`orderloop`), and it renders the storefront flow and the list of built-in flows from
+`@orderloop/core` at build time, so it changes when they do.
+
+```bash
+pnpm site:dev       # local preview
+pnpm site:build     # static build into apps/site/dist
+pnpm site:deploy    # build, then wrangler deploy
+```
+
+"Request a deployment" is a `mailto:` link (`apps/site/src/lib/links.ts`); its mailbox needs a rule
+in the zone's Email Routing.

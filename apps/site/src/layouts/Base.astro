@@ -1,0 +1,55 @@
+---
+/*
+ * The page shell: Ledger's tokens from @orderloop/design (light by default, ink night on request,
+ * the app's rule), the app's faces self-hosted, and the theme set before first paint.
+ */
+import '@fontsource/ibm-plex-sans/latin-400.css';
+import '@fontsource/ibm-plex-sans/latin-500.css';
+import '@fontsource/ibm-plex-sans/latin-600.css';
+import '@fontsource/ibm-plex-mono/latin-400.css';
+import '@fontsource/ibm-plex-mono/latin-500.css';
+import { FONTS, palette, type Scheme } from '@orderloop/design/tokens';
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+const { title, description } = Astro.props;
+
+const vars = (scheme: Scheme) =>
+  Object.entries(palette(scheme))
+    .map(([k, v]) => `--${k}:${v};`)
+    .join('');
+const tokens =
+  `:root{${vars('light')}--font-sans:${FONTS.sans};--font-mono:${FONTS.mono};color-scheme:light}` +
+  `:root[data-theme="dark"]{${vars('dark')}color-scheme:dark}` +
+  // A band is set in the other look: ink night on a light page, paper on a dark one.
+  `.band{${vars('dark')}}:root[data-theme="dark"] .band{${vars('light')}}`;
+
+// The app's choices (light, dark, system), stored per origin; light unless the reader chose.
+const THEME_SCRIPT = `(function(){var d=document.documentElement,m=matchMedia('(prefers-color-scheme: dark)');function a(){var c='light';try{c=localStorage.getItem('ol-theme')||'light'}catch(e){}d.dataset.themeChoice=c;d.dataset.theme=c==='system'?(m.matches?'dark':'light'):c}a();m.addEventListener('change',a);addEventListener('ol-theme',a)})()`;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#f6f1e8" />
+    <style is:inline set:html={tokens} />
+    <script is:inline set:html={THEME_SCRIPT} />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

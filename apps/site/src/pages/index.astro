@@ -1,0 +1,264 @@
+---
+import {
+  ORDER_CHANNEL_LABELS,
+  ORDER_MODEL_LABELS,
+  type OrderChannel,
+  type OrderModel,
+  TEMPLATES,
+} from '@orderloop/core';
+import FlowPlate from '../components/FlowPlate.astro';
+import Ledger from '../components/Ledger.astro';
+import Mark from '../components/Mark.astro';
+import ThemeSwitch from '../components/ThemeSwitch.astro';
+import Base from '../layouts/Base.astro';
+import { FLOW_FACTS } from '../lib/flow';
+import { CONSOLE, CONTACT, DOCS } from '../lib/links';
+
+const flows = Object.entries(TEMPLATES).map(([id, make]) => {
+  const f = make();
+  return {
+    id,
+    name: f.name,
+    model: ORDER_MODEL_LABELS[f.model as OrderModel],
+    channels: f.channels.map((c) => ORDER_CHANNEL_LABELS[c as OrderChannel]).join(', '),
+    description: f.description,
+  };
+});
+
+const principles = [
+  {
+    claim: 'People decide what can’t be undone.',
+    how: 'Automation and AI act on what can be reversed. Moving money, cancelling, rejecting and publishing wait for a person: approval and wait-for-event nodes are durable waits with a timeout, and an approval escalates when its timeout passes.',
+  },
+  {
+    claim: 'A decision can be taken back.',
+    how: 'Approve, reject and cancel on the order page come with an undo window before they are sent. Every action is idempotent, so a retry is always safe and the page can say plainly what happened.',
+  },
+  {
+    claim: 'AI helps. It never holds an order up.',
+    how: 'Extract, classify, risk score, forecast and the router answer in JSON against a schema, within 20 seconds, or a deterministic heuristic answers instead. Everything works with AI switched off.',
+  },
+  {
+    claim: 'The role is the boundary.',
+    how: 'A viewer reads, an approver also decides approvals, an operator does the rest. The same roles bind API tokens, MCP clients and A2A agents: nothing acting for a person can do more than that person.',
+  },
+  {
+    claim: 'Flows are data.',
+    how: 'Draw a flow in the editor or ask the copilot to draft one. Publishing makes an immutable version, and each order pins the version it started on.',
+  },
+];
+
+const intake = [
+  {
+    from: 'Storefronts, marketplaces and tills',
+    via: 'POST /api/v1/webhooks/orders',
+    note: 'Signed with an integration’s key and scoped to the flows it may start.',
+  },
+  {
+    from: 'Shopify',
+    via: 'POST /api/v1/channels/shopify/orders',
+    note: 'Orders as Shopify sends them.',
+  },
+  {
+    from: 'EDI X12 850',
+    via: 'POST /api/v1/channels/edi/850',
+    note: 'Purchase orders from trading partners.',
+  },
+  {
+    from: 'Email',
+    via: 'orders@ · po@ · purchasing@',
+    note: 'The body and attached PDFs or Office files become the order’s document for AI extraction.',
+  },
+  {
+    from: 'Your own systems',
+    via: '/api/v1',
+    note: 'REST with role-scoped tokens, described in OpenAPI 3.1.',
+  },
+  {
+    from: 'Assistants and agents',
+    via: '/mcp · /a2a',
+    note: 'MCP clients and A2A agents, each signed in with OAuth.',
+  },
+];
+
+const deployment = [
+  ['Its own Workers', 'The web app and the engine, at your-company.orderloop.app'],
+  ['Its own data', 'A D1 database and an R2 bucket nobody else’s orders touch'],
+  ['Its own model traffic', 'An AI Gateway with its own logs and limits'],
+  ['Its own secrets', 'Payment, carrier and webhook keys held for you alone'],
+  ['Where the data lives', 'Kept in the EU or the FedRAMP jurisdiction when you need it'],
+  [
+    'How it changes',
+    'Shipped by CI in rings, with a database restore point and automatic rollback',
+  ],
+];
+---
+
+<Base
+  title="OrderLoop: every order is a loop you can see"
+  description="OrderLoop runs each commerce order from intake to outcome as a durable flow graph on Cloudflare, shows where it is and why, and undoes its own work when a step fails."
+>
+  <a class="skip" href="#main">Skip to the page</a>
+  <header class="top">
+    <a class="wordmark" href="/" aria-label="OrderLoop home"><Mark /> OrderLoop</a>
+    <nav aria-label="Page">
+      <a href="#ledger">How it runs</a>
+      <a href="#flows">Flows</a>
+      <a href="#deploy">Deployments</a>
+      <a href={DOCS}>Docs</a>
+    </nav>
+    <div class="top-actions">
+      <ThemeSwitch />
+      <a class="quiet" href={CONSOLE}>Sign in</a>
+      <a class="button" href={CONTACT}>Request a deployment</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Every order is a loop you can see.</h1>
+        <p class="lede">
+          OrderLoop runs each order, from any channel and in any commerce model, from intake to outcome
+          as a flow graph on Cloudflare. When a person is needed it says where and why. When a step
+          fails, it undoes what it did.
+        </p>
+        <div class="actions">
+          <a class="button large" href={CONTACT}>Request a deployment</a>
+          <a class="text-link" href={DOCS}>Read the docs</a>
+        </div>
+      </div>
+      <figure class="hero-plate">
+        <FlowPlate id="plate-wide" class="wide" perLine={4} width={820} />
+        <FlowPlate id="plate-narrow" class="narrow" perLine={2} width={380} />
+        <figcaption>
+          <span><strong>Storefront order</strong>, as it ships: {FLOW_FACTS.nodes} nodes, {
+            FLOW_FACTS.outcomes
+          } ways to end.</span>
+          <span>This run is paid, shipped, partly returned and refunded. The branches it didn’t take stay on the sheet.</span>
+          <span class="legend" aria-hidden="true">
+            <span><i class="k-run"></i>ran</span>
+            <span><i class="k-ghost"></i>not taken</span>
+            <span><i class="k-wait"></i>waits</span>
+            <span><i class="k-undo"></i>undone if a later step fails</span>
+          </span>
+        </figcaption>
+      </figure>
+    </section>
+
+    <Ledger />
+
+    <section id="flows" class="flows" aria-labelledby="flows-title">
+      <div class="section-head">
+        <h2 id="flows-title">Every kind of order, one engine.</h2>
+        <p>
+          OrderLoop ships with these flows. Each is a starting point you edit, and one generic Workflow
+          runs all of them: sell-side and buy-side, one order or a subscription that runs for years.
+        </p>
+      </div>
+      <table>
+        <thead>
+          <tr><th scope="col">Flow</th><th scope="col">Model</th><th scope="col">Arrives by</th><th scope="col">What it does</th></tr>
+        </thead>
+        <tbody>
+          {
+            flows.map((f) => (
+              <tr>
+                <th scope="row">{f.name}</th>
+                <td>{f.model}</td>
+                <td>{f.channels}</td>
+                <td>{f.description}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </section>
+
+    <section class="principles" aria-labelledby="principles-title">
+      <div class="section-head">
+        <h2 id="principles-title">Automation where it’s safe, people where it isn’t.</h2>
+      </div>
+      <dl>
+        {
+          principles.map((p) => (
+            <div>
+              <dt>{p.claim}</dt>
+              <dd>{p.how}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section class="intake" aria-labelledby="intake-title">
+      <div class="section-head">
+        <h2 id="intake-title">Orders arrive the way they already do.</h2>
+        <p>Each one starts the same kind of loop. A webhook or an email that arrives twice finds the order it already started.</p>
+      </div>
+      <ul>
+        {
+          intake.map((i) => (
+            <li>
+              <span class="from">{i.from}</span>
+              <code>{i.via}</code>
+              <span class="note">{i.note}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section id="deploy" class="deploy band" aria-labelledby="deploy-title">
+      <div class="section-head">
+        <h2 id="deploy-title">Your own OrderLoop, not a share of ours.</h2>
+        <p>
+          Each customer gets a dedicated deployment that we run for you, built on Cloudflare Workers,
+          Workflows, Durable Objects, Workers AI, D1 and R2. It shares nothing with anyone else’s:
+          not data, not secrets, not limits.
+        </p>
+      </div>
+      <dl>
+        {
+          deployment.map(([k, v]) => (
+            <div>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section class="close" aria-labelledby="close-title">
+      <h2 id="close-title" class="sr-only">Next steps</h2>
+      <div class="door">
+        <h3>Run your orders on your own OrderLoop.</h3>
+        <p>Tell us what you sell or buy, the channels orders arrive on, and where your data needs to live. We’ll set up a deployment and walk your team through it.</p>
+        <a class="button large" href={CONTACT}>Request a deployment</a>
+      </div>
+      <div class="door">
+        <h3>See how it’s built before you talk to anyone.</h3>
+        <p>The guides, the node catalog, the REST API with its OpenAPI document, and the MCP and A2A references.</p>
+        <a class="button large secondary" href={DOCS}>Read the docs</a>
+        <a class="text-link" href={`${DOCS}api/`}>Browse the API</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="wordmark small"><Mark /> OrderLoop</span>
+    <nav aria-label="Footer">
+      <a href={DOCS}>Docs</a>
+      <a href={`${DOCS}api/`}>API</a>
+      <a href={CONSOLE}>Sign in</a>
+      <a href={CONTACT}>Contact</a>
+    </nav>
+  </footer>
+
+  <script>
+    import { replayPlate, holdRollback } from '../lib/motion';
+    replayPlate();
+    holdRollback();
+  </script>
+</Base>

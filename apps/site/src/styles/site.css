@@ -1,0 +1,1290 @@
+/*
+ * Ledger, set for a page that has to persuade: the app's paper, ink, hairlines and registrar blue
+ * (tokens from @orderloop/design, written by Base.astro), with the scale turned up. Status colours
+ * still mean status: green succeeded, amber waits, red failed, rust undone.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --gutter: clamp(1rem, 0.4rem + 2.4vw, 2.5rem);
+  --max: 84rem;
+  --hair: 1px solid var(--rule);
+  --ink-soft: color-mix(in oklch, var(--ink) 78%, var(--paper));
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --display: -0.032em;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 4.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1.0625rem / 1.6 var(--font-sans);
+  font-feature-settings: "ss02";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+
+/* ── Browser surfaces ─────────────────────────────────────────────────────── */
+
+::selection {
+  background: color-mix(in oklch, var(--link) 24%, transparent);
+}
+
+:where(a, button, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+html {
+  scrollbar-color: var(--input) var(--paper);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip {
+  position: absolute;
+  left: var(--gutter);
+  top: -3rem;
+  z-index: 20;
+  padding: 0.5rem 0.75rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: var(--radius);
+}
+
+.skip:focus {
+  top: 0.5rem;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 0 0.875rem;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 500;
+  font-size: 0.9375rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease),
+    box-shadow 160ms var(--ease);
+}
+
+.button:hover {
+  background: color-mix(in oklch, var(--primary) 88%, var(--paper));
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--ink) 18%, transparent);
+}
+
+.button.large {
+  min-height: 3rem;
+  padding: 0 1.25rem;
+  font-size: 1.0625rem;
+}
+
+.button.secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--input);
+}
+
+.button.secondary:hover {
+  background: var(--card);
+  border-color: var(--ink-soft);
+}
+
+.text-link {
+  color: var(--link);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--link) 40%, transparent);
+}
+
+.text-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ── Top bar: the app's 48px bar, on paper ───────────────────────────────── */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  height: 3.5rem;
+  padding: 0 var(--gutter);
+  background: color-mix(in oklch, var(--paper) 94%, transparent);
+  border-bottom: var(--hair);
+  backdrop-filter: saturate(1.2) blur(8px);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1.0625rem;
+  letter-spacing: -0.015em;
+  text-decoration: none;
+}
+
+.mark-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.top nav {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.9375rem;
+}
+
+.top nav a,
+.top .quiet {
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.top nav a:hover,
+.top .quiet:hover {
+  color: var(--ink);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  font-size: 0.9375rem;
+}
+
+.theme {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.theme:hover {
+  border-color: var(--rule);
+  color: var(--ink);
+}
+
+.theme svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+
+.theme .moon,
+[data-theme="dark"] .theme .sun {
+  display: none;
+}
+
+[data-theme="dark"] .theme .moon {
+  display: block;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
+
+main > section {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+main > .hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(2rem, 4vw, 4rem);
+  align-items: center;
+  min-height: calc(100svh - 3.5rem);
+  padding-top: clamp(2rem, 5vh, 4rem);
+  padding-bottom: clamp(2.5rem, 6vh, 4.5rem);
+}
+
+.hero h1 {
+  font-size: clamp(2.75rem, 1.2rem + 4.6vw, 5.5rem);
+  line-height: 0.98;
+  letter-spacing: var(--display);
+}
+
+.lede {
+  max-width: 34rem;
+  margin-top: 1.5rem;
+  font-size: clamp(1.0625rem, 0.95rem + 0.4vw, 1.25rem);
+  color: var(--ink-soft);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem 1.5rem;
+  margin-top: 2.25rem;
+}
+
+.hero-plate {
+  margin: 0;
+  padding: clamp(0.75rem, 1.5vw, 1.25rem);
+  background: var(--sheet);
+  border: var(--hair);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--ink) 4%, transparent),
+    0 18px 40px -24px color-mix(in oklch, var(--ink) 30%, transparent);
+}
+
+.hero-plate figcaption {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: var(--hair);
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.hero-plate figcaption strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+}
+
+.legend i {
+  display: inline-block;
+  width: 1.125rem;
+  height: 0;
+  border-top: 2px solid var(--ink);
+}
+
+.legend .k-ghost {
+  border-top: 1px dashed var(--edge);
+}
+
+.legend .k-wait {
+  border-top-color: var(--wait);
+}
+
+.legend .k-undo {
+  border-top-color: var(--undo);
+}
+
+/* ── The plate (FlowPlate.astro) ─────────────────────────────────────────── */
+
+.plate {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--font-sans);
+  overflow: visible;
+}
+
+.plate.narrow {
+  display: none;
+}
+
+.plate .grid-dot {
+  fill: var(--sheet-grid);
+}
+
+.plate .e {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.plate .e.run {
+  stroke: var(--edge-active);
+  stroke-width: 1.6;
+}
+
+.plate .e.ghost {
+  stroke: var(--edge);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.7;
+}
+
+.plate .n rect {
+  fill: var(--node);
+  stroke: var(--node-border);
+  stroke-width: 1;
+}
+
+.plate .n.run > rect:first-child {
+  stroke: var(--ink);
+  stroke-width: 1.25;
+}
+
+.plate .n.ghost > rect {
+  fill: none;
+  stroke: var(--edge);
+  stroke-dasharray: 3 3;
+}
+
+.plate .n text {
+  fill: var(--ink);
+  font-weight: 500;
+}
+
+.plate .n.ghost text {
+  fill: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.plate .n .cat {
+  fill: var(--cat-commerce);
+  stroke: none;
+}
+
+.plate .n[data-cat="trigger"] .cat {
+  fill: var(--cat-trigger);
+}
+
+.plate .n[data-cat="control"] .cat {
+  fill: var(--cat-control);
+}
+
+.plate .n[data-cat="ai"] .cat {
+  fill: var(--cat-ai);
+}
+
+.plate .mark {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.plate .mark.wait {
+  stroke: var(--wait);
+}
+
+.plate .mark.undo {
+  stroke: var(--undo);
+}
+
+.plate .mark.outcome {
+  fill: var(--ok);
+  stroke: none;
+}
+
+/* The replay (motion.ts): the run starts unlit, and a token rides it, lighting each step. */
+.plate .token {
+  display: none;
+  fill: var(--link);
+  stroke: var(--sheet);
+  stroke-width: 2;
+}
+
+.plate.riding .token {
+  display: block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plate.replaying .e.run {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 260ms var(--ease);
+  }
+
+  .plate.replaying .e.run.lit {
+    stroke-dashoffset: 0;
+  }
+
+  .plate.replaying .n.run {
+    opacity: 0.32;
+    transition: opacity 240ms var(--ease);
+  }
+
+  .plate.replaying .n.run.lit {
+    opacity: 1;
+  }
+
+  .plate.replaying .n.run:has(.mark.wait).lit > rect:first-child {
+    animation: waiting 900ms var(--ease);
+  }
+}
+
+@keyframes waiting {
+  from {
+    stroke: var(--wait);
+    stroke-width: 2.5;
+  }
+}
+
+/* ── Section rhythm ───────────────────────────────────────────────────────── */
+
+main > section + section {
+  margin-top: clamp(5rem, 10vw, 9rem);
+}
+
+.section-head {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 1rem 3rem;
+  align-items: end;
+  padding-bottom: 1.5rem;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 0;
+}
+
+.section-head h2 {
+  font-size: clamp(2.125rem, 1.2rem + 3vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: var(--display);
+}
+
+.section-head p {
+  max-width: 36rem;
+  color: var(--ink-soft);
+}
+
+.aside {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.aside code {
+  font-size: 0.75rem;
+}
+
+/* ── The ledger (Ledger.astro) ────────────────────────────────────────────── */
+
+.ledger .sheet {
+  --spine: clamp(10rem, 16vw, 13rem);
+}
+
+.lane-heads,
+.ledger .row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--spine) minmax(0, 1fr);
+}
+
+.lane-heads {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 2;
+  background: var(--paper);
+  border-bottom: var(--hair);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.lane-heads span {
+  padding: 0.625rem 0;
+}
+
+.lane-heads span:nth-child(2) {
+  text-align: center;
+}
+
+.lane-heads span:nth-child(3) {
+  padding-left: 2rem;
+}
+
+.ledger .row {
+  border-bottom: var(--hair);
+}
+
+.ledger .ops,
+.ledger .eng {
+  display: grid;
+  align-content: start;
+  gap: 0.875rem;
+  padding: 1.75rem 0;
+}
+
+.ledger .ops {
+  padding-right: 2rem;
+  font-size: clamp(1.0625rem, 0.95rem + 0.45vw, 1.3125rem);
+  line-height: 1.5;
+}
+
+.ledger .eng {
+  padding-left: 2rem;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+}
+
+.ledger .eng code {
+  font-size: 0.875em;
+}
+
+.ledger pre {
+  margin: 0;
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  background: var(--card);
+  border: var(--hair);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.ledger pre code {
+  font-size: inherit;
+}
+
+/* The spine: the flow itself, a ruled column with the node pills on it. */
+.ledger .spine {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.75rem 0.5rem;
+  border-inline: var(--hair);
+  background: var(--sheet);
+}
+
+.ledger .spine::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 0;
+  border-left: 1.5px solid var(--ink);
+  z-index: 0;
+}
+
+.ledger .row:first-of-type .spine::before {
+  top: 2.4rem;
+}
+
+.pill {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  padding: 0.3rem 0.625rem 0.3rem 0.875rem;
+  background: var(--node);
+  border: 1.25px solid var(--ink);
+  border-radius: 5px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.pill::before {
+  content: "";
+  position: absolute;
+  left: 0.375rem;
+  top: 50%;
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 1px;
+  background: var(--cat-commerce);
+  translate: 0 -50%;
+}
+
+.pill[data-cat="trigger"]::before {
+  background: var(--cat-trigger);
+}
+
+.pill[data-cat="control"]::before {
+  background: var(--cat-control);
+}
+
+.pill.end {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.pill.wait {
+  border-color: var(--wait);
+}
+
+/* The capture switch: two outcomes, written as a sentence. */
+.outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.outcome legend {
+  float: left;
+  margin-right: 0.25rem;
+  padding: 0;
+  font-weight: 600;
+}
+
+.outcome input,
+.lane-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.outcome label {
+  padding: 0.125rem 0.75rem 0.2rem;
+  border: 1px solid var(--input);
+  border-radius: 999px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease),
+    border-color 160ms var(--ease);
+}
+
+.outcome label:hover {
+  border-color: var(--ink-soft);
+}
+
+.outcome input:focus-visible + label {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+#capture-fails:checked + label {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--paper);
+}
+
+#capture-ok:checked + label {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--paper);
+}
+
+.ledger:has(#capture-fails:checked) .when-ok,
+.ledger:has(#capture-ok:checked) .when-fails {
+  display: none;
+}
+
+.ledger .capture .ops strong {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+/* Undone: a ledger reverses an entry by striking it and posting a counter-entry on the same line.
+   The compensations run newest first, so ship is struck first and authorize last. */
+.stamp {
+  display: none;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  color: var(--undo);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.stamp svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stamp.counter code {
+  font-size: 0.8125rem;
+  color: var(--undo);
+}
+
+.ledger:has(#capture-fails:checked) .stamp {
+  display: flex;
+}
+
+.ledger:has(#capture-fails:checked) .undoable .entry {
+  text-decoration: line-through 1px var(--undo);
+}
+
+/* Mono code at 13px keeps its strike thin and low, so the original entry stays legible. */
+.ledger:has(#capture-fails:checked) .undoable pre.entry {
+  text-decoration-thickness: 1px;
+  color: var(--muted-foreground);
+}
+
+.ledger:has(#capture-fails:checked) .undoable .pill {
+  border-color: var(--undo);
+  color: var(--undo);
+}
+
+.ledger:has(#capture-fails:checked) .undoable .spine::before {
+  border-left-color: var(--undo);
+  border-left-style: dashed;
+}
+
+/* A failed order's account closes at its End node: the spine stops there, under a double rule. */
+.ledger:has(#capture-fails:checked) .capture .spine::before {
+  bottom: auto;
+  height: 4.25rem;
+}
+
+.pill.end::after {
+  content: "";
+  position: absolute;
+  inset: auto -0.5rem -0.4rem;
+  border-bottom: 3px double var(--bad);
+}
+
+/* Until the capture row is on screen the reversal waits (motion.ts adds `pre-roll`, then removes
+   it, which starts the animations from the top). */
+.ledger.pre-roll .stamp {
+  visibility: hidden;
+}
+
+.ledger.pre-roll .undoable .entry {
+  text-decoration-color: transparent;
+}
+
+.ledger.pre-roll .undoable .pill {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.ledger.pre-roll .undoable .spine::before {
+  border-left-color: var(--ink);
+  border-left-style: solid;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ledger:has(#capture-fails:checked) .stamp {
+    animation: undone 520ms var(--ease) both;
+    animation-delay: calc(240ms + var(--i, 0) * 280ms);
+  }
+
+  .ledger.pre-roll .stamp {
+    animation: none;
+  }
+
+  .ledger .undoable .entry,
+  .ledger .undoable .pill {
+    transition:
+      text-decoration-color 360ms var(--ease) calc(240ms + var(--i, 0) * 280ms),
+      border-color 360ms var(--ease) calc(240ms + var(--i, 0) * 280ms),
+      color 360ms var(--ease) calc(240ms + var(--i, 0) * 280ms);
+  }
+
+  .ledger.pre-roll .undoable .entry,
+  .ledger.pre-roll .undoable .pill {
+    transition: none;
+  }
+}
+
+@keyframes undone {
+  from {
+    opacity: 0;
+    translate: -6px 0;
+    filter: blur(2px);
+  }
+}
+
+.lane-switch {
+  display: none;
+}
+
+/* ── Flows table ──────────────────────────────────────────────────────────── */
+
+.flows table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.flows th,
+.flows td {
+  padding: 1rem 1.5rem 1rem 0;
+  border-bottom: var(--hair);
+  text-align: left;
+  vertical-align: top;
+}
+
+.flows thead th {
+  padding-block: 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.flows tbody th {
+  font-weight: 600;
+  font-size: 1.0625rem;
+  white-space: nowrap;
+}
+
+.flows td:nth-child(2),
+.flows td:nth-child(3) {
+  color: var(--muted-foreground);
+}
+
+.flows td:last-child {
+  max-width: 40rem;
+  color: var(--ink-soft);
+  padding-right: 0;
+}
+
+/* ── Principles and deployment: claim on the left, the mechanism on the right ─ */
+
+.principles dl,
+.deploy dl {
+  margin: 0;
+}
+
+.principles dl > div,
+.deploy dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 0.5rem 3rem;
+  padding: 1.5rem 0;
+  border-bottom: var(--hair);
+}
+
+.principles dt {
+  font-size: clamp(1.25rem, 1rem + 0.9vw, 1.75rem);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.principles dd,
+.deploy dd {
+  margin: 0;
+  max-width: 40rem;
+  color: var(--ink-soft);
+}
+
+.deploy dt {
+  font-weight: 600;
+}
+
+/* ── Intake ───────────────────────────────────────────────────────────────── */
+
+.intake ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.intake li {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr);
+  gap: 0.5rem 2rem;
+  align-items: baseline;
+  padding: 1.125rem 0;
+  border-bottom: var(--hair);
+}
+
+.intake .from {
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+
+.intake code {
+  font-size: 0.875rem;
+  color: var(--link);
+}
+
+.intake .note {
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+}
+
+/* ── The deployment band: the same ledger, in the other look ─────────────── */
+
+main > section.band {
+  /* Derived tokens resolve where they're declared, so the band declares its own. */
+  --hair: 1px solid var(--rule);
+  --ink-soft: color-mix(in oklch, var(--ink) 78%, var(--paper));
+  max-width: none;
+  padding: clamp(4rem, 8vw, 7rem) max(var(--gutter), calc((100vw - var(--max)) / 2 + var(--gutter)));
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.band .section-head {
+  border-bottom-color: var(--ink);
+}
+
+main > .band + section {
+  margin-top: clamp(4rem, 8vw, 7rem);
+}
+
+/* ── Close: two doors, ruled like a ledger's totals ─────────────────────── */
+
+main > .close {
+  width: calc(100% - 2 * var(--gutter));
+  max-width: calc(var(--max) - 2 * var(--gutter));
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 2px solid var(--ink);
+  border-bottom: 3px double var(--ink);
+}
+
+.door {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 1.25rem;
+  padding: clamp(2rem, 4vw, 3.5rem) clamp(1rem, 3vw, 3rem) clamp(2rem, 4vw, 3.5rem) 0;
+}
+
+.door + .door {
+  padding-left: clamp(1rem, 3vw, 3rem);
+  padding-right: 0;
+  border-left: var(--hair);
+}
+
+.door h3 {
+  font-size: clamp(1.75rem, 1.1rem + 2vw, 2.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.028em;
+}
+
+.door p {
+  max-width: 30rem;
+  color: var(--ink-soft);
+}
+
+.door .button {
+  margin-top: 0.5rem;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: var(--max);
+  margin: 3rem auto 0;
+  padding: 1.5rem var(--gutter) 2.5rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+.foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.foot nav a {
+  text-decoration: none;
+}
+
+.foot nav a:hover {
+  color: var(--ink);
+}
+
+.wordmark.small {
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
+
+/* ── 404 ──────────────────────────────────────────────────────────────────── */
+
+.missing {
+  display: grid;
+  justify-items: start;
+  gap: 1.5rem;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 4rem var(--gutter);
+}
+
+.missing h1 {
+  margin-top: 4rem;
+  font-size: clamp(2.5rem, 1.5rem + 3vw, 4rem);
+  letter-spacing: var(--display);
+  line-height: 1;
+}
+
+.missing p {
+  color: var(--ink-soft);
+}
+
+.missing p a {
+  color: var(--link);
+}
+
+/* ── Narrow screens ───────────────────────────────────────────────────────── */
+
+@media (max-width: 64rem) {
+  .top nav {
+    display: none;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .section-head {
+    grid-template-columns: 1fr;
+  }
+
+  .flows table,
+  .flows tbody,
+  .flows tr,
+  .flows th,
+  .flows td {
+    display: block;
+  }
+
+  .flows thead {
+    display: none;
+  }
+
+  .flows tr {
+    padding: 1.125rem 0;
+    border-bottom: var(--hair);
+  }
+
+  .flows th,
+  .flows td {
+    padding: 0;
+    border: 0;
+  }
+
+  .flows td:nth-child(2),
+  .flows td:nth-child(3) {
+    display: inline;
+    font-size: 0.875rem;
+  }
+
+  .flows td:nth-child(2)::after {
+    content: " · ";
+  }
+
+  .flows td:last-child {
+    margin-top: 0.375rem;
+  }
+
+  .intake li {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
+
+@media (max-width: 44rem) {
+  .top {
+    gap: 0.75rem;
+  }
+
+  .top .quiet {
+    display: none;
+  }
+
+  .top .button {
+    padding: 0 0.625rem;
+    font-size: 0.875rem;
+  }
+
+  .plate.wide {
+    display: none;
+  }
+
+  .plate.narrow {
+    display: block;
+  }
+
+  /* One lane at a time, chosen by the switch; the rows keep their place. */
+  .lane-switch {
+    position: sticky;
+    top: 3.5rem;
+    z-index: 3;
+    display: flex;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0.625rem 0;
+    border: 0;
+    background: var(--paper);
+    border-bottom: var(--hair);
+  }
+
+  .lane-switch label {
+    flex: 1;
+    padding: 0.4rem 0;
+    border: 1px solid var(--input);
+    border-radius: var(--radius);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .lane-switch input:checked + label {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  .lane-switch input:focus-visible + label {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .lane-heads {
+    display: none;
+  }
+
+  .ledger .row {
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    grid-template-areas: "spine lane";
+  }
+
+  .ledger .spine {
+    grid-area: spine;
+    padding: 1.25rem 0.375rem;
+    border-left: 0;
+  }
+
+  .outcome legend {
+    float: none;
+    width: 100%;
+    margin-bottom: 0.25rem;
+  }
+
+  .pill {
+    font-size: 0.75rem;
+    padding-inline: 0.75rem 0.375rem;
+  }
+
+  .ledger .ops,
+  .ledger .eng {
+    grid-area: lane;
+    padding: 1.25rem 0 1.25rem 1rem;
+  }
+
+  .ledger:has(#lane-ops:checked) .eng,
+  .ledger:has(#lane-eng:checked) .ops {
+    display: none;
+  }
+
+  /* The capture switch lives in the operations lane; engineering readers keep it too. */
+  .ledger:has(#lane-eng:checked) .capture .ops {
+    display: grid;
+    grid-area: auto;
+    grid-column: 1 / -1;
+    padding: 1.25rem 0 0;
+  }
+
+  .ledger:has(#lane-eng:checked) .capture .ops > p {
+    display: none;
+  }
+
+  .ledger:has(#lane-eng:checked) .capture {
+    grid-template-areas:
+      "switch switch"
+      "spine lane";
+  }
+
+  .ledger:has(#lane-eng:checked) .capture .ops {
+    grid-area: switch;
+  }
+
+  .principles dl > div,
+  .deploy dl > div {
+    grid-template-columns: 1fr;
+  }
+
+  main > .close {
+    grid-template-columns: 1fr;
+  }
+
+  .door,
+  .door + .door {
+    padding-inline: 0;
+    border-left: 0;
+  }
+
+  .door + .door {
+    border-top: var(--hair);
+  }
+}

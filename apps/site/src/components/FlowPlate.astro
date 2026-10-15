@@ -1,0 +1,89 @@
+---
+/*
+ * The storefront flow set as ledger lines (src/lib/flow.ts). Every node and edge carries its place
+ * on the run as `data-step`; the page script replays the run once, and without it (or with reduced
+ * motion) the plate shows the finished run.
+ */
+import { HERO_CHOICES, node, plate, runPath } from '../lib/flow';
+
+interface Props {
+  perLine: number;
+  width: number;
+  class: string;
+  id: string;
+}
+const { perLine, width, class: className, id } = Astro.props;
+const p = plate(HERO_CHOICES, perLine, width);
+const path = runPath(HERO_CHOICES);
+const untaken = p.nodes.filter((n) => n.step < 0).map((n) => n.label.join(' '));
+const summary =
+  `The run: ${path.map((id) => node(id).label).join(', ')}. ` +
+  `Branches this run did not take: ${untaken.join(', ')}.`;
+---
+
+<svg
+  class:list={['plate', className]}
+  viewBox={`0 0 ${p.width} ${p.height}`}
+  role="img"
+  aria-labelledby={`${id}-title ${id}-desc`}
+>
+  <title id={`${id}-title`}>The storefront order flow, run once</title>
+  <desc id={`${id}-desc`}>{summary}</desc>
+  <defs>
+    <pattern id={`${id}-grid`} width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.9" class="grid-dot"></circle>
+    </pattern>
+  </defs>
+  <rect width={p.width} height={p.height} fill={`url(#${id}-grid)`}></rect>
+  <g class="edges">
+    {
+      p.edges.map((e) => (
+        <path class:list={['e', e.step >= 0 ? 'run' : 'ghost']} d={e.d} data-step={e.step} pathLength="1" />
+      ))
+    }
+  </g>
+  <g class="nodes">
+    {
+      p.nodes.map((n) => {
+        const main = n.step >= 0;
+        const size = main ? 14.5 : 13.5;
+        const lineH = size + 2.5;
+        const top =
+          n.y + n.h / 2 - ((n.label.length - 1) * lineH) / 2 + size * 0.36 + (main ? 4 : 0);
+        return (
+          <g
+            class:list={['n', main ? 'run' : 'ghost', n.outcome && `end-${n.outcome}`]}
+            data-step={n.step}
+            data-cat={n.category}
+          >
+            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx="5" />
+            {main && <rect class="cat" x={n.x + 12} y={n.y + 8} width="12" height="2" />}
+            <text x={n.x + (main ? 12 : 10)} y={top} font-size={size}>
+              {n.label.map((l, i) => (
+                <tspan x={n.x + (main ? 12 : 10)} dy={i === 0 ? 0 : lineH}>
+                  {l}
+                </tspan>
+              ))}
+            </text>
+            {main && n.waits && (
+              <g class="mark wait" transform={`translate(${n.x + n.w - 16} ${n.y + 9})`}>
+                <circle cx="5" cy="5" r="4.5" />
+                <path d="M5 2.6V5l1.6 1.2" />
+              </g>
+            )}
+            {main && n.rollback && (
+              <g class="mark undo" transform={`translate(${n.x + n.w - 16} ${n.y + 9})`}>
+                <path d="M2.2 4.2A3.6 3.6 0 1 1 2 6.6" />
+                <path d="M1 2v2.6h2.6" />
+              </g>
+            )}
+            {main && n.outcome && (
+              <circle class="mark outcome" cx={n.x + n.w - 11} cy={n.y + 14} r="4" />
+            )}
+          </g>
+        );
+      })
+    }
+  </g>
+  <circle class="token" r="5" cx="0" cy="0"></circle>
+</svg>

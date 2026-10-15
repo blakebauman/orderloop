@@ -1,0 +1,30 @@
+---
+/*
+ * Light and ink night, the app's two looks. One button: it names the look it switches to. The
+ * choice is stored as the app stores it (`ol-theme`); Base.astro applies it before first paint.
+ */
+---
+
+<button class="theme" type="button" data-theme-switch aria-label="Use the dark theme">
+  <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+  <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"></path></svg>
+</button>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>('[data-theme-switch]');
+  const sync = () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    button?.setAttribute('aria-label', dark ? 'Use the light theme' : 'Use the dark theme');
+  };
+  sync();
+  button?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('ol-theme', next);
+      window.dispatchEvent(new Event('ol-theme'));
+    } catch {
+      document.documentElement.dataset.theme = next;
+    }
+    sync();
+  });
+</script>

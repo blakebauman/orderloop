@@ -73,8 +73,8 @@ export type Deployment = {
   jurisdiction?: 'eu' | 'fedramp';
   /** Skipped by CI: stays on what it runs now. */
   hold: boolean;
-  /** Deploys the docs site after it (the orderloop deployment only). */
-  docs: boolean;
+  /** Deploys the public sites (the docs and the orderloop.app marketing page) after it. */
+  sites: boolean;
   /**
    * A public demo: the demo data is loaded on each deploy and nightly, visitors sign in with one
    * click, models are mocked and waits run 1440× faster. Never on a customer's deployment.
@@ -136,7 +136,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(raw.d1Id ? { d1Id: raw.d1Id as string } : {}),
     ...(raw.jurisdiction ? { jurisdiction: raw.jurisdiction as 'eu' | 'fedramp' } : {}),
     hold: raw.hold === true,
-    docs: raw.docs === true,
+    sites: raw.sites === true,
     demo: raw.demo === true,
     ...(limits ? { limits: limits as Deployment['limits'] } : {}),
   };
@@ -159,7 +159,7 @@ export function loadDeployments(dir = join(ROOT, 'deployments')): Deployment[] {
       seen.set(d[key], d.id);
     }
   }
-  if (list.filter((d) => d.docs).length > 1) throw new Error('only one deployment sets docs');
+  if (list.filter((d) => d.sites).length > 1) throw new Error('only one deployment sets sites');
   return list;
 }
 

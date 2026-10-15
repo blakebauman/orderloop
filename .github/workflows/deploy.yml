@@ -145,13 +145,13 @@ jobs:
       # (the app's rollback step has already run by now, so a docs failure never rolls the app back).
       - name: Deploy docs
         id: docs
-        if: fromJSON(inputs.deployment).docs
+        if: fromJSON(inputs.deployment).sites
         run: retry pnpm docs:deploy
       # The docs host is the route in apps/docs/wrangler.jsonc. The home page, a reference page and
       # the OpenAPI document are served, and an unknown page is a real 404.
       - name: Smoke test docs
         id: docs-smoke
-        if: fromJSON(inputs.deployment).docs
+        if: fromJSON(inputs.deployment).sites
         run: |
           host=$(node -e "const {parse}=require('jsonc-parser');console.log(parse(require('fs').readFileSync('apps/docs/wrangler.jsonc','utf8')).routes[0].pattern)")
           get() { curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "$@"; }
@@ -162,5 +162,26 @@ jobs:
           status=$(curl -s -o /dev/null -w '%{http_code}' "https://$host/no-such-page-${GITHUB_SHA::7}/")
           [ "$status" = 404 ] || { echo "::error::an unknown docs page answered $status, not 404"; exit 1; }
       - name: Roll back docs on a failed smoke test
-        if: failure() && steps.docs.outcome == 'success'
+        if: failure() && steps.docs.outcome == 'success' && steps.docs-smoke.outcome == 'failure'
         run: retry pnpm --filter @orderloop/docs exec wrangler rollback -y -m "Docs smoke test failed for ${GITHUB_SHA::7}"
+      # The orderloop.app marketing page: a static Worker like the docs, independent of the app.
+      - name: Deploy site
+        id: site
+        if: fromJSON(inputs.deployment).sites
+        run: retry pnpm site:deploy
+      # The site's host is the route in apps/site/wrangler.jsonc. The page renders the storefront
+      # flow, links to the workspace, and an unknown page is a real 404.
+      - name: Smoke test site
+        id: site-smoke
+        if: fromJSON(inputs.deployment).sites
+        run: |
+          host=$(node -e "const {parse}=require('jsonc-parser');console.log(parse(require('fs').readFileSync('apps/site/wrangler.jsonc','utf8')).routes[0].pattern)")
+          get() { curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "$@"; }
+          get -o "$RUNNER_TEMP/site-home.html" "https://$host/"
+          grep -q "<link rel=\"canonical\" href=\"https://$host/\"" "$RUNNER_TEMP/site-home.html"
+          grep -q 'tpl-storefront-order' "$RUNNER_TEMP/site-home.html"
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$host/no-such-page-${GITHUB_SHA::7}/")
+          [ "$status" = 404 ] || { echo "::error::an unknown site page answered $status, not 404"; exit 1; }
+      - name: Roll back site on a failed smoke test
+        if: failure() && steps.site.outcome == 'success' && steps.site-smoke.outcome == 'failure'
+        run: retry pnpm --filter @orderloop/site exec wrangler rollback -y -m "Site smoke test failed for ${GITHUB_SHA::7}"

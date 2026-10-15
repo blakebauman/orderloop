@@ -28,7 +28,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
-| `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
+| `sites` | `false` | Deploy the public sites after it: the docs (`apps/docs`) and the marketing page at `orderloop.app` (`apps/site`). Only `orderloop` sets it |
 
 With the suffix, deployment `acme` gets these resource names:
 

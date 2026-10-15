@@ -1,0 +1,25 @@
+{
+  "name": "@orderloop/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The orderloop.app marketing page: a static Astro site deployed as a Workers static-assets Worker. Its flow graph and catalog facts render from @orderloop/core at build time.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "lint": "biome check .",
+    "check-types": "astro sync && tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@orderloop/core": "workspace:*",
+    "@orderloop/design": "workspace:*",
+    "astro": "^7.0.7"
+  },
+  "devDependencies": {
+    "wrangler": "catalog:"
+  }
+}

@@ -1,0 +1,14 @@
+---
+import Mark from '../components/Mark.astro';
+import Base from '../layouts/Base.astro';
+import { CONSOLE } from '../lib/links';
+---
+
+<Base title="Page not found · OrderLoop" description="There is no page at this address.">
+  <main class="missing">
+    <a class="wordmark" href="/"><Mark /> OrderLoop</a>
+    <h1>There’s no page here.</h1>
+    <p>The address may be mistyped, or the page has moved. Workspaces live at their own address, such as <a href={CONSOLE}>console.orderloop.app</a>.</p>
+    <a class="button" href="/">Go to the home page</a>
+  </main>
+</Base>

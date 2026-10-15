@@ -13,6 +13,7 @@ pnpm check-types             # turbo → tsc --noEmit (web runs react-router typ
 pnpm --filter @orderloop/engine types   # after changing apps/engine/wrangler.jsonc
 pnpm --filter @orderloop/web types      # after changing apps/web/wrangler.jsonc
 pnpm docs:dev / docs:build              # Starlight docs in apps/docs (build includes a link check)
+pnpm site:dev / site:build              # the orderloop.app marketing page in apps/site
 pnpm sync:theme                         # regenerate the docs theme from packages/design tokens
 ```
 

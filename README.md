@@ -53,6 +53,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 | `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, assistant), live order view, approvals inbox, back office, REST API. React Router on Workers |
 | `apps/engine` (`@orderloop/engine`) | OrderAgent and AssistantAgent DOs, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
 | `apps/docs` (`@orderloop/docs`) | Documentation site (Starlight), deployed as a static-assets Worker. Reference pages render from `@orderloop/core` at build time |
+| `apps/site` (`@orderloop/site`) | The marketing page at `orderloop.app` (Astro), deployed as a static-assets Worker. Its flow graph and flow list render from `@orderloop/core` at build time |
 | `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
 | `packages/design` (`@orderloop/design`) | Ledger tokens as data, held to `apps/web/app/app.css` by a test; generates the docs theme (`pnpm sync:theme`) |
 | `packages/db` (`@orderloop/db`) | D1 schema (Drizzle), migrations and seed data, flow persistence |
@@ -153,6 +154,7 @@ configured, deployed and tested is in [`docs/`](docs/README.md), which isn't pub
 pnpm docs:dev        # local preview
 pnpm docs:build      # static build, then an internal link check
 pnpm docs:deploy     # build and deploy the orderloop-docs Worker
+pnpm site:deploy     # build and deploy the orderloop-site Worker (orderloop.app)
 ```
 
 ## CI/CD
