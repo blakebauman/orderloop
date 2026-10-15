@@ -96,6 +96,8 @@ export function shopifyToInbound(
       ...(opts.customerId ? { customerId: opts.customerId } : {}),
       ...(order.email ? { contact: { email: order.email, ...(name ? { name } : {}) } } : {}),
       ...(shipTo ? { shipTo } : {}),
+      // Shopify took the money at checkout: authorize and capture only record it.
+      payment: { provider: 'external', reference: String(order.id) },
       meta: { shopify: { id: order.id, name: order.name ?? null } },
     },
   };

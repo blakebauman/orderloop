@@ -307,12 +307,18 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   'commerce.authorize_payment': async ({ env, ctx, config, stepKey }) => {
-    const r = await cx.authorizePayment(env, ctx.order, stepKey, str(config.method, 'card'));
-    const ok = r.status === 'authorized';
+    const purpose = config.purpose === 'verify' ? 'verify' : 'hold';
+    const method = str(config.method, 'card');
+    const r = await cx.authorizePayment(env, ctx.order, stepKey, method, purpose);
+    const ok = r.status === 'authorized' || r.status === 'verified';
     return {
       branches: [ok ? 'ok' : 'declined'],
       output: r,
-      summary: ok ? `Authorized ${cash(r.amount, ctx)}` : 'Declined',
+      summary: !ok
+        ? `Declined${r.reason ? `: ${r.reason}` : ''}`
+        : r.status === 'verified'
+          ? 'Verified and saved the card'
+          : `Authorized ${cash(r.amount, ctx)}`,
     };
   },
 
@@ -444,7 +450,7 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   'commerce.pay_supplier': async ({ env, ctx, stepKey }) => {
-    const r = await cx.charge(env, { ...ctx.order, meta: {} }, `ap_${stepKey}`);
+    const r = await cx.paySupplier(env, ctx.order, stepKey);
     return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 

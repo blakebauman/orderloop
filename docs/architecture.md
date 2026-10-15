@@ -178,11 +178,19 @@ Variables and secrets are listed in [Configuration](configuration.md).
 (`customers`, `products`, `contract_prices`, `price_sources`, `price_rules`, `reservations`,
 `stock_movements`, `locations`, `location_stock`, `entitlements`, `payments`,
 `shipments`, `messages`)
-and R2. Each function is the seam where a real adapter (Stripe, a WMS, a carrier API, an ERP)
-replaces the mock. `validateAddress` is the seam for an address provider (USPS, Loqate); the mock
-calls `checkAddress` from core. `quoteShipping` is the only connector that makes an outbound request: it
-POSTs to a shipping-rate node's live carriers (https, 5 seconds, credentials from
-`SHIPPING_CARRIER_AUTH`) and falls back to the node's configured services.
+and R2. Each function is the seam where a real adapter (a WMS, a carrier API, an ERP)
+replaces the mock. Payments already have one: `apps/engine/src/payments.ts` (re-exported from
+`connectors.ts`) records each payment in D1 and, with `PAYMENTS_MODE=stripe`, calls Stripe through
+the fetch client in `apps/engine/src/stripe.ts` (form encoding, pinned `Stripe-Version`,
+`StripeError`, no SDK and no retries of its own). Card errors take the node's declined or failed
+branch; Stripe 5xx, 429, 409 and network errors throw so the step retries; any other refusal is a
+`NonRetryableError`. `paymentSource` in `packages/core/src/payments.ts` picks external, offline,
+adopt, confirm, off-session or none from `order.payment`, the node's method and the customer's
+saved card, and `toMinor`/`fromMinor` (`packages/core/src/money.ts`) convert amounts, with
+zero-decimal currencies. `validateAddress` is the seam for an address provider (USPS, Loqate); the mock
+calls `checkAddress` from core. `quoteShipping` POSTs to a shipping-rate node's live carriers
+(https, 5 seconds, credentials from `SHIPPING_CARRIER_AUTH`) and falls back to the node's
+configured services; it and the Stripe calls are the connectors' only outbound requests.
 
 Two rules hold for every connector:
 
@@ -191,14 +199,16 @@ Two rules hold for every connector:
   `shp_${orderId}_${stepKey}`, and inserts use `onConflictDoNothing`. Every order on a flow shares
   its step keys, so the order id is what keeps two orders apart. A retried step finds its own row
   instead of writing a second one. `refund` returns the refund its step already made, and never
-  refunds more than was captured or charged. Stock changes (`reserveInventory`'s holds and
+  refunds more than was captured or charged; with Stripe payments it spreads over them newest
+  first, one row (`rfd_…`, `rfd_…_1`) and Stripe refund per payment. A Stripe call's
+  `Idempotency-Key` is the row id, so a retried step replays Stripe's first answer. Stock changes (`reserveInventory`'s holds and
   `restock`) go through the `stock_movements` ledger, which records each change and applies it to
   `products` (or, with a `location_id`, a store's `location_stock` row) in one batch, once. A hold is written only while the stock is still free. Capture flips its authorization to `captured` and records the capture in one batch, and a retried capture returns the one already recorded.
 - **After a continue-as-new, keys gain the generation.** The ids above embed the effect key, `${nodeId}#${run}@g${generation}` from generation 2 on (see [OrderLoop Workflow](workflow.md#step-names)).
 - **Compensations are idempotent.** `releaseInventory` releases only `held` reservations (each
   release is a ledger movement, so a cancel racing a rollback releases once),
   `voidAuthorizations` voids only `authorized` payments (a void racing a capture leaves exactly
-  one of them), `cancelShipment` sets one shipment
+  one of them; a Stripe one is canceled in Stripe first, and D1 changes only after), `cancelShipment` sets one shipment
   `cancelled`, `revokeEntitlements` revokes only `issued` codes, `restoreShippedStock` restores a `consumed` reservation once, `reverseBalance` reverses a balance entry once. Running one twice changes nothing.
 
 The saga compensations a failed order runs are `ROLLBACKS` in `apps/engine/src/nodes.ts`; a
@@ -210,8 +220,8 @@ To exercise failure paths, set `meta.simulate` on the order input:
 | `meta.simulate` | Effect |
 |---|---|
 | `out_of_stock` | `reserveInventory` reports every line short |
-| `payment_decline` | `authorizePayment` records a `declined` authorization |
-| `charge_fail` | `charge` records a `failed` charge |
+| `payment_decline` | `authorizePayment` records a `declined` authorization (with `PAYMENTS_MODE=stripe` and a test key: confirms with `pm_card_visa_chargeDeclined`) |
+| `charge_fail` | `charge` records a `failed` charge (likewise on Stripe) |
 | `three_way_mismatch` | `commerce.three_way_match` sees an invoice 10% over the order total |
 
 Documents go to R2 through `storeDocument` at `orders/<orderId>/<kind>/<name>` and are indexed in

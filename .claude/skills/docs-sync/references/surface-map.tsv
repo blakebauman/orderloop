@@ -74,4 +74,6 @@
 ^apps/engine/src/a2a/	reference/a2a docs/architecture.md guides/assistant docs/testing.md	prose
 ^packages/core/src/a2a\.ts$	reference/a2a docs/architecture.md	gen
 ^apps/docs/src/components/A2a(Skills|TaskStates)\.astro$	reference/a2a	gen
-^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api docs/configuration.md	prose
+^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api docs/configuration.md guides/payments	prose
+^apps/engine/src/(payments|stripe)\.ts$	guides/payments docs/architecture.md docs/configuration.md docs/data-model.md docs/workflow.md	prose
+^packages/core/src/(money|payments)\.ts$	guides/payments docs/architecture.md	prose

@@ -91,6 +91,10 @@ Idempotency-Key: po-NW-7781
   buyer without a customer account; `input.fulfillment` is `{ method, locationId? }`;
   `input.shippingOption` (up to 80) is the id of the shipping option the buyer chose (see
   [Shipping rates](/guides/fulfillment/#shipping-rates)).
+- `input.payment` is `{ provider, intentId?, paymentMethodId?, stripeCustomerId?, reference? }`:
+  `provider` is `stripe` or `external`, and the ids are a Stripe PaymentIntent (`pi_…`), payment
+  method (`pm_…`) and customer (`cus_…`). It tells the payment nodes what to authorize or charge;
+  see [Payments](/guides/payments/#how-an-order-says-it-is-paid).
 - `input.currency` defaults to `USD` and must have an exchange rate in the workspace; another
   code returns `400`. See [Currency](/reference/expressions/#currency).
 - `input.lines` are `{ sku, name?, qty, unitPrice?, sellerId?, locationId? }` (`locationId` pins the store a line ships from; route fulfillment normally sets it). Pricing nodes fill in prices, in the order's

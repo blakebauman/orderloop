@@ -1,0 +1,101 @@
+---
+title: Payments
+description: How the payment nodes authorize, verify, capture, charge, void and refund, what an order can say about how it is paid, and how Stripe and the simulated gateway differ.
+---
+
+The payment nodes are `commerce.authorize_payment`, `commerce.capture_payment`,
+`commerce.charge` and `commerce.refund` (see the [node reference](/reference/nodes/)). A workspace
+runs them against one of two gateways, which its administrator chooses:
+
+| Gateway | What happens |
+|---|---|
+| Simulated (the default) | Payments are recorded on the order and nothing is charged. `meta.simulate` forces a decline or a failed charge (see [Simulating failures](/guides/templates/#simulating-failures)) |
+| Stripe | Each node calls Stripe: a hold is a PaymentIntent with manual capture, a capture captures it, a charge is a confirmed PaymentIntent. A workspace switched to Stripe without a Stripe key fails every payment step rather than letting an order ship unpaid |
+
+The rest of this page describes both; where they differ, it says so.
+
+## Authorize: hold or verify
+
+`commerce.authorize_payment` has a `purpose`:
+
+| `purpose` | Records | Use it for |
+|---|---|---|
+| `hold` (default) | An authorization for the order total, captured later by `commerce.capture_payment` | Orders that ship or are collected, then capture |
+| `verify` | A verified card: Stripe checks it, saves it to the customer for later charges and releases the hold at once | Subscriptions, whose renewals use `commerce.charge` and never capture |
+
+Both take `ok`; a refused card takes `declined`. In Stripe, the step summary names the decline
+code, for example `Declined: insufficient_funds`. If Stripe asks the customer to authenticate (3-D
+Secure), the node takes `declined` with `authentication_required`: an order runs without the buyer
+present.
+
+The `method` decides whether Stripe is involved at all. `card` and `wallet` go to Stripe;
+`card_present`, `cash`, `gift_card`, `ach` and `terms` are taken outside OrderLoop (a till's
+terminal, an invoice) and are only recorded.
+
+## How an order says it is paid
+
+`input.payment` on a [new order](/reference/rest-api/#start-an-order) tells the payment nodes what
+to use. All of it is optional.
+
+| Field | Meaning |
+|---|---|
+| `provider` | `stripe`, or `external` when the sending channel already took the money |
+| `intentId` | A Stripe PaymentIntent (`pi_…`) your checkout already authorized for this order |
+| `paymentMethodId` | A Stripe payment method (`pm_…`) to authorize |
+| `stripeCustomerId` | The Stripe customer (`cus_…`) the payment method belongs to |
+| `reference` | The payment's id in the sending system, for `external` |
+
+```json
+{
+  "flowId": "tpl-storefront-order",
+  "input": {
+    "model": "b2c",
+    "customerId": "cus_ada",
+    "lines": [{ "sku": "MON-27", "qty": 1 }],
+    "payment": { "provider": "stripe", "intentId": "pi_3QxY2bLkdIwHu7ix0abc1234" }
+  }
+}
+```
+
+The authorize step picks the first that applies:
+
+| Source | When | What it does |
+|---|---|---|
+| External | `provider` is `external` | Records the payment; capture and refund are recorded too. [Shopify orders](/guides/channel-adapters/#shopify) arrive this way |
+| Offline | The node's `method` is not `card` or `wallet` | Records the payment |
+| Adopt | `intentId` is set | Checks the PaymentIntent and uses it. It must be in the order's currency, for exactly the order total, still uncaptured, and not already used by another order; otherwise the node takes `declined` and says why. Nothing new is created |
+| Confirm | `paymentMethodId` is set | Authorizes that payment method for the order total |
+| Saved card | The customer has a card saved by an earlier `verify` | Authorizes it off-session |
+| None | Nothing above | Takes `declined`: there is nothing to pay with |
+
+`commerce.charge` follows the same order, except that it ignores `intentId` (that paid for the
+first payment) and charges off-session, so a subscription's renewals charge the card its `verify`
+step saved.
+
+## Capture, void and refund
+
+- **Capture** takes the lesser of the authorization and the current order total; the rest of the
+  hold is released. A marketplace order whose seller rejected their part captures only what was
+  kept (see [Marketplace](/guides/marketplace/#partial-acceptance-and-capture)).
+- **Void.** When an order fails after authorizing, the rollback cancels the hold. Cancelling an
+  order does the same. In Stripe the PaymentIntent is canceled first and the payment marked
+  `voided` only once Stripe confirms, so a void that fails is retried, not lost. A hold that was
+  captured in the meantime stays captured.
+- **Refund** returns up to the requested amount of what was captured or charged and not yet
+  refunded. When the order was paid more than once (a subscription's renewals), the refund draws
+  on the newest payment first and makes one Stripe refund per payment it uses.
+
+## Retries never pay twice
+
+Every call to Stripe carries an idempotency key made from the order and the step (its step name,
+plus the generation after a continue-as-new). When Stripe is unavailable or the response is lost,
+the step retries with the same key and Stripe returns its first answer, so a retried authorize
+creates one PaymentIntent and a retried refund refunds once. A request Stripe refuses outright,
+such as a PaymentIntent that doesn't exist, fails the step without retrying.
+
+## Testing against Stripe
+
+With a Stripe test key, an order that names no payment method pays with Stripe's test Visa, and
+`meta.simulate: "payment_decline"` or `"charge_fail"` uses Stripe's always-declined test card, so the
+built-in flows and the dashboard's demo scenarios run end to end in test mode. A live key never
+substitutes a card: an order without one is declined.

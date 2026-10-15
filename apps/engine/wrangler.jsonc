@@ -85,10 +85,14 @@
     // "false" accepts mail without a passing DMARC/DKIM/SPF result (never in production).
     "INTAKE_REQUIRE_AUTH": "true",
     // "false" turns off the acknowledgement reply.
-    "INTAKE_REPLY": "true"
+    "INTAKE_REPLY": "true",
+    // "mock" records payments in D1 only (meta.simulate drives declines); "stripe" authorizes,
+    // captures, charges, voids and refunds through Stripe and needs STRIPE_SECRET_KEY.
+    "PAYMENTS_MODE": "mock"
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).
   // SHIPPING_CARRIER_AUTH — JSON object of live shipping carrier id → Authorization header value,
   // e.g. {"acme":"Bearer …"}, for the liveCarriers of a commerce.shipping_rate node.
+  // STRIPE_SECRET_KEY — Stripe secret or restricted key, required when PAYMENTS_MODE is "stripe".
 }

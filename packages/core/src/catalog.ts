@@ -306,7 +306,8 @@ export const NODE_SPECS = [
     type: 'commerce.authorize_payment',
     category: 'commerce',
     label: 'Authorize payment',
-    description: 'Places an authorization hold. Voided automatically if the order later fails.',
+    description:
+      'Places an authorization hold for the order total, or checks the card and saves it for later charges. A hold is voided automatically if the order later fails.',
     icon: 'CreditCard',
     fields: [
       {
@@ -315,6 +316,14 @@ export const NODE_SPECS = [
         kind: 'select',
         options: ['card', 'card_present', 'wallet', 'gift_card', 'cash', 'ach', 'terms'],
         default: 'card',
+      },
+      {
+        key: 'purpose',
+        label: 'Purpose',
+        kind: 'select',
+        options: ['hold', 'verify'],
+        default: 'hold',
+        hint: 'hold keeps the money for a later capture; verify checks the card, saves it for Charge, and releases the hold at once',
       },
     ],
     outputs: ['ok', 'declined'],

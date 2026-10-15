@@ -349,7 +349,11 @@ export function subscriptionFlow(): Flow {
       .n('price', 'commerce.price', 'Plan price', { useContracts: false })
       .n('shipping', 'commerce.shipping_rate', 'Shipping')
       .n('tax', 'commerce.tax', 'Tax')
-      .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })
+      // Renewals charge the saved card; a hold here would never be captured.
+      .n('authorize', 'commerce.authorize_payment', 'Verify card', {
+        method: 'card',
+        purpose: 'verify',
+      })
       .n('welcome', 'commerce.notify', 'Welcome email', {
         to: 'customer',
         subject: 'Welcome! Your first box ships soon',

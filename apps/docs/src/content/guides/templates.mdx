@@ -37,7 +37,7 @@ exercises a different path:
 | B2B out of stock | `tpl-b2b-order` | `meta.simulate: "out_of_stock"`: the reservation comes up short and the order fails and rolls back |
 | Procurement request | `tpl-purchase-request` | Eight laptops: AI classifies spend, manager then finance approve, PO, supplier ack, 3-way match |
 | Reorder (stock review) | `tpl-reorder` | The forecast finds SKUs below their reorder point and drafts a replenishment PO |
-| Subscription | `tpl-subscription` | Authorize, then a loop of wait → charge → ship |
+| Subscription | `tpl-subscription` | Verify and save the card (no hold), then a loop of wait → charge → ship |
 | Subscription, card fails | `tpl-subscription` | `meta.simulate: "charge_fail"`: the renewal and its retry both fail and the subscription pauses |
 | Storefront order in euros | `tpl-storefront-order` | The retail checkout in `EUR`: USD prices and shipping rates convert at the workspace's stored `EUR` rate, and the order, capture and webhooks are in euros |
 | Marketplace order, two sellers | `tpl-marketplace-order` | `HP-200` from a seller that auto-accepts and `KET-01` from one that is asked: the order waits for Kettle & Co, then ships what was accepted and schedules each seller's payout net of commission. See [Marketplace](/guides/marketplace/) |
@@ -55,8 +55,8 @@ failure path:
 | Value | Effect |
 |---|---|
 | `out_of_stock` | Reserve inventory reports every line short |
-| `payment_decline` | Authorize payment takes `declined` |
-| `charge_fail` | Charge takes `failed` |
+| `payment_decline` | Authorize payment takes `declined` (on Stripe with a test key, through Stripe's always-declined test card; see [Payments](/guides/payments/#testing-against-stripe)) |
+| `charge_fail` | Charge takes `failed` (likewise) |
 | `three_way_mismatch` | 3-way match sees an invoice 10% over the PO and takes `mismatch` |
 
 Restarting an order from its page drops `meta.simulate`, so the retry runs for real.

@@ -114,7 +114,7 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 | Node type | Compensation |
 |---|---|
 | `commerce.reserve_inventory` | `releaseInventory`: releases every held reservation |
-| `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization |
+| `commerce.authorize_payment` | `voidAuthorizations`: voids every open authorization; a Stripe one is canceled in Stripe first (an already-canceled PaymentIntent counts) and marked `voided` only after |
 | `commerce.split_by_seller` | `cancelSellerOrders`: cancels every pending or accepted seller order |
 | `commerce.payout` | `reversePayouts`: reverses every scheduled payout |
 | `commerce.ship` | `cancelShipment` for every shipment id in the step's output (`shipments`; one per source location on a split), then `restoreShippedStock`: once none of the order's shipments is live (`label_created`, `ready_for_pickup`, `collected`), stock its shipments consumed goes back, each reservation once |

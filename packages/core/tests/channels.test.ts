@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   inboundOrderSchema,
   parseX12,
+  paymentSource,
   type ShopifyOrder,
   shopifyToInbound,
   verifyShopifyHmac,
@@ -47,6 +48,15 @@ describe('Shopify orders', () => {
     expect(pos.ok && pos.order.channel).toBe('pos');
     expect(app.ok && app.order.channel).toBe('mobile');
     expect(b2b.ok && b2b.order.model).toBe('b2b');
+  });
+
+  it('records that Shopify took the payment', () => {
+    const r = shopifyToInbound(order);
+    expect(r.ok && r.order.payment).toEqual({
+      provider: 'external',
+      reference: '820982911946154500',
+    });
+    expect(r.ok && paymentSource(r.order)).toBe('external');
   });
 
   it('refuses line items without a SKU', () => {

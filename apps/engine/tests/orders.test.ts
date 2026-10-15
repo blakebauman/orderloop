@@ -418,7 +418,7 @@ describe('subscription', () => {
     expect(done.reason).toBe('Renewal payment failed');
     expect(done.nodes.fulfill!.status).toBe('skipped');
     const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
-    expect(pays.map((p) => p.status).sort()).toEqual(['authorized', 'failed', 'failed']);
+    expect(pays.map((p) => p.status).sort()).toEqual(['failed', 'failed', 'verified']);
   });
 });
 
