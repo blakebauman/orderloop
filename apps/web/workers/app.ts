@@ -29,6 +29,7 @@ import { docs, engine } from '../app/lib/env.server';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
+import { overBudget } from '../app/lib/rate-limit';
 
 /**
  * The deploy smoke test's check: this Worker's D1 and R2, and the engine's (over the service
@@ -135,6 +136,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (!caller) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const due = setupDue(caller);
     if (due) return Response.json({ error: due }, { status: 403 });
+    const limited = await overBudget('API_LIMIT', caller.id);
+    if (limited) return limited;
     return handleApi(request, caller);
   }
 

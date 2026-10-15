@@ -75,6 +75,7 @@ created through the API and stored in D1; they are not configuration.
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |
+| `API_LIMIT`, `AGENT_LIMIT`, `WEBHOOK_LIMIT` | web | Per-caller budgets (`app/lib/rate-limit.ts`): 600 requests a minute per principal on `/api/v1` (after authentication), 300 per principal on each of `/mcp` and `/a2a` (keyed `<path>:<principal id>`), and 1,200 per integration on the signed webhooks (after the signature verifies, so a forged request can't spend a sender's budget) or per shop on Shopify's. Over the limit answers `429` with `Retry-After: 60`. A deployment's `limits` in the registry replace these numbers ([Operations](operations.md#the-registry)). Counted per Cloudflare location, so they stop a runaway client rather than meter it exactly. Without the binding (unit tests) nothing is limited |
 | `OAUTH_KV` | web | KV namespace for [MCP](https://docs.orderloop.app/reference/mcp/) and [A2A](https://docs.orderloop.app/reference/a2a/) OAuth clients, grants and tokens (tokens hashed, grant data encrypted). `wrangler.jsonc` gives no id; the namespace is provisioned on deploy |
 
 The web Worker's compatibility flags are `nodejs_compat` and `global_fetch_strictly_public`. The

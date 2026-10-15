@@ -39,6 +39,7 @@ import {
   TokenExpired,
 } from './auth.server';
 import { engine } from './env.server';
+import { overBudget } from './rate-limit';
 
 export const MCP_PATH = '/mcp';
 export const AUTHORIZE_PATH = '/oauth/authorize';
@@ -196,6 +197,9 @@ async function forward(request: Request, path: Endpoint, props: Props): Promise<
     );
   const due = setupDue(caller);
   if (due) return Response.json({ error: due }, { status: 403 });
+  // MCP and A2A have a budget each, per principal.
+  const limited = await overBudget('AGENT_LIMIT', `${path}:${caller.id}`);
+  if (limited) return limited;
   const { twoFactorDue: _due, passwordChangeDue: _pw, ...principal } = caller;
   const headers = new Headers(request.headers);
   // The engine trusts the principal header; the client's credential stays here.

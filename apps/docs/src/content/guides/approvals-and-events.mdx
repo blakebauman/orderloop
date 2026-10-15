@@ -131,6 +131,7 @@ so a captured request can't be replayed later. `k` is the integration's `id`; it
 | `401` | Missing or malformed header, no `k=`, an unknown or revoked integration, stale timestamp, or wrong signature |
 | `403` | The integration may not deliver that event, or is bound to a channel other than the order's |
 | `404` | No such order, or (for a channel-bound integration) not one it can see |
+| `429` | The integration sent more than 1,200 requests in a minute (inbound orders included); retry after `Retry-After` seconds |
 
 Answering `409` lets the sender's own retry policy deliver an event that arrives before the order
 reaches its wait.

@@ -26,6 +26,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `environment` | `deploy-<id>` | The GitHub environment holding the deployment's secrets. `orderloop` uses `production` |
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
+| `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 

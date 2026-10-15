@@ -80,7 +80,13 @@ export type Deployment = {
    * click, models are mocked and waits run 1440× faster. Never on a customer's deployment.
    */
   demo: boolean;
+  /** Requests a minute per caller, where this customer needs other than the base budgets. */
+  limits?: Partial<Record<LimitKey, number>>;
 };
+
+/** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
+const LIMITS = { api: 'API_LIMIT', agents: 'AGENT_LIMIT', webhooks: 'WEBHOOK_LIMIT' } as const;
+type LimitKey = keyof typeof LIMITS;
 
 function readJsonc(path: string): Record<string, unknown> {
   const errors: ParseError[] = [];
@@ -107,6 +113,19 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     throw new Error(`${file}: d1Id must be the D1 database's id`);
   if (raw.jurisdiction !== undefined && raw.jurisdiction !== 'eu' && raw.jurisdiction !== 'fedramp')
     throw new Error(`${file}: jurisdiction must be "eu" or "fedramp"`);
+  const limits = raw.limits as Record<string, unknown> | undefined;
+  if (limits !== undefined) {
+    if (typeof limits !== 'object' || limits === null)
+      throw new Error(`${file}: limits must be an object`);
+    for (const [k, v] of Object.entries(limits)) {
+      if (!(k in LIMITS))
+        throw new Error(`${file}: limits.${k} is not one of ${Object.keys(LIMITS).join(', ')}`);
+      if (!Number.isInteger(v) || (v as number) < 1)
+        throw new Error(
+          `${file}: limits.${k} must be a positive whole number of requests a minute`,
+        );
+    }
+  }
   return {
     id,
     ring,
@@ -119,6 +138,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     hold: raw.hold === true,
     docs: raw.docs === true,
     demo: raw.demo === true,
+    ...(limits ? { limits: limits as Deployment['limits'] } : {}),
   };
 }
 
@@ -195,9 +215,14 @@ export function renderWeb(base: Config, d: Deployment): Config {
   );
   // Rate-limit namespaces are per account: slot 1 keeps the base ids (1001, 1002), slot 2 uses
   // 2001, 2002, and so on.
+  // The registry's `limits` replace a binding's requests a minute; the period stays 60 seconds.
+  const budgets = new Map(
+    Object.entries(d.limits ?? {}).map(([k, v]) => [LIMITS[k as LimitKey] as string, v]),
+  );
   config.ratelimits = config.ratelimits.map((r: Config) => ({
     ...r,
     namespace_id: String(d.slot * 1000 + (Number(r.namespace_id) % 1000)),
+    ...(budgets.has(r.name) ? { simple: { ...r.simple, limit: budgets.get(r.name) } } : {}),
   }));
   storage(config, d);
   if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };

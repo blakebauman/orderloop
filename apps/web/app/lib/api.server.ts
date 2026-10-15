@@ -87,6 +87,7 @@ import {
   touchIntegration,
 } from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
+import { overBudget } from './rate-limit';
 import {
   createSubscription,
   deleteSubscription,
@@ -334,6 +335,8 @@ async function readSigned(
   if (!integration) return { refused: json({ error: 'Unknown or revoked integration' }, 401) };
   const check = await verifyWebhook(verificationSecrets(integration), raw, header);
   if (!check.ok) return { refused: json({ error: check.reason }, 401) };
+  const limited = await overBudget('WEBHOOK_LIMIT', integration.id);
+  if (limited) return { refused: limited };
   await touchIntegration(integration.id);
   return { raw, signature: /v1=([0-9a-f]+)/i.exec(header ?? '')?.[1] ?? '', integration };
 }
@@ -476,6 +479,12 @@ export async function handleShopifyOrder(request: Request): Promise<Response> {
   }
   if (!(await verifyShopifyHmac(secret, raw, request.headers.get('x-shopify-hmac-sha256'))))
     return json({ error: 'Bad signature' }, 401);
+  // Shopify signs with one app secret, so the shop is the sender.
+  const limited = await overBudget(
+    'WEBHOOK_LIMIT',
+    `shopify:${request.headers.get('x-shopify-shop-domain') ?? ''}`,
+  );
+  if (limited) return limited;
   const topic = request.headers.get('x-shopify-topic');
   if (topic !== 'orders/create') return json({ ignored: true, topic });
   let order: ShopifyOrder;

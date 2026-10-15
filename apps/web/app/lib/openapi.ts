@@ -36,6 +36,10 @@ const errors = {
   '400': ok('Invalid request', '#/components/schemas/Error'),
   '401': ok('Missing or wrong bearer token', '#/components/schemas/Error'),
   '404': ok('Not found', '#/components/schemas/Error'),
+  '429': ok(
+    "Over the caller's requests a minute; wait Retry-After seconds",
+    '#/components/schemas/Error',
+  ),
 };
 const orderId = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
 

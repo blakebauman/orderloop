@@ -37,7 +37,9 @@ Send `Authorization: Bearer …` with every request, one of:
   app acts "via A2A", and grants a role no higher than their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
 
 Both are the credentials the [REST API](/reference/rest-api/) takes, with the same throttling
-(`429` with `Retry-After`) and expiry (`401` with the reason). A token is bound to one endpoint:
+(`429` with `Retry-After`) and expiry (`401` with the reason). Each caller has 300 requests a
+minute on `/a2a`, separate from its budget on `/mcp`; over it the answer is `429` with
+`Retry-After: 60`. A token is bound to one endpoint:
 an OAuth grant for `/mcp` is refused at `/a2a` and the reverse, so connecting the same app to both
 is two grants, each listed (and disconnected) on **Account**. API tokens work on both.
 

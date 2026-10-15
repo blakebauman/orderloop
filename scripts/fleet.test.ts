@@ -47,9 +47,21 @@ test('the web config binds its own engine, domain and rate-limit namespaces', ()
   assert.equal(c.services[0].service, 'orderloop-engine-acme');
   assert.deepEqual(
     c.ratelimits.map((r: { namespace_id: string }) => r.namespace_id),
-    ['2001', '2002'],
+    ['2001', '2002', '2003', '2004', '2005'],
   );
   assert.equal(c.d1_databases[0].migrations_dir, '../../packages/db/migrations');
+});
+
+test("a customer's limits replace the base budgets they name", () => {
+  const big = toDeployment({ ...acme, limits: { webhooks: 6000 } });
+  const limit = (c: {
+    ratelimits: { name: string; simple: { limit: number; period: number } }[];
+  }) => Object.fromEntries(c.ratelimits.map((r) => [r.name, r.simple]));
+  const c = limit(renderWeb(base('web'), big));
+  assert.deepEqual(c.WEBHOOK_LIMIT, { limit: 6000, period: 60 });
+  assert.deepEqual(c.API_LIMIT, limit(base('web')).API_LIMIT);
+  assert.throws(() => toDeployment({ ...acme, limits: { mcp: 10 } }), /limits.mcp/);
+  assert.throws(() => toDeployment({ ...acme, limits: { api: 0 } }), /positive/);
 });
 
 test("orderloop.app's own deployment renders the base configs unchanged", () => {

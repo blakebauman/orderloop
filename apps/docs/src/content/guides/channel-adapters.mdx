@@ -56,6 +56,7 @@ stock and prices; an order with none returns `400` `Line items without a SKU: â€
 | `401` | Missing or wrong HMAC |
 | `409` | The routed flow has no published version |
 | `422` | The same Shopify order id already arrived with different contents |
+| `429` | The shop sent more than 1,200 webhooks in a minute; Shopify retries it |
 | `503` | The workspace hasn't enabled Shopify (no client secret is set) |
 
 Shopify retries on any non-`2xx`, which suits `409` (publish the flow and the retry starts the

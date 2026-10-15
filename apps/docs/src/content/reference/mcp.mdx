@@ -127,7 +127,9 @@ tokens 30 days.
 - **Credentials stay at the edge.** OrderLoop resolves the caller before the request reaches the
   tools; `Authorization` and cookies go no further, and the model never sees a token.
 - **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
-- **Rate limits.** `/oauth/register` allows 10 requests a minute and `/oauth/token` 60, per
-  address; over that it answers `429 { "error": "slow_down" }` with `Retry-After: 60`.
+- **Rate limits.** Each caller (a person's grant or an API token) has 300 requests a minute on
+  `/mcp`, and another 300 on `/a2a`; over that it answers `429` with `Retry-After: 60`.
+  `/oauth/register` allows 10 requests a minute and `/oauth/token` 60, per address; over that it
+  answers `429 { "error": "slow_down" }` with `Retry-After: 60`.
 - **Tokens at rest.** Tokens are stored hashed and grant data encrypted.
 
