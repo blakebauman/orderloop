@@ -26,9 +26,9 @@ pnpm web:dev               # web + engine in one Vite session
 Open the URL Vite prints (`http://localhost:5173` by default). With `APP_PASSWORD` unset, which is
 the default in `apps/web/.dev.vars.example`, and no people added, the dashboard and the API are
 open (on localhost only; a deployed host answers `503` until `APP_PASSWORD` is set); **Set up sign-in** in the account menu creates the first operator and turns sign-in on (see
-[Team and roles](https://docs.orderloop.io/guides/team-and-roles/)).
+[Team and roles](https://docs.orderloop.app/guides/team-and-roles/)).
 
-The first request that needs a flow seeds the [built-in flows](https://docs.orderloop.io/guides/templates/) and publishes
+The first request that needs a flow seeds the [built-in flows](https://docs.orderloop.app/guides/templates/) and publishes
 each as a new version when its content hasn't been published before (version 1 on a fresh database).
 
 ## Run a scenario
@@ -57,7 +57,7 @@ becomes a minute and a 30-day return window closes in about half an hour.
 
 Some orders stop at an approval or wait for an event. Decide approvals from the order page or the
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
-[REST API](https://docs.orderloop.io/reference/rest-api/) or a [signed webhook](https://docs.orderloop.io/guides/approvals-and-events/).
+[REST API](https://docs.orderloop.app/reference/rest-api/) or a [signed webhook](https://docs.orderloop.app/guides/approvals-and-events/).
 
 ## Start an order over the API
 
@@ -92,7 +92,7 @@ After changing a `wrangler.jsonc`, regenerate that app's binding types with
 
 ## Next
 
-- [Concepts](https://docs.orderloop.io/start/concepts/): flows, versions, orders, waits and rollback.
-- [Building flows](https://docs.orderloop.io/guides/building-flows/): the editor and the rules a flow must follow.
+- [Concepts](https://docs.orderloop.app/start/concepts/): flows, versions, orders, waits and rollback.
+- [Building flows](https://docs.orderloop.app/guides/building-flows/): the editor and the rules a flow must follow.
 - [Deploy](deploy.md): ship both Workers to your account.
 - [Configuration](configuration.md): every variable, secret and binding.

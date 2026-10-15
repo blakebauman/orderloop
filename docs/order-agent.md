@@ -10,7 +10,7 @@ named by the order id (`orderAgentName` in `@orderloop/core`). It:
 - owns the order's waits and delivers approvals and events to the right instance;
 - cancels with compensation.
 
-Questions about an order go to the person's [workspace assistant](https://docs.orderloop.io/guides/assistant/), which reads
+Questions about an order go to the person's [workspace assistant](https://docs.orderloop.app/guides/assistant/), which reads
 and acts on the order through this agent.
 
 ## State
@@ -140,7 +140,7 @@ waits. Terminating means no End node runs, so the agent announces the ending its
 
 ## A2A watchers
 
-An [A2A](https://docs.orderloop.io/reference/a2a/) task that follows this order calls `watch(name)`, which records the
+An [A2A](https://docs.orderloop.app/reference/a2a/) task that follows this order calls `watch(name)`, which records the
 caller's `A2AAgent` name in `a2a_watchers` (repeats are ignored). `onStateChanged` computes a key
 from the status and the event types the order waits on; when it differs from the last one stored
 (`a2a_watch_state`) and someone watches, it schedules `notifyWatchers({ names, attempt })` at once.

@@ -119,7 +119,7 @@ components:
 
 # Design System: Order Loop docs
 
-This file describes `apps/docs`: the Starlight site at docs.orderloop.io and the Scalar page at
+This file describes `apps/docs`: the Starlight site at docs.orderloop.app and the Scalar page at
 `/api/`. The system itself is the web app's, "Ledger", authored in `apps/web/app/app.css`; this file
 records what the docs do with it. It is **derived from the shipped code** (`src/styles/brand.css`,
 `src/components/`, the generated `src/styles/theme.css`). When the code and this file disagree,

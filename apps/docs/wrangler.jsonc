@@ -8,5 +8,5 @@
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
   },
-  "routes": [{ "pattern": "docs.orderloop.io", "custom_domain": true }]
+  "routes": [{ "pattern": "docs.orderloop.app", "custom_domain": true }]
 }

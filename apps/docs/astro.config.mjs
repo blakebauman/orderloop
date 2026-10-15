@@ -5,7 +5,7 @@ import starlight from '@astrojs/starlight';
 import { defineConfig, passthroughImageService } from 'astro/config';
 
 export default defineConfig({
-  site: 'https://docs.orderloop.io',
+  site: 'https://docs.orderloop.app',
   // No image transforms: the default service needs `sharp`, a native dependency these docs
   // don't otherwise need.
   image: { service: passthroughImageService() },

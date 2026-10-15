@@ -44,7 +44,7 @@ Workflow names (`orderloop-order`, `orderloop-replenish`) must be unique in the 
 
 ## Email intake
 
-To start orders from email ([Email intake](https://docs.orderloop.io/guides/email-intake/)), Cloudflare
+To start orders from email ([Email intake](https://docs.orderloop.app/guides/email-intake/)), Cloudflare
 Email Routing delivers mail for the intake addresses to the engine Worker's `email()` entrypoint
 (`apps/engine/src/email.ts`); what to accept is decided in `packages/core/src/intake.ts`.
 
@@ -77,13 +77,13 @@ To test without a mail server, call `receiveEmail` from a test with a fake
 
 ## Channel adapters
 
-- **Shopify** ([Channel adapters](https://docs.orderloop.io/guides/channel-adapters/#shopify)): put the
+- **Shopify** ([Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#shopify)): put the
   Shopify app's client secret on the web Worker with
   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
   `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`). Until it is set the route answers `503`. The
   integrator creates the `orders/create` webhook in Shopify, pointing at
   `https://orderloop.app/api/v1/channels/shopify/orders`.
-- **EDI X12 850** ([Channel adapters](https://docs.orderloop.io/guides/channel-adapters/#edi-x12-850)):
+- **EDI X12 850** ([Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#edi-x12-850)):
   map each trading partner's ISA sender id (`ISA06`) to a customer id in `EDI_PARTNERS`, in `vars`
   in `apps/web/wrangler.jsonc`, for example `{ "NORTHWIND": "cus_northwind" }`. A sender that isn't
   listed is refused with `403`.
@@ -99,7 +99,7 @@ verifies, looks up the customer and starts the order.
 - After the first deploy, sign in with no email and `APP_PASSWORD` (users see it as "the workspace
   password"), open **Team** and add people with their roles, and create API tokens for other
   systems. `APP_PASSWORD` stays as a break-glass operator sign-in. See
-  [Team and roles](https://docs.orderloop.io/guides/team-and-roles/).
+  [Team and roles](https://docs.orderloop.app/guides/team-and-roles/).
 
 ## Sign-in setup and open mode
 
@@ -164,7 +164,7 @@ state (live order state, assistant conversations) is not part of D1 and isn't re
 
 ## The docs site
 
-The public docs, docs.orderloop.io, are `apps/docs` (`@orderloop/docs`), a static Starlight site served by a static-assets
+The public docs, docs.orderloop.app, are `apps/docs` (`@orderloop/docs`), a static Starlight site served by a static-assets
 Worker, `orderloop-docs`, with no runtime code.
 
 ```bash
@@ -174,5 +174,5 @@ pnpm docs:deploy    # build, then wrangler deploy
 ```
 
 The reference pages (node catalog, built-in flows, event and status lists) and the
-[OpenAPI explorer](https://docs.orderloop.io/api/) render from the source at build time, so rebuild and redeploy the docs
+[OpenAPI explorer](https://docs.orderloop.app/api/) render from the source at build time, so rebuild and redeploy the docs
 whenever those change.

@@ -9,7 +9,7 @@ metadata:
 # Syncing the docs
 
 The docs are `apps/docs` (`@orderloop/docs`): Starlight on Astro, static output, served by the
-`orderloop-docs` static-assets Worker at `docs.orderloop.io`. They document Order Loop as it is at
+`orderloop-docs` static-assets Worker at `docs.orderloop.app`. They document Order Loop as it is at
 this commit, for the people who use a workspace and the developers who integrate with one (Start,
 Guides, Reference). How OrderLoop is built, configured, deployed and tested is in the repo-root
 `docs/` folder (plain Markdown, unpublished); keep it in step the same way. The `docs-page` skill

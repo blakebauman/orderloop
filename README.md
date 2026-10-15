@@ -39,8 +39,8 @@ inbound order email ── Cloudflare Email Routing ── email() ─►├─ 
 - **Live UI.** The Workflow reports sequenced plan snapshots to the order's OrderAgent, which ignores stale or replayed ones, and the agent syncs its state to every open order page through `useAgent`. The same socket carries actions: approve, reject, deliver event, and cancel.
 - **Long-lived subscriptions** loop over billing periods, then use **continue-as-new**: they start a fresh Workflow instance with their variables carried over, so the step history never grows without bound.
 - **Mock connectors** (`apps/engine/src/connectors.ts`) cover inventory, payments, shipping, documents and the outbox, against D1 and R2. Every write is keyed by its step and every compensation is idempotent. They are where real adapters (Stripe, a WMS, carriers, an ERP) plug in. To exercise failure paths, set `meta.simulate` to one of `out_of_stock`, `payment_decline`, `charge_fail` or `three_way_mismatch`.
-- **Orders arrive by email too.** Cloudflare Email Routing delivers `orders@`, `po@` and `purchasing@` to the engine's `email()` entrypoint (`apps/engine/src/email.ts`). Mail from an authenticated customer address, company domain or allowlisted sender starts the mailbox's flow. The body and attachments (PDF and Office files through Workers AI `toMarkdown`) become the order's document for the AI extract node, and the Message-ID is the idempotency key. See the [Email intake guide](https://docs.orderloop.io/guides/email-intake/).
-- **A workspace assistant.** A panel (⌘J) backed by one `AssistantAgent` Durable Object per person answers from live data through role-checked tools. Deciding an approval, delivering an event, cancelling, publishing a flow and running the stock review show a confirm card first; flow changes come back to the editor as proposals. See the [assistant guide](https://docs.orderloop.io/guides/assistant/).
+- **Orders arrive by email too.** Cloudflare Email Routing delivers `orders@`, `po@` and `purchasing@` to the engine's `email()` entrypoint (`apps/engine/src/email.ts`). Mail from an authenticated customer address, company domain or allowlisted sender starts the mailbox's flow. The body and attachments (PDF and Office files through Workers AI `toMarkdown`) become the order's document for the AI extract node, and the Message-ID is the idempotency key. See the [Email intake guide](https://docs.orderloop.app/guides/email-intake/).
+- **A workspace assistant.** A panel (⌘J) backed by one `AssistantAgent` Durable Object per person answers from live data through role-checked tools. Deciding an approval, delivering an event, cancelling, publishing a flow and running the stock review show a confirm card first; flow changes come back to the editor as proposals. See the [assistant guide](https://docs.orderloop.app/guides/assistant/).
 - **AI never blocks an order.** Every model call uses JSON mode with a schema, has a 20-second cap, and falls back to a deterministic heuristic. Set `AI_MODE=mock` to use the heuristics only.
 
 See [ROADMAP.md](ROADMAP.md) for planned work.
@@ -139,11 +139,11 @@ Two channels connect without producing that payload themselves:
 
 ### Email intake
 
-Send an order, order form or purchase order to `orders@orderloop.io` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send is covered in the [Email intake guide](https://docs.orderloop.io/guides/email-intake/); setting up Email Routing for your own domain is in [docs/deploy.md](docs/deploy.md).
+Send an order, order form or purchase order to `orders@orderloop.app` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send is covered in the [Email intake guide](https://docs.orderloop.app/guides/email-intake/); setting up Email Routing for your own domain is in [docs/deploy.md](docs/deploy.md).
 
 ## Docs
 
-The docs site is `apps/docs`, published at [docs.orderloop.io](https://docs.orderloop.io) for the
+The docs site is `apps/docs`, published at [docs.orderloop.app](https://docs.orderloop.app) for the
 people who use a workspace and the developers who integrate with one: guides, the REST API, a node
 catalog generated from the catalog source, and an OpenAPI explorer. How OrderLoop is built,
 configured, deployed and tested is in [`docs/`](docs/README.md), which isn't published.
