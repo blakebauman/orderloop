@@ -8,9 +8,11 @@ describe('token lifetimes', () => {
   it('turns a lifetime into an expiry time', () => {
     expect(expiresAtFor('30', now)).toBe(now + 30 * DAY);
     expect(expiresAtFor('365', now)).toBe(now + 365 * DAY);
-    expect(expiresAtFor('never', now)).toBeNull();
     expect(isTokenLifetime('90')).toBe(true);
     expect(isTokenLifetime('7')).toBe(false);
+    // Every token expires: there is no lifetime without an end, and none longer than a year.
+    expect(isTokenLifetime('never')).toBe(false);
+    expect(isTokenLifetime('730')).toBe(false);
   });
 
   it('says whether a token is active, expiring soon, expired or revoked', () => {

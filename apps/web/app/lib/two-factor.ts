@@ -16,6 +16,9 @@ export const TWO_FACTOR_REQUIREMENTS = {
 
 export type TwoFactorRequirement = keyof typeof TWO_FACTOR_REQUIREMENTS;
 
+/** Until an admin chooses: operators and admins, who can change orders, flows and the team. */
+export const DEFAULT_TWO_FACTOR: TwoFactorRequirement = 'operator';
+
 export const isTwoFactorRequirement = (v: unknown): v is TwoFactorRequirement =>
   typeof v === 'string' && Object.hasOwn(TWO_FACTOR_REQUIREMENTS, v);
 

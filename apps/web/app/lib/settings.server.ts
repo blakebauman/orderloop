@@ -8,14 +8,21 @@ import { workspaceSettings } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { audit } from './audit.server';
 import { db } from './env.server';
-import { isTwoFactorRequirement, type TwoFactorRequirement } from './two-factor';
+import {
+  DEFAULT_TWO_FACTOR,
+  isTwoFactorRequirement,
+  type TwoFactorRequirement,
+} from './two-factor';
 
 const KEY = 'two_factor_required';
 const CACHE_MS = 30_000;
 
 let cached: { value: TwoFactorRequirement; at: number } | null = null;
 
-/** Which roles must use two-factor sign-in; `off` until an admin sets it. */
+/**
+ * Which roles must use two-factor sign-in. Until an admin chooses, operators and admins must: the
+ * roles that can change orders, flows and the team.
+ */
 export async function twoFactorRequirement(): Promise<TwoFactorRequirement> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
   const row = await db()
@@ -23,7 +30,7 @@ export async function twoFactorRequirement(): Promise<TwoFactorRequirement> {
     .from(workspaceSettings)
     .where(eq(workspaceSettings.key, KEY))
     .get();
-  const value = isTwoFactorRequirement(row?.value) ? row.value : 'off';
+  const value = isTwoFactorRequirement(row?.value) ? row.value : DEFAULT_TWO_FACTOR;
   cached = { value, at: Date.now() };
   return value;
 }
