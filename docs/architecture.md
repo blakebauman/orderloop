@@ -104,7 +104,7 @@ Business events are audited at the first place that knows the actor: the web app
 handlers write them with `audit` (`apps/web/app/lib/audit.server.ts`), the engine writes them with
 `recordAudit` (`apps/engine/src/audit.ts`) for the order socket (`via: 'app'`), the assistant, MCP
 and A2A (`runAction`, A2A `place_order`; `tool` recorded). Both build the row with `auditRow`
-(`packages/core/src/audit.ts`) into `audit_events`; the RPC callers' own rows are written by the
+(`packages/core/src/audit.ts`) into `audit_events` through `appendAudit` (`packages/db/src/audit.ts`), which seals each into a SHA-256 hash chain (`sealAuditRow`; `verifyAuditChain` checks it) and logs it as an `audit_event` line; the RPC callers' own rows are written by the
 caller, so nothing is written twice. Replays and no-ops, email intake and the scheduled stock
 review are not recorded.
 

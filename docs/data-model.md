@@ -51,6 +51,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0031_invoices_payment_events.sql` | `invoices` (Stripe invoices issued by `commerce.invoice`) and `payment_events` (Stripe event ids already handled, kept 30 days) |
 | `0032_passkeys.sql` | `passkeys` and `passkey_challenges` |
 | `0033_flow_published_by.sql` | `flow_versions.published_by`, who published each version as the audit trail names them (null for built-in templates and older versions) |
+| `0034_audit_chain.sql` | `audit_events.seq` (unique index `audit_events_seq`), `prev_hash` and `hash`: the hash chain; triggers `audit_events_no_update` (no `UPDATE`) and `audit_events_keep_90_days` (no `DELETE` of an event younger than 90 days). Earlier events stay unsealed |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -155,7 +156,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 | `auth_failures` | Failed attempts per `key` (`email-ip:`, `ip:`, `email:` for sign-in; `setup-ip:` for wrong setup codes; `two-factor:<user id>` for wrong codes; `reauth:<user id>` for wrong current passwords on the Account page) with `count` and `window_start`; a 15-minute fixed window, and rows a day old are dropped. See [Failed sign-ins](https://docs.orderloop.app/guides/team-and-roles/#failed-sign-ins) |
 | `webhook_receipts` | Delivered signed events: `id` (`event:<integration id>:<signature>`) and `received_at`, indexed by `received_at`. A repeat of a recorded signature is answered as a duplicate; rows older than 10 minutes are pruned as new ones are written (and by the [retention sweep](#retention)). See [Signed events](https://docs.orderloop.app/reference/rest-api/#signed-events) |
 | `workspace_settings` | Settings admins change in the app: `key`, `value`, `updated_at`, `updated_by`. `two_factor_required` is `off`, `admin`, `operator`, `approver` or `viewer` (`operator` when the row is absent; `DEFAULT_TWO_FACTOR`), the lowest role that must use [two-factor sign-in](https://docs.orderloop.app/guides/team-and-roles/#requiring-it). `approval_separation` (`APPROVAL_SEPARATION_KEY` in `packages/core/src/roles.ts`) is `on` or `off` (the default, also when the row is absent): with `on`, the principal in `orders.started_by` can't decide that order's approvals (`ownOrderRefusal`) |
-| `audit_events` | The audit log, security and business events (`apps/web/app/lib/audit.server.ts` for the web app; `apps/engine/src/audit.ts` writes the same rows through `auditRow` in core for the order socket, assistant, MCP and A2A): `at`, `action` (see [Audit log](https://docs.orderloop.app/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target` (the order, flow or subscription for business events), `detail` (JSON; business events carry `via`), `ip`. Indexed by `at` and `(action, at)`; rows older than 180 days are deleted as new ones are written |
+| `audit_events` | The audit log, security and business events (`apps/web/app/lib/audit.server.ts` for the web app; `apps/engine/src/audit.ts` writes the same rows through `auditRow` in core for the order socket, assistant, MCP and A2A): `at`, `action` (see [Audit log](https://docs.orderloop.app/guides/team-and-roles/#audit-log)), `actor`, `actor_id`, `actor_kind`, `target` (the order, flow or subscription for business events), `detail` (JSON; business events carry `via`), `ip`, and the hash chain: `seq` (unique, from 1), `prev_hash` (`genesis` for the first) and `hash` (SHA-256 over the event's fields, `seq` and `prev_hash`; `sealAuditRow` in core), all null for events written before migration 0034. Written through `appendAudit` (`packages/db/src/audit.ts`), which retries when two writers take the same `seq`. Indexed by `at`, `(action, at)` and unique `seq`. Append-only: trigger `audit_events_no_update` refuses any `UPDATE`, and `audit_events_keep_90_days` refuses a `DELETE` of an event younger than 90 days. Past the deployment's retention the engine's [retention sweep](#retention) archives events to R2 and then deletes them |
 
 No password, token or recovery code is stored in the clear; the two-factor secret is, because
 checking a code needs it. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/).
@@ -195,7 +196,7 @@ The web app serves them at `/docs/<key>` to signed-in users only.
 
 ## Retention
 
-A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `scheduled()` handler on the cron `30 3 * * *`, UTC) deletes, in one batch:
+A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `scheduled()` handler on the cron `30 3 * * *`, UTC) deletes, in one batch (audit events are archived first, see below):
 
 | Table | Deleted when |
 |---|---|
@@ -206,4 +207,6 @@ A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `s
 | `webhook_receipts` | `received_at` older than 10 minutes |
 | `payment_events` | `received_at` older than 30 days |
 
-Orders and everything in an order's record (payments, invoices, shipments, the stock and balance ledgers, flow versions) are kept. `audit_events` prunes itself on write.
+Orders and everything in an order's record (payments, invoices, shipments, the stock and balance ledgers, flow versions) are kept.
+
+`audit_events` is not pruned on write. The sweep moves events older than `AUDIT_RETENTION_DAYS` (default 400, at least 90; `auditRetentionDays` in core) to the `DOCS` R2 bucket (`archiveAudit`): one NDJSON object per batch of up to 1,000 events (one event a line, hashes included) at `audit/<yyyy-mm-dd>/<at>-<id>.ndjson`, at most 50,000 events a run, each batch deleted only after its object is written. Events from before the chain go first, by time; sealed events go in `seq` order and stop at the first one still within the retention, so what remains is an unbroken chain. The sweep reports the count as `auditArchived`.

@@ -39,6 +39,14 @@ DELETE FROM customers WHERE id <> 'cus_internal';
 UPDATE customers SET balance = 0 WHERE id = 'cus_internal';
 DELETE FROM fx_rates WHERE currency <> 'USD';
 
+-- The audit log refuses to delete events younger than 90 days (migration 0034); a demo's is
+-- emptied anyway, with the same trigger put back after.
+DROP TRIGGER IF EXISTS audit_events_keep_90_days;
 DELETE FROM audit_events;
+CREATE TRIGGER audit_events_keep_90_days BEFORE DELETE ON audit_events
+WHEN old.at > (CAST(strftime('%s', 'now') AS INTEGER) - 90 * 86400) * 1000
+BEGIN
+  SELECT RAISE(ABORT, 'audit events are kept at least 90 days');
+END;
 DELETE FROM auth_failures;
 DELETE FROM sessions WHERE user_id = 'usr_demo';

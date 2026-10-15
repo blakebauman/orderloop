@@ -1,10 +1,13 @@
 /**
  * Retention: a daily sweep (the Worker's cron trigger) that deletes rows nothing reads once they
  * are old. Orders and everything that is part of an order's record (payments, shipments, the stock
- * and balance ledgers, flow versions) are kept; the audit log prunes itself on write (180 days).
+ * and balance ledgers, flow versions) are kept. Audit events past the deployment's retention
+ * (`AUDIT_RETENTION_DAYS`, 400 days unless set) are archived to R2 first, then deleted.
  */
 
+import { auditRetentionDays } from '@orderloop/core';
 import {
+  auditEvents,
   createDb,
   inboundEmails,
   nodeRuns,
@@ -13,7 +16,7 @@ import {
   webhookDeliveries,
   webhookReceipts,
 } from '@orderloop/db';
-import { and, lt, ne } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 
 const DAY = 86_400_000;
 
@@ -63,6 +66,7 @@ export async function sweep(env: Env, now = Date.now()) {
       .returning({ id: paymentEvents.id }),
   ]);
   return {
+    auditArchived: await archiveAudit(env, now),
     sessions: expiredSessions.length,
     webhookDeliveries: deliveries.length,
     nodeRuns: runs.length,
@@ -70,4 +74,71 @@ export async function sweep(env: Env, now = Date.now()) {
     webhookReceipts: receipts.length,
     paymentEvents: events.length,
   };
+}
+
+/** Audit events per archive object, and the most one sweep moves. */
+const ARCHIVE_BATCH = 1000;
+const ARCHIVE_MAX = 50_000;
+
+/** Where an archive of audit events goes in the R2 bucket. */
+export const auditArchiveKey = (first: { at: number; id: string }) =>
+  `audit/${new Date(first.at).toISOString().slice(0, 10)}/${first.at}-${first.id}.ndjson`;
+
+/**
+ * Moves audit events past the retention to R2, one NDJSON object (one event a line, hashes and
+ * all) per batch, deleting each batch only once its object is written. Sealed events go in chain
+ * order and stop at the first one still inside the retention, so what stays is an unbroken chain;
+ * events from before the chain go by time. Returns how many moved.
+ */
+export async function archiveAudit(env: Env, now = Date.now()) {
+  const db = createDb(env.DB);
+  const cutoff = now - auditRetentionDays(env.AUDIT_RETENTION_DAYS) * DAY;
+  let moved = 0;
+  const put = (rows: (typeof auditEvents.$inferSelect)[]) =>
+    env.DOCS.put(auditArchiveKey(rows[0]!), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`, {
+      httpMetadata: { contentType: 'application/x-ndjson' },
+      customMetadata: { events: String(rows.length) },
+    });
+
+  while (moved < ARCHIVE_MAX) {
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(and(isNull(auditEvents.seq), lt(auditEvents.at, cutoff)))
+      .orderBy(asc(auditEvents.at), asc(auditEvents.id))
+      .limit(ARCHIVE_BATCH);
+    if (!rows.length) break;
+    await put(rows);
+    const last = rows.at(-1)!;
+    await db
+      .delete(auditEvents)
+      .where(
+        and(
+          isNull(auditEvents.seq),
+          or(
+            lt(auditEvents.at, last.at),
+            and(eq(auditEvents.at, last.at), lte(auditEvents.id, last.id)),
+          ),
+        ),
+      );
+    moved += rows.length;
+    if (rows.length < ARCHIVE_BATCH) break;
+  }
+
+  while (moved < ARCHIVE_MAX) {
+    const batch = await db
+      .select()
+      .from(auditEvents)
+      .where(isNotNull(auditEvents.seq))
+      .orderBy(asc(auditEvents.seq))
+      .limit(ARCHIVE_BATCH);
+    const old = batch.findIndex((r) => r.at >= cutoff);
+    const rows = old === -1 ? batch : batch.slice(0, old);
+    if (!rows.length) break;
+    await put(rows);
+    await db.delete(auditEvents).where(lte(auditEvents.seq, rows.at(-1)!.seq!));
+    moved += rows.length;
+    if (rows.length < batch.length || batch.length < ARCHIVE_BATCH) break;
+  }
+  return moved;
 }

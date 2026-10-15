@@ -12,7 +12,8 @@
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }  (409 not waiting)
  *   POST /api/v1/orders/:id/cancel              { reason? }  (409 already finished)
  *
- *   GET    /api/v1/audit-events                 ?type=auth|team|token|api|oauth|integration&before=<ms>&limit=  (operator)
+ *   GET    /api/v1/audit-events                 ?type=…&before=<ms>&limit=  newest first; ?after=<seq> oldest first (admin)
+ *   GET    /api/v1/audit-events/verify          ?after=<seq>  checks the hash chain (admin)
  *
  *   GET    /api/v1/webhook-subscriptions
  *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
@@ -75,7 +76,7 @@ import {
   subscriptionInput,
 } from './api-schemas';
 import { isAuditGroup } from './audit';
-import { audit, listAudit } from './audit.server';
+import { audit, listAudit, verifyAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
 import { decodeCursor, encodeCursor } from './cursor';
@@ -139,9 +140,21 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         events: await listAudit({
           group: isAuditGroup(type) ? type : undefined,
           before: Number(q.get('before')) || undefined,
+          after: q.has('after') ? Number(q.get('after')) || 0 : undefined,
           limit: Number(q.get('limit')) || 100,
         }),
       });
+    }
+    if (
+      parts[0] === 'audit-events' &&
+      parts[1] === 'verify' &&
+      parts.length === 2 &&
+      request.method === 'GET'
+    ) {
+      const denied = need('admin');
+      if (denied) return denied;
+      const after = url.searchParams.get('after');
+      return json(await verifyAudit(after ? Number(after) || 0 : undefined));
     }
     if (parts[0] === 'channels' && parts[1] === 'edi' && parts[2] === '850') {
       if (request.method !== 'POST') return json({ error: 'Not found' }, 404);

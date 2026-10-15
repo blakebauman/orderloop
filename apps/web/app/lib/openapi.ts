@@ -331,9 +331,9 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/audit-events': {
         get: {
-          summary: 'Security audit log, newest first (admin)',
+          summary: 'Audit log, newest first; or with `after`, oldest first for export (admin)',
           description:
-            'Sign-ins, failed and throttled sign-ins, setup and recovery, team and token changes, and what was done to orders, approvals, flows and webhooks (through the app, the API, a signed webhook, the assistant, MCP or A2A). Kept 180 days.',
+            'Sign-ins, failed and throttled sign-ins, setup and recovery, team and token changes, and what was done to orders, approvals, flows and webhooks (through the app, the API, a signed webhook, the assistant, MCP or A2A). Each event carries its place in the hash chain (`seq`, `prevHash`, `hash`). Events are kept 400 days unless your contract sets another period, then archived.',
           parameters: [
             {
               name: 'type',
@@ -346,9 +346,32 @@ export function openApiDocument(serverUrl: string) {
               description: 'Only events before this time (ms since the epoch), to page back',
               schema: { type: 'integer' },
             },
+            {
+              name: 'after',
+              in: 'query',
+              description:
+                'Only sealed events after this `seq`, oldest first: page forward with the last `seq` you received (0 for the first page)',
+              schema: { type: 'integer', minimum: 0 },
+            },
             { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500 } },
           ],
           responses: { '200': ok('{ events }'), ...errors },
+        },
+      },
+      '/api/v1/audit-events/verify': {
+        get: {
+          summary: "Check the audit log's hash chain (admin)",
+          description:
+            "Recomputes each event's hash and checks it follows the one before, up to 2000 events a call. Without `after` it starts at the oldest event still kept; pass `next` from the response as `after` to continue. `ok: false` names the first event that fails (`brokenAt`) and why.",
+          parameters: [
+            {
+              name: 'after',
+              in: 'query',
+              description: 'Start just after this `seq`',
+              schema: { type: 'integer', minimum: 1 },
+            },
+          ],
+          responses: { '200': ok('{ ok, checked, last?, next?, brokenAt?, reason? }'), ...errors },
         },
       },
       '/api/v1/webhook-subscriptions': {

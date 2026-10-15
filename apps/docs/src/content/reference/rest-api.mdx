@@ -42,7 +42,8 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, note? }` | `{ ok: true }`, `403 { error }` if the caller started the order and the workspace separates [approvals](/guides/team-and-roles/#approvals) |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
-| `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (admin) |
+| `GET` | `/api/v1/audit-events?type=&before=&after=&limit=` | | `{ events }` (admin) |
+| `GET` | `/api/v1/audit-events/verify?after=` | | `{ ok, checked, last, next }` or `{ ok: false, brokenAt, reason }` (admin) |
 | `GET` | `/api/v1/integrations` | | `{ integrations }` (admin) |
 | `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (admin) |
 | `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (admin) |
@@ -260,8 +261,10 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 `GET /api/v1/audit-events` returns the audit log (sign-ins, team and token changes, and what was done to orders, approvals, flows and webhooks), newest first, for feeding a log
 system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook` or `stock`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
-you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
-(an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions. Business events carry `via` in `detail` (`app`, `api`, `webhook`, `assistant`, `mcp` or `a2a`).
+you have. `after` (a `seq`) switches to export order: only hashed events after that `seq`, oldest first, so the last `seq` you received is the next cursor (`0` starts at the beginning); `before` and `after` aren't meant together. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
+(an object or `null`), `ip` and, for hashed events, `seq`, `prevHash` and `hash` (all `null` on events from before the chain). See [Audit log](/guides/team-and-roles/#audit-log) for the actions. Business events carry `via` in `detail` (`app`, `api`, `webhook`, `assistant`, `mcp` or `a2a`).
+
+`GET /api/v1/audit-events/verify` (admin) recomputes each event's hash and checks that it follows the one before, up to 2,000 events a call. It starts at the oldest event still in the log, or just after `after`. It returns `{ ok: true, checked, last, next }`, where `last` is the final event checked (`seq` and `hash`) and `next` is present when there is more: pass it as `after` to continue. A failure is `{ ok: false, brokenAt, reason }`, the `seq` of the first event that fails and why. Events are kept 400 days unless your contract sets another period (at least 90), then archived.
 
 ## Webhook subscriptions
 

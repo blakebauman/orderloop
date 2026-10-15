@@ -27,8 +27,13 @@ export default defineConfig(async () => {
             TIME_SCALE: '1',
             ...bindings,
           },
-          // A second, empty database for testing migrations against rows in an older shape.
-          d1Databases: { MIGRATION_DB: 'migration-test', DEMO_DB: 'demo-test' },
+          // Empty databases: for migrations against rows in an older shape, the demo reset, and
+          // an audit log no other test writes to.
+          d1Databases: {
+            MIGRATION_DB: 'migration-test',
+            DEMO_DB: 'demo-test',
+            AUDIT_DB: 'audit-test',
+          },
         },
       }),
     ],

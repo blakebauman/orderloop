@@ -236,8 +236,20 @@ Each published flow version also keeps who published it, as the audit trail name
 published before this was recorded, and built-in templates, have none.
 
 A person signing in only hears that the email and password didn't match; the reason is for
-admins. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
+admins. Passwords and tokens are never recorded. Writing an event
 never blocks the action it records. An approval's decider is also recorded on the approval itself (below).
+
+### Keeping and checking the log
+
+The log is append-only: an event can't be edited or deleted. Events are kept 400 days unless your
+contract sets another period (never under 90 days), then archived before they leave the log.
+
+Each event is chained to the one before it with a hash, so a changed, removed or reordered event is
+detectable. Events from before the chain was introduced have no hash. Admins check the chain with
+[`GET /api/v1/audit-events/verify`](/reference/rest-api/#audit-events), up to 2,000 events a call.
+
+To export the log or feed a log system, page forward with `after`, the `seq` of the last event
+you received: events come back oldest first, and only hashed events are included.
 
 ## Who decided
 

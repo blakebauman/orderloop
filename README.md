@@ -88,7 +88,8 @@ GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
 POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "note": "…" }
 POST /api/v1/orders/:id/cancel               { "reason": "…" }
-GET  /api/v1/audit-events?type=&before=     audit log: security and business events (admin)
+GET  /api/v1/audit-events?type=&before=&after=   audit log: security and business events (admin)
+GET  /api/v1/audit-events/verify?after=     check the audit log's hash chain (admin)
 ```
 
 ### Outbound webhooks
