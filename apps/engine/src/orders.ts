@@ -13,6 +13,7 @@ import { createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { storeDocument } from './connectors';
 import { loadFlowVersion } from './flows';
+import { orderAgent } from './namespaces';
 import type { OrderLoopParams } from './workflow';
 
 /** Creates the order row, initialises its OrderAgent and starts generation 1 of its Workflow. */
@@ -141,7 +142,7 @@ async function launch(
       'text/plain; charset=utf-8',
     );
   }
-  await env.ORDER_AGENT.getByName(orderId).init(order, flow, instanceId);
+  await orderAgent(env, orderId).init(order, flow, instanceId);
   const params: OrderLoopParams = {
     orderId,
     flowId: flow.id,

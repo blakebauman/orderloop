@@ -205,7 +205,7 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 | `customers` | `name`, `email`; `stripe_customer_id`, `stripe_payment_method_id` | Indexed by `lower(email)` |
 | `sellers` | `name`, `email` | Marketplace sellers |
 | `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)); `contact_email` and `title` are cleared by [erasure](#export-and-erasure), or by the retention sweep where `PERSONAL_DATA_RETENTION_DAYS` is set |
-| OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order. See [OrderAgent](order-agent.md#state) |
+| OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order, in the deployment's [jurisdiction](#data-residency). See [OrderAgent](order-agent.md#state) |
 | R2 | `orders/<orderId>/inbound/po.txt` (the inbound document), `inbound/message.eml` (the raw email) | Served at `/docs/<key>` to signed-in users only. See [R2 documents](#r2-documents) |
 | `inbound_emails` | `sender`, `subject` | Deleted after 180 days; the `.eml` in R2 is not |
 | `messages` | `recipient`, `subject`, `body` | The `commerce.notify` outbox |
@@ -217,6 +217,14 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 
 `payments`, `shipments`, `invoices` and the ledgers hold ids, amounts and tracking numbers, not
 names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
+
+### Data residency
+
+A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`.
+
+Each is fixed when the resource is created. Set the jurisdiction before the deployment's first order: with a different value the Durable Objects get different ids, and existing orders' live state is stranded (D1 and R2 can't move either). Local dev and tests leave it empty; workerd doesn't implement jurisdictions.
+
+Not covered by this setting, so not controlled by OrderLoop's jurisdiction: Workflows instance state (memoized step results, which include node outputs), Workers AI inference, AI Gateway logs, and Workers logs. The Worker code itself runs at Cloudflare's edge nearest the request. Treat these as outside the jurisdiction when answering a residency question; see [To the model](#to-the-model) and [To AI Gateway and logs](#to-ai-gateway-and-logs).
 
 ### Export and erasure
 

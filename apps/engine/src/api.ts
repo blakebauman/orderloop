@@ -19,6 +19,7 @@ import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
 import { copilot } from './ai';
 import { handleMcp, MCP_PATH } from './mcp';
+import { orderAgent, scopedEnv } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { separationRefusal } from './separation';
@@ -35,12 +36,13 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     if (url.pathname === MCP_PATH) return handleMcp(request);
     if (url.pathname === A2A_PATH) return handleA2A(request, this.env);
     return (
-      (await routeAgentRequest(request, this.env)) ?? new Response('Not found', { status: 404 })
+      (await routeAgentRequest(request, scopedEnv(this.env))) ??
+      new Response('Not found', { status: 404 })
     );
   }
 
   private agent(orderId: string) {
-    return this.env.ORDER_AGENT.getByName(orderId);
+    return orderAgent(this.env, orderId);
   }
 
   startOrder(input: StartOrderInput) {

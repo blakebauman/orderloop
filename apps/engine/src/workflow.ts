@@ -40,6 +40,7 @@ import {
 } from '@orderloop/core';
 import type { Report } from './agent';
 import { loadFlowVersion } from './flows';
+import { orderAgent } from './namespaces';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
 import { instanceExists } from './orders';
 import { emit, orderSummary } from './outbox';
@@ -73,7 +74,7 @@ export const eventVar = (event: string) => event.replace(/[^a-zA-Z0-9]+/g, '_');
 export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
   override async run(event: Readonly<WorkflowEvent<OrderLoopParams>>, step: WorkflowStep) {
     const p = event.payload;
-    const agent = this.env.ORDER_AGENT.getByName(p.orderId);
+    const agent = orderAgent(this.env, p.orderId);
     const flow = JSON.parse(
       await step.do('load-flow', async () => {
         const f = await loadFlowVersion(this.env, p.flowId, p.version);
@@ -177,7 +178,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       } catch (err) {
         if (!(await instanceExists(env, id))) throw err;
       }
-      await env.ORDER_AGENT.getByName(p.orderId).continuedAs(id, generation);
+      await orderAgent(env, p.orderId).continuedAs(id, generation);
       return id;
     });
   }
@@ -192,7 +193,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     report: (r: Omit<Report, 'seq' | 'generation'>, durable?: boolean) => Promise<void>,
   ): Promise<Outcome> {
     const env = this.env;
-    const agent = env.ORDER_AGENT.getByName(p.orderId);
+    const agent = orderAgent(env, p.orderId);
     const spec = nodeSpec(node.type);
     const config = withDefaults(node.type, node.config);
     const str = (v: unknown) => (typeof v === 'string' ? v : '');

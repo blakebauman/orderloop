@@ -23,6 +23,7 @@ import {
 import { createDb, paymentEvents } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { settleInvoice } from './billing';
+import { orderAgent } from './namespaces';
 import { markIntentCanceled, orderForIntent } from './payments';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
@@ -120,7 +121,7 @@ async function deliver(
   name: string,
   payload: Record<string, unknown>,
 ): Promise<PaymentEventResult> {
-  const agent = env.ORDER_AGENT.getByName(orderId);
+  const agent = orderAgent(env, orderId);
   const state = (await agent.snapshot()) as OrderState;
   if (!state.orderId) return { outcome: 'ignored', orderId, reason: 'Unknown order' };
   const clean = Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));

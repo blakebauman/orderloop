@@ -25,7 +25,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `suffix` | `-<id>` | Added to every resource name. `orderloop` uses `""`, so its resources keep the base names |
 | `environment` | `deploy-<id>` | The GitHub environment holding the deployment's secrets. `orderloop` uses `production` |
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
-| `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
+| `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created, and where the engine's Durable Objects (`OrderAgent`, `AssistantAgent`, `A2AAgent`) are created. Rendered into the engine's `DATA_JURISDICTION`; `renderEngine` omits it when unset, leaving the base `""`. Fixed for a deployment's life: see [Data residency](data-model.md#data-residency) |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
@@ -57,9 +57,11 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 ## Adding a customer
 
 1. Create `deployments/<id>.jsonc` with `id`, `ring` (usually `canary` first), the next free
-   `slot` and, for EU data, `"jurisdiction": "eu"`.
+   `slot` and, for EU data, `"jurisdiction": "eu"`. Set it now: D1, R2 and the Durable Objects take
+   it at creation, so adding or changing it after the first order strands that order's live state
+   (see [Data residency](data-model.md#data-residency)).
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
-   database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
+   database and R2 bucket (in the jurisdiction; the Durable Objects get theirs from the engine's `DATA_JURISDICTION`, rendered at deploy), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
    It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret

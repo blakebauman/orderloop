@@ -12,6 +12,7 @@ import { type ListTasksRequest, type ListTasksResponse, Task, TaskState } from '
 import type { ServerCallContext, TaskStore } from '@a2a-js/sdk/server';
 import { orderTaskState } from '@orderloop/core';
 import { snapshot } from '../assistant/data';
+import { orderAgent } from '../namespaces';
 import { agentStatus } from './parts';
 
 /** An action the assistant proposed in a chat task, waiting for `{ "confirm": true }`. */
@@ -147,7 +148,7 @@ export class SqlTaskStore implements TaskStore {
       taskId,
       orderId,
     );
-    await this.env.ORDER_AGENT.getByName(orderId).watch(this.watcher);
+    await orderAgent(this.env, orderId).watch(this.watcher);
   }
 
   /** The unfinished tasks following an order, each read through it, and whether that changed it. */

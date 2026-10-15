@@ -234,6 +234,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };
+  // Durable Objects keep data where D1 and R2 do.
+  if (d.jurisdiction) config.vars = { ...config.vars, DATA_JURISDICTION: d.jurisdiction };
   if (d.personalDataRetentionDays)
     config.vars = {
       ...config.vars,
