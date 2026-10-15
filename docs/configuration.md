@@ -89,10 +89,18 @@ The web Worker serves `orderloop.app` as a custom domain; change `routes` in
 `apps/web/wrangler.jsonc` for your own. The engine has no routes, no `workers.dev` URL and no preview
 URLs: only the web app's service binding reaches it, plus Email Routing rules that send mail to it
 (see [Email intake](deploy.md#email-intake)). The docs Worker (`apps/docs/wrangler.jsonc`)
-serves `docs.orderloop.app`.
+serves `docs.orderloop.app`, and likewise sets `workers_dev` and `preview_urls` to `false`.
 
 Both app Workers answer `GET /health` with `{ ok: true, service }`. The web app's
 `GET /health/deep` also checks D1, R2 and the engine (see
 [Request routing](architecture.md#request-routing)). The web app sets `workers_dev` and
 `preview_urls` to `false` too, so `orderloop.app` is its only address and the zone's rules apply to
 every request.
+
+## Runtime limits and observability
+
+Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
+and traces on); lower the rate once traffic makes the volume or cost matter. `limits.cpu_ms` stops a
+runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
+waits, such as model calls, don't count against it. The web app also sets `placement.mode` to `smart`, so
+it runs near D1 and the engine rather than near the visitor.

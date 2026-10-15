@@ -6,7 +6,20 @@
   // global_fetch_strictly_public: MCP clients that identify by a Client ID Metadata Document
   // (an https client_id) are fetched from the public internet only.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  "observability": { "enabled": true },
+  // Every request is logged and traced (sampling 1 = all of them); lower the rate once traffic
+  // makes the volume or cost matter.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": true },
+    "traces": { "enabled": true }
+  },
+  // A runaway request stops at 5 s of CPU (the default is 30 s). Rendering, a PBKDF2 sign-in and an
+  // EDI batch each use well under a second.
+  "limits": { "cpu_ms": 5000 },
+  // Runs near D1 and the engine rather than near the visitor: most requests make several calls to
+  // each.
+  "placement": { "mode": "smart" },
   "upload_source_maps": true,
   // Served only at orderloop.app, so the zone's rules apply to every request: no workers.dev or
   // preview URL as a second way in.
