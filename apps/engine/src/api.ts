@@ -9,6 +9,7 @@ import {
   type CopilotResult,
   type EngineRpc,
   type OrderState,
+  type PaymentEvent,
   parseMailboxes,
   runHealthChecks,
   type StartOrderInput,
@@ -19,6 +20,7 @@ import { A2A_PATH, handleA2A } from './a2a/route';
 import { copilot } from './ai';
 import { handleMcp, MCP_PATH } from './mcp';
 import { startOrder, startOrderOnce } from './orders';
+import { handleStripeEvent } from './payment-events';
 import { separationRefusal } from './separation';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
@@ -51,6 +53,10 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async sendEvent(orderId: string, event: string, payload?: Record<string, unknown>) {
     if (!(await this.snapshot(orderId))) return { delivered: false, notFound: true as const };
     return this.agent(orderId).deliver(event, payload ?? {});
+  }
+
+  paymentEvent(event: PaymentEvent) {
+    return handleStripeEvent(this.env, event);
   }
 
   async decide(

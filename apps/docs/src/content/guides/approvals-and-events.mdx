@@ -136,6 +136,28 @@ so a captured request can't be replayed later. `k` is the integration's `id`; it
 Answering `409` lets the sender's own retry policy deliver an event that arrives before the order
 reaches its wait.
 
+### Stripe events
+
+Stripe doesn't sign with an integration key, so it has its own endpoint,
+`POST /api/v1/webhooks/stripe`, verified with the `Stripe-Signature` header and the endpoint's
+signing secret. During a secret roll Stripe sends a signature for each secret; any one that matches
+passes. The deployment's operator registers the endpoint in Stripe and enables three events:
+
+| Event | What OrderLoop does |
+|---|---|
+| `invoice.paid` | For an invoice an order issued through Stripe (see [Payments](/guides/payments/#invoices-paid-through-stripe)): marks it paid, records the payment, settles the account charge, and delivers `payment.received` to the order (payload `provider`, `invoiceId`, `invoiceNumber`, `amount`, `currency`) |
+| `payment_intent.canceled` | Marks the order's payment authorization `voided` |
+| `charge.dispute.created` | Delivers `payment.disputed` (payload `disputeId`, `amount`, `currency`, `reason`) when a node is waiting for it; otherwise it is noted and nothing else happens |
+
+Each Stripe event id is acted on once; a redelivery answers `200` with `{ "outcome": "duplicate" }`.
+Events about invoices or payments OrderLoop didn't create, and other event types, answer `200`
+with `{ "outcome": "ignored" }`. When `invoice.paid` arrives before the order reaches its
+`payment.received` wait (the customer paid while it waited for an approval, say), the invoice is
+settled and the answer is `409`: Stripe delivers the event again later (it keeps trying for three
+days) and it resumes the order then. Once the order has ended, the event is settled and not
+retried. A bad signature answers `400`, and `503` means Stripe webhooks aren't configured on the
+deployment.
+
 ## Cancelling
 
 Cancel from the order page, the API (`POST /api/v1/orders/:id/cancel` with an optional `reason`),
@@ -145,7 +167,8 @@ ended, or one that is already being cancelled, does nothing. Otherwise OrderLoop
 1. stops the run;
 2. undoes the order's work: releases its inventory reservations, voids its payment
    authorizations, cancels its open shipments and staged store pickups, restocks stock those
-   shipments consumed once none is live, reverses its on-account invoice charges, revokes its
+   shipments consumed once none is live, voids its unpaid Stripe invoices (a paid one is left
+   alone and named in the timeline), reverses its on-account invoice charges, revokes its
    issued digital codes, cancels its seller orders and reverses its scheduled payouts;
 3. marks pending approvals `cancelled` and clears the order's waits;
 4. sets the status to `cancelled`, with the reason and the counts in the timeline;

@@ -90,6 +90,42 @@ export type Refund = {
 
 export type Customer = { id: string; object: 'customer'; email: string | null };
 
+export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'uncollectible' | 'void';
+
+export type Invoice = {
+  id: string;
+  object: 'invoice';
+  status: InvoiceStatus;
+  customer: string;
+  currency: string;
+  /** Minor units. */
+  total: number;
+  amount_due: number;
+  amount_paid: number;
+  number: string | null;
+  hosted_invoice_url: string | null;
+  due_date: number | null;
+  metadata: Record<string, string>;
+};
+
+export type InvoiceItem = {
+  id: string;
+  object: 'invoiceitem';
+  amount: number;
+  currency: string;
+  invoice: string | null;
+};
+
+/** A webhook event, as Stripe POSTs it. `data.object` is the resource it is about. */
+export type StripeEvent = {
+  id: string;
+  object: 'event';
+  type: string;
+  created: number;
+  livemode: boolean;
+  data: { object: Record<string, unknown> & { id: string; object: string } };
+};
+
 /** `{a: {b: 1}, c: [x]}` → `a[b]=1&c[0]=x`, as Stripe's form API nests parameters. */
 export function encodeForm(params: StripeParams): string {
   const out = new URLSearchParams();
@@ -108,7 +144,7 @@ export type StripeClient = ReturnType<typeof stripeClient>;
 
 export function stripeClient(secretKey: string) {
   async function request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     params?: StripeParams,
     idempotencyKey?: string,
@@ -119,7 +155,7 @@ export function stripeClient(secretKey: string) {
     };
     let url = `${API}${path}`;
     let body: string | undefined;
-    if (method === 'GET') {
+    if (method !== 'POST') {
       const q = params ? encodeForm(params) : '';
       if (q) url += `?${q}`;
     } else {
@@ -144,6 +180,7 @@ export function stripeClient(secretKey: string) {
 
   const post = <T>(path: string, params: StripeParams, key: string) =>
     request<T>('POST', path, params, key);
+  const invoice = (id: string) => `/v1/invoices/${encodeURIComponent(id)}`;
 
   return {
     /** Live or test: test keys may use Stripe's test payment methods (pm_card_visa…). */
@@ -163,6 +200,20 @@ export function stripeClient(secretKey: string) {
     },
     customers: {
       create: (params: StripeParams, key: string) => post<Customer>('/v1/customers', params, key),
+    },
+    invoices: {
+      create: (params: StripeParams, key: string) => post<Invoice>('/v1/invoices', params, key),
+      retrieve: (id: string) => request<Invoice>('GET', invoice(id)),
+      finalize: (id: string, params: StripeParams, key: string) =>
+        post<Invoice>(`${invoice(id)}/finalize`, params, key),
+      send: (id: string, key: string) => post<Invoice>(`${invoice(id)}/send`, {}, key),
+      void: (id: string, key: string) => post<Invoice>(`${invoice(id)}/void`, {}, key),
+      /** Only a draft can be deleted; a finalized invoice is voided instead. */
+      del: (id: string) => request<{ id: string; deleted: boolean }>('DELETE', invoice(id)),
+    },
+    invoiceItems: {
+      create: (params: StripeParams, key: string) =>
+        post<InvoiceItem>('/v1/invoiceitems', params, key),
     },
   };
 }

@@ -36,7 +36,11 @@ describe('OpenAPI document', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);
     expect(doc.paths['/api/v1/webhooks/orders'].post.security).toEqual([]);
-    // Shopify signs with its own header; EDI comes from an operator token.
+    // Stripe and Shopify sign with their own headers; EDI comes from an operator token.
+    expect(doc.paths['/api/v1/webhooks/stripe'].post.security).toEqual([]);
+    expect(Object.keys(doc.paths['/api/v1/webhooks/stripe'].post.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '409', '503']),
+    );
     expect(doc.paths['/api/v1/channels/shopify/orders'].post.security).toEqual([]);
     expect(doc.paths['/api/v1/channels/edi/850'].post).not.toHaveProperty('security');
   });

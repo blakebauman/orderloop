@@ -128,12 +128,15 @@ Readonly connections (`shouldConnectionBeReadonly`) aren't used: they would also
 own state writes.
 
 `deliver` returning `delivered: false` is what lets `POST /api/v1/webhooks/events` answer `409`
-until a node is waiting for the event.
+until a node is waiting for the event. Stripe events take the same path from inside the engine:
+`handleStripeEvent` (`apps/engine/src/payment-events.ts`, behind `EngineRpc.paymentEvent`) calls
+`deliver` for `payment.received` and `payment.disputed`, and answers `retry` (the web app's `409`)
+when nothing waits yet and the order hasn't ended.
 
 ## Cancel
 
 `cancel` terminates the Workflow instance (logging, not failing, if that throws), runs
-`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, cancel seller orders, reverse scheduled payouts, revoke issued digital codes, restock consumed stock once no shipment is live, reverse on-account invoice charges), marks
+`compensateOrder` (release held stock, void open authorizations, cancel booked shipments and staged pickups, cancel seller orders, reverse scheduled payouts, revoke issued digital codes, void unpaid Stripe invoices, restock consumed stock once no shipment is live, then reverse on-account invoice charges not already settled by a paid invoice), marks
 every pending approval row `cancelled`, sets status `cancelled` with the reason and clears the
 waits. Terminating means no End node runs, so the agent announces the ending itself: it schedules
 `emitWebhook` for `order.cancelled`. A second `cancel` that arrives while the first is still running returns `{ ok: false }` without doing anything.

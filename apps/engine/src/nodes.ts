@@ -43,6 +43,7 @@ import {
   truthy,
 } from '@orderloop/core';
 import * as ai from './ai';
+import * as billing from './billing';
 import * as clef from './clef';
 import * as cx from './connectors';
 
@@ -360,7 +361,7 @@ export const EXECUTORS: Record<string, Exec> = {
 
   'commerce.invoice': async ({ env, ctx, config, stepKey }) => {
     const terms = str(config.terms, 'due_on_receipt');
-    const days = { due_on_receipt: 0, net_15: 15, net_30: 30, net_60: 60 }[terms] ?? 30;
+    const days = billing.TERM_DAYS[terms] ?? 30;
     const due = new Date(ctx.now + days * 86_400_000).toISOString().slice(0, 10);
     const key = await cx.storeDocument(
       env,
@@ -376,6 +377,15 @@ export const EXECUTORS: Record<string, Exec> = {
       config.onAccount !== false &&
       customer?.kind === 'business' &&
       (await cx.paidAmount(env, ctx.order.id)) < ctx.order.total;
+    // Issued before the account is charged, so a step that fails here leaves no charge behind.
+    const issued =
+      config.provider === 'stripe'
+        ? await billing.issueStripeInvoice(env, ctx.order, stepKey, {
+            terms,
+            sendEmail: config.sendEmail !== false,
+            onAccount: owed,
+          })
+        : null;
     if (owed)
       await cx.addToBalance(env, {
         orderId: ctx.order.id,
@@ -383,10 +393,22 @@ export const EXECUTORS: Record<string, Exec> = {
         customerId: customer.id,
         amount: toBase(ctx.order.total, ctx.order.fxRate),
       });
+    const stripe = issued
+      ? {
+          invoiceId: issued.externalId,
+          number: issued.number,
+          hostedUrl: issued.hostedUrl,
+          status: issued.status,
+        }
+      : undefined;
     return {
-      output: { key, terms, due, onAccount: owed },
-      vars: { invoiceKey: key, dueDate: due },
-      summary: `${terms} · due ${due}${owed ? ' · on account' : ''}`,
+      output: { key, terms, due, onAccount: owed, ...(stripe ? { stripe } : {}) },
+      vars: {
+        invoiceKey: key,
+        dueDate: due,
+        ...(issued?.hostedUrl ? { invoiceUrl: issued.hostedUrl } : {}),
+      },
+      summary: `${terms} · due ${due}${owed ? ' · on account' : ''}${issued ? ` · ${issued.provider === 'stripe' ? `Stripe ${issued.number ?? issued.externalId}` : 'Stripe (mock)'}` : ''}`,
     };
   },
 
@@ -868,8 +890,12 @@ export const ROLLBACKS: Record<
     const restored = await cx.restoreShippedStock(env, orderId);
     return `Cancelled ${ids.join(', ')}${restored ? `, restocked ${restored} lines` : ''}`;
   },
-  'commerce.invoice': async (env, orderId) =>
-    `Reversed ${await cx.reverseBalance(env, orderId)} account charges`,
+  'commerce.invoice': async (env, orderId) => {
+    // Void first: an invoice Stripe reports paid keeps its account charge, which the payment settles.
+    const { voided, paid } = await billing.voidInvoices(env, orderId);
+    const reversed = await cx.reverseBalance(env, orderId);
+    return `Voided ${voided} invoices${paid.length ? `, left paid ${paid.join(', ')}` : ''}, reversed ${reversed} account charges`;
+  },
 };
 
 /** Applies TIME_SCALE so demos compress days into minutes. Never below one second. */

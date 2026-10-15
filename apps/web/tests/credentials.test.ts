@@ -6,7 +6,6 @@ import {
   newApiToken,
   normalizeEmail,
   passwordProblem,
-  safeEqual,
   sha256Hex,
   verifyPassword,
 } from '../app/lib/credentials';
@@ -40,12 +39,6 @@ describe('credentials', () => {
     expect(normalizeEmail('  Ada@Example.COM ')).toBe('ada@example.com');
     expect(isEmail('ada@example.com')).toBe(true);
     expect(isEmail('ada@example')).toBe(false);
-  });
-
-  it('compares strings without short-circuiting on content', () => {
-    expect(safeEqual('abc', 'abc')).toBe(true);
-    expect(safeEqual('abc', 'abd')).toBe(false);
-    expect(safeEqual('abc', 'abcd')).toBe(false);
   });
 });
 

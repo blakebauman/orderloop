@@ -43,7 +43,8 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return Array.from(sig, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
+/** Constant time for equal-length strings; different lengths fail fast, which leaks only length. */
+export function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -61,22 +62,29 @@ export async function signWebhook(
   return `t=${nowSec}${k},v1=${await hmacHex(secret, `${nowSec}.${rawBody}`)}`;
 }
 
-function headerParts(header: string): Map<string, string> {
-  return new Map(
-    header.split(',').map((p) => {
-      const i = p.indexOf('=');
-      return [p.slice(0, i).trim(), p.slice(i + 1).trim()] as const;
-    }),
-  );
+/** `t=1,v1=a,v1=b` → `{t: ['1'], v1: ['a', 'b']}`: a key may repeat. */
+function headerParts(header: string): Map<string, string[]> {
+  const parts = new Map<string, string[]>();
+  for (const p of header.split(',')) {
+    const i = p.indexOf('=');
+    if (i < 0) continue;
+    const k = p.slice(0, i).trim();
+    parts.set(k, [...(parts.get(k) ?? []), p.slice(i + 1).trim()]);
+  }
+  return parts;
 }
 
 /** The integration a signature names (`k=`), if any. */
 export const signatureKeyId = (header: string | null): string | undefined =>
-  header ? headerParts(header).get('k') || undefined : undefined;
+  header ? headerParts(header).get('k')?.[0] || undefined : undefined;
 
 export type VerifyResult = { ok: true } | { ok: false; reason: string };
 
-/** Checks a signature against `secret`, or against each of several (a key being rotated). */
+/**
+ * Checks a signature against `secret`, or against each of several (a key being rotated). The header
+ * may carry several `v1` signatures (Stripe sends one per signing secret while one is rolled); any
+ * one that matches any secret passes.
+ */
 export async function verifyWebhook(
   secret: string | readonly string[],
   rawBody: string,
@@ -85,16 +93,38 @@ export async function verifyWebhook(
 ): Promise<VerifyResult> {
   if (!header) return { ok: false, reason: 'Missing signature header' };
   const parts = headerParts(header);
-  const t = Number(parts.get('t'));
-  const v1 = parts.get('v1');
-  if (!Number.isFinite(t) || !v1) return { ok: false, reason: 'Malformed signature header' };
+  const t = Number(parts.get('t')?.[0]);
+  const given = (parts.get('v1') ?? []).filter(Boolean).map((v) => v.toLowerCase());
+  if (!parts.get('t')?.[0] || !Number.isFinite(t) || !given.length)
+    return { ok: false, reason: 'Malformed signature header' };
   if (Math.abs(nowSec - t) > toleranceSec)
     return { ok: false, reason: 'Signature timestamp outside tolerance' };
-  const given = v1.toLowerCase();
   for (const s of typeof secret === 'string' ? [secret] : secret) {
-    if (timingSafeEqual(await hmacHex(s, `${t}.${rawBody}`), given)) return { ok: true };
+    const expected = await hmacHex(s, `${t}.${rawBody}`);
+    // Every candidate is compared, so the time taken doesn't say which one matched.
+    let match = false;
+    for (const v of given) match = constantTimeEqual(expected, v) || match;
+    if (match) return { ok: true };
   }
   return { ok: false, reason: 'Signature mismatch' };
+}
+
+// ── Stripe ─────────────────────────────────────────────────────────────────
+
+/**
+ * Stripe's webhook signature: `Stripe-Signature: t=<unix seconds>,v1=<hex>[,v1=<hex>…][,v0=…]`, an
+ * HMAC-SHA256 of `${t}.${rawBody}` with the endpoint's signing secret (`whsec_…`): the same scheme
+ * as ours without `k`. During a secret roll Stripe signs with both secrets, so several `v1`s come.
+ */
+export const STRIPE_SIGNATURE_HEADER = 'stripe-signature';
+
+export function verifyStripeSignature(
+  secret: string,
+  rawBody: string,
+  header: string | null,
+  opts: { toleranceSec?: number; nowSec?: number } = {},
+): Promise<VerifyResult> {
+  return verifyWebhook(secret, rawBody, header, opts);
 }
 
 // ── Outbound ───────────────────────────────────────────────────────────────

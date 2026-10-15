@@ -8,6 +8,7 @@ import {
   createDb,
   inboundEmails,
   nodeRuns,
+  paymentEvents,
   sessions,
   webhookDeliveries,
   webhookReceipts,
@@ -26,12 +27,14 @@ export const RETENTION = {
   inboundEmailsMs: 180 * DAY,
   /** Replay receipts for signed webhooks: the signature window plus slack. */
   webhookReceiptsMs: 10 * 60_000,
+  /** Handled Stripe event ids: Stripe redelivers for three days; kept well past that. */
+  paymentEventsMs: 30 * DAY,
 } as const;
 
 /** Deletes everything past its retention, in one batch. Returns rows deleted per table. */
 export async function sweep(env: Env, now = Date.now()) {
   const db = createDb(env.DB);
-  const [expiredSessions, deliveries, runs, emails, receipts] = await db.batch([
+  const [expiredSessions, deliveries, runs, emails, receipts, events] = await db.batch([
     db.delete(sessions).where(lt(sessions.expiresAt, now)).returning({ id: sessions.tokenHash }),
     db
       .delete(webhookDeliveries)
@@ -54,6 +57,10 @@ export async function sweep(env: Env, now = Date.now()) {
       .delete(webhookReceipts)
       .where(lt(webhookReceipts.receivedAt, now - RETENTION.webhookReceiptsMs))
       .returning({ id: webhookReceipts.id }),
+    db
+      .delete(paymentEvents)
+      .where(lt(paymentEvents.receivedAt, now - RETENTION.paymentEventsMs))
+      .returning({ id: paymentEvents.id }),
   ]);
   return {
     sessions: expiredSessions.length,
@@ -61,5 +68,6 @@ export async function sweep(env: Env, now = Date.now()) {
     nodeRuns: runs.length,
     inboundEmails: emails.length,
     webhookReceipts: receipts.length,
+    paymentEvents: events.length,
   };
 }

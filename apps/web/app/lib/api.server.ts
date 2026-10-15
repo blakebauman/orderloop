@@ -28,6 +28,9 @@
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  *   POST /api/v1/webhooks/orders                { model, channel, externalId, lines, … }
  *
+ * Stripe's webhook (Stripe-Signature with STRIPE_WEBHOOK_SECRET; see ./stripe.server.ts):
+ *   POST /api/v1/webhooks/stripe                invoice.paid, payment_intent.canceled, charge.dispute.created
+ *
  * Channel adapters:
  *   POST /api/v1/channels/shopify/orders         Shopify orders/create webhook (X-Shopify-Hmac-Sha256)
  *   POST /api/v1/channels/edi/850                raw X12 850 interchange (operator; EDI_PARTNERS)

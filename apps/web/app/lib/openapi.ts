@@ -221,6 +221,30 @@ export function openApiDocument(serverUrl: string) {
           },
         },
       },
+      '/api/v1/webhooks/stripe': {
+        post: {
+          summary: 'Stripe webhook (no bearer token)',
+          description:
+            "Add this URL as a Stripe webhook endpoint and enable `invoice.paid`, `payment_intent.canceled` and `charge.dispute.created`. Verified with `Stripe-Signature` (any `v1` signature from the endpoint's signing secret, within 5 minutes). Each event id is handled once. `invoice.paid` settles an invoice the order issued through Stripe and delivers `payment.received`; `payment_intent.canceled` voids the authorization it held; `charge.dispute.created` delivers `payment.disputed` to a node waiting for it. Other events are acknowledged and ignored.",
+          security: [],
+          parameters: [
+            { name: 'Stripe-Signature', in: 'header', required: true, schema: { type: 'string' } },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          responses: {
+            ...errors,
+            '200': ok('Handled, already handled, or ignored (`{ outcome }`)'),
+            '400': ok('Bad signature, or not a Stripe event', '#/components/schemas/Error'),
+            '409': ok(
+              'The order is not waiting for this payment yet; Stripe delivers it again later',
+            ),
+            '503': ok('Stripe webhooks are not configured', '#/components/schemas/Error'),
+          },
+        },
+      },
       '/api/v1/channels/shopify/orders': {
         post: {
           summary: 'Shopify orders/create webhook (no bearer token)',

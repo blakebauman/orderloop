@@ -90,6 +90,26 @@ To test without a mail server, call `receiveEmail` from a test with a fake
 The mapping is pure code in `packages/core/src/channels/` (`shopify.ts`, `x12.ts`); the web Worker
 verifies, looks up the customer and starts the order.
 
+## Stripe webhook
+
+A deployment with `PAYMENTS_MODE` `stripe` whose flows issue invoices through Stripe
+(`commerce.invoice` with provider `stripe`) needs Stripe's events to settle them and resume orders.
+In the Stripe Dashboard (Developers → Webhooks), add an endpoint at
+`https://<domain>/api/v1/webhooks/stripe` (orderloop.app's is
+`https://orderloop.app/api/v1/webhooks/stripe`) on the same account and mode (live or test) as
+`STRIPE_SECRET_KEY`, and enable these events:
+
+- `invoice.paid`: settles the invoice and delivers `payment.received`
+- `payment_intent.canceled`: marks the authorization `voided`
+- `charge.dispute.created`: delivers `payment.disputed` to a waiting node
+
+Put the endpoint's signing secret in the deployment's GitHub environment as `STRIPE_WEBHOOK_SECRET`;
+the next deploy sets it on the web Worker. Until it is set the route answers `503`, and Stripe
+retries. For local development, run
+`stripe listen --forward-to localhost:5173/api/v1/webhooks/stripe --events invoice.paid,payment_intent.canceled,charge.dispute.created`
+and put the `whsec_…` it prints in `apps/web/.dev.vars`. Rolling the secret in the Dashboard is safe:
+during the overlap Stripe signs with both, and either passes.
+
 ## Settings for production
 
 - `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses
@@ -146,7 +166,7 @@ Each deployment's job runs in its GitHub environment (`production` for orderloop
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
 them it fails rather than skipping. The environment's `SETUP_TOKEN`,
-`SHOPIFY_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
+`SHOPIFY_WEBHOOK_SECRET`, `STRIPE_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.
 

@@ -6,6 +6,8 @@
  * Session and API tokens are random and stored only as SHA-256.
  */
 
+import { constantTimeEqual } from '@orderloop/core';
+
 const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BITS = 256;
@@ -37,15 +39,7 @@ export async function sha256Hex(input: string): Promise<string> {
 
 /** Compares two secrets in constant time, length included: it compares their SHA-256 digests. */
 export async function secretEqual(a: string, b: string): Promise<boolean> {
-  return safeEqual(await sha256Hex(a), await sha256Hex(b));
-}
-
-/** Constant time for equal-length inputs; different lengths fail fast, which leaks only length. */
-export function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+  return constantTimeEqual(await sha256Hex(a), await sha256Hex(b));
 }
 
 async function derive(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
@@ -74,7 +68,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   if (scheme !== 'pbkdf2' || !iterStr || !saltB64 || !expected) return false;
   const iterations = Number(iterStr);
   if (!Number.isInteger(iterations) || iterations < 1 || iterations > 1_000_000) return false;
-  return safeEqual(await derive(password, base64urlToBytes(saltB64), iterations), expected);
+  return constantTimeEqual(await derive(password, base64urlToBytes(saltB64), iterations), expected);
 }
 
 /** A password an operator hands to a new user, or after a reset: 20 characters, about 120 bits. */

@@ -3,6 +3,7 @@ import {
   createDb,
   inboundEmails,
   nodeRuns,
+  paymentEvents,
   sessions,
   users,
   webhookDeliveries,
@@ -86,6 +87,18 @@ describe('retention sweep', () => {
         { id: 'event:ret-old', receivedAt: now - RETENTION.webhookReceiptsMs - 1 },
         { id: 'event:ret-new', receivedAt: now },
       ]);
+    const event = (id: string, receivedAt: number) => ({
+      id,
+      provider: 'stripe',
+      type: 'invoice.paid',
+      receivedAt,
+    });
+    await db()
+      .insert(paymentEvents)
+      .values([
+        event('evt_ret_old', now - RETENTION.paymentEventsMs - 1),
+        event('evt_ret_new', now - 3 * DAY),
+      ]);
 
     const swept = await sweep(env, now);
     expect(swept).toMatchObject({
@@ -94,6 +107,7 @@ describe('retention sweep', () => {
       nodeRuns: 1,
       inboundEmails: 1,
       webhookReceipts: 1,
+      paymentEvents: 1,
     });
 
     const left = async <T extends { id: string }>(rows: Promise<T[]>) =>
@@ -130,5 +144,13 @@ describe('retention sweep', () => {
           .where(inArray(inboundEmails.id, ['eml_ret_old', 'eml_ret_new'])),
       ),
     ).toEqual(['eml_ret_new']);
+    expect(
+      await left(
+        db()
+          .select()
+          .from(paymentEvents)
+          .where(inArray(paymentEvents.id, ['evt_ret_old', 'evt_ret_new'])),
+      ),
+    ).toEqual(['evt_ret_new']);
   });
 });

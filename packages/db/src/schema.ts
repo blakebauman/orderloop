@@ -595,6 +595,52 @@ export const webhookReceipts = sqliteTable(
   (t) => [index('webhook_receipts_received').on(t.receivedAt)],
 );
 
+/**
+ * Invoices issued through Stripe (`commerce.invoice` with provider "stripe"). Written before Stripe
+ * is called, with the due date it asks for, so a retried step repeats the same request.
+ */
+export const invoices = sqliteTable(
+  'invoices',
+  {
+    id: text('id').primaryKey(),
+    orderId: text('order_id').notNull(),
+    /** stripe | mock (provider "stripe" while PAYMENTS_MODE is "mock"). */
+    provider: text('provider').notNull(),
+    /** pending (nothing in Stripe yet) | draft | open | paid | void. */
+    status: text('status').notNull(),
+    /** The Stripe invoice (in_…). */
+    externalId: text('external_id'),
+    number: text('number'),
+    /** Stripe's hosted invoice page, where the customer pays. */
+    hostedUrl: text('hosted_url'),
+    amount: real('amount').notNull(),
+    currency: text('currency').notNull(),
+    terms: text('terms').notNull(),
+    dueAt: integer('due_at'),
+    /** The account charge this invoice made (`balance_entries`), settled when it is paid. */
+    balanceEntryId: text('balance_entry_id'),
+    createdAt: integer('created_at').notNull(),
+    paidAt: integer('paid_at'),
+  },
+  (t) => [
+    index('invoices_order').on(t.orderId),
+    uniqueIndex('invoices_external').on(t.externalId).where(sql`${t.externalId} IS NOT NULL`),
+  ],
+);
+
+/** Payment provider events already handled, by event id; kept 30 days (Stripe retries for 3). */
+export const paymentEvents = sqliteTable(
+  'payment_events',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider').notNull(),
+    type: text('type').notNull(),
+    orderId: text('order_id'),
+    receivedAt: integer('received_at').notNull(),
+  },
+  (t) => [index('payment_events_received').on(t.receivedAt)],
+);
+
 /** Failed authentication attempts per key in a fixed window; see `throttle.ts` in the web app. */
 export const authFailures = sqliteTable('auth_failures', {
   key: text('key').primaryKey(),
