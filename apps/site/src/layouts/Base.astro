@@ -45,7 +45,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#f6f1e8" />
+    <meta name="theme-color" content={palette('light').paper} />
     <style is:inline set:html={tokens} />
     <script is:inline set:html={THEME_SCRIPT} />
   </head>

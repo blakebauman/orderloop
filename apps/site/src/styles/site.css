@@ -781,7 +781,7 @@ main > section + section {
   text-decoration: line-through 1px var(--undo);
 }
 
-/* Mono code at 13px keeps its strike thin and low, so the original entry stays legible. */
+/* Struck mono code keeps a thin strike and dims to muted, so the original entry stays legible. */
 .ledger:has(#capture-fails:checked) .undoable pre.entry {
   text-decoration-thickness: 1px;
   color: var(--muted-foreground);
