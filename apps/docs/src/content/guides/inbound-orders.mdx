@@ -86,7 +86,7 @@ const res = await fetch('https://orderloop.app/api/v1/webhooks/orders', {
 
 ## What an integration may start
 
-An operator creates one integration per sending system and scopes it
+An admin creates one integration per sending system and scopes it
 ([Integrations](/reference/rest-api/#integrations)). To start orders it needs `startOrders: true`.
 If it is bound to a `channel`, every order it posts must be on that channel. If the body names a
 `flowId`, that flow must be in the integration's `flows` (or `flows` is `["*"]`); a body without

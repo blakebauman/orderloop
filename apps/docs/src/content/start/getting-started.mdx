@@ -5,12 +5,12 @@ description: Sign in to your workspace, run a scenario, watch an order move thro
 
 OrderLoop runs at [orderloop.app](https://orderloop.app). Each person in a workspace signs in with
 their own email and password and has a role: a **viewer** reads, an **approver** also decides
-approvals, and an **operator** also starts and cancels orders, edits and publishes flows, and
-manages the team. See [Team and roles](/guides/team-and-roles/).
+approvals, and an **operator** also starts and cancels orders and edits and publishes flows, and an **admin**
+also manages the team, API tokens, webhooks and integrations. See [Team and roles](/guides/team-and-roles/).
 
 ## Sign in
 
-An operator adds you on the **Team** page and sends you a temporary password. Sign in with your
+An admin adds you on the **Team** page and sends you a temporary password. Sign in with your
 email and that password, then choose a password of your own. If your workspace requires
 [two-factor sign-in](/guides/team-and-roles/#two-factor-sign-in) for your role, you set it up next.
 
@@ -34,7 +34,7 @@ Some orders stop at an approval or wait for an event. Decide approvals from the 
 
 ## Start an order over the API
 
-Other systems call the [REST API](/reference/rest-api/) with an API token. An operator creates one
+Other systems call the [REST API](/reference/rest-api/) with an API token. An admin creates one
 on the **Team** page with a name, a role and an expiry; it is shown once.
 
 ```bash

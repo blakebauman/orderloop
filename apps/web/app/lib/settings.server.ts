@@ -15,7 +15,7 @@ const CACHE_MS = 30_000;
 
 let cached: { value: TwoFactorRequirement; at: number } | null = null;
 
-/** Which roles must use two-factor sign-in; `off` until an operator sets it. */
+/** Which roles must use two-factor sign-in; `off` until an admin sets it. */
 export async function twoFactorRequirement(): Promise<TwoFactorRequirement> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
   const row = await db()

@@ -54,7 +54,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (!(err instanceof Throttled)) throw err;
     return data(
       {
-        error: `${err.message}${email.trim() ? ' If you’ve forgotten your password, ask an operator to reset it.' : ''}`,
+        error: `${err.message}${email.trim() ? ' If you’ve forgotten your password, ask an admin to reset it.' : ''}`,
       },
       { status: 429, headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) } },
     );
@@ -175,7 +175,7 @@ export default function Login() {
         />
         {workspace ? (
           <p id="workspace-hint" className="mt-1.5 text-muted-foreground text-xs">
-            Signs you in as an operator, without an account of your own.
+            Signs you in as an admin, without an account of your own.
           </p>
         ) : null}
         {error ? (
@@ -188,7 +188,7 @@ export default function Login() {
         </Button>
         <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
           {workspace ? null : (
-            <p>Forgot your password? Ask an operator to reset it on the Team page.</p>
+            <p>Forgot your password? Ask an admin to reset it on the Team page.</p>
           )}
           {sharedPassword ? (
             <button

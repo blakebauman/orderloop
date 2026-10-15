@@ -15,9 +15,9 @@ export default function InApp() {
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const me = useMe();
   const shell = useRouteLoaderData('routes/shell') as
-    | { operators?: { name: string; email: string }[] }
+    | { admins?: { name: string; email: string }[] }
     | undefined;
-  const operators = shell?.operators ?? [];
+  const admins = shell?.admins ?? [];
   const status = isRouteErrorResponse(error) ? error.status : 500;
   const body =
     isRouteErrorResponse(error) && error.data && typeof error.data === 'object' ? error.data : null;
@@ -32,10 +32,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           {ROLE_LABELS[me.role]}.
         </p>
         <p className="mt-2 text-muted-foreground text-sm">
-          {operators.length ? (
+          {admins.length ? (
             <>
-              An operator can change your role:{' '}
-              {operators.map((o, i) => (
+              An admin can change your role:{' '}
+              {admins.map((o, i) => (
                 <span key={o.email}>
                   {i ? ', ' : ''}
                   <a href={`mailto:${o.email}`} className="text-link hover:underline">
@@ -46,7 +46,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
               .
             </>
           ) : (
-            'An operator can change your role.'
+            'An admin can change your role.'
           )}
         </p>
       </Refused>

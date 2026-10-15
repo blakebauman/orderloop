@@ -37,16 +37,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(approvals)
     .where(eq(approvals.status, 'pending'))
     .get();
-  // Who to ask when a page needs a higher role: up to three active operators.
-  const operators = atLeast(me.role, 'operator')
+  // Who to ask when a page needs a higher role: up to three active admins.
+  const admins = atLeast(me.role, 'admin')
     ? []
     : await db()
         .select({ name: users.name, email: users.email })
         .from(users)
-        .where(and(eq(users.role, 'operator'), isNull(users.disabledAt)))
+        .where(and(eq(users.role, 'admin'), isNull(users.disabledAt)))
         .orderBy(users.name)
         .limit(3);
-  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true, operators };
+  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true, admins };
 }
 
 /**
@@ -324,7 +324,7 @@ const who = (me: Principal, auth: boolean) =>
 
 /** Who is signed in, their account, the team and its audit log, and signing in or out. */
 function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
-  const operator = atLeast(me.role, 'operator');
+  const admin = atLeast(me.role, 'admin');
   return (
     <>
       <DropdownMenuLabel className="font-normal">
@@ -335,7 +335,7 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
       <DropdownMenuItem asChild>
         <Link to="/account">Account</Link>
       </DropdownMenuItem>
-      {operator ? (
+      {admin ? (
         <>
           <DropdownMenuItem asChild>
             <Link to="/team">Team and roles</Link>
@@ -350,7 +350,7 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
         <DropdownMenuItem asChild>
           <a href="/logout">Sign out</a>
         </DropdownMenuItem>
-      ) : operator ? (
+      ) : admin ? (
         <DropdownMenuItem asChild>
           <Link to="/team">Set up sign-in</Link>
         </DropdownMenuItem>

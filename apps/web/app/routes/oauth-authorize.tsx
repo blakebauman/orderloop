@@ -46,11 +46,13 @@ export const headers: Route.HeadersFunction = ({ loaderHeaders, actionHeaders })
   return h;
 };
 
-const ROLE_SCOPE: Record<Role, string> = {
+/** What an app may be granted. Admin isn't offered: MCP and A2A have no admin tools. */
+const ROLE_SCOPE: Partial<Record<Role, string>> = {
   viewer: 'Read orders, flows, approvals and stock',
   approver: 'Also approve or reject approvals',
   operator: 'Also deliver events, cancel orders, publish flows and run the stock review',
 };
+const grantable = (r: Role) => r in ROLE_SCOPE;
 
 /**
  * A refused request in words a person can act on. The provider's own description stays beside it,
@@ -95,7 +97,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const details = await oauth.describeConsent(authRequest);
     if (me.kind === 'password') return { personal: true as const, app: details.clientName };
     const consent = await oauth.beginConsent(authRequest);
-    const roles = ROLES.filter((r) => atLeast(me.role, r));
+    const roles = ROLES.filter((r) => grantable(r) && atLeast(me.role, r));
     return data(
       {
         details,
@@ -126,7 +128,7 @@ export async function action({ request }: Route.ActionArgs) {
       return new Response(null, { status: 302, headers: denied.headers });
     }
     const role = form.get('role');
-    if (!isRole(role) || !atLeast(me.role, role))
+    if (!isRole(role) || !grantable(role) || !atLeast(me.role, role))
       return data({ error: 'Choose a role you have yourself.' }, { status: 400 });
     const approved = await oauth.approveConsent(request, handle, { scope: [role] });
     const client = await oauth.lookupClient(approved.request.clientId);
@@ -176,7 +178,7 @@ export default function OAuthAuthorize() {
               a person, so OrderLoop can’t connect “{d.app}” to it.
             </p>
             <p className="mt-2 text-muted-foreground text-sm">
-              Sign in with your own account and this request comes back. No account yet? An operator
+              Sign in with your own account and this request comes back. No account yet? An admin
               can add you on the Team page.
             </p>
             <Button asChild className="mt-5">

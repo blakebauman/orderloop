@@ -1,5 +1,5 @@
 /**
- * Which roles must use two-factor sign-in, a workspace setting operators choose on the Team page.
+ * Which roles must use two-factor sign-in, a workspace setting admins choose on the Team page.
  * Pure; `settings.server.ts` stores it and `auth.server.ts` enforces it.
  */
 
@@ -8,8 +8,9 @@ import { atLeast, type Role } from '@orderloop/core';
 /** The lowest role that must use two-factor sign-in, or `off`. Each covers the roles above it. */
 export const TWO_FACTOR_REQUIREMENTS = {
   off: 'Nobody',
-  operator: 'Operators',
-  approver: 'Approvers and operators',
+  admin: 'Admins',
+  operator: 'Operators and admins',
+  approver: 'Approvers, operators and admins',
   viewer: 'Everyone',
 } as const;
 

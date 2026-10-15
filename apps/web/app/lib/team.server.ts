@@ -58,32 +58,32 @@ export async function listTeam() {
 }
 
 function role(v: unknown): Role {
-  if (!isRole(v)) throw new TeamError('Pick a role: viewer, approver or operator.');
+  if (!isRole(v)) throw new TeamError('Pick a role: viewer, approver, operator or admin.');
   return v;
 }
 
 /**
- * Without APP_PASSWORD, the last active operator is the only way in to manage the team, so they
+ * Without APP_PASSWORD, the last active admin is the only way in to manage the team, so they
  * can't be demoted or disabled.
  */
-async function keepAnOperator(exceptId: string) {
+async function keepAnAdmin(exceptId: string) {
   if ((env as { APP_PASSWORD?: string }).APP_PASSWORD) return;
   const other = await db()
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.role, 'operator'), isNull(users.disabledAt), ne(users.id, exceptId)))
+    .where(and(eq(users.role, 'admin'), isNull(users.disabledAt), ne(users.id, exceptId)))
     .get();
   if (!other)
     throw new TeamError(
-      'That would leave no operator to manage the team. Make someone else an operator first.',
+      'That would leave no admin to manage the team. Make someone else an admin first.',
     );
 }
 
 /**
  * The first account on an open deployment (no APP_PASSWORD, no users): the person setting it up,
- * as an operator with a password they choose. Adding it turns sign-in on.
+ * as an admin with a password they choose. Adding it turns sign-in on.
  */
-export async function createFirstOperator(
+export async function createFirstAdmin(
   request: Request,
   input: { email: string; name: string; password: string },
 ) {
@@ -101,13 +101,13 @@ export async function createFirstOperator(
       id,
       email,
       name,
-      role: 'operator',
+      role: 'admin',
       passwordHash: await hashPassword(input.password),
       createdAt: Date.now(),
     });
   forgetUserCount();
-  await audit(request, 'team.first_operator', {
-    actor: { kind: 'user', id, email, name, role: 'operator' },
+  await audit(request, 'team.first_admin', {
+    actor: { kind: 'user', id, email, name, role: 'admin' },
     target: email,
   });
   return id;
@@ -147,9 +147,9 @@ export async function addUser(
 
 export async function setRole(request: Request, by: Principal, id: string, next: unknown) {
   const r = role(next);
-  if (r !== 'operator') await keepAnOperator(id);
-  if (id === by.id && r !== 'operator')
-    throw new TeamError('Ask another operator to change your own role.');
+  if (r !== 'admin') await keepAnAdmin(id);
+  if (id === by.id && r !== 'admin')
+    throw new TeamError('Ask another admin to change your own role.');
   const user = await target(id);
   if (user.role === r) return;
   await db().update(users).set({ role: r }).where(eq(users.id, id));
@@ -185,7 +185,7 @@ export async function resetPassword(request: Request, by: Principal, id: string)
 
 export async function setDisabled(request: Request, by: Principal, id: string, disabled: boolean) {
   if (id === by.id) throw new TeamError('You can’t disable yourself.');
-  if (disabled) await keepAnOperator(id);
+  if (disabled) await keepAnAdmin(id);
   const user = await target(id);
   await db()
     .update(users)

@@ -20,7 +20,7 @@ export const AUDIT_ACTIONS = {
   'auth.two_factor_disabled': 'Turned off two-factor sign-in',
   'auth.recovery_codes_replaced': 'Made new recovery codes',
   'auth.recovery_code_used': 'Used a recovery code',
-  'team.first_operator': 'Created the first operator',
+  'team.first_admin': 'Created the first admin',
   'team.user_added': 'Added a person',
   'team.role_changed': 'Changed a role',
   'team.password_reset': 'Reset a password',

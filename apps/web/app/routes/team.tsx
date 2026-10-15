@@ -22,7 +22,7 @@ import { requireUser, startSession } from '~/lib/auth.server';
 import { setTwoFactorRequirement, twoFactorRequirement } from '~/lib/settings.server';
 import {
   addUser,
-  createFirstOperator,
+  createFirstAdmin,
   createToken,
   listTeam,
   resetPassword,
@@ -45,7 +45,7 @@ import type { Route } from './+types/team';
 export const meta = () => [{ title: 'Team · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const me = await requireUser(request, 'operator');
+  const me = await requireUser(request, 'admin');
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
   const [team, twoFactorRequired] = await Promise.all([listTeam(), twoFactorRequirement()]);
   // The address a new person signs in at, to send along with their temporary password.
@@ -57,13 +57,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 type Secret = { kind: 'password' | 'token'; label: string; value: string };
 
 export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
+  const me = await requireUser(request, 'admin');
   const f = await request.formData();
   const str = (k: string) => String(f.get(k) ?? '');
   try {
-    if (str('intent') === 'first-operator') {
+    if (str('intent') === 'first-admin') {
       if (me.kind !== 'open') throw new TeamError('The team already has people.');
-      const id = await createFirstOperator(request, {
+      const id = await createFirstAdmin(request, {
         email: str('email'),
         name: str('name'),
         password: str('password'),
@@ -74,7 +74,7 @@ export async function action({ request }: Route.ActionArgs) {
       case 'add-user': {
         if (me.kind === 'open')
           throw new TeamError(
-            'Create your own operator account first; adding people turns on sign-in.',
+            'Create your own admin account first; adding people turns on sign-in.',
           );
         const r = await addUser(request, me, {
           email: str('email'),
@@ -154,12 +154,14 @@ const ROLE_GUIDE: Record<Role, string> = {
   viewer: 'Sees every order and flow, and asks the assistant. Changes nothing.',
   approver: 'Also decides approvals. Can’t cancel orders, deliver events or publish flows.',
   operator:
-    'Also starts, cancels and restarts orders, delivers events, edits and publishes flows, and manages this page.',
+    'Also starts, cancels and restarts orders, delivers events, and edits and publishes flows.',
+  admin:
+    'Also manages this page (people, API tokens, sign-in rules), webhooks and integrations, and reads the audit log.',
 };
 
 function RoleGuide() {
   return (
-    <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+    <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
       {ROLES.map((r) => (
         <div key={r}>
           <dt className="font-medium">{ROLE_LABELS[r]}</dt>
@@ -236,7 +238,7 @@ export default function Team() {
     secretRef.current?.focus();
     (secret.kind === 'token' ? addToken : addPerson).current?.reset();
   }, [secret]);
-  if (me.kind === 'open') return <FirstOperator error={error} />;
+  if (me.kind === 'open') return <FirstAdmin error={error} />;
   return (
     <>
       <PageHeader
@@ -602,20 +604,20 @@ function AskButton({
   );
 }
 
-/** An open deployment: whoever sets it up creates the first operator account, which turns sign-in on. */
-function FirstOperator({ error }: { error: string | null }) {
+/** An open deployment: whoever sets it up creates the first admin account, which turns sign-in on. */
+function FirstAdmin({ error }: { error: string | null }) {
   const creating = useNavigation().state === 'submitting';
   return (
     <>
       <PageHeader
         title="Team"
-        subtitle="Anyone can use this workspace until it has a first operator."
+        subtitle="Anyone can use this workspace until it has a first admin."
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         <div className="grid max-w-[1000px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <Section title="Create your operator account">
+          <Section title="Create your admin account">
             <Form method="post" className="space-y-3">
-              <input type="hidden" name="intent" value="first-operator" />
+              <input type="hidden" name="intent" value="first-admin" />
               <p className="text-muted-foreground text-sm">
                 Once it exists, everyone signs in, and you add people and API tokens here.
               </p>

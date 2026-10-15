@@ -126,7 +126,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       return json({ flows: await listFlows() });
     }
     if (parts[0] === 'audit-events' && parts.length === 1 && request.method === 'GET') {
-      const denied = need('operator');
+      const denied = need('admin');
       if (denied) return denied;
       const q = url.searchParams;
       const type = q.get('type');
@@ -143,9 +143,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       return need('operator') ?? (await handleEdi850(await readText(request, MAX_EDI_BYTES)));
     }
     if (parts[0] === 'webhook-subscriptions')
-      return need('operator') ?? (await handleSubscriptions(request, parts, body));
+      return need('admin') ?? (await handleSubscriptions(request, parts, body));
     if (parts[0] === 'integrations')
-      return need('operator') ?? (await handleIntegrations(request, caller, parts, body));
+      return need('admin') ?? (await handleIntegrations(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {

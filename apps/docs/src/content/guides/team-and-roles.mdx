@@ -1,6 +1,6 @@
 ---
 title: Team and roles
-description: Who can sign in, what viewers, approvers and operators may do, the workspace password, two-factor sign-in, API tokens and the audit log.
+description: Who can sign in, what viewers, approvers, operators and admins may do, the workspace password, two-factor sign-in, API tokens and the audit log.
 ---
 
 Each person signs in with their own email and password, and has one role. API tokens carry a role
@@ -10,21 +10,22 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 |---|---|
 | `viewer` | See orders, flows, approvals and the back office; use the [assistant](/guides/assistant/) to read |
 | `approver` | Also approve and reject approvals, including through the assistant |
-| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, have the assistant do those and draft flow changes, manage webhook subscriptions and integration keys, and manage the team and API tokens |
+| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, and have the assistant do those and draft flow changes |
+| `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, and read the audit log |
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
 ## The workspace password
 
 Besides each person's own sign-in, a workspace can have a workspace password, set by your OrderLoop
-administrator. It is a break-glass operator sign-in: on the sign-in page, choose **Use the
-workspace password instead** and enter it to reach the Team page as an operator (the REST API's
+administrator. It is a break-glass admin sign-in: on the sign-in page, choose **Use the
+workspace password instead** and enter it to reach the Team page as an admin (the REST API's
 equivalent is the password as a bearer token). It has no identity, so its decisions are recorded as
-`operator`. Use it to add the first operator, then sign in as yourself.
+`admin`. Use it to add the first admin, then sign in as yourself.
 
 ## The Team page
 
-Operators manage people and tokens at `/team`:
+Admins manage people and tokens at `/team`:
 
 - **Add person:** email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
@@ -37,7 +38,7 @@ Operators manage people and tokens at `/team`:
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. You can't reset your own.
-- In a workspace without a workspace password, the last active operator can't be demoted or
+- In a workspace without a workspace password, the last active admin can't be demoted or
   disabled, so someone can always manage the team.
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
@@ -50,7 +51,7 @@ session.
 
 ### Temporary passwords
 
-A password an operator sets (a new person's, or a reset) is temporary. Signing in with it works,
+A password an admin sets (a new person's, or a reset) is temporary. Signing in with it works,
 but until the person chooses their own on the **Account** page, every other page sends them there,
 and the REST API, MCP, A2A, the order page's live connection and order documents answer `403`.
 Choosing a new password ends it, and the Team page marks people still on one with
@@ -61,7 +62,7 @@ Choosing a new password ends it, and the Team page marks people still on one wit
 The **Account** page lists where you're signed in: each session's browser and system, address,
 sign-in time and last activity, with this browser marked. **Sign out** ends one other session;
 **Sign out everywhere else** ends all but this one. Changing your password also signs you out
-everywhere else. An operator's **Reset password** or **Disable** on the Team page ends all of a
+everywhere else. An admin's **Reset password** or **Disable** on the Team page ends all of a
 person's sessions.
 
 ### Two-factor sign-in
@@ -77,7 +78,7 @@ Turning it on shows 10 recovery codes once, like `k7mqp-3xw9d`, with **Copy** an
 broken phone (on the sign-in step, **Use a recovery code**); the Account page shows how many are
 left and warns at three. **New recovery codes** replaces them all, and **Turn off** removes
 two-factor sign-in after a confirmation; each asks for your password. If you have no phone and no
-codes left, an operator can **Reset two-factor** on the Team page.
+codes left, an admin can **Reset two-factor** on the Team page.
 
 Codes are time-based one-time passwords (RFC 6238: HMAC-SHA1, 30-second steps, 6 digits). The code
 for the step before or after the current one is accepted too, in case the phone's clock is a little
@@ -86,8 +87,8 @@ The workspace password and API tokens don't use two-factor sign-in.
 
 #### Requiring it
 
-Operators choose who must use two-factor sign-in under **Two-factor sign-in** on the Team page:
-nobody (the default), operators, approvers and operators, or everyone. The section counts the people
+Admins choose who must use two-factor sign-in under **Two-factor sign-in** on the Team page:
+nobody (the default), admins, operators and admins, approvers, operators and admins, or everyone. The section counts the people
 covered who haven't set it up. Until they do, those people can only use their Account page: every
 other page sends them there, and the REST API, the order page's live connection and order documents
 answer `403`. They can't turn it off while it is required, but can make new recovery codes. Changing
@@ -134,8 +135,7 @@ decide approvals but not start orders. Approval decisions made with a token are 
 MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
 you sign in (two-factor included) and choose a role. Connecting needs your own account: the
 workspace password belongs to no one, so it can't stand behind an app, and the consent page asks
-whoever is signed in with it to sign in as themselves. You can grant your own role or a lower one,
-never a higher one. **Account** lists **Connected apps**, each with whether it is an AI client
+whoever is signed in with it to sign in as themselves. You can grant your own role or a lower one, never a higher one, and never `admin`: MCP and A2A have no admin tools, so an app is at most an `operator`. **Account** lists **Connected apps**, each with whether it is an AI client
 (MCP) or an agent (A2A), the address its access goes to, its role and when it connected;
 **Disconnect** ends it after a confirmation. Every request from a connected app re-reads you: if you are
 disabled it stops working, and its role is the lower of what you granted and what you have now. What
@@ -145,21 +145,21 @@ an app that uses both is connected twice. See [MCP server](/reference/mcp/) and
 
 ## Audit log
 
-Operators see security events at **Audit log** (in the account menu and linked from the Team page, `/audit`), newest first,
+Admins see security events at **Audit log** (in the account menu and linked from the Team page, `/audit`), newest first,
 filtered by kind, and through [`GET /api/v1/audit-events`](/reference/rest-api/#audit-events).
 Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, wrong workspace password), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). A two-factor `auth.sign_in` records whether it used the app or a recovery code |
-| Team | `team.first_operator`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
+| Team | `team.first_admin`, `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset`, `team.two_factor_requirement` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
 | API access | `api.bearer_failed` and `api.bearer_throttled`, for wrong guesses at the workspace password; `api.token_expired`, at most hourly per token, when an expired token is used |
 
 A person signing in only hears that the email and password didn't match; the reason is for
-operators. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
+admins. Passwords and tokens are never recorded. Events are kept 180 days. Writing an event
 never blocks the action it records. Approval decisions are recorded on the approval itself (below),
 not here.
 

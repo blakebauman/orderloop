@@ -84,7 +84,7 @@ WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/orig
 
 `apps/web/app/lib/auth.server.ts` resolves the principal: a `__Host-ol_session` cookie (a `sessions`
 row), the shared-password cookie, or a bearer token. With `APP_PASSWORD` unset and no `users`, it
-is an open operator, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/). The engine's own
+is an open admin, which is the local dev default; `openModeRefused` makes the Worker answer `503` on any other host. See [Team and roles](https://docs.orderloop.app/guides/team-and-roles/). The engine's own
 `fetch` (`apps/engine/src/index.ts`) answers `/health` and routes agent requests; with
 `workers_dev: false` and no routes it is reachable only through the binding. Its `email` handler
 receives messages from Email Routing and hands them to `receiveEmail`; see

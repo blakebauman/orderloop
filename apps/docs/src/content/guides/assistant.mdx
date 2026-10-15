@@ -74,7 +74,7 @@ check. The audit trail names the actor as `<email> via assistant`: that string i
 
 ## Roles
 
-The assistant works within your role (`viewer`, `approver`, `operator`, in order). A tool your role can't use is
+The assistant works within your role (`viewer`, `approver`, `operator`, `admin`, in order; no assistant tool needs `admin`). A tool your role can't use is
 not offered to the model, and is refused if it is called anyway; the assistant says which role can.
 Every role can use the read tools. The role is re-read from your session when a tool runs, so a
 role change, a sign-out or a disabled account applies to an open panel at once. See
