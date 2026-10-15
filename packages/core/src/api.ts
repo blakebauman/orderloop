@@ -4,6 +4,7 @@
  * `EngineRpc` rather than importing engine source.
  */
 
+import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
 import type {
@@ -202,6 +203,13 @@ export interface EngineRpc {
   copilot(req: CopilotRequest): Promise<CopilotResult>;
   /** Email intake: mailbox local part → flow id, from the engine's INTAKE_MAILBOXES. */
   intakeMailboxes(): Promise<Record<string, string>>;
+  /** Everything held about the person with this email (orders capped; see `truncated`). */
+  exportDataSubject(email: string): Promise<SubjectExport>;
+  /**
+   * Erases the person with this email from their orders, customer accounts, documents, messages
+   * and intake log. Refused while any of their orders is still running.
+   */
+  eraseDataSubject(email: string): Promise<ErasureResult>;
   /** Runs the stock review now (normally a daily cron on the Replenish Workflow). */
   runReplenish(): Promise<{ instanceId: string }>;
   /** Deep health: the engine's own D1 and R2 bindings answer. */

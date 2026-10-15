@@ -20,6 +20,9 @@
  *   DELETE /api/v1/webhook-subscriptions/:id
  *   GET    /api/v1/webhook-subscriptions/:id/deliveries
  *
+ *   POST   /api/v1/data-subjects/export     { email }  everything held about them, as JSON (admin)
+ *   POST   /api/v1/data-subjects/erase      { email }  erase them; repeat while done is false (admin)
+ *
  *   GET    /api/v1/integrations                 signing keys for external systems (operator)
  *   POST   /api/v1/integrations                 { name, events?, startOrders?, flows?, channel? } → secret, once
  *   POST   /api/v1/integrations/:id/rotate      new secret; the old one works for 24 hours
@@ -44,6 +47,7 @@ import {
   allowsEvent,
   allowsOrder,
   atLeast,
+  fingerprintOf,
   flowForOrder,
   type InboundOrder,
   inboundFingerprint,
@@ -58,6 +62,7 @@ import {
   shopifyToInbound,
   signatureKeyId,
   startOrderSchema,
+  subjectEmail,
   toStartRequest,
   verificationSecrets,
   verifyShopifyHmac,
@@ -69,6 +74,7 @@ import { eq, lt } from 'drizzle-orm';
 import type { z } from 'zod';
 import {
   cancelInput,
+  dataSubjectInput,
   decisionInput,
   eventSchema,
   integrationInput,
@@ -171,6 +177,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       return need('admin') ?? (await handleSubscriptions(request, caller, parts, body));
     if (parts[0] === 'integrations')
       return need('admin') ?? (await handleIntegrations(request, caller, parts, body));
+    if (parts[0] === 'data-subjects')
+      return need('admin') ?? (await handleDataSubjects(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {
@@ -346,6 +354,56 @@ async function handleSubscriptions(
   if (parts[2] === 'deliveries' && parts.length === 3 && request.method === 'GET')
     return json({ deliveries: await listDeliveries(id) });
   return json({ error: 'Not found' }, 404);
+}
+
+/**
+ * Export or erase what's held about one person (`subjects.ts` in the engine). The audit log names
+ * them by a hash of their address, so the log itself doesn't keep what was erased.
+ */
+async function handleDataSubjects(
+  request: Request,
+  caller: Principal,
+  parts: string[],
+  body: () => Promise<unknown>,
+): Promise<Response> {
+  const verb = parts[1];
+  if (parts.length !== 2 || request.method !== 'POST' || (verb !== 'export' && verb !== 'erase'))
+    return json({ error: 'Not found' }, 404);
+  const parsed = dataSubjectInput.safeParse(await body());
+  if (!parsed.success)
+    return json({ error: 'Send { "email": "…" }', issues: parsed.error.issues }, 400);
+  const target = `subject:${(await fingerprintOf(subjectEmail(parsed.data.email))).slice(0, 16)}`;
+  if (verb === 'export') {
+    const data = await engine().exportDataSubject(parsed.data.email);
+    await audit(request, 'personal_data.exported', {
+      actor: caller,
+      target,
+      detail: { orders: data.orders.length, customers: data.customers.length, via: 'api' },
+    });
+    return new Response(JSON.stringify(data, null, 2), {
+      headers: {
+        'content-type': 'application/json',
+        'content-disposition': 'attachment; filename="personal-data.json"',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  const result = await engine().eraseDataSubject(parsed.data.email);
+  if (!result.ok)
+    return json(
+      {
+        ...result,
+        error: 'Some of their orders are still running: cancel them or let them finish',
+      },
+      409,
+    );
+  const { ok: _ok, ...counts } = result;
+  await audit(request, 'personal_data.erased', {
+    actor: caller,
+    target,
+    detail: { ...counts, via: 'api' },
+  });
+  return json(result);
 }
 
 async function handleIntegrations(

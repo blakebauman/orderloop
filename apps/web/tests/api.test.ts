@@ -1,7 +1,13 @@
 import type { Principal } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const engine = { decide: vi.fn(), cancel: vi.fn(), sendEvent: vi.fn() };
+const engine = {
+  decide: vi.fn(),
+  cancel: vi.fn(),
+  sendEvent: vi.fn(),
+  exportDataSubject: vi.fn(),
+  eraseDataSubject: vi.fn(),
+};
 
 const receipts = new Set<string>();
 /** Just enough of drizzle for the webhook receipts: claim with insert, release with delete. */
@@ -321,5 +327,50 @@ describe('order list paging', () => {
       operator,
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe('data subject requests over REST', () => {
+  beforeEach(() => audit.mockReset());
+
+  it("are an admin's, and the audit log names the person only by a hash", async () => {
+    expect((await post('data-subjects/erase', { email: 'jane@example.com' })).status).toBe(403);
+    expect((await post('data-subjects/erase', { email: 'not an email' }, admin)).status).toBe(400);
+
+    engine.eraseDataSubject.mockResolvedValueOnce({
+      ok: true,
+      done: true,
+      orders: 2,
+      customers: 1,
+      documents: 3,
+      messages: 1,
+      inboundEmails: 0,
+      teamMember: false,
+    });
+    const res = await post('data-subjects/erase', { email: 'Jane@Example.com' }, admin);
+    expect(res.status).toBe(200);
+    expect(engine.eraseDataSubject).toHaveBeenCalledWith('Jane@Example.com');
+    const [, action, event] = audit.mock.calls[0]!;
+    expect(action).toBe('personal_data.erased');
+    expect(event.target).toMatch(/^subject:[0-9a-f]{16}$/);
+    expect(JSON.stringify(event)).not.toMatch(/jane/i);
+
+    // The same person hashes the same, whatever the case.
+    engine.exportDataSubject.mockResolvedValueOnce({ orders: [], customers: [] });
+    const exported = await post('data-subjects/export', { email: ' jane@example.com' }, admin);
+    expect(exported.headers.get('content-disposition')).toContain('attachment');
+    expect(audit.mock.calls[1]![2].target).toBe(event.target);
+  });
+
+  it('answers 409 while their orders still run', async () => {
+    engine.eraseDataSubject.mockResolvedValueOnce({
+      ok: false,
+      reason: 'active_orders',
+      orders: ['ord_1'],
+    });
+    const res = await post('data-subjects/erase', { email: 'jane@example.com' }, admin);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ orders: ['ord_1'] });
+    expect(audit).not.toHaveBeenCalled();
   });
 });

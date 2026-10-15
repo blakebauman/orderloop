@@ -22,6 +22,7 @@ import { handleMcp, MCP_PATH } from './mcp';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { separationRefusal } from './separation';
+import { eraseDataSubject, exportDataSubject } from './subjects';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   /**
@@ -75,6 +76,14 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     if (own) return { ok: false as const, reason: 'own_order' as const, error: own };
     await this.agent(orderId).decide(nodeId, decision, by, note, deciderId);
     return { ok: true as const };
+  }
+
+  exportDataSubject(email: string) {
+    return exportDataSubject(this.env, email);
+  }
+
+  eraseDataSubject(email: string) {
+    return eraseDataSubject(this.env, email);
   }
 
   async cancel(orderId: string, reason: string) {

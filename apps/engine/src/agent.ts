@@ -10,6 +10,7 @@ import {
   decodePrincipal,
   type EdgeState,
   EMPTY_ORDER_STATE,
+  eraseOrderState,
   type FlowVersion,
   MAX_EVENT_PAYLOAD_BYTES,
   type NodeRun,
@@ -118,6 +119,19 @@ export class OrderAgent extends Agent<Env, State> {
 
   async snapshot(): Promise<OrderState> {
     return this.state;
+  }
+
+  /**
+   * Removes a data subject from this order (`eraseOrderState` in core) once it has finished, and
+   * returns its erased title (`held` false when this object never held the order). Null while it
+   * still runs: its steps may yet need the buyer's details.
+   */
+  async erasePersonalData(terms: string[]): Promise<{ held: boolean; title: string } | null> {
+    if (!this.state.orderId) return { held: false, title: '' };
+    if (!TERMINAL_ORDER_STATUSES.includes(this.state.status)) return null;
+    this.setState({ ...eraseOrderState(this.state, terms), updatedAt: Date.now() });
+    await this.syncIndex();
+    return { held: true, title: this.state.order?.title ?? '' };
   }
 
   async init(order: Order, flow: FlowVersion, instanceId: string) {

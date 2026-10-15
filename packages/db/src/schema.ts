@@ -70,6 +70,8 @@ export const orders = sqliteTable(
     fxRate: real('fx_rate').notNull().default(1),
     /** The principal id that started it; null for channels, email and the stock review. */
     startedBy: text('started_by'),
+    /** When a data subject erasure removed the buyer from it. */
+    erasedAt: integer('erased_at'),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),

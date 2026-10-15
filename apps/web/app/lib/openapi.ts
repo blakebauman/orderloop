@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 import {
   cancelInput,
+  dataSubjectInput,
   decisionInput,
   eventSchema,
   integrationInput,
@@ -372,6 +373,35 @@ export function openApiDocument(serverUrl: string) {
             },
           ],
           responses: { '200': ok('{ ok, checked, last?, next?, brokenAt?, reason? }'), ...errors },
+        },
+      },
+      '/api/v1/data-subjects/export': {
+        post: {
+          summary: 'Export everything held about a person, by email (admin)',
+          description:
+            'Their customer accounts, their orders (as a customer, as a guest buyer, or as the sender of an order email) with contact details, lines and metadata, the messages sent to them, their intake log entries and the documents on their orders. Up to 500 orders; `truncated` says when there were more. `teamMember` says the address also belongs to a person on your team.',
+          requestBody: body(dataSubjectInput),
+          responses: {
+            '200': ok(
+              'A JSON file: { email, customers, orders, messages, inboundEmails, documents, truncated, teamMember }',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/data-subjects/erase': {
+        post: {
+          summary: 'Erase a person from orders, accounts, documents and messages (admin)',
+          description:
+            'Removes who the person is and keeps the commercial record: their contact details, names, addresses, inbound documents and emails, and the messages sent to them go; lines, amounts, payments and shipments stay, and their customer accounts become "Erased customer". Works through 100 orders a call: repeat while `done` is false. Refused with 409 while any of their orders is still running. The audit log keeps its events under its own retention and names the request by a hash of the address.',
+          requestBody: body(dataSubjectInput),
+          responses: {
+            '200': ok(
+              '{ ok, done, orders, customers, documents, messages, inboundEmails, teamMember }',
+            ),
+            '409': ok('{ reason: "active_orders", orders }'),
+            ...errors,
+          },
         },
       },
       '/api/v1/webhook-subscriptions': {

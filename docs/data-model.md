@@ -52,6 +52,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0032_passkeys.sql` | `passkeys` and `passkey_challenges` |
 | `0033_flow_published_by.sql` | `flow_versions.published_by`, who published each version as the audit trail names them (null for built-in templates and older versions) |
 | `0034_audit_chain.sql` | `audit_events.seq` (unique index `audit_events_seq`), `prev_hash` and `hash`: the hash chain; triggers `audit_events_no_update` (no `UPDATE`) and `audit_events_keep_90_days` (no `DELETE` of an event younger than 90 days). Earlier events stay unsealed |
+| `0035_order_erased_at.sql` | `orders.erased_at`: when a [data subject erasure](#personal-data) removed the buyer from the order; later requests skip it |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -82,7 +83,7 @@ engine, `ensureSeeded` in the web app; see [Templates](https://docs.orderloop.ap
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `erased_at` (set by `eraseDataSubject`; null otherwise), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)`,
@@ -203,7 +204,7 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 |---|---|---|
 | `customers` | `name`, `email`; `stripe_customer_id`, `stripe_payment_method_id` | Indexed by `lower(email)` |
 | `sellers` | `name`, `email` | Marketplace sellers |
-| `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)) |
+| `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)); `contact_email` and `title` are cleared by [erasure](#export-and-erasure) |
 | OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order. See [OrderAgent](order-agent.md#state) |
 | R2 | `orders/<orderId>/inbound/po.txt` (the inbound document), `inbound/message.eml` (the raw email) | Served at `/docs/<key>` to signed-in users only. See [R2 documents](#r2-documents) |
 | `inbound_emails` | `sender`, `subject` | Deleted after 180 days; the `.eml` in R2 is not |
@@ -216,6 +217,56 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 
 `payments`, `shipments`, `invoices` and the ledgers hold ids, amounts and tracking numbers, not
 names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
+
+### Export and erasure
+
+A data subject request (`POST /api/v1/data-subjects/export` and `/erase`, admin; `handleDataSubjects` in
+`apps/web/app/lib/api.server.ts`, `EngineRpc.exportDataSubject` and `eraseDataSubject`,
+`apps/engine/src/subjects.ts`) is about one email address, matched as `lower(email)` (`subjectEmail`). The
+subject is:
+
+- the `customers` with that email;
+- the `orders` with that `contact_email`, or whose `customer_id` is one of those customers;
+- the orders an `inbound_emails` row from that `sender` started (`order_id`).
+
+Orders with `erased_at` set are no longer part of it. A `users` row with the address is only reported
+(`teamMember`); it is never changed.
+
+**Export** returns a JSON attachment: `customers` (without `stripe_payment_method_id`), up to 500 orders
+(`truncated` when there were more) with `contact`, `lines` and `meta` read from each agent's state,
+`messages` (to those orders or to the address), `inbound_emails` rows (without `r2_key`) and the
+`documents` list (`key`, `kind`, `contentType`, `createdAt`).
+
+**Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
+has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
+`null` for an order that is still running). Otherwise it takes 100 orders a call (`done: false` means
+call again). For each order:
+
+| Place | After |
+|---|---|
+| OrderAgent state | `eraseOrderState` (core): `contact`, `documentText` and `documentKey` removed; `meta` through `scrubPersonal` plus the subject's terms; `title`, line names, `vars`, node `summary`, `error` and `output`, timeline `message` and `data`, and `reason` have the terms replaced with `[erased]` and emails and phone numbers masked. The terms are the email, the customer account names, and the order's contact name, email and phone and `shipTo` name, each at least 3 characters, longest first |
+| R2 | Objects under `orders/<id>/` deleted |
+| `documents` | Rows for the order deleted |
+| `webhook_deliveries` | Rows for the order deleted |
+| `messages` | `recipient`, `subject` and `body` set to `[erased]` |
+| `inbound_emails` | For rows with this `order_id`: `sender` set to `[erased]`, `subject` to `''`, `r2_key` to null |
+| `orders` | `contact_email` null, `title` erased (an order no agent holds is erased in D1 with the terms), `erased_at` set |
+
+When no order is left (the last call, `done: true`): `inbound_emails` from that sender that never
+started an order are erased the same way and their R2 `.eml` deleted, `messages` to the address are
+erased, and each `customers` row becomes `name` `Erased customer`, `email`
+`erased-<id>@erased.invalid` and `stripe_customer_id` and `stripe_payment_method_id` null. Lines, amounts,
+`payments`, `shipments`, `invoices` and the ledgers are kept.
+
+`audit_events` keep their events (append-only, own retention). Each request writes
+`personal_data.exported` or `personal_data.erased` (filter group `personal_data`, "Personal data") with the
+target `subject:` and the first 16 hex characters of the SHA-256 of the normalised email
+(`fingerprintOf`), so the log does not hold the address.
+
+Not reached: the Workflow instance's params and step outputs, which Cloudflare Workflows retains; the
+Stripe customer at Stripe (only the ids here are cleared); AI Gateway and Workers logs, which follow
+their own retention; the R2 audit archives (`audit/…`); `sellers`; and `orders.external_id` and
+`customer_id`, which stay on an erased order.
 
 ### To the model
 
