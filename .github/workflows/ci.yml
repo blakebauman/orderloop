@@ -71,6 +71,7 @@ jobs:
       internal: ${{ steps.rings.outputs.internal }}
       canary: ${{ steps.rings.outputs.canary }}
       general: ${{ steps.rings.outputs.general }}
+      deployments: ${{ steps.rings.outputs.deployments }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -82,9 +83,12 @@ jobs:
       - id: rings
         run: |
           rings=$(node scripts/fleet.ts matrix)
+          # Each ring is a list of ids (so its jobs are named by id); `deployments` maps an id to
+          # its entry.
           for ring in staging internal canary general; do
-            echo "$ring=$(jq -c --arg r "$ring" '.[$r]' <<<"$rings")" >> "$GITHUB_OUTPUT"
+            echo "$ring=$(jq -c --arg r "$ring" '[.[$r][].id]' <<<"$rings")" >> "$GITHUB_OUTPUT"
           done
+          echo "deployments=$(jq -c '[.[][]] | map({key: .id, value: .}) | from_entries' <<<"$rings")" >> "$GITHUB_OUTPUT"
 
   staging:
     needs: plan
@@ -92,11 +96,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        deployment: ${{ fromJSON(needs.plan.outputs.staging) }}
-    name: ${{ matrix.deployment.id }}
+        id: ${{ fromJSON(needs.plan.outputs.staging) }}
+    name: staging
     uses: ./.github/workflows/deploy.yml
     with:
-      deployment: ${{ toJSON(matrix.deployment) }}
+      deployment: ${{ toJSON(fromJSON(needs.plan.outputs.deployments)[matrix.id]) }}
     secrets: inherit
 
   internal:
@@ -105,11 +109,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        deployment: ${{ fromJSON(needs.plan.outputs.internal) }}
-    name: ${{ matrix.deployment.id }}
+        id: ${{ fromJSON(needs.plan.outputs.internal) }}
+    name: internal
     uses: ./.github/workflows/deploy.yml
     with:
-      deployment: ${{ toJSON(matrix.deployment) }}
+      deployment: ${{ toJSON(fromJSON(needs.plan.outputs.deployments)[matrix.id]) }}
     secrets: inherit
 
   canary:
@@ -118,11 +122,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        deployment: ${{ fromJSON(needs.plan.outputs.canary) }}
-    name: ${{ matrix.deployment.id }}
+        id: ${{ fromJSON(needs.plan.outputs.canary) }}
+    name: canary
     uses: ./.github/workflows/deploy.yml
     with:
-      deployment: ${{ toJSON(matrix.deployment) }}
+      deployment: ${{ toJSON(fromJSON(needs.plan.outputs.deployments)[matrix.id]) }}
     secrets: inherit
 
   general:
@@ -133,9 +137,9 @@ jobs:
       # Customers in the general ring deploy a few at a time.
       max-parallel: 4
       matrix:
-        deployment: ${{ fromJSON(needs.plan.outputs.general) }}
-    name: ${{ matrix.deployment.id }}
+        id: ${{ fromJSON(needs.plan.outputs.general) }}
+    name: general
     uses: ./.github/workflows/deploy.yml
     with:
-      deployment: ${{ toJSON(matrix.deployment) }}
+      deployment: ${{ toJSON(fromJSON(needs.plan.outputs.deployments)[matrix.id]) }}
     secrets: inherit
