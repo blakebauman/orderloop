@@ -142,6 +142,32 @@ export const fulfillmentSchema = z.object({
 });
 export type Fulfillment = z.infer<typeof fulfillmentSchema>;
 
+export const PAYMENT_PROVIDERS = ['stripe', 'external'] as const;
+export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
+
+/**
+ * How the order is paid, when the caller already knows. `stripe` names a PaymentIntent to adopt,
+ * a payment method to confirm, or a Stripe customer to charge off-session; `external` means the
+ * channel took the money (a Shopify checkout) and `reference` is its id there.
+ */
+export const orderPaymentSchema = z.object({
+  provider: z.enum(PAYMENT_PROVIDERS),
+  intentId: z
+    .string()
+    .regex(/^pi_\w+$/)
+    .optional(),
+  paymentMethodId: z
+    .string()
+    .regex(/^pm_\w+$/)
+    .optional(),
+  stripeCustomerId: z
+    .string()
+    .regex(/^cus_\w+$/)
+    .optional(),
+  reference: z.string().max(200).optional(),
+});
+export type OrderPayment = z.infer<typeof orderPaymentSchema>;
+
 export const orderInputSchema = z.object({
   model: z.enum(ORDER_MODELS),
   channel: z.enum(ORDER_CHANNELS).default('api'),
@@ -155,6 +181,7 @@ export const orderInputSchema = z.object({
   fulfillment: fulfillmentSchema.optional(),
   /** The shipping option the buyer chose, by id; a shipping-rate node set to `from_order` charges it. */
   shippingOption: z.string().max(80).optional(),
+  payment: orderPaymentSchema.optional(),
   /** Free-form inbound document text (an email, order form or PO) for the AI extract node. */
   documentText: z.string().max(50_000).optional(),
   /** R2 key of an uploaded document. */

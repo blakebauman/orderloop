@@ -41,6 +41,7 @@ Topics other than `orders/create` are acknowledged and ignored so Shopify stops 
 | `shipping_address` | `shipTo`: `name`, `address1`, `address2`, `city`, `province_code`, `zip`, `country_code`, plus `latitude` and `longitude` when both are present |
 | `name` | `title`: `Shopify order #1001` |
 | `id`, `name` | `meta.shopify` |
+| (always) | `payment`: `{ provider: 'external', reference: id }`. Shopify took the money, so the payment nodes record it and never charge the card again (see [Payments](/guides/payments/#how-an-order-says-it-is-paid)) |
 
 The order's customer is the one whose email matches `email` (case-insensitive); with no match the
 order starts without a `customerId`. Every line item needs a SKU, since that is how OrderLoop finds

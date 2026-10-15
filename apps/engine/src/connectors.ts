@@ -1,7 +1,8 @@
 /**
  * Mock commerce connectors over the D1 back office and R2. Each is the seam where a real adapter
- * (Stripe, a WMS, a carrier API, NetSuite) plugs in later. Every write is keyed by the step that
- * made it, so a retried step never double-books, and every compensation is idempotent.
+ * (a WMS, a carrier API, NetSuite) plugs in later; payments already have one (./payments, with
+ * Stripe). Every write is keyed by the step that made it, so a retried step never double-books, and
+ * every compensation is idempotent.
  *
  * Failure simulation for demos and tests: set `order.meta.simulate` to one of
  * "payment_decline", "charge_fail", "out_of_stock", "three_way_mismatch".
@@ -53,6 +54,7 @@ import {
 import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { voidAuthorizations } from './payments';
 
 const db = (env: Env) => createDb(env.DB);
 const simulate = (order: Order) => String(order.meta?.simulate ?? '');
@@ -641,138 +643,18 @@ export async function validateAddress(_env: Env, shipTo: unknown) {
 
 // ── Payments ───────────────────────────────────────────────────────────────
 
-async function recordPayment(
-  env: Env,
-  id: string,
-  orderId: string,
-  kind: string,
-  amount: number,
-  status: string,
-  ref?: string,
-) {
-  const d = db(env);
-  await d
-    .insert(payments)
-    .values({ id, orderId, kind, amount, status, ref, createdAt: Date.now() })
-    .onConflictDoNothing();
-  // A retried step returns what the first attempt recorded, not what this one asked for.
-  const row = await d.select().from(payments).where(eq(payments.id, id)).get();
-  return { paymentId: id, amount: row?.amount ?? amount, status: row?.status ?? status };
-}
+// The gateway (mock or Stripe) lives in ./payments; re-exported for existing callers.
+export {
+  authorizePayment,
+  capturePayment,
+  charge,
+  paidAmount,
+  paySupplier,
+  refund,
+  voidAuthorizations,
+} from './payments';
 
-export async function authorizePayment(env: Env, order: Order, stepKey: string, method: string) {
-  const declined = simulate(order) === 'payment_decline';
-  return recordPayment(
-    env,
-    `pay_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_'),
-    order.id,
-    `authorization:${method}`,
-    order.total,
-    declined ? 'declined' : 'authorized',
-  );
-}
-
-/** Compensation: void every open authorization for the order. Idempotent. */
-export async function voidAuthorizations(env: Env, orderId: string) {
-  const res = await db(env)
-    .update(payments)
-    .set({ status: 'voided' })
-    .where(and(eq(payments.orderId, orderId), eq(payments.status, 'authorized')))
-    .returning();
-  return res.length;
-}
-
-export async function capturePayment(env: Env, order: Order, stepKey: string) {
-  const d = db(env);
-  const id = `cap_${stepKey}_${order.id}`.replace(/[^\w-]/g, '_');
-  // A retry after the capture was recorded returns it rather than looking for an open authorization.
-  const done = await d.select().from(payments).where(eq(payments.id, id)).get();
-  if (done) return { paymentId: id, amount: done.amount, status: done.status };
-  const [auth] = await d
-    .select()
-    .from(payments)
-    .where(and(eq(payments.orderId, order.id), eq(payments.status, 'authorized')));
-  if (!auth) return { paymentId: null, amount: 0, status: 'failed' };
-  // Never more than the order now costs: lines dropped after authorizing (a seller rejecting
-  // their part) are released, not charged.
-  const amount = money(Math.min(auth.amount, order.total));
-  // One transaction: the authorization flips only if still open, and the capture is recorded only
-  // if this call flipped it, so a void racing the capture leaves exactly one of them.
-  await d.batch([
-    d
-      .update(payments)
-      .set({ status: 'captured', ref: id })
-      .where(and(eq(payments.id, auth.id), eq(payments.status, 'authorized'))),
-    d
-      .insert(payments)
-      .select(
-        d
-          .select({
-            id: sql`${id}`.as('id'),
-            orderId: sql`${order.id}`.as('order_id'),
-            kind: sql`'capture'`.as('kind'),
-            amount: sql`${amount}`.as('amount'),
-            status: sql`'succeeded'`.as('status'),
-            ref: sql`${auth.id}`.as('ref'),
-            createdAt: sql`${Date.now()}`.as('created_at'),
-          })
-          .from(payments)
-          .where(
-            and(eq(payments.id, auth.id), eq(payments.status, 'captured'), eq(payments.ref, id)),
-          ),
-      )
-      .onConflictDoNothing(),
-  ]);
-  const row = await d.select().from(payments).where(eq(payments.id, id)).get();
-  return row
-    ? { paymentId: id, amount: row.amount, status: row.status }
-    : { paymentId: null, amount: 0, status: 'failed' };
-}
-
-export async function charge(env: Env, order: Order, stepKey: string) {
-  const fail = simulate(order) === 'charge_fail';
-  return recordPayment(
-    env,
-    `chg_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_'),
-    order.id,
-    'charge',
-    order.total,
-    fail ? 'failed' : 'succeeded',
-  );
-}
-
-/**
- * Refunds up to `requested` (everything still refundable when omitted) of the money captured or
- * charged on the order. Keyed by step: a retried step returns the refund it already made.
- */
-export async function refund(env: Env, order: Order, stepKey: string, requested?: number) {
-  const d = db(env);
-  const id = `rfd_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
-  const done = await d.select().from(payments).where(eq(payments.id, id)).get();
-  if (done) return { paymentId: id, amount: done.amount, status: done.status };
-
-  const rows = await d.select().from(payments).where(eq(payments.orderId, order.id));
-  const paid = rows
-    .filter((p) => p.status === 'succeeded' && (p.kind === 'capture' || p.kind === 'charge'))
-    .reduce((s, p) => s + p.amount, 0);
-  const refunded = rows
-    .filter((p) => p.kind === 'refund' && p.status === 'succeeded')
-    .reduce((s, p) => s + p.amount, 0);
-  const refundable = money(paid - refunded);
-  const amount = money(Math.min(requested ?? refundable, refundable));
-  if (amount <= 0) return { paymentId: null, amount: 0, status: 'failed' };
-  return recordPayment(env, id, order.id, 'refund', amount, 'succeeded');
-}
-
-/** Money captured or charged on the order, before refunds. */
-export async function paidAmount(env: Env, orderId: string) {
-  const rows = await db(env).select().from(payments).where(eq(payments.orderId, orderId));
-  return money(
-    rows
-      .filter((p) => p.status === 'succeeded' && (p.kind === 'capture' || p.kind === 'charge'))
-      .reduce((s, p) => s + p.amount, 0),
-  );
-}
+// ── Customer balances ──────────────────────────────────────────────────────
 
 /**
  * Adds to a customer's balance once per order and step: the ledger row and the balance update run

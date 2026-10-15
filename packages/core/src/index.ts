@@ -14,6 +14,8 @@ export * from './json-schema';
 export * from './layout';
 export * from './lines';
 export * from './logic';
+export * from './money';
+export * from './payments';
 export * from './policy';
 export * from './pricing';
 export * from './roles';

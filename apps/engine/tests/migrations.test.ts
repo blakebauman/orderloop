@@ -120,3 +120,41 @@ describe('0027_remove_demo_data', () => {
       ).toBe(0);
   });
 });
+
+describe('0030_stripe_payments', () => {
+  it('marks existing payments as mock and gives each Stripe customer to one account', async () => {
+    const db = testEnv.MIGRATION_DB;
+    const { applied, next } = before('0030_');
+    await applyD1Migrations(db, applied);
+    await db.batch([
+      db.prepare(
+        `INSERT INTO payments (id, order_id, kind, amount, status, ref, created_at) VALUES
+         ('pay-old', 'o-old', 'authorization:card', 12.5, 'captured', 'cap-old', 0)`,
+      ),
+      db.prepare(
+        `INSERT INTO customers (id, name, email) VALUES
+         ('cus-a', 'A', 'a@example.com'), ('cus-b', 'B', 'b@example.com')`,
+      ),
+    ]);
+    await applyD1Migrations(db, [next]);
+
+    expect(
+      await db
+        .prepare(
+          "SELECT provider, external_id, currency, amount FROM payments WHERE id = 'pay-old'",
+        )
+        .first(),
+    ).toEqual({ provider: 'mock', external_id: null, currency: null, amount: 12.5 });
+    expect(
+      await db
+        .prepare(
+          "SELECT stripe_customer_id, stripe_payment_method_id FROM customers WHERE id = 'cus-a'",
+        )
+        .first(),
+    ).toEqual({ stripe_customer_id: null, stripe_payment_method_id: null });
+    await db.prepare("UPDATE customers SET stripe_customer_id = 'cus_X' WHERE id = 'cus-a'").run();
+    await expect(
+      db.prepare("UPDATE customers SET stripe_customer_id = 'cus_X' WHERE id = 'cus-b'").run(),
+    ).rejects.toThrow(/UNIQUE/);
+  });
+});

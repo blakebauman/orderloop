@@ -118,8 +118,17 @@ export const customers = sqliteTable(
     creditLimit: real('credit_limit').notNull().default(0),
     balance: real('balance').notNull().default(0),
     terms: text('terms').notNull().default('net_30'),
+    /** The customer's Stripe customer (cus_…), created on their first `verify` authorization. */
+    stripeCustomerId: text('stripe_customer_id'),
+    /** The card a `verify` authorization saved, which renewals charge off-session. */
+    stripePaymentMethodId: text('stripe_payment_method_id'),
   },
-  (t) => [index('customers_email').on(sql`lower(${t.email})`)],
+  (t) => [
+    index('customers_email').on(sql`lower(${t.email})`),
+    uniqueIndex('customers_stripe_customer')
+      .on(t.stripeCustomerId)
+      .where(sql`${t.stripeCustomerId} IS NOT NULL`),
+  ],
 );
 
 export const products = sqliteTable('products', {
@@ -348,10 +357,16 @@ export const payments = sqliteTable(
     status: text('status').notNull(),
     ref: text('ref'),
     createdAt: integer('created_at').notNull(),
+    /** mock | stripe | external (the channel took the money) | offline (cash, terms, a till). */
+    provider: text('provider').notNull().default('mock'),
+    /** The processor's id: a PaymentIntent (pi_…) or a Refund (re_…). */
+    externalId: text('external_id'),
+    currency: text('currency'),
   },
   (t) => [
     index('payments_order').on(t.orderId),
     index('payments_status_created').on(t.status, t.createdAt),
+    index('payments_external').on(t.externalId).where(sql`${t.externalId} IS NOT NULL`),
   ],
 );
 
