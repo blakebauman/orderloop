@@ -76,6 +76,7 @@ engine source.
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
+| `POST /login/passkey`, `POST /account/passkeys` | React Router action routes (JSON steps `options`/`verify`, and `options`/`add`/`remove`) for WebAuthn passkeys via `@simplewebauthn/server`; `apps/web/app/lib/passkeys.server.ts`. Internal to the web app, not part of the REST API. The RP ID and origin are the request's host; a verified passkey with user verification starts a session without a password or two-factor code |
 | everything else | React Router (UI routes guard themselves with `requireUser(request, role)`) |
 
 Before the API, agent and React Router branches, a browser request that changes state or opens a

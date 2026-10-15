@@ -3,6 +3,7 @@ import { index, layout, type RouteConfig, route } from '@react-router/dev/routes
 export default [
   route('login', 'routes/login.tsx'),
   route('login/two-factor', 'routes/login-two-factor.tsx'),
+  route('login/passkey', 'routes/login-passkey.ts'),
   route('logout', 'routes/logout.ts'),
   // A new deployment's first admin, from its one-time setup code (lib/setup.server.ts).
   route('setup', 'routes/setup.tsx'),
@@ -27,4 +28,5 @@ export default [
   // Resource routes the editor and order page post to.
   route('flows/:flowId/action', 'routes/flow-action.ts'),
   route('orders/:orderId/action', 'routes/order-action.ts'),
+  route('account/passkeys', 'routes/account-passkeys.ts'),
 ] satisfies RouteConfig;

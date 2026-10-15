@@ -21,6 +21,8 @@ export const AUDIT_ACTIONS = {
   'auth.session_ended': 'Signed out a session',
   'auth.other_sessions_ended': 'Signed out everywhere else',
   'auth.two_factor_failed': 'Two-factor code wrong',
+  'auth.passkey_added': 'Added a passkey',
+  'auth.passkey_removed': 'Removed a passkey',
   'auth.two_factor_throttled': 'Two-factor refused: too many wrong codes',
   'auth.two_factor_enabled': 'Turned on two-factor sign-in',
   'auth.two_factor_disabled': 'Turned off two-factor sign-in',
@@ -94,6 +96,9 @@ export function describe(e: AuditEvent): string {
   else if (d.role) parts.push(role(d.role));
   if (typeof d.reason === 'string') parts.push(d.reason);
   if (typeof d.twoFactor === 'string') parts.push(`two-factor ${d.twoFactor}`);
+  if (e.action.startsWith('auth.passkey_') && typeof d.name === 'string') parts.push(d.name);
+  if (d.method === 'passkey') parts.push('with a passkey');
+  if (d.passkeys === 'removed') parts.push('passkeys removed');
   if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
     parts.push(`${d.left} left`);
   if (typeof d.decision === 'string') parts.push(d.decision);
