@@ -84,6 +84,10 @@ export type Deployment = {
   limits?: Partial<Record<LimitKey, number>>;
   /** Days audit events are kept before they're archived to R2 and deleted (at least 90). */
   auditRetentionDays?: number;
+  /** Days after an order finishes that its buyer's personal data is erased (at least 30). */
+  personalDataRetentionDays?: number;
+  /** Days the R2 archive keeps audit events past the database's retention; unset keeps them. */
+  auditArchiveDays?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
   aiPersonalData: 'redact' | 'send';
   /** Whether the AI Gateway keeps request logs (prompts and responses). Default true. */
@@ -140,6 +144,14 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     throw new Error(`${file}: aiPersonalData must be "redact" or "send"`);
   if (raw.aiGatewayLogs !== undefined && typeof raw.aiGatewayLogs !== 'boolean')
     throw new Error(`${file}: aiGatewayLogs must be true or false`);
+  const personal = raw.personalDataRetentionDays;
+  if (personal !== undefined && (!Number.isInteger(personal) || (personal as number) < 30))
+    throw new Error(
+      `${file}: personalDataRetentionDays must be a whole number of days, at least 30`,
+    );
+  const archive = raw.auditArchiveDays;
+  if (archive !== undefined && (!Number.isInteger(archive) || (archive as number) < 1))
+    throw new Error(`${file}: auditArchiveDays must be a whole number of days`);
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
@@ -157,6 +169,8 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     demo: raw.demo === true,
     ...(limits ? { limits: limits as Deployment['limits'] } : {}),
     ...(retention !== undefined ? { auditRetentionDays: retention as number } : {}),
+    ...(personal !== undefined ? { personalDataRetentionDays: personal as number } : {}),
+    ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs !== false,
   };
@@ -220,6 +234,11 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };
+  if (d.personalDataRetentionDays)
+    config.vars = {
+      ...config.vars,
+      PERSONAL_DATA_RETENTION_DAYS: String(d.personalDataRetentionDays),
+    };
   // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
   if (d.demo)
     config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };
@@ -308,6 +327,7 @@ function shellNames(id: string | undefined) {
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',
     AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
+    AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
   };
   for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
 }

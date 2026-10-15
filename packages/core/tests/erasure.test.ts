@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_ORDER_STATE, type OrderState } from '../src/api';
-import { eraseOrderState, eraseText, erasureTerms, subjectEmail } from '../src/erasure';
+import {
+  eraseOrderState,
+  eraseText,
+  erasureTerms,
+  personalDataRetentionDays,
+  subjectEmail,
+} from '../src/erasure';
 
 describe('erasure', () => {
   it('matches a subject by their trimmed, lower-cased email', () => {
@@ -59,5 +65,15 @@ describe('erasure', () => {
     expect(erased.nodes.notify).toMatchObject({ summary: 'Emailed [erased]', output: {} });
     expect(erased.timeline[0]!.message).toBe('Sent receipt to [erased]');
     expect(erased.status).toBe('completed');
+  });
+});
+
+describe('personal data retention', () => {
+  it('keeps personal data unless a deployment sets days, and never fewer than 30', () => {
+    expect(personalDataRetentionDays(undefined)).toBeNull();
+    expect(personalDataRetentionDays('')).toBeNull();
+    expect(personalDataRetentionDays('0')).toBeNull();
+    expect(personalDataRetentionDays('365')).toBe(365);
+    expect(personalDataRetentionDays('7')).toBe(30);
   });
 });

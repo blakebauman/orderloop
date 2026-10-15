@@ -134,3 +134,14 @@ test('workflow AI nodes see personal data only where the registry says send', ()
   assert.equal(toDeployment(acme).aiGatewayLogs, true);
   assert.equal(toDeployment({ ...acme, aiGatewayLogs: false }).aiGatewayLogs, false);
 });
+
+test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days", () => {
+  const short = toDeployment({ ...acme, personalDataRetentionDays: 365 });
+  assert.equal(renderEngine(base('engine'), short).vars.PERSONAL_DATA_RETENTION_DAYS, '365');
+  assert.equal(
+    renderEngine(base('engine'), toDeployment(acme)).vars.PERSONAL_DATA_RETENTION_DAYS,
+    '',
+  );
+  assert.throws(() => toDeployment({ ...acme, personalDataRetentionDays: 7 }), /at least 30/);
+  assert.throws(() => toDeployment({ ...acme, auditArchiveDays: 0 }), /auditArchiveDays/);
+});

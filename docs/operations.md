@@ -28,6 +28,8 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
+| `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
+| `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
@@ -59,6 +61,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database and R2 bucket (in the jurisdiction), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
+   It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
    It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.

@@ -243,7 +243,7 @@ never blocks the action it records. An approval's decider is also recorded on th
 ### Keeping and checking the log
 
 The log is append-only: an event can't be edited or deleted. Events are kept 400 days unless your
-contract sets another period (never under 90 days), then archived before they leave the log.
+contract sets another period (never under 90 days), then archived before they leave the log. The archive is kept unless your contract sets a period after which archived events expire.
 
 Each event is chained to the one before it with a hash, so a changed, removed or reordered event is
 detectable. Events from before the chain was introduced have no hash. Admins check the chain with
@@ -263,6 +263,8 @@ An admin answers a request about one person, by the email address they are known
 - **Refused while an order runs.** If any of their orders has not finished, the answer is `409` with `reason: "active_orders"` and the order ids. Cancel those orders or let them finish, then ask again.
 - **Orders, 100 a call.** When `done` is `false`, call again. Each order loses its contact, inbound document and personal `meta`; their email, names, phone and ship-to name are replaced with `[erased]` in the title, line names, step outputs and summaries and the timeline, and other emails and phone numbers are masked. Stored documents, the order's webhook delivery records, the messages sent for it and its intake log entry (sender and subject) are erased too. Lines, amounts, payments, shipments and the ledgers stay, and an erased order is skipped next time.
 - **Then the rest.** With no orders left, intake emails from that sender that never became an order, and messages to that address, are erased, and each customer account becomes "Erased customer" with a placeholder email and no Stripe ids.
+
+Personal data can also leave on its own. A workspace can be set up so that the personal data on finished orders is removed after an agreed period (never under 30 days), in the same way and with the same result as an erasure request, except that only the order's own contact is removed and customer accounts are untouched. Ask your Order Loop contact to set it up.
 
 Team members are not touched: when `teamMember` is `true`, remove the person on the [Team page](#the-team-page). The Stripe customer is not deleted at Stripe. The audit log keeps its events under its own retention; both calls are recorded as `personal_data.*` under **Personal data**, naming the person by a hash.
 

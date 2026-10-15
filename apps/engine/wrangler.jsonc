@@ -95,7 +95,11 @@
     "AI_PERSONAL_DATA": "redact",
     // Days audit events are kept before the daily sweep archives them to R2 and deletes them.
     // At least 90; the registry's auditRetentionDays sets it per deployment.
-    "AUDIT_RETENTION_DAYS": "400"
+    "AUDIT_RETENTION_DAYS": "400",
+    // Days after an order finishes that the daily sweep erases its buyer's personal data (the
+    // commercial record stays). Empty keeps it; at least 30. The registry's
+    // personalDataRetentionDays sets it per deployment.
+    "PERSONAL_DATA_RETENTION_DAYS": ""
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).
