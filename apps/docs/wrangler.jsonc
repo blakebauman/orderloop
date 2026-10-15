@@ -8,5 +8,8 @@
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
   },
+  // Served only at its custom domain: no workers.dev or preview URL as a second address.
+  "workers_dev": false,
+  "preview_urls": false,
   "routes": [{ "pattern": "docs.orderloop.app", "custom_domain": true }]
 }
