@@ -12,7 +12,15 @@ import {
   useSearchParams,
 } from 'react-router';
 import { Mark } from '~/components/mark';
-import { authEnabled, principal, type SignInResult, signIn, Throttled } from '~/lib/auth.server';
+import {
+  authEnabled,
+  principal,
+  type SignInResult,
+  signIn,
+  signInDemo,
+  Throttled,
+} from '~/lib/auth.server';
+import { isDemo } from '~/lib/demo.server';
 import { nextPath } from '~/lib/next-path';
 import { oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/login';
@@ -31,11 +39,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     const clientId = new URL(next, request.url).searchParams.get('client_id');
     if (clientId) app = (await oauthApi(request).lookupClient(clientId))?.clientName ?? null;
   }
-  return { sharedPassword: !!(env as { APP_PASSWORD?: string }).APP_PASSWORD, app };
+  return { sharedPassword: !!(env as { APP_PASSWORD?: string }).APP_PASSWORD, app, demo: isDemo() };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
+  if (form.get('intent') === 'demo' && isDemo())
+    return redirect(nextPath(request), { headers: { 'set-cookie': await signInDemo(request) } });
   const email = String(form.get('email') ?? '');
   let result: SignInResult | null;
   try {
@@ -62,7 +72,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Login() {
-  const { sharedPassword, app } = useLoaderData<typeof loader>();
+  const { sharedPassword, app, demo } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const busy = useNavigation().state === 'submitting';
@@ -87,7 +97,20 @@ export default function Login() {
   return (
     // Anchored near the top rather than centred, so the card doesn't jump when the email field
     // comes and goes.
-    <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
+    <main className="grid min-h-dvh content-start justify-items-center gap-4 bg-background px-4 pt-[16vh]">
+      {demo && !connecting ? (
+        <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
+          <input type="hidden" name="intent" value="demo" />
+          <h1 className="font-semibold tracking-title text-2xl">OrderLoop demo</h1>
+          <p className="mt-1 text-muted-foreground text-sm">
+            A sample workspace with customers, a catalog and stores. Run scenarios, edit flows and
+            decide approvals as an operator. It resets every night.
+          </p>
+          <Button type="submit" className="mt-4 w-full" disabled={busy}>
+            {busy ? 'Opening…' : 'Explore the demo'}
+          </Button>
+        </Form>
+      ) : null}
       <Form method="post" className="h-fit w-full max-w-sm rounded-md border bg-card p-6">
         {params.get('signed-out') && !error ? (
           <p role="status" className="mb-4 text-muted-foreground text-sm">

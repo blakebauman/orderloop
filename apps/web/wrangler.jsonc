@@ -42,7 +42,10 @@
     "ORDER_ROUTES": "",
     // EDI 850s: JSON from a trading partner's ISA sender id to the customer it orders for. A
     // sender not listed here is refused.
-    "EDI_PARTNERS": ""
+    "EDI_PARTNERS": "",
+    // "true" only on a demo deployment (scripts/fleet.ts sets it): one-click sign-in as a shared
+    // operator, with people, tokens, integrations and webhooks locked (app/lib/demo.server.ts).
+    "DEMO_MODE": ""
   }
   // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
   // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). SHOPIFY_WEBHOOK_SECRET —

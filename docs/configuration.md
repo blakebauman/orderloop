@@ -43,6 +43,7 @@ Set in `vars` in `apps/web/wrangler.jsonc`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORDER_ROUTES` | `""` | Inbound orders: JSON object from `model:channel` or `model:*` to a flow id, overriding the built-in routes (`DEFAULT_ORDER_ROUTES` in `packages/core/src/inbound.ts`: `b2c:pos` and `d2c:pos` → `tpl-pos-sale`) key by key. Keys are lowercase letters, digits and underscores (`*` allowed after the colon); entries with another key or an empty flow id are dropped, as is a value that isn't a JSON object. A route that isn't set starts the model's default flow. See [Inbound orders](https://docs.orderloop.io/guides/inbound-orders/#routing) |
+| `DEMO_MODE` | `""` | `"true"` only on a demo deployment, where `scripts/fleet.ts` sets it (see [The demo](operations.md#the-demo)). The sign-in page offers one-click sign-in as the shared `demo@orderloop.app` operator, who never owes two-factor setup; changes on Team and Account, `/oauth/authorize`, integrations and webhook subscriptions answer `403` (`apps/web/app/lib/demo.server.ts`); the flow templates are checked on every load, since the nightly reset removes them |
 | `EDI_PARTNERS` | `""` | EDI 850s: JSON object from a trading partner's ISA sender id to the customer id it orders for, e.g. `{ "NORTHWIND": "cus_northwind" }`. A sender not listed is refused with `403`. See [Channel adapters](https://docs.orderloop.io/guides/channel-adapters/#edi-x12-850) |
 
 ## Web secrets

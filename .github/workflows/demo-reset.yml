@@ -1,0 +1,83 @@
+name: Reset demo
+
+# Every night, puts each demo deployment (deployments/*.jsonc with "demo": true) back to the demo
+# data: stops its running orders, removes what visitors made (packages/db/reset/demo.sql)
+# and loads packages/db/seed/0001_demo.sql again. Run it by hand from the Actions tab too.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-reset
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      demos: ${{ steps.demos.outputs.demos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: demos
+        run: echo "demos=$(node scripts/fleet.ts demos)" >> "$GITHUB_OUTPUT"
+
+  reset:
+    needs: plan
+    if: needs.plan.outputs.demos != '[]'
+    name: reset (${{ matrix.demo.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: ${{ fromJSON(needs.plan.outputs.demos) }}
+    environment:
+      name: ${{ matrix.demo.environment }}
+    # A deploy to the same deployment waits for the reset, and the reverse.
+    concurrency:
+      group: deploy-${{ matrix.demo.id }}
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ID: ${{ matrix.demo.id }}
+      CONFIG: wrangler.${{ matrix.demo.id }}.json
+      WORKFLOW: orderloop-order${{ matrix.demo.suffix }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Render config
+        run: node scripts/fleet.ts render "$ID"
+      # Otherwise a running order's next step would write its row back after the reset.
+      - name: Stop running orders
+        run: |
+          d1() { pnpm --silent --filter @orderloop/web exec wrangler d1 execute DB --remote --config "$CONFIG" "$@"; }
+          d1 --json --command "SELECT instance_id FROM orders WHERE instance_id IS NOT NULL AND status IN ('queued', 'running', 'waiting')" \
+            > "$RUNNER_TEMP/running.json"
+          jq -r '.[0].results[].instance_id' "$RUNNER_TEMP/running.json" | while read -r instance; do
+            pnpm --filter @orderloop/engine exec wrangler workflows instances terminate "$WORKFLOW" "$instance" \
+              || echo "::notice::$instance had already stopped"
+          done
+      - name: Remove what visitors made
+        run: pnpm --filter @orderloop/web exec wrangler d1 execute DB --remote --config "$CONFIG" --file ../../packages/db/reset/demo.sql
+      - name: Load demo data
+        run: pnpm --filter @orderloop/web exec wrangler d1 execute DB --remote --config "$CONFIG" --file ../../packages/db/seed/0001_demo.sql

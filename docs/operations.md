@@ -101,6 +101,32 @@ wait for approval after `internal` succeeds.
 - **Fleet status:** `node scripts/fleet.ts status` calls each deployment's `/health/deep` and
   prints its ring, domain and health.
 
+## The demo
+
+`demo.orderloop.app` is a public demo, the `demo` deployment, with `"demo": true` in its
+registry file. Compared with a customer's deployment:
+
+- **Demo data.** Each deploy loads `packages/db/seed/0001_demo.sql` after the migrations (the
+  customers, catalog, stores, sellers and rates local development uses), so the dashboard's
+  scenarios are there.
+- **One-click sign-in.** `DEMO_MODE` is `"true"`, so the sign-in page offers **Explore the demo**,
+  which signs a visitor in as the shared operator `demo@orderloop.app` (created on first use, with
+  no password). People with their own account on the demo sign in below it as usual.
+- **Guardrails.** Visitors can start and cancel orders, decide approvals, run scenarios and edit and
+  publish flows. They can't change the Team or Account pages (people, roles, tokens, two-factor,
+  sessions, settings), and integrations, webhook subscriptions and connecting apps (`/mcp`, `/a2a`)
+  are closed, so the demo can't be pointed at anything outside it.
+- **No spend, fast time.** Models are mocked (`AI_MODE=mock`, no AI Gateway) and waits run 1440×
+  faster (`TIME_SCALE`), as in local development.
+- **Nightly reset.** `.github/workflows/demo-reset.yml` runs at 04:00 UTC (and from the Actions
+  tab): it stops the orders still running, applies `packages/db/reset/demo.sql` (everything
+  visitors made, the audit log and the demo visitor's sessions; people, settings, integrations,
+  `cus_internal`, `USD` and the price sources stay) and loads the demo data again. Durable Object
+  state of old orders stays behind, unreachable once their rows are gone.
+
+To bring it up: `./scripts/provision.sh demo`, then set `"hold": false` in `deployments/demo.jsonc`
+and merge. The demo's own `APP_PASSWORD` (in `.secrets/demo/`) is for you, not visitors.
+
 ## Removing a customer
 
 A deployment holds only that customer's data, so removing it is the erasure:

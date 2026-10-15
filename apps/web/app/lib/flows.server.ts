@@ -18,13 +18,17 @@ import {
   seedFlows,
 } from '@orderloop/db';
 import { desc, eq, sql } from 'drizzle-orm';
+import { isDemo } from './demo.server';
 import { db } from './env.server';
 
 let seeded = false;
 
-/** Publishes the built-in templates on first use (cheap no-op afterwards). */
+/**
+ * Publishes the built-in templates on first use (cheap no-op afterwards). A demo checks every
+ * time, since its nightly reset removes them while isolates stay warm.
+ */
 export async function ensureSeeded() {
-  if (seeded) return;
+  if (seeded && !isDemo()) return;
   await seedFlows(
     db(),
     Object.values(TEMPLATES).map((t) => t()),
