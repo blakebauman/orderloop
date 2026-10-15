@@ -30,14 +30,14 @@ are served from.
 Send `Authorization: Bearer …` with every request, one of:
 
 - An [API token](/guides/team-and-roles/#api-tokens) (`ol_live_…`). It carries the role it was
-  created with and its expiry. The workspace password works as a break-glass admin.
+  created with and its expiry.
 - An OAuth access token, from the authorization-code flow with PKCE. Request the resource
   `https://orderloop.app/a2a`; the scope is the role to act with. The person signs in on
-  OrderLoop's consent page with their own account (not the workspace password), sees that the
+  OrderLoop's consent page with their own account, sees that the
   app acts "via A2A", and grants a role no higher than their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
 
-Both are the credentials the [REST API](/reference/rest-api/) takes, with the same throttling
-(`429` with `Retry-After`) and expiry (`401` with the reason). Each caller has 300 requests a
+Both are the credentials the [REST API](/reference/rest-api/) takes, with the same expiry
+(`401` with the reason). Each caller has 300 requests a
 minute on `/a2a`, separate from its budget on `/mcp`; over it the answer is `429` with
 `Retry-After: 60`. A token is bound to one endpoint:
 an OAuth grant for `/mcp` is refused at `/a2a` and the reverse, so connecting the same app to both

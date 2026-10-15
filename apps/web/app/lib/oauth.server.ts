@@ -7,8 +7,8 @@
  * The consent page is ours (routes/oauth-authorize.tsx): a signed-in person approves a client with
  * a role no higher than their own, and can disconnect it from their Account page.
  *
- * Both endpoints also take the REST API's credentials as a bearer token (`ol_live_…` API tokens,
- * or the shared APP_PASSWORD), so clients configured with a header (Claude Code, Cursor, an A2A
+ * Both endpoints also take the REST API's credentials as a bearer token (`ol_live_…` API tokens),
+ * so clients configured with a header (Claude Code, Cursor, an A2A
  * client) work without the browser flow. Either way the caller is resolved here, as they are now,
  * and the request is forwarded to the engine (apps/engine/src/mcp.ts, apps/engine/src/a2a/) with
  * the principal header, like the agent sockets.

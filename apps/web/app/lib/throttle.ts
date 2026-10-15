@@ -13,8 +13,8 @@ export const LIMITS = {
   ip: 30,
   /** Many places trying one account; high, so an attacker can't easily lock a person out. */
   email: 50,
-  /** Guesses at the shared APP_PASSWORD as an API bearer token, per place. */
-  'api-ip': 20,
+  /** Guesses at a deployment's setup code (`/setup`), per place. */
+  'setup-ip': 10,
   /** Wrong two-factor codes for one person, after a correct password. */
   'two-factor': 5,
   /** Wrong current passwords from someone already signed in (Account page re-checks). */
@@ -27,9 +27,9 @@ export type FailureRow = { key: string; count: number; windowStart: number };
 
 export const throttleKey = (kind: ThrottleKind, value: string) => `${kind}:${value}`;
 
-/** The keys a sign-in attempt counts against. A blank email is the shared workspace password. */
+/** The keys a sign-in attempt counts against. */
 export function signInKeys(email: string, ip: string): string[] {
-  const who = email.trim().toLowerCase() || '(workspace password)';
+  const who = email.trim().toLowerCase() || '(no email)';
   return [
     throttleKey('email-ip', `${who}|${ip}`),
     throttleKey('ip', ip),

@@ -16,7 +16,7 @@ import {
 } from '../app/lib/api.server';
 import {
   apiPrincipal,
-  openModeRefused,
+  awaitingSetup,
   principal,
   sessionId,
   setupDue,
@@ -69,9 +69,16 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
   if (url.pathname === '/health/deep') return deepHealth(env);
 
-  // Open mode (no APP_PASSWORD, no people) makes everyone an operator: local development only.
-  const unset = await openModeRefused(url);
-  if (unset) return new Response(unset, { status: 503 });
+  // With no people yet, a deployed workspace is waiting for its first admin: only the setup page
+  // (and its assets) answer. On localhost the same state is open, for local development.
+  if (
+    url.pathname !== '/setup' &&
+    !url.pathname.startsWith('/assets/') &&
+    (await awaitingSetup(url))
+  )
+    return request.method === 'GET' && request.headers.get('accept')?.includes('text/html')
+      ? Response.redirect(new URL('/setup', url).href, 302)
+      : Response.json({ error: 'This workspace is not set up yet.' }, { status: 503 });
 
   // A demo deployment keeps visitors away from people, credentials and outbound endpoints.
   const locked = demoRefusal(request);

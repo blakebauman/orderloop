@@ -263,18 +263,11 @@ export default function Account() {
               </Form>
             ) : (
               <p className="text-muted-foreground text-sm">
-                {me.kind === 'open' ? (
-                  <>
-                    Sign-in is off: there is no workspace password and nobody has their own sign-in
-                    yet.{' '}
-                    <Link to="/team" className="text-link hover:underline">
-                      Turn it on from the Team page
-                    </Link>
-                    .
-                  </>
-                ) : (
-                  'You are signed in with the workspace password, which has no account of its own.'
-                )}
+                Sign-in is off: nobody has an account yet.{' '}
+                <Link to="/team" className="text-link hover:underline">
+                  Turn it on from the Team page
+                </Link>
+                .
               </p>
             )}
           </Section>

@@ -22,20 +22,9 @@ import type { Route } from './+types/oauth-authorize';
 
 export const meta = ({ loaderData: d }: Route.MetaArgs) => [
   {
-    title:
-      d && 'error' in d
-        ? 'Can’t connect this app · OrderLoop'
-        : d && 'personal' in d
-          ? 'Use your own account · OrderLoop'
-          : 'Connect an app · OrderLoop',
+    title: d && 'error' in d ? 'Can’t connect this app · OrderLoop' : 'Connect an app · OrderLoop',
   },
 ];
-
-/**
- * The workspace password belongs to no one, so it can't stand behind a lasting grant: an app's
- * actions must trace to a person. (Open local development has no accounts at all and keeps working.)
- */
-const SHARED_REFUSED = 'Sign in with your own account to connect an app.';
 
 /** The consent cookie and anti-framing headers from the loader, and the redirect's cookies. */
 export const headers: Route.HeadersFunction = ({ loaderHeaders, actionHeaders }) => {
@@ -95,7 +84,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     const authRequest = await oauth.parseAuthRequest(request);
     // First: a failed lookup leaves nothing behind.
     const details = await oauth.describeConsent(authRequest);
-    if (me.kind === 'password') return { personal: true as const, app: details.clientName };
     const consent = await oauth.beginConsent(authRequest);
     const roles = ROLES.filter((r) => grantable(r) && atLeast(me.role, r));
     return data(
@@ -121,8 +109,6 @@ export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const handle = String(form.get('handle') ?? '');
   try {
-    if (me.kind === 'password' && form.get('decision') === 'approve')
-      return data({ error: SHARED_REFUSED }, { status: 403 });
     if (form.get('decision') !== 'approve') {
       const denied = await oauth.denyConsent(request, handle);
       return new Response(null, { status: 302, headers: denied.headers });
@@ -168,24 +154,7 @@ export default function OAuthAuthorize() {
     <main className="grid min-h-dvh place-items-center bg-background px-4">
       <div className="w-full max-w-md rounded-md border bg-card p-6">
         <Mark className="size-7" />
-        {'personal' in d ? (
-          <>
-            <h1 className="mt-4 text-balance font-semibold tracking-title text-2xl">
-              Use your own account to connect an app
-            </h1>
-            <p className="mt-2 text-sm">
-              You’re signed in with the workspace password, which belongs to no one. An app acts for
-              a person, so OrderLoop can’t connect “{d.app}” to it.
-            </p>
-            <p className="mt-2 text-muted-foreground text-sm">
-              Sign in with your own account and this request comes back. No account yet? An admin
-              can add you on the Team page.
-            </p>
-            <Button asChild className="mt-5">
-              <a href={switchAccount}>Sign in with your account</a>
-            </Button>
-          </>
-        ) : 'error' in d ? (
+        {'error' in d ? (
           <>
             <h1 className="mt-4 font-semibold tracking-title text-2xl">Can’t connect this app</h1>
             <p className="mt-2 text-sm">{d.error}</p>

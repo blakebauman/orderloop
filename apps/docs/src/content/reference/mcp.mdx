@@ -23,8 +23,7 @@ connects at `/a2a`; see [A2A endpoint](/reference/a2a/).
 Add a custom connector with the URL `https://orderloop.app/mcp`. The client discovers the
 authorization server, registers itself and opens OrderLoop's consent page in your browser:
 
-1. Sign in with your own account. Two-factor sign-in applies. The workspace password can't
-   connect an app, because an app's actions must trace to a person.
+1. Sign in with your own account. Two-factor sign-in applies.
 2. Check which app is asking and where access will be sent. An app that registered itself is
    marked as unverified; an app on your own computer gets an extra warning.
 3. Choose a role. You are offered your own role and the roles below it, lowest first, and the
@@ -67,8 +66,7 @@ A client that runs OAuth itself finds the authorization server from
 to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.
 
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
-credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and the workspace
-password as a break-glass admin. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
+credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens. These work on `/a2a` too. A bearer that isn't a valid token is `401`, and an expired token is
 refused (`401` with the reason), as there.
 
 ## Tools

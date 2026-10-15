@@ -17,8 +17,8 @@ import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 /**
  * A person's principal from their live session: null once it has expired or been deleted, or the
- * user is disabled; otherwise with their current role, name and email. The shared password and
- * open local dev have no session to check. Using a socket counts as activity, so it keeps the
+ * user is disabled; otherwise with their current role, name and email. API tokens and open local
+ * dev have no session to check. Using a socket counts as activity, so it keeps the
  * session from going idle.
  */
 export async function livePrincipal(env: Env, p: ProxiedPrincipal): Promise<Principal | null> {

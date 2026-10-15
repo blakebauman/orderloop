@@ -13,8 +13,7 @@ the server accepts. Response bodies are described here.
 ## Authentication
 
 Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a signed-in dashboard
-session cookie also works, and so does the workspace password, a break-glass admin sign-in set
-by your administrator). Each route needs
+session cookie also works). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
 (starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations and reading audit events `admin`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
@@ -22,9 +21,7 @@ authenticated by an HMAC signature instead (see [signed events](#signed-events) 
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid field, with its `path`
 and `message`) on a `400` for an invalid body.
-`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` too many wrong bearer tokens from one address (more
-than 20 bearers that aren't `ol_live_` tokens in 15 minutes, which only guesses at the workspace
-password produce; see `Retry-After`) or a caller over its requests a minute (below), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
+`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` a caller over its requests a minute (below; see `Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
 
 ### Rate limits
 
@@ -43,7 +40,7 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `GET` | `/api/v1/orders?model=&channel=&status=&q=&limit=&cursor=` | | `{ orders, nextCursor }` |
 | `GET` | `/api/v1/orders/:id` | | The order's live state |
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
-| `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }`, `403 { error }` if the caller started the order and the workspace separates [approvals](/guides/team-and-roles/#approvals) |
+| `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, note? }` | `{ ok: true }`, `403 { error }` if the caller started the order and the workspace separates [approvals](/guides/team-and-roles/#approvals) |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
 | `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (admin) |
 | `GET` | `/api/v1/integrations` | | `{ integrations }` (admin) |
@@ -160,10 +157,10 @@ that event yet. An unknown order is `404`. See [Approvals and events](/guides/ap
 ```http
 POST /api/v1/orders/ord_…/approvals/approval
 
-{ "decision": "approved", "by": "dana@example.com", "note": "Paid down last week" }
+{ "decision": "approved", "note": "Paid down last week" }
 ```
 
-`decision` is `approved` or `rejected`. A person or an API token decides as themselves (`by` is ignored); only the workspace password may name `by`, which defaults to `api`. The decision takes effect at once;
+`decision` is `approved` or `rejected`. A person or an API token always decides as themselves; the record names the caller. The decision takes effect at once;
 the dashboard's undo window does not apply to the API. An unknown order is `404`, and a node that
 isn't waiting for an approval (already decided, or never reached) is `409`.
 
@@ -216,7 +213,7 @@ recorded and may be retried.
 
 The order routes bound their bodies the same way: `POST /api/v1/orders/{id}/events` takes `event`
 (1 to 100 characters) and an optional `payload` of at most 32 KiB of JSON,
-`POST …/approvals/{nodeId}` takes `decision`, `by` (at most 200 characters) and `note` (at most
+`POST …/approvals/{nodeId}` takes `decision` and `note` (at most
 2000), and `POST …/cancel` takes `reason` (at most 500). Anything else is a `400` with `issues`.
 The order page enforces the same bounds.
 

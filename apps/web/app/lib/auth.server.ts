@@ -7,15 +7,14 @@
  *   `__Host-ol_2fa` cookie (a `sign_in_challenges` row) instead, and the session only once a code
  *   from their authenticator app, or a recovery code, checks out.
  * - The REST API takes `Authorization: Bearer ol_live_…`, an `api_tokens` row with its own role.
- * - `APP_PASSWORD`, when set, is a break-glass admin: sign in with the password and no email
- *   (the older HMAC cookie), or send it as the bearer token.
- * - With no `APP_PASSWORD` and no users (local development) everything is open, as an admin.
+ * - There is no shared password. A new deployment's first admin comes from its one-time setup
+ *   code (`setup.server.ts`); with no users on localhost (local development) everything is open,
+ *   as an admin.
  *
  * Users carry an `external_sub` column for linking an outside identity later; sign-in through
  * an outside provider would create the same session row.
  */
 
-import { env } from 'cloudflare:workers';
 import {
   atLeast,
   type Principal,
@@ -41,8 +40,6 @@ import {
   hashPassword,
   normalizeEmail,
   randomToken,
-  safeEqual,
-  secretEqual,
   sha256Hex,
   verifyPassword,
 } from './credentials';
@@ -58,34 +55,10 @@ const SESSION = '__Host-ol_session';
 /** Between a correct password and a correct code, for someone with two-factor sign-in on. */
 const CHALLENGE = '__Host-ol_2fa';
 const CHALLENGE_MS = 10 * 60_000;
-/** The shared-password cookie: an HMAC of APP_PASSWORD. */
-const SHARED = 'ol_session';
 const TOKEN_TOUCH_MS = 5 * 60_000;
 const EXPIRED_AUDIT_MS = 60 * 60_000;
 
 const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'admin' };
-const SHARED_PRINCIPAL: Principal = {
-  kind: 'password',
-  id: 'shared-password',
-  name: 'admin',
-  role: 'admin',
-};
-
-function password(): string | undefined {
-  return (env as { APP_PASSWORD?: string }).APP_PASSWORD || undefined;
-}
-
-async function hmac(pw: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(pw),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('orderloop-session'));
-  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/[+/=]/g, '');
-}
 
 function cookie(request: Request, name: string): string | undefined {
   return (request.headers.get('cookie') ?? '')
@@ -94,7 +67,7 @@ function cookie(request: Request, name: string): string | undefined {
     ?.slice(name.length + 1);
 }
 
-// Whether any user exists decides if a deployment without APP_PASSWORD is open. It only changes
+// Whether any user exists decides if a deployment is open (localhost) or waiting for setup. It only changes
 // when the first user is added, so each isolate remembers it briefly.
 let haveUsers: { value: boolean; at: number } | null = null;
 async function anyUsers() {
@@ -109,16 +82,16 @@ export const forgetUserCount = () => {
 
 export async function authEnabled(): Promise<boolean> {
   // A demo always signs visitors in (as the demo user), so it is never open.
-  return !!password() || isDemo() || (await anyUsers());
+  return isDemo() || (await anyUsers());
 }
 
 /**
- * Why the request is refused because sign-in isn't set up, or null. With no APP_PASSWORD and no
- * people every caller would be an admin, which only local development may be.
+ * True while a deployed workspace has no people yet: every caller would be an admin, which only
+ * local development may be, so everything but the setup page is refused until its first admin
+ * signs up with the setup code.
  */
-export async function openModeRefused(url: URL): Promise<string | null> {
-  if (isLocalHost(url) || (await authEnabled())) return null;
-  return 'Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first admin on the Team page.';
+export async function awaitingSetup(url: URL): Promise<boolean> {
+  return !isLocalHost(url) && !(await authEnabled());
 }
 
 /**
@@ -137,7 +110,7 @@ export async function sessionId(request: Request): Promise<string | undefined> {
  */
 export type Caller = Principal & { twoFactorDue?: true; passwordChangeDue?: true };
 
-/** The signed-in person (or shared-password admin) for a browser request, or null. */
+/** The signed-in person for a browser request, or null. */
 export async function principal(request: Request): Promise<Caller | null> {
   if (!(await authEnabled())) return OPEN;
   const token = cookie(request, SESSION);
@@ -188,9 +161,6 @@ export async function principal(request: Request): Promise<Caller | null> {
       };
     }
   }
-  const pw = password();
-  const shared = cookie(request, SHARED);
-  if (pw && shared && safeEqual(shared, await hmac(pw))) return SHARED_PRINCIPAL;
   return null;
 }
 
@@ -203,13 +173,13 @@ export class Throttled extends Error {
   }
 }
 
-async function waitFor(keys: string[]) {
+export async function waitFor(keys: string[]) {
   const rows = await db().select().from(authFailures).where(inArray(authFailures.key, keys));
   return blockedFor(rows, Date.now());
 }
 
 /** Counts a failure against each key, starting a fresh window where the old one has ended. */
-async function recordFailure(keys: string[]) {
+export async function recordFailure(keys: string[]) {
   const now = Date.now();
   const expired = sql`${now} - ${authFailures.windowStart} >= ${WINDOW_MS}`;
   for (const key of keys)
@@ -244,26 +214,14 @@ export async function reauthenticate(userId: string, given: string, hash: string
 }
 
 /**
- * The caller of a REST request: a bearer token, else the browser session. Guesses at the shared
- * APP_PASSWORD are throttled per address (throws `Throttled`); `ol_live_` tokens are random
- * 192-bit values, so they aren't, and a busy address can't lock out working integrations.
+ * The caller of a REST request: a bearer token, else the browser session. Tokens are random
+ * 192-bit `ol_live_` values, so guesses aren't throttled, and a busy address can't lock out
+ * working integrations.
  */
 export async function apiPrincipal(request: Request): Promise<Caller | null> {
   const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return principal(request);
-  if (!bearer.startsWith(API_TOKEN_PREFIX)) {
-    const key = [throttleKey('api-ip', clientIp(request))];
-    const wait = await waitFor(key);
-    if (wait) {
-      await audit(request, 'api.bearer_throttled');
-      throw new Throttled(wait);
-    }
-    const pw = password();
-    if (pw && (await secretEqual(bearer, pw))) return SHARED_PRINCIPAL;
-    await recordFailure(key);
-    await audit(request, 'api.bearer_failed');
-    return null;
-  }
+  if (!bearer.startsWith(API_TOKEN_PREFIX)) return null;
   const row = await db()
     .select()
     .from(apiTokens)
@@ -297,7 +255,7 @@ const lower = (a: Role, b: Role): Role => (atLeast(a, b) ? b : a);
 
 /**
  * The caller behind an OAuth grant, as they are now: null once the person is disabled or deleted,
- * the shared password is unset, or (for open local dev) sign-in has been turned on. The role is
+ * or (for open local dev) sign-in has been turned on. The role is
  * the lower of what was granted and what they have now, so demoting someone also narrows the apps
  * they connected.
  */
@@ -327,8 +285,6 @@ export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
       ...(passwordChangeDue ? { passwordChangeDue: true as const } : {}),
     };
   }
-  if (g.kind === 'password')
-    return password() ? { ...SHARED_PRINCIPAL, role: lower(g.role, SHARED_PRINCIPAL.role) } : null;
   if (g.kind === 'open') return (await authEnabled()) ? null : { ...OPEN, role: g.role };
   return null;
 }
@@ -388,7 +344,7 @@ let decoy: Promise<string> | null = null;
 export type SignInResult = { cookie: string; twoFactor: boolean };
 
 /**
- * Checks an email and password. Null for a wrong one. No email means the shared APP_PASSWORD.
+ * Checks an email and password. Null for a wrong one, or no email.
  * Throws `Throttled`, before checking anything, when this person, this address or this account
  * has failed too often in the current window.
  */
@@ -404,7 +360,7 @@ export async function signIn(
     await audit(request, 'auth.sign_in_throttled', { target });
     throw new Throttled(wait);
   }
-  const r = await checkCredentials(request, email, given);
+  const r = await checkCredentials(email, given);
   if ('reason' in r) {
     await recordFailure(keys);
     // The audit log says why; the person signing in only hears that it didn't match.
@@ -415,24 +371,14 @@ export async function signIn(
   await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
   if (r.twoFactor) return { cookie: await startChallenge(r.principal.id), twoFactor: true };
   await audit(request, 'auth.sign_in', { actor: r.principal });
-  return { cookie: r.cookie ?? (await startSession(request, r.principal.id)), twoFactor: false };
+  return { cookie: await startSession(request, r.principal.id), twoFactor: false };
 }
 
 async function checkCredentials(
-  request: Request,
   email: string,
   given: string,
-): Promise<{ cookie?: string; principal: Principal; twoFactor: boolean } | { reason: string }> {
-  if (!email.trim()) {
-    const pw = password();
-    if (!pw) return { reason: 'no workspace password is set' };
-    if (!(await secretEqual(given, pw))) return { reason: 'wrong workspace password' };
-    return {
-      cookie: `${SHARED}=${await hmac(pw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
-      principal: SHARED_PRINCIPAL,
-      twoFactor: false,
-    };
-  }
+): Promise<{ principal: Principal; twoFactor: boolean } | { reason: string }> {
+  if (!email.trim()) return { reason: 'no email' };
   const user = await db()
     .select()
     .from(users)
@@ -624,7 +570,7 @@ async function useRecoveryCode(userId: string, code: string) {
   return r.meta.changes > 0;
 }
 
-/** Ends the session server-side and returns cookies that clear both kinds. */
+/** Ends the session server-side and returns the cookies that clear it. */
 export async function signOut(request: Request): Promise<string[]> {
   const who = await principal(request);
   if (who && who.kind !== 'open') await audit(request, 'auth.sign_out', { actor: who });
@@ -633,11 +579,7 @@ export async function signOut(request: Request): Promise<string[]> {
     await db()
       .delete(sessions)
       .where(eq(sessions.tokenHash, await sha256Hex(token)));
-  return [
-    `${SESSION}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
-    `${SHARED}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
-    clearChallengeCookie,
-  ];
+  return [`${SESSION}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`, clearChallengeCookie];
 }
 
 /** Who acted, for audit fields such as an approval's `by`. */

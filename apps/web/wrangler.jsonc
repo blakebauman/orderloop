@@ -69,8 +69,8 @@
     // operator, with people, tokens, integrations and webhooks locked (app/lib/demo.server.ts).
     "DEMO_MODE": ""
   }
-  // Secrets (wrangler secret put): APP_PASSWORD — when set, the dashboard and API require it
-  // (cookie for the UI, `Authorization: Bearer <password>` for /api/v1). SHOPIFY_WEBHOOK_SECRET —
+  // Secrets (wrangler secret put): SETUP_TOKEN — the one-time setup code that creates an admin on
+  // /setup (app/lib/setup.server.ts); a new one recovers admin access. SHOPIFY_WEBHOOK_SECRET —
   // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders. Signed webhooks
   // use integration keys (/api/v1/integrations), stored in D1, not a secret here.
 }

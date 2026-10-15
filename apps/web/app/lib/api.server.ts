@@ -217,9 +217,14 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (!parsed.success)
         return json({ error: 'Invalid decision', issues: parsed.error.issues }, 400);
       const b = parsed.data;
-      // A person or a named token decides; only the shared password may name someone else.
-      const by = caller.kind === 'password' ? (b.by ?? 'api') : actor(caller);
-      const res = await engine().decide(orderId, parts[3], b.decision, by, caller.id, b.note);
+      const res = await engine().decide(
+        orderId,
+        parts[3],
+        b.decision,
+        actor(caller),
+        caller.id,
+        b.note,
+      );
       if (res.ok) return json(res);
       if (res.reason === 'own_order') return json({ error: res.error }, 403);
       return res.reason === 'not_found'

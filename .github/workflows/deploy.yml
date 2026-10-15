@@ -18,7 +18,7 @@ jobs:
     name: ${{ fromJSON(inputs.deployment).id }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The deployment's GitHub environment holds its secrets (APP_PASSWORD, SHOPIFY_WEBHOOK_SECRET,
+    # The deployment's GitHub environment holds its secrets (SETUP_TOKEN, SHOPIFY_WEBHOOK_SECRET,
     # INTAKE_ALLOWLIST, SHIPPING_CARRIER_AUTH, STRIPE_SECRET_KEY) and, if it should, a required
     # reviewer.
     # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID can be repository secrets.
@@ -76,7 +76,7 @@ jobs:
       # never removes one, so a secret set by hand survives.
       - name: Collect secrets
         env:
-          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
           SHOPIFY_WEBHOOK_SECRET: ${{ secrets.SHOPIFY_WEBHOOK_SECRET }}
           INTAKE_ALLOWLIST: ${{ secrets.INTAKE_ALLOWLIST }}
           SHIPPING_CARRIER_AUTH: ${{ secrets.SHIPPING_CARRIER_AUTH }}
@@ -127,7 +127,8 @@ jobs:
           # D1, R2 and the engine (over the service binding) all answer.
           curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health/deep"
           # The app itself, not just the health route: the sign-in page renders.
-          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
+          # (On a workspace with no people yet it redirects to the setup page, which must render too.)
+          curl -fsSL --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
       # Any failure once the engine has shipped puts each Worker that deployed back on its
       # previous version, so the deployment never runs a new engine behind an old web app (or the
       # reverse). D1 migrations are not rolled back, which is why they must be additive.
