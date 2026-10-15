@@ -12,7 +12,7 @@ export const meta = () => [{ title: 'Audit log · OrderLoop' }];
 const PAGE = 100;
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request, 'operator');
+  await requireUser(request, 'admin');
   const q = new URL(request.url).searchParams;
   const type = q.get('type');
   const group = isAuditGroup(type) ? type : undefined;

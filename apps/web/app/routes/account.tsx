@@ -173,8 +173,8 @@ export default function Account() {
           {me.passwordChangeDue ? (
             <p className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Choose your own password to continue.</span> You signed
-              in with a temporary password an operator gave you; the rest of OrderLoop opens once
-              you replace it.
+              in with a temporary password an admin gave you; the rest of OrderLoop opens once you
+              replace it.
             </p>
           ) : null}
           {me.twoFactorDue ? (

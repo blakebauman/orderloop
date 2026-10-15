@@ -76,14 +76,15 @@ const { handleApi, handleSignedEvent } = await import('~/lib/api.server');
 const { signWebhook } = await import('@orderloop/core');
 
 const operator: Principal = { kind: 'token', id: 'tok_1', name: 'ci', role: 'operator' };
-const post = (path: string, body: unknown) =>
+const admin: Principal = { ...operator, id: 'tok_2', role: 'admin' };
+const post = (path: string, body: unknown, as = operator) =>
   handleApi(
     new Request(`https://app.test/api/v1/${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    operator,
+    as,
   );
 
 describe('order actions over REST', () => {
@@ -242,7 +243,7 @@ describe('integrations over REST', () => {
       integration: { id: 'int_new', name: 'Stripe' },
       secret: 'whsec_abc',
     });
-    const res = await post('integrations', { name: 'Stripe', events: ['payment.received'] });
+    const res = await post('integrations', { name: 'Stripe', events: ['payment.received'] }, admin);
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ secret: 'whsec_abc' });
     expect(integrations.createIntegration).toHaveBeenCalledWith(
@@ -250,34 +251,35 @@ describe('integrations over REST', () => {
       'ops@example.com',
     );
     expect(audit).toHaveBeenCalledWith(expect.any(Request), 'integration.created', {
-      actor: operator,
+      actor: admin,
       target: 'Stripe',
       detail: { id: 'int_new' },
     });
   });
 
-  it('rotates and revokes, 404 for an unknown key, and needs an operator', async () => {
+  it('rotates and revokes, 404 for an unknown key, and needs an admin', async () => {
     integrations.rotateIntegration.mockResolvedValueOnce({
       integration: { name: 'Stripe' },
       secret: 'whsec_2',
     });
-    expect((await post('integrations/int_new/rotate', {})).status).toBe(200);
+    expect((await post('integrations/int_new/rotate', {}, admin)).status).toBe(200);
     integrations.rotateIntegration.mockResolvedValueOnce(null);
-    expect((await post('integrations/int_nope/rotate', {})).status).toBe(404);
+    expect((await post('integrations/int_nope/rotate', {}, admin)).status).toBe(404);
     integrations.revokeIntegration.mockResolvedValueOnce({ name: 'Stripe' });
     const del = await handleApi(
       new Request('https://app.test/api/v1/integrations/int_new', { method: 'DELETE' }),
-      operator,
+      admin,
     );
     expect(del.status).toBe(200);
     expect(audit.mock.calls.map((c) => c[1])).toEqual([
       'integration.rotated',
       'integration.revoked',
     ]);
-    const viewer: Principal = { ...operator, role: 'viewer' };
-    expect(
-      (await handleApi(new Request('https://app.test/api/v1/integrations'), viewer)).status,
-    ).toBe(403);
+    // Operators run orders and flows; keys, webhooks and the audit log are an admin's.
+    for (const path of ['integrations', 'webhook-subscriptions', 'audit-events'])
+      expect(
+        (await handleApi(new Request(`https://app.test/api/v1/${path}`), operator)).status,
+      ).toBe(403);
   });
 });
 

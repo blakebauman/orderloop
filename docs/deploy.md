@@ -98,7 +98,7 @@ verifies, looks up the customer and starts the order.
 - Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`): logs kept up to 100,000 entries (oldest deleted first), no caching, authentication on, 120 requests a minute (sliding). It is created once per account, in the dashboard (**AI** > **AI Gateway**) or with the AI Gateway API; change its limits there.
 - After the first deploy, sign in with no email and `APP_PASSWORD` (users see it as "the workspace
   password"), open **Team** and add people with their roles, and create API tokens for other
-  systems. `APP_PASSWORD` stays as a break-glass operator sign-in. See
+  systems. `APP_PASSWORD` stays as a break-glass admin sign-in. See
   [Team and roles](https://docs.orderloop.app/guides/team-and-roles/).
 
 ## Sign-in setup and open mode
@@ -106,14 +106,14 @@ verifies, looks up the customer and starts the order.
 With `APP_PASSWORD` set, sign-in is required from the start; the form sends no email, and the REST
 API's equivalent is the password as a bearer token.
 
-A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an operator, which is
+A deployment with no `APP_PASSWORD` and no people is open: everyone acts as an admin, which is
 the local development default. Open mode runs only on `localhost`, `127.0.0.1`, `[::1]` and
 `*.localhost`; any other host answers every request except `/health` and `/health/deep` with `503`
 and the text "Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the
-first operator on the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`,
+first admin on the Team page." (`openModeRefused` in `apps/web/app/lib/auth.server.ts`,
 `isLocalHost` in `apps/web/app/lib/origin.ts`). To turn sign-in on locally, open **Set up sign-in** in the account
-menu (the Team page) and create an operator account with a password you choose; from then on
-everyone signs in. Without `APP_PASSWORD`, the last active operator can't be demoted or disabled.
+menu (the Team page) and create an admin account with a password you choose; from then on
+everyone signs in. Without `APP_PASSWORD`, the last active admin can't be demoted or disabled.
 
 All settings are listed in [Configuration](configuration.md).
 

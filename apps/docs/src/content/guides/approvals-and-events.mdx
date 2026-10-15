@@ -47,7 +47,7 @@ shows why a person is being asked (for a credit check: how far over the limit, t
 balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval times out and to which step. Keyboard: `j`/`k` (or the arrow keys)
 move between rows, `a` approves, `r` rejects and `z` undoes.
 
-Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`operator` for
+Deciding needs the `approver` role or higher. `by` is the signed-in person's email (`admin` for
 the shared workspace password); see [Team and roles](/guides/team-and-roles/#who-decided).
 
 From the **API**:
@@ -105,7 +105,7 @@ waiting.
 
 ### Signed events
 
-Each external system gets its own integration: an operator creates it with
+Each external system gets its own integration: an admin creates it with
 [`POST /api/v1/integrations`](/reference/rest-api/#integrations), which returns its `id` and a
 signing secret (`whsec_…`) shown once. The integration limits what the system may do: the events it
 may deliver (`events`, or `["*"]` for any), and optionally one `channel`, in which case it reaches

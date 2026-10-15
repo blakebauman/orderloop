@@ -13,10 +13,10 @@ the server accepts. Response bodies are described here.
 ## Authentication
 
 Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a signed-in dashboard
-session cookie also works, and so does the workspace password, a break-glass operator sign-in set
+session cookie also works, and so does the workspace password, a break-glass admin sign-in set
 by your administrator). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
-(starting, cancelling, events, webhook subscriptions, integrations) `operator`; a token or person without it gets
+(starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations and reading audit events `admin`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
 authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
 
@@ -45,11 +45,11 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, by?, note? }` | `{ ok: true }` |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
-| `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (operator) |
-| `GET` | `/api/v1/integrations` | | `{ integrations }` (operator) |
-| `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (operator) |
-| `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (operator) |
-| `DELETE` | `/api/v1/integrations/:id` | | `{ ok: true }` (operator) |
+| `GET` | `/api/v1/audit-events?type=&before=&limit=` | | `{ events }` (admin) |
+| `GET` | `/api/v1/integrations` | | `{ integrations }` (admin) |
+| `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (admin) |
+| `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (admin) |
+| `DELETE` | `/api/v1/integrations/:id` | | `{ ok: true }` (admin) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
@@ -172,7 +172,7 @@ payment authorizations, cancels shipments and staged pickups, restocks shipped s
 
 An integration is one external system's signing key and what it may do. Create one per system, so
 a leaked key is revoked on its own and a payment provider can't start orders. All four routes
-need the `operator` role.
+need the `admin` role.
 
 - `POST /api/v1/integrations` takes `name` (1 to 100 characters) and the scope:
   `events` (event names it may deliver to `/api/v1/webhooks/events`, or `["*"]`; default none),
@@ -254,7 +254,7 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 ## Audit events
 
 `GET /api/v1/audit-events` returns the security audit log, newest first, for feeding a log
-system; it needs the `operator` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth` or `integration`; `limit` is
+system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth` or `integration`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
 (an object or `null`) and `ip`. See [Audit log](/guides/team-and-roles/#audit-log) for the actions.

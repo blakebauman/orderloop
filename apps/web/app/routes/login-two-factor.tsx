@@ -124,7 +124,7 @@ export default function LoginTwoFactor() {
           >
             {recovery ? 'Use a code from your app instead' : 'Lost your phone? Use a recovery code'}
           </button>
-          <p>No codes left? Ask an operator to reset your two-factor sign-in.</p>
+          <p>No codes left? Ask an admin to reset your two-factor sign-in.</p>
           <Link
             to="/logout"
             className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"

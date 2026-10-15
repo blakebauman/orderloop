@@ -30,7 +30,7 @@ are served from.
 Send `Authorization: Bearer …` with every request, one of:
 
 - An [API token](/guides/team-and-roles/#api-tokens) (`ol_live_…`). It carries the role it was
-  created with and its expiry. The workspace password works as a break-glass operator.
+  created with and its expiry. The workspace password works as a break-glass admin.
 - An OAuth access token, from the authorization-code flow with PKCE. Request the resource
   `https://orderloop.app/a2a`; the scope is the role to act with. The person signs in on
   OrderLoop's consent page with their own account (not the workspace password), sees that the

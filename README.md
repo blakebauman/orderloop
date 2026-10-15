@@ -73,7 +73,7 @@ Open the dashboard and run one of the scenarios (they appear once the demo data 
 
 ## REST API
 
-Authenticate with `Authorization: Bearer ol_live_…`, an API token an operator creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` does everything else. `APP_PASSWORD`, when set, is a break-glass operator sign-in and bearer token. With no `APP_PASSWORD` and no people, the dashboard and API are open on localhost only (local development); any other host answers `503` until you set `APP_PASSWORD`.
+Authenticate with `Authorization: Bearer ol_live_…`, an API token an admin creates on the Team page. Each token and person has a role: `viewer` reads, `approver` also decides approvals, `operator` also starts and cancels orders, delivers events and edits flows, `admin` also manages the team, tokens, webhooks, integrations and the audit log. `APP_PASSWORD`, when set, is a break-glass admin sign-in and bearer token. With no `APP_PASSWORD` and no people, the dashboard and API are open on localhost only (local development); any other host answers `503` until you set `APP_PASSWORD`.
 
 ```
 GET  /api/v1/openapi.json                    OpenAPI 3.1 description (public)
@@ -87,7 +87,7 @@ GET  /api/v1/orders/:id                      live state from the order's agent
 POST /api/v1/orders/:id/events               { "event": "payment.received", "payload": {} }   ← webhooks
 POST /api/v1/orders/:id/approvals/:nodeId    { "decision": "approved" | "rejected", "by": "…", "note": "…" }
 POST /api/v1/orders/:id/cancel               { "reason": "…" }
-GET  /api/v1/audit-events?type=&before=     security audit log (operator)
+GET  /api/v1/audit-events?type=&before=     security audit log (admin)
 ```
 
 ### Outbound webhooks
@@ -107,7 +107,7 @@ Each delivery is signed with the subscription's secret in the same `X-OrderLoop-
 
 ### Signed webhooks
 
-External systems start and resume orders without a token by signing the raw body with their integration's secret. An operator creates one integration per system with `POST /api/v1/integrations` (`{ name, events, startOrders, flows, channel }`), which returns its id and secret once; the scope limits what its signatures can do. `POST /api/v1/integrations/:id/rotate` issues a new secret and keeps the old one working for 24 hours.
+External systems start and resume orders without a token by signing the raw body with their integration's secret. An admin creates one integration per system with `POST /api/v1/integrations` (`{ name, events, startOrders, flows, channel }`), which returns its id and secret once; the scope limits what its signatures can do. `POST /api/v1/integrations/:id/rotate` issues a new secret and keeps the old one working for 24 hours.
 
 ```
 POST /api/v1/webhooks/events

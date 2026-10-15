@@ -262,7 +262,7 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/audit-events': {
         get: {
-          summary: 'Security audit log, newest first (operator)',
+          summary: 'Security audit log, newest first (admin)',
           description:
             'Sign-ins, failed and throttled sign-ins, team and token changes, and refused shared-password API attempts. Kept 180 days.',
           parameters: [
@@ -284,11 +284,11 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/webhook-subscriptions': {
         get: {
-          summary: 'List webhook subscriptions',
+          summary: 'List webhook subscriptions (admin)',
           responses: { '200': ok('Subscriptions'), ...errors },
         },
         post: {
-          summary: 'Subscribe a URL to order events',
+          summary: 'Subscribe a URL to order events (admin)',
           description: 'The response carries the signing secret. It is shown only once.',
           requestBody: body(subscriptionInput),
           responses: { '201': ok('{ subscription, secret }'), ...errors },
@@ -296,25 +296,25 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/webhook-subscriptions/{id}': {
         delete: {
-          summary: 'Delete a subscription',
+          summary: 'Delete a subscription (admin)',
           parameters: [orderId],
           responses: { '200': ok('Deleted'), ...errors },
         },
       },
       '/api/v1/webhook-subscriptions/{id}/deliveries': {
         get: {
-          summary: 'Recent deliveries, newest first',
+          summary: 'Recent deliveries, newest first (admin)',
           parameters: [orderId],
           responses: { '200': ok('Deliveries'), ...errors },
         },
       },
       '/api/v1/integrations': {
         get: {
-          summary: 'List integrations (signing keys for external systems)',
+          summary: 'List integrations, the signing keys for external systems (admin)',
           responses: { '200': ok('Integrations, without their secrets'), ...errors },
         },
         post: {
-          summary: 'Create an integration',
+          summary: 'Create an integration (admin)',
           description:
             'The scope says what its signed webhooks may do: `events` it may deliver, whether it may `startOrders`, the `flows` an order may name and the one `channel` it may reach. The response carries the signing secret. It is shown only once.',
           requestBody: body(integrationInput),
@@ -323,7 +323,7 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/integrations/{id}/rotate': {
         post: {
-          summary: 'Rotate an integration secret',
+          summary: 'Rotate an integration secret (admin)',
           description:
             'Returns a new secret, shown once. The previous secret keeps working for 24 hours, so the sender can switch without a gap.',
           parameters: [orderId],
@@ -332,7 +332,7 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/integrations/{id}': {
         delete: {
-          summary: 'Revoke an integration',
+          summary: 'Revoke an integration (admin)',
           description: 'Both its secrets stop working at once.',
           parameters: [orderId],
           responses: { '200': ok('Revoked'), ...errors },

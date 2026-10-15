@@ -16,7 +16,8 @@ describe('two-factor requirement', () => {
   it('accepts only known settings', () => {
     expect(isTwoFactorRequirement('operator')).toBe(true);
     expect(isTwoFactorRequirement('off')).toBe(true);
-    expect(isTwoFactorRequirement('admin')).toBe(false);
+    expect(isTwoFactorRequirement('admin')).toBe(true);
+    expect(isTwoFactorRequirement('owner')).toBe(false);
     expect(isTwoFactorRequirement('toString')).toBe(false);
     expect(isTwoFactorRequirement(undefined)).toBe(false);
   });
@@ -29,6 +30,6 @@ describe('two-factor requirement', () => {
         target: null,
         detail: { from: 'off', to: 'operator' },
       }),
-    ).toBe('Changed who needs two-factor sign-in: Nobody → Operators');
+    ).toBe('Changed who needs two-factor sign-in: Nobody → Operators and admins');
   });
 });

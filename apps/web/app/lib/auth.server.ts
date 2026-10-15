@@ -1,15 +1,15 @@
 /**
  * Who is signed in, and what they may do. Roles are in `@orderloop/core` (viewer < approver <
- * operator).
+ * operator < admin).
  *
  * - People sign in with an email and password from D1 `users`; the `__Host-ol_session` cookie holds
  *   a random token whose SHA-256 is a `sessions` row. Someone with two-factor sign-in on gets a
  *   `__Host-ol_2fa` cookie (a `sign_in_challenges` row) instead, and the session only once a code
  *   from their authenticator app, or a recovery code, checks out.
  * - The REST API takes `Authorization: Bearer ol_live_…`, an `api_tokens` row with its own role.
- * - `APP_PASSWORD`, when set, is a break-glass operator: sign in with the password and no email
+ * - `APP_PASSWORD`, when set, is a break-glass admin: sign in with the password and no email
  *   (the older HMAC cookie), or send it as the bearer token.
- * - With no `APP_PASSWORD` and no users (local development) everything is open, as an operator.
+ * - With no `APP_PASSWORD` and no users (local development) everything is open, as an admin.
  *
  * Users carry an `external_sub` column for linking an outside identity later; sign-in through
  * an outside provider would create the same session row.
@@ -63,12 +63,12 @@ const SHARED = 'ol_session';
 const TOKEN_TOUCH_MS = 5 * 60_000;
 const EXPIRED_AUDIT_MS = 60 * 60_000;
 
-const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'operator' };
+const OPEN: Principal = { kind: 'open', id: 'local', name: 'local', role: 'admin' };
 const SHARED_PRINCIPAL: Principal = {
   kind: 'password',
   id: 'shared-password',
-  name: 'operator',
-  role: 'operator',
+  name: 'admin',
+  role: 'admin',
 };
 
 function password(): string | undefined {
@@ -114,11 +114,11 @@ export async function authEnabled(): Promise<boolean> {
 
 /**
  * Why the request is refused because sign-in isn't set up, or null. With no APP_PASSWORD and no
- * people every caller would be an operator, which only local development may be.
+ * people every caller would be an admin, which only local development may be.
  */
 export async function openModeRefused(url: URL): Promise<string | null> {
   if (isLocalHost(url) || (await authEnabled())) return null;
-  return 'Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first operator on the Team page.';
+  return 'Sign-in is not set up. Set the APP_PASSWORD secret, sign in with it, and add the first admin on the Team page.';
 }
 
 /**
@@ -132,12 +132,12 @@ export async function sessionId(request: Request): Promise<string | undefined> {
 
 /**
  * A browser caller. `twoFactorDue` marks a person whose role must use two-factor sign-in but who
- * hasn't set it up; `passwordChangeDue`, one still on a password an operator set. Until they put it
+ * hasn't set it up; `passwordChangeDue`, one still on a password an admin set. Until they put it
  * right, they may only use their Account page.
  */
 export type Caller = Principal & { twoFactorDue?: true; passwordChangeDue?: true };
 
-/** The signed-in person (or shared-password operator) for a browser request, or null. */
+/** The signed-in person (or shared-password admin) for a browser request, or null. */
 export async function principal(request: Request): Promise<Caller | null> {
   if (!(await authEnabled())) return OPEN;
   const token = cookie(request, SESSION);
@@ -337,13 +337,13 @@ export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
 export class TokenExpired extends Error {
   constructor(readonly expiredAt: number) {
     super(
-      `This API token expired on ${new Date(expiredAt).toISOString().slice(0, 10)}. An operator can create a new one on the Team page.`,
+      `This API token expired on ${new Date(expiredAt).toISOString().slice(0, 10)}. An admin can create a new one on the Team page.`,
     );
   }
 }
 
 export const forbidden = (min: Role) =>
-  `This needs the ${ROLE_LABELS[min]} role. Ask an operator to change your role on the Team page.`;
+  `This needs the ${ROLE_LABELS[min]} role. Ask an admin to change your role on the Team page.`;
 
 export const TWO_FACTOR_DUE =
   'Your role needs two-factor sign-in. Set it up on your Account page first.';

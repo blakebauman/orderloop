@@ -28,7 +28,7 @@ authorization server, registers itself and opens OrderLoop's consent page in you
 2. Check which app is asking and where access will be sent. An app that registered itself is
    marked as unverified; an app on your own computer gets an extra warning.
 3. Choose a role. You are offered your own role and the roles below it, lowest first, and the
-   lowest (`viewer`) is selected. That role is the grant's scope.
+   lowest (`viewer`) is selected. `admin` is never offered: MCP has no admin tools. That role is the grant's scope.
 4. Select **Connect**. **Cancel** refuses the app.
 
 ### Claude Code
@@ -68,7 +68,7 @@ to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `
 
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
 credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens, and the workspace
-password as a break-glass operator. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
+password as a break-glass admin. These work on `/a2a` too. Wrong guesses are throttled (`429` with `Retry-After`) and an expired token is
 refused (`401` with the reason), as there.
 
 ## Tools

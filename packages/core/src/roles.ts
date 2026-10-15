@@ -4,16 +4,19 @@
  * - `viewer` reads orders, flows, approvals and the back office, and asks the workspace assistant.
  * - `approver` also decides approvals.
  * - `operator` also starts, cancels and restarts orders, delivers events, edits and publishes
- *   flows, runs the stock review, and manages the team, API tokens and webhooks.
+ *   flows, and runs the stock review.
+ * - `admin` also manages the team, API tokens, webhooks and integrations, the workspace's
+ *   settings, and reads the audit log.
  */
 
-export const ROLES = ['viewer', 'approver', 'operator'] as const;
+export const ROLES = ['viewer', 'approver', 'operator', 'admin'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   viewer: 'Viewer',
   approver: 'Approver',
   operator: 'Operator',
+  admin: 'Admin',
 };
 
 export const isRole = (v: unknown): v is Role => ROLES.includes(v as Role);
