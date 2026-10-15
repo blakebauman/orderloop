@@ -15,7 +15,7 @@ the server accepts. Response bodies are described here.
 Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a signed-in dashboard
 session cookie also works). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
-(starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations and reading audit events `admin`; a token or person without it gets
+(starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations, data subject requests and reading audit events `admin`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). Five routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
 authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)); `POST /api/v1/webhooks/stripe` is verified with Stripe's own `Stripe-Signature` (see [Stripe events](/guides/approvals-and-events/#stripe-events)).
 
@@ -44,6 +44,8 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
 | `GET` | `/api/v1/audit-events?type=&before=&after=&limit=` | | `{ events }` (admin) |
 | `GET` | `/api/v1/audit-events/verify?after=` | | `{ ok, checked, last, next }` or `{ ok: false, brokenAt, reason }` (admin) |
+| `POST` | `/api/v1/data-subjects/export` | `{ email }` | A JSON file: `{ email, customers, orders, messages, inboundEmails, documents, truncated, teamMember }` (admin) |
+| `POST` | `/api/v1/data-subjects/erase` | `{ email }` | `{ ok, done, orders, customers, documents, messages, inboundEmails, teamMember }`, or `409 { reason: "active_orders", orders, error }` (admin) |
 | `GET` | `/api/v1/integrations` | | `{ integrations }` (admin) |
 | `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (admin) |
 | `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (admin) |
@@ -259,12 +261,20 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 ## Audit events
 
 `GET /api/v1/audit-events` returns the audit log (sign-ins, team and token changes, and what was done to orders, approvals, flows and webhooks), newest first, for feeding a log
-system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook` or `stock`; `limit` is
+system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook`, `stock` or `personal_data`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. `after` (a `seq`) switches to export order: only hashed events after that `seq`, oldest first, so the last `seq` you received is the next cursor (`0` starts at the beginning); `before` and `after` aren't meant together. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
 (an object or `null`), `ip` and, for hashed events, `seq`, `prevHash` and `hash` (all `null` on events from before the chain). See [Audit log](/guides/team-and-roles/#audit-log) for the actions. Business events carry `via` in `detail` (`app`, `api`, `webhook`, `assistant`, `mcp` or `a2a`).
 
 `GET /api/v1/audit-events/verify` (admin) recomputes each event's hash and checks that it follows the one before, up to 2,000 events a call. It starts at the oldest event still in the log, or just after `after`. It returns `{ ok: true, checked, last, next }`, where `last` is the final event checked (`seq` and `hash`) and `next` is present when there is more: pass it as `after` to continue. A failure is `{ ok: false, brokenAt, reason }`, the `seq` of the first event that fails and why. Events are kept 400 days unless your contract sets another period (at least 90), then archived.
+
+## Data subject requests
+
+Both calls need the `admin` role and take the person's email in the body (never the URL); the address is matched case-insensitively. A person is the customer accounts with that email, the orders with it as the guest contact and the orders started by an email from that sender. The audit log records each call as `personal_data.exported` or `personal_data.erased`, with the target `subject:` and a hash of the address. Walkthrough: [Privacy requests](/guides/team-and-roles/#privacy-requests).
+
+`POST /api/v1/data-subjects/export` with `{ "email": "…" }` answers with a JSON attachment (`personal-data.json`, `cache-control: no-store`): `customers` (without the saved Stripe payment method), `orders` (up to 500, each with `contact`, `lines` and `meta`), `messages`, `inboundEmails`, `documents` (a list of `key`, `kind`, `contentType` and `createdAt`), `truncated` (more orders than the export holds) and `teamMember` (the address also belongs to a person on the team, who is not exported).
+
+`POST /api/v1/data-subjects/erase` erases the person and keeps lines, amounts, payments, shipments and the ledgers. It works through 100 orders a call: while the answer has `done: false`, send the same request again. The answer counts what it changed (`orders`, `customers`, `documents`, `messages`, `inboundEmails`) and repeats `teamMember`; team members are not erased, so remove them on the Team page. It is refused with `409` and `{ reason: "active_orders", orders }` while any of the person's orders has not finished. A body without a valid `email` is `400`.
 
 ## Webhook subscriptions
 

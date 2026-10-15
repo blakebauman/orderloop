@@ -47,6 +47,8 @@ export const AUDIT_ACTIONS = {
   'integration.created': 'Created an integration key',
   'integration.rotated': 'Rotated an integration key',
   'integration.revoked': 'Revoked an integration key',
+  'personal_data.exported': "Exported a person's data",
+  'personal_data.erased': 'Erased a person from orders and accounts',
   ...BUSINESS_AUDIT_ACTIONS,
 } as const;
 
@@ -65,6 +67,7 @@ export const AUDIT_GROUPS = {
   flow: 'Flows',
   webhook: 'Webhooks',
   stock: 'Stock review',
+  personal_data: 'Personal data',
 } as const;
 
 export type AuditGroup = keyof typeof AUDIT_GROUPS;

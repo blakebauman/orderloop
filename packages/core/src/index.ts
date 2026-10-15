@@ -7,6 +7,7 @@ export * from './audit';
 export * from './catalog';
 export * from './channels/shopify';
 export * from './channels/x12';
+export * from './erasure';
 export * from './fulfillment';
 export * from './graph';
 export * from './health';

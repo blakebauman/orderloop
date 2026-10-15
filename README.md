@@ -103,6 +103,8 @@ DELETE /api/v1/webhook-subscriptions/:id
 GET    /api/v1/webhook-subscriptions/:id/deliveries
 ```
 
+Privacy requests (admin): `POST /api/v1/data-subjects/export` and `POST /api/v1/data-subjects/erase`, each with `{ "email": "…" }`. Export returns a JSON file of what is held about that person; erase removes who they are from their orders, accounts, documents and messages and keeps the commercial record, 100 orders a call (repeat while `done` is false), and is refused with `409` while any of their orders is still running.
+
 Ending events cover every way an order ends: an End node, a cancel from the UI or API (`order.cancelled`, sent by the order's agent), and a node that throws (`order.failed`, with the node and its error).
 
 Each delivery is signed with the subscription's secret in the same `X-OrderLoop-Signature` scheme as inbound events, so `verifyWebhook` checks it. `X-OrderLoop-Delivery` stays the same across retries; use it to dedupe. A delivery runs in its own `${nodeId}#${run}:emit` step and is retried with backoff. If the endpoint is still down when retries run out, the delivery is left `failed` and the order carries on.

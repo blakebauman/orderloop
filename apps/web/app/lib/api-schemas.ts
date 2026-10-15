@@ -48,3 +48,6 @@ export const integrationInput = z.object({
   flows: z.array(z.string().min(1).max(100)).max(50).default([]),
   channel: z.enum(ORDER_CHANNELS).nullable().optional(),
 });
+
+/** A data subject request: the person, by the email address they're known by. */
+export const dataSubjectInput = z.object({ email: z.string().trim().email().max(320) });

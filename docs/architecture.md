@@ -50,10 +50,12 @@ inbound mail ── Email Routing ──email()───────────
 | `snapshot(orderId)` | The agent's `OrderState`, or `null` for an unknown order |
 | `copilot(req)` | Edits or creates a flow graph from a prompt |
 | `intakeMailboxes()` | The email intake mailboxes (local part → flow id) from the engine's `INTAKE_MAILBOXES`, for the back office |
+| `exportDataSubject(email)` | Everything held about the person with that email (`subjects.ts`): customer accounts, up to 500 orders with their agent state, messages, intake log rows, documents; see [Personal data](data-model.md#personal-data) |
+| `eraseDataSubject(email)` | Erases that person (100 orders a call, `done` says whether to call again) or returns `{ ok: false, reason: 'active_orders', orders }`. Calls each order's `OrderAgent.erasePersonalData` |
 | `runReplenish()` | Creates a `Replenish` instance now |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes` and `runReplenish` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject` and `runReplenish` forwards to the order's agent via
 `ORDER_AGENT.getByName(orderId)`. `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
