@@ -85,7 +85,8 @@ opens it is delivered.
 ## Partial acceptance and capture
 
 On `partial`, `commerce.seller_accept` drops the rejected sellers' lines from the order and
-re-totals it (`vars.rejectedSellers` lists them). The card was authorized for the full order, so
+re-totals it (`vars.rejectedSellers` lists them): shipping stays as charged, and tax is applied again
+at the rate (and on the base) the tax node used. The card was authorized for the full order, so
 `commerce.capture_payment` captures the lesser of the authorization and the new order total and
 releases the rest. The customer is charged only for what ships.
 

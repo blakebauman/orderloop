@@ -125,6 +125,7 @@ export function orderSummary(o: Order) {
     customerId: o.customerId ?? null,
     currency: o.currency,
     subtotal: o.subtotal,
+    shipping: o.shipping ?? 0,
     tax: o.tax,
     total: o.total,
     fxRate: o.fxRate ?? 1,

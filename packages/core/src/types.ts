@@ -153,6 +153,8 @@ export const orderInputSchema = z.object({
   lines: z.array(orderLineSchema).default([]),
   contact: contactSchema.optional(),
   fulfillment: fulfillmentSchema.optional(),
+  /** The shipping option the buyer chose, by id; a shipping-rate node set to `from_order` charges it. */
+  shippingOption: z.string().max(80).optional(),
   /** Free-form inbound document text (an email, order form or PO) for the AI extract node. */
   documentText: z.string().max(50_000).optional(),
   /** R2 key of an uploaded document. */
@@ -178,8 +180,15 @@ export type Order = OrderInput & {
   id: string;
   createdAt: number;
   subtotal: number;
+  /** Shipping charged, set by a shipping-rate node. */
+  shipping: number;
   tax: number;
+  /** `subtotal + shipping + tax`. */
   total: number;
+  /** The rate the tax node applied, kept so a re-total (a seller dropping lines) charges the same. */
+  taxRate?: number;
+  /** Whether that tax node taxed shipping too. */
+  taxShipping?: boolean;
   /** Units of the order's currency per one BASE_CURRENCY, fixed when the order is priced. */
   fxRate?: number;
   /** `total` in BASE_CURRENCY, for credit, budgets and reporting. */

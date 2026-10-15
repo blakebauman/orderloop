@@ -88,7 +88,9 @@ Idempotency-Key: po-NW-7781
 - `input.model` is required: one of <Values of="order-models" />. `input.channel` is one of
   <Values of="order-channels" /> and defaults to `api`. See [Commerce models](/guides/commerce-models/).
 - `input.title` (up to 140 characters) and `input.customerId` are optional. `input.externalId` (up to 200) is the order's id in its channel; `input.contact` is `{ email, name?, phone? }` for a
-  buyer without a customer account; `input.fulfillment` is `{ method, locationId? }`.
+  buyer without a customer account; `input.fulfillment` is `{ method, locationId? }`;
+  `input.shippingOption` (up to 80) is the id of the shipping option the buyer chose (see
+  [Shipping rates](/guides/fulfillment/#shipping-rates)).
 - `input.currency` defaults to `USD` and must have an exchange rate in the workspace; another
   code returns `400`. See [Currency](/reference/expressions/#currency).
 - `input.lines` are `{ sku, name?, qty, unitPrice?, sellerId?, locationId? }` (`locationId` pins the store a line ships from; route fulfillment normally sets it). Pricing nodes fill in prices, in the order's
@@ -123,7 +125,7 @@ customer id, contact email or external id. Each row has `id`, `model`, `channel`
 | Field | Meaning |
 |---|---|
 | `orderId`, `status`, `reason` | Identity, status, and the reason when cancelled or failed |
-| `order` | The order with computed `subtotal`, `tax` and `total` |
+| `order` | The order with computed `subtotal`, `shipping`, `tax` and `total` (`subtotal + shipping + tax`), and once taxed `taxRate` and `taxShipping` |
 | `flow` | The pinned flow version, including its graph |
 | `nodes` | Per node: `status`, `runs`, `summary`, `output`, `error`, `branches`, `startedAt`, `endedAt` |
 | `edges` | Per edge: `pending`, `active` or `inactive` |

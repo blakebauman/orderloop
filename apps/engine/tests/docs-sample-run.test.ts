@@ -20,7 +20,7 @@ type Run = {
   flowId: string;
   input: unknown;
   status: string;
-  order: { subtotal: number; tax: number; total: number };
+  order: { subtotal: number; shipping?: number; tax: number; total: number };
   waits: unknown[];
   nodes: Record<string, { status: string; summary?: string }>;
 };
@@ -85,6 +85,7 @@ for (const [name, sample, volatile] of RUNS) {
     expect({
       status: s!.status,
       subtotal: s!.order!.subtotal,
+      shipping: s!.order!.shipping,
       tax: s!.order!.tax,
       total: s!.order!.total,
       waits: s!.waits.map((w) => ({
@@ -96,6 +97,7 @@ for (const [name, sample, volatile] of RUNS) {
     }).toEqual({
       status: sample.status,
       subtotal: sample.order.subtotal,
+      shipping: sample.order.shipping ?? 0,
       tax: sample.order.tax,
       total: sample.order.total,
       waits: sample.waits,

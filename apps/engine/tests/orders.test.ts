@@ -552,6 +552,73 @@ describe('storefront order', () => {
     expect(rma.map((r) => r.status).sort()).toEqual(['label_created', 'return_label']);
   });
 
+  it('charges the cheapest shipping option and taxes it with the subtotal', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({ model: 'b2c', customerId: 'cus_ada', lines: [{ sku: 'GSK-010', qty: 5 }] }),
+    });
+    const s = await waitingOn(
+      orderId,
+      (x) => x.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    // 5 × 8.50; Standard is 6.95 + 1.00 a unit; 8% tax on goods and shipping.
+    expect(s.order).toMatchObject({
+      subtotal: 42.5,
+      shipping: 11.95,
+      shippingOption: 'standard',
+      taxRate: 0.08,
+      taxShipping: true,
+      tax: 4.36,
+      total: 58.81,
+    });
+    expect(s.nodes.shipping!.summary).toBe('Standard (UPS) · $11.95');
+    expect(s.nodes.ship!.summary).toMatch(/^UPS /);
+    const pays = await db().select().from(payments).where(eq(payments.orderId, orderId));
+    expect(pays.find((p) => p.kind === 'capture')!.amount).toBe(58.81);
+  });
+
+  it('charges the option the buyer chose, abroad, and declines one that isn’t offered', async () => {
+    await introspect();
+    const shipTo = { line1: '1 Hauptstr.', city: 'Berlin', postalCode: '10115', country: 'DE' };
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        model: 'b2c',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+        shippingOption: 'express',
+        meta: { shipTo },
+      }),
+    });
+    const s = await waitingOn(
+      orderId,
+      (x) => x.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    // Express is 19.95 + 2.00 a unit, × 2.5 outside the US.
+    expect(s.order).toMatchObject({
+      shipping: Math.round((19.95 + 2 * 5) * 2.5 * 100) / 100,
+      shippingOption: 'express',
+    });
+    expect(s.nodes.ship!.summary).toMatch(/^FEDEX /);
+
+    const { orderId: other } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({
+        model: 'b2c',
+        customerId: 'cus_ada',
+        lines: [{ sku: 'GSK-010', qty: 5 }],
+        shippingOption: 'teleport',
+      }),
+    });
+    const done = await settled(other);
+    expect(done.status).toBe('declined');
+    expect(done.nodes.shipping!.branches).toEqual(['unavailable']);
+    expect(done.nodes.authorize!.status).toBe('skipped');
+  });
+
   it('restocks only the lines a partial return lists', async () => {
     await introspect();
     const before = { mon: await stock('MON-27'), gsk: await stock('GSK-010') };
@@ -841,6 +908,14 @@ describe('marketplace order', () => {
     const capture = pays.find((p) => p.kind === 'capture')!;
     expect(capture.amount).toBe(done.order!.total);
     expect(capture.amount).toBeLessThan(auth.amount);
+    // Shipping stays as charged for the whole cart; tax re-applies at the tax node's 8%.
+    expect(done.order).toMatchObject({
+      subtotal: 129,
+      shipping: 9.95,
+      taxRate: 0.08,
+      tax: 11.12,
+      total: 150.07,
+    });
     const out = await db().select().from(payouts).where(eq(payouts.orderId, orderId));
     expect(out.map((p) => p.sellerId)).toEqual(['sel_brightside']);
   });
@@ -1190,6 +1265,7 @@ describe('pricing chain', () => {
       id: 'ord_pricing',
       createdAt: Date.now(),
       subtotal: 0,
+      shipping: 0,
       tax: 0,
       total: 0,
     };
@@ -1292,6 +1368,7 @@ describe('pricing chain', () => {
             id: 'ord_credit',
             createdAt: 0,
             subtotal: total,
+            shipping: 0,
             tax: 0,
             total,
             fxRate,
@@ -1328,6 +1405,7 @@ describe('pricing chain', () => {
           id: `ord_${type.replace('.', '_')}_${order.customerId ?? 'guest'}`,
           createdAt: 0,
           subtotal: total,
+          shipping: 0,
           tax: 0,
           total,
           fxRate: 1,
@@ -1599,6 +1677,7 @@ describe('inventory', () => {
     id,
     createdAt: Date.now(),
     subtotal: 0,
+    shipping: 0,
     tax: 0,
     total: 0,
     lines,
@@ -1712,6 +1791,7 @@ describe('payments', () => {
     id,
     createdAt: Date.now(),
     subtotal: 40,
+    shipping: 0,
     tax: 0,
     total: 40,
     lines: [],
@@ -2064,6 +2144,7 @@ describe('assess', () => {
     id,
     createdAt: 0,
     subtotal: 0,
+    shipping: 0,
     tax: 0,
     total: 0,
   });

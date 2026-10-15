@@ -21,6 +21,17 @@ describe('OpenAPI document', () => {
             expect(media.schema, path).toHaveProperty('type');
   });
 
+  it('describes an order with its shipping and totals', () => {
+    const json = JSON.parse(JSON.stringify(doc));
+    const start = json.paths['/api/v1/orders'].post.requestBody.content['application/json'].schema;
+    expect(start.properties.input.properties.shippingOption.type).toBe('string');
+    const order = json.components.schemas.Order;
+    expect(order.required).toEqual(
+      expect.arrayContaining(['id', 'subtotal', 'shipping', 'tax', 'total']),
+    );
+    expect(order.properties.shippingOption.type).toBe('string');
+  });
+
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);

@@ -16,6 +16,7 @@ const order = (o: Partial<Order> = {}): Order => ({
   meta: {},
   createdAt: 0,
   subtotal: 698,
+  shipping: 0,
   tax: 0,
   total: 698,
   ...o,

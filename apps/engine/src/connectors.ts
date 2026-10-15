@@ -18,7 +18,12 @@ import {
   type PriceRule,
   type PriceSource,
   type PriceSourceKind,
+  parseCarrierQuote,
+  type RateRequest,
   rankStores,
+  rateOptions,
+  type ShippingConfig,
+  type ShippingOption,
   type StockLine,
   type StockSource,
   shipToPoint,
@@ -1038,6 +1043,76 @@ export async function reversePayouts(env: Env, orderId: string) {
 
 // ── Shipping ───────────────────────────────────────────────────────────────
 
+const CARRIER_TIMEOUT_MS = 5_000;
+
+/** Units that ship: digital lines don't. */
+export async function physicalUnits(env: Env, order: Order) {
+  const { lines } = await stockedLines(env, order);
+  return lines.reduce((n, [, l]) => n + l.qty, 0);
+}
+
+/** `SHIPPING_CARRIER_AUTH`: a JSON object of live carrier id → Authorization header value. */
+function carrierAuth(env: Env): Record<string, string> {
+  try {
+    const v = JSON.parse(env.SHIPPING_CARRIER_AUTH ?? '{}') as unknown;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    return Object.fromEntries(
+      Object.entries(v).filter((e): e is [string, string] => typeof e[1] === 'string'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Quotes one live carrier: POSTs `{ itemCount, country, subtotal, currency }` (amounts in the base
+ * currency) and reads `{ options: [...] }`. Any failure (https only, 5 s, non-2xx, bad JSON)
+ * returns no options, so the caller falls back to the static services.
+ */
+async function liveQuote(
+  carrier: ShippingConfig['liveCarriers'][number],
+  req: RateRequest,
+  auth: string | undefined,
+): Promise<ShippingOption[]> {
+  if (!carrier.url.startsWith('https://')) return [];
+  try {
+    const res = await fetch(carrier.url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(auth ? { authorization: auth } : {}),
+      },
+      body: JSON.stringify({
+        itemCount: req.itemCount,
+        country: req.country ?? null,
+        subtotal: req.subtotal,
+        currency: BASE_CURRENCY,
+      }),
+      signal: AbortSignal.timeout(CARRIER_TIMEOUT_MS),
+    });
+    if (!res.ok) return [];
+    return parseCarrierQuote(carrier, await res.json());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The shipping options for a request, cheapest first: the live carriers' quotes when any answered,
+ * else the static services (a carrier adapter replaces the mock here).
+ */
+export async function quoteShipping(
+  env: Env,
+  config: ShippingConfig,
+  req: RateRequest,
+): Promise<{ options: ShippingOption[]; source: 'live' | 'static' }> {
+  const auth = config.liveCarriers.length ? carrierAuth(env) : {};
+  const live = (
+    await Promise.all(config.liveCarriers.map((c) => liveQuote(c, req, auth[c.id])))
+  ).flat();
+  return { options: rateOptions(config, req, live), source: live.length ? 'live' : 'static' };
+}
+
 /**
  * Books one shipment per location the physical lines ship from (one, unless routing split the
  * order), then consumes the held stock. The first shipment keeps the step's id, so a single-source
@@ -1163,7 +1238,7 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 <style>body{font:14px system-ui;margin:40px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:6px;text-align:left}</style>
 <h1>${esc(title)}</h1><p>Order ${esc(order.id)} · ${new Date().toISOString().slice(0, 10)}</p>${meta}
 <table><tr><th>SKU</th><th>Item</th><th>Qty</th><th>Unit</th><th>Line</th></tr>${rows}</table>
-<p>Subtotal ${cash(order.subtotal)} · Tax ${cash(order.tax)} · <b>Total ${cash(order.total)} ${esc(order.currency)}</b></p>`;
+<p>Subtotal ${cash(order.subtotal)}${order.shipping || order.shippingOption ? ` · Shipping ${cash(order.shipping ?? 0)}` : ''} · Tax ${cash(order.tax)} · <b>Total ${cash(order.total)} ${esc(order.currency)}</b></p>`;
 }
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */

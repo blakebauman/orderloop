@@ -80,6 +80,8 @@ export const orderBrief = (order: Order) => ({
   title: order.title,
   lines: order.lines,
   subtotal: order.subtotal,
+  shipping: order.shipping ?? 0,
+  shippingOption: order.shippingOption,
   tax: order.tax,
   total: order.total,
   currency: order.currency,

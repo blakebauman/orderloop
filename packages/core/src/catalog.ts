@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { assessConfigErrors, assessOutputs, assessQuestionsSchema } from './assess';
 import { policyRulesSchema } from './policy';
+import { SHIPPING_SELECTIONS, shippingConfigSchema } from './shipping';
 
 export type NodeCategory = 'trigger' | 'commerce' | 'control' | 'ai';
 
@@ -160,12 +161,74 @@ export const NODE_SPECS = [
     outputs: OUT,
   }),
   node({
+    type: 'commerce.shipping_rate',
+    category: 'commerce',
+    label: 'Shipping rate',
+    description:
+      'Rates the order’s shipping (configured services, or live carrier quotes) and charges the chosen option. Pickup, carry-out and digital-only orders ship free.',
+    icon: 'Ship',
+    fields: [
+      {
+        key: 'rates',
+        label: 'Rates',
+        kind: 'json',
+        required: true,
+        schema: shippingConfigSchema,
+        default: {
+          services: [
+            {
+              id: 'standard',
+              title: 'Standard',
+              carrier: 'ups',
+              base: 6.95,
+              perItem: 1,
+              minDays: 3,
+              maxDays: 5,
+            },
+            {
+              id: 'express',
+              title: 'Express',
+              carrier: 'fedex',
+              base: 19.95,
+              perItem: 2,
+              minDays: 1,
+              maxDays: 2,
+            },
+          ],
+          intlMultiplier: 2.5,
+          domesticCountries: ['US'],
+          freeThreshold: 500,
+        },
+        hint: 'services (base + perItem × units, in the base currency), liveCarriers, intlMultiplier, domesticCountries, freeThreshold',
+      },
+      {
+        key: 'select',
+        label: 'Option',
+        kind: 'select',
+        options: [...SHIPPING_SELECTIONS],
+        default: 'from_order',
+        hint: 'from_order charges order.shippingOption, or the cheapest when the order names none',
+      },
+    ],
+    outputs: ['ok', 'unavailable'],
+  }),
+  node({
     type: 'commerce.tax',
     category: 'commerce',
     label: 'Calculate tax',
-    description: 'Computes tax on the subtotal (mock tax engine).',
+    description:
+      'Computes tax on the subtotal, and on shipping unless told not to (mock tax engine).',
     icon: 'Percent',
-    fields: [{ key: 'rate', label: 'Rate', kind: 'number', default: 0.08 }],
+    fields: [
+      { key: 'rate', label: 'Rate', kind: 'number', default: 0.08 },
+      {
+        key: 'includeShipping',
+        label: 'Tax shipping',
+        kind: 'boolean',
+        default: true,
+        hint: 'Off taxes the subtotal only',
+      },
+    ],
     outputs: OUT,
   }),
   node({
@@ -432,8 +495,9 @@ export const NODE_SPECS = [
         key: 'carrier',
         label: 'Carrier',
         kind: 'select',
-        options: ['ups', 'fedex', 'dhl', 'freight'],
+        options: ['from_order', 'ups', 'fedex', 'dhl', 'freight'],
         default: 'ups',
+        hint: 'from_order books the carrier of the shipping option the order was charged for',
       },
     ],
     outputs: OUT,

@@ -15,6 +15,7 @@ const state = (currency: string, total: number, fxRate: number): OrderState => (
     meta: {},
     createdAt: 0,
     subtotal: total,
+    shipping: 0,
     tax: 0,
     total,
     fxRate,

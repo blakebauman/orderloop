@@ -17,6 +17,7 @@ export * from './logic';
 export * from './policy';
 export * from './pricing';
 export * from './roles';
+export * from './shipping';
 export * from './templates';
 export * from './types';
 

@@ -347,6 +347,7 @@ export function subscriptionFlow(): Flow {
       .n('signup', 'trigger.webhook', 'Subscription signup', { source: 'storefront' })
       .n('validate', 'commerce.validate', 'Validate')
       .n('price', 'commerce.price', 'Plan price', { useContracts: false })
+      .n('shipping', 'commerce.shipping_rate', 'Shipping')
       .n('tax', 'commerce.tax', 'Tax')
       .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })
       .n('welcome', 'commerce.notify', 'Welcome email', {
@@ -365,7 +366,7 @@ export function subscriptionFlow(): Flow {
       .n('charge', 'commerce.charge', 'Charge renewal')
       .n('retry_wait', 'control.wait', 'Dunning delay', { duration: '3 days' })
       .n('retry', 'commerce.charge', 'Retry charge')
-      .n('fulfill', 'commerce.ship', 'Ship box', { carrier: 'ups' })
+      .n('fulfill', 'commerce.ship', 'Ship box', { carrier: 'from_order' })
       .n('next', 'control.set', 'Next cycle', {
         assign: { cycle: { '+': [{ var: 'vars.cycle' }, 1] } },
       })
@@ -379,9 +380,15 @@ export function subscriptionFlow(): Flow {
       })
       .n('renew', 'control.continue_as_new', 'Next year')
       .n('declined', 'control.end', 'Card declined', { outcome: 'failed', reason: 'Card declined' })
+      .n('no_shipping', 'control.end', 'No shipping', {
+        outcome: 'declined',
+        reason: 'The shipping option chosen is not offered',
+      })
       .e('signup', 'validate')
       .e('validate', 'price')
-      .e('price', 'tax')
+      .e('price', 'shipping')
+      .e('shipping.ok', 'tax')
+      .e('shipping.unavailable', 'no_shipping')
       .e('tax', 'authorize')
       .e('authorize.ok', 'welcome')
       .e('authorize.declined', 'declined')
@@ -415,6 +422,7 @@ export function storefrontOrderFlow(): Flow {
       .n('checkout', 'trigger.webhook', 'Storefront checkout', { source: 'storefront' })
       .n('validate', 'commerce.validate', 'Validate')
       .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('shipping', 'commerce.shipping_rate', 'Shipping')
       .n('tax', 'commerce.tax', 'Tax')
       .n('policy', 'commerce.policy', 'Store policy', {
         rules: [
@@ -434,7 +442,7 @@ export function storefrontOrderFlow(): Flow {
       })
       .n('authorize', 'commerce.authorize_payment', 'Authorize card', { method: 'card' })
       .n('reserve', 'commerce.reserve_inventory', 'Reserve stock')
-      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'from_order' })
       .n('capture', 'commerce.capture_payment', 'Capture payment')
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
@@ -485,9 +493,15 @@ export function storefrontOrderFlow(): Flow {
         outcome: 'failed',
         reason: 'Payment capture failed',
       })
+      .n('no_shipping', 'control.end', 'No shipping', {
+        outcome: 'declined',
+        reason: 'The shipping option chosen is not offered',
+      })
       .e('checkout', 'validate')
       .e('validate', 'price')
-      .e('price', 'tax')
+      .e('price', 'shipping')
+      .e('shipping.ok', 'tax')
+      .e('shipping.unavailable', 'no_shipping')
       .e('tax', 'policy')
       .e('policy.pass', 'authorize')
       .e('policy.fail', 'reject')
@@ -515,7 +529,7 @@ export function storefrontOrderFlow(): Flow {
         id: 'tpl-storefront-order',
         name: 'Storefront order',
         description:
-          'Card checkout: store policy, authorize, reserve, ship and capture, then a 30-day return window: RMA label, goods received, restock and a full or partial refund.',
+          'Card checkout: shipping and tax, store policy, authorize, reserve, ship and capture, then a 30-day return window: RMA label, goods received, restock and a full or partial refund.',
         model: 'b2c',
         channels: ['web', 'mobile', 'api'],
       })
@@ -528,6 +542,7 @@ export function marketplaceOrderFlow(): Flow {
       .n('checkout', 'trigger.webhook', 'Marketplace checkout', { source: 'marketplace' })
       .n('validate', 'commerce.validate', 'Validate')
       .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('shipping', 'commerce.shipping_rate', 'Shipping')
       .n('tax', 'commerce.tax', 'Tax')
       .n('risk', 'ai.risk_score', 'Fraud check', { threshold: 70 })
       .n('trust', 'control.approval', 'Trust & safety review', {
@@ -550,7 +565,7 @@ export function marketplaceOrderFlow(): Flow {
       .n('record', 'commerce.seller_accept', 'Record response', { decision: 'from_event' })
       .n('expire', 'commerce.seller_accept', 'Reject unanswered', { decision: 'expire_pending' })
       .n('reserve', 'commerce.reserve_inventory', 'Reserve stock')
-      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'from_order' })
       .n('capture', 'commerce.capture_payment', 'Capture payment')
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
@@ -595,9 +610,15 @@ export function marketplaceOrderFlow(): Flow {
         outcome: 'failed',
         reason: 'Payment capture failed',
       })
+      .n('no_shipping', 'control.end', 'No shipping', {
+        outcome: 'declined',
+        reason: 'The shipping option chosen is not offered',
+      })
       .e('checkout', 'validate')
       .e('validate', 'price')
-      .e('price', 'tax')
+      .e('price', 'shipping')
+      .e('shipping.ok', 'tax')
+      .e('shipping.unavailable', 'no_shipping')
       .e('tax', 'risk')
       .e('risk.low', 'authorize')
       .e('risk.high', 'trust')
@@ -654,11 +675,12 @@ export function omnichannelOrderFlow(): Flow {
       .n('checkout', 'trigger.webhook', 'Checkout', { source: 'web' })
       .n('validate', 'commerce.validate', 'Validate')
       .n('price', 'commerce.price', 'List price', { useContracts: false })
+      .n('shipping', 'commerce.shipping_rate', 'Shipping')
       .n('tax', 'commerce.tax', 'Tax')
       .n('authorize', 'commerce.authorize_payment', 'Authorize payment', { method: 'card' })
       .n('route', 'commerce.route_fulfillment', 'Route fulfillment')
       .n('reserve_ship', 'commerce.reserve_inventory', 'Reserve stock')
-      .n('ship', 'commerce.ship', 'Ship', { carrier: 'ups' })
+      .n('ship', 'commerce.ship', 'Ship', { carrier: 'from_order' })
       .n('shipped', 'commerce.notify', 'Shipping confirmation', {
         to: 'customer',
         subject: '{{ref}} is on its way ({{vars.tracking}})',
@@ -703,9 +725,15 @@ export function omnichannelOrderFlow(): Flow {
         outcome: 'failed',
         reason: 'Payment capture failed',
       })
+      .n('no_shipping', 'control.end', 'No shipping', {
+        outcome: 'declined',
+        reason: 'The shipping option chosen is not offered',
+      })
       .e('checkout', 'validate')
       .e('validate', 'price')
-      .e('price', 'tax')
+      .e('price', 'shipping')
+      .e('shipping.ok', 'tax')
+      .e('shipping.unavailable', 'no_shipping')
       .e('tax', 'authorize')
       .e('authorize.ok', 'route')
       .e('authorize.declined', 'declined')
