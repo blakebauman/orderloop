@@ -21,6 +21,7 @@ import { useAgent } from 'agents/react';
 import {
   ChevronRight,
   CircleSlash,
+  ExternalLink,
   FileText,
   MessageSquareText,
   RotateCcw,
@@ -989,10 +990,33 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
           <p className="text-muted-foreground">No lines yet.</p>
         )}
       </section>
-      {records.documents.length ? (
+      {records.documents.length || records.invoices.length ? (
         <section>
           <h2 className="section-title mb-2">Documents</h2>
           <ul className="space-y-1">
+            {records.invoices.map((inv) => (
+              <li key={inv.id} className="flex flex-wrap items-center gap-x-1.5">
+                {inv.hostedUrl ? (
+                  <a
+                    href={inv.hostedUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-link hover:underline"
+                  >
+                    <ExternalLink className="size-3.5" aria-hidden="true" /> Stripe invoice
+                    {inv.number ? ` ${inv.number}` : ''}
+                  </a>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <FileText className="size-3.5" aria-hidden="true" /> Stripe invoice
+                    {inv.number ? ` ${inv.number}` : ''}
+                  </span>
+                )}
+                <span className="text-muted-foreground">
+                  · {humanize(inv.status)} · {money(inv.amount, inv.currency)}
+                </span>
+              </li>
+            ))}
             {records.documents.map((d) => (
               <li key={d.id}>
                 <a

@@ -12,7 +12,6 @@
  * D1 is written only after Stripe answers.
  */
 
-import { NonRetryableError } from 'cloudflare:workflows';
 import {
   money,
   type Order,
@@ -23,12 +22,11 @@ import {
 } from '@orderloop/core';
 import { createDb, customers, payments } from '@orderloop/db';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { type PaymentIntent, StripeError, stripeClient } from './stripe';
+import { ensureCustomer, rethrow, rowId, type Stripe, stripeFor, stripeMode } from './gateway';
+import { type PaymentIntent, StripeError } from './stripe';
 
 const db = (env: Env) => createDb(env.DB);
 const simulate = (order: Order) => String(order.meta?.simulate ?? '');
-const rowId = (prefix: string, ...parts: string[]) =>
-  `${prefix}_${parts.join('_')}`.replace(/[^\w-]/g, '_');
 
 export type PaymentPurpose = 'hold' | 'verify';
 
@@ -42,34 +40,6 @@ export type PaymentResult = {
 };
 
 type Provider = 'mock' | 'stripe' | 'external' | 'offline';
-
-/** True when new payments go to Stripe. Any mode other than "mock" or "stripe" is a config error. */
-function stripeMode(env: Env): boolean {
-  const mode = String(env.PAYMENTS_MODE ?? 'mock');
-  if (mode === 'mock') return false;
-  if (mode === 'stripe') return true;
-  throw new NonRetryableError(`Unknown PAYMENTS_MODE "${mode}": use "mock" or "stripe"`);
-}
-
-/** The Stripe client, or a permanent failure when no key is configured. */
-function stripeFor(env: Env) {
-  if (!env.STRIPE_SECRET_KEY)
-    throw new NonRetryableError(
-      'Stripe payments need STRIPE_SECRET_KEY: set the secret, or PAYMENTS_MODE to "mock"',
-    );
-  return stripeClient(env.STRIPE_SECRET_KEY);
-}
-
-/**
- * Rethrows a failed Stripe call: Stripe's own failures, rate limits and network errors throw as-is
- * so the step retries with the same key; a request Stripe refuses (bad parameters, wrong state)
- * would be refused again, so it fails the step for good.
- */
-function rethrow(err: unknown): never {
-  if (err instanceof StripeError && !err.isRetryable && !err.isCardError)
-    throw new NonRetryableError(`Stripe: ${err.message}${err.code ? ` (${err.code})` : ''}`);
-  throw err;
-}
 
 type PaymentRow = typeof payments.$inferSelect;
 
@@ -133,51 +103,11 @@ async function savedPayment(env: Env, order: Order): Promise<SavedPayment> {
 }
 
 /**
- * The order's Stripe customer: given on the order, already on the account, or created once (keyed by
- * the account, so racing steps make one). A guest gets one per order, which is not stored.
- */
-async function ensureCustomer(
-  env: Env,
-  stripe: ReturnType<typeof stripeFor>,
-  order: Order,
-): Promise<string> {
-  if (order.payment?.stripeCustomerId) return order.payment.stripeCustomerId;
-  const d = db(env);
-  const account = order.customerId
-    ? await d.select().from(customers).where(eq(customers.id, order.customerId)).get()
-    : undefined;
-  if (account?.stripeCustomerId) return account.stripeCustomerId;
-  const created = await stripe.customers
-    .create(
-      account
-        ? { email: account.email, name: account.name, metadata: { customer_id: account.id } }
-        : {
-            email: order.contact?.email,
-            name: order.contact?.name,
-            metadata: { order_id: order.id },
-          },
-      account ? rowId('cust', account.id) : rowId('cust', order.id),
-    )
-    .catch(rethrow);
-  if (!account) return created.id;
-  await d
-    .update(customers)
-    .set({ stripeCustomerId: created.id })
-    .where(and(eq(customers.id, account.id), sql`${customers.stripeCustomerId} is null`));
-  const stored = await d
-    .select({ id: customers.stripeCustomerId })
-    .from(customers)
-    .where(eq(customers.id, account.id))
-    .get();
-  return stored?.id ?? created.id;
-}
-
-/**
  * The payment method a new PaymentIntent confirms with. With a test key, an order that gives none
  * pays with Stripe's test card, and `meta.simulate` swaps in the test card that is always declined.
  */
 function paymentMethodFor(
-  stripe: ReturnType<typeof stripeFor>,
+  stripe: Stripe,
   source: PaymentSource,
   order: Order,
   saved: SavedPayment,
@@ -352,6 +282,35 @@ export async function voidAuthorizations(env: Env, orderId: string) {
   return voided;
 }
 
+/**
+ * Stripe canceled a PaymentIntent (it expired, or someone canceled it in the Dashboard): its open
+ * authorization is voided. Returns the orders whose payment changed.
+ */
+export async function markIntentCanceled(env: Env, intentId: string) {
+  const res = await db(env)
+    .update(payments)
+    .set({ status: 'voided' })
+    .where(
+      and(
+        eq(payments.externalId, intentId),
+        eq(payments.provider, 'stripe'),
+        eq(payments.status, 'authorized'),
+      ),
+    )
+    .returning({ orderId: payments.orderId });
+  return res.map((r) => r.orderId);
+}
+
+/** The order a Stripe PaymentIntent pays, if OrderLoop made or adopted it. */
+export async function orderForIntent(env: Env, intentId: string) {
+  const row = await db(env)
+    .select({ orderId: payments.orderId })
+    .from(payments)
+    .where(and(eq(payments.externalId, intentId), eq(payments.provider, 'stripe')))
+    .get();
+  return row?.orderId ?? null;
+}
+
 // ── Capture ───────────────────────────────────────────────────────────────
 
 export async function capturePayment(env: Env, order: Order, stepKey: string) {
@@ -502,11 +461,7 @@ export async function charge(env: Env, order: Order, stepKey: string): Promise<P
 }
 
 /** A guest's card, saved by this order's `verify` authorization (guests have no account to hold it). */
-async function verifiedCard(
-  env: Env,
-  stripe: ReturnType<typeof stripeFor>,
-  orderId: string,
-): Promise<SavedPayment> {
+async function verifiedCard(env: Env, stripe: Stripe, orderId: string): Promise<SavedPayment> {
   const row = await db(env)
     .select()
     .from(payments)

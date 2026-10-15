@@ -6,6 +6,7 @@
 
 import type { InboundOrder } from '../inbound';
 import type { OrderChannel } from '../types';
+import { constantTimeEqual } from '../webhooks';
 
 /** The fields OrderLoop reads from Shopify's order payload. */
 export type ShopifyOrder = {
@@ -124,8 +125,5 @@ export async function verifyShopifyHmac(
     await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)),
   );
   const expected = btoa(String.fromCharCode(...mac));
-  if (expected.length !== header.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ header.charCodeAt(i);
-  return diff === 0;
+  return constantTimeEqual(expected, header);
 }

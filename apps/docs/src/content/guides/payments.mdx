@@ -85,6 +85,29 @@ step saved.
   refunded. When the order was paid more than once (a subscription's renewals), the refund draws
   on the newest payment first and makes one Stripe refund per payment it uses.
 
+## Invoices paid through Stripe
+
+`commerce.invoice` always renders the invoice document. With `provider: stripe` it also issues a
+Stripe invoice for the order: it reuses the customer's Stripe customer (or creates one), creates a
+draft invoice with the configured terms, adds one item per line plus shipping and tax, finalizes it
+and, with `sendEmail` on (the default), has Stripe email it. `net_15`, `net_30` and `net_60` are
+due that many days after it is issued; `due_on_receipt` is due the next day. The order page lists
+the invoice under Documents with a link to Stripe's hosted invoice page, where the customer pays,
+and the node's output carries the same link (`stripe.hostedUrl`, also `vars.invoiceUrl`).
+
+When the customer pays, Stripe notifies OrderLoop (see
+[Stripe events](/guides/approvals-and-events/#stripe-events)): the invoice is marked paid, the
+payment is recorded as `invoice_payment`, the amount comes off the customer's account balance if
+the invoice put it there, and the order receives `payment.received`, which a Wait-for-event node
+such as the B2B flow's "Payment received" is waiting for.
+
+If the order fails or is cancelled, an unpaid Stripe invoice is voided and its account charge
+reversed. An invoice already paid is left alone and named in the rollback or cancel summary; return
+the money with a refund in Stripe.
+
+On the simulated gateway, `provider: stripe` records the invoice without calling Stripe, so a flow
+built for Stripe still runs; nothing will pay it, so deliver `payment.received` yourself.
+
 ## Retries never pay twice
 
 Every call to Stripe carries an idempotency key made from the order and the step (its step name,

@@ -75,7 +75,10 @@ The order page shows `Guest · <email>` in place of a customer.
   "No credit account (consumer)".
 - [Generate invoice](/reference/nodes/#commerce.invoice): only an invoice to a business customer that is not
   yet paid in full is added to their balance, and its summary ends "· on account".
-  Set `onAccount` to `false` to never add it. `terms` defaults to `due_on_receipt`.
+  Set `onAccount` to `false` to never add it. `terms` defaults to `due_on_receipt`. With
+  `provider: stripe` the invoice is also issued through Stripe and paid online (see
+  [Payments](/guides/payments/#invoices-paid-through-stripe)); a paid invoice takes its charge back
+  off the balance.
 - [Notify](/reference/nodes/#commerce.notify) with `to: customer` falls back to `contact.email`.
 - [Risk score](/guides/ai/#ai-nodes): the offline heuristic adds 15 for a guest ("Guest checkout")
   and 30 for an order with neither customer nor contact ("Unknown customer").

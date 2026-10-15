@@ -146,6 +146,30 @@ export type CopilotResult = {
   warnings: GraphIssue[];
 };
 
+/**
+ * A payment provider's webhook event, already verified by the web app: Stripe's event id, its type
+ * (`invoice.paid`…) and the object it is about.
+ */
+export type PaymentEvent = {
+  provider: 'stripe';
+  id: string;
+  type: string;
+  data: { object: Record<string, unknown> };
+};
+
+/**
+ * `handled` (acted on), `duplicate` (this event id was handled before), `ignored` (not a type or an
+ * object OrderLoop acts on), or `retry`: the order isn't waiting for it yet, so the provider
+ * should deliver it again later.
+ */
+export type PaymentEventResult = {
+  outcome: 'handled' | 'duplicate' | 'ignored' | 'retry';
+  orderId?: string;
+  /** The order event delivered to a waiting node (`payment.received`, `payment.disputed`). */
+  delivered?: string;
+  reason?: string;
+};
+
 export interface EngineRpc {
   startOrder(input: StartOrderInput): Promise<StartOrderResult>;
   /** Starts an order at most once per idempotency key. */
@@ -156,6 +180,8 @@ export interface EngineRpc {
     event: string,
     payload?: Record<string, unknown>,
   ): Promise<{ delivered: boolean; nodeId?: string; notFound?: true }>;
+  /** A verified payment provider event (Stripe): settles invoices and resumes the order. */
+  paymentEvent(event: PaymentEvent): Promise<PaymentEventResult>;
   /** `by` is who the record names; `deciderId` the principal, checked against the order's starter. */
   decide(
     orderId: string,

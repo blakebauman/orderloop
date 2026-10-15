@@ -16,8 +16,8 @@ Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a sig
 session cookie also works). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
 (starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations and reading audit events `admin`; a token or person without it gets
-`403`. See [Team and roles](/guides/team-and-roles/). Four routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
-authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)).
+`403`. See [Team and roles](/guides/team-and-roles/). Five routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
+authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)); `POST /api/v1/webhooks/stripe` is verified with Stripe's own `Stripe-Signature` (see [Stripe events](/guides/approvals-and-events/#stripe-events)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid field, with its `path`
 and `message`) on a `400` for an invalid body.
@@ -53,6 +53,7 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `GET` | `/api/v1/webhook-subscriptions/:id/deliveries` | | `{ deliveries }` |
 | `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }`, `404` or `409` |
 | `POST` | `/api/v1/webhooks/orders` | `{ model, channel, externalId, lines, … }` | `201 { orderId, flowId }`, or `200` on a replay |
+| `POST` | `/api/v1/webhooks/stripe` | A Stripe event | `200 { outcome }`, `409` when the order isn't waiting yet |
 | `POST` | `/api/v1/channels/shopify/orders` | A Shopify `orders/create` payload | `201 { orderId, flowId }`, `200` on a replay or `{ ignored: true, topic }` |
 | `POST` | `/api/v1/channels/edi/850` | Raw X12 (`application/edi-x12` or `text/plain`) | `200 { sender, results }` (operator) |
 
@@ -167,7 +168,7 @@ isn't waiting for an approval (already decided, or never reached) is `409`.
 ## Cancel
 
 `POST /api/v1/orders/:id/cancel` stops the order's run, releases reserved stock, voids
-payment authorizations, cancels shipments and staged pickups, restocks shipped stock, reverses on-account invoice charges, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
+payment authorizations, cancels shipments and staged pickups, restocks shipped stock, voids unpaid Stripe invoices, reverses on-account invoice charges, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
 `Cancelled via API`. Cancelling an order that has already finished changes nothing and returns
 `409` `{ error: "The order has already finished" }`; an unknown order is `404`.
 

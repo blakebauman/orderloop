@@ -463,9 +463,24 @@ export const NODE_SPECS = [
     category: 'commerce',
     label: 'Generate invoice',
     description:
-      'Renders the invoice to R2 with the configured payment terms. Unpaid invoices for business customers go on their account, and come off it if the order fails.',
+      'Renders the invoice to R2 with the configured payment terms, and can also issue it through Stripe for the customer to pay online. Unpaid invoices for business customers go on their account, and come off it if the order fails (a Stripe invoice is voided).',
     icon: 'FileText',
     fields: [
+      {
+        key: 'provider',
+        label: 'Issue through',
+        kind: 'select',
+        options: ['document', 'stripe'],
+        default: 'document',
+        hint: 'stripe also finalizes a Stripe invoice the customer pays online; its payment delivers payment.received',
+      },
+      {
+        key: 'sendEmail',
+        label: 'Email the invoice',
+        kind: 'boolean',
+        default: true,
+        hint: 'stripe only: Stripe emails the invoice to the customer',
+      },
       {
         key: 'terms',
         label: 'Terms',

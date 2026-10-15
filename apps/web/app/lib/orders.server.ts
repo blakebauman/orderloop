@@ -7,6 +7,7 @@ import {
   flows,
   fxRates,
   inboundEmails,
+  invoices,
   locationStock,
   locations,
   messages,
@@ -115,7 +116,7 @@ export async function listApprovals(status = 'pending') {
 }
 
 export async function orderRecords(orderId: string) {
-  const [docs, msgs, pays, ships, parts, outs] = await Promise.all([
+  const [docs, msgs, pays, ships, parts, outs, bills] = await Promise.all([
     db()
       .select()
       .from(documents)
@@ -160,6 +161,19 @@ export async function orderRecords(orderId: string) {
       .leftJoin(sellers, eq(sellers.id, payouts.sellerId))
       .where(eq(payouts.orderId, orderId))
       .orderBy(payouts.sellerId),
+    db()
+      .select({
+        id: invoices.id,
+        status: invoices.status,
+        number: invoices.number,
+        hostedUrl: invoices.hostedUrl,
+        amount: invoices.amount,
+        currency: invoices.currency,
+        dueAt: invoices.dueAt,
+      })
+      .from(invoices)
+      .where(eq(invoices.orderId, orderId))
+      .orderBy(desc(invoices.createdAt)),
   ]);
   return {
     documents: docs,
@@ -168,6 +182,7 @@ export async function orderRecords(orderId: string) {
     shipments: ships,
     sellers: parts.map((p) => ({ ...p, name: p.name ?? 'Marketplace' })),
     payouts: outs,
+    invoices: bills,
   };
 }
 

@@ -120,7 +120,7 @@ A node type with `rollback: true` in the catalog registers a compensation on its
 | `commerce.ship` | `cancelShipment` for every shipment id in the step's output (`shipments`; one per source location on a split), then `restoreShippedStock`: once none of the order's shipments is live (`label_created`, `ready_for_pickup`, `collected`), stock its shipments consumed goes back, each reservation once |
 | `commerce.pickup_ready` | `cancelShipment` for the staged pickup's shipment id in the step's output |
 | `commerce.deliver_digital` | `revokeEntitlements`: revokes every issued code |
-| `commerce.invoice` | `reverseBalance`: reverses each on-account balance entry once, with a negative `rev_` entry |
+| `commerce.invoice` | `voidInvoices` (`apps/engine/src/billing.ts`): voids each unpaid Stripe invoice in Stripe (a draft is deleted) before marking it `void`; one Stripe reports paid is left alone and named in the summary. Then `reverseBalance`: reverses each on-account balance entry once, with a negative `rev_` entry, skipping one its paid invoice already settled (`set_`) |
 
 Each runs with `{ retries: { limit: 3, delay: '10 seconds', backoff: 'linear' }, timeout: '2 minutes' }`
 and reports the node `rolled_back`. A failed report is logged, not thrown, so Workflows never reruns a compensation that already ran. When the instance fails (an End node with outcome `failed`, or a

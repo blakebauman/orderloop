@@ -75,5 +75,7 @@
 ^packages/core/src/a2a\.ts$	reference/a2a docs/architecture.md	gen
 ^apps/docs/src/components/A2a(Skills|TaskStates)\.astro$	reference/a2a	gen
 ^packages/core/src/channels/(shopify|x12)\.ts$	guides/channel-adapters reference/rest-api docs/configuration.md guides/payments	prose
-^apps/engine/src/(payments|stripe)\.ts$	guides/payments docs/architecture.md docs/configuration.md docs/data-model.md docs/workflow.md	prose
+^apps/engine/src/(payments|stripe|gateway|billing|payment-events)\.ts$	guides/payments docs/architecture.md docs/configuration.md docs/data-model.md docs/workflow.md	prose
+^apps/engine/src/(billing|payment-events)\.ts$	guides/approvals-and-events docs/order-agent.md	prose
+^apps/web/app/lib/stripe\.server\.ts$	guides/payments guides/approvals-and-events reference/rest-api docs/architecture.md docs/configuration.md docs/deploy.md	prose
 ^packages/core/src/(money|payments)\.ts$	guides/payments docs/architecture.md	prose

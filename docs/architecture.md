@@ -68,6 +68,7 @@ engine source.
 | `GET /health/deep` | `runHealthChecks` over this Worker's D1 and R2 and `EngineRpc.health()` (the engine's D1 and R2): `{ ok, service, checks: { db, docs, engine } }`, each `"ok"` or `"fail"`, with `503` when any fails. The deploy smoke test calls it |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by `readSigned`, an HMAC with the secret of the integration the signature names (`k=`, `findIntegration` in `apps/web/app/lib/integrations.server.ts`; the previous secret too during a rotation), then held to its scope (`allowsEvent` in `packages/core/src/integrations.ts`: its events, and its channel's orders only) |
 | `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, the integration's scope (`allowsOrder`: it may start orders, on its channel, naming only its `flows`), a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.app/guides/inbound-orders/) |
+| `POST /api/v1/webhooks/stripe` | `handleStripeWebhook` (`apps/web/app/lib/stripe.server.ts`), before authentication: `verifyStripeSignature` (any `v1` in `Stripe-Signature`) against `STRIPE_WEBHOOK_SECRET` (`503` unset, `400` bad signature or not an event), the `WEBHOOK_LIMIT` budget keyed `stripe`, then `EngineRpc.paymentEvent`: `409` when the outcome is `retry`, `500` when the engine throws, else `200`. Stripe signs with the endpoint's secret, not an integration key, so no integration scope applies; the engine dedupes on the event id (`payment_events`) |
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
@@ -190,6 +191,15 @@ zero-decimal currencies. `validateAddress` is the seam for an address provider (
 calls `checkAddress` from core. `quoteShipping` POSTs to a shipping-rate node's live carriers
 (https, 5 seconds, credentials from `SHIPPING_CARRIER_AUTH`) and falls back to the node's
 configured services; it and the Stripe calls are the connectors' only outbound requests.
+`apps/engine/src/gateway.ts` holds what payments and billing share: the mode, the client,
+`rethrow` and `ensureCustomer` (the account's Stripe customer, created once under `cust_<id>`).
+`apps/engine/src/billing.ts` issues `commerce.invoice`'s Stripe invoices in the order Stripe needs
+since API 2022-08-01: customer, a draft with `pending_invoice_items_behavior=exclude`,
+`auto_advance=false` and `collection_method=send_invoice`, each item created with `invoice=in_…`,
+finalize, then send; each call keyed from the invoice row id (`inv_…`, `inv_…_item_<n>`,
+`inv_…_finalize`, `inv_…_send`). `settleInvoice` marks the invoice paid, records the
+`invoice_payment` and settles the account charge in one D1 batch; `handleStripeEvent`
+(`apps/engine/src/payment-events.ts`) calls it for `invoice.paid`.
 
 Two rules hold for every connector:
 
@@ -208,10 +218,10 @@ Two rules hold for every connector:
   release is a ledger movement, so a cancel racing a rollback releases once),
   `voidAuthorizations` voids only `authorized` payments (a void racing a capture leaves exactly
   one of them; a Stripe one is canceled in Stripe first, and D1 changes only after), `cancelShipment` sets one shipment
-  `cancelled`, `revokeEntitlements` revokes only `issued` codes, `restoreShippedStock` restores a `consumed` reservation once, `reverseBalance` reverses a balance entry once. Running one twice changes nothing.
+  `cancelled`, `revokeEntitlements` revokes only `issued` codes, `restoreShippedStock` restores a `consumed` reservation once, `reverseBalance` reverses a balance entry once (and not one a paid invoice settled), `voidInvoices` voids an invoice in Stripe before D1 and leaves a paid one alone. Running one twice changes nothing.
 
 The saga compensations a failed order runs are `ROLLBACKS` in `apps/engine/src/nodes.ts`; a
-cancel runs `compensateOrder`, which releases, voids, cancels open shipments and staged pickups, revokes issued digital codes, restocks shipped stock once no shipment is live, reverses on-account charges, cancels seller orders and reverses scheduled payouts in one pass. A node
+cancel runs `compensateOrder`, which releases, voids, cancels open shipments and staged pickups, revokes issued digital codes, voids unpaid Stripe invoices, restocks shipped stock once no shipment is live, reverses on-account charges, cancels seller orders and reverses scheduled payouts in one pass. A node
 type with `rollback: true` in the catalog must have a `ROLLBACKS` entry.
 
 To exercise failure paths, set `meta.simulate` on the order input:

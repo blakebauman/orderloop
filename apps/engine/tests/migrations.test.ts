@@ -158,3 +158,55 @@ describe('0030_stripe_payments', () => {
     ).rejects.toThrow(/UNIQUE/);
   });
 });
+
+describe('0031_invoices_payment_events', () => {
+  it('adds the invoice and event tables beside existing rows, one row per Stripe invoice', async () => {
+    const db = testEnv.MIGRATION_DB;
+    const { applied, next } = before('0031_');
+    await applyD1Migrations(db, applied);
+    await db.batch([
+      db.prepare(
+        `INSERT INTO payments (id, order_id, kind, amount, status, created_at, provider, external_id, currency)
+         VALUES ('pay-s', 'o-1', 'authorization:card', 10, 'authorized', 0, 'stripe', 'pi_1', 'USD')`,
+      ),
+      db.prepare(
+        `INSERT INTO balance_entries (id, order_id, customer_id, amount, applied, created_at)
+         VALUES ('bal_o-1', 'o-1', 'cus-a', 10, 1, 0)`,
+      ),
+    ]);
+    await applyD1Migrations(db, [next]);
+
+    expect(
+      await db.prepare("SELECT provider, external_id FROM payments WHERE id = 'pay-s'").first(),
+    ).toEqual({ provider: 'stripe', external_id: 'pi_1' });
+    expect(
+      await db.prepare("SELECT amount, applied FROM balance_entries WHERE id = 'bal_o-1'").first(),
+    ).toEqual({ amount: 10, applied: 1 });
+    const invoice = (id: string, external: string | null) =>
+      db
+        .prepare(
+          `INSERT INTO invoices (id, order_id, provider, status, external_id, amount, currency, terms, balance_entry_id, created_at)
+           VALUES (?, 'o-1', 'stripe', 'pending', ?, 10, 'USD', 'net_30', 'bal_o-1', 0)`,
+        )
+        .bind(id, external)
+        .run();
+    await invoice('inv-a', 'in_1');
+    await invoice('inv-b', null);
+    await invoice('inv-c', null);
+    await expect(invoice('inv-d', 'in_1')).rejects.toThrow(/UNIQUE/);
+    expect(
+      await db
+        .prepare("SELECT status, paid_at, hosted_url FROM invoices WHERE id = 'inv-a'")
+        .first(),
+    ).toEqual({ status: 'pending', paid_at: null, hosted_url: null });
+    const event = (receivedAt: number) =>
+      db
+        .prepare(
+          "INSERT INTO payment_events (id, provider, type, received_at) VALUES ('evt_1', 'stripe', 'invoice.paid', ?)",
+        )
+        .bind(receivedAt)
+        .run();
+    await event(0);
+    await expect(event(1)).rejects.toThrow(/UNIQUE|PRIMARY/);
+  });
+});

@@ -30,6 +30,7 @@ import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 import { overBudget } from '../app/lib/rate-limit';
+import { handleStripeWebhook } from '../app/lib/stripe.server';
 
 /**
  * The deploy smoke test's check: this Worker's D1 and R2, and the engine's (over the service
@@ -103,6 +104,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (url.pathname === '/api/v1/webhooks/orders' && request.method === 'POST') {
     return handleSignedOrder(request);
+  }
+  // Stripe signs with the endpoint's signing secret (Stripe-Signature).
+  if (url.pathname === '/api/v1/webhooks/stripe' && request.method === 'POST') {
+    return handleStripeWebhook(request);
   }
   // Shopify signs with its own HMAC header, not a bearer token.
   if (url.pathname === '/api/v1/channels/shopify/orders' && request.method === 'POST') {

@@ -54,6 +54,7 @@ import {
 import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { reverseBalanceEntry, voidInvoices } from './billing';
 import { voidAuthorizations } from './payments';
 
 const db = (env: Env) => createDb(env.DB);
@@ -694,7 +695,8 @@ export async function addToBalance(
 
 /**
  * Compensation: takes the order's invoices back off the customer's account. Each entry is reversed
- * at most once, by its own ledger row. Returns how many entries were reversed.
+ * at most once, by its own ledger row, and not at all once its invoice was paid (settled). Returns
+ * how many entries were reversed.
  */
 export async function reverseBalance(env: Env, orderId: string) {
   const d = db(env);
@@ -711,31 +713,8 @@ export async function reverseBalance(env: Env, orderId: string) {
     );
   let reversed = 0;
   for (const e of entries) {
-    const id = `rev_${e.id}`;
-    const pending = and(eq(balanceEntries.id, id), eq(balanceEntries.applied, false));
-    const [, , [mark]] = await d.batch([
-      d
-        .insert(balanceEntries)
-        .values({
-          id,
-          orderId,
-          customerId: e.customerId,
-          amount: -e.amount,
-          createdAt: Date.now(),
-        })
-        .onConflictDoNothing(),
-      d
-        .update(customers)
-        .set({ balance: sql`${customers.balance} - ${e.amount}` })
-        .where(
-          and(
-            eq(customers.id, e.customerId),
-            sql`exists (select 1 from ${balanceEntries} where ${pending})`,
-          ),
-        ),
-      d.update(balanceEntries).set({ applied: true }).where(pending).returning(),
-    ]);
-    if (mark) reversed += 1;
+    const [, , marked] = await d.batch(reverseBalanceEntry(env, e, Date.now()));
+    if (marked.length) reversed += 1;
   }
   return reversed;
 }
@@ -1125,7 +1104,7 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */
 export async function compensateOrder(env: Env, orderId: string) {
-  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked, unbilled] =
+  const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked, invoices] =
     await Promise.all([
       releaseInventory(env, orderId),
       voidAuthorizations(env, orderId),
@@ -1133,8 +1112,10 @@ export async function compensateOrder(env: Env, orderId: string) {
       cancelSellerOrders(env, orderId),
       reversePayouts(env, orderId),
       revokeEntitlements(env, orderId),
-      reverseBalance(env, orderId),
+      voidInvoices(env, orderId),
     ]);
+  // After the void, so an invoice found paid in Stripe keeps its (settled) account charge.
+  const unbilled = await reverseBalance(env, orderId);
   // After the cancel above, so a shipment it cancelled no longer holds the stock.
   const restored = await restoreShippedStock(env, orderId);
   return {
@@ -1146,6 +1127,8 @@ export async function compensateOrder(env: Env, orderId: string) {
     payoutsReversed,
     revoked,
     unbilled,
+    invoicesVoided: invoices.voided,
+    invoicesPaid: invoices.paid,
   };
 }
 

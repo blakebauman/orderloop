@@ -1,7 +1,8 @@
 /**
  * An in-memory Stripe for the `stripe` test project, installed over `globalThis.fetch`. It models
- * what the payment gateway relies on: PaymentIntent states (manual capture, cancel, off-session
- * confirms), refunds against what was received, customers, card declines, and idempotency keys
+ * what the payment gateway and billing rely on: PaymentIntent states (manual capture, cancel,
+ * off-session confirms), refunds against what was received, customers, invoices (draft → items
+ * attached by id → finalize → send / void / pay), card declines, and idempotency keys
  * (a repeated key replays the first response; a different body under it is refused). Requests to
  * anything other than api.stripe.com go to the real fetch.
  */
@@ -26,6 +27,28 @@ export type FakeIntent = {
   off_session: boolean;
   setup_future_usage: string | null;
   refunded: number;
+};
+
+export type FakeInvoice = {
+  id: string;
+  object: 'invoice';
+  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void';
+  customer: string;
+  currency: string;
+  total: number;
+  amount_due: number;
+  amount_paid: number;
+  number: string | null;
+  hosted_invoice_url: string | null;
+  due_date: number | null;
+  days_until_due: number | null;
+  collection_method: string;
+  auto_advance: boolean;
+  pending_invoice_items_behavior: string | null;
+  description: string | null;
+  metadata: Record<string, string>;
+  lines: { id: string; amount: number; description: string | null }[];
+  sent: number;
 };
 
 export type StripeCall = {
@@ -63,6 +86,14 @@ export function installStripeFake() {
   const intents = new Map<string, FakeIntent>();
   const refunds = new Map<string, Json>();
   const customers = new Map<string, Json>();
+  const invoices = new Map<string, FakeInvoice>();
+  /** Invoice items created without an invoice, waiting for the customer's next one. */
+  const pendingItems: {
+    id: string;
+    customer: string;
+    amount: number;
+    description: string | null;
+  }[] = [];
   const idempotent = new Map<string, { body: string; status: number; json: Json }>();
   const calls: StripeCall[] = [];
   /** Paths whose next request is processed but whose response is lost (a network error). */
@@ -140,7 +171,122 @@ export function installStripeFake() {
     return ok(view(pi));
   }
 
+  const invalid = (message: string, code?: string) =>
+    error(400, { type: 'invalid_request_error', message, ...(code ? { code } : {}) });
+  const missing = (what: string, id: string) =>
+    error(404, {
+      type: 'invalid_request_error',
+      code: 'resource_missing',
+      message: `No such ${what}: '${id}'`,
+    });
+  const invoiceView = (inv: FakeInvoice) => ({ ...inv }) as unknown as Json;
+
+  function createInvoice(p: Form) {
+    const customer = String(p.customer ?? '');
+    if (!customers.has(customer)) return missing('customer', customer);
+    const method = String(p.collection_method ?? 'charge_automatically');
+    const days = p.days_until_due === undefined ? null : Number(p.days_until_due);
+    const due = p.due_date === undefined ? null : Number(p.due_date);
+    if (method === 'send_invoice' && days === null && due === null)
+      return invalid(
+        'Invoices with collection_method=send_invoice need days_until_due or due_date',
+      );
+    if (due !== null && due * 1000 < Date.now()) return invalid('due_date must be in the future');
+    const inv: FakeInvoice = {
+      id: nextId('in'),
+      object: 'invoice',
+      status: 'draft',
+      customer,
+      currency: String(p.currency ?? 'usd'),
+      total: 0,
+      amount_due: 0,
+      amount_paid: 0,
+      number: null,
+      hosted_invoice_url: null,
+      due_date: due,
+      days_until_due: days,
+      collection_method: method,
+      auto_advance: p.auto_advance === 'true',
+      pending_invoice_items_behavior: (p.pending_invoice_items_behavior as string) ?? null,
+      description: (p.description as string) ?? null,
+      metadata: (p.metadata as Record<string, string>) ?? {},
+      lines: [],
+      sent: 0,
+    };
+    // Stripe's behavior before 2022-08-01: a new invoice swept up the customer's pending items.
+    if (inv.pending_invoice_items_behavior === 'include')
+      for (const item of pendingItems.filter((i) => i.customer === customer)) {
+        inv.lines.push(item);
+        inv.total += item.amount;
+        pendingItems.splice(pendingItems.indexOf(item), 1);
+      }
+    inv.amount_due = inv.total;
+    invoices.set(inv.id, inv);
+    return ok(invoiceView(inv));
+  }
+
+  function createInvoiceItem(p: Form) {
+    const customer = String(p.customer ?? '');
+    if (!customers.has(customer)) return missing('customer', customer);
+    const amount = Number(p.amount);
+    if (!Number.isInteger(amount)) return invalid('Bad amount');
+    const item = {
+      id: nextId('ii'),
+      customer,
+      amount,
+      description: (p.description as string) ?? null,
+    };
+    if (p.invoice === undefined) {
+      pendingItems.push(item);
+      return ok({ ...item, object: 'invoiceitem', invoice: null });
+    }
+    const inv = invoices.get(String(p.invoice));
+    if (!inv) return missing('invoice', String(p.invoice));
+    if (inv.status !== 'draft') return invalid('You can only add items to a draft invoice');
+    if (inv.customer !== customer) return invalid('The invoice belongs to another customer');
+    if (String(p.currency ?? inv.currency) !== inv.currency) return invalid('Currency mismatch');
+    inv.lines.push({ id: item.id, amount, description: item.description });
+    inv.total += amount;
+    inv.amount_due = inv.total;
+    return ok({ ...item, object: 'invoiceitem', invoice: inv.id, currency: inv.currency });
+  }
+
+  function invoiceAction(method: string, id: string, action: string | undefined) {
+    const inv = invoices.get(id);
+    if (!inv) return missing('invoice', id);
+    if (method === 'GET' && !action) return ok(invoiceView(inv));
+    if (method === 'DELETE' && !action) {
+      if (inv.status !== 'draft') return invalid('You can only delete draft invoices.');
+      invoices.delete(id);
+      return ok({ id, object: 'invoice', deleted: true });
+    }
+    if (action === 'finalize') {
+      if (inv.status !== 'draft') return invalid('This invoice is already finalized.');
+      inv.number = `FAKE-${id.slice(-4)}`;
+      inv.hosted_invoice_url = `https://invoice.stripe.com/i/${id}`;
+      inv.due_date ??= Math.floor(Date.now() / 1000) + (inv.days_until_due ?? 0) * 86_400;
+      inv.status = inv.total === 0 ? 'paid' : 'open';
+      return ok(invoiceView(inv));
+    }
+    if (action === 'send') {
+      if (inv.status !== 'open') return invalid('You can only send an open invoice.');
+      inv.sent += 1;
+      return ok(invoiceView(inv));
+    }
+    if (action === 'void') {
+      if (inv.status !== 'open' && inv.status !== 'uncollectible')
+        return invalid(`You can only void an open invoice; this one is ${inv.status}.`);
+      inv.status = 'void';
+      return ok(invoiceView(inv));
+    }
+    return invalid(`Unrecognized invoice action ${action}`);
+  }
+
   function handle(method: string, path: string, p: Form): { status: number; json: Json } {
+    if (method === 'POST' && path === '/v1/invoices') return createInvoice(p);
+    if (method === 'POST' && path === '/v1/invoiceitems') return createInvoiceItem(p);
+    const inv = /^\/v1\/invoices\/([^/]+)(?:\/(finalize|send|void))?$/.exec(path);
+    if (inv) return invoiceAction(method, decodeURIComponent(inv[1]!), inv[2]);
     if (method === 'POST' && path === '/v1/customers') {
       const c = {
         id: nextId('cus'),
@@ -232,7 +378,7 @@ export function installStripeFake() {
     // The client sends a string body; reading it from `init` avoids workerd's form-body warning.
     const raw = (init as RequestInit | undefined)?.body;
     const body =
-      req.method === 'GET'
+      req.method !== 'POST'
         ? url.search.slice(1)
         : typeof raw === 'string'
           ? raw
@@ -287,6 +433,7 @@ export function installStripeFake() {
     intents,
     refunds,
     customers,
+    invoices,
     calls,
     /** Only Stripe calls for `path` (exact) or matching the regex. */
     callsTo(method: string, path: string | RegExp) {
@@ -314,6 +461,19 @@ export function installStripeFake() {
         metadata,
       });
       return r.json as unknown as FakeIntent;
+    },
+    /** The customer pays an open invoice on its hosted page; returns Stripe's `invoice.paid` event. */
+    payInvoice(id: string) {
+      const inv = invoices.get(id);
+      if (inv?.status !== 'open') throw new Error(`Invoice ${id} is not open`);
+      inv.status = 'paid';
+      inv.amount_paid = inv.total;
+      inv.amount_due = 0;
+      return {
+        id: nextId('evt'),
+        type: 'invoice.paid',
+        data: { object: invoiceView(inv) },
+      };
     },
     restore() {
       spy.mockRestore();
