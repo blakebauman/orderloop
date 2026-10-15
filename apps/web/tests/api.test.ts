@@ -25,7 +25,7 @@ vi.mock('drizzle-orm', async (actual) => ({
   eq: (_col: unknown, value: string) => ({ eq: value }),
   lt: () => ({}),
 }));
-const env: Record<string, string> = {};
+const env: Record<string, unknown> = {};
 
 vi.mock('cloudflare:workers', () => ({ env }));
 vi.mock('~/lib/env.server', () => ({ engine: () => engine, db: () => fakeDb }));
@@ -206,6 +206,31 @@ describe('signed events', () => {
     const web = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
     expect((await send(web, await sign(web, 'int_web', 'whsec_web'))).status).toBe(200);
     expect(engine.sendEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("spends only a verified integration's budget, and answers 429 once it runs out", async () => {
+    const spent: string[] = [];
+    env.WEBHOOK_LIMIT = {
+      limit: async ({ key }: { key: string }) => {
+        spent.push(key);
+        return { success: spent.length < 2 };
+      },
+    };
+    try {
+      const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+      // A forged signature is refused before it can use up the real sender's budget.
+      expect((await send(raw, await sign(raw, 'int_pay', 'whsec_other'))).status).toBe(401);
+      expect(spent).toEqual([]);
+      engine.sendEvent.mockResolvedValue({ delivered: true, nodeId: 'pay' });
+      expect((await send(raw, await sign(raw))).status).toBe(200);
+      const limited = await send(raw, await sign(raw));
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get('retry-after')).toBe('60');
+      expect(spent).toEqual(['int_pay', 'int_pay']);
+      expect(engine.sendEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      delete env.WEBHOOK_LIMIT;
+    }
   });
 });
 

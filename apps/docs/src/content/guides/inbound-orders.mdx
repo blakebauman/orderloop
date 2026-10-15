@@ -139,6 +139,7 @@ pair with different contents returns `422` and starts nothing. To change an acce
 | `403` | The integration may not start orders, is bound to another channel, or may not choose that `flowId` |
 | `409` | A new order's flow has no published version |
 | `422` | The same `channel` and `externalId` already arrived with different contents |
+| `429` | The integration sent more than 1,200 requests in a minute (events included); retry after `Retry-After` seconds |
 | `500` | Engine error |
 
 Errors are `{ "error": "…" }`. Treat `201` and `200` as accepted; retry on `5xx` with the same body.

@@ -24,7 +24,15 @@ Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid fiel
 and `message`) on a `400` for an invalid body.
 `401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` too many wrong bearer tokens from one address (more
 than 20 bearers that aren't `ol_live_` tokens in 15 minutes, which only guesses at the workspace
-password produce; see `Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
+password produce; see `Retry-After`) or a caller over its requests a minute (below), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
+
+### Rate limits
+
+Each caller has a budget of requests a minute: an API token, or a signed-in person, gets 600 on
+`/api/v1`. Over it, the request is refused with `429 { "error": "Too many requests; try again in 60 seconds." }`
+and `Retry-After: 60`; wait that long and retry. The count is kept at each Cloudflare location
+the requests arrive at, so it stops a runaway client rather than metering an exact number. A
+deployment can have different budgets; ask your OrderLoop contact if an integration needs more.
 
 ## Routes
 
