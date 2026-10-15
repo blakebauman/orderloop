@@ -6,6 +6,8 @@ export default defineConfig(async () => {
   const migrations = await readD1Migrations('../../packages/db/migrations');
   // The demo customers, catalog and stores the tests order against (not part of the migrations).
   const seed = await readD1Migrations('../../packages/db/seed');
+  // The demo deployment's nightly reset (.github/workflows/demo-reset.yml).
+  const demoReset = await readD1Migrations('../../packages/db/reset');
   return {
     plugins: [
       // TC39 decorators (`@callable()`): Oxc doesn't transform them yet.
@@ -18,11 +20,12 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             TEST_SEED: seed,
+            TEST_DEMO_RESET: demoReset,
             AI_MODE: 'mock',
             TIME_SCALE: '1',
           },
           // A second, empty database for testing migrations against rows in an older shape.
-          d1Databases: { MIGRATION_DB: 'migration-test' },
+          d1Databases: { MIGRATION_DB: 'migration-test', DEMO_DB: 'demo-test' },
         },
       }),
     ],

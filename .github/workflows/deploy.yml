@@ -95,6 +95,10 @@ jobs:
       # (contract) ships in a later change, once no deployed code needs what it removes.
       - name: Migrate D1
         run: retry pnpm --filter @orderloop/web exec wrangler d1 migrations apply DB --remote --config "$CONFIG"
+      # A demo carries the demo data (INSERT OR IGNORE: loading it again changes nothing).
+      - name: Load demo data
+        if: fromJSON(inputs.deployment).demo
+        run: retry pnpm --filter @orderloop/web exec wrangler d1 execute DB --remote --config "$CONFIG" --file ../../packages/db/seed/0001_demo.sql
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
         id: engine

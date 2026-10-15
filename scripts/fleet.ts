@@ -7,6 +7,7 @@
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
+ *   node scripts/fleet.ts demos                   the provisioned demo deployments, for the nightly reset
  *
  * A rendered config is the app's wrangler.jsonc with the deployment's names, ids and domain put
  * in, written next to it so its relative paths still resolve. See docs/operations.md.
@@ -72,8 +73,13 @@ export type Deployment = {
   jurisdiction?: 'eu' | 'fedramp';
   /** Skipped by CI: stays on what it runs now. */
   hold: boolean;
-  /** Deploys the docs site after it (orderloop.app only). */
+  /** Deploys the docs site after it (the orderloop deployment only). */
   docs: boolean;
+  /**
+   * A public demo: the demo data is loaded on each deploy and nightly, visitors sign in with one
+   * click, models are mocked and waits run 1440× faster. Never on a customer's deployment.
+   */
+  demo: boolean;
 };
 
 function readJsonc(path: string): Record<string, unknown> {
@@ -112,6 +118,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(raw.jurisdiction ? { jurisdiction: raw.jurisdiction as 'eu' | 'fedramp' } : {}),
     hold: raw.hold === true,
     docs: raw.docs === true,
+    demo: raw.demo === true,
   };
 }
 
@@ -170,6 +177,9 @@ export function renderEngine(base: Config, d: Deployment): Config {
   config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
   storage(config, d);
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
+  // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
+  if (d.demo)
+    config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };
   return config;
 }
 
@@ -190,6 +200,7 @@ export function renderWeb(base: Config, d: Deployment): Config {
     namespace_id: String(d.slot * 1000 + (Number(r.namespace_id) % 1000)),
   }));
   storage(config, d);
+  if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };
   return config;
 }
 
@@ -291,6 +302,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'status') await status();
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
+    else if (cmd === 'demos')
+      console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error('usage: fleet.ts render|matrix|secrets|status|names|set-d1 (see the header)');
   } catch (err) {

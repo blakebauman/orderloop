@@ -1,0 +1,10 @@
+// The public demo at demo.orderloop.app: demo data, one-click sign-in as a shared operator, mocked
+// models, compressed time, reset every night. See docs/operations.md, "The demo".
+{
+  "id": "demo",
+  "ring": "internal",
+  "slot": 2,
+  "domain": "demo.orderloop.app",
+  "hold": true,
+  "demo": true
+}

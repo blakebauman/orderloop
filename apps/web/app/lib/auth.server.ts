@@ -46,6 +46,7 @@ import {
   sha256Hex,
   verifyPassword,
 } from './credentials';
+import { DEMO_USER, isDemo } from './demo.server';
 import { db } from './env.server';
 import { isLocalHost } from './origin';
 import { twoFactorRequirement } from './settings.server';
@@ -107,7 +108,8 @@ export const forgetUserCount = () => {
 };
 
 export async function authEnabled(): Promise<boolean> {
-  return !!password() || (await anyUsers());
+  // A demo always signs visitors in (as the demo user), so it is never open.
+  return !!password() || isDemo() || (await anyUsers());
 }
 
 /**
@@ -172,7 +174,11 @@ export async function principal(request: Request): Promise<Caller | null> {
           .set({ lastSeenAt: now, ip: clientIp(request) })
           .where(eq(sessions.tokenHash, hash));
       const role = person.role as Role;
-      const due = !totpEnabledAt && mustUseTwoFactor(role, await twoFactorRequirement());
+      // The shared demo visitor can't set up two-factor sign-in (its Account page is read-only).
+      const due =
+        person.id !== DEMO_USER.id &&
+        !totpEnabledAt &&
+        mustUseTwoFactor(role, await twoFactorRequirement());
       return {
         kind: 'user',
         ...person,
@@ -467,6 +473,24 @@ export async function startSession(request: Request, userId: string): Promise<st
     });
   await db().update(users).set({ lastLoginAt: now }).where(eq(users.id, userId));
   return sessionCookie(token);
+}
+
+/**
+ * Signs a visitor in as the demo user, creating it on first use. Only in demo mode; throws
+ * otherwise, so the button can't be replayed against a real workspace.
+ */
+export async function signInDemo(request: Request): Promise<string> {
+  if (!isDemo()) throw new Error('Not a demo deployment');
+  await db()
+    .insert(users)
+    .values({ ...DEMO_USER, createdAt: Date.now() })
+    .onConflictDoNothing();
+  forgetUserCount();
+  await audit(request, 'auth.sign_in', {
+    actor: { kind: 'user', ...DEMO_USER },
+    detail: { demo: true },
+  });
+  return startSession(request, DEMO_USER.id);
 }
 
 // ── The two-factor step ──

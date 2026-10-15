@@ -88,3 +88,20 @@ test('the matrix groups by ring and leaves held deployments out', () => {
   );
   assert.deepEqual(m.general, []);
 });
+
+test('a demo mocks models, speeds up time and turns on demo sign-in', () => {
+  const demo = toDeployment({
+    id: 'demo',
+    ring: 'internal',
+    slot: 5,
+    d1Id: 'd',
+    domain: 'demo.orderloop.app',
+    demo: true,
+  });
+  const engine = renderEngine(base('engine'), demo);
+  assert.equal(engine.vars.AI_MODE, 'mock');
+  assert.equal(engine.vars.AI_GATEWAY_ID, '');
+  assert.equal(engine.vars.TIME_SCALE, '1440');
+  assert.equal(renderWeb(base('web'), demo).vars.DEMO_MODE, 'true');
+  assert.equal(renderWeb(base('web'), acme).vars.DEMO_MODE, '');
+});

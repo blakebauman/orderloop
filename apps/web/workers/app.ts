@@ -24,6 +24,7 @@ import {
   TokenExpired,
 } from '../app/lib/auth.server';
 import { withSecurityHeaders } from '../app/lib/csp';
+import { demoRefusal } from '../app/lib/demo.server';
 import { docs, engine } from '../app/lib/env.server';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
@@ -70,6 +71,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // Open mode (no APP_PASSWORD, no people) makes everyone an operator: local development only.
   const unset = await openModeRefused(url);
   if (unset) return new Response(unset, { status: 503 });
+
+  // A demo deployment keeps visitors away from people, credentials and outbound endpoints.
+  const locked = demoRefusal(request);
+  if (locked) return locked;
 
   // A2A discovery: the Agent Card is public, like the OpenAPI document. A 1.0 client says so
   // (A2A-Version: 1.0); anyone else gets the 0.3 shape, which embeds the 1.0 interfaces.
