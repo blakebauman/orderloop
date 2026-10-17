@@ -173,3 +173,10 @@ test("a customer's sso sets the web Worker's identity provider", () => {
     /clientId/,
   );
 });
+
+test("a customer's assistantDailyTokens sets the assistant's budget", () => {
+  const big = toDeployment({ ...acme, assistantDailyTokens: 0 });
+  assert.equal(renderEngine(base('engine'), big).vars.ASSISTANT_DAILY_TOKENS, '0');
+  assert.equal(renderEngine(base('engine'), acme).vars.ASSISTANT_DAILY_TOKENS, '1000000');
+  assert.throws(() => toDeployment({ ...acme, assistantDailyTokens: -1 }), /assistantDailyTokens/);
+});

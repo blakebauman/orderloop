@@ -8,8 +8,14 @@
  * inside the caller's step. R2 keys are limited to the order's own documents.
  */
 
-import { type AssessAnswers, type AssessQuestions, clampAnswers } from '@orderloop/core';
-import { type AiSource, withTimeout } from './ai';
+import {
+  type AiProvenance,
+  type AssessAnswers,
+  type AssessQuestions,
+  clampAnswers,
+  promptId,
+} from '@orderloop/core';
+import { logAiCall, withTimeout } from './ai';
 
 /** Clef's limits: 4 images, 4 MiB each, 8 MiB decoded in all. */
 export const MAX_IMAGES = 4;
@@ -162,9 +168,15 @@ export function assessHeuristic(questions: AssessQuestions, state: unknown): Ass
 export async function assess(
   env: Env,
   input: { state: unknown; questions: AssessQuestions; images?: ClefImage[] },
-): Promise<{ value: Assessment; source: AiSource }> {
-  const fallback = () => ({ answers: assessHeuristic(input.questions, input.state) });
-  if (String(env.AI_MODE) === 'mock') return { value: fallback(), source: 'heuristic' };
+): Promise<{ value: Assessment } & AiProvenance> {
+  const prompt = promptId('assess');
+  const started = Date.now();
+  const heuristic = (reason: string) => {
+    const p: AiProvenance = { source: 'heuristic', model: null, prompt, fallback: reason };
+    logAiCall(p, Date.now() - started);
+    return { value: { answers: assessHeuristic(input.questions, input.state) }, ...p };
+  };
+  if (String(env.AI_MODE) === 'mock') return heuristic('mock');
   try {
     const res = (await withTimeout(
       env.AI.run(
@@ -181,12 +193,13 @@ export async function assess(
     )) as { answers?: unknown; usage?: Assessment['usage']; result?: Assessment };
     const body = res.answers ? res : (res.result ?? res);
     if (!body.answers || typeof body.answers !== 'object') throw new Error('no answers');
+    const p: AiProvenance = { source: 'model', model: String(env.ASSESS_MODEL), prompt };
+    logAiCall(p, Date.now() - started);
     return {
       value: { answers: clampAnswers(input.questions, body.answers), usage: body.usage },
-      source: 'model',
+      ...p,
     };
   } catch (err) {
-    console.warn('assess fallback', err instanceof Error ? err.message : err);
-    return { value: fallback(), source: 'heuristic' };
+    return heuristic(err instanceof Error ? err.message : String(err));
   }
 }

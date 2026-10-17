@@ -150,6 +150,13 @@ describe('B2B order', () => {
     expect(waiting.order!.title).toBe('PO NW-7781');
     expect(waiting.nodes.credit!.branches).toEqual(['ok']);
     expect(waiting.nodes.router!.branches).toEqual(['auto_approve']);
+    // Where the answer came from: here the heuristic, since tests run with AI_MODE=mock.
+    expect(waiting.nodes.router!.output).toMatchObject({
+      source: 'heuristic',
+      model: null,
+      prompt: 'router@1',
+      fallback: 'mock',
+    });
     expect(waiting.nodes.approval!.status).toBe('skipped');
   });
 

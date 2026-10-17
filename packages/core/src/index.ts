@@ -20,6 +20,7 @@ export * from './money';
 export * from './payments';
 export * from './policy';
 export * from './pricing';
+export * from './provenance';
 export * from './redact';
 export * from './roles';
 export * from './shipping';

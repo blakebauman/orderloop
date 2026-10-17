@@ -27,6 +27,7 @@ import {
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import { pruneConfirmations } from './confirmations';
 import { eraseOrders } from './subjects';
+import { pruneUsage } from './usage';
 
 const DAY = 86_400_000;
 
@@ -79,6 +80,7 @@ export async function sweep(env: Env, now = Date.now()) {
     auditArchived: await archiveAudit(env, now),
     personalDataErased: await expirePersonalData(env, now),
     confirmations: await pruneConfirmations(env, now),
+    aiUsageDays: await pruneUsage(env, now),
     sessions: expiredSessions.length,
     webhookDeliveries: deliveries.length,
     nodeRuns: runs.length,

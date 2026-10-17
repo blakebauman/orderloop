@@ -106,6 +106,8 @@ export type Deployment = {
   personalDataRetentionDays?: number;
   /** Days the R2 archive keeps audit events past the database's retention; unset keeps them. */
   auditArchiveDays?: number;
+  /** Model tokens a person's assistant may use a day (0: no limit); unset keeps the base. */
+  assistantDailyTokens?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
   aiPersonalData: 'redact' | 'send';
   /** Whether the AI Gateway keeps request logs (prompts and responses). Default true. */
@@ -168,6 +170,9 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     throw new Error(`${file}: aiPersonalData must be "redact" or "send"`);
   if (raw.aiGatewayLogs !== undefined && typeof raw.aiGatewayLogs !== 'boolean')
     throw new Error(`${file}: aiGatewayLogs must be true or false`);
+  const tokens = raw.assistantDailyTokens;
+  if (tokens !== undefined && (!Number.isInteger(tokens) || (tokens as number) < 0))
+    throw new Error(`${file}: assistantDailyTokens must be a whole number (0 for no limit)`);
   const personal = raw.personalDataRetentionDays;
   if (personal !== undefined && (!Number.isInteger(personal) || (personal as number) < 30))
     throw new Error(
@@ -203,6 +208,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(limits ? { limits: limits as Deployment['limits'] } : {}),
     ...(retention !== undefined ? { auditRetentionDays: retention as number } : {}),
     ...(personal !== undefined ? { personalDataRetentionDays: personal as number } : {}),
+    ...(tokens !== undefined ? { assistantDailyTokens: tokens as number } : {}),
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs !== false,
@@ -268,6 +274,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };
+  if (d.assistantDailyTokens !== undefined)
+    config.vars = { ...config.vars, ASSISTANT_DAILY_TOKENS: String(d.assistantDailyTokens) };
   // Durable Objects keep data where D1 and R2 do.
   if (d.jurisdiction) config.vars = { ...config.vars, DATA_JURISDICTION: d.jurisdiction };
   if (d.personalDataRetentionDays)

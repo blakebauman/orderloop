@@ -54,6 +54,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0034_audit_chain.sql` | `audit_events.seq` (unique index `audit_events_seq`), `prev_hash` and `hash`: the hash chain; triggers `audit_events_no_update` (no `UPDATE`) and `audit_events_keep_90_days` (no `DELETE` of an event younger than 90 days). Earlier events stay unsealed |
 | `0035_order_erased_at.sql` | `orders.erased_at`: when a [data subject erasure](#personal-data) removed the buyer from the order; later requests skip it |
 | `0036_action_confirmations.sql` | `action_confirmations` (one-time codes for [MCP actions](architecture.md#mcp)) and index `action_confirmations_expires` |
+| `0037_ai_usage.sql` | `ai_usage` (model tokens per person per day for the assistant) and index `ai_usage_day` |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -170,6 +171,7 @@ checking a code needs it. See [Team and roles](https://docs.orderloop.app/guides
 | `webhook_subscriptions` | `url`, `secret` (returned once, at creation), `events` (a JSON array; `"*"` matches all), `active` |
 | `integrations` | An external system that signs inbound webhooks (`POST /api/v1/webhooks/events` and `/orders`), id `int_…`: `name`, `secret` (`whsec_` and 48 hex digits; returned once, at creation and rotation), `previous_secret` and `previous_expires_at` (the secret before a rotation, accepted for 24 hours), and its scope: `events` (a JSON array; `"*"` matches all), `start_orders` (boolean), `flows` (a JSON array of flow ids an order body may name; `"*"` matches all) and `channel` (null for any). With `created_at`, `created_by`, `last_used_at` (touched on each verified request) and `revoked_at`. Revoking sets `revoked_at` and clears the previous secret; the row stays so audit entries still resolve. The signature names the row with `k=` |
 | `action_confirmations` | One-time codes for actions over MCP (`apps/engine/src/confirmations.ts`): `id` (`cfm_` and 32 hex characters), `principal_id` (who it was issued to), `tool`, `input_digest` (`fingerprintOf({ tool, input })`, so key order is ignored), `created_at`, `expires_at` (5 minutes, `CONFIRMATION_TTL_MS`) and `used_at`. A code is used by one `UPDATE` that matches caller, tool, digest, unused and unexpired, so two calls can't both run. Indexed by `expires_at`; rows expired over a day are deleted by the [retention sweep](#retention) |
+| `ai_usage` | Assistant model tokens per person per UTC day (`apps/engine/src/usage.ts`), primary key `(principal_id, day)`: `principal_id`, `day` (`2026-10-17`), `tokens`, `calls`. Written when a turn finishes (`totalUsage.totalTokens`), read before the next to refuse once `ASSISTANT_DAILY_TOKENS` is reached. Indexed by `day`; days older than 90 are deleted by the [retention sweep](#retention) |
 | `payment_events` | Stripe events already handled, by Stripe's event id: `provider`, `type`, `order_id`, `received_at`. Claimed before the event is acted on and deleted again when the answer is `retry` or handling throws; kept 30 days by the [retention sweep](#retention), since Stripe redelivers for three |
 | `webhook_deliveries` | The outbox: one row per event per subscription, id `whd_${orderId}_${stepKey}_${subscriptionId}`. `status` is `pending`, `delivered` or `failed`; with `attempts`, `response_status`, `last_error`, `delivered_at` |
 
@@ -340,6 +342,7 @@ A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `s
 | `webhook_receipts` | `received_at` older than 10 minutes |
 | `payment_events` | `received_at` older than 30 days |
 | `action_confirmations` | `expires_at` older than 1 day (`pruneConfirmations`; reported as `confirmations`) |
+| `ai_usage` | `day` older than 90 days (`pruneUsage`; reported as `aiUsageDays`) |
 
 Orders and everything in an order's record (payments, invoices, shipments, the stock and balance ledgers, flow versions) are kept.
 

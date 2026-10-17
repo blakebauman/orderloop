@@ -91,6 +91,14 @@ builds on the graph on screen. A request that changes nothing says so, with no c
 
 Creating a flow from a description still happens on the Flows page.
 
+## Daily allowance
+
+Each person can use up to 1,000,000 model tokens a day in the assistant, counted from midnight UTC.
+When it is spent, the assistant says "You've used today's assistant allowance. It resets at
+midnight UTC; your OrderLoop contact can raise it." and answers again the next day. Answers from
+the fixed rules below cost nothing. Your OrderLoop administrator can raise the limit or remove it.
+MCP clients bring their own model, so they aren't counted.
+
 ## Without the model
 
 The assistant answers with `@cf/moonshotai/kimi-k2.6` by default (see

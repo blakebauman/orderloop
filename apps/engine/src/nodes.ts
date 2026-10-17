@@ -720,7 +720,7 @@ export const EXECUTORS: Record<string, Exec> = {
       text = (await (await env.DOCS.get(ctx.order.documentKey))?.text()) ?? '';
     if (!text) return { summary: 'No document; using order as given', output: { skipped: true } };
     const catalog = (await cx.getProducts(env)).map((p) => ({ sku: p.sku, name: p.name }));
-    const { value, source } = await ai.extractOrder(env, text, catalog);
+    const { value, ...via } = await ai.extractOrder(env, text, catalog);
     const customer = ctx.order.customerId
       ? undefined
       : value.customerName
@@ -738,37 +738,37 @@ export const EXECUTORS: Record<string, Exec> = {
             }
           : {}),
       },
-      output: { ...value, source },
+      output: { ...value, ...via },
       vars: { poNumber: value.poNumber },
-      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''}${value.rejected?.length ? ` · ${value.rejected.length} held back` : ''} (${source})`,
+      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''}${value.rejected?.length ? ` · ${value.rejected.length} held back` : ''} (${via.source})`,
     };
   },
 
   'ai.classify': async ({ env, ctx, config }) => {
     const labels = stringList(config.labels, ['other']);
-    const { value, source } = await ai.classify(env, ctx.order, labels);
+    const { value, ...via } = await ai.classify(env, ctx.order, labels);
     return {
       vars: { [str(config.into, 'category')]: value.label },
-      output: { ...value, source },
+      output: { ...value, ...via },
       summary: `${value.label} (${Math.round(value.confidence * 100)}%)`,
     };
   },
 
   'ai.risk_score': async ({ env, ctx, config }) => {
     const customer = await cx.getCustomer(env, ctx.order.customerId);
-    const { value, source } = await ai.riskScore(env, ctx.order, customer);
+    const { value, ...via } = await ai.riskScore(env, ctx.order, customer);
     const high = value.score >= num(config.threshold, 70);
     return {
       branches: [high ? 'high' : 'low'],
       vars: { risk: value.score },
-      output: { ...value, source },
+      output: { ...value, ...via },
       summary: `Risk ${Math.round(value.score)}${value.reasons[0] ? ` · ${value.reasons[0]}` : ''}`,
     };
   },
 
   'ai.forecast': async ({ env, ctx, config }) => {
     const stock = await cx.getProducts(env);
-    const { value, source } = await ai.forecast(env, stock, num(config.horizonDays, 30));
+    const { value, ...via } = await ai.forecast(env, stock, num(config.horizonDays, 30));
     const bySku = new Map(stock.map((p) => [p.sku, p]));
     const lines = value.lines.map((l) => ({
       sku: l.sku,
@@ -779,20 +779,22 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       order: lines.length ? { lines } : { lines: ctx.order.lines },
       vars: supplier ? { supplier } : {},
-      output: { ...value, source },
-      summary: lines.length ? `${lines.length} SKUs to reorder (${source})` : 'Stock is healthy',
+      output: { ...value, ...via },
+      summary: lines.length
+        ? `${lines.length} SKUs to reorder (${via.source})`
+        : 'Stock is healthy',
     };
   },
 
   'ai.summarize': async ({ env, ctx, config }) => {
-    const { value, source } = await ai.summarize(env, {
+    const { value, ...via } = await ai.summarize(env, {
       order: ctx.order,
       vars: ctx.vars,
       completed: ctx.nodes,
     });
     return {
       vars: { [str(config.into, 'summary')]: value.summary },
-      output: { ...value, source },
+      output: { ...value, ...via },
       summary: value.summary.slice(0, 80),
     };
   },
@@ -800,7 +802,7 @@ export const EXECUTORS: Record<string, Exec> = {
   'ai.router': async ({ env, ctx, config }) => {
     const routes = stringList(config.routes, ['auto_approve', 'needs_approval']);
     const customer = await cx.getCustomer(env, ctx.order.customerId);
-    const { value, source } = await ai.route(
+    const { value, ...via } = await ai.route(
       env,
       str(config.instructions, 'Decide how to handle this order.'),
       routes,
@@ -811,7 +813,7 @@ export const EXECUTORS: Record<string, Exec> = {
         completed: ctx.nodes,
       },
     );
-    return { branches: [value.route], output: { ...value, source }, summary: `→ ${value.route}` };
+    return { branches: [value.route], output: { ...value, ...via }, summary: `→ ${value.route}` };
   },
 
   'ai.assess': async ({ env, ctx, config }) => {
@@ -834,14 +836,14 @@ export const EXECUTORS: Record<string, Exec> = {
       imageRefs(config.images, ctx),
       ctx.order.id,
     );
-    const { value, source } = await clef.assess(env, { state, questions, images });
+    const { value, ...via } = await clef.assess(env, { state, questions, images });
     const branchOn = str(config.branchOn).trim();
     const branch = assessBranch(value.answers[branchOn], num(config.minConfidence, 0));
     return {
       branches: [branch],
       vars: { [str(config.into, 'assessment')]: value.answers },
-      output: { answers: value.answers, images: images.length, notes, usage: value.usage, source },
-      summary: `${describeAnswers(value.answers)} (${source})`.slice(0, 160),
+      output: { answers: value.answers, images: images.length, notes, usage: value.usage, ...via },
+      summary: `${describeAnswers(value.answers)} (${via.source})`.slice(0, 160),
     };
   },
 };
