@@ -14,6 +14,7 @@ browser ──► apps/web (React Router on Workers) ──RPC──► apps/eng
               ├─ /mcp (OAuth, MCP clients) ────────────────►│    its tools, served to MCP clients
               └─ /a2a (OAuth, A2A agents) ─────────────────►├─ A2AAgent DO (one per caller): A2A tasks that follow orders
                                                             ├─ Replenish Workflow (cron schedule): daily stock review
+AI shopping platforms ── /.well-known/ucp, /ucp/* (UCP, platform key) ── proxied to the engine's checkout
 storefront, marketplace, POS ── POST /api/v1/webhooks/orders (signed, on apps/web)
 Shopify, EDI X12 850 ── POST /api/v1/channels/shopify/orders, /api/v1/channels/edi/850
 Stripe events (invoice.paid…) ── POST /api/v1/webhooks/stripe ── EngineRpc.paymentEvent

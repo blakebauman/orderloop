@@ -89,6 +89,9 @@
     // "mock" records payments in D1 only (meta.simulate drives declines); "stripe" authorizes,
     // captures, charges, voids and refunds through Stripe and needs STRIPE_SECRET_KEY.
     "PAYMENTS_MODE": "mock",
+    // Stripe publishable key (pk_…) a UCP platform tokenizes the buyer's card with; with
+    // PAYMENTS_MODE "stripe", agentic checkout offers the Stripe payment handler only when it is set.
+    "STRIPE_PUBLISHABLE_KEY": "",
     // "redact" keeps buyers' names, emails, phone numbers and addresses out of what workflow AI
     // nodes send a model (core's redact.ts); "send" includes them. The registry's aiPersonalData
     // sets it per deployment.
@@ -112,4 +115,6 @@
   // SHIPPING_CARRIER_AUTH — JSON object of live shipping carrier id → Authorization header value,
   // e.g. {"acme":"Bearer …"}, for the liveCarriers of a commerce.shipping_rate node.
   // STRIPE_SECRET_KEY — Stripe secret or restricted key, required when PAYMENTS_MODE is "stripe".
+  // UCP_SIGNING_KEY — private P-256 JWK with a kid that signs UCP order webhooks; its public half
+  // is published at /.well-known/ucp. Without it, agentic checkout sends no order events.
 }

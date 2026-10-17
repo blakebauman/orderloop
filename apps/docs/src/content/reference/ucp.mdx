@@ -1,0 +1,312 @@
+---
+title: Agentic checkout (UCP)
+description: Let AI shopping platforms build a cart, pay and place orders in your workspace over Google's Universal Commerce Protocol, and follow those orders with signed events.
+---
+
+import UcpValues from '../../components/UcpValues.astro';
+
+OrderLoop speaks the [Universal Commerce Protocol](https://ucp.dev) (UCP), version `2026-08-25`, as a
+business. An AI shopping platform that you have let in can create a **checkout**, fill in the buyer
+and the shipping address, pay with a card the buyer has tokenized, and place an order. The order
+runs through a [flow](/start/concepts/) of your choosing, like any other, on the `agent` channel
+(shown as **AI agent**). The platform follows the order with signed events.
+
+| | |
+|---|---|
+| Discovery | `GET https://orderloop.app/.well-known/ucp` |
+| REST | `https://orderloop.app/ucp/v1` |
+| MCP | `https://orderloop.app/ucp/mcp` |
+
+This is the platform-facing surface. It is separate from the workspace's own
+[MCP server](/reference/mcp/) and [A2A endpoint](/reference/a2a/), which are for your team's tools:
+a platform's key does not work there and a person's token does not work here.
+
+## Turning it on
+
+An admin chooses the **checkout flow**: the published flow that every completed checkout starts
+(its latest published version). Agentic checkout is off until one is set, and `/.well-known/ucp`
+and every `/ucp` call answer `404` while it is.
+
+The flow has to be one that can take a card:
+
+- It contains a `commerce.authorize_payment` node.
+- That node's `method` is `card` (the default) or `wallet`; the other methods (such as `ach` or `terms`) are refused.
+- That node's `purpose` is `hold` (the default), not `verify`, so the money can be captured later.
+
+The built-in `tpl-storefront-order` flow qualifies. A flow that fails these rules is refused when
+it is chosen, with `422` and the reason.
+
+A checkout is priced by the checkout flow's own pricing nodes, run before the order exists, so the
+buyer sees the total the order will charge:
+
+<UcpValues of="quote-nodes" />
+
+The nodes run in the order the flow reaches them, and a type that appears twice is priced once. A
+flow without one of them simply skips that step. Because the store policy runs too, a checkout the
+flow would refuse is reported on the checkout as an error the platform can act on (see
+[Messages](#messages)) rather than failing at completion.
+
+Settings, set with `POST /api/v1/ucp/settings` (admin; see [REST API](/reference/rest-api/)):
+
+| Field | Meaning |
+|---|---|
+| `checkoutFlowId` | The flow described above, or `null` to turn agentic checkout off |
+| `links` | Up to 10 legal links every checkout shows the buyer: `{ type, url, title? }`, such as a privacy policy, terms of service or refund policy |
+| `orderUrl` | Where a buyer sees their order, a URL containing `{id}` such as `https://shop.example/orders/{id}`. Without it the link is the order's page in the workspace |
+
+```bash
+curl -X POST https://orderloop.app/api/v1/ucp/settings \
+  -H "Authorization: Bearer ol_live_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "checkoutFlowId": "tpl-storefront-order",
+    "links": [{ "type": "privacy_policy", "url": "https://shop.example/privacy" }],
+    "orderUrl": "https://shop.example/orders/{id}"
+  }'
+```
+
+`GET /api/v1/ucp` returns `{ settings, platforms }`. The routes need the `admin` role, are recorded
+in the [audit log](/guides/team-and-roles/#audit-log) and are locked in the demo workspace.
+
+## Letting in a platform
+
+A platform is let in by an admin, with its name and the URL of its UCP profile:
+
+```bash
+curl -X POST https://orderloop.app/api/v1/ucp/platforms \
+  -H "Authorization: Bearer ol_live_…" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Acme Shopping", "profileUrl": "https://acme.example/.well-known/ucp" }'
+```
+
+The answer is `201 { platform, key }`. The `key` (`ol_ucp_…`) is shown once and is the only
+credential the platform needs; OrderLoop keeps its hash and prefix. `profileUrl` must be `https`.
+`DELETE /api/v1/ucp/platforms/:id` revokes the platform: its key stops working at once and its
+orders stop sending it events. Its earlier checkouts and orders stay on record.
+
+Every request from a platform carries:
+
+- Its key, as `X-API-Key: ol_ucp_…` or `Authorization: Bearer ol_ucp_…`.
+- Its profile, in `UCP-Agent: profile="https://acme.example/.well-known/ucp"`, which must be the
+  profile it was registered with. Over [MCP](#mcp-binding) the header may be left out when every
+  call names the profile in its `meta` instead.
+
+| Status | Code | When |
+|---|---|---|
+| `401` | `unauthorized` | No live platform key |
+| `400` | `invalid_profile_url` | `UCP-Agent` is missing (REST) or not a `profile="…"` value |
+| `403` | `forbidden` | The profile named is not the one the key was registered with |
+| `404` | `not_found` | Agentic checkout is off |
+| `429` | | Over 300 requests a minute for that platform; wait `Retry-After` seconds |
+
+Protocol errors have the body `{ "code": "…", "content": "…" }`.
+
+## Discovery
+
+`GET /.well-known/ucp` is public and cached for five minutes. It is OrderLoop's **business
+profile**: the services (REST and MCP), the capabilities below, the payment handlers on offer (see
+[Payment handlers](#payment-handlers)) and the public key order events are signed with.
+
+<UcpValues of="capabilities" />
+
+Each request is negotiated against the platform's own profile, which OrderLoop fetches from the URL
+it was registered with (`https` only, no redirects, at most 128 KB) and keeps for an hour. A
+capability is active when both profiles list it at a version they share, except that an extension
+whose parent is not active is dropped. Failures are reported as follows:
+
+| Outcome | Response |
+|---|---|
+| The profile can't be fetched | `424 profile_unreachable` |
+| The profile isn't usable JSON | `422 profile_malformed` |
+| The platform is on a newer UCP version than OrderLoop | `422 version_unsupported` |
+| No capability in common | `200` with an error response, code `capabilities_incompatible` |
+
+## Checkout lifecycle
+
+| Request | Does |
+|---|---|
+| `POST /ucp/v1/checkout-sessions` | Creates a checkout; `201` |
+| `GET /ucp/v1/checkout-sessions/:id` | Reads it |
+| `PUT /ucp/v1/checkout-sessions/:id` | Updates it. The body replaces the whole checkout: whatever it leaves out is cleared |
+| `POST /ucp/v1/checkout-sessions/:id/complete` | Pays and places the order. Needs `Idempotency-Key` |
+| `POST /ucp/v1/checkout-sessions/:id/cancel` | Cancels it. Needs `Idempotency-Key` |
+| `GET /ucp/v1/orders/:id` | Reads an order the platform placed |
+
+A checkout holds `line_items` (each an `item.id`, which is the SKU, and a `quantity`), the `buyer`
+(an email is required) and `fulfillment`. At most 100 lines and 10,000 units a line. OrderLoop
+prices it on every write, and again right before completing, so the amounts are always what the flow
+will charge. Amounts are integers in minor units, and the currency is `USD`. A checkout lives six
+hours; after that it reads as `canceled`.
+
+Its `status` follows from what it holds:
+
+<UcpValues of="statuses" />
+
+A write that races another (for example an update while the checkout is being completed) is
+refused with `409 conflict`; read the checkout and try again. An update to a checkout that is being
+completed, or is already `completed` or `canceled`, comes back unchanged with a `not_allowed`
+error message. Completing a checkout that is already `completed` returns it. Canceling one that
+is not open is `409 not_cancelable`. Creating a checkout in which nothing is sold answers `200`
+with an error response (`item_unavailable`, severity `unrecoverable`) and creates nothing.
+
+A body over 256 KB is `413 too_large`; one that fails validation is `400 invalid_request`.
+
+### Idempotency
+
+Complete and cancel require an `Idempotency-Key` header of 16 to 255 characters; create and update
+accept one. A repeat of the same request within 24 hours gets the first response. The same key with a
+different body is `409 idempotency_conflict`, as is a repeat while the first is still running. A request
+that fails with a server error or loses a race releases its key, so it can be retried.
+
+### Messages
+
+A checkout carries `messages`, each with a `type` (`error`, `warning` or `info`), a `code`, a
+`content`, usually a `path` into the checkout, and for errors a `severity`:
+
+<UcpValues of="severities" />
+
+The codes a platform will meet:
+
+| Code | Meaning |
+|---|---|
+| `missing` | The checkout lacks lines, the buyer's email, a complete address or a shipping option |
+| `item_unavailable` | The SKU is not sold here |
+| `out_of_stock` | Fewer units are available than asked for |
+| `address_undeliverable` | The address is incomplete or invalid |
+| `policy` | The flow's store policy refuses this checkout; `content` says which rule |
+| `invalid` | A pricing node rejected the checkout |
+| `fulfillment_required` | The items ship, and the platform doesn't support `dev.ucp.shopping.fulfillment` |
+| `payment_failed` | Payment could not be authorized; see [Completing](#completing-a-checkout) |
+| `order_failed` | The order could not be placed; the payment hold is released. Try again |
+| `not_allowed` | The checkout can no longer be changed |
+| `expired` | The checkout expired (an `info` message) |
+
+## Fulfillment
+
+Fulfillment is shipping only. When any line ships, the checkout's `fulfillment` has one method
+(`fm_shipping`) covering the lines that ship, one destination (`dest_1`, the address the platform
+sent) and one group (`fg_1`) whose `options` are the checkout flow's shipping rates for that
+address. Digital goods need no address and no fulfillment.
+
+- Send the address as a destination with `street_address`, `address_locality`, `postal_code`,
+  `address_country` (and optionally `extended_address`, `address_region`, `first_name`, `last_name`).
+- Choose an option with `selected_option_id` on the group. If the platform chooses none, the flow's
+  shipping node picks one (the cheapest unless the flow says otherwise).
+- On an update, a platform may name the held address as `selected_destination_id: "dest_1"` without
+  resending it.
+- A platform that doesn't negotiate `dev.ucp.shopping.fulfillment` can buy only digital goods.
+
+## Payment handlers
+
+A checkout response lists the handlers on offer in `ucp.payment_handlers`. A completed or canceled
+one lists none.
+
+**`app.orderloop.stripe`** is offered when the workspace takes Stripe payments for agentic checkout.
+Its `config` carries the Stripe `publishable_key`. The platform tokenizes the buyer's card with
+Stripe under that key and sends the resulting PaymentMethod:
+
+```json
+{
+  "payment": {
+    "instruments": [
+      {
+        "id": "instr_1",
+        "handler_id": "stripe",
+        "type": "card",
+        "selected": true,
+        "credential": { "type": "stripe_payment_method", "token": "pm_…" }
+      }
+    ]
+  }
+}
+```
+
+`handler_id` is the `id` of the handler entry in the response. The instrument marked `selected` is
+used, or the only one.
+
+**`app.orderloop.test`** is offered instead while payments are not live (a workspace trying
+checkout end to end). It takes any token and records the payment without taking money; the token
+`tok_test_decline` is declined.
+
+### Completing a checkout
+
+`POST …/complete` with the body above and an `Idempotency-Key`. OrderLoop prices the checkout once
+more and, if it is `ready_for_complete`, authorizes the card for the quoted total and holds it
+(manual capture: nothing is taken yet). It then starts an order on the checkout flow. The flow's
+own authorize step adopts that hold, and capture happens as in any order (see
+[Payments](/guides/payments/)). The response is the checkout with `status: "completed"` and
+`order: { id, permalink_url }`.
+
+If the checkout is not ready, the response is the checkout with its messages. If the card is
+declined, the checkout returns to `ready_for_complete` with a `payment_failed` error at `$.payment`
+and no order is placed; the platform can retry with another instrument. A card that needs the buyer
+to authenticate (3-D Secure) is refused the same way, as this checkout cannot take the buyer
+through authentication. A hold is keyed by the checkout, the PaymentMethod and the amount, so a
+retry after a lost answer does not place a second one.
+
+## Orders and events
+
+`GET /ucp/v1/orders/:id` returns the UCP order entity for an order this platform placed (another
+platform's order is not found). It needs the `dev.ucp.shopping.order` capability. The entity is a full
+snapshot, and carries:
+
+- `line_items`, with `quantity` as `original`, `total` and `fulfilled`, and a `status` of
+  `processing`, `partial`, `fulfilled` or `removed`.
+- `fulfillment.expectations` (shipping, pickup or digital) and `fulfillment.events` (`shipped`,
+  `ready_for_pickup`, `delivered`, with tracking number and carrier).
+- `adjustments`: each refund (negative amounts) and, when the order ended without being fulfilled
+  (cancelled, declined, failed or rolled back), a `cancellation` that removes every line.
+- `totals` and `permalink_url`.
+
+When the platform's profile gives the order capability a `config.webhook_url` (`https`, or
+`localhost`), OrderLoop POSTs the whole entity there each time the order changes, a moment after it
+settles. An entity identical to the last one delivered is not sent again. A failed delivery (a
+non-2xx answer, a timeout after 10 seconds) is retried up to five times with growing delays. Events
+are sent only while the workspace has a signing key configured; its public half is in the `keys` of
+the business profile.
+
+A platform verifies an event before trusting it:
+
+1. Check `Content-Digest` (`sha-256=:…:`) against the raw body.
+2. Verify the RFC 9421 `Signature` over the `Signature-Input` components with the key in
+   `/.well-known/ucp` whose `kid` equals the signature's `keyid`. The algorithm is ES256 and the
+   covered components are `@method`, `@authority`, `@path`, `content-digest`, `content-type` and
+   `ucp-agent`; the signature includes `created`.
+3. Use `Webhook-Id` to ignore a repeat, and `Webhook-Timestamp` (Unix seconds) to refuse a stale
+   one. `UCP-Agent` names OrderLoop's own profile.
+
+If the order ends without being fulfilled, the payment hold placed at completion is released.
+
+## MCP binding
+
+`POST /ucp/mcp` serves the same operations as MCP tools: `create_checkout`, `get_checkout`,
+`update_checkout`, `complete_checkout`, `cancel_checkout` and `get_order`. It is JSON-RPC over
+`POST` with plain JSON answers (no stream); any other method is `405`.
+
+Arguments are `{ meta, id?, checkout? }`:
+
+- `meta["ucp-agent"].profile` is required on every call and must be the platform's registered
+  profile.
+- `meta["idempotency-key"]` is required for `complete_checkout` and `cancel_checkout`.
+- `id` is the checkout (or, for `get_order`, the order); `checkout` is the same body REST takes.
+
+A business outcome is a result whose `structuredContent` is the UCP body, as on REST. A protocol
+error is a JSON-RPC error with the HTTP status set: code `-32001` for a profile problem (`422`,
+`424`) and `-32000` for everything else. Malformed JSON-RPC uses the standard codes
+(`-32700`, `-32600`, `-32601`, `-32602`).
+
+## Not supported yet
+
+- Currencies other than `USD`.
+- Shipping is the only fulfillment method; no pickup.
+- Catalog search and lookup, carts, identity linking, the discount extension, AP2 mandates and the
+  embedded checkout.
+- Cards that require 3-D Secure authentication (refused with `payment_failed`).
+- Verifying a platform's own request signatures; platforms authenticate with their key.
+
+## Audit
+
+Changing the settings, letting in a platform and revoking one are recorded in the audit log under
+**Agentic checkout** as `ucp.settings`, `ucp.platform_added` and `ucp.platform_revoked`. Orders a
+platform places are listed with the **AI agent** channel and are started by the platform, not by a
+person.

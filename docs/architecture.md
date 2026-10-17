@@ -55,9 +55,9 @@ inbound mail ── Email Routing ──email()───────────
 | `runReplenish()` | Creates a `Replenish` instance now |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject` and `runReplenish` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject`, `ucpProfile` and `runReplenish` forwards to the order's agent via
 `orderAgent(env, orderId)` (`apps/engine/src/namespaces.ts`). `EngineApi` trusts its caller: authorization happens in the web
-app before the call. The forwarded requests (sockets, `/mcp`, `/a2a`) carry a principal the engine believes only when it is signed with `PRINCIPAL_KEY` for that path and unexpired (`forwardedPrincipal`). The web app types its `ENGINE` binding with `EngineRpc` and never imports
+app before the call. The forwarded requests (sockets, `/mcp`, `/a2a`, `/ucp/*`) carry a principal the engine believes only when it is signed with `PRINCIPAL_KEY` for that path and unexpired (`forwardedPrincipal`). The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
 
 ## Request routing
@@ -76,6 +76,7 @@ engine source.
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
 | `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
+| `GET /.well-known/ucp`, `/ucp`, `/ucp/*` | `ucpDiscovery` and `ucpFetch` (`apps/web/app/lib/ucp.server.ts`), before the OAuth paths. See [UCP](#ucp-agentic-checkout) |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
 | `GET /login/sso`, `GET /login/sso/callback` | React Router loader routes for single sign-on (`apps/web/app/lib/sso.server.ts`; rules in `sso.ts`). `/login/sso` redirects to `/login` unless `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are all set, spends the `API_LIMIT` budget per address, fetches the issuer's discovery document (cached an hour; its `issuer` must match, its endpoints must be https) and redirects to the authorization endpoint: code flow, PKCE `S256`, `state` and `nonce`, kept with the code verifier and the next path in the 10-minute `__Host-ol_sso` cookie (`SameSite=Lax`, so the provider's top-level redirect carries it). The callback checks the cookie and `state`, swaps the code at the token endpoint (`client_secret_basic`, or the secret in the body when the provider lists methods without it), verifies the ID token with `jose` (signature from `jwks_uri`, issuer, audience, `nonce`, expiry with 60 seconds of tolerance), then `decideSso` picks the person: linked `external_sub`, else the same verified email (then linked, `auth.sso_linked`), else a new person when `jitRole` is set and the domain is listed (`team.user_added` with `via: "sso"`). `email_verified: false` discards the email (Entra ID omits the claim, which counts as verified). It starts the same session as a password (`startSession`) and audits `auth.sign_in` with `method: "sso"`; a failure is `auth.sign_in_failed` with `method: "sso"` and a redirect to `/login?sso=failed`, `refused` or `disabled`. With `ssoOnly` in effect (`ssoOnlyInEffect`: saved and a provider configured), `checkCredentials` and passkey sign-in refuse (`SSO only`), and `principal` no longer asks for two-factor setup or a password change from anyone (`passwordInUse`); someone with no password is never asked for two-factor sign-in either |
@@ -179,6 +180,83 @@ request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<
 the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
 `A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
 changed. See [A2A endpoint](https://docs.orderloop.app/reference/a2a/#push-notifications).
+
+## UCP (agentic checkout)
+
+`/.well-known/ucp`, `/ucp/v1/*` and `/ucp/mcp` let AI shopping platforms buy from the workspace over
+the [Universal Commerce Protocol](https://docs.orderloop.app/reference/ucp/) (`UCP_VERSION`
+`2026-08-25`). The protocol lives in core: `packages/core/src/checkout.ts` is the protocol-neutral
+checkout session (`CHECKOUT_STATUSES`, `missingInfo`, `openStatus`, `quoteNodes`,
+`checkoutFlowProblem`) and `packages/core/src/ucp/` is UCP over it: profile and negotiation
+(`profile.ts`, `ucpSettingsSchema`), checkout and order mappers (`checkout.ts`, `order.ts`), RFC 9421
+message signatures (`signature.ts`, ES256 and `Content-Digest`), RFC 8941 structured fields
+(`structured.ts`) and error shapes (`errors.ts`). All of it is pure and tested against the official
+schemas. The engine serves it from `apps/engine/src/ucp/`.
+
+**Boundary.** A platform is not a `Principal`: it has no role and acts only on its own checkouts
+and orders. The web Worker (`ucpFetch`) finds it by key (`X-API-Key` or `Bearer`, `ol_ucp_` and the
+SHA-256 in `ucp_platforms.key_hash`, revoked rows excluded), requires `UCP-Agent` to equal the
+registered `profile_url` (MCP may omit the header; the engine checks `meta["ucp-agent"]` against the
+same profile), answers `404` while `checkoutFlowId` is unset, spends the `AGENT_LIMIT` budget per
+platform (`/ucp:<platform id>`), deletes `authorization`, `x-api-key` and `cookie`, and signs a
+`PlatformCaller` onto `x-orderloop-principal` with `signPlatform`. That is a separate envelope
+(`u1`, not `v1`) over the same key, path and 60-second expiry, so `verifyPrincipal` never accepts it
+and `verifyPlatform` never accepts a principal: a platform's header is refused at `/mcp`, `/a2a` and
+the sockets, and a person's at `/ucp`. The engine's `handleUcp` (`rest.ts`) believes only that
+header. The engine does not import web code; the web Worker reaches the profile through
+`EngineRpc.ucpProfile(origin)`.
+
+**Discovery.** `ucpProfile` (`config.ts`) builds the business profile for the request's origin:
+services, `UCP_CAPABILITIES`, the payment handlers (`paymentHandlers`: `app.orderloop.stripe` with
+`PAYMENTS_MODE` `stripe` and `STRIPE_PUBLISHABLE_KEY`, else `app.orderloop.test` in `mock`) and the
+public half of `UCP_SIGNING_KEY`. It is public, `cache-control: public, max-age=300`, and `404` (max-age 60)
+while off. The platform's own profile is fetched by `platformProfile` (`platform.ts`): https only,
+`redirect: 'manual'`, 5 seconds, 128 KB, stored in `ucp_platforms.profile` and reused for an hour. A
+failure is `424 profile_unreachable` or `422 profile_malformed`; `negotiate` then intersects the capabilities
+(`version_unsupported` is `422`, an empty intersection a `200` error response).
+
+**Quote parity.** `quoteCheckout` (`quote.ts`) prices a session with the checkout flow's own executors:
+`quoteNodes(graph)` picks the `QUOTE_NODE_TYPES` nodes (`commerce.validate`, `price`, `shipping_rate`,
+`tax`, `policy`) in the order the flow reaches them and runs `EXECUTORS` on a draft order, in
+process, on the flow's latest published version. Those executors only read, so a quote writes
+nothing. The order the flow later runs prices the same lines the same way, so the hold placed at
+completion matches the total the order's authorize node adopts. Sessions are priced again on every
+write and once more right before completing. A session is a row in `checkout_sessions` (the JSON in
+`data`, `version` compared on every write: a loser gets `409 conflict`).
+
+**Completing.** `completeCheckout` (`checkout.ts`) is under an `Idempotency-Key` (`once`,
+`idempotency.ts`; `ucp_idempotency`, 24 hours, a throwing request releases its key). It reprices, claims the
+session (`complete_in_progress`) and calls `authorizeCheckout` (`payments.ts`): for Stripe a PaymentIntent
+with `capture_method: 'manual'`, `confirm: true` and `allow_redirects: 'never'`, keyed
+`ucp_<session>_<pm>_<amount>` so a retry replays the same hold; a PaymentIntent that is not
+`requires_capture` (3-D Secure, processing) is canceled and reported as `payment_failed`. The hold goes
+into the order input as `payment: { provider: 'stripe', intentId }`, and the order's
+`commerce.authorize_payment` node adopts it (the `adopt` source in `packages/core/src/payments.ts`; see
+[Payments](https://docs.orderloop.app/guides/payments/)). The order starts with `startOrderOnce` keyed
+`ucp:<session id>`, `channel: 'agent'`, `startedBy` the platform id and `meta.ucp = { platformId,
+checkoutId, origin }`. If starting it throws, the hold is released (`releaseHold`).
+
+**Order events.** `OrderAgent` sees `meta.ucp` on its order and, after a state change settles,
+queues `ucpSync` (2 seconds, table `ucp_sync`: `digest`, `pending`, `released`). `syncUcpOrder`
+(`webhooks.ts`) builds the full `toUcpOrder` entity (`orderEntity`), skips it when its digest equals the
+last delivered, and otherwise POSTs it to the order capability's `config.webhook_url` from the cached
+platform profile, signed with `signMessage` (`@method`, `@authority`, `@path`, `content-digest`,
+`content-type`, `ucp-agent`) and the `UCP_SIGNING_KEY` `kid`, with `Webhook-Id` and `Webhook-Timestamp`.
+A failure that is worth retrying is rescheduled with `10 * 2^attempt` seconds up to `WEBHOOK_RETRIES`.
+Nowhere to send (revoked platform, no `webhook_url`, no order capability, no signing key) is not retried.
+The same `ucpSync` releases a hold no step took once the order ends `cancelled`, `declined`, `failed` or
+`rolled_back` (`UNFULFILLED`).
+
+**MCP.** `/ucp/mcp` (`mcp.ts`) answers JSON-RPC itself instead of through the MCP SDK because UCP fixes
+the error shape: a protocol error is a JSON-RPC error (`-32001` for `422` and `424`, `-32000` otherwise,
+with the HTTP status) and a business outcome is a result with `structuredContent`. The six tools call
+the same operations as REST.
+
+The retention sweep prunes `ucp_idempotency` after 48 hours and abandoned `checkout_sessions` 30 days after
+they expire (see [Retention](data-model.md#retention)). Audit actions `ucp.settings`,
+`ucp.platform_added` and `ucp.platform_revoked` (group `ucp`, "Agentic checkout") are written by the
+admin API (`/api/v1/ucp`, `handleUcpAdmin` in `api.server.ts`), which refuses a flow that
+`checkoutFlowProblem` rejects; demo mode locks `/api/v1/ucp`.
 
 ## Bindings
 

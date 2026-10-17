@@ -107,6 +107,7 @@ export default defineConfig({
             { label: 'Expressions and policy rules', slug: 'reference/expressions' },
             { label: 'MCP server', slug: 'reference/mcp' },
             { label: 'A2A endpoint', slug: 'reference/a2a' },
+            { label: 'Agentic checkout (UCP)', slug: 'reference/ucp' },
             // Scalar over the OpenAPI document generated from apps/web (src/pages/api.astro).
             { label: 'OpenAPI explorer', link: '/api/' },
           ],

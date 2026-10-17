@@ -7,6 +7,7 @@ export * from './audit';
 export * from './catalog';
 export * from './channels/shopify';
 export * from './channels/x12';
+export * from './checkout';
 export * from './erasure';
 export * from './fulfillment';
 export * from './graph';
@@ -26,6 +27,7 @@ export * from './roles';
 export * from './shipping';
 export * from './templates';
 export * from './types';
+export * from './ucp';
 export * from './untrusted';
 
 /** Short, sortable, URL-safe ids: a prefix, base36 time and randomness. */

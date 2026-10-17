@@ -45,6 +45,7 @@ export const ORDER_CHANNELS = [
   'api',
   'manual',
   'schedule',
+  'agent',
 ] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
@@ -58,6 +59,7 @@ export const ORDER_CHANNEL_LABELS: Record<OrderChannel, string> = {
   api: 'API',
   manual: 'Dashboard',
   schedule: 'Schedule',
+  agent: 'AI agent',
 };
 
 export const FULFILLMENT_METHODS = ['ship', 'pickup', 'carry_out', 'digital'] as const;

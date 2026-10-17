@@ -10,4 +10,6 @@ interface Env {
   PRINCIPAL_KEY?: string;
   /** The key before a rotation, still accepted until the web Worker signs with the new one. */
   PRINCIPAL_KEY_PREVIOUS?: string;
+  /** Signs UCP order webhooks: a private P-256 JWK with a `kid`, published in /.well-known/ucp. */
+  UCP_SIGNING_KEY?: string;
 }

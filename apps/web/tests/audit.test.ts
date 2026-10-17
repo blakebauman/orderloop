@@ -62,6 +62,7 @@ suite('audit vocabulary', () => {
       'api',
       'oauth',
       'integration',
+      'ucp',
       'order',
       'approval',
       'flow',

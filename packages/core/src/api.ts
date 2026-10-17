@@ -214,4 +214,9 @@ export interface EngineRpc {
   runReplenish(): Promise<{ instanceId: string }>;
   /** Deep health: the engine's own D1 and R2 bindings answer. */
   health(): Promise<HealthReport>;
+  /**
+   * The UCP business profile (`/.well-known/ucp`) with `origin`'s URLs, or null while agentic
+   * checkout is off. The engine builds it because it holds the signing key.
+   */
+  ucpProfile(origin: string): Promise<Record<string, unknown> | null>;
 }

@@ -172,6 +172,18 @@ When the order has finished and everyone has heard, `a2a_watchers` is cleared.
 keyed by `key`. While deliveries are pending it reschedules itself after `10 * 2^attempt` seconds,
 up to 5 retries (`WEBHOOK_RETRIES`), matching the Workflow's backoff, then leaves the rows `failed`.
 
+## UCP order events
+
+An order placed by an agentic checkout carries `meta.ucp = { platformId, checkoutId, origin }`
+(`ucpMetaOf`, `apps/engine/src/ucp/webhooks.ts`). When the state settles, `queueUcpSync` marks the
+private `ucp_sync` table (`digest`, `pending`, `released`) and schedules `ucpSync` two seconds out, so a
+burst of reports sends one event. `ucpSync` first releases the PaymentIntent hold the checkout placed
+(`order.payment.intentId`) once the status is `cancelled`, `declined`, `failed` or `rolled_back` and
+`released` is not yet set, then calls `syncUcpOrder`, which sends the full order entity unless its
+digest is the last one delivered. A failure worth retrying is rescheduled with the webhooks' backoff
+(`10 * 2^attempt` seconds, `WEBHOOK_RETRIES`); anything else is not retried. See
+[Architecture](architecture.md#ucp-agentic-checkout).
+
 ## Rollback outcome
 
 A failed instance runs its compensations inside Workflows, after the order is already `failed`.

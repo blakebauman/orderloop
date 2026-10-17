@@ -15,12 +15,14 @@ import {
 } from '@orderloop/core';
 import {
   auditEvents,
+  checkoutSessions,
   createDb,
   inboundEmails,
   nodeRuns,
   orders,
   paymentEvents,
   sessions,
+  ucpIdempotency,
   webhookDeliveries,
   webhookReceipts,
 } from '@orderloop/db';
@@ -43,39 +45,60 @@ export const RETENTION = {
   webhookReceiptsMs: 10 * 60_000,
   /** Handled Stripe event ids: Stripe redelivers for three days; kept well past that. */
   paymentEventsMs: 30 * DAY,
+  /** UCP Idempotency-Key replays: UCP asks for 24 hours and recommends 48. */
+  ucpIdempotencyMs: 2 * DAY,
+  /**
+   * Checkout sessions that never placed an order, after they expired. One that did is part of
+   * its order's record (its line ids and ship-to are what the platform's order events show).
+   */
+  abandonedCheckoutsMs: 30 * DAY,
 } as const;
 
 /** Deletes everything past its retention, in one batch. Returns rows deleted per table. */
 export async function sweep(env: Env, now = Date.now()) {
   const db = createDb(env.DB);
-  const [expiredSessions, deliveries, runs, emails, receipts, events] = await db.batch([
-    db.delete(sessions).where(lt(sessions.expiresAt, now)).returning({ id: sessions.tokenHash }),
-    db
-      .delete(webhookDeliveries)
-      .where(
-        and(
-          lt(webhookDeliveries.createdAt, now - RETENTION.webhookDeliveriesMs),
-          ne(webhookDeliveries.status, 'pending'),
-        ),
-      )
-      .returning({ id: webhookDeliveries.id }),
-    db
-      .delete(nodeRuns)
-      .where(lt(nodeRuns.endedAt, now - RETENTION.nodeRunsMs))
-      .returning({ id: nodeRuns.nodeId }),
-    db
-      .delete(inboundEmails)
-      .where(lt(inboundEmails.receivedAt, now - RETENTION.inboundEmailsMs))
-      .returning({ id: inboundEmails.id }),
-    db
-      .delete(webhookReceipts)
-      .where(lt(webhookReceipts.receivedAt, now - RETENTION.webhookReceiptsMs))
-      .returning({ id: webhookReceipts.id }),
-    db
-      .delete(paymentEvents)
-      .where(lt(paymentEvents.receivedAt, now - RETENTION.paymentEventsMs))
-      .returning({ id: paymentEvents.id }),
-  ]);
+  const [expiredSessions, deliveries, runs, emails, receipts, events, replays, checkouts] =
+    await db.batch([
+      db.delete(sessions).where(lt(sessions.expiresAt, now)).returning({ id: sessions.tokenHash }),
+      db
+        .delete(webhookDeliveries)
+        .where(
+          and(
+            lt(webhookDeliveries.createdAt, now - RETENTION.webhookDeliveriesMs),
+            ne(webhookDeliveries.status, 'pending'),
+          ),
+        )
+        .returning({ id: webhookDeliveries.id }),
+      db
+        .delete(nodeRuns)
+        .where(lt(nodeRuns.endedAt, now - RETENTION.nodeRunsMs))
+        .returning({ id: nodeRuns.nodeId }),
+      db
+        .delete(inboundEmails)
+        .where(lt(inboundEmails.receivedAt, now - RETENTION.inboundEmailsMs))
+        .returning({ id: inboundEmails.id }),
+      db
+        .delete(webhookReceipts)
+        .where(lt(webhookReceipts.receivedAt, now - RETENTION.webhookReceiptsMs))
+        .returning({ id: webhookReceipts.id }),
+      db
+        .delete(paymentEvents)
+        .where(lt(paymentEvents.receivedAt, now - RETENTION.paymentEventsMs))
+        .returning({ id: paymentEvents.id }),
+      db
+        .delete(ucpIdempotency)
+        .where(lt(ucpIdempotency.createdAt, now - RETENTION.ucpIdempotencyMs))
+        .returning({ key: ucpIdempotency.key }),
+      db
+        .delete(checkoutSessions)
+        .where(
+          and(
+            isNull(checkoutSessions.orderId),
+            lt(checkoutSessions.expiresAt, now - RETENTION.abandonedCheckoutsMs),
+          ),
+        )
+        .returning({ id: checkoutSessions.id }),
+    ]);
   return {
     auditArchived: await archiveAudit(env, now),
     personalDataErased: await expirePersonalData(env, now),
@@ -87,6 +110,8 @@ export async function sweep(env: Env, now = Date.now()) {
     inboundEmails: emails.length,
     webhookReceipts: receipts.length,
     paymentEvents: events.length,
+    ucpIdempotency: replays.length,
+    abandonedCheckouts: checkouts.length,
   };
 }
 

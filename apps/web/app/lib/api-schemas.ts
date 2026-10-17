@@ -51,3 +51,13 @@ export const integrationInput = z.object({
 
 /** A data subject request: the person, by the email address they're known by. */
 export const dataSubjectInput = z.object({ email: z.string().trim().email().max(320) });
+
+/** A UCP platform an admin lets in: its name and the profile it must name in UCP-Agent. */
+export const platformInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  profileUrl: z
+    .string()
+    .url()
+    .max(500)
+    .refine((u) => u.startsWith('https://'), 'The profile must be served over https'),
+});
