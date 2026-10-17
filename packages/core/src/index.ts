@@ -25,6 +25,7 @@ export * from './roles';
 export * from './shipping';
 export * from './templates';
 export * from './types';
+export * from './untrusted';
 
 /** Short, sortable, URL-safe ids: a prefix, base36 time and randomness. */
 export function newId(prefix: string): string {
