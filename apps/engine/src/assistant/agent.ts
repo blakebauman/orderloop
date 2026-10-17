@@ -11,6 +11,7 @@
 
 import { AIChatAgent } from '@cloudflare/ai-chat';
 import {
+  ASSISTANT_BUDGET_SPENT,
   ASSISTANT_TOOLS,
   type AssistantContext,
   type AssistantTool,
@@ -31,6 +32,7 @@ import {
 } from 'ai';
 import type { z } from 'zod';
 import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
+import { assistantBudgetSpent, finishTurn } from '../usage';
 import { type ActionInput, type ActionTool, attention, previewAction, Refused } from './data';
 import { assistantModel, type ModelSource } from './model';
 import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
@@ -83,8 +85,11 @@ export class AssistantAgent extends AIChatAgent<Env> {
         headers: { 'content-type': 'text/plain' },
       });
     }
+    if (await assistantBudgetSpent(this.env, p))
+      return new Response(ASSISTANT_BUDGET_SPENT, { headers: { 'content-type': 'text/plain' } });
     const context = readContext(options?.body?.context);
     const used: ModelSource = { source: 'model' };
+    const started = Date.now();
     const result = streamText({
       model: assistantModel(this.env, context, used),
       system: systemPrompt(p, context),
@@ -97,7 +102,10 @@ export class AssistantAgent extends AIChatAgent<Env> {
       stopWhen: stepCountIs(6),
       temperature: 0.2,
       abortSignal: options?.abortSignal,
-      onFinish,
+      onFinish: async (event) => {
+        await finishTurn(this.env, p, used, event.totalUsage.totalTokens, started);
+        return onFinish(event as never);
+      },
     });
     return result.toUIMessageStreamResponse({
       messageMetadata: ({ part }) =>

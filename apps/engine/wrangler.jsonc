@@ -102,7 +102,10 @@
     "PERSONAL_DATA_RETENTION_DAYS": "",
     // Where Durable Objects (orders, assistants, A2A tasks) live: "eu" or "fedramp", from the
     // registry's jurisdiction, like D1 and R2. Empty: anywhere. Set before the first order only.
-    "DATA_JURISDICTION": ""
+    "DATA_JURISDICTION": "",
+    // Model tokens each person's assistant conversations (in the app and A2A chat) may use per UTC
+    // day; "0" is no limit. The registry's assistantDailyTokens sets it per deployment.
+    "ASSISTANT_DAILY_TOKENS": "1000000"
   }
   // Secrets: INTAKE_ALLOWLIST — extra senders allowed to start orders by email, comma-separated
   // addresses or @domains (customers' own addresses are always allowed).
