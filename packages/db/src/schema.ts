@@ -722,3 +722,22 @@ export const auditEvents = sqliteTable(
     uniqueIndex('audit_events_seq').on(t.seq),
   ],
 );
+
+/**
+ * One-time codes for MCP actions (`confirmations.ts` in the engine): issued with a preview, used
+ * once by the same caller for the same input, within five minutes.
+ */
+export const actionConfirmations = sqliteTable(
+  'action_confirmations',
+  {
+    id: text('id').primaryKey(),
+    principalId: text('principal_id').notNull(),
+    tool: text('tool').notNull(),
+    /** SHA-256 of the action's input (`fingerprintOf`), so the code runs only what was previewed. */
+    inputDigest: text('input_digest').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    usedAt: integer('used_at'),
+  },
+  (t) => [index('action_confirmations_expires').on(t.expiresAt)],
+);

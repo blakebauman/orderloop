@@ -25,6 +25,7 @@ import {
   webhookReceipts,
 } from '@orderloop/db';
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
+import { pruneConfirmations } from './confirmations';
 import { eraseOrders } from './subjects';
 
 const DAY = 86_400_000;
@@ -77,6 +78,7 @@ export async function sweep(env: Env, now = Date.now()) {
   return {
     auditArchived: await archiveAudit(env, now),
     personalDataErased: await expirePersonalData(env, now),
+    confirmations: await pruneConfirmations(env, now),
     sessions: expiredSessions.length,
     webhookDeliveries: deliveries.length,
     nodeRuns: runs.length,

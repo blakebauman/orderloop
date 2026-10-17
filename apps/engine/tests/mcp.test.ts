@@ -175,9 +175,43 @@ describe('MCP', () => {
     const nothing = await call(op, 'deliver_event', { orderId, event: 'no.such.event' });
     expect(nothing.isError).toBe(true);
 
+    // An action's first call previews it and changes nothing.
     const approver = person('approver', 'ann@example.com');
-    const done = await call(approver, 'decide_approval', { orderId, decision: 'approved' });
+    const decide = { orderId, decision: 'approved' };
+    const first = await call(approver, 'decide_approval', decide);
+    expect(first.isError).toBeFalsy();
+    expect(first.structuredContent).toMatchObject({
+      preview: { title: expect.any(String) },
+      confirmation: expect.stringMatching(/^cfm_[0-9a-f]{32}$/),
+    });
+    expect((await state(orderId)).waits.some((w) => w.kind === 'approval')).toBe(true);
+    const code = first.structuredContent!.confirmation as string;
+
+    // The code is for this person and this input only.
+    const someoneElse = person('approver', 'bob@example.com');
+    expect(
+      (await call(someoneElse, 'decide_approval', { ...decide, confirmation: code })).isError,
+    ).toBe(true);
+    expect(
+      (
+        await call(approver, 'decide_approval', {
+          ...decide,
+          decision: 'rejected',
+          confirmation: code,
+        })
+      ).isError,
+    ).toBe(true);
+    expect(
+      (await call(approver, 'decide_approval', { ...decide, confirmation: 'cfm_nope' })).isError,
+    ).toBe(true);
+    expect((await state(orderId)).waits.some((w) => w.kind === 'approval')).toBe(true);
+
+    const done = await call(approver, 'decide_approval', { ...decide, confirmation: code });
     expect(done.isError).toBeFalsy();
+    // Once.
+    expect(
+      (await call(approver, 'decide_approval', { ...decide, confirmation: code })).isError,
+    ).toBe(true);
     const s = await until(async () => {
       const s = await state(orderId);
       return s.waits.some((w) => w.kind === 'approval') ? false : s;

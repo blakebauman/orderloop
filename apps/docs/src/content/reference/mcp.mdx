@@ -72,7 +72,7 @@ refused (`401` with the reason), as there.
 ## Tools
 
 A client sees only the rows its role can use. **Write** tools are the ones the
-assistant stops to confirm; over MCP the client decides how to ask, using the annotations below.
+assistant stops to confirm; over MCP they take two calls, described next.
 
 <McpTools />
 
@@ -81,7 +81,37 @@ Each tool has a title, a description and a JSON input schema. Results come back 
 already decided, the order has finished, you started the order and the workspace [separates approvals](/guides/team-and-roles/#approvals)) is returned as a tool error the model can read, not a
 protocol error. A tool the role can't use is not listed, and calling it by name fails as unknown.
 
-Annotations tell a client when to confirm:
+## Actions take two calls
+
+An action (`decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
+`run_stock_review`) never runs on the first call, whatever the client does. The first call
+changes nothing and returns:
+
+```json
+{
+  "preview": { … },
+  "confirmation": "cfm_…",
+  "expiresAt": 1760000000000,
+  "next": "Nothing has happened yet. …"
+}
+```
+
+The `preview` is what the assistant's confirm card shows: the order or flow, and where the
+action leads. If the action is blocked (for example, you started the order and the workspace
+separates approvals), the call returns a tool error with the reason and no code. The tool
+descriptions and the server's instructions tell the model to show the preview to the person and to
+call again only once they agree.
+
+The action runs when the same person calls again with the same input plus `confirmation`, within
+5 minutes. A code works once. A code used by someone else, for another tool or with a different
+input (key order doesn't matter), or one that expired or was used, is refused with a tool error;
+call without it for a new preview. The role and the order's state are checked again when the
+action runs.
+
+Reads, `propose_flow_change` and `place_order` do not take a code. Over [A2A](/reference/a2a/),
+typed skills run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
+
+Annotations also tell a client when to confirm:
 
 | Tools | Hints |
 |---|---|
