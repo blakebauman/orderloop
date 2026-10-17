@@ -19,6 +19,14 @@ import { CopyButton } from '~/components/copy-button';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser, startSession } from '~/lib/auth.server';
+import { SCIM_PATH } from '~/lib/scim';
+import {
+  createScimToken,
+  revokeScimToken,
+  scimGroupsWithRoles,
+  scimTokenSet,
+  setScimRoles,
+} from '~/lib/scim.server';
 import {
   approvalSeparation,
   setApprovalSeparation,
@@ -56,11 +64,13 @@ export const meta = () => [{ title: 'Team · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
-  const [team, twoFactorRequired, separated, sso] = await Promise.all([
+  const [team, twoFactorRequired, separated, sso, scimToken, scimGroups] = await Promise.all([
     listTeam(),
     twoFactorRequirement(),
     approvalSeparation(),
     ssoSettings(),
+    scimTokenSet(),
+    scimGroupsWithRoles(),
   ]);
   const provider = ssoConfig();
   // The address a new person signs in at, to send along with their temporary password.
@@ -72,6 +82,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     sso: provider
       ? { issuer: provider.issuer, settings: sso, linked: await linkedToSso(me.id) }
       : null,
+    scim: {
+      endpoint: new URL(SCIM_PATH, request.url).href,
+      token: scimToken,
+      groups: scimGroups,
+    },
     me,
     now: Date.now(),
     signInUrl,
@@ -191,6 +206,27 @@ export async function action({ request }: Route.ActionArgs) {
           secret: { kind: 'token', label: `API token “${r.name}”`, value: r.token } as Secret,
         };
       }
+      case 'scim-token':
+        return {
+          secret: {
+            kind: 'token',
+            label: 'SCIM token',
+            value: await createScimToken(request, me),
+          } as Secret,
+        };
+      case 'scim-revoke':
+        await revokeScimToken(request, me);
+        return {
+          ok: true,
+          done: 'SCIM token revoked. Provisioning stops until you make a new one.',
+        };
+      case 'scim-roles': {
+        const map: Record<string, Role> = {};
+        for (const [k, v] of f.entries())
+          if (k.startsWith('role:') && isRole(v)) map[k.slice('role:'.length)] = v;
+        await setScimRoles(request, me, map);
+        return { ok: true, done: 'Group roles saved; members’ roles follow them now.' };
+      }
       case 'revoke':
         await revokeToken(request, me, str('id'));
         return { ok: true };
@@ -258,7 +294,7 @@ function RoleSelect({
 }
 
 export default function Team() {
-  const { people, tokens, me, now, twoFactorRequired, separated, sso, signInUrl } =
+  const { people, tokens, me, now, twoFactorRequired, separated, sso, scim, signInUrl } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
@@ -532,6 +568,8 @@ export default function Team() {
 
           {sso ? <SsoForm {...sso} /> : null}
 
+          <ScimSection {...scim} fetcher={fetcher} />
+
           <ApprovalSeparationForm separated={separated} />
 
           <Section title="API tokens" flush>
@@ -732,6 +770,115 @@ function TokenExpiry({ state, expiresAt }: { state: TokenState; expiresAt: numbe
     >
       expires {formatTime(expiresAt)}
     </span>
+  );
+}
+
+/** SCIM provisioning: the endpoint, its token, and which pushed groups give which role. */
+function ScimSection({
+  endpoint,
+  token,
+  groups,
+  fetcher,
+}: {
+  endpoint: string;
+  token: { updatedAt: number; updatedBy: string } | null;
+  groups: { id: string; displayName: string; members: number; role: Role | null }[];
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const busy = fetcher.state !== 'idle';
+  const roles = useFetcher();
+  return (
+    <Section title="SCIM provisioning">
+      <p className="max-w-[65ch] text-muted-foreground text-xs">
+        Your identity provider can add people, update them and turn them off here. Turning someone
+        off signs them out everywhere and disconnects their apps and the API tokens they made. Give
+        it the endpoint and a token.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Endpoint</span>
+        <code className="select-all break-all rounded-sm bg-card px-2 py-1 font-mono">
+          {endpoint}
+        </code>
+        <CopyButton text={endpoint} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm">
+          {token ? (
+            <>
+              Token made <Ago ms={token.updatedAt} /> by {token.updatedBy}.
+            </>
+          ) : (
+            'No token: provisioning is off.'
+          )}
+        </span>
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="scim-token" />
+          <Button size="sm" variant="outline" type="submit" disabled={busy}>
+            {token ? 'Replace token' : 'Make a token'}
+          </Button>
+        </fetcher.Form>
+        {token ? (
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="scim-revoke" />
+            <Button size="sm" variant="outline" type="submit" disabled={busy}>
+              Revoke
+            </Button>
+          </fetcher.Form>
+        ) : null}
+      </div>
+      {groups.length ? (
+        <roles.Form method="post" className="mt-4">
+          <input type="hidden" name="intent" value="scim-roles" />
+          <p className="text-sm">Groups from your identity provider</p>
+          <ul className="mt-2 divide-y rounded-md border text-sm">
+            {groups.map((g) => (
+              <li
+                key={g.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+              >
+                <span>
+                  {g.displayName}{' '}
+                  <span className="text-muted-foreground text-xs">
+                    {g.members} {g.members === 1 ? 'member' : 'members'}
+                  </span>
+                </span>
+                <NativeSelect
+                  name={`role:${g.id}`}
+                  defaultValue={g.role ?? ''}
+                  className="h-8"
+                  aria-label={`Role for ${g.displayName}`}
+                >
+                  <NativeSelectOption value="">Gives no role</NativeSelectOption>
+                  {ROLES.map((r) => (
+                    <NativeSelectOption key={r} value={r}>
+                      Gives {ROLE_LABELS[r]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </li>
+            ))}
+          </ul>
+          <Button
+            size="sm"
+            variant="outline"
+            type="submit"
+            className="mt-2"
+            disabled={roles.state !== 'idle'}
+          >
+            Save group roles
+          </Button>
+          <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+            Someone in a group that gives a role has the highest role of their groups, or Viewer
+            when none of theirs gives one. Their role follows changes to their groups, and the last
+            active admin always stays an admin.
+          </p>
+        </roles.Form>
+      ) : token ? (
+        <p className="mt-3 text-muted-foreground text-xs">
+          Groups your identity provider pushes appear here, to map to roles.
+        </p>
+      ) : null}
+    </Section>
   );
 }
 

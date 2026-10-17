@@ -193,12 +193,53 @@ single sign-on only is on, see a **Sign-in** note in place of the password, two-
 sections.
 
 Disabling someone at the provider doesn't end a session they already have; it ends when it would
-have anyway. **Disable** on the Team page ends it now. Adding and removing people automatically
-from the provider (SCIM) isn't available.
+have anyway. **Disable** on the Team page ends it now, and
+[SCIM provisioning](#provisioning-with-scim) can do it for you as the provider changes.
 
 Changes are audited as `team.sso_settings`; links as `auth.sso_linked`; people added by sign-in as
 `team.user_added`, shown "by single sign-on"; and each sign-in as `auth.sign_in`, shown "with single
 sign-on". A failed one is `auth.sign_in_failed` with the reason and `method: sso`.
+
+## Provisioning with SCIM
+
+Your identity provider (Okta, Microsoft Entra ID and others) can add people, update them and turn
+them off here by itself, over SCIM 2.0. Under **SCIM provisioning** on the Team page, admins find
+the **Endpoint** (your address followed by `/scim/v2`) and make the token to give the provider.
+
+- **The token.** **Make a token** shows a value starting `ol_scim_` once; copy it into the
+  provider's provisioning settings as a bearer token. Only a hash is kept, so a lost token can't be
+  shown again: **Replace token** makes a new one and the old one stops working at once, and
+  **Revoke** stops provisioning until you make another. With no token, every request is refused
+  (`401`). Requests are limited in rate, like the rest of the API.
+- **What the provider can do.** Create, list, look up, update and delete people (**Users**) and
+  groups (**Groups**), by the standard SCIM operations (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`).
+  Lists are paged (`startIndex` from 1, `count` up to 200) and can be filtered with `eq` on
+  `userName`, `externalId`, `displayName` or `id`, the way providers look for a match. Both Okta's
+  and Entra ID's phrasing of a change is understood.
+- **People.** `userName` is the email. Someone added this way is a **Viewer** with no password, so
+  they [sign in with single sign-on](#single-sign-on): connect it first. The first time they do,
+  they are matched to their provisioned entry by email. An email already on the team is refused
+  with a `409` (`uniqueness`). Changes to a name, email or the provider's id for them are kept.
+- **Deactivating.** Setting `active` to `false`, or deleting the person at the provider, disables
+  them here and ends their access at once: their sessions, the [connected apps](#connected-apps)
+  they authorised and the [API tokens](#api-tokens) they made are all revoked. A delete also takes
+  them out of their groups and keeps them on the Team page as disabled. Activating them again
+  turns the person back on; their sessions and tokens stay ended.
+- **The last admin.** The last active admin can't be deactivated this way: the provider gets a
+  `409`. Make someone else an admin first.
+- **Groups to roles.** Groups the provider pushes appear under **Groups from your identity
+  provider**, each with a choice of **Gives no role** or **Gives** a role. Someone in groups that
+  give roles has the highest of those roles; someone whose groups give none has Viewer. A person's
+  role is re-worked when a mapped group gains or loses a member, when a mapped group is deleted
+  and when an admin saves the mapping. A group with no role changes nobody's role, so roles you
+  set by hand for people outside mapped groups stay. The last active admin is never demoted by
+  this; the audit log notes that it was kept.
+
+Everything SCIM does is audited as it is done by SCIM provisioning (`team.user_added`,
+`team.user_updated`, `team.user_disabled` with how many sessions, apps and tokens it ended,
+`team.user_enabled` and `team.role_changed`). Making and revoking the token are `scim.token_created`
+and `scim.token_revoked`; changing the mapping is `team.scim_roles`. Role changes that follow a
+mapping change are recorded as the admin who saved it.
 
 ## Approvals
 
@@ -252,7 +293,8 @@ Each event records when, who acted, what they acted on, details and the address:
 | Kind | Actions |
 |---|---|
 | Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
-| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to) |
+| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.user_updated` (a new name or email), `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled` (when SCIM or an admin ends access: how many sessions, apps and tokens), `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to), `team.scim_roles` (from and to, which groups give which role) |
+| SCIM provisioning | `scim.token_created` (notes when it replaced an old one), `scim.token_revoked` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |

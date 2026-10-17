@@ -161,7 +161,18 @@ Removing `sso` from the registry (the Worker then has no issuer) turns the butto
 configured provider), so passwords and passkeys work again; people single sign-on added have no
 password and need an admin to reset one for them.
 A person disabled at the provider keeps their session until it ends; an admin disabling them on the
-Team page ends it now. Provisioning and removal from the provider (SCIM) isn't built.
+Team page ends it now, or the provider can do it through SCIM (below).
+
+### Provisioning (SCIM)
+
+For a customer whose provider pushes people and groups (Okta, Entra ID), set single sign-on up first:
+people SCIM creates are viewers with no password, so they can only sign in through it (linked by
+email on their first sign-in). Then ask the customer's admin to open **SCIM provisioning** on the
+Team page, make a token (`ol_scim_…`, shown once; only its SHA-256 is stored) and paste the
+**Endpoint** (`https://<domain>/scim/v2`) and token into the provider's provisioning settings. No
+registry entry, secret or deploy is involved. The admin maps pushed groups to roles on the same
+page. Deactivating at the provider ends the person's sessions, connected apps and the API tokens
+they made. Without a token every `/scim/v2` request is a `401`; demo deployments lock the path.
 
 ## Rotating the principal key
 

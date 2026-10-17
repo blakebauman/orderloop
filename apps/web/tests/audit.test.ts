@@ -58,6 +58,7 @@ suite('audit vocabulary', () => {
       'auth',
       'team',
       'token',
+      'scim',
       'api',
       'oauth',
       'integration',
