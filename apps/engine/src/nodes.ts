@@ -726,10 +726,8 @@ export const EXECUTORS: Record<string, Exec> = {
       : value.customerName
         ? await cx.findCustomerByName(env, value.customerName)
         : undefined;
-    const known = new Set(catalog.map((c) => c.sku));
-    const lines = value.lines
-      .filter((l) => known.has(String(l.sku).toUpperCase()) && l.qty > 0)
-      .map((l) => ({ sku: String(l.sku).toUpperCase(), qty: Math.round(l.qty) }));
+    // Held to the catalog and quantity bounds in `extractOrder`; what didn't pass is in `rejected`.
+    const lines = value.lines;
     return {
       order: {
         ...(lines.length ? { lines } : {}),
@@ -742,7 +740,7 @@ export const EXECUTORS: Record<string, Exec> = {
       },
       output: { ...value, source },
       vars: { poNumber: value.poNumber },
-      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''} (${source})`,
+      summary: `${lineCount(lines.length)}${customer ? ` · ${customer.name}` : ''}${value.rejected?.length ? ` · ${value.rejected.length} held back` : ''} (${source})`,
     };
   },
 
