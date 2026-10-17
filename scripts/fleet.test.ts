@@ -3,7 +3,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
-import { loadDeployments, matrix, renderEngine, renderWeb, toDeployment } from './fleet.ts';
+import {
+  loadDeployments,
+  matrix,
+  renderEngine,
+  renderWeb,
+  secretsProblem,
+  toDeployment,
+} from './fleet.ts';
 
 const base = (app: string) =>
   parse(readFileSync(join(import.meta.dirname, '..', 'apps', app, 'wrangler.jsonc'), 'utf8'));
@@ -179,4 +186,42 @@ test("a customer's assistantDailyTokens sets the assistant's budget", () => {
   assert.equal(renderEngine(base('engine'), big).vars.ASSISTANT_DAILY_TOKENS, '0');
   assert.equal(renderEngine(base('engine'), acme).vars.ASSISTANT_DAILY_TOKENS, '1000000');
   assert.throws(() => toDeployment({ ...acme, assistantDailyTokens: -1 }), /assistantDailyTokens/);
+});
+
+test('payments are mocked unless the registry says stripe, with its publishable key', () => {
+  const mocked = renderEngine(base('engine'), acme);
+  assert.equal(mocked.vars.PAYMENTS_MODE, 'mock');
+  assert.equal(mocked.vars.STRIPE_PUBLISHABLE_KEY, '');
+  const live = toDeployment({
+    ...acme,
+    payments: 'stripe',
+    stripePublishableKey: 'pk_live_abc123',
+  });
+  const engine = renderEngine(base('engine'), live);
+  assert.equal(engine.vars.PAYMENTS_MODE, 'stripe');
+  assert.equal(engine.vars.STRIPE_PUBLISHABLE_KEY, 'pk_live_abc123');
+  assert.throws(() => toDeployment({ ...acme, payments: 'paypal' }), /payments must/);
+  assert.throws(
+    () => toDeployment({ ...acme, payments: 'stripe', stripePublishableKey: 'sk_live_abc' }),
+    /publishable key/,
+  );
+  assert.throws(
+    () => toDeployment({ ...acme, stripePublishableKey: 'pk_test_abc' }),
+    /needs payments/,
+  );
+  assert.throws(
+    () => toDeployment({ id: 'demo', ring: 'internal', slot: 5, demo: true, payments: 'stripe' }),
+    /demo/,
+  );
+});
+
+test('a Stripe deployment needs STRIPE_SECRET_KEY in the same mode as its publishable key', () => {
+  assert.equal(secretsProblem(acme, {}), null);
+  const stripe = toDeployment({ ...acme, payments: 'stripe', stripePublishableKey: 'pk_test_abc' });
+  assert.match(secretsProblem(stripe, {}) ?? '', /STRIPE_SECRET_KEY/);
+  assert.match(
+    secretsProblem(stripe, { STRIPE_SECRET_KEY: 'sk_live_x' }) ?? '',
+    /both test or both live/,
+  );
+  assert.equal(secretsProblem(stripe, { STRIPE_SECRET_KEY: 'rk_test_x' }), null);
 });

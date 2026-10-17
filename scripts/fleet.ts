@@ -119,6 +119,18 @@ export type Deployment = {
    * environment's OIDC_CLIENT_SECRET; the redirect URI to register is https://<domain>/login/sso/callback.
    */
   sso?: { issuer: string; clientId: string };
+  /**
+   * How the engine takes payments: `mock` (the default) records them without taking money;
+   * `stripe` authorizes, captures and refunds through Stripe with the environment's
+   * STRIPE_SECRET_KEY, which a deploy then requires.
+   */
+  payments: 'mock' | 'stripe';
+  /**
+   * The Stripe publishable key (pk_…) of the same account and mode as STRIPE_SECRET_KEY. Agentic
+   * checkout's Stripe payment handler gives it to platforms to tokenize cards with; without it no
+   * handler is offered. Only with `payments: "stripe"`.
+   */
+  stripePublishableKey?: string;
 };
 
 /** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
@@ -194,6 +206,20 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     if (typeof sso.clientId !== 'string' || !sso.clientId.trim())
       throw new Error(`${file}: sso.clientId must be the client id the provider issued`);
   }
+  if (raw.payments !== undefined && raw.payments !== 'mock' && raw.payments !== 'stripe')
+    throw new Error(`${file}: payments must be "mock" or "stripe"`);
+  const payments = raw.payments === 'stripe' ? 'stripe' : 'mock';
+  if (payments === 'stripe' && raw.demo === true)
+    throw new Error(`${file}: a demo takes no real payments; leave payments "mock"`);
+  const pk = raw.stripePublishableKey;
+  if (pk !== undefined) {
+    if (typeof pk !== 'string' || !/^pk_(test|live)_\w+$/.test(pk))
+      throw new Error(
+        `${file}: stripePublishableKey must be a Stripe publishable key (pk_test_… or pk_live_…)`,
+      );
+    if (payments !== 'stripe')
+      throw new Error(`${file}: stripePublishableKey needs payments "stripe"`);
+  }
   return {
     id,
     ring,
@@ -214,6 +240,8 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs !== false,
     ...(sso ? { sso: { issuer: sso.issuer as string, clientId: sso.clientId as string } } : {}),
+    payments,
+    ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
   };
 }
 
@@ -284,6 +312,11 @@ export function renderEngine(base: Config, d: Deployment): Config {
       ...config.vars,
       PERSONAL_DATA_RETENTION_DAYS: String(d.personalDataRetentionDays),
     };
+  config.vars = {
+    ...config.vars,
+    PAYMENTS_MODE: d.payments,
+    STRIPE_PUBLISHABLE_KEY: d.stripePublishableKey ?? '',
+  };
   // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
   if (d.demo)
     config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };
@@ -351,14 +384,31 @@ export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
   ) as Record<Ring, Deployment[]>;
 }
 
-function secrets(app: string | undefined, out: string | undefined) {
-  if (app !== 'web' && app !== 'engine') throw new Error('secrets <engine|web> <out>');
-  if (!out) throw new Error('secrets <engine|web> <out>');
+/**
+ * Why the environment's secrets can't run `d`, or null: a Stripe deployment needs
+ * STRIPE_SECRET_KEY, in the same mode (test or live) as its publishable key.
+ */
+export function secretsProblem(d: Deployment, env: Record<string, string | undefined>) {
+  if (d.payments !== 'stripe') return null;
+  const sk = env.STRIPE_SECRET_KEY;
+  if (!sk)
+    return `${d.id} takes payments through Stripe: add STRIPE_SECRET_KEY to its GitHub environment`;
+  const live = (k: string) => /^(sk|rk|pk)_live_/.test(k);
+  if (d.stripePublishableKey && live(sk) !== live(d.stripePublishableKey))
+    return `${d.id}: STRIPE_SECRET_KEY and stripePublishableKey are not both test or both live keys`;
+  return null;
+}
+
+function secrets(app: string | undefined, out: string | undefined, id?: string) {
+  if (app !== 'web' && app !== 'engine') throw new Error('secrets <engine|web> <out> [id]');
+  if (!out) throw new Error('secrets <engine|web> <out> [id]');
   const missing = REQUIRED_SECRETS.filter((k) => !process.env[k]);
   if (missing.length)
     throw new Error(
       `${missing.join(', ')} not set: add it to the deployment's GitHub environment (scripts/provision.sh generates one)`,
     );
+  const problem = app === 'engine' && id ? secretsProblem(byId(id), process.env) : null;
+  if (problem) throw new Error(problem);
   // Only the ones set: `--secrets-file` adds to a Worker's secrets and never removes one.
   const values = Object.fromEntries(
     SECRETS[app].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : [])),
@@ -419,7 +469,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     if (cmd === 'render') render(args[0]);
     else if (cmd === 'matrix') console.log(JSON.stringify(matrix(loadDeployments())));
-    else if (cmd === 'secrets') secrets(args[0], args[1]);
+    else if (cmd === 'secrets') secrets(args[0], args[1], args[2]);
     else if (cmd === 'status') await status();
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
