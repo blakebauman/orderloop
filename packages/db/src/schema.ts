@@ -768,3 +768,16 @@ export const actionConfirmations = sqliteTable(
   },
   (t) => [index('action_confirmations_expires').on(t.expiresAt)],
 );
+
+/** Model tokens each person's assistant conversations used per UTC day (`usage.ts` in the engine). */
+export const aiUsage = sqliteTable(
+  'ai_usage',
+  {
+    principalId: text('principal_id').notNull(),
+    /** `2026-10-17`. */
+    day: text('day').notNull(),
+    tokens: integer('tokens').notNull().default(0),
+    calls: integer('calls').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.principalId, t.day] }), index('ai_usage_day').on(t.day)],
+);

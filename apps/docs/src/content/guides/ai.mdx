@@ -13,8 +13,13 @@ OrderLoop uses Workers AI in three places: the AI nodes in a flow, the flow copi
 - **A 20-second cap.** A slower call is abandoned.
 - **A deterministic fallback.** When AI is unavailable, or the model errors, times out or returns
   nothing, a heuristic produces the result instead. An order never stalls on the model.
-- **The source is recorded.** Each AI node's output carries `source: "model"` or
-  `source: "heuristic"`; the Extract order and Demand forecast summaries show it too.
+- **The source is recorded.** Each AI node's output says where its answer came from: `source`
+  (`"model"` or `"heuristic"`), `model` (the model that answered, `null` for the heuristic),
+  `prompt` (the instructions' name and version, such as `router@1`; the version changes whenever
+  the instructions or the answer format do) and, when the heuristic answered, `fallback` (why:
+  `mock`, the error or timeout, a malformed answer, or for Demand forecast "nothing to reorder" or
+  "no usable lines in the answer"). Assess and the assistant's order assessment record the same
+  fields. The Extract order and Demand forecast summaries show the source too.
 
 By default the AI nodes and the copilot use `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, the
 assistant `@cf/moonshotai/kimi-k2.6`, and Assess `@cf/cloudflare/clef`. Your OrderLoop

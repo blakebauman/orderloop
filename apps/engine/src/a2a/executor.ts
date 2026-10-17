@@ -26,6 +26,7 @@ import {
 import {
   A2A_SKILLS,
   type A2ATaskState,
+  ASSISTANT_BUDGET_SPENT,
   ASSISTANT_TOOLS,
   type AssistantTool,
   atLeast,
@@ -49,6 +50,7 @@ import { assistantModel, type ModelSource } from '../assistant/model';
 import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from '../assistant/tools';
 import { recordAudit } from '../audit';
 import { startOrderOnce } from '../orders';
+import { assistantBudgetSpent, finishTurn } from '../usage';
 import { dataArtifact, newTask, readMessage, statusEvent } from './parts';
 import type { SqlTaskStore } from './store';
 
@@ -255,7 +257,12 @@ export class OrderLoopExecutor implements AgentExecutor {
    * action the task stops with a preview, for the caller to confirm.
    */
   private async chat(p: Principal, ids: Ids, prompt: string, bus: ExecutionEventBus) {
+    if (await assistantBudgetSpent(this.env, p)) {
+      bus.publish(statusEvent(ids, 'TASK_STATE_COMPLETED', ASSISTANT_BUDGET_SPENT));
+      return;
+    }
     const used: ModelSource = { source: 'model' };
+    const started = Date.now();
     const proposed: { tool: AssistantTool; input: Record<string, unknown> }[] = [];
     const result = await generateText({
       model: assistantModel(this.env, { kind: 'workspace' }, used),
@@ -265,6 +272,7 @@ export class OrderLoopExecutor implements AgentExecutor {
       stopWhen: stepCountIs(6),
       temperature: 0.2,
     });
+    await finishTurn(this.env, p, used, result.totalUsage.totalTokens, started);
     for (const call of result.toolCalls)
       if (isAssistantTool(call.toolName) && isActionTool(call.toolName))
         proposed.push({ tool: call.toolName, input: call.input as Record<string, unknown> });

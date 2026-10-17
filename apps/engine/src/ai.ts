@@ -8,6 +8,8 @@
  */
 
 import {
+  type AiPrompt,
+  type AiProvenance,
   autoLayout,
   boundExtractedLines,
   boundText,
@@ -28,12 +30,13 @@ import {
   type Order,
   type OrderLine,
   personalDataMode,
+  promptId,
   type RejectedLine,
   validateGraph,
   withDefaults,
 } from '@orderloop/core';
 
-export type AiSource = 'model' | 'heuristic';
+export type { AiSource } from '@orderloop/core';
 
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -50,13 +53,31 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * One line per model call, `{"type":"ai_call",…}`, for the fallback rate and latency until
+ * metrics exist. A fallback other than mock mode is a warning.
+ */
+export function logAiCall(p: AiProvenance, ms: number, extra: Record<string, unknown> = {}) {
+  const line = JSON.stringify({ type: 'ai_call', ...p, ms, ...extra });
+  if (p.source === 'heuristic' && p.fallback !== 'mock') console.warn(line);
+  else console.log(line);
+}
+
 export async function runJson<T>(
   env: Env,
+  prompt: AiPrompt,
   messages: Msg[],
   schema: Record<string, unknown>,
   fallback: () => T,
-): Promise<{ value: T; source: AiSource }> {
-  if (String(env.AI_MODE) === 'mock') return { value: fallback(), source: 'heuristic' };
+): Promise<{ value: T } & AiProvenance> {
+  const id = promptId(prompt);
+  const started = Date.now();
+  const heuristic = (reason: string) => {
+    const p: AiProvenance = { source: 'heuristic', model: null, prompt: id, fallback: reason };
+    logAiCall(p, Date.now() - started);
+    return { value: fallback(), ...p };
+  };
+  if (String(env.AI_MODE) === 'mock') return heuristic('mock');
   try {
     const res = (await withTimeout(
       env.AI.run(
@@ -76,10 +97,11 @@ export async function runJson<T>(
     if (value === undefined || value === null) throw new Error('empty response');
     // A malformed answer would fail the step and call the model again on every retry.
     if (!conforms(value, schema)) throw new Error('response does not match the schema');
-    return { value, source: 'model' };
+    const p: AiProvenance = { source: 'model', model: String(env.AI_MODEL), prompt: id };
+    logAiCall(p, Date.now() - started);
+    return { value, ...p };
   } catch (err) {
-    console.warn('ai fallback', err instanceof Error ? err.message : err);
-    return { value: fallback(), source: 'heuristic' };
+    return heuristic(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -126,6 +148,7 @@ export async function extractOrder(
 ) {
   return runJson<Extracted>(
     env,
+    'extract',
     [
       {
         role: 'system',
@@ -185,6 +208,7 @@ const KEYWORDS: Record<string, string[]> = {
 export async function classify(env: Env, order: Order, labels: string[]) {
   return runJson<{ label: string; confidence: number }>(
     env,
+    'classify',
     [
       {
         role: 'system',
@@ -217,6 +241,7 @@ export async function classify(env: Env, order: Order, labels: string[]) {
 export async function riskScore(env: Env, order: Order, customer: ModelContextInput['customer']) {
   return runJson<{ score: number; reasons: string[] }>(
     env,
+    'risk',
     [
       {
         role: 'system',
@@ -277,10 +302,14 @@ export async function forecast(env: Env, rows: StockRow[], horizonDays: number) 
   if (!low.length)
     return {
       value: { lines: [] as { sku: string; qty: number; reason: string }[] },
-      source: 'heuristic' as AiSource,
+      source: 'heuristic' as const,
+      model: null,
+      prompt: promptId('forecast'),
+      fallback: 'nothing to reorder',
     };
   return runJson<{ lines: { sku: string; qty: number; reason: string }[] }>(
     env,
+    'forecast',
     [
       {
         role: 'system',
@@ -312,7 +341,13 @@ export async function forecast(env: Env, rows: StockRow[], horizonDays: number) 
     const lines = r.value.lines.filter((l) => valid.has(l.sku) && l.qty > 0);
     return lines.length
       ? { ...r, value: { lines } }
-      : { value: fallback(), source: 'heuristic' as AiSource };
+      : {
+          ...r,
+          value: fallback(),
+          source: 'heuristic' as const,
+          model: null,
+          fallback: 'no usable lines in the answer',
+        };
   });
 }
 
@@ -326,6 +361,7 @@ export async function route(
 ) {
   return runJson<{ route: string; reason: string }>(
     env,
+    'router',
     [
       {
         role: 'system',
@@ -378,6 +414,7 @@ export function routerPrompt(instructions: string, routes: string[]) {
 export async function summarize(env: Env, context: ModelContextInput) {
   return runJson<{ summary: string }>(
     env,
+    'summarize',
     [
       {
         role: 'system',
@@ -413,6 +450,7 @@ const CATALOG_BRIEF = NODE_SPECS.map((s) => ({
 export async function copilot(env: Env, req: CopilotRequest): Promise<CopilotResult> {
   const { value } = await runJson<{ explanation: string; graph: FlowGraph }>(
     env,
+    'copilot',
     [
       {
         role: 'system',

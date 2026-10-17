@@ -316,7 +316,20 @@ Every AI node except Assess, and the copilot, go through `runJson` (`apps/engine
 `response_format: json_schema`, temperature `0.2`, `max_tokens` 2048, a 20-second cap
 (`AI_TIMEOUT_MS`), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
 non-conforming answer is treated like an error. On `AI_MODE=mock`, an error, a timeout or an empty
-answer, each node's heuristic runs and the output records `source: "heuristic"`. Extract order and
+answer, each node's heuristic runs and the output records `source: "heuristic"`. Every answer
+carries `AiProvenance` (`packages/core/src/provenance.ts`): `source`, `model` (null for the
+heuristic), `prompt` (`router@1`, from `AI_PROMPTS`; bump a prompt's version whenever its
+instructions or answer schema change) and `fallback` (`mock`, the error or timeout message, a
+malformed answer, or the forecast's `nothing to reorder` / `no usable lines in the answer`). Assess
+and the assistant's `assess_order` record it too.
+
+Each model call (`runJson`, `clef.assess`, each assistant and A2A chat turn) logs one JSON line,
+`{"type":"ai_call", source, model, prompt, fallback?, ms, tokens?}` (`logAiCall`); a fallback other
+than `mock` is a warning. This is the way to read the fallback rate until metrics exist (plan item
+#26). The assistant's turns are also held to `ASSISTANT_DAILY_TOKENS` a person a UTC day
+(`apps/engine/src/usage.ts`, table `ai_usage`): `assistantBudgetSpent` refuses a turn with
+`ASSISTANT_BUDGET_SPENT` once spent, and `finishTurn` adds `totalUsage.totalTokens` when it ends.
+Heuristic turns cost nothing; MCP clients bring their own model and aren't counted. Extract order and
 Summarize send at most the first 20,000 characters (Summarize's, after redaction).
 
 Assess calls Clef directly (`assess` in `apps/engine/src/clef.ts`, `ASSESS_MODEL`) with the fixed
