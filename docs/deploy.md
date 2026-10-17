@@ -116,9 +116,10 @@ during the overlap Stripe signs with both, and either passes.
 platform can pay and follow its orders; the checkout flow and the platforms are then set by an admin
 in the app (`/api/v1/ucp`).
 
-- `STRIPE_PUBLISHABLE_KEY` (a `vars` entry in `apps/engine/wrangler.jsonc`, empty by default): the
-  `pk_…` key of the same Stripe account and mode as `STRIPE_SECRET_KEY`. With `PAYMENTS_MODE` `stripe`
-  and no key, the profile offers no payment handler.
+- `"payments": "stripe"` and `stripePublishableKey` in the deployment's registry file
+  ([operations](operations.md)): the `pk_…` key of the same Stripe account and mode as
+  `STRIPE_SECRET_KEY`, rendered into the engine's `STRIPE_PUBLISHABLE_KEY`. With `payments`
+  `stripe` and no key, the profile offers no payment handler.
 - `UCP_SIGNING_KEY` (engine secret): a private P-256 JWK with a `kid`. Without it the profile has no
   `keys` and order events are not sent. Add it to the deployment's GitHub environment secrets, like
   `STRIPE_SECRET_KEY`; the deploy job passes it to the engine (`scripts/fleet.ts secrets engine`).
@@ -181,7 +182,7 @@ If it fails, only the docs Worker is rolled back; the app has already passed.
 Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
-them it fails rather than skipping. The environment must have `PRINCIPAL_KEY`, the key that signs the principal header the web Worker forwards and the engine checks: `fleet.ts secrets` fails the deploy, before it migrates anything, when it is missing (`provision.sh` generates one, including for an environment that already runs). `PRINCIPAL_KEY_PREVIOUS` is set only during a [rotation](operations.md#rotating-the-principal-key). The environment's `SETUP_TOKEN`,
+them it fails rather than skipping. The environment must have `PRINCIPAL_KEY`, the key that signs the principal header the web Worker forwards and the engine checks: `fleet.ts secrets` fails the deploy, before it migrates anything, when it is missing (`provision.sh` generates one, including for an environment that already runs). It also fails a deployment the registry says takes payments through Stripe when the environment has no `STRIPE_SECRET_KEY`, or one in the other mode (test or live) from its `stripePublishableKey`. `PRINCIPAL_KEY_PREVIOUS` is set only during a [rotation](operations.md#rotating-the-principal-key). The environment's `SETUP_TOKEN`,
 `SHOPIFY_WEBHOOK_SECRET`, `STRIPE_WEBHOOK_SECRET`, `OIDC_CLIENT_SECRET` (single sign-on; see [operations](operations.md#single-sign-on)), `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.

@@ -89,7 +89,7 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           UCP_SIGNING_KEY: ${{ secrets.UCP_SIGNING_KEY }}
         run: |
-          node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json"
+          node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json" "$ID"
           node scripts/fleet.ts secrets web "$RUNNER_TEMP/web-secrets.json"
       # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
       # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
