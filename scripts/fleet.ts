@@ -52,7 +52,13 @@ type Ring = (typeof RINGS)[number];
 
 /** Each app's secrets, read from the deploy job's environment (a GitHub environment's secrets). */
 const SECRETS = {
-  web: ['PRINCIPAL_KEY', 'SETUP_TOKEN', 'SHOPIFY_WEBHOOK_SECRET', 'STRIPE_WEBHOOK_SECRET'],
+  web: [
+    'PRINCIPAL_KEY',
+    'SETUP_TOKEN',
+    'SHOPIFY_WEBHOOK_SECRET',
+    'STRIPE_WEBHOOK_SECRET',
+    'OIDC_CLIENT_SECRET',
+  ],
   engine: [
     'PRINCIPAL_KEY',
     'PRINCIPAL_KEY_PREVIOUS',
@@ -104,6 +110,12 @@ export type Deployment = {
   aiPersonalData: 'redact' | 'send';
   /** Whether the AI Gateway keeps request logs (prompts and responses). Default true. */
   aiGatewayLogs: boolean;
+  /**
+   * The customer's OpenID Connect identity provider for single sign-on: its issuer (https, as its
+   * discovery document names it) and this deployment's client id. The client secret is the
+   * environment's OIDC_CLIENT_SECRET; the redirect URI to register is https://<domain>/login/sso/callback.
+   */
+  sso?: { issuer: string; clientId: string };
 };
 
 /** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
@@ -167,6 +179,15 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
+  const sso = raw.sso as Record<string, unknown> | undefined;
+  if (sso !== undefined) {
+    if (typeof sso !== 'object' || sso === null)
+      throw new Error(`${file}: sso must be { "issuer", "clientId" }`);
+    if (typeof sso.issuer !== 'string' || !/^https:\/\/[^\s]+$/.test(sso.issuer))
+      throw new Error(`${file}: sso.issuer must be the identity provider's https issuer URL`);
+    if (typeof sso.clientId !== 'string' || !sso.clientId.trim())
+      throw new Error(`${file}: sso.clientId must be the client id the provider issued`);
+  }
   return {
     id,
     ring,
@@ -185,6 +206,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs !== false,
+    ...(sso ? { sso: { issuer: sso.issuer as string, clientId: sso.clientId as string } } : {}),
   };
 }
 
@@ -282,6 +304,8 @@ export function renderWeb(base: Config, d: Deployment): Config {
   }));
   storage(config, d);
   if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };
+  if (d.sso)
+    config.vars = { ...config.vars, OIDC_ISSUER: d.sso.issuer, OIDC_CLIENT_ID: d.sso.clientId };
   return config;
 }
 

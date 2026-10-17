@@ -10,6 +10,7 @@ import {
   ROLE_LABELS,
   type Role,
 } from '@orderloop/core';
+import { describeSso } from './sso';
 import { isTwoFactorRequirement, TWO_FACTOR_REQUIREMENTS } from './two-factor';
 
 export const AUDIT_ACTIONS = {
@@ -28,6 +29,7 @@ export const AUDIT_ACTIONS = {
   'auth.two_factor_disabled': 'Turned off two-factor sign-in',
   'auth.recovery_codes_replaced': 'Made new recovery codes',
   'auth.recovery_code_used': 'Used a recovery code',
+  'auth.sso_linked': 'Linked a sign-in from the identity provider',
   'team.first_admin': 'Created the first admin',
   'team.recovery_admin': 'Recovered admin access with a setup code',
   'team.setup_refused': 'Setup refused: wrong setup code',
@@ -39,6 +41,7 @@ export const AUDIT_ACTIONS = {
   'team.two_factor_reset': 'Reset two-factor sign-in',
   'team.two_factor_requirement': 'Changed who needs two-factor sign-in',
   'team.approval_separation': 'Changed whether people may approve orders they started',
+  'team.sso_settings': 'Changed single sign-on settings',
   'token.created': 'Created an API token',
   'token.revoked': 'Revoked an API token',
   'api.token_expired': 'API refused: expired token',
@@ -92,7 +95,10 @@ export function describe(e: AuditEvent): string {
   if (e.target) parts.push(e.target);
   if (e.action === 'team.role_changed' && d.from && d.to)
     parts.push(`${role(d.from)} → ${role(d.to)}`);
-  else if (e.action === 'team.approval_separation')
+  else if (e.action === 'team.sso_settings') {
+    parts.push(describeSso(d.to));
+    if (d.via === 'setup code') parts.push('by a setup code recovering access');
+  } else if (e.action === 'team.approval_separation')
     parts.push(d.to === 'on' ? 'separated: no one approves their own orders' : 'not separated');
   else if (isTwoFactorRequirement(d.from) && isTwoFactorRequirement(d.to))
     parts.push(`${TWO_FACTOR_REQUIREMENTS[d.from]} → ${TWO_FACTOR_REQUIREMENTS[d.to]}`);
@@ -101,6 +107,8 @@ export function describe(e: AuditEvent): string {
   if (typeof d.twoFactor === 'string') parts.push(`two-factor ${d.twoFactor}`);
   if (e.action.startsWith('auth.passkey_') && typeof d.name === 'string') parts.push(d.name);
   if (d.method === 'passkey') parts.push('with a passkey');
+  if (d.method === 'sso') parts.push('with single sign-on');
+  if (d.via === 'sso') parts.push('by single sign-on');
   if (d.passkeys === 'removed') parts.push('passkeys removed');
   if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
     parts.push(`${d.left} left`);

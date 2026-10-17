@@ -1,9 +1,9 @@
 ---
 title: Team and roles
-description: Who can sign in, what viewers, approvers, operators and admins may do, setting up the first admin, recovering admin access, two-factor sign-in, who may approve their own orders, API tokens and the audit log.
+description: Who can sign in, what viewers, approvers, operators and admins may do, setting up the first admin, recovering admin access, two-factor sign-in, single sign-on, who may approve their own orders, API tokens and the audit log.
 ---
 
-Each person signs in with their own email and password, and has one role. API tokens carry a role
+Each person signs in with their own email and password, or through your organization's identity provider ([single sign-on](#single-sign-on)), and has one role. API tokens carry a role
 too. The roles are ordered, so each one can do everything the roles before it can:
 
 | Role | Can |
@@ -39,6 +39,10 @@ To avoid needing that, keep a second admin account with [two-factor sign-in](#tw
 turned on, and store its credentials and recovery codes offline. Disable it when you don't want it
 to be able to sign in; you can enable it again later. The setup code is the last resort.
 
+If your workspace is [single sign-on only](#single-sign-on) and the identity provider is down or
+misconfigured, redeeming a setup code also turns **Single sign-on only** off, so the new admin signs
+in with their password. It is recorded as `team.sso_settings` with the setup code as the cause.
+
 ## The Team page
 
 Admins manage people and tokens at `/team`:
@@ -56,6 +60,8 @@ Admins manage people and tokens at `/team`:
   can set it up again. It also removes their [passkeys](#passkeys), in case the lost device holds
   one, and applies even if they had passkeys but no authenticator app. You can't reset your own.
 - The last active admin can't be demoted or disabled, so someone can always manage the team.
+- **Single sign-on:** when your identity provider is connected, a section for who may join and
+  whether it is the only way in; see [Single sign-on](#single-sign-on).
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
 They are stored only as salted PBKDF2-SHA256 hashes.
@@ -152,6 +158,48 @@ Failed passkey sign-ins count against the address. A successful sign-in clears i
 `(no email)`. API tokens aren't throttled: they are long random values, so a busy address can't lock
 out working integrations. The address is the client's IP as Cloudflare sees it.
 
+## Single sign-on
+
+People can sign in through your organization's OpenID Connect identity provider (Okta, Microsoft
+Entra ID, Google Workspace and others). Ask whoever runs your OrderLoop deployment to connect it;
+they need your provider's issuer URL and a client id and secret from it. Until it is connected, none
+of this appears.
+
+Once it is, the sign-in page has **Sign in with single sign-on**. It sends you to the provider; when
+you come back you are signed in, with the same session as a password gives you, and taken to the
+page you were heading to. The first time, OrderLoop matches you to the person with the same email
+(only if the provider says the address is verified; a provider that leaves out the claim, such as
+Entra ID, doesn't count) and links your provider identity to them, so later sign-ins match the
+identity itself. An email already linked to a different identity is refused. Disabled people are
+refused. If the attempt can't finish, the sign-in page says so with one of three messages: it didn't
+finish (try again, then tell an admin), you aren't on the team, or your account is disabled. The
+audit log has the reason.
+
+Under **Single sign-on** on the Team page, admins choose:
+
+- **Someone not on the team:** **Is refused** (the default) or **Joins as** a role. With a role,
+  anyone the provider signs in whose email domain is listed is added with that role on their first
+  sign-in, with no password.
+- **From these email domains:** the domains allowed to join, separated by commas or spaces. A role
+  needs at least one.
+- **Single sign-on only:** turns off passwords and passkeys. Sign in with single sign-on yourself
+  once first; the page refuses otherwise. Password and passkey sign-in are then refused, nobody is
+  sent to set up an authenticator app or change a temporary password, and the sign-in page shows
+  only the single sign-on button. Your provider handles two-factor sign-in.
+
+People who have no password (the ones single sign-on added) are never asked for the app's
+[two-factor sign-in](#two-factor-sign-in). On the **Account** page, they, and everyone while
+single sign-on only is on, see a **Sign-in** note in place of the password, two-factor and passkey
+sections.
+
+Disabling someone at the provider doesn't end a session they already have; it ends when it would
+have anyway. **Disable** on the Team page ends it now. Adding and removing people automatically
+from the provider (SCIM) isn't available.
+
+Changes are audited as `team.sso_settings`; links as `auth.sso_linked`; people added by sign-in as
+`team.user_added`, shown "by single sign-on"; and each sign-in as `auth.sign_in`, shown "with single
+sign-on". A failed one is `auth.sign_in_failed` with the reason and `method: sso`.
+
 ## Approvals
 
 Under **Approvals** on the Team page, **Who started an order** is **May approve it** (the default) or
@@ -203,8 +251,8 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
-| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`) |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
+| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled`, `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to) |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |

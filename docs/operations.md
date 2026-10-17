@@ -32,6 +32,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
+| `sso` | none | `{ "issuer": "https://…", "clientId": "…" }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). Rendered into the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -69,7 +70,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
    the environment. Add `SHOPIFY_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH`,
-   `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` there if the customer uses them (Stripe also
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` or `OIDC_CLIENT_SECRET` ([single sign-on](#single-sign-on)) there if the customer uses them (Stripe also
    needs `PAYMENTS_MODE` set to `stripe` in the engine's `vars`, and invoices through Stripe need
    the [Stripe webhook](deploy.md#stripe-webhook)). To gate this customer's deploys, add a required reviewer to the
    environment.
@@ -141,6 +142,27 @@ registry file. Compared with a customer's deployment:
 To bring it up: `./scripts/provision.sh demo`, then set `"hold": false` in `deployments/demo.jsonc`
 and merge. The demo's own setup code (`.secrets/demo/setup-code`) is for you, not visitors: it creates an admin account for managing the demo.
 
+## Single sign-on
+
+A customer signs in through its own OpenID Connect provider (Okta, Entra ID, Google Workspace, …):
+
+1. At the provider, register a web application (authorization code flow) with the redirect URI
+   `https://<domain>/login/sso/callback`. Scopes `openid email profile`; PKCE is used. Note the
+   issuer (as its `/.well-known/openid-configuration` names it), the client id and the client secret.
+2. Add `"sso": { "issuer": "https://…", "clientId": "…" }` to the registry file, and set
+   `OIDC_CLIENT_SECRET` in the deployment's GitHub environment.
+3. Merge. The next deploy renders `OIDC_ISSUER` and `OIDC_CLIENT_ID` into the web Worker and sets the
+   secret. With all three set the sign-in page shows **Sign in with single sign-on**.
+4. Tell the customer's admins. On the Team page they choose who may join and from which email
+   domains, and can turn on **Single sign-on only** once they have signed in that way themselves.
+
+Removing `sso` from the registry (the Worker then has no issuer) turns the button off. A saved
+**Single sign-on only** then has no effect (`ssoOnlyInEffect` in `settings.server.ts` needs a
+configured provider), so passwords and passkeys work again; people single sign-on added have no
+password and need an admin to reset one for them.
+A person disabled at the provider keeps their session until it ends; an admin disabling them on the
+Team page ends it now. Provisioning and removal from the provider (SCIM) isn't built.
+
 ## Rotating the principal key
 
 `PRINCIPAL_KEY` signs the principal header the web Worker forwards to the engine, and each signature
@@ -170,7 +192,9 @@ printed), sets it as `SETUP_TOKEN` on the deployment's GitHub environment, so th
 it, and on the web Worker with `wrangler secret put`, so it works now. Send the person recovering
 `https://<domain>/setup` and the code. They create a new admin account with an email not already on
 the team, which is audited as `team.recovery_admin` (a wrong code as `team.setup_refused`), and
-they can then reset the others. The code works once; the last active admin can never be demoted or
+they can then reset the others. If the workspace was **Single sign-on only**, redeeming the code
+turns that off (audited as `team.sso_settings` with `via: "setup code"`), so the new admin can sign
+in with their password even when the identity provider is the problem. The code works once; the last active admin can never be demoted or
 disabled, so recovery is only needed when the admins can't sign in.
 
 Break-glass: recommend that each customer keeps a second admin account with two-factor sign-in on,

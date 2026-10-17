@@ -11,8 +11,9 @@
  *   code (`setup.server.ts`); with no users on localhost (local development) everything is open,
  *   as an admin.
  *
- * Users carry an `external_sub` column for linking an outside identity later; sign-in through
- * an outside provider would create the same session row.
+ * - With single sign-on set up (`sso.server.ts`), people can also sign in through the workspace's
+ *   identity provider, linked by `users.external_sub`; it starts the same session row. With
+ *   SSO-only on, passwords and passkeys are refused, and two-factor sign-in is the provider's job.
  */
 
 import {
@@ -46,7 +47,7 @@ import {
 import { DEMO_USER, isDemo } from './demo.server';
 import { db } from './env.server';
 import { isLocalHost } from './origin';
-import { twoFactorRequirement } from './settings.server';
+import { ssoOnlyInEffect, twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
 import { hashRecoveryCode, looksLikeTotp, verifyTotp } from './totp';
 import { mustUseTwoFactor } from './two-factor';
@@ -110,6 +111,15 @@ export async function sessionId(request: Request): Promise<string | undefined> {
  */
 export type Caller = Principal & { twoFactorDue?: true; passwordChangeDue?: true };
 
+/**
+ * Whether someone signs in with a password, which is what two-factor sign-in protects: not when
+ * they have none (people single sign-on added) or the workspace is SSO-only. Then the identity
+ * provider asks for a second factor, and this app can't.
+ */
+async function passwordInUse(passwordHash: string | null) {
+  return passwordHash !== null && !(await ssoOnlyInEffect());
+}
+
 /** The signed-in person for a browser request, or null. */
 export async function principal(request: Request): Promise<Caller | null> {
   if (!(await authEnabled())) return OPEN;
@@ -125,6 +135,7 @@ export async function principal(request: Request): Promise<Caller | null> {
         role: users.role,
         totpEnabledAt: users.totpEnabledAt,
         passwordChangeDue: users.passwordChangeDue,
+        passwordHash: users.passwordHash,
         seen: sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`,
       })
       .from(sessions)
@@ -140,7 +151,7 @@ export async function principal(request: Request): Promise<Caller | null> {
       )
       .get();
     if (row) {
-      const { seen, totpEnabledAt, passwordChangeDue, ...person } = row;
+      const { seen, totpEnabledAt, passwordChangeDue, passwordHash, ...person } = row;
       if (now - seen > SESSION_TOUCH_MS)
         await db()
           .update(sessions)
@@ -151,13 +162,17 @@ export async function principal(request: Request): Promise<Caller | null> {
       const due =
         person.id !== DEMO_USER.id &&
         !totpEnabledAt &&
+        (await passwordInUse(passwordHash)) &&
         mustUseTwoFactor(role, await twoFactorRequirement());
       return {
         kind: 'user',
         ...person,
         role,
         ...(due ? { twoFactorDue: true as const } : {}),
-        ...(passwordChangeDue ? { passwordChangeDue: true as const } : {}),
+        // A temporary password matters only while passwords sign people in.
+        ...(passwordChangeDue && (await passwordInUse(passwordHash))
+          ? { passwordChangeDue: true as const }
+          : {}),
       };
     }
   }
@@ -269,20 +284,26 @@ export async function grantPrincipal(g: GrantProps): Promise<Caller | null> {
         role: users.role,
         totpEnabledAt: users.totpEnabledAt,
         passwordChangeDue: users.passwordChangeDue,
+        passwordHash: users.passwordHash,
       })
       .from(users)
       .where(and(eq(users.id, g.id), isNull(users.disabledAt)))
       .get();
     if (!row) return null;
-    const { totpEnabledAt, passwordChangeDue, ...person } = row;
+    const { totpEnabledAt, passwordChangeDue, passwordHash, ...person } = row;
     const own = person.role as Role;
-    const due = !totpEnabledAt && mustUseTwoFactor(own, await twoFactorRequirement());
+    const due =
+      !totpEnabledAt &&
+      (await passwordInUse(passwordHash)) &&
+      mustUseTwoFactor(own, await twoFactorRequirement());
     return {
       kind: 'user',
       ...person,
       role: lower(g.role, own),
       ...(due ? { twoFactorDue: true as const } : {}),
-      ...(passwordChangeDue ? { passwordChangeDue: true as const } : {}),
+      ...(passwordChangeDue && (await passwordInUse(passwordHash))
+        ? { passwordChangeDue: true as const }
+        : {}),
     };
   }
   if (g.kind === 'open') return (await authEnabled()) ? null : { ...OPEN, role: g.role };
@@ -388,6 +409,7 @@ async function checkCredentials(
   const ok = await verifyPassword(given, user?.passwordHash ?? (await decoy));
   if (!user) return { reason: 'unknown email' };
   if (!user.passwordHash) return { reason: 'no password set' };
+  if (await ssoOnlyInEffect()) return { reason: 'SSO only' };
   if (!ok) return { reason: 'wrong password' };
   if (user.disabledAt) return { reason: 'disabled' };
   return {

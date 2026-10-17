@@ -12,8 +12,9 @@ import { workspaceSettings } from '@orderloop/db';
 import { eq, ne } from 'drizzle-orm';
 import { audit, clientIp } from './audit.server';
 import { authEnabled, recordFailure, Throttled, waitFor } from './auth.server';
-import { secretEqual, sha256Hex } from './credentials';
+import { normalizeEmail, secretEqual, sha256Hex } from './credentials';
 import { db } from './env.server';
+import { setSsoSettings, ssoSettings } from './settings.server';
 import { insertAdmin, type NewAdmin, TeamError } from './team.server';
 import { throttleKey } from './throttle';
 
@@ -74,8 +75,9 @@ export async function redeemSetupCode(request: Request, given: string, input: Ne
     throw new TeamError(
       'That setup code has been used. Ask whoever runs the workspace for a new one.',
     );
+  let id: string;
   try {
-    return await insertAdmin(request, input, first ? 'team.first_admin' : 'team.recovery_admin');
+    id = await insertAdmin(request, input, first ? 'team.first_admin' : 'team.recovery_admin');
   } catch (err) {
     // Nobody was created (a bad address or password): the code still works.
     if (before)
@@ -86,4 +88,17 @@ export async function redeemSetupCode(request: Request, given: string, input: Ne
     else await db().delete(workspaceSettings).where(eq(workspaceSettings.key, USED_KEY));
     throw err;
   }
+  // Recovering access is for when sign-in is broken, an identity provider included: the new
+  // admin signs in with their password, so SSO-only goes off until an admin turns it on again.
+  const sso = await ssoSettings();
+  if (sso.ssoOnly) {
+    const email = normalizeEmail(input.email);
+    await setSsoSettings(
+      request,
+      { kind: 'user', id, email, name: input.name.trim() || email, role: 'admin' },
+      { ...sso, ssoOnly: false },
+      'setup code',
+    );
+  }
+  return id;
 }

@@ -22,6 +22,7 @@ import { audit, clientIp } from './audit.server';
 import { recordFailure, startSession, Throttled, waitFor } from './auth.server';
 import { randomToken, sha256Hex } from './credentials';
 import { db } from './env.server';
+import { ssoOnlyInEffect } from './settings.server';
 import { TeamError } from './team.server';
 import { throttleKey } from './throttle';
 import { confirmPassword } from './two-factor.server';
@@ -187,6 +188,7 @@ export async function signInWithPasskey(
     await audit(request, 'auth.sign_in_failed', { detail: { reason, method: 'passkey' } });
     return null;
   };
+  if (await ssoOnlyInEffect()) return refuse('SSO only');
   const c = token ? await takeChallenge(await sha256Hex(token)) : null;
   if (!c) return refuse('passkey challenge expired');
   const row = await db()

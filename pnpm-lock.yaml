@@ -247,6 +247,9 @@ importers:
       isbot:
         specifier: ^5.1.36
         version: 5.2.2
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       lucide-react:
         specifier: 'catalog:'
         version: 0.577.0(react@19.3.0)
