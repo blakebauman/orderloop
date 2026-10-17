@@ -101,9 +101,15 @@ the same methods over RPC.
 ### Roles on the socket
 
 The web app proxies the socket with the signed-in principal in `x-orderloop-principal`
-(`PRINCIPAL_HEADER`, base64 JSON from `encodePrincipal` in `packages/core/src/roles.ts`), set by the
-web Worker after removing any copy the browser sent; the engine has no public route. `onConnect`
-stores it as the connection's state. For a signed-in person the header also carries their
+(`PRINCIPAL_HEADER`), set by the web Worker after removing any copy the browser sent
+(`setPrincipalHeader`, `apps/web/app/lib/principal.server.ts`). The value is `v1.<payload>.<signature>`
+from `signPrincipal` in `packages/core/src/roles.ts`: an HMAC-SHA256 with `PRINCIPAL_KEY` over the
+principal, the request path and an expiry `PRINCIPAL_TTL_MS` (60 seconds) away. `onConnect` checks it
+once with `forwardedPrincipal` (`apps/engine/src/principal.ts`, `verifyPrincipal` in core): a missing
+or unsigned header, a bad signature, another path or an expired one is refused, so a request that
+reaches the engine another way cannot name a principal. It accepts `PRINCIPAL_KEY_PREVIOUS` as well,
+for [key rotation](operations.md#rotating-the-principal-key). `onConnect` then
+stores the principal as the connection's state, which is not checked again for expiry. For a signed-in person the header also carries their
 session's id (the SHA-256 that keys `sessions`), which never reaches the browser.
 
 Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from
@@ -115,8 +121,9 @@ call fails with `Your sign-in has ended. Reload the page to sign in again.` and 
 closes with code `4401` just after. A successful check also records the session's activity
 (`last_seen_at`, at most every `SESSION_TOUCH_MS`), so working on an order page keeps it from
 going idle. A caller without at least `min` gets `This needs the <Role>
-role.`; a socket with no principal is refused. API tokens and open local dev have no
-session to re-check. Calls over RPC have no connection and are trusted, because the web app's
+role.`; a socket with no principal is refused. An API token's principal is re-read from
+`api_tokens` and ends once the token is revoked or expired (its role follows the token's current
+one); open local dev's ends once any user exists. Calls over RPC have no connection and are trusted, because the web app's
 routes already checked the role.
 
 ### Audit on the socket

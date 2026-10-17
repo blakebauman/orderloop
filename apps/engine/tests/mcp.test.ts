@@ -1,7 +1,6 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
-  encodePrincipal,
   type OrderInput,
   type OrderState,
   PRINCIPAL_HEADER,
@@ -11,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
+import { signed } from './principal';
 
 const state = async (id: string) => (await env.ORDER_AGENT.getByName(id).snapshot()) as OrderState;
 
@@ -72,7 +72,7 @@ async function rpc(p: Principal | null, method: string, params: Record<string, u
     accept: 'application/json, text/event-stream',
     'mcp-protocol-version': '2025-06-18',
   });
-  if (p) headers.set(PRINCIPAL_HEADER, encodePrincipal(p));
+  if (p) headers.set(PRINCIPAL_HEADER, await signed(p, '/mcp'));
   const res = await worker.fetch(
     new Request('https://engine/mcp', {
       method: 'POST',

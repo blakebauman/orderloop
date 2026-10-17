@@ -2,7 +2,6 @@ import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   type Attention,
-  encodePrincipal,
   type OrderInput,
   type OrderState,
   PRINCIPAL_HEADER,
@@ -18,6 +17,7 @@ import { describeResult, heuristicStep } from '../src/assistant/model';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
+import { signed } from './principal';
 
 const db = () => createDb(env.DB);
 const state = async (id: string) => (await env.ORDER_AGENT.getByName(id).snapshot()) as OrderState;
@@ -283,7 +283,8 @@ describe('assistant actions', () => {
 describe('assistant socket', () => {
   const socket = async (name: string, principal: ProxiedPrincipal | null) => {
     const headers = new Headers({ Upgrade: 'websocket' });
-    if (principal) headers.set(PRINCIPAL_HEADER, encodePrincipal(principal));
+    if (principal)
+      headers.set(PRINCIPAL_HEADER, await signed(principal, `/agents/assistant-agent/${name}`));
     const res = await worker.fetch(
       new Request(`http://engine/agents/assistant-agent/${name}`, { headers }),
       env,

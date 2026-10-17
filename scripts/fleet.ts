@@ -52,9 +52,21 @@ type Ring = (typeof RINGS)[number];
 
 /** Each app's secrets, read from the deploy job's environment (a GitHub environment's secrets). */
 const SECRETS = {
-  web: ['SETUP_TOKEN', 'SHOPIFY_WEBHOOK_SECRET', 'STRIPE_WEBHOOK_SECRET'],
-  engine: ['INTAKE_ALLOWLIST', 'SHIPPING_CARRIER_AUTH', 'STRIPE_SECRET_KEY'],
+  web: ['PRINCIPAL_KEY', 'SETUP_TOKEN', 'SHOPIFY_WEBHOOK_SECRET', 'STRIPE_WEBHOOK_SECRET'],
+  engine: [
+    'PRINCIPAL_KEY',
+    'PRINCIPAL_KEY_PREVIOUS',
+    'INTAKE_ALLOWLIST',
+    'SHIPPING_CARRIER_AUTH',
+    'STRIPE_SECRET_KEY',
+  ],
 } as const;
+
+/**
+ * Secrets a deploy can't go without. PRINCIPAL_KEY signs every request the web Worker forwards to
+ * the engine: without it in the environment the deploy stops here, before migrating anything.
+ */
+const REQUIRED_SECRETS = ['PRINCIPAL_KEY'] as const;
 
 export type Deployment = {
   id: string;
@@ -309,6 +321,11 @@ export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
 function secrets(app: string | undefined, out: string | undefined) {
   if (app !== 'web' && app !== 'engine') throw new Error('secrets <engine|web> <out>');
   if (!out) throw new Error('secrets <engine|web> <out>');
+  const missing = REQUIRED_SECRETS.filter((k) => !process.env[k]);
+  if (missing.length)
+    throw new Error(
+      `${missing.join(', ')} not set: add it to the deployment's GitHub environment (scripts/provision.sh generates one)`,
+    );
   // Only the ones set: `--secrets-file` adds to a Worker's secrets and never removes one.
   const values = Object.fromEntries(
     SECRETS[app].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : [])),

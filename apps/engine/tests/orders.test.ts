@@ -2,7 +2,6 @@ import { createExecutionContext, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   APPROVAL_SEPARATION_KEY,
-  encodePrincipal,
   type OrderInput,
   type OrderState,
   OWN_ORDER_REFUSAL,
@@ -57,6 +56,7 @@ import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { EXECUTORS } from '../src/nodes';
 import { startOrder, startOrderOnce } from '../src/orders';
+import { signed } from './principal';
 
 const db = () => createDb(env.DB);
 const agent = (id: string) => env.ORDER_AGENT.getByName(id);
@@ -1500,7 +1500,8 @@ describe('agent socket roles', () => {
   /** Opens the order page's socket the way the web proxy does, as `principal`. */
   const socket = async (orderId: string, principal: ProxiedPrincipal | null) => {
     const headers = new Headers({ Upgrade: 'websocket' });
-    if (principal) headers.set(PRINCIPAL_HEADER, encodePrincipal(principal));
+    if (principal)
+      headers.set(PRINCIPAL_HEADER, await signed(principal, `/agents/order-agent/${orderId}`));
     const res = await worker.fetch(
       new Request(`http://engine/agents/order-agent/${orderId}`, { headers }),
       env,

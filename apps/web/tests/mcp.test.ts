@@ -1,4 +1,4 @@
-import { decodePrincipal, PRINCIPAL_HEADER, type Principal } from '@orderloop/core';
+import { PRINCIPAL_HEADER, type Principal, verifyPrincipal } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 class Throttled extends Error {
@@ -10,6 +10,7 @@ class TokenExpired extends Error {}
 
 const kv = new Map<string, string>();
 const env = {
+  PRINCIPAL_KEY: 'web-test-key',
   OAUTH_KV: {
     get: async (k: string, type?: string | { type?: string }) => {
       const v = kv.get(k) ?? null;
@@ -103,7 +104,9 @@ describe('MCP and A2A on the web Worker', () => {
     const forwarded = engineFetch.mock.calls[0]![0];
     expect(new URL(forwarded.url).pathname).toBe('/mcp');
     expect(forwarded.headers.get('authorization')).toBeNull();
-    expect(decodePrincipal(forwarded.headers.get(PRINCIPAL_HEADER))).toMatchObject(token);
+    expect(
+      await verifyPrincipal([env.PRINCIPAL_KEY], forwarded.headers.get(PRINCIPAL_HEADER), '/mcp'),
+    ).toMatchObject(token);
   });
 
   it('refuses a caller who must choose their own password or set up two-factor first', async () => {
@@ -163,7 +166,9 @@ describe('MCP and A2A on the web Worker', () => {
     const forwarded = engineFetch.mock.calls[0]![0];
     expect(new URL(forwarded.url).pathname).toBe('/a2a');
     expect(forwarded.headers.get('authorization')).toBeNull();
-    expect(decodePrincipal(forwarded.headers.get(PRINCIPAL_HEADER))).toMatchObject(token);
+    expect(
+      await verifyPrincipal([env.PRINCIPAL_KEY], forwarded.headers.get(PRINCIPAL_HEADER), '/a2a'),
+    ).toMatchObject(token);
   });
 
   it('binds an OAuth token to the endpoint it was granted for', async () => {

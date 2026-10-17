@@ -21,13 +21,7 @@ import {
   type OAuthHelpers,
   OAuthResourceServer,
 } from '@cloudflare/workers-oauth-provider';
-import {
-  A2A_PATH,
-  encodePrincipal,
-  PRINCIPAL_HEADER,
-  type Principal,
-  ROLES,
-} from '@orderloop/core';
+import { A2A_PATH, type Principal, ROLES } from '@orderloop/core';
 import { clientIp } from './audit.server';
 import {
   apiPrincipal,
@@ -39,6 +33,7 @@ import {
   TokenExpired,
 } from './auth.server';
 import { engine } from './env.server';
+import { setPrincipalHeader } from './principal.server';
 import { overBudget } from './rate-limit';
 
 export const MCP_PATH = '/mcp';
@@ -205,6 +200,6 @@ async function forward(request: Request, path: Endpoint, props: Props): Promise<
   // The engine trusts the principal header; the client's credential stays here.
   headers.delete('authorization');
   headers.delete('cookie');
-  headers.set(PRINCIPAL_HEADER, encodePrincipal(principal satisfies Principal));
+  await setPrincipalHeader(headers, principal satisfies Principal, path);
   return engine().fetch(new Request(`https://engine${path}`, new Request(request, { headers })));
 }

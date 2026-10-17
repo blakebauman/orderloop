@@ -64,7 +64,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    database and R2 bucket (in the jurisdiction; the Durable Objects get theirs from the engine's `DATA_JURISDICTION`, rendered at deploy), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
-   It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
+   It sets the environment's `PRINCIPAL_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks one, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
@@ -140,6 +140,21 @@ registry file. Compared with a customer's deployment:
 
 To bring it up: `./scripts/provision.sh demo`, then set `"hold": false` in `deployments/demo.jsonc`
 and merge. The demo's own setup code (`.secrets/demo/setup-code`) is for you, not visitors: it creates an admin account for managing the demo.
+
+## Rotating the principal key
+
+`PRINCIPAL_KEY` signs the principal header the web Worker forwards to the engine, and each signature
+lasts 60 seconds, so a rotation needs no downtime when it runs in two deploys:
+
+1. In the deployment's GitHub environment, set `PRINCIPAL_KEY_PREVIOUS` to the current key and
+   `PRINCIPAL_KEY` to a new one (`openssl rand -hex 32`). Deploy. The engine deploys first and
+   accepts both; the web Worker then signs with the new one.
+2. Remove `PRINCIPAL_KEY_PREVIOUS` from the environment and deploy again.
+
+Removing a secret from the environment does not remove it from the Worker: `fleet.ts secrets` writes
+only the ones set and `--secrets-file` never deletes, so also run
+`wrangler secret delete PRINCIPAL_KEY_PREVIOUS` against the deployment's engine Worker
+(`orderloop-engine-<id>`), or the old key stays accepted.
 
 ## Recovering admin access
 

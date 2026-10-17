@@ -18,7 +18,8 @@ jobs:
     name: ${{ fromJSON(inputs.deployment).id }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The deployment's GitHub environment holds its secrets (SETUP_TOKEN, SHOPIFY_WEBHOOK_SECRET,
+    # The deployment's GitHub environment holds its secrets (PRINCIPAL_KEY, required, and
+    # PRINCIPAL_KEY_PREVIOUS during a rotation; SETUP_TOKEN, SHOPIFY_WEBHOOK_SECRET,
     # STRIPE_WEBHOOK_SECRET, INTAKE_ALLOWLIST, SHIPPING_CARRIER_AUTH, STRIPE_SECRET_KEY) and, if it
     # should, a required reviewer.
     # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID can be repository secrets.
@@ -76,6 +77,8 @@ jobs:
       # never removes one, so a secret set by hand survives.
       - name: Collect secrets
         env:
+          PRINCIPAL_KEY: ${{ secrets.PRINCIPAL_KEY }}
+          PRINCIPAL_KEY_PREVIOUS: ${{ secrets.PRINCIPAL_KEY_PREVIOUS }}
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
           SHOPIFY_WEBHOOK_SECRET: ${{ secrets.SHOPIFY_WEBHOOK_SECRET }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}

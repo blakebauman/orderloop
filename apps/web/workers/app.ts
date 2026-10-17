@@ -1,10 +1,8 @@
 import {
   AGENT_CARD_PATH,
   agentCard,
-  encodePrincipal,
   isLegacyA2AVersion,
   legacyAgentCard,
-  PRINCIPAL_HEADER,
   runHealthChecks,
 } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
@@ -29,6 +27,7 @@ import { docs, engine } from '../app/lib/env.server';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
+import { setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { handleStripeWebhook } from '../app/lib/stripe.server';
 
@@ -169,7 +168,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     headers.delete('cookie');
     headers.delete('authorization');
     const session = caller.kind === 'user' ? await sessionId(request) : undefined;
-    headers.set(PRINCIPAL_HEADER, encodePrincipal({ ...caller, ...(session ? { session } : {}) }));
     // Everyone has exactly one assistant, named after them: whatever name the browser asked
     // for, it reaches its own.
     const path = assistant
@@ -178,6 +176,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
           `/agents/assistant-agent/${encodeURIComponent(caller.id)}`,
         )
       : url.pathname;
+    await setPrincipalHeader(headers, { ...caller, ...(session ? { session } : {}) }, path);
     return engine().fetch(
       new Request(`https://engine${path}${url.search}`, new Request(request, { headers })),
     );

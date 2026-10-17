@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   atLeast,
-  decodePrincipal,
-  encodePrincipal,
   OWN_ORDER_REFUSAL,
   ownOrderRefusal,
+  PRINCIPAL_TTL_MS,
   type Principal,
+  signPrincipal,
+  verifyPrincipal,
 } from '../src/roles';
 
 describe('roles', () => {
@@ -18,26 +19,67 @@ describe('roles', () => {
     expect(atLeast('approver', 'operator')).toBe(false);
     expect(atLeast(null, 'viewer')).toBe(false);
   });
+});
 
-  it('round-trips a principal through the proxy header, names included', () => {
-    const p: Principal = {
-      kind: 'user',
-      id: 'usr_1',
-      name: 'Zoë Ångström',
-      email: 'zoe@example.com',
-      role: 'approver',
-    };
-    expect(decodePrincipal(encodePrincipal(p))).toEqual(p);
-    expect(decodePrincipal(encodePrincipal({ ...p, session: 'ab12' }))).toEqual({
+describe('signed principal header', () => {
+  const key = 'k1';
+  const p: Principal = {
+    kind: 'user',
+    id: 'usr_1',
+    name: 'Zoë Ångström',
+    email: 'zoe@example.com',
+    role: 'approver',
+  };
+  const now = 1_700_000_000_000;
+
+  it('round-trips a principal for its path, names and session included', async () => {
+    expect(
+      await verifyPrincipal([key], await signPrincipal(key, p, '/mcp', now), '/mcp', now),
+    ).toEqual(p);
+    const withSession = await signPrincipal(key, { ...p, session: 'ab12' }, '/a2a', now);
+    expect(await verifyPrincipal([key], withSession, '/a2a', now)).toEqual({
       ...p,
       session: 'ab12',
     });
   });
 
-  it('rejects a missing, malformed or role-less header', () => {
-    expect(decodePrincipal(null)).toBeNull();
-    expect(decodePrincipal('not base64 json')).toBeNull();
-    expect(decodePrincipal(btoa(JSON.stringify({ id: 'x', name: 'x', role: 'owner' })))).toBeNull();
+  it('refuses another key, another path, an expired header and a tampered one', async () => {
+    const h = await signPrincipal(key, p, '/mcp', now);
+    expect(await verifyPrincipal(['other'], h, '/mcp', now)).toBeNull();
+    expect(await verifyPrincipal([undefined], h, '/mcp', now)).toBeNull();
+    expect(await verifyPrincipal([key], h, '/a2a', now)).toBeNull();
+    expect(await verifyPrincipal([key], h, '/mcp', now + PRINCIPAL_TTL_MS)).toBeNull();
+    const [v, payload, sig] = h.split('.');
+    const admin = btoa(
+      JSON.stringify({ p: { ...p, role: 'admin' }, path: '/mcp', exp: now + PRINCIPAL_TTL_MS }),
+    ).replace(/=+$/, '');
+    expect(await verifyPrincipal([key], `${v}.${admin}.${sig}`, '/mcp', now)).toBeNull();
+    expect(await verifyPrincipal([key], `${v}.${payload}.${sig}.x`, '/mcp', now)).toBeNull();
+  });
+
+  it('accepts the previous key during a rotation', async () => {
+    const old = await signPrincipal('old', p, '/mcp', now);
+    expect(await verifyPrincipal(['new', 'old'], old, '/mcp', now)).toEqual(p);
+  });
+
+  it('refuses a missing, malformed, unsigned or role-less header', async () => {
+    expect(await verifyPrincipal([key], null, '/mcp', now)).toBeNull();
+    expect(await verifyPrincipal([key], 'not a header', '/mcp', now)).toBeNull();
+    expect(
+      await verifyPrincipal(
+        [key],
+        btoa(JSON.stringify({ id: 'x', name: 'x', role: 'admin' })),
+        '/mcp',
+        now,
+      ),
+    ).toBeNull();
+    const owner = await signPrincipal(
+      key,
+      { ...p, role: 'owner' as Principal['role'] },
+      '/mcp',
+      now,
+    );
+    expect(await verifyPrincipal([key], owner, '/mcp', now)).toBeNull();
   });
 });
 
