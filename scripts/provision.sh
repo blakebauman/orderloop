@@ -65,6 +65,15 @@ fi
 # The GitHub environment the deploy job runs in, and its secrets. A secret already set is left
 # alone; the setup code is generated and kept in .secrets/<id>/ (gitignored) for the first admin.
 gh api --method PUT "repos/{owner}/{repo}/environments/$ENVIRONMENT" >/dev/null
+# The key the web Worker signs forwarded requests with and the engine checks. CI sets it on both
+# Workers and won't deploy without it, so a deployment that already runs gets one here too. It is
+# never written to disk.
+if gh secret list --env "$ENVIRONMENT" --json name -q '.[].name' | grep -qx PRINCIPAL_KEY; then
+  echo "$ENVIRONMENT already has PRINCIPAL_KEY"
+else
+  openssl rand -hex 32 | tr -d '\n' | gh secret set PRINCIPAL_KEY --env "$ENVIRONMENT"
+  echo "Set PRINCIPAL_KEY on $ENVIRONMENT"
+fi
 # A Worker that already runs has its own secrets, set by hand or by an earlier deploy: a new
 # generated one would replace them on the next deploy, so only a new deployment gets them.
 if wrangler secret list --name "$WEB" >/dev/null 2>&1; then

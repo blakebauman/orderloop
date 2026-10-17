@@ -57,7 +57,7 @@ inbound mail ── Email Routing ──email()───────────
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
 `startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject` and `runReplenish` forwards to the order's agent via
 `orderAgent(env, orderId)` (`apps/engine/src/namespaces.ts`). `EngineApi` trusts its caller: authorization happens in the web
-app before the call. The web app types its `ENGINE` binding with `EngineRpc` and never imports
+app before the call. The forwarded requests (sockets, `/mcp`, `/a2a`) carry a principal the engine believes only when it is signed with `PRINCIPAL_KEY` for that path and unexpired (`forwardedPrincipal`). The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
 
 ## Request routing
@@ -74,7 +74,7 @@ engine source.
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
-| `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller in `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
+| `/agents/order-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'` |
@@ -126,7 +126,7 @@ token (one not shaped `<user>:<grant>:<secret>`) is checked as an `ol_live_` tok
 
 `forward` resolves the caller (for a grant, `grantPrincipal` re-reads the person: disabled means
 refused, and the role is the lower of granted and current), refuses a pending two-factor setup,
-deletes `authorization` and `cookie`, sets `x-orderloop-principal` and fetches the engine over the
+deletes `authorization` and `cookie`, signs the caller into `x-orderloop-principal` for that path (`setPrincipalHeader`, `PRINCIPAL_KEY`) and fetches the engine over the
 `ENGINE` binding. The engine's `fetch` and `EngineApi.fetch` hand `/mcp` to `handleMcp`
 (`apps/engine/src/mcp.ts`): `createMcpHandler` from `agents/mcp/server`, a fresh
 `McpServer` (`@modelcontextprotocol/server`) per request, no session. It registers only the

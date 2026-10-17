@@ -165,7 +165,7 @@ If it fails, only the docs Worker is rolled back; the app has already passed.
 Each deployment's job runs in its GitHub environment (`production` for orderloop.app, `deploy-<id>`
 for a customer; add a required reviewer there to gate its releases). It needs
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment or repository secrets; without
-them it fails rather than skipping. The environment's `SETUP_TOKEN`,
+them it fails rather than skipping. The environment must have `PRINCIPAL_KEY`, the key that signs the principal header the web Worker forwards and the engine checks: `fleet.ts secrets` fails the deploy, before it migrates anything, when it is missing (`provision.sh` generates one, including for an environment that already runs). `PRINCIPAL_KEY_PREVIOUS` is set only during a [rotation](operations.md#rotating-the-principal-key). The environment's `SETUP_TOKEN`,
 `SHOPIFY_WEBHOOK_SECRET`, `STRIPE_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
 push to `main` never cancels a run already on its way to production.

@@ -15,9 +15,7 @@ import {
   type AssistantContext,
   type AssistantTool,
   atLeast,
-  decodePrincipal,
   flowGraphSchema,
-  PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
@@ -32,7 +30,7 @@ import {
   tool,
 } from 'ai';
 import type { z } from 'zod';
-import { livePrincipal, SESSION_ENDED } from '../principal';
+import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
 import { type ActionInput, type ActionTool, attention, previewAction, Refused } from './data';
 import { assistantModel, type ModelSource } from './model';
 import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
@@ -42,7 +40,7 @@ export class AssistantAgent extends AIChatAgent<Env> {
 
   /** Kept per instance: the proxy always connects a person to their own assistant. */
   override async onConnect(connection: Connection, ctx: ConnectionContext) {
-    const p = decodePrincipal(ctx.request.headers.get(PRINCIPAL_HEADER));
+    const p = await forwardedPrincipal(this.env, ctx.request);
     if (!p || p.id !== this.name) {
       connection.close(4403, 'Not your assistant');
       return;

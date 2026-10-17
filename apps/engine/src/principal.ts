@@ -1,32 +1,63 @@
 /**
- * Who is calling an agent over a proxied socket, as they are now. The web app sets the principal
- * header when it proxies a socket (PRINCIPAL_HEADER); agents keep it on the connection and re-read
- * it here before acting, so signing out, a password reset, being disabled or a role change applies
- * to a page that is already open.
+ * Who is calling. The web app signs the principal header (PRINCIPAL_HEADER) onto each request it
+ * forwards: the order page's and the assistant's sockets, `/mcp` and `/a2a`. `forwardedPrincipal`
+ * believes it only with a valid signature for that path. Agents keep a socket's principal on the
+ * connection and re-read it with `livePrincipal` before acting, so signing out, a password reset,
+ * being disabled, a role change, a revoked token or sign-in being turned on applies to a page that
+ * is already open.
  */
 
 import {
   isRole,
+  PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
   SESSION_IDLE_MS,
   SESSION_TOUCH_MS,
+  verifyPrincipal,
 } from '@orderloop/core';
-import { createDb, sessions, users } from '@orderloop/db';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { apiTokens, createDb, sessions, users } from '@orderloop/db';
+import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
+
+/** The principal the web app signed onto this request, or null. */
+export function forwardedPrincipal(env: Env, request: Request): Promise<ProxiedPrincipal | null> {
+  if (!env.PRINCIPAL_KEY) console.error('PRINCIPAL_KEY is not set: refusing forwarded requests');
+  return verifyPrincipal(
+    [env.PRINCIPAL_KEY, env.PRINCIPAL_KEY_PREVIOUS],
+    request.headers.get(PRINCIPAL_HEADER),
+    new URL(request.url).pathname,
+  );
+}
 
 /**
- * A person's principal from their live session: null once it has expired or been deleted, or the
- * user is disabled; otherwise with their current role, name and email. API tokens and open local
- * dev have no session to check. Using a socket counts as activity, so it keeps the
- * session from going idle.
+ * A principal as it is now. A person's comes from their live session: null once it has expired or
+ * been deleted, or the user is disabled; otherwise with their current role, name and email. Using
+ * a socket counts as activity, so it keeps the session from going idle. An API token's is null
+ * once it is revoked or expired, and open local dev's once anyone has an account.
  */
 export async function livePrincipal(env: Env, p: ProxiedPrincipal): Promise<Principal | null> {
   const { session, ...principal } = p;
-  if (p.kind !== 'user') return principal;
-  if (!session) return null;
   const db = createDb(env.DB);
   const now = Date.now();
+  if (p.kind === 'open') {
+    const anyone = await db.select({ id: users.id }).from(users).limit(1).get();
+    return anyone ? null : principal;
+  }
+  if (p.kind === 'token') {
+    const token = await db
+      .select({ role: apiTokens.role })
+      .from(apiTokens)
+      .where(
+        and(
+          eq(apiTokens.id, p.id),
+          isNull(apiTokens.revokedAt),
+          or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+        ),
+      )
+      .get();
+    return token && isRole(token.role) ? { ...principal, role: token.role } : null;
+  }
+  if (!session) return null;
   const seen = sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`;
   const row = await db
     .select({ id: users.id, email: users.email, name: users.name, role: users.role, seen })

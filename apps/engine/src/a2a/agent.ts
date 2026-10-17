@@ -26,15 +26,10 @@ import {
   ServerCallContext,
   validateVersion,
 } from '@a2a-js/sdk/server';
-import {
-  A2A_LEGACY_PROTOCOL_VERSION,
-  A2A_PROTOCOL_VERSION,
-  agentCard,
-  decodePrincipal,
-  PRINCIPAL_HEADER,
-} from '@orderloop/core';
+import { A2A_LEGACY_PROTOCOL_VERSION, A2A_PROTOCOL_VERSION, agentCard } from '@orderloop/core';
 import { Refused } from '../assistant/data';
 import { runTool } from '../assistant/tools';
+import { forwardedPrincipal } from '../principal';
 import { OrderLoopExecutor, PrincipalUser, principalOf } from './executor';
 import { PushSender, SqlPushStore } from './push';
 import { isTerminal, SqlTaskStore } from './store';
@@ -138,7 +133,7 @@ export class A2AAgent extends DurableObject<Env> {
         status: 405,
         headers: { allow: 'POST' },
       });
-    const proxied = decodePrincipal(request.headers.get(PRINCIPAL_HEADER));
+    const proxied = await forwardedPrincipal(this.env, request);
     if (!proxied) return new Response('Unauthorized', { status: 401 });
     const { session: _session, ...principal } = proxied;
     const body = await request.text();

@@ -7,7 +7,6 @@
 
 import {
   atLeast,
-  decodePrincipal,
   type EdgeState,
   EMPTY_ORDER_STATE,
   eraseOrderState,
@@ -21,7 +20,6 @@ import {
   type OutboundEvent,
   type PendingWait,
   type PlanNode,
-  PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
   payloadFits,
@@ -37,7 +35,7 @@ import { recordAudit } from './audit';
 import { compensateOrder } from './connectors';
 import { a2aAgent } from './namespaces';
 import { emit, orderSummary } from './outbox';
-import { livePrincipal, SESSION_ENDED } from './principal';
+import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from './principal';
 import { separationRefusal } from './separation';
 
 export type Report = {
@@ -377,14 +375,14 @@ export class OrderAgent extends Agent<Env, State> {
 
   // ── Callable from the order page ──
   //
-  // The web app proxies the page's WebSocket here with the signed-in principal in a header it sets
-  // itself (PRINCIPAL_HEADER); `onConnect` keeps it on the connection. Each socket call re-reads a
+  // The web app proxies the page's WebSocket here with the signed-in principal in a header it signs
+  // (PRINCIPAL_HEADER); `onConnect` keeps it on the connection. Each socket call re-reads a
   // person's session and user from D1, so signing out, a password reset, being disabled or a role
   // change applies to a page that is already open. The same methods called over RPC (EngineApi,
   // from the web app's own authorized routes) or by the Workflow have no connection and are trusted.
 
-  override onConnect(connection: Connection<ConnectionState>, ctx: ConnectionContext) {
-    connection.setState({ principal: decodePrincipal(ctx.request.headers.get(PRINCIPAL_HEADER)) });
+  override async onConnect(connection: Connection<ConnectionState>, ctx: ConnectionContext) {
+    connection.setState({ principal: await forwardedPrincipal(this.env, ctx.request) });
   }
 
   /**

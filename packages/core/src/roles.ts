@@ -45,8 +45,11 @@ export const SESSION_IDLE_MS = 7 * 86_400_000;
 export const SESSION_TOUCH_MS = 5 * 60_000;
 
 /**
- * The header the web app sets when it proxies the order page's agent connection, after removing
- * any copy the browser sent. The engine is reachable only through that proxy.
+ * The header the web app sets when it forwards a request to the engine (the order page's and the
+ * assistant's sockets, `/mcp` and `/a2a`), after removing any copy the caller sent. The engine is
+ * reachable only through the web app's service binding, and it still believes the header only
+ * when it is signed: an HMAC over the principal, the path it was sent to and an expiry, under the
+ * `PRINCIPAL_KEY` secret the two Workers share.
  */
 export const PRINCIPAL_HEADER = 'x-orderloop-principal';
 
@@ -57,22 +60,94 @@ export const PRINCIPAL_HEADER = 'x-orderloop-principal';
  */
 export type ProxiedPrincipal = Principal & { session?: string };
 
-export function encodePrincipal(p: ProxiedPrincipal): string {
-  return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(p))));
+/** How long a signed header is good for. A socket is checked once, when it connects. */
+export const PRINCIPAL_TTL_MS = 60_000;
+
+/** Local dev's key (`vite.config.ts` gives it to both Workers). Never a deployment's. */
+export const DEV_PRINCIPAL_KEY = 'orderloop-local-dev-principal-key';
+
+const PRINCIPAL_VERSION = 'v1';
+const enc = new TextEncoder();
+const keys = new Map<string, ReturnType<typeof crypto.subtle.importKey>>();
+
+function hmacKey(secret: string) {
+  let key = keys.get(secret);
+  if (!key) {
+    key = crypto.subtle.importKey(
+      'raw',
+      enc.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign', 'verify'],
+    );
+    keys.set(secret, key);
+  }
+  return key;
 }
 
-/** The principal in a proxied request, or null when the header is missing or malformed. */
-export function decodePrincipal(header: string | null | undefined): ProxiedPrincipal | null {
+const b64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+const fromB64url = (s: string) =>
+  Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+/**
+ * The header value for `p`, good for requests to `path` until `now + PRINCIPAL_TTL_MS`:
+ * `v1.<payload>.<signature>`, both base64url.
+ */
+export async function signPrincipal(
+  secret: string,
+  p: ProxiedPrincipal,
+  path: string,
+  now = Date.now(),
+): Promise<string> {
+  const payload = b64url(enc.encode(JSON.stringify({ p, path, exp: now + PRINCIPAL_TTL_MS })));
+  const signed = `${PRINCIPAL_VERSION}.${payload}`;
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(signed));
+  return `${signed}.${b64url(new Uint8Array(sig))}`;
+}
+
+/**
+ * The principal in a forwarded request, or null unless the header is signed by one of `secrets`
+ * (the current key, then the one before it while a rotation finishes), names this `path` and
+ * hasn't expired.
+ */
+export async function verifyPrincipal(
+  secrets: readonly (string | undefined)[],
+  header: string | null | undefined,
+  path: string,
+  now = Date.now(),
+): Promise<ProxiedPrincipal | null> {
   if (!header) return null;
+  const [version, payload, sig, extra] = header.split('.');
+  if (version !== PRINCIPAL_VERSION || !payload || !sig || extra !== undefined) return null;
   try {
-    const bytes = Uint8Array.from(atob(header), (c) => c.charCodeAt(0));
-    const p = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ProxiedPrincipal>;
-    if (typeof p.id !== 'string' || typeof p.name !== 'string' || !isRole(p.role)) return null;
+    const data = enc.encode(`${version}.${payload}`);
+    const mac = fromB64url(sig);
+    let valid = false;
+    for (const secret of secrets)
+      if (secret && (await crypto.subtle.verify('HMAC', await hmacKey(secret), mac, data))) {
+        valid = true;
+        break;
+      }
+    if (!valid) return null;
+    const body = JSON.parse(new TextDecoder().decode(fromB64url(payload))) as {
+      p?: Partial<ProxiedPrincipal>;
+      path?: unknown;
+      exp?: unknown;
+    };
+    if (body.path !== path || typeof body.exp !== 'number' || body.exp <= now) return null;
+    const p = body.p;
+    if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !isRole(p.role))
+      return null;
+    if (p.kind !== 'user' && p.kind !== 'token' && p.kind !== 'open') return null;
     return {
-      kind: p.kind ?? 'user',
+      kind: p.kind,
       id: p.id,
       name: p.name,
-      email: p.email,
+      ...(typeof p.email === 'string' ? { email: p.email } : {}),
       role: p.role,
       ...(typeof p.session === 'string' ? { session: p.session } : {}),
     };

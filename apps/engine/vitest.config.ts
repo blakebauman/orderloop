@@ -25,6 +25,8 @@ export default defineConfig(async () => {
             TEST_DEMO_RESET: demoReset,
             AI_MODE: 'mock',
             TIME_SCALE: '1',
+            // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
+            PRINCIPAL_KEY: 'test-principal-key',
             ...bindings,
           },
           // Empty databases: for migrations against rows in an older shape, the demo reset, and

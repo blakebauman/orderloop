@@ -3,7 +3,6 @@ import { env } from 'cloudflare:workers';
 import { AgentCard } from '@a2a-js/sdk';
 import {
   agentCard,
-  encodePrincipal,
   type OrderInput,
   type OrderState,
   PRINCIPAL_HEADER,
@@ -14,6 +13,7 @@ import { SqlPushStore } from '../src/a2a/push';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
+import { signed } from './principal';
 
 const state = async (id: string) => (await env.ORDER_AGENT.getByName(id).snapshot()) as OrderState;
 
@@ -78,7 +78,7 @@ let n = 0;
 /** One JSON-RPC call to /a2a as the web Worker forwards it. */
 async function rpc(p: Principal | null, method: string, params: Json = {}, version = '1.0') {
   const headers = new Headers({ 'content-type': 'application/json', 'a2a-version': version });
-  if (p) headers.set(PRINCIPAL_HEADER, encodePrincipal(p));
+  if (p) headers.set(PRINCIPAL_HEADER, await signed(p, '/a2a'));
   return worker.fetch(
     new Request('https://engine/a2a', {
       method: 'POST',
@@ -492,7 +492,10 @@ describe('A2A 0.3 clients', () => {
     const res = await worker.fetch(
       new Request('https://engine/a2a', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', [PRINCIPAL_HEADER]: encodePrincipal(p) },
+        headers: {
+          'content-type': 'application/json',
+          [PRINCIPAL_HEADER]: await signed(p, '/a2a'),
+        },
         body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method, params }),
       }),
       env,

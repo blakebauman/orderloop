@@ -6,4 +6,8 @@ interface Env {
   SHIPPING_CARRIER_AUTH?: string;
   /** Stripe secret or restricted key (sk_… / rk_…); required when PAYMENTS_MODE is "stripe". */
   STRIPE_SECRET_KEY?: string;
+  /** Shared with the web Worker: signs the principal header on every forwarded request. */
+  PRINCIPAL_KEY?: string;
+  /** The key before a rotation, still accepted until the web Worker signs with the new one. */
+  PRINCIPAL_KEY_PREVIOUS?: string;
 }

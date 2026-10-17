@@ -12,19 +12,13 @@
 
 import { env } from 'cloudflare:workers';
 import { McpServer } from '@modelcontextprotocol/server';
-import {
-  ASSISTANT_TOOLS,
-  type AssistantTool,
-  atLeast,
-  decodePrincipal,
-  PRINCIPAL_HEADER,
-  type Principal,
-} from '@orderloop/core';
+import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
 import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from './assistant/tools';
 import { issueConfirmation, useConfirmation } from './confirmations';
+import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
 
@@ -127,10 +121,10 @@ const handler = createMcpHandler(
   },
 );
 
-/** Serves an MCP request the web Worker forwarded, or 401 without its principal header. */
-export function handleMcp(request: Request): Promise<Response> {
-  const proxied = decodePrincipal(request.headers.get(PRINCIPAL_HEADER));
-  if (!proxied) return Promise.resolve(new Response('Unauthorized', { status: 401 }));
+/** Serves an MCP request the web Worker forwarded, or 401 without its signed principal header. */
+export async function handleMcp(request: Request): Promise<Response> {
+  const proxied = await forwardedPrincipal(env, request);
+  if (!proxied) return new Response('Unauthorized', { status: 401 });
   const { session: _session, ...principal } = proxied;
   return handler.fetch(request, {
     authInfo: {
