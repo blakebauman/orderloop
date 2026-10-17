@@ -38,6 +38,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { orderAgent } from './namespaces';
+import { checkoutsOf, deleteCheckoutsOf, scrubCheckouts } from './ucp/subjects';
 
 /** Orders erased per call; the caller repeats until `done`. */
 const ERASE_BATCH = 100;
@@ -131,6 +132,17 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
       contentType: d.contentType,
       createdAt: d.createdAt,
     })),
+    checkouts: (await checkoutsOf(env, s.email)).map(
+      ({ id, status, buyer, shipTo, lines, orderId, createdAt }) => ({
+        id,
+        status,
+        buyer,
+        shipTo,
+        lines,
+        orderId,
+        createdAt,
+      }),
+    ),
     truncated: rows.length > EXPORT_MAX,
     teamMember: s.teamMember,
   };
@@ -192,6 +204,7 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
       .where(lower(messages.recipient, s.email))
       .returning({ id: messages.id })
   ).length;
+  await deleteCheckoutsOf(env, s.email);
   for (const c of s.accounts) {
     await s.db
       .update(customers)
@@ -211,8 +224,8 @@ type OrderRow = typeof orders.$inferSelect;
 
 /**
  * Erases the buyer from finished orders: each order's agent state (`erasePersonalData`), its R2
- * documents and document rows, its webhook deliveries, and the messages and intake rows that
- * belong to it. `terms` are the subject's words to erase besides each order's own contact; the
+ * documents and document rows, its webhook deliveries, the checkout session that placed it, and
+ * the messages and intake rows that belong to it. `terms` are the subject's words to erase besides each order's own contact; the
  * retention sweep passes none. An order running again is skipped and named in `refused`.
  */
 export async function eraseOrders(
@@ -249,6 +262,7 @@ export async function eraseOrders(
     result.orders++;
   }
   for (const c of chunks(done)) {
+    await scrubCheckouts(env, c);
     await db.delete(documents).where(inArray(documents.orderId, c));
     await db.delete(webhookDeliveries).where(inArray(webhookDeliveries.orderId, c));
     result.messages += (

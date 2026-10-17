@@ -781,3 +781,65 @@ export const aiUsage = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.principalId, t.day] }), index('ai_usage_day').on(t.day)],
 );
+
+/** AI shopping platforms let in to check out over UCP (`apps/engine/src/ucp/`). */
+export const ucpPlatforms = sqliteTable(
+  'ucp_platforms',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    /** The UCP profile the platform must name in `UCP-Agent`. */
+    profileUrl: text('profile_url').notNull(),
+    keyPrefix: text('key_prefix').notNull(),
+    /** SHA-256 of the platform's API key. */
+    keyHash: text('key_hash').notNull(),
+    /** The profile as last fetched (JSON), and when. */
+    profile: text('profile'),
+    profileFetchedAt: integer('profile_fetched_at'),
+    createdAt: integer('created_at').notNull(),
+    createdBy: text('created_by'),
+    lastUsedAt: integer('last_used_at'),
+    revokedAt: integer('revoked_at'),
+  },
+  (t) => [uniqueIndex('ucp_platforms_key').on(t.keyHash)],
+);
+
+/** Checkout sessions (`CheckoutSession` in @orderloop/core, as JSON in `data`). */
+export const checkoutSessions = sqliteTable(
+  'checkout_sessions',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    status: text('status').notNull(),
+    data: text('data').notNull(),
+    orderId: text('order_id'),
+    /** Compared on every write. */
+    version: integer('version').notNull().default(1),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [
+    index('checkout_sessions_owner').on(t.ownerId, t.createdAt),
+    index('checkout_sessions_expires').on(t.expiresAt),
+    uniqueIndex('checkout_sessions_order').on(t.orderId).where(sql`${t.orderId} IS NOT NULL`),
+  ],
+);
+
+/** Idempotency-Key replays on the UCP endpoints, per platform; kept 24 hours. */
+export const ucpIdempotency = sqliteTable(
+  'ucp_idempotency',
+  {
+    ownerId: text('owner_id').notNull(),
+    key: text('key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    /** Null while the first request is still running. */
+    status: integer('status'),
+    response: text('response'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerId, t.key] }),
+    index('ucp_idempotency_created').on(t.createdAt),
+  ],
+);

@@ -1,16 +1,18 @@
 /**
  * orderloop-engine. No public routes: the web app reaches it through a service binding, as RPC
  * (`EngineApi`) or plain fetch for the health check, the agent WebSockets it proxies, MCP
- * (`/mcp`, see ./mcp.ts) and A2A (`/a2a`, see ./a2a/).
+ * (`/mcp`, see ./mcp.ts), A2A (`/a2a`, see ./a2a/) and UCP (`/ucp/*`, see ./ucp/).
  * Cloudflare Email Routing delivers inbound order email to `email()` (see ./email.ts).
  */
 
+import { UCP_PATH } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
 import { receiveEmail } from './email';
 import { handleMcp, MCP_PATH } from './mcp';
 import { scopedEnv } from './namespaces';
 import { sweep } from './retention';
+import { handleUcp } from './ucp/rest';
 
 export { A2AAgent } from './a2a/agent';
 export { OrderAgent } from './agent';
@@ -25,6 +27,8 @@ export default {
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-engine' });
     if (url.pathname === MCP_PATH) return handleMcp(request);
     if (url.pathname === A2A_PATH) return handleA2A(request, env);
+    if (url.pathname === UCP_PATH || url.pathname.startsWith(`${UCP_PATH}/`))
+      return handleUcp(request, env);
     return (
       (await routeAgentRequest(request, scopedEnv(env))) ??
       new Response('Not found', { status: 404 })

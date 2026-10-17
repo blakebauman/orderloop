@@ -4,6 +4,8 @@ import {
   isLegacyA2AVersion,
   legacyAgentCard,
   runHealthChecks,
+  UCP_PATH,
+  UCP_PROFILE_PATH,
 } from '@orderloop/core';
 import { createRequestHandler } from 'react-router';
 import {
@@ -32,6 +34,7 @@ import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
 import { scimFetch } from '../app/lib/scim.server';
 import { handleStripeWebhook } from '../app/lib/stripe.server';
+import { ucpDiscovery, ucpFetch } from '../app/lib/ucp.server';
 
 /**
  * The deploy smoke test's check: this Worker's D1 and R2, and the engine's (over the service
@@ -94,6 +97,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       headers: { 'cache-control': 'public, max-age=300', vary: 'A2A-Version' },
     });
   }
+
+  // UCP (agentic checkout): the business profile is public; checkout and orders under /ucp take
+  // a registered platform's key (app/lib/ucp.server.ts).
+  if (url.pathname === UCP_PROFILE_PATH && request.method === 'GET') return ucpDiscovery(url);
+  if (url.pathname === UCP_PATH || url.pathname.startsWith(`${UCP_PATH}/`))
+    return ucpFetch(request);
 
   // MCP, A2A and their OAuth endpoints (discovery, registration, tokens). The consent page
   // itself, /oauth/authorize, is a page of the app below.

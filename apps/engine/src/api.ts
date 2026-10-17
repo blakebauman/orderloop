@@ -14,6 +14,7 @@ import {
   runHealthChecks,
   type StartOrderInput,
   type StartOrderOnceInput,
+  UCP_PATH,
 } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
@@ -24,17 +25,21 @@ import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
+import { ucpProfile } from './ucp/config';
+import { handleUcp } from './ucp/rest';
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   /**
    * The web app proxies the agent WebSockets (`/agents/order-agent/:id`,
-   * `/agents/assistant-agent/:id`), MCP (`/mcp`) and A2A (`/a2a`) here.
+   * `/agents/assistant-agent/:id`), MCP (`/mcp`), A2A (`/a2a`) and UCP (`/ucp/*`) here.
    */
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-engine' });
     if (url.pathname === MCP_PATH) return handleMcp(request);
     if (url.pathname === A2A_PATH) return handleA2A(request, this.env);
+    if (url.pathname === UCP_PATH || url.pathname.startsWith(`${UCP_PATH}/`))
+      return handleUcp(request, this.env);
     return (
       (await routeAgentRequest(request, scopedEnv(this.env))) ??
       new Response('Not found', { status: 404 })
@@ -118,5 +123,9 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
       db: () => this.env.DB.prepare('select 1').first(),
       docs: () => this.env.DOCS.head('health'),
     });
+  }
+
+  ucpProfile(origin: string) {
+    return ucpProfile(this.env, origin);
   }
 }

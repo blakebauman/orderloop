@@ -110,6 +110,22 @@ retries. For local development, run
 and put the `whsec_…` it prints in `apps/web/.dev.vars`. Rolling the secret in the Dashboard is safe:
 during the overlap Stripe signs with both, and either passes.
 
+## Agentic checkout
+
+[Agentic checkout](https://docs.orderloop.app/reference/ucp/) needs two settings on the engine before a
+platform can pay and follow its orders; the checkout flow and the platforms are then set by an admin
+in the app (`/api/v1/ucp`).
+
+- `STRIPE_PUBLISHABLE_KEY` (a `vars` entry in `apps/engine/wrangler.jsonc`, empty by default): the
+  `pk_…` key of the same Stripe account and mode as `STRIPE_SECRET_KEY`. With `PAYMENTS_MODE` `stripe`
+  and no key, the profile offers no payment handler.
+- `UCP_SIGNING_KEY` (engine secret): a private P-256 JWK with a `kid`. Without it the profile has no
+  `keys` and order events are not sent. Add it to the deployment's GitHub environment secrets, like
+  `STRIPE_SECRET_KEY`; the deploy job passes it to the engine (`scripts/fleet.ts secrets engine`).
+
+Migration `0039_ucp.sql` only adds tables, so it is safe to apply before the code that uses it.
+See [Configuration](configuration.md#engine-secrets).
+
 ## Settings for production
 
 - `TIME_SCALE` is `"1"` (real time) in `apps/engine/wrangler.jsonc`. Only local dev compresses

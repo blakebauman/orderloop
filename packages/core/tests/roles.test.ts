@@ -5,7 +5,9 @@ import {
   ownOrderRefusal,
   PRINCIPAL_TTL_MS,
   type Principal,
+  signPlatform,
   signPrincipal,
+  verifyPlatform,
   verifyPrincipal,
 } from '../src/roles';
 
@@ -80,6 +82,39 @@ describe('signed principal header', () => {
       now,
     );
     expect(await verifyPrincipal([key], owner, '/mcp', now)).toBeNull();
+  });
+});
+
+describe('signed platform header', () => {
+  const key = 'k1';
+  const c = {
+    id: 'ucp_1',
+    name: 'Shopping agent',
+    profileUrl: 'https://agent.example/profile',
+    origin: 'https://shop.example',
+  };
+  const now = 1_700_000_000_000;
+
+  it('round-trips a platform for its path until it expires', async () => {
+    const header = await signPlatform(key, c, '/ucp/v1/checkout-sessions', now);
+    expect(await verifyPlatform([key], header, '/ucp/v1/checkout-sessions', now)).toEqual(c);
+    expect(await verifyPlatform([key], header, '/ucp/v1/orders/x', now)).toBeNull();
+    expect(
+      await verifyPlatform([key], header, '/ucp/v1/checkout-sessions', now + PRINCIPAL_TTL_MS),
+    ).toBeNull();
+    expect(await verifyPlatform(['k2'], header, '/ucp/v1/checkout-sessions', now)).toBeNull();
+  });
+
+  it('never passes for a principal, nor a principal for a platform', async () => {
+    const platform = await signPlatform(key, c, '/mcp', now);
+    expect(await verifyPrincipal([key], platform, '/mcp', now)).toBeNull();
+    const person = await signPrincipal(
+      key,
+      { kind: 'user', id: 'usr_1', name: 'Ada', role: 'admin' },
+      '/ucp/mcp',
+      now,
+    );
+    expect(await verifyPlatform([key], person, '/ucp/mcp', now)).toBeNull();
   });
 });
 

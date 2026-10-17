@@ -50,6 +50,10 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/integrations` | `{ name, events?, startOrders?, flows?, channel? }` | `201 { integration, secret }` (admin) |
 | `POST` | `/api/v1/integrations/:id/rotate` | | `{ integration, secret }` (admin) |
 | `DELETE` | `/api/v1/integrations/:id` | | `{ ok: true }` (admin) |
+| `GET` | `/api/v1/ucp` | | `{ settings, platforms }` (admin) |
+| `POST` | `/api/v1/ucp/settings` | `{ checkoutFlowId, links?, orderUrl? }` | `{ settings }`, or `422 { error }` when the flow cannot take checkouts (admin) |
+| `POST` | `/api/v1/ucp/platforms` | `{ name, profileUrl }` | `201 { platform, key }`; the key is shown once (admin) |
+| `DELETE` | `/api/v1/ucp/platforms/:id` | | `{ ok: true }`, or `404` (admin) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
@@ -301,6 +305,7 @@ These aren't part of `/api/v1`.
   are the [MCP server](/reference/mcp/), the [A2A endpoint](/reference/a2a/) and their OAuth
   endpoints.
 - `GET /.well-known/agent-card.json` is the A2A Agent Card, public and cached for five minutes.
+- `/ucp/*` and `GET /.well-known/ucp` are [agentic checkout](/reference/ucp/): the business profile is public and cached for five minutes (`404` while the feature is off); the rest takes a registered platform's `ol_ucp_` key, not an API token.
 - `/agents/order-agent/:id` and `/agents/assistant-agent/:name` are the dashboard's live sockets
   for a signed-in person. They are not a public API; the assistant route always reaches the
   caller's own assistant.

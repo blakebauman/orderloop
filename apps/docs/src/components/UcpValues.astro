@@ -1,0 +1,147 @@
+---
+/*
+ * Agentic checkout's enums as tables, rendered from @orderloop/core: checkout statuses, issue
+ * severities, capabilities and the flow nodes a checkout is priced with. The values come from
+ * core; the one-line meanings beside them are keyed by value, so a new value shows up with a
+ * blank meaning rather than going missing.
+ */
+import {
+  CHECKOUT_STATUSES,
+  FINAL_CHECKOUT_STATUSES,
+  ISSUE_SEVERITIES,
+  QUOTE_NODE_TYPES,
+  UCP_CAPABILITIES,
+  UCP_VERSION,
+} from '@orderloop/core';
+
+interface Props {
+  of: 'statuses' | 'severities' | 'capabilities' | 'quote-nodes';
+}
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const { of } = Astro.props;
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const MEANING: Record<string, string> = {
+  incomplete:
+    'Something is missing or wrong that the platform can fix by updating the checkout: see its messages.',
+  requires_escalation:
+    'Only the buyer can clear what is wrong (an error with severity requires_buyer_input or requires_buyer_review); send them to continue_url.',
+  ready_for_complete: 'Priced and complete: the platform can complete it.',
+  complete_in_progress: 'Payment is being authorized and the order placed. It cannot change now.',
+  completed: 'The order is placed. The checkout never changes again.',
+  canceled: 'Canceled by the platform, or expired. The checkout never changes again.',
+  recoverable: 'The platform can fix it by updating the checkout: an unknown SKU, a missing email.',
+  requires_buyer_input: 'The buyer must supply something no API field carries.',
+  requires_buyer_review: 'The buyer must approve something before the order is placed.',
+  unrecoverable: 'Nothing can be done with this checkout; start a new one.',
+  'commerce.validate': 'Checks the order is well formed.',
+  'commerce.price': 'Prices the lines.',
+  'commerce.shipping_rate': 'Offers and charges shipping options for the address.',
+  'commerce.tax': 'Works out tax.',
+  'commerce.policy': "Applies the store's policy rules.",
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const statuses = CHECKOUT_STATUSES.map((s) => ({
+  value: s,
+  final: FINAL_CHECKOUT_STATUSES.includes(s),
+}));
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const severities = [...ISSUE_SEVERITIES];
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const quoteNodes = [...QUOTE_NODE_TYPES];
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const version = UCP_VERSION;
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const capabilities = Object.entries(UCP_CAPABILITIES).map(([name, c]) => ({
+  name,
+  extendsName: (c as { extends?: string }).extends,
+}));
+---
+
+{
+  of === 'statuses' && (
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Final</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        {statuses.map((s) => (
+          <tr>
+            <td>
+              <code>{s.value}</code>
+            </td>
+            <td>{s.final ? 'Yes' : 'No'}</td>
+            <td>{MEANING[s.value] ?? ''}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+{
+  of === 'severities' && (
+    <table>
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        {severities.map((s) => (
+          <tr>
+            <td>
+              <code>{s}</code>
+            </td>
+            <td>{MEANING[s] ?? ''}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+{
+  of === 'capabilities' && (
+    <table>
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>Version</th>
+          <th>Extends</th>
+        </tr>
+      </thead>
+      <tbody>
+        {capabilities.map((c) => (
+          <tr>
+            <td>
+              <code>{c.name}</code>
+            </td>
+            <td>
+              <code>{version}</code>
+            </td>
+            <td>{c.extendsName ? <code>{c.extendsName}</code> : ''}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+{
+  of === 'quote-nodes' && (
+    <ul>
+      {quoteNodes.map((t) => (
+        <li>
+          <a href={`/reference/nodes/#${t}`}>
+            <code>{t}</code>
+          </a>
+          {MEANING[t] ? `: ${MEANING[t]}` : ''}
+        </li>
+      ))}
+    </ul>
+  )
+}

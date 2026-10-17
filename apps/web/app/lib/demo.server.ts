@@ -24,6 +24,7 @@ const LOCKED = [
   '/oauth/authorize',
   '/api/v1/integrations',
   '/api/v1/webhook-subscriptions',
+  '/api/v1/ucp',
   '/scim/v2',
 ];
 

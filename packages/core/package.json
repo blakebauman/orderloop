@@ -17,6 +17,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "@orderloop/typescript-config": "workspace:*",
     "@types/json-logic-js": "^2.0.8",
     "typescript": "catalog:",

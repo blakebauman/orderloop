@@ -27,6 +27,15 @@ export default defineConfig(async () => {
             TIME_SCALE: '1',
             // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
             PRINCIPAL_KEY: 'test-principal-key',
+            // Signs UCP order webhooks in tests (a throwaway key, never a deployment's).
+            UCP_SIGNING_KEY: JSON.stringify({
+              kty: 'EC',
+              crv: 'P-256',
+              x: '9BMdj1UdIkXENV6_5MJlSn_hc9o2M8ugpvUwJ_HjH5k',
+              y: 'ydWDPKFRXLLygy6PsmbuGplP54RXbsePMjlM9Bswmu0',
+              d: 'za01NtCYcTPRwZ-MHjrWj00mA1u3a_sBgjrBpu0SBfk',
+              kid: 'test-ucp-2026',
+            }),
             ...bindings,
           },
           // Empty databases: for migrations against rows in an older shape, the demo reset, and
@@ -56,6 +65,7 @@ export default defineConfig(async () => {
         project('stripe', ['tests/stripe/**/*.test.ts'], {
           PAYMENTS_MODE: 'stripe',
           STRIPE_SECRET_KEY: 'sk_test_fake',
+          STRIPE_PUBLISHABLE_KEY: 'pk_test_fake',
         }),
       ],
     },

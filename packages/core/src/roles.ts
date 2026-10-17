@@ -93,20 +93,60 @@ const b64url = (bytes: Uint8Array) =>
 const fromB64url = (s: string) =>
   Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
+/** `<version>.<payload>.<signature>` over `body`, both base64url. */
+async function seal(secret: string, version: string, body: unknown): Promise<string> {
+  const signed = `${version}.${b64url(enc.encode(JSON.stringify(body)))}`;
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(signed));
+  return `${signed}.${b64url(new Uint8Array(sig))}`;
+}
+
+/**
+ * What `seal` signed, or null unless the header is a `version` envelope signed by one of
+ * `secrets` (the current key, then the one before it while a rotation finishes), names this
+ * `path` and hasn't expired.
+ */
+async function unseal(
+  secrets: readonly (string | undefined)[],
+  version: string,
+  header: string | null | undefined,
+  path: string,
+  now: number,
+): Promise<Record<string, unknown> | null> {
+  if (!header) return null;
+  const [v, payload, sig, extra] = header.split('.');
+  if (v !== version || !payload || !sig || extra !== undefined) return null;
+  try {
+    const data = enc.encode(`${v}.${payload}`);
+    const mac = fromB64url(sig);
+    let valid = false;
+    for (const secret of secrets)
+      if (secret && (await crypto.subtle.verify('HMAC', await hmacKey(secret), mac, data))) {
+        valid = true;
+        break;
+      }
+    if (!valid) return null;
+    const body = JSON.parse(new TextDecoder().decode(fromB64url(payload))) as Record<
+      string,
+      unknown
+    >;
+    if (body.path !== path || typeof body.exp !== 'number' || body.exp <= now) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The header value for `p`, good for requests to `path` until `now + PRINCIPAL_TTL_MS`:
  * `v1.<payload>.<signature>`, both base64url.
  */
-export async function signPrincipal(
+export function signPrincipal(
   secret: string,
   p: ProxiedPrincipal,
   path: string,
   now = Date.now(),
 ): Promise<string> {
-  const payload = b64url(enc.encode(JSON.stringify({ p, path, exp: now + PRINCIPAL_TTL_MS })));
-  const signed = `${PRINCIPAL_VERSION}.${payload}`;
-  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(signed));
-  return `${signed}.${b64url(new Uint8Array(sig))}`;
+  return seal(secret, PRINCIPAL_VERSION, { p, path, exp: now + PRINCIPAL_TTL_MS });
 }
 
 /**
@@ -120,40 +160,64 @@ export async function verifyPrincipal(
   path: string,
   now = Date.now(),
 ): Promise<ProxiedPrincipal | null> {
-  if (!header) return null;
-  const [version, payload, sig, extra] = header.split('.');
-  if (version !== PRINCIPAL_VERSION || !payload || !sig || extra !== undefined) return null;
-  try {
-    const data = enc.encode(`${version}.${payload}`);
-    const mac = fromB64url(sig);
-    let valid = false;
-    for (const secret of secrets)
-      if (secret && (await crypto.subtle.verify('HMAC', await hmacKey(secret), mac, data))) {
-        valid = true;
-        break;
-      }
-    if (!valid) return null;
-    const body = JSON.parse(new TextDecoder().decode(fromB64url(payload))) as {
-      p?: Partial<ProxiedPrincipal>;
-      path?: unknown;
-      exp?: unknown;
-    };
-    if (body.path !== path || typeof body.exp !== 'number' || body.exp <= now) return null;
-    const p = body.p;
-    if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !isRole(p.role))
-      return null;
-    if (p.kind !== 'user' && p.kind !== 'token' && p.kind !== 'open') return null;
-    return {
-      kind: p.kind,
-      id: p.id,
-      name: p.name,
-      ...(typeof p.email === 'string' ? { email: p.email } : {}),
-      role: p.role,
-      ...(typeof p.session === 'string' ? { session: p.session } : {}),
-    };
-  } catch {
+  const body = await unseal(secrets, PRINCIPAL_VERSION, header, path, now);
+  const p = body?.p as Partial<ProxiedPrincipal> | undefined;
+  if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !isRole(p.role)) return null;
+  if (p.kind !== 'user' && p.kind !== 'token' && p.kind !== 'open') return null;
+  return {
+    kind: p.kind,
+    id: p.id,
+    name: p.name,
+    ...(typeof p.email === 'string' ? { email: p.email } : {}),
+    role: p.role,
+    ...(typeof p.session === 'string' ? { session: p.session } : {}),
+  };
+}
+
+/**
+ * A UCP platform (an AI shopping surface the workspace let in) calling `/ucp/*`. It is not a
+ * Principal: it has no role and acts only on the checkouts and orders it started, so its header
+ * is a different envelope (`u1`) that `verifyPrincipal` never accepts, and the reverse.
+ */
+export type PlatformCaller = {
+  id: string;
+  name: string;
+  /** The UCP profile it is registered with, and named in UCP-Agent. */
+  profileUrl: string;
+  /** The public origin it called, for the URLs the engine hands back (`continue_url`, profiles). */
+  origin: string;
+};
+
+const PLATFORM_VERSION = 'u1';
+
+/** The header value for a platform calling `path` (same header and key as `signPrincipal`). */
+export function signPlatform(
+  secret: string,
+  c: PlatformCaller,
+  path: string,
+  now = Date.now(),
+): Promise<string> {
+  return seal(secret, PLATFORM_VERSION, { c, path, exp: now + PRINCIPAL_TTL_MS });
+}
+
+/** The platform a forwarded `/ucp/*` request is from, or null (see `verifyPrincipal`). */
+export async function verifyPlatform(
+  secrets: readonly (string | undefined)[],
+  header: string | null | undefined,
+  path: string,
+  now = Date.now(),
+): Promise<PlatformCaller | null> {
+  const body = await unseal(secrets, PLATFORM_VERSION, header, path, now);
+  const c = body?.c as Partial<PlatformCaller> | undefined;
+  if (
+    !c ||
+    typeof c.id !== 'string' ||
+    typeof c.name !== 'string' ||
+    typeof c.profileUrl !== 'string' ||
+    typeof c.origin !== 'string'
+  )
     return null;
-  }
+  return { id: c.id, name: c.name, profileUrl: c.profileUrl, origin: c.origin };
 }
 
 /**

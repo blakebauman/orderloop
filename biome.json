@@ -16,7 +16,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/worker-configuration.d.ts",
-      "!packages/db/migrations/meta"
+      "!packages/db/migrations/meta",
+      "!packages/core/tests/fixtures/ucp"
     ]
   },
   "formatter": {

@@ -142,6 +142,8 @@ export type SubjectExport = {
   messages: Record<string, unknown>[];
   inboundEmails: Record<string, unknown>[];
   documents: { key: string; kind: string; contentType: string; createdAt: number }[];
+  /** Agentic checkout sessions they were the buyer of. */
+  checkouts: Record<string, unknown>[];
   /** True when there were more orders than one export holds. */
   truncated: boolean;
   teamMember: boolean;

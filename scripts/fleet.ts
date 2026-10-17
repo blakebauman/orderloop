@@ -65,6 +65,7 @@ const SECRETS = {
     'INTAKE_ALLOWLIST',
     'SHIPPING_CARRIER_AUTH',
     'STRIPE_SECRET_KEY',
+    'UCP_SIGNING_KEY',
   ],
 } as const;
 

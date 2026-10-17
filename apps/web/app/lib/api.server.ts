@@ -28,6 +28,11 @@
  *   POST   /api/v1/integrations/:id/rotate      new secret; the old one works for 24 hours
  *   DELETE /api/v1/integrations/:id             revoke
  *
+ *   GET    /api/v1/ucp                          agentic checkout: settings and platforms (admin)
+ *   POST   /api/v1/ucp/settings                 { checkoutFlowId, links?, orderUrl? }
+ *   POST   /api/v1/ucp/platforms                { name, profileUrl } → API key, once
+ *   DELETE /api/v1/ucp/platforms/:id            revoke
+ *
  * Signed webhooks (an integration's key, no token; see `readSigned`):
  *   POST /api/v1/webhooks/events                { orderId, event, payload? }
  *   POST /api/v1/webhooks/orders                { model, channel, externalId, lines, … }
@@ -64,6 +69,7 @@ import {
   startOrderSchema,
   subjectEmail,
   toStartRequest,
+  ucpSettingsSchema,
   verificationSecrets,
   verifyShopifyHmac,
   verifyWebhook,
@@ -79,6 +85,7 @@ import {
   eventSchema,
   integrationInput,
   orderEventInput,
+  platformInput,
   subscriptionInput,
 } from './api-schemas';
 import { isAuditGroup } from './audit';
@@ -100,6 +107,14 @@ import {
 } from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
 import { overBudget } from './rate-limit';
+import {
+  addPlatform,
+  checkoutFlowRefusal,
+  listPlatforms,
+  revokePlatform,
+  setUcpSettings,
+  ucpSettings,
+} from './ucp.server';
 import {
   createSubscription,
   deleteSubscription,
@@ -177,6 +192,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       return need('admin') ?? (await handleSubscriptions(request, caller, parts, body));
     if (parts[0] === 'integrations')
       return need('admin') ?? (await handleIntegrations(request, caller, parts, body));
+    if (parts[0] === 'ucp')
+      return need('admin') ?? (await handleUcpAdmin(request, caller, parts, body));
     if (parts[0] === 'data-subjects')
       return need('admin') ?? (await handleDataSubjects(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
@@ -444,6 +461,54 @@ async function handleIntegrations(
       actor: caller,
       target: revoked.name,
       detail: { id },
+    });
+    return json({ ok: true });
+  }
+  return json({ error: 'Not found' }, 404);
+}
+
+async function handleUcpAdmin(
+  request: Request,
+  caller: Principal,
+  parts: string[],
+  body: () => Promise<unknown>,
+): Promise<Response> {
+  if (parts.length === 1 && request.method === 'GET')
+    return json({ settings: await ucpSettings(), platforms: await listPlatforms() });
+  if (parts[1] === 'settings' && parts.length === 2 && request.method === 'POST') {
+    const parsed = ucpSettingsSchema.safeParse(await body());
+    if (!parsed.success)
+      return json({ error: 'Invalid settings', issues: parsed.error.issues }, 400);
+    const flowId = parsed.data.checkoutFlowId;
+    const refusal = flowId ? await checkoutFlowRefusal(flowId) : null;
+    if (refusal) return json({ error: refusal }, 422);
+    const from = await ucpSettings();
+    await setUcpSettings(parsed.data, actor(caller));
+    await audit(request, 'ucp.settings', {
+      actor: caller,
+      detail: { from: from.checkoutFlowId, to: flowId },
+    });
+    return json({ settings: parsed.data });
+  }
+  if (parts[1] === 'platforms' && parts.length === 2 && request.method === 'POST') {
+    const parsed = platformInput.safeParse(await body());
+    if (!parsed.success)
+      return json({ error: 'Invalid platform', issues: parsed.error.issues }, 400);
+    const added = await addPlatform(parsed.data, actor(caller));
+    await audit(request, 'ucp.platform_added', {
+      actor: caller,
+      target: added.platform.name,
+      detail: { id: added.platform.id, profileUrl: added.platform.profileUrl },
+    });
+    return json(added, 201);
+  }
+  if (parts[1] === 'platforms' && parts.length === 3 && request.method === 'DELETE') {
+    const revoked = await revokePlatform(parts[2]!);
+    if (!revoked) return json({ error: 'Not found' }, 404);
+    await audit(request, 'ucp.platform_revoked', {
+      actor: caller,
+      target: revoked.name,
+      detail: { id: revoked.id },
     });
     return json({ ok: true });
   }

@@ -37,6 +37,8 @@ import { a2aAgent } from './namespaces';
 import { emit, orderSummary } from './outbox';
 import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from './principal';
 import { separationRefusal } from './separation';
+import { releaseHold } from './ucp/payments';
+import { syncUcpOrder, ucpMetaOf } from './ucp/webhooks';
 
 export type Report = {
   /** Plan snapshots are sequenced per generation; stale ones are dropped. */
@@ -58,6 +60,8 @@ type ConnectionState = { principal: ProxiedPrincipal | null };
 const TIMELINE_CAP = 400;
 // Matches the Workflow's emit step: 5 retries with exponential backoff from 10 seconds.
 const WEBHOOK_RETRIES = 5;
+/** Statuses an order ends in without having been fulfilled. */
+const UNFULFILLED: readonly OrderStatus[] = ['cancelled', 'declined', 'failed', 'rolled_back'];
 
 /** What an A2A watcher cares about: the order's status and what it waits on. */
 const watchKey = (s: State) => `${s.status}|${s.waits.map((w) => w.eventType).join(',')}`;
@@ -552,7 +556,9 @@ export class OrderAgent extends Agent<Env, State> {
   }
 
   override onStateChanged(state: State | undefined) {
-    if (!state?.orderId || !this.watchers().length) return;
+    if (!state?.orderId) return;
+    if (ucpMetaOf(state.order?.meta)) this.queueUcpSync();
+    if (!this.watchers().length) return;
     this.sql`CREATE TABLE IF NOT EXISTS a2a_watch_state (id INTEGER PRIMARY KEY, key TEXT)`;
     const key = watchKey(state);
     const last = this.sql<{ key: string }>`SELECT key FROM a2a_watch_state WHERE id = 1`[0]?.key;
@@ -584,6 +590,56 @@ export class OrderAgent extends Agent<Env, State> {
       });
     else if (TERMINAL_ORDER_STATUSES.includes(this.state.status))
       this.sql`DELETE FROM a2a_watchers`;
+  }
+
+  // ── UCP order events ──
+  // An order a UCP checkout placed tells the platform about every change: a sync a moment after
+  // the state settles sends the whole order entity, unless it is the same as the last one sent.
+
+  private ucpSyncRow() {
+    this
+      .sql`CREATE TABLE IF NOT EXISTS ucp_sync (id INTEGER PRIMARY KEY, digest TEXT, pending INTEGER NOT NULL DEFAULT 0, released INTEGER NOT NULL DEFAULT 0)`;
+    return this.sql<{
+      digest: string | null;
+      pending: number;
+      released: number;
+    }>`SELECT digest, pending, released FROM ucp_sync WHERE id = 1`[0];
+  }
+
+  private queueUcpSync() {
+    if (this.ucpSyncRow()?.pending) return;
+    this
+      .sql`INSERT INTO ucp_sync (id, pending) VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET pending = 1`;
+    this.ctx.waitUntil(this.schedule(2, 'ucpSync', { attempt: 0 }));
+  }
+
+  /** Sends the platform the order as it is now; retried with the webhooks' backoff. */
+  async ucpSync(p: { attempt: number }) {
+    const orderId = this.state.orderId;
+    const u = ucpMetaOf(this.state.order?.meta);
+    if (!orderId || !u) return;
+    this.sql`UPDATE ucp_sync SET pending = 0 WHERE id = 1`;
+    const row = this.ucpSyncRow();
+    // A hold the checkout placed that no step took is released once the order ends without it.
+    const intent = this.state.order?.payment?.intentId;
+    if (intent && !row?.released && UNFULFILLED.includes(this.state.status)) {
+      try {
+        await releaseHold(this.env, intent);
+        this.sql`UPDATE ucp_sync SET released = 1 WHERE id = 1`;
+      } catch (err) {
+        console.warn('ucp release hold', orderId, err);
+      }
+    }
+    let out: Awaited<ReturnType<typeof syncUcpOrder>>;
+    try {
+      out = await syncUcpOrder(this.env, orderId, u, row?.digest ?? null);
+    } catch (err) {
+      out = { sent: false, retry: true, reason: String(err) };
+    }
+    if (out.sent) this.sql`UPDATE ucp_sync SET digest = ${out.digest} WHERE id = 1`;
+    else if (out.retry && p.attempt < WEBHOOK_RETRIES)
+      await this.schedule(10 * 2 ** p.attempt, 'ucpSync', { attempt: p.attempt + 1 });
+    else if (out.retry) console.warn('ucp order event gave up', orderId, out.reason);
   }
 
   /**

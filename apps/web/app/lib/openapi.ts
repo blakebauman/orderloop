@@ -12,6 +12,7 @@ import {
   OUTBOUND_EVENTS,
   orderInputSchema,
   startOrderSchema,
+  ucpSettingsSchema,
 } from '@orderloop/core';
 import { z } from 'zod';
 import {
@@ -21,6 +22,7 @@ import {
   eventSchema,
   integrationInput,
   orderEventInput,
+  platformInput,
   subscriptionInput,
 } from './api-schemas';
 
@@ -456,6 +458,42 @@ export function openApiDocument(serverUrl: string) {
         delete: {
           summary: 'Revoke an integration (admin)',
           description: 'Both its secrets stop working at once.',
+          parameters: [orderId],
+          responses: { '200': ok('Revoked'), ...errors },
+        },
+      },
+      '/api/v1/ucp': {
+        get: {
+          summary: 'Agentic checkout: its settings and the AI shopping platforms let in (admin)',
+          responses: { '200': ok('{ settings, platforms }, without their keys'), ...errors },
+        },
+      },
+      '/api/v1/ucp/settings': {
+        post: {
+          summary: 'Set agentic checkout up, or turn it off (admin)',
+          description:
+            'The checkout flow is the published flow a completed checkout starts; it must authorize a card payment. `links` are the legal links every checkout shows, and `orderUrl` (with `{id}`) is where a buyer sees their order. A null `checkoutFlowId` turns agentic checkout off.',
+          requestBody: body(ucpSettingsSchema),
+          responses: {
+            '200': ok('{ settings }'),
+            '422': ok('The flow cannot take checkouts', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/ucp/platforms': {
+        post: {
+          summary: 'Let in an AI shopping platform (admin)',
+          description:
+            'The platform calls with the returned API key and names `profileUrl` in its `UCP-Agent` header. The key is shown only once.',
+          requestBody: body(platformInput),
+          responses: { '201': ok('{ platform, key }'), ...errors },
+        },
+      },
+      '/api/v1/ucp/platforms/{id}': {
+        delete: {
+          summary: 'Revoke an AI shopping platform (admin)',
+          description: 'Its key stops working at once, and its orders stop sending it events.',
           parameters: [orderId],
           responses: { '200': ok('Revoked'), ...errors },
         },

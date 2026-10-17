@@ -82,3 +82,12 @@
 ^apps/web/app/(lib/sso(\.server)?\.ts|routes/login-sso(-callback)?\.ts)$	guides/team-and-roles start/getting-started docs/architecture.md docs/configuration.md docs/operations.md docs/data-model.md	prose
 ^scripts/fleet\.ts$	docs/operations.md docs/configuration.md docs/deploy.md	prose
 ^apps/web/app/lib/scim(\.server)?\.ts$	guides/team-and-roles docs/architecture.md docs/data-model.md docs/operations.md docs/testing.md	prose
+^packages/core/src/(checkout|ucp/[^/]+)\.ts$	reference/ucp docs/architecture.md docs/testing.md	gen
+^apps/docs/src/components/UcpValues\.astro$	reference/ucp	gen
+^apps/engine/src/ucp/	reference/ucp docs/architecture.md docs/configuration.md docs/data-model.md docs/testing.md	prose
+^apps/web/app/lib/ucp\.server\.ts$	reference/ucp reference/rest-api guides/team-and-roles docs/architecture.md	prose
+^apps/(engine|web)/tests/(stripe/)?ucp(-helpers)?\.test\.ts$|^apps/engine/tests/ucp-helpers\.ts$|^packages/core/tests/(checkout|ucp)\.test\.ts$	docs/testing.md	prose
+^packages/core/src/types\.ts$	guides/commerce-models	prose
+^apps/web/app/lib/(audit|demo\.server)\.ts$	guides/team-and-roles reference/ucp	prose
+^packages/db/migrations/0039_ucp\.sql$	docs/data-model.md reference/ucp	prose
+^apps/engine/src/(retention|agent|env\.d)\.ts$	docs/data-model.md docs/order-agent.md docs/configuration.md reference/ucp	prose
