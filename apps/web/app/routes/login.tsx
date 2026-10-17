@@ -23,6 +23,8 @@ import {
 import { isDemo } from '~/lib/demo.server';
 import { nextPath } from '~/lib/next-path';
 import { oauthApi } from '~/lib/oauth.server';
+import { ssoOnlyInEffect } from '~/lib/settings.server';
+import { ssoConfig } from '~/lib/sso.server';
 import type { Route } from './+types/login';
 
 export const meta = () => [{ title: 'Sign in · OrderLoop' }];
@@ -39,13 +41,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     const clientId = new URL(next, request.url).searchParams.get('client_id');
     if (clientId) app = (await oauthApi(request).lookupClient(clientId))?.clientName ?? null;
   }
-  return { app, demo: isDemo() };
+  return { app, demo: isDemo(), sso: !!ssoConfig(), ssoOnly: await ssoOnlyInEffect() };
 }
+
+/** What the sign-in page says after single sign-on sent someone back without a session. */
+const SSO_ERRORS: Record<string, string> = {
+  failed: 'Single sign-on didn’t finish. Try again; if it keeps failing, tell an admin.',
+  refused:
+    'Your identity provider signed you in, but you aren’t on this workspace’s team. Ask an admin to add you.',
+  disabled: 'Your account here is disabled. Ask an admin to enable it.',
+};
 
 export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   if (form.get('intent') === 'demo' && isDemo())
     return redirect(nextPath(request), { headers: { 'set-cookie': await signInDemo(request) } });
+  if (await ssoOnlyInEffect())
+    return { error: 'This workspace signs in with single sign-on only. Use the button above.' };
   const email = String(form.get('email') ?? '');
   let result: SignInResult | null;
   try {
@@ -67,13 +79,14 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Login() {
-  const { app, demo } = useLoaderData<typeof loader>();
+  const { app, demo, sso, ssoOnly } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const busy = useNavigation().state === 'submitting';
   const password = useRef<HTMLInputElement>(null);
   const passkey = usePasskeySignIn();
-  const error = passkey.error ?? result?.error;
+  const error = passkey.error ?? result?.error ?? SSO_ERRORS[params.get('sso') ?? ''] ?? undefined;
+  const ssoHref = `/login/sso${params.get('next') ? `?next=${encodeURIComponent(params.get('next')!)}` : ''}`;
   // After a refusal, the password is ready to retype.
   useEffect(() => {
     if (error) password.current?.select();
@@ -107,58 +120,78 @@ export default function Login() {
             ? app
               ? `Sign in to connect “${app}” to OrderLoop.`
               : 'Sign in to connect an app to OrderLoop.'
-            : 'Sign in with your work email.'}
+            : ssoOnly
+              ? 'Sign in with your organization’s account.'
+              : 'Sign in with your work email.'}
         </p>
-        <label className="mt-5 block text-sm" htmlFor="email">
-          Email
-        </label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          required
-          autoFocus
-          autoComplete="username"
-          className="mt-1"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'sign-in-error' : undefined}
-        />
-        <label className="mt-3 block text-sm" htmlFor="password">
-          Password
-        </label>
-        <Input
-          ref={password}
-          id="password"
-          name="password"
-          type="password"
-          required
-          autoComplete="current-password"
-          className="mt-1"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'sign-in-error' : undefined}
-        />
-        {error ? (
-          <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <Button type="submit" className="mt-4 w-full" disabled={busy || passkey.busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </Button>
-        {passkey.supported ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="mt-2 w-full"
-            disabled={busy || passkey.busy}
-            onClick={() => void passkey.start(params.toString())}
-          >
-            {passkey.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+        {sso ? (
+          <Button asChild variant={ssoOnly ? 'default' : 'outline'} className="mt-5 w-full">
+            <a href={ssoHref}>Sign in with single sign-on</a>
           </Button>
         ) : null}
-        <p className="mt-3 text-muted-foreground text-xs">
-          Forgot your password? Ask an admin to reset it on the Team page.
-        </p>
+        {ssoOnly ? (
+          error ? (
+            <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
+              {error}
+            </p>
+          ) : null
+        ) : (
+          <>
+            {sso ? (
+              <p className="mt-4 text-center text-muted-foreground text-xs">or with a password</p>
+            ) : null}
+            <label className={`${sso ? 'mt-2' : 'mt-5'} block text-sm`} htmlFor="email">
+              Email
+            </label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              required
+              autoFocus={!sso}
+              autoComplete="username"
+              className="mt-1"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'sign-in-error' : undefined}
+            />
+            <label className="mt-3 block text-sm" htmlFor="password">
+              Password
+            </label>
+            <Input
+              ref={password}
+              id="password"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              className="mt-1"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'sign-in-error' : undefined}
+            />
+            {error ? (
+              <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <Button type="submit" className="mt-4 w-full" disabled={busy || passkey.busy}>
+              {busy ? 'Signing in…' : 'Sign in'}
+            </Button>
+            {passkey.supported ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 w-full"
+                disabled={busy || passkey.busy}
+                onClick={() => void passkey.start(params.toString())}
+              >
+                {passkey.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+              </Button>
+            ) : null}
+            <p className="mt-3 text-muted-foreground text-xs">
+              Forgot your password? Ask an admin to reset it on the Team page.
+            </p>
+          </>
+        )}
       </Form>
     </main>
   );

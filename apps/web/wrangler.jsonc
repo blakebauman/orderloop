@@ -67,12 +67,18 @@
     "EDI_PARTNERS": "",
     // "true" only on a demo deployment (scripts/fleet.ts sets it): one-click sign-in as a shared
     // operator, with people, tokens, integrations and webhooks locked (app/lib/demo.server.ts).
-    "DEMO_MODE": ""
+    "DEMO_MODE": "",
+    // Single sign-on (app/lib/sso.server.ts): the OpenID Connect issuer and client id, from the
+    // registry's `sso`. With the OIDC_CLIENT_SECRET secret, they put "Sign in with single sign-on"
+    // on the sign-in page; admins set the rest on the Team page. Empty: no SSO.
+    "OIDC_ISSUER": "",
+    "OIDC_CLIENT_ID": ""
   }
   // Secrets (wrangler secret put): SETUP_TOKEN — the one-time setup code that creates an admin on
   // /setup (app/lib/setup.server.ts); a new one recovers admin access. SHOPIFY_WEBHOOK_SECRET —
   // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders.
   // STRIPE_WEBHOOK_SECRET — the Stripe webhook endpoint's signing secret (whsec_…); enables
-  // POST /api/v1/webhooks/stripe. Signed webhooks
+  // POST /api/v1/webhooks/stripe. PRINCIPAL_KEY — signs what this Worker forwards to the engine.
+  // OIDC_CLIENT_SECRET — the identity provider's client secret for single sign-on. Signed webhooks
   // use integration keys (/api/v1/integrations), stored in D1, not a secret here.
 }

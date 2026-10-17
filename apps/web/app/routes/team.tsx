@@ -22,9 +22,13 @@ import { requireUser, startSession } from '~/lib/auth.server';
 import {
   approvalSeparation,
   setApprovalSeparation,
+  setSsoSettings,
   setTwoFactorRequirement,
+  ssoSettings,
   twoFactorRequirement,
 } from '~/lib/settings.server';
+import { parseDomains, type SsoSettings } from '~/lib/sso';
+import { linkedToSso, ssoConfig } from '~/lib/sso.server';
 import {
   addUser,
   createFirstAdmin,
@@ -52,14 +56,26 @@ export const meta = () => [{ title: 'Team · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
-  const [team, twoFactorRequired, separated] = await Promise.all([
+  const [team, twoFactorRequired, separated, sso] = await Promise.all([
     listTeam(),
     twoFactorRequirement(),
     approvalSeparation(),
+    ssoSettings(),
   ]);
+  const provider = ssoConfig();
   // The address a new person signs in at, to send along with their temporary password.
   const signInUrl = new URL('/login', request.url).href;
-  return { ...team, twoFactorRequired, separated, me, now: Date.now(), signInUrl };
+  return {
+    ...team,
+    twoFactorRequired,
+    separated,
+    sso: provider
+      ? { issuer: provider.issuer, settings: sso, linked: await linkedToSso(me.id) }
+      : null,
+    me,
+    now: Date.now(),
+    signInUrl,
+  };
 }
 
 /** One-time secrets come back from the action and are shown once, never stored in the clear. */
@@ -120,6 +136,24 @@ export async function action({ request }: Route.ActionArgs) {
           throw new TeamError('Pick who must use two-factor sign-in.');
         await setTwoFactorRequirement(request, me, next);
         return { ok: true, done: 'Two-factor requirement saved.' };
+      }
+      case 'sso-settings': {
+        if (!ssoConfig()) throw new TeamError('Single sign-on isn’t set up for this workspace.');
+        const jit = str('jit');
+        const next: SsoSettings = {
+          jitRole: isRole(jit) ? jit : null,
+          domains: parseDomains(str('domains')),
+          ssoOnly: str('only') === 'on',
+        };
+        if (next.jitRole && !next.domains.length)
+          throw new TeamError('List the email domains new people may join from.');
+        // Proof it works before it is the only way in: whoever turns passwords off has used it.
+        if (next.ssoOnly && !(await linkedToSso(me.id)))
+          throw new TeamError(
+            'Sign in with single sign-on yourself once before turning passwords off.',
+          );
+        await setSsoSettings(request, me, next);
+        return { ok: true, done: 'Single sign-on settings saved.' };
       }
       case 'approval-separation': {
         const on = str('separated') === 'on';
@@ -224,7 +258,7 @@ function RoleSelect({
 }
 
 export default function Team() {
-  const { people, tokens, me, now, twoFactorRequired, separated, signInUrl } =
+  const { people, tokens, me, now, twoFactorRequired, separated, sso, signInUrl } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
@@ -496,6 +530,8 @@ export default function Team() {
             }
           />
 
+          {sso ? <SsoForm {...sso} /> : null}
+
           <ApprovalSeparationForm separated={separated} />
 
           <Section title="API tokens" flush>
@@ -696,6 +732,74 @@ function TokenExpiry({ state, expiresAt }: { state: TokenState; expiresAt: numbe
     >
       expires {formatTime(expiresAt)}
     </span>
+  );
+}
+
+/** Single sign-on: who it may add, from which domains, and whether it is the only way in. */
+function SsoForm({
+  issuer,
+  settings,
+  linked,
+}: {
+  issuer: string;
+  settings: SsoSettings;
+  linked: boolean;
+}) {
+  const fetcher = useFetcher();
+  return (
+    <Section title="Single sign-on">
+      <p className="max-w-[65ch] text-muted-foreground text-xs">
+        People can sign in through your identity provider,{' '}
+        <span className="font-mono">{issuer}</span>. Someone already on the team is matched by email
+        on their first sign-in.
+      </p>
+      <fetcher.Form method="post" className="mt-3 grid max-w-xl gap-3">
+        <input type="hidden" name="intent" value="sso-settings" />
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="sso-jit" className="text-sm">
+            Someone not on the team
+          </label>
+          <NativeSelect
+            id="sso-jit"
+            name="jit"
+            defaultValue={settings.jitRole ?? 'off'}
+            className="h-8"
+          >
+            <NativeSelectOption value="off">Is refused</NativeSelectOption>
+            {ROLES.map((r) => (
+              <NativeSelectOption key={r} value={r}>
+                Joins as {ROLE_LABELS[r]}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+        <Field label="From these email domains">
+          <Input
+            id="sso-domains"
+            name="domains"
+            defaultValue={settings.domains.join(', ')}
+            placeholder="example.com, example.co.uk"
+            className="h-8"
+          />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="only" value="on" defaultChecked={settings.ssoOnly} />
+          Single sign-on only: turn off passwords and passkeys
+        </label>
+        <div>
+          <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+            Save
+          </Button>
+        </div>
+      </fetcher.Form>
+      <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+        With single sign-on only, your identity provider handles two-factor sign-in, and a person
+        disabled there can’t sign in here once their session ends; disable them here to end it now.
+        {linked
+          ? ' If the provider stops working, a setup code recovers access and turns passwords back on.'
+          : ' To turn passwords off, first sign in with single sign-on yourself.'}
+      </p>
+    </Section>
   );
 }
 

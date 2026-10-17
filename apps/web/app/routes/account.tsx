@@ -22,6 +22,7 @@ import { audit } from '~/lib/audit.server';
 import { requireUser, sessionId, Throttled } from '~/lib/auth.server';
 import { oauthApi } from '~/lib/oauth.server';
 import { listPasskeys } from '~/lib/passkeys.server';
+import { usesPassword } from '~/lib/sso.server';
 import {
   changeOwnPassword,
   endOtherSessions,
@@ -43,11 +44,12 @@ export const meta = () => [{ title: 'Account · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  const [sessions, twoFactor, grants, passkeys] = await Promise.all([
+  const [sessions, twoFactor, grants, passkeys, password] = await Promise.all([
     ownSessions(me, await sessionId(request)),
     twoFactorStatus(me),
     oauthApi(request).listUserGrants(me.id),
     me.kind === 'user' ? listPasskeys(me.id) : [],
+    me.kind === 'user' ? usesPassword(me.id) : true,
   ]);
   const apps = grants.items.map((g) => ({
     id: g.id,
@@ -58,7 +60,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     role: g.scope.find(isRole) ?? 'viewer',
     createdAt: g.createdAt * 1000,
   }));
-  return { me, sessions, twoFactor, apps, passkeys };
+  return { me, sessions, twoFactor, apps, passkeys, password };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -135,7 +137,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Account() {
-  const { me, sessions, twoFactor, apps, passkeys } = useLoaderData<typeof loader>();
+  const { me, sessions, twoFactor, apps, passkeys, password } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const end = useFetcher<typeof action>();
   const formatTime = useDateTime();
@@ -196,8 +198,13 @@ export default function Account() {
               </Button>
             </div>
           ) : null}
-          <Section title="Password">
-            {me.kind === 'user' ? (
+          <Section title={password ? 'Password' : 'Sign-in'}>
+            {me.kind === 'user' && !password ? (
+              <p className="text-muted-foreground text-sm">
+                You sign in with single sign-on. Your organization’s identity provider looks after
+                your password and two-factor sign-in.
+              </p>
+            ) : me.kind === 'user' ? (
               <Form method="post" className="space-y-3" ref={passwordForm}>
                 <input type="hidden" name="intent" value="password" />
                 {/* Lets a password manager save the new password against this account. */}
@@ -270,10 +277,12 @@ export default function Account() {
               </p>
             )}
           </Section>
-          {twoFactor && (!me.passwordChangeDue || me.twoFactorDue) ? (
+          {password && twoFactor && (!me.passwordChangeDue || me.twoFactorDue) ? (
             <TwoFactor status={twoFactor} />
           ) : null}
-          {me.kind === 'user' && !me.passwordChangeDue ? <Passkeys passkeys={passkeys} /> : null}
+          {me.kind === 'user' && password && !me.passwordChangeDue ? (
+            <Passkeys passkeys={passkeys} />
+          ) : null}
           {me.kind === 'user' && !me.passwordChangeDue ? (
             <Section
               title="Where you're signed in"

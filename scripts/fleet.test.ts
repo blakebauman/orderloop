@@ -154,3 +154,22 @@ test("an EU customer's Durable Objects are in the EU, like their D1 and R2", () 
   const anywhere = toDeployment({ ...acme, jurisdiction: undefined });
   assert.equal(renderEngine(base('engine'), anywhere).vars.DATA_JURISDICTION, '');
 });
+
+test("a customer's sso sets the web Worker's identity provider", () => {
+  const sso = toDeployment({
+    ...acme,
+    sso: { issuer: 'https://acme.okta.com', clientId: '0oa123' },
+  });
+  const c = renderWeb(base('web'), sso);
+  assert.equal(c.vars.OIDC_ISSUER, 'https://acme.okta.com');
+  assert.equal(c.vars.OIDC_CLIENT_ID, '0oa123');
+  assert.equal(renderWeb(base('web'), acme).vars.OIDC_ISSUER, '');
+  assert.throws(
+    () => toDeployment({ ...acme, sso: { issuer: 'http://acme.okta.com', clientId: 'x' } }),
+    /https issuer/,
+  );
+  assert.throws(
+    () => toDeployment({ ...acme, sso: { issuer: 'https://acme.okta.com' } }),
+    /clientId/,
+  );
+});

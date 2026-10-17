@@ -79,3 +79,5 @@
 ^apps/engine/src/(billing|payment-events)\.ts$	guides/approvals-and-events docs/order-agent.md	prose
 ^apps/web/app/lib/stripe\.server\.ts$	guides/payments guides/approvals-and-events reference/rest-api docs/architecture.md docs/configuration.md docs/deploy.md	prose
 ^packages/core/src/(money|payments)\.ts$	guides/payments docs/architecture.md	prose
+^apps/web/app/(lib/sso(\.server)?\.ts|routes/login-sso(-callback)?\.ts)$	guides/team-and-roles start/getting-started docs/architecture.md docs/configuration.md docs/operations.md docs/data-model.md	prose
+^scripts/fleet\.ts$	docs/operations.md docs/configuration.md docs/deploy.md	prose
