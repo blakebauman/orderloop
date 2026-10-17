@@ -34,6 +34,7 @@ export const AUDIT_ACTIONS = {
   'team.recovery_admin': 'Recovered admin access with a setup code',
   'team.setup_refused': 'Setup refused: wrong setup code',
   'team.user_added': 'Added a person',
+  'team.user_updated': 'Changed a person’s name or email',
   'team.role_changed': 'Changed a role',
   'team.password_reset': 'Reset a password',
   'team.user_disabled': 'Disabled a person',
@@ -42,8 +43,11 @@ export const AUDIT_ACTIONS = {
   'team.two_factor_requirement': 'Changed who needs two-factor sign-in',
   'team.approval_separation': 'Changed whether people may approve orders they started',
   'team.sso_settings': 'Changed single sign-on settings',
+  'team.scim_roles': 'Changed which groups give which role',
   'token.created': 'Created an API token',
   'token.revoked': 'Revoked an API token',
+  'scim.token_created': 'Created the SCIM token',
+  'scim.token_revoked': 'Revoked the SCIM token',
   'api.token_expired': 'API refused: expired token',
   'oauth.app_connected': 'Connected an app over MCP',
   'oauth.app_disconnected': 'Disconnected an app',
@@ -62,6 +66,7 @@ export const AUDIT_GROUPS = {
   auth: 'Sign-in',
   team: 'Team',
   token: 'API tokens',
+  scim: 'SCIM provisioning',
   api: 'API access',
   oauth: 'Connected apps',
   integration: 'Integrations',
@@ -109,6 +114,11 @@ export function describe(e: AuditEvent): string {
   if (d.method === 'passkey') parts.push('with a passkey');
   if (d.method === 'sso') parts.push('with single sign-on');
   if (d.via === 'sso') parts.push('by single sign-on');
+  if (d.via === 'scim') parts.push('by SCIM provisioning');
+  if (typeof d.kept === 'string') parts.push(`kept: ${d.kept}`);
+  if (e.action === 'team.user_disabled' && typeof d.sessions === 'number')
+    parts.push(`${d.sessions} sessions, ${d.apps ?? 0} apps and ${d.tokens ?? 0} tokens ended`);
+  if (e.action === 'scim.token_created' && d.replaced) parts.push('replacing the old one');
   if (d.passkeys === 'removed') parts.push('passkeys removed');
   if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
     parts.push(`${d.left} left`);

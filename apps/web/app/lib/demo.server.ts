@@ -20,7 +20,12 @@ export const DEMO_USER = {
 /** Changes nobody may make in a demo: they would reach past it, or spoil it for the next visitor. */
 const LOCKED_WRITES = ['/team', '/account'];
 /** Not even readable: credentials and outbound endpoints live here. */
-const LOCKED = ['/oauth/authorize', '/api/v1/integrations', '/api/v1/webhook-subscriptions'];
+const LOCKED = [
+  '/oauth/authorize',
+  '/api/v1/integrations',
+  '/api/v1/webhook-subscriptions',
+  '/scim/v2',
+];
 
 const under = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`) || path === `${prefix}.data`;

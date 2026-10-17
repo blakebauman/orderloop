@@ -498,7 +498,7 @@ export const users = sqliteTable(
     name: text('name').notNull(),
     role: text('role').notNull(),
     passwordHash: text('password_hash'),
-    /** An outside identity provider's subject, once that sign-in exists. */
+    /** The identity provider's subject for single sign-on, linked on first SSO sign-in. */
     externalSub: text('external_sub'),
     createdAt: integer('created_at').notNull(),
     lastLoginAt: integer('last_login_at'),
@@ -510,10 +510,37 @@ export const users = sqliteTable(
     totpLastStep: integer('totp_last_step'),
     /** The password was set by an operator (first or reset); the person must choose their own. */
     passwordChangeDue: integer('password_change_due', { mode: 'boolean' }).notNull().default(false),
+    /** The identity provider's own id for this person, as SCIM provisioning sent it. */
+    scimExternalId: text('scim_external_id'),
   },
   (t) => [
     uniqueIndex('users_email').on(t.email),
     uniqueIndex('users_external_sub').on(t.externalSub).where(sql`${t.externalSub} IS NOT NULL`),
+  ],
+);
+
+/** Groups the identity provider pushes over SCIM; admins map them to roles. */
+export const scimGroups = sqliteTable('scim_groups', {
+  id: text('id').primaryKey(),
+  displayName: text('display_name').notNull(),
+  externalId: text('external_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const scimGroupMembers = sqliteTable(
+  'scim_group_members',
+  {
+    groupId: text('group_id')
+      .notNull()
+      .references(() => scimGroups.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.userId] }),
+    index('scim_group_members_user').on(t.userId),
   ],
 );
 

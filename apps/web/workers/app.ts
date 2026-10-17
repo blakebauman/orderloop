@@ -29,6 +29,8 @@ import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 import { setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
+import { SCIM_PATH } from '../app/lib/scim';
+import { scimFetch } from '../app/lib/scim.server';
 import { handleStripeWebhook } from '../app/lib/stripe.server';
 
 /**
@@ -96,6 +98,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // MCP, A2A and their OAuth endpoints (discovery, registration, tokens). The consent page
   // itself, /oauth/authorize, is a page of the app below.
   if (isOAuthPath(url.pathname)) return oauthFetch(request, env, ctx);
+
+  // SCIM provisioning from the identity provider, with its own bearer token.
+  if (url.pathname === SCIM_PATH || url.pathname.startsWith(`${SCIM_PATH}/`))
+    return scimFetch(request);
 
   // Signed webhooks authenticate by HMAC, not by the admin password.
   if (url.pathname === '/api/v1/webhooks/events' && request.method === 'POST') {
