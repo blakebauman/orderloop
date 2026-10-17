@@ -131,7 +131,19 @@ deletes `authorization` and `cookie`, sets `x-orderloop-principal` and fetches t
 (`apps/engine/src/mcp.ts`): `createMcpHandler` from `agents/mcp/server`, a fresh
 `McpServer` (`@modelcontextprotocol/server`) per request, no session. It registers only the
 `ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS` and `runTool` from `assistant/tools.ts`, the
-code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`. See
+code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`.
+
+An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
+`run_stock_review`) never runs on the first call, because a client may not ask its person. Its
+schema gains an optional `confirmation`, and its description and the server `instructions` say to
+show the preview first. Without a code, the handler returns `previewAction` (the assistant's confirm
+card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmation`
+(`apps/engine/src/confirmations.ts`), `expiresAt` and `next`, and changes nothing. With one,
+`useConfirmation` must pass before `runTool`: a single `UPDATE` on D1 `action_confirmations` matching
+the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
+`CONFIRMATION_TTL_MS` (5 minutes). Anything else is a tool error. The sweep calls
+`pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
+the call, as with REST); A2A chat has its own `{ confirm }`. See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
 ## A2A

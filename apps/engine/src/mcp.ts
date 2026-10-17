@@ -6,7 +6,8 @@
  * an `ol_live_` API token), checks Origin, and forwards here over the service binding with the
  * principal header, as it does for the agent sockets. This layer trusts that header, like the rest
  * of EngineApi. Each request is answered by a fresh server listing only the tools the caller's
- * role can use; nothing is kept between requests.
+ * role can use. An action (decide, deliver, cancel, publish, stock review) runs only on a second
+ * call carrying the one-time code the first call returned with its preview (confirmations.ts).
  */
 
 import { env } from 'cloudflare:workers';
@@ -20,8 +21,10 @@ import {
   type Principal,
 } from '@orderloop/core';
 import { createMcpHandler } from 'agents/mcp/server';
-import { Refused } from './assistant/data';
-import { runTool, TOOL_INPUTS, type ToolInput } from './assistant/tools';
+import { z } from 'zod';
+import { previewAction, Refused } from './assistant/data';
+import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from './assistant/tools';
+import { issueConfirmation, useConfirmation } from './confirmations';
 
 export const MCP_PATH = '/mcp';
 
@@ -41,24 +44,37 @@ const result = (value: unknown) => {
   };
 };
 
+const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
+
 function createServer(p: Principal) {
   const server = new McpServer(
     { name: 'orderloop', title: 'OrderLoop', version: '1.0.0' },
     {
       instructions:
-        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference.',
+        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Actions (deciding, delivering an event, cancelling, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
     },
   );
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {
     const t = ASSISTANT_TOOLS[name];
     if (!atLeast(p.role, t.role)) continue;
     const readOnly = !t.confirm;
+    const action = isActionTool(name);
     server.registerTool(
       name,
       {
         title: t.title,
-        description: t.description,
-        inputSchema: TOOL_INPUTS[name],
+        description: action
+          ? `${t.description} Call it once to get a preview and a confirmation code; show the preview to the person, and only once they agree call it again with the same input and \`confirmation\`.`
+          : t.description,
+        inputSchema: action
+          ? (TOOL_INPUTS[name] as z.ZodObject).extend({
+              confirmation: z
+                .string()
+                .max(100)
+                .optional()
+                .describe('The code a first call returned, once the person has agreed'),
+            })
+          : TOOL_INPUTS[name],
         annotations: {
           title: t.title,
           readOnlyHint: readOnly,
@@ -67,13 +83,31 @@ function createServer(p: Principal) {
           openWorldHint: false,
         },
       },
-      async (input: ToolInput<typeof name>) => {
+      async (raw: ToolInput<typeof name> & { confirmation?: string }) => {
         try {
-          return result(await runTool(env, p, name, input, { via: 'MCP' }));
+          if (!action) return result(await runTool(env, p, name, raw, { via: 'MCP' }));
+          const { confirmation, ...input } = raw;
+          if (!confirmation) {
+            const preview = await previewAction(env, p, name, input as never);
+            if (preview.blocked) return refusal(preview.blocked);
+            const { code, expiresAt } = await issueConfirmation(env, p, name, input);
+            return result({
+              preview,
+              confirmation: code,
+              expiresAt,
+              next: 'Nothing has happened yet. Show the person this preview; if they agree, call again with the same input and this confirmation.',
+            });
+          }
+          if (!(await useConfirmation(env, p, name, input, confirmation)))
+            return refusal(
+              'That confirmation is not valid: it expired, was already used, or was for a different action or input. Call without it for a new preview.',
+            );
+          return result(
+            await runTool(env, p, name, input as ToolInput<typeof name>, { via: 'MCP' }),
+          );
         } catch (err) {
           // A refusal (wrong role, nothing waiting, already decided) is the model's to read.
-          if (err instanceof Refused)
-            return { content: [{ type: 'text' as const, text: err.message }], isError: true };
+          if (err instanceof Refused) return refusal(err.message);
           throw err;
         }
       },
