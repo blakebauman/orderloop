@@ -8,8 +8,9 @@ function NativeSelect({
   ...props
 }: Omit<React.ComponentProps<'select'>, 'size'> & { size?: 'sm' | 'default' }) {
   return (
+    // Content width by default; a select styled `w-full` takes its wrapper with it.
     <div
-      className="group/native-select relative w-fit has-[select:disabled]:opacity-50"
+      className="group/native-select relative w-fit has-[select.w-full]:w-full has-[select:disabled]:opacity-50"
       data-slot="native-select-wrapper"
     >
       <select

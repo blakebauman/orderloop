@@ -1,3 +1,4 @@
+import type { FlowGraph } from '@orderloop/core';
 import {
   approvals,
   contains,
@@ -6,6 +7,7 @@ import {
   documents,
   flows,
   fxRates,
+  getFlowVersionJson,
   inboundEmails,
   invoices,
   locationStock,
@@ -236,6 +238,18 @@ export async function publishedFlows() {
     .from(flows)
     .where(sql`${flows.publishedVersion} is not null`)
     .orderBy(flows.name);
+}
+
+/** Each published flow with the graph orders on it will run, for the new-order form. */
+export async function publishedFlowGraphs() {
+  const list = await publishedFlows();
+  return Promise.all(
+    list.map(async (f) => {
+      const v = await getFlowVersionJson(db(), f.id, f.version ?? undefined);
+      const graph = { nodes: v?.flow.nodes ?? [], edges: v?.flow.edges ?? [] } as FlowGraph;
+      return { ...f, graph };
+    }),
+  );
 }
 
 /** Display names for the given customer ids, for lists that only carry the id. */
