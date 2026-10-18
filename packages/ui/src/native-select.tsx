@@ -4,13 +4,20 @@ import { cn } from './lib/utils';
 
 function NativeSelect({
   className,
+  wrapperClassName,
   size = 'default',
   ...props
-}: Omit<React.ComponentProps<'select'>, 'size'> & { size?: 'sm' | 'default' }) {
+}: Omit<React.ComponentProps<'select'>, 'size'> & {
+  size?: 'sm' | 'default';
+  /** Sizes the wrapper, which is content width by default; `w-full` fills the container. */
+  wrapperClassName?: string;
+}) {
   return (
-    // Content width by default; a select styled `w-full` takes its wrapper with it.
     <div
-      className="group/native-select relative w-fit has-[select.w-full]:w-full has-[select:disabled]:opacity-50"
+      className={cn(
+        'group/native-select relative w-fit has-[select:disabled]:opacity-50',
+        wrapperClassName,
+      )}
       data-slot="native-select-wrapper"
     >
       <select
