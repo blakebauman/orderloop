@@ -24,7 +24,12 @@ export default defineConfig({
         {
           configPath: '../engine/wrangler.jsonc',
           config: {
-            vars: { TIME_SCALE: '1440', AI_GATEWAY_ID: '', PRINCIPAL_KEY: DEV_PRINCIPAL_KEY },
+            vars: {
+              TIME_SCALE: '1440',
+              AI_GATEWAY_ID: '',
+              PRINCIPAL_KEY: DEV_PRINCIPAL_KEY,
+              SIMULATE_FAILURES: 'true',
+            },
           },
           devOnly: true,
         },

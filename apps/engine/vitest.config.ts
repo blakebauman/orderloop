@@ -25,6 +25,8 @@ export default defineConfig(async () => {
             TEST_DEMO_RESET: demoReset,
             AI_MODE: 'mock',
             TIME_SCALE: '1',
+            // The failure-path tests set meta.simulate; tests/orders.test.ts also covers it off.
+            SIMULATE_FAILURES: 'true',
             // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
             PRINCIPAL_KEY: 'test-principal-key',
             // Signs UCP order webhooks in tests (a throwaway key, never a deployment's).

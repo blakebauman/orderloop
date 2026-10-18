@@ -317,9 +317,16 @@ export function renderEngine(base: Config, d: Deployment): Config {
     PAYMENTS_MODE: d.payments,
     STRIPE_PUBLISHABLE_KEY: d.stripePublishableKey ?? '',
   };
-  // A demo spends nothing on models and finishes a "3-day" wait in minutes, like local dev.
+  // A demo spends nothing on models, finishes a "3-day" wait in minutes and runs the failing
+  // scenarios, like local dev.
   if (d.demo)
-    config.vars = { ...config.vars, AI_MODE: 'mock', AI_GATEWAY_ID: '', TIME_SCALE: '1440' };
+    config.vars = {
+      ...config.vars,
+      AI_MODE: 'mock',
+      AI_GATEWAY_ID: '',
+      TIME_SCALE: '1440',
+      SIMULATE_FAILURES: 'true',
+    };
   return config;
 }
 

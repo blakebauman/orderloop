@@ -49,8 +49,10 @@ exercises a different path:
 
 ### Simulating failures
 
-The built-in commerce steps read `order.meta.simulate`, so any order (from the API too) can take a
-failure path:
+The built-in commerce steps read `order.meta.simulate`, so an order can take a failure path on
+purpose. Only workspaces that allow simulated failures honour it: local development and demo
+workspaces do; elsewhere, including production, the field is dropped when the order starts, whoever
+sends it (the API, inbound orders, email or an agent).
 
 | Value | Effect |
 |---|---|

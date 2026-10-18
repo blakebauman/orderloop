@@ -194,6 +194,16 @@ export type OrderInput = z.infer<typeof orderInputSchema>;
 /** What callers send: `channel`, `currency`, `lines` and `meta` have defaults. */
 export type OrderInputDraft = z.input<typeof orderInputSchema>;
 
+/**
+ * The order without `meta.simulate`, the field that forces a connector failure. The engine drops
+ * it at start unless the deployment allows simulated failures (`SIMULATE_FAILURES`).
+ */
+export function withoutSimulation<T extends Pick<OrderInputDraft, 'meta'>>(input: T): T {
+  if (!input.meta || !('simulate' in input.meta)) return input;
+  const { simulate: _simulate, ...meta } = input.meta;
+  return { ...input, meta };
+}
+
 /** A request to start an order: POST /api/v1/orders, and A2A's place_order skill. */
 export const startOrderSchema = z.object({
   flowId: z.string(),
