@@ -68,8 +68,9 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 ## Flows
 
 `GET /api/v1/flows` lists every flow, most recently updated first, with `id`, `name`,
-`description`, `model`, `channels`, `publishedVersion` (null until the first publish), `updatedAt` and
-`nodeCount`. Flows are edited and published in the dashboard's editor; the API starts orders on them.
+`description`, `model`, `channels`, `publishedVersion` (null until the first publish),
+`hasUnpublishedChanges` (the draft differs from the published version), `updatedAt` and `nodeCount`.
+Archived drafts are left out. Flows are edited and published in the dashboard's editor; the API starts orders on them.
 
 ## Start an order
 

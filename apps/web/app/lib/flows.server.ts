@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import {
   type Flow,
   type FlowGraph,
@@ -6,6 +7,7 @@ import {
   ORDER_MODELS,
   type OrderChannel,
   type OrderModel,
+  parseOrderRoutes,
   TEMPLATES,
   validateGraph,
 } from '@orderloop/core';
@@ -17,9 +19,10 @@ import {
   saveDraft,
   seedFlows,
 } from '@orderloop/db';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { isDemo } from './demo.server';
 import { db } from './env.server';
+import { summarizeFlow } from './new-order';
 
 let seeded = false;
 
@@ -36,7 +39,11 @@ export async function ensureSeeded() {
   seeded = true;
 }
 
-export async function listFlows() {
+/**
+ * Every flow for the flows list: its draft's step summary, the live version and whether the draft
+ * has changed since it was published. Archived drafts only with `archived`.
+ */
+export async function listFlows({ archived = false } = {}) {
   await ensureSeeded();
   const rows = await db()
     .select({
@@ -47,19 +54,53 @@ export async function listFlows() {
       channels: flows.channels,
       publishedVersion: flows.publishedVersion,
       updatedAt: flows.updatedAt,
+      archivedAt: flows.archivedAt,
       graphJson: flows.graphJson,
+      publishedJson: flowVersions.flowJson,
+      publishedAt: flowVersions.publishedAt,
     })
     .from(flows)
-    .orderBy(desc(flows.updatedAt));
-  return rows.map(({ graphJson, channels, ...r }) => {
+    .leftJoin(
+      flowVersions,
+      and(eq(flowVersions.flowId, flows.id), eq(flowVersions.version, flows.publishedVersion)),
+    )
+    .where(archived ? sql`${flows.archivedAt} is not null` : isNull(flows.archivedAt))
+    .orderBy(flows.name);
+  return rows.map(({ graphJson, publishedJson, channels, ...r }) => {
     const g = JSON.parse(graphJson) as FlowGraph;
+    const live = publishedJson ? (JSON.parse(publishedJson) as FlowGraph) : null;
     return {
       ...r,
       model: r.model as OrderModel,
       channels: JSON.parse(channels) as OrderChannel[],
       nodeCount: g.nodes.length,
+      summary: summarizeFlow(g),
+      /** Published, and the draft has changed since. */
+      dirty: !!live && !sameGraph(g, { nodes: live.nodes, edges: live.edges }),
     };
   });
+}
+
+/** `ORDER_ROUTES`: inbound `model:channel` (or `model:*`) to flow id. */
+export const orderRoutes = () => parseOrderRoutes((env as { ORDER_ROUTES?: string }).ORDER_ROUTES);
+
+/** The flow's name, or null when there is no such flow. */
+export async function flowName(id: string) {
+  const row = await db().select({ name: flows.name }).from(flows).where(eq(flows.id, id)).get();
+  return row?.name ?? null;
+}
+
+/**
+ * Archives or restores a draft. Only a flow that was never published: no order can be on it, and no
+ * route can start one. Returns false for anything else.
+ */
+export async function setArchived(id: string, archived: boolean) {
+  const res = await db()
+    .update(flows)
+    .set({ archivedAt: archived ? Date.now() : null })
+    .where(and(eq(flows.id, id), isNull(flows.publishedVersion)))
+    .returning({ id: flows.id });
+  return res.length > 0;
 }
 
 export async function getFlow(id: string) {

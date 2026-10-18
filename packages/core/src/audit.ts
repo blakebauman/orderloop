@@ -15,6 +15,8 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'approval.decided': 'Decided an approval',
   'flow.saved': 'Saved a flow draft',
   'flow.published': 'Published a flow',
+  'flow.archived': 'Archived a flow draft',
+  'flow.restored': 'Restored a flow draft',
   'webhook.subscribed': 'Subscribed to order events',
   'webhook.unsubscribed': 'Removed a webhook subscription',
   'webhook.rotated': 'Rotated a webhook signing secret',

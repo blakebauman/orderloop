@@ -59,6 +59,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0039_ucp.sql` | `ucp_platforms`, `checkout_sessions` and `ucp_idempotency`, for [agentic checkout](architecture.md#ucp-agentic-checkout) |
 | `0040_webhook_rotation.sql` | `webhook_subscriptions.previous_secret` and `previous_expires_at`, for outbound secret rotation |
 | `0041_order_index_where.sql` | `orders.waiting_for`, `stopped_at` and `reason`, so the orders list can say who a wait is on and where and why an order ended |
+| `0042_flow_archived.sql` | `flows.archived_at`: a never-published draft archived out of the flows list |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -75,7 +76,7 @@ error until its rate is added to `fx_rates`.
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `description`, `model`, `channels` (JSON array), `published_version` |
+| `flows` | One row per flow; `graph_json` is the editable draft | `id`, `name`, `description`, `model`, `channels` (JSON array), `published_version`, `archived_at` (a never-published draft archived out of the flows list; null otherwise) |
 | `flow_versions` | Immutable published snapshots; primary key `(flow_id, version)`, cascades with the flow | `flow_json`, `published_at`, `published_by` (nullable: the audit trail's name for who published it) |
 
 `publishFlow` (`packages/db/src/flows.ts`) saves the draft and inserts the next version, numbering and inserting it in one statement so racing publishes get consecutive versions; seeding passes `unlessPublished`, which inserts nothing when the identical content is already a version. It takes `{ publishedBy }`, stored in `flow_versions.published_by`.

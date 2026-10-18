@@ -41,6 +41,8 @@ export type OrderFilters = {
   sort?: 'created' | 'oldest' | 'updated' | 'total' | 'waiting';
   /** Only what needs a person: failed, rolled back, or waiting on a pending approval. */
   attention?: boolean;
+  /** Only orders on this flow, any version. */
+  flow?: string;
   /** Newest-first paging: only orders created before the previous page's last row. */
   after?: OrderCursor;
 };
@@ -57,6 +59,7 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
       : undefined,
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
+    f.flow ? eq(orders.flowId, f.flow) : undefined,
     f.status === 'declined'
       ? // Orders declined before `declined` existed were stored as cancelled (see `orderStatus`).
         or(eq(orders.status, 'declined'), inArray(orders.id, declinedIds()))
@@ -280,6 +283,21 @@ export async function publishedFlows() {
     .from(flows)
     .where(sql`${flows.publishedVersion} is not null`)
     .orderBy(flows.name);
+}
+
+/** Orders still running (queued, running or waiting) per flow and version, for the flows list. */
+export async function runningByFlow(): Promise<Record<string, Record<number, number>>> {
+  const rows = await db()
+    .select({ flowId: orders.flowId, version: orders.flowVersion, n: sql<number>`count(*)` })
+    .from(orders)
+    .where(inArray(orders.status, ['queued', 'running', 'waiting']))
+    .groupBy(orders.flowId, orders.flowVersion);
+  const out: Record<string, Record<number, number>> = {};
+  for (const r of rows) {
+    out[r.flowId] ??= {};
+    out[r.flowId]![r.version] = r.n;
+  }
+  return out;
 }
 
 /** Each published flow with the graph orders on it will run, for the new-order form. */
