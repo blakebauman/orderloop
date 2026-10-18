@@ -147,7 +147,7 @@ export const NODE_SPECS = [
         label: 'Price books and volume tiers',
         kind: 'boolean',
         default: true,
-        hint: 'Use the price-book and volume entries in the back office',
+        hint: 'Use the price-book and volume entries on the Commerce page',
       },
       {
         key: 'basis',

@@ -26,7 +26,7 @@ import { engine } from '~/lib/env.server';
 import { eventAction, eventWaiting } from '~/lib/events';
 import { count, humanize, money, orderRef, plural } from '~/lib/format';
 import {
-  backOffice,
+  commerceData,
   customerNames,
   publishedFlows,
   recentInboundEmails,
@@ -36,9 +36,9 @@ import { RECORD_KINDS, type RecordKind, type RecordRow, recordTone } from '~/lib
 import { recentRecords } from '~/lib/records.server';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
-import type { Route } from './+types/back-office';
+import type { Route } from './+types/commerce';
 
-export const meta = () => [{ title: 'Back office · OrderLoop' }];
+export const meta = () => [{ title: 'Commerce · OrderLoop' }];
 
 /** Waiting orders whose live state the page reads, newest first. */
 const CHECKED = 20;
@@ -47,7 +47,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
   const [office, waiting, emails, configured, flows, records] = await Promise.all([
-    backOffice(),
+    commerceData(),
     waitingOrders(),
     recentInboundEmails(),
     // The engine owns INTAKE_MAILBOXES; ask it rather than assume the defaults.
@@ -119,11 +119,11 @@ export function shouldRevalidate({
 }
 
 type EventItem = Awaited<ReturnType<typeof loader>>['events'][number];
-type Office = Awaited<ReturnType<typeof backOffice>>;
+type Office = Awaited<ReturnType<typeof commerceData>>;
 
 const eventKey = (e: Pick<EventItem, 'orderId' | 'nodeId'>) => `${e.orderId}-${e.nodeId}`;
 
-export default function BackOffice() {
+export default function Commerce() {
   const {
     products: allProducts,
     customers: allCustomers,
@@ -166,7 +166,7 @@ export default function BackOffice() {
   return (
     <>
       <PageHeader
-        title="Back office"
+        title="Commerce"
         subtitle="Orders waiting on the outside world, what orders have done (payments, shipments, stock held, messages), and the stock, prices, customers and sellers the commerce steps work against."
         actions={
           canOperate ? (
@@ -215,7 +215,7 @@ export default function BackOffice() {
             Find
           </Button>
           {q ? (
-            <Link to="/back-office" className="text-link text-sm hover:underline">
+            <Link to="/commerce" className="text-link text-sm hover:underline">
               Clear
             </Link>
           ) : null}
@@ -619,7 +619,7 @@ export default function BackOffice() {
                   <tr key={s.id}>
                     <td className="px-4 py-1.5">
                       <Link
-                        to={`/back-office?q=${encodeURIComponent(s.name)}#records`}
+                        to={`/commerce?q=${encodeURIComponent(s.name)}#records`}
                         className={cn('hover:underline', !s.active && 'text-muted-foreground')}
                         title={`Seller orders and payouts for ${s.name}`}
                       >
@@ -657,7 +657,7 @@ function Held({ sku, n }: { sku: string; n: number }) {
   if (!n) return <>{count(0)}</>;
   return (
     <Link
-      to={`/back-office?q=${encodeURIComponent(sku)}&records=holds#records`}
+      to={`/commerce?q=${encodeURIComponent(sku)}&records=holds#records`}
       className="text-link hover:underline"
       aria-label={`${count(n)} reserved: see the orders holding ${sku}`}
     >

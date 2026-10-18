@@ -5,7 +5,7 @@ import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import type { Route } from './+types/order-action';
 
-/** Form posts from pages without a live agent connection (approvals inbox, back office). */
+/** Form posts from pages without a live agent connection (approvals inbox, Commerce). */
 export async function action({ request, params }: Route.ActionArgs) {
   const f = await request.formData();
   const intent = String(f.get('intent'));
@@ -44,7 +44,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
     if (intent === 'event') {
       const event = String(f.get('event'));
-      const res = await engine().sendEvent(params.orderId, event, { source: 'back-office' });
+      const res = await engine().sendEvent(params.orderId, event, { source: 'commerce' });
       if (res.delivered) await record('order.event_delivered', { event, nodeId: res.nodeId });
       return { ok: true, ...res };
     }

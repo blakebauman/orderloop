@@ -51,7 +51,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 
 | Path | Role |
 |---|---|
-| `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, assistant), live order view, approvals inbox, back office, REST API. React Router on Workers |
+| `apps/web` (`@orderloop/web`) | Dashboard, flow editor (palette, canvas, inspector, assistant), live order view, approvals inbox, Commerce page, REST API. React Router on Workers |
 | `apps/engine` (`@orderloop/engine`) | OrderAgent and AssistantAgent DOs, OrderLoop and Replenish Workflows, node executors, connectors, AI, `EngineApi` RPC |
 | `apps/docs` (`@orderloop/docs`) | Documentation site (Starlight), deployed as a static-assets Worker. Reference pages render from `@orderloop/core` at build time |
 | `packages/core` (`@orderloop/core`) | No bindings: flow schema, node catalog, planner and validation, layout, JSON Logic expressions, templates, RPC contract |
@@ -145,7 +145,7 @@ Two channels connect without producing that payload themselves:
 
 ### Email intake
 
-Send an order, order form or purchase order to `orders@orderloop.app` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Back office page lists every message received with its outcome. Who may send is covered in the [Email intake guide](https://docs.orderloop.app/guides/email-intake/); setting up Email Routing for your own domain is in [docs/deploy.md](docs/deploy.md).
+Send an order, order form or purchase order to `orders@orderloop.app` (or `po@`, or `purchasing@` for purchase requests) from a customer's address. The sender gets an acknowledgement with the order reference, and the Commerce page lists every message received with its outcome. Who may send is covered in the [Email intake guide](https://docs.orderloop.app/guides/email-intake/); setting up Email Routing for your own domain is in [docs/deploy.md](docs/deploy.md).
 
 ## Docs
 

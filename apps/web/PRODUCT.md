@@ -23,7 +23,7 @@ Flows are data: an order pins an immutable flow version, and the live order view
 
 ## Operating Context
 
-- The surfaces are the dashboard, the orders list and live order page, the approvals inbox, flows and the flow editor (palette, canvas, inspector, copilot), the back office (mock inventory and store stock, customers, marketplace sellers, pricing, payments, shipping, documents, outbox), the team page and the account page.
+- The surfaces are the dashboard, the orders list and live order page, the approvals inbox, flows and the flow editor (palette, canvas, inspector, copilot), the Commerce page (the mock back office: inventory and store stock, customers, marketplace sellers, pricing, payments, shipping, documents, outbox), the team page and the account page.
 - Orders arrive from the dashboard, the REST API, signed inbound orders from storefronts, marketplaces and POS systems (`POST /api/v1/webhooks/orders`), and inbound email (`orders@`, `po@`, `purchasing@`). Each order has a commerce model and a channel.
 - Live order state syncs over a WebSocket from each order's agent. Actions (approve, reject, deliver event, cancel, chat) travel on the same socket.
 - AI exists today in two places. The **flow-editor copilot** drafts or edits a flow graph from a prompt and returns an explanation plus validation issues. The **per-order Chat tab** answers from order state through tools and prepares approve, reject and cancel actions, which a person confirms on the order page with the usual undo window.

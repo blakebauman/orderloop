@@ -99,13 +99,13 @@ waiting.
   records it by hand, such as **Mark as collected** for `pickup.collected` or **Record payment** for
   `payment.received` (payload `{ "source": "dashboard", "amount": <order total> }`). The event name
   and the API endpoint are under **For developers**.
-- **Back office**: lists the events the 20 most recently updated waiting orders wait for, with each
+- **Commerce page**: lists the events the 20 most recently updated waiting orders wait for, with each
   order's customer and total, and the same button as the order page. Nothing is sent for five
   seconds, so **Undo** takes it back; leaving the page sends it at once. The payload is
-  `{ "source": "back-office" }`. Seller responses on a marketplace order are recorded per seller on
+  `{ "source": "commerce" }`. Seller responses on a marketplace order are recorded per seller on
   the order page.
 
-The back office's **Records** section shows what orders have done outside the flow, newest first:
+The Commerce page's **Records** section shows what orders have done outside the flow, newest first:
 money (payments, invoices and seller payouts), shipments, stock holds, seller orders, messages sent
 and documents. Each row names its order and, for connector writes, the step that wrote it
 (`capture#1`): a retried step finds that same record rather than writing another. The search box at

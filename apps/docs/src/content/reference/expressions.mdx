@@ -137,7 +137,7 @@ problem in its summary and output, including a missing or free-text ship-to.
 [Price lines](/reference/nodes/#commerce.price) prices each line through the workspace's chain of
 price sources, in priority order. The default chain is price books (stops when one matches),
 contract prices (stops) and volume tiers (keeps going), with the product's list price as the
-fallback. The back office shows the chain in order; your administrator maintains its entries.
+fallback. The Commerce page shows the chain in order; your administrator maintains its entries.
 
 1. For each active source in order, the node finds its entries that match the line and takes the
    lowest price among them, so the deepest volume tier wins.
@@ -173,7 +173,7 @@ already in the order's currency. Totals carry `baseTotal`, the total in USD.
 - `order.total` in an expression is in the order's currency; use `order.baseTotal` for a threshold
   that should hold across currencies. Policy rule amounts compare `order.total`.
 
-The back office lists the workspace's rates; your administrator keeps them current.
+The Commerce page lists the workspace's rates; your administrator keeps them current.
 
 ## Durations
 

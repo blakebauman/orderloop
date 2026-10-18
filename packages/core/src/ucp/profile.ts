@@ -69,7 +69,7 @@ export function readUcpSettings(raw: string | null | undefined): UcpSettings {
   }
 }
 
-/** The order's page for its buyer: the configured template, else the back office's. */
+/** The order's page for its buyer: the configured template, else the app's. */
 export const orderPermalink = (s: UcpSettings, origin: string, orderId: string) =>
   s.orderUrl
     ? s.orderUrl.replace('{id}', encodeURIComponent(orderId))

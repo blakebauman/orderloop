@@ -24,7 +24,7 @@ import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { count, humanize } from '~/lib/format';
 import { addOne, describeIssues, parseLines, summarizeFlow } from '~/lib/new-order';
-import { backOffice, currencies, demoAvailable, publishedFlowGraphs } from '~/lib/orders.server';
+import { commerceData, currencies, demoAvailable, publishedFlowGraphs } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
@@ -35,7 +35,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   await ensureSeeded();
   const [flows, office, demo] = await Promise.all([
     publishedFlowGraphs(),
-    backOffice(),
+    commerceData(),
     demoAvailable(),
   ]);
   // "Edit first" on the scenarios page: the scenario's order without its simulated failure.
@@ -84,7 +84,7 @@ export async function action({ request }: Route.ActionArgs) {
       'flowId',
     );
 
-  const office = await backOffice();
+  const office = await commerceData();
   const parsed = parseLines(str('lines'), new Set(office.products.map((p) => p.sku)));
   if (parsed.issues.length)
     return fail(

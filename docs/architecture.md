@@ -29,7 +29,7 @@ inbound mail ── Email Routing ──email()───────────
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
-| `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, back office, `/api/v1` |
+| `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, Commerce page, `/api/v1` |
 | `apps/docs` (`@orderloop/docs`) | This site |
 
 `packages/core` is pure TypeScript so its semantics can be unit tested in Node: anything that needs
@@ -49,7 +49,7 @@ inbound mail ── Email Routing ──email()───────────
 | `cancel(orderId, reason)` | Terminates the Workflow and compensates; returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `finished`) |
 | `snapshot(orderId)` | The agent's `OrderState`, or `null` for an unknown order |
 | `copilot(req)` | Edits or creates a flow graph from a prompt |
-| `intakeMailboxes()` | The email intake mailboxes (local part → flow id) from the engine's `INTAKE_MAILBOXES`, for the back office |
+| `intakeMailboxes()` | The email intake mailboxes (local part → flow id) from the engine's `INTAKE_MAILBOXES`, for the Commerce page |
 | `exportDataSubject(email)` | Everything held about the person with that email (`subjects.ts`): customer accounts, up to 500 orders with their agent state, messages, intake log rows, documents; see [Personal data](data-model.md#personal-data) |
 | `eraseDataSubject(email)` | Erases that person (100 orders a call, `done` says whether to call again) or returns `{ ok: false, reason: 'active_orders', orders }`. Calls each order's `OrderAgent.erasePersonalData` |
 | `runReplenish()` | Creates a `Replenish` instance now |

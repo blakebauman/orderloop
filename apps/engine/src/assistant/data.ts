@@ -351,7 +351,7 @@ export async function findProducts(env: Env, q?: string, belowReorder?: boolean)
     )
     .orderBy(asc(products.sku))
     .limit(40);
-  return { products: rows, href: '/back-office' };
+  return { products: rows, href: '/commerce' };
 }
 
 export async function listFlows(env: Env) {
@@ -583,7 +583,7 @@ export async function previewAction<T extends ActionTool>(
         const low = (await findProducts(env, undefined, true)).products;
         return {
           title: 'Run the stock review now',
-          href: '/back-office',
+          href: '/commerce',
           consequences: [
             low.length
               ? `Starts a reorder for ${low.length} SKU${low.length === 1 ? '' : 's'} at or below the reorder point: ${low
@@ -681,7 +681,7 @@ export async function runAction<T extends ActionTool>(
         actor: p,
         detail: { instanceId: instance.id, ...trail },
       });
-      return { done: 'Started the stock review', href: '/back-office', instanceId: instance.id };
+      return { done: 'Started the stock review', href: '/commerce', instanceId: instance.id };
     }
   }
   throw new Refused('Unknown action.');

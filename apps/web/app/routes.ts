@@ -24,7 +24,7 @@ export default [
       route('flows', 'routes/flows.tsx'),
       route('flows/:flowId', 'routes/flow-editor.tsx'),
       route('approvals', 'routes/approvals.tsx'),
-      route('back-office', 'routes/back-office.tsx'),
+      route('commerce', 'routes/commerce.tsx'),
       route('team', 'routes/team.tsx'),
       route('audit', 'routes/audit.tsx'),
       route('account', 'routes/account.tsx'),

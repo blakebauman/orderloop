@@ -631,7 +631,7 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
       <p className="mt-2 text-muted-foreground text-xs">
         The new order runs on the flow’s current version; this one stays as it is, for the record.
         To see what blocked it,{' '}
-        <Link to="/back-office" className="text-link hover:underline">
+        <Link to="/commerce" className="text-link hover:underline">
           check stock and credit
         </Link>
         .
