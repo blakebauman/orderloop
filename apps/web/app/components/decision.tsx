@@ -27,35 +27,58 @@ export const lockAt = (deadline: number) => deadline - LOCK_LEAD_MS;
 
 export type Decision = 'approved' | 'rejected';
 
-/** The reason, the figures behind it, and the escalation clock. */
-export function DecisionContext({ ctx, className }: { ctx: ApprovalContext; className?: string }) {
-  const now = useNow(ctx.deadline ? 1000 : null);
+/**
+ * Why a person is asked, the figures behind it, what the order is for, the approvals before this
+ * one, and the escalation clock.
+ */
+export function DecisionContext({
+  ctx,
+  className,
+  clock = true,
+}: {
+  ctx: ApprovalContext;
+  className?: string;
+  /** Show the escalation clock; off once the approval is no longer open. */
+  clock?: boolean;
+}) {
+  const now = useNow(clock && ctx.deadline ? 1000 : null);
   const formatTime = useDateTime();
-  if (!ctx.reason && !ctx.facts.length && !ctx.deadline) return null;
+  const ticking = clock && ctx.deadline !== undefined && lockAt(ctx.deadline) > now;
+  if (!ctx.reason && !ctx.facts.length && !ctx.lines && !ctx.trail.length && !ticking) return null;
   return (
-    <div className={cn('text-sm', className)}>
+    <div className={cn('space-y-0.5 text-sm', className)}>
       {ctx.reason ? <p className="font-medium text-foreground">{ctx.reason}</p> : null}
-      {ctx.facts.length || ctx.deadline ? (
-        <p className="mt-0.5 text-muted-foreground text-xs tabular">
+      {ctx.facts.length ? (
+        <p className="max-w-[72ch] text-muted-foreground text-xs tabular">
           {ctx.facts.join(' · ')}
-          {/* The clock counts to when decisions close, the moment that matters to the person
-              deciding; once closed, the controls say what happens next. */}
-          {ctx.deadline && lockAt(ctx.deadline) > now ? (
-            <>
-              {ctx.facts.length ? ' · ' : ''}
-              <span
-                className={cn(ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait')}
-                title={formatTime(ctx.deadline)}
-                suppressHydrationWarning
-              >
-                {lockAt(ctx.deadline) - now <= WARN_MS
-                  ? `Decisions close ${until(lockAt(ctx.deadline), now)}${ctx.onTimeout ? `, then ${ctx.onTimeout}` : ''}`
-                  : ctx.onTimeout
-                    ? `If no one decides ${until(lockAt(ctx.deadline), now)}: ${ctx.onTimeout}`
-                    : `Times out ${until(lockAt(ctx.deadline), now)}`}
-              </span>
-            </>
-          ) : null}
+        </p>
+      ) : null}
+      {ctx.lines ? (
+        <p className="max-w-[72ch] truncate text-muted-foreground text-xs" title={ctx.lines}>
+          For {ctx.lines}
+        </p>
+      ) : null}
+      {ctx.trail.length ? (
+        <p className="max-w-[72ch] text-muted-foreground text-xs">
+          Before this: {ctx.trail.join(', then ')}
+        </p>
+      ) : null}
+      {/* The clock counts to when decisions close, the moment that matters to the person deciding;
+          once closed, the controls say what happens next. */}
+      {ticking && ctx.deadline ? (
+        <p
+          className={cn(
+            'text-muted-foreground text-xs',
+            ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait',
+          )}
+          title={formatTime(ctx.deadline)}
+          suppressHydrationWarning
+        >
+          {lockAt(ctx.deadline) - now <= WARN_MS
+            ? `Decisions close ${until(lockAt(ctx.deadline), now)}${ctx.onTimeout ? `, then it goes to ${ctx.onTimeout}` : ''}`
+            : ctx.onTimeout
+              ? `If no one decides ${until(lockAt(ctx.deadline), now)}, it goes to ${ctx.onTimeout}`
+              : `Times out ${until(lockAt(ctx.deadline), now)}`}
         </p>
       ) : null}
     </div>
@@ -72,6 +95,7 @@ export function DecisionControls({
   shortcuts,
   onPendingChange,
   onFlush,
+  label,
   defaultNote = '',
 }: {
   onDecide: (decision: Decision, note: string) => void;
@@ -92,6 +116,8 @@ export function DecisionControls({
    * left). It must survive navigation, so use `sendDecision` rather than page-bound transports.
    */
   onFlush?: (decision: Decision, note: string) => void;
+  /** What the buttons decide, for their accessible names, e.g. "#agszfp, $9,760.00". */
+  label?: string;
   defaultNote?: string;
 }) {
   const [note, setNote] = useState(defaultNote);
@@ -252,6 +278,7 @@ export function DecisionControls({
         setNote={setNote}
         disabled={disabled || locked}
         decide={decide}
+        label={label}
       />
     </div>
   );
@@ -264,6 +291,7 @@ function DecisionForm({
   setNote,
   disabled,
   decide,
+  label,
 }: {
   compact?: boolean;
   noteId: string;
@@ -271,6 +299,7 @@ function DecisionForm({
   setNote: (note: string) => void;
   disabled?: boolean;
   decide: (decision: Decision) => void;
+  label?: string;
 }) {
   return (
     <div className={cn('flex flex-wrap items-center gap-2', compact && 'sm:flex-nowrap')}>
@@ -286,11 +315,24 @@ function DecisionForm({
         disabled={disabled}
       />
       <div className="flex gap-2">
-        <Button size="sm" disabled={disabled} onClick={() => decide('approved')}>
-          <Check /> Approve
+        <Button
+          size="sm"
+          disabled={disabled}
+          onClick={() => decide('approved')}
+          aria-label={label ? `Approve ${label}` : undefined}
+          aria-keyshortcuts="A"
+        >
+          <Check aria-hidden="true" /> Approve
         </Button>
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => decide('rejected')}>
-          <X /> Reject
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => decide('rejected')}
+          aria-label={label ? `Reject ${label}` : undefined}
+          aria-keyshortcuts="R"
+        >
+          <X aria-hidden="true" /> Reject
         </Button>
       </div>
     </div>

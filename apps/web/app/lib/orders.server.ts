@@ -148,6 +148,8 @@ export async function listApprovals(status = 'pending') {
       currency: orders.currency,
       customerId: orders.customerId,
       customerName: customers.name,
+      fxRate: orders.fxRate,
+      startedBy: orders.startedBy,
     })
     .from(approvals)
     .leftJoin(orders, eq(orders.id, approvals.orderId))

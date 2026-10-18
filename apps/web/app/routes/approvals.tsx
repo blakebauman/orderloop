@@ -1,4 +1,11 @@
-import { ORDER_MODEL_LABELS, type OrderModel, type OrderState } from '@orderloop/core';
+import {
+  BASE_CURRENCY,
+  ORDER_MODEL_LABELS,
+  type OrderModel,
+  type OrderState,
+  ownOrderRefusal,
+  toBase,
+} from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -12,6 +19,7 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { humanize, money, orderRef, outcomeLabel } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
+import { approvalSeparation } from '~/lib/settings.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/approvals';
 
@@ -19,24 +27,44 @@ export const meta = () => [{ title: 'Approvals · OrderLoop' }];
 
 const FILTERS = ['pending', 'approved', 'rejected', 'escalated', 'all'] as const;
 
+/** Orders whose live state is read for context, pending ones first. */
+const CONTEXT_ORDERS = 60;
+
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const me = await requireUser(request);
   const status = new URL(request.url).searchParams.get('status') ?? 'pending';
-  const rows = await listApprovals(status);
-  // Pending rows carry the reason and escalation clock from each order's live state.
-  const open = rows.filter((r) => r.status === 'pending').slice(0, 25);
-  const states = await Promise.all(
-    open.map((r) =>
-      engine()
-        .snapshot(r.orderId)
-        .catch(() => null),
+  const [rows, separate] = await Promise.all([listApprovals(status), approvalSeparation()]);
+  // Each row carries the reason, figures and escalation clock from its order's live state; the
+  // pending queue comes first, then decided rows, so history says what it was about too.
+  const ids = [
+    ...new Set(
+      [...rows]
+        .sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
+        .map((r) => r.orderId),
+    ),
+  ].slice(0, CONTEXT_ORDERS);
+  const states = new Map(
+    await Promise.all(
+      ids.map(
+        async (id) =>
+          [
+            id,
+            (await engine()
+              .snapshot(id)
+              .catch(() => null)) as OrderState | null,
+          ] as const,
+      ),
     ),
   );
   const context: Record<string, ApprovalContext> = {};
-  open.forEach((r, i) => {
-    const s = states[i] as OrderState | null;
+  // Said before anyone acts, not after the undo window: who may not decide which rows.
+  const refused: Record<string, string> = {};
+  for (const r of rows) {
+    const s = states.get(r.orderId);
     if (s) context[r.id] = approvalContext(s, r.nodeId);
-  });
+    const why = r.status === 'pending' ? ownOrderRefusal(separate, r.startedBy, me.id) : null;
+    if (why) refused[r.id] = why;
+  }
   // Most urgent first: the soonest escalation, then the oldest request.
   if (status === 'pending')
     rows.sort(
@@ -44,10 +72,11 @@ export async function loader({ request }: Route.LoaderArgs) {
         (context[a.id]?.deadline ?? Number.POSITIVE_INFINITY) -
           (context[b.id]?.deadline ?? Number.POSITIVE_INFINITY) || a.requestedAt - b.requestedAt,
     );
-  return { status, rows, context };
+  // Who started each order stays on the server; the page only needs `refused`.
+  return { status, rows: rows.map(({ startedBy: _, ...r }) => r), context, refused };
 }
 
-type Item = Awaited<ReturnType<typeof listApprovals>>[number];
+type Item = Omit<Awaited<ReturnType<typeof listApprovals>>[number], 'startedBy'>;
 type Shown = { r: Item; gone?: number };
 
 /**
@@ -73,14 +102,26 @@ function useStableRows(rows: Item[], status: string) {
         })
         .filter((p) => !p.gone || now - p.gone < 60_000);
       const known = new Set(prev.map((p) => p.r.id));
-      return [...kept, ...rows.filter((r) => !known.has(r.id)).map((r) => ({ r }))];
+      const added = rows.filter((r) => !known.has(r.id));
+      // The next approval on the same order (an escalation, or the next sign-off) takes the place
+      // of the one it follows, so an order is never listed twice.
+      const placed = kept.map((p) => {
+        if (!p.gone) return p;
+        const next = added.find((r) => r.orderId === p.r.orderId);
+        if (!next) return p;
+        added.splice(added.indexOf(next), 1);
+        return { r: next };
+      });
+      return [...placed, ...added.map((r) => ({ r }))];
     });
   }, [rows, status]);
   return shown;
 }
 
 export default function Approvals() {
-  const { rows, status, context } = useLoaderData<typeof loader>();
+  const { rows, status, context, refused } = useLoaderData<typeof loader>();
+  const canApprove = useCan('approver');
+  const anyOpen = rows.some((r) => r.status === 'pending' && !refused[r.id]);
   const shown = useStableRows(rows, status);
   // J or K from anywhere on the page (outside fields) starts the keyboard path at the first row.
   useEffect(() => {
@@ -88,7 +129,8 @@ export default function Approvals() {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k') return;
       const el = document.activeElement;
-      if (el && el !== document.body && !el.closest('header, nav')) return;
+      // Clicking the page focuses <main> (it takes focus for the skip link); that counts as the page.
+      if (el && el !== document.body && el.tagName !== 'MAIN' && !el.closest('header, nav')) return;
       const first = document.querySelector<HTMLElement>('main li[tabindex="0"]');
       if (first) {
         e.preventDefault();
@@ -126,7 +168,7 @@ export default function Approvals() {
                 aria-pressed={status === s}
                 onClick={() => setParams({ status: s })}
                 className={cn(
-                  'rounded-[4px] px-2.5 py-2 sm:py-1',
+                  'min-h-8 rounded-[4px] px-2.5 py-1.5',
                   status === s
                     ? 'bg-primary font-medium text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -141,11 +183,16 @@ export default function Approvals() {
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
         {shown.length ? (
           <>
-            {status === 'pending' ? (
+            {anyOpen && !canApprove ? (
+              <p className="mb-3 text-muted-foreground text-sm">
+                You can see what is waiting; people with the approver role decide.
+              </p>
+            ) : anyOpen ? (
               <p className="mb-3 hidden text-muted-foreground text-xs sm:block">
-                Keyboard: <kbd className="font-mono">J</kbd>/<kbd className="font-mono">K</kbd> move
-                between rows, <kbd className="font-mono">A</kbd> approve,{' '}
-                <kbd className="font-mono">R</kbd> reject, <kbd className="font-mono">Z</kbd> undo.
+                Keyboard: <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd>{' '}
+                move between rows, <kbd className="font-mono">A</kbd> approves,{' '}
+                <kbd className="font-mono">R</kbd> rejects, <kbd className="font-mono">Z</kbd>{' '}
+                undoes.
               </p>
             ) : null}
             {/* J / K (or arrows) move between open rows; the rows themselves take A / R / Z. */}
@@ -171,6 +218,7 @@ export default function Approvals() {
                   key={r.id}
                   r={r}
                   ctx={context[r.id] ?? undefined}
+                  refused={refused[r.id]}
                   onHold={hold}
                   gone={!!gone}
                 />
@@ -196,7 +244,7 @@ export default function Approvals() {
                 ? 'Nothing is waiting on a decision.'
                 : status === 'all'
                   ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
-                  : `No ${status} approvals.`}
+                  : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
             </Empty>
           </div>
         )}
@@ -208,11 +256,14 @@ export default function Approvals() {
 function Row({
   r,
   ctx: liveCtx,
+  refused,
   onHold,
   gone,
 }: {
   r: Item;
   ctx?: ApprovalContext;
+  /** Why this person may not decide it (separation of duties), said before they try. */
+  refused?: string;
   onHold: (on: boolean) => void;
   /** No longer in the pending queue (escalated or decided elsewhere); kept in place briefly. */
   gone?: boolean;
@@ -227,15 +278,27 @@ function Row({
   if (liveCtx) seen.current = liveCtx;
   const ctx = seen.current;
   const decided = fetcher.data?.ok;
+  const [made, setMade] = useState<'approved' | 'rejected' | null>(null);
   const open = r.status === 'pending' && !decided && !gone;
   const orderName =
     r.orderTitle || (r.orderModel ? ORDER_MODEL_LABELS[r.orderModel as OrderModel] : '');
+  const amount = money(r.amount, r.currency ?? undefined);
+  const inBase =
+    r.currency && r.currency !== BASE_CURRENCY && r.amount !== null
+      ? money(toBase(r.amount, r.fxRate ?? 1), BASE_CURRENCY)
+      : null;
+  // A refused decision comes back after focus moved on: bring it back to the row that says why.
+  const error = fetcher.data?.error;
+  useEffect(() => {
+    if (error) ref.current?.focus();
+  }, [error]);
   return (
     <li
       ref={ref}
       tabIndex={open || gone ? 0 : undefined}
       aria-labelledby={titleId}
       aria-describedby={ctx?.reason ? reasonId : undefined}
+      aria-keyshortcuts={open && !refused ? 'A R Z' : undefined}
       className={cn(
         'grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
         gone && 'bg-muted/40',
@@ -252,40 +315,49 @@ function Row({
           <span className="text-muted-foreground text-sm">
             {r.customerName ?? r.customerId ?? 'No customer'}
           </span>
-          <span className="ml-auto font-semibold tabular sm:hidden">
-            {money(r.amount, r.currency ?? undefined)}
+          {/* In the row's name for screen readers everywhere; shown here on phones only. */}
+          <span className="ml-auto font-semibold tabular sm:sr-only">
+            {amount}
+            {inBase ? <span className="font-normal text-muted-foreground"> ({inBase})</span> : null}
           </span>
         </div>
-        {open && ctx ? (
+        {ctx ? (
           <div id={reasonId}>
-            <DecisionContext ctx={ctx} className="mt-1.5" />
+            <DecisionContext ctx={ctx} clock={open} className="mt-1.5" />
           </div>
-        ) : ctx?.reason ? (
-          <p id={reasonId} className="mt-1.5 text-muted-foreground text-sm">
-            {ctx.reason}
-          </p>
         ) : null}
         <p className="mt-1 text-muted-foreground text-xs">
           {ctx?.step ? `${ctx.step} · ` : ''}
-          for {humanize(r.assignee) || 'anyone'} · requested <Ago ms={r.requestedAt} />
+          assigned to {humanize(r.assignee) || 'any approver'} · requested{' '}
+          <Ago ms={r.requestedAt} />
           {r.status === 'escalated'
-            ? ' · nobody decided in time'
+            ? ` · nobody decided in time${ctx?.onTimeout ? `, so it went to ${ctx.onTimeout}` : ''}`
             : r.decidedBy
               ? ` · ${r.status} by ${r.decidedBy}`
               : ''}
-          {r.note ? ` · “${r.note}”` : ''}
         </p>
-        {fetcher.data?.error ? (
+        {r.note ? (
+          <p className="mt-1 max-w-[72ch] text-sm">
+            <span className="text-muted-foreground">Note: </span>
+            {r.note}
+          </p>
+        ) : null}
+        {error ? (
           <p className="mt-1.5 text-bad text-sm" role="alert">
-            {fetcher.data.error}
+            {error}
           </p>
         ) : null}
       </div>
       <div className="flex flex-col items-start gap-2 sm:items-end">
-        <span className="hidden font-semibold tabular sm:block">
-          {money(r.amount, r.currency ?? undefined)}
+        <span aria-hidden="true" className="hidden text-right font-semibold tabular sm:block">
+          {amount}
+          {inBase ? (
+            <span className="block font-normal text-muted-foreground text-xs">{inBase}</span>
+          ) : null}
         </span>
-        {open && canApprove ? (
+        {open && canApprove && refused ? (
+          <p className="max-w-64 text-muted-foreground text-sm sm:text-right">{refused}</p>
+        ) : open && canApprove ? (
           <DecisionControls
             compact
             deadline={ctx?.deadline}
@@ -294,7 +366,9 @@ function Row({
             onPendingChange={onHold}
             onFlush={(decision, note) => sendDecision(r.orderId, r.nodeId, decision, note)}
             busy={fetcher.state !== 'idle'}
+            label={`${orderRef(r.orderId)}, ${amount}`}
             onDecide={(decision, note) => {
+              setMade(decision);
               // Keep the keyboard flow going: the next open row takes focus.
               if (ref.current?.contains(document.activeElement)) {
                 let next = ref.current.nextElementSibling as HTMLElement | null;
@@ -317,7 +391,8 @@ function Row({
             to={`/orders/${r.orderId}`}
             className="inline-flex items-center gap-1 text-link text-sm hover:underline"
           >
-            Decision recorded, see the order <ArrowRight className="size-3.5" />
+            {made === 'rejected' ? 'Rejected' : 'Approved'}; the order goes on. See it{' '}
+            <ArrowRight className="size-3.5" aria-hidden="true" />
           </Link>
         ) : gone ? (
           <div className="flex flex-col items-start gap-1 sm:items-end" role="status">
@@ -325,7 +400,9 @@ function Row({
               <>
                 <ApprovalBadge status="escalated" />
                 <span className="text-muted-foreground text-xs">
-                  {ctx.onTimeout ? `No decision in time: ${ctx.onTimeout}` : 'No decision in time'}
+                  {ctx.onTimeout
+                    ? `No decision in time; it went to ${ctx.onTimeout}`
+                    : 'No decision in time'}
                 </span>
               </>
             ) : (
