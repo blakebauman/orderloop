@@ -136,6 +136,8 @@ registry file. Compared with a customer's deployment:
   are closed, so the demo can't be pointed at anything outside it.
 - **No spend, fast time.** Models are mocked (`AI_MODE=mock`, no AI Gateway) and waits run 1440×
   faster (`TIME_SCALE`), as in local development.
+- **Failing scenarios.** `SIMULATE_FAILURES` is `"true"`, so the scenarios that fail on purpose do.
+  A customer's deployment leaves it off and drops `meta.simulate` from every order.
 - **Nightly reset.** `.github/workflows/demo-reset.yml` runs at 04:00 UTC (and from the Actions
   tab): it stops the orders still running, applies `packages/db/reset/demo.sql` (everything
   visitors made, the audit log (`demo.sql` drops the `audit_events_keep_90_days` trigger around the delete and recreates it) and the demo visitor's sessions; people, settings, integrations,

@@ -9,7 +9,7 @@ runs them against one of two gateways, which its administrator chooses:
 
 | Gateway | What happens |
 |---|---|
-| Simulated (the default) | Payments are recorded on the order and nothing is charged. `meta.simulate` forces a decline or a failed charge (see [Simulating failures](/guides/templates/#simulating-failures)) |
+| Simulated (the default) | Payments are recorded on the order and nothing is charged. Where simulated failures are allowed, `meta.simulate` forces a decline or a failed charge (see [Simulating failures](/guides/templates/#simulating-failures)) |
 | Stripe | Each node calls Stripe: a hold is a PaymentIntent with manual capture, a capture captures it, a charge is a confirmed PaymentIntent. A workspace switched to Stripe without a Stripe key fails every payment step rather than letting an order ship unpaid |
 
 The rest of this page describes both; where they differ, it says so.

@@ -42,6 +42,8 @@ Without it the dashboard's **Demo scenarios** panel and the `/orders/scenarios` 
 answers 404), and a flow's **Test run** starts an empty order. The New order form always starts blank and
 never sends `meta.simulate`; only a scenario does, from the server's list (`startScenario`,
 `apps/web/app/lib/scenarios.server.ts`), and **Edit first** fills the form from a scenario without it.
+The engine honours `meta.simulate` because dev sets `SIMULATE_FAILURES=true` (`apps/web/vite.config.ts`);
+production leaves it off and drops the field for every caller.
 
 With the demo data loaded, the dashboard lists 15 one-click scenarios, each a real order on a seeded flow: a guest checkout, a B2B purchase order
 read from an email, an order over its credit limit, an out-of-stock order that rolls back, a purchase

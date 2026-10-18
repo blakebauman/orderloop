@@ -297,6 +297,23 @@ describe('B2B order', () => {
     expect(failed.rollback).toEqual({ outcome: 'complete', error: null });
     expect(failed.nodes.reserve!.status).toBe('rolled_back');
   });
+
+  it('drops meta.simulate where the deployment does not allow simulated failures', async () => {
+    await introspect();
+    const { orderId } = await startOrder(
+      { ...env, SIMULATE_FAILURES: '' },
+      {
+        flowId: 'tpl-b2b-order',
+        input: input({
+          model: 'b2b',
+          customerId: 'cus_northwind',
+          lines: [{ sku: 'WID-100', qty: 1 }],
+          meta: { simulate: 'out_of_stock', ref: 'kept' },
+        }),
+      },
+    );
+    expect((await state(orderId)).order!.meta).toEqual({ ref: 'kept' });
+  });
 });
 
 describe('cancel', () => {

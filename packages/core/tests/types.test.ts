@@ -6,7 +6,20 @@ import {
   orderInputSchema,
   TEMPLATES,
   templatesFor,
+  withoutSimulation,
 } from '../src';
+
+describe('withoutSimulation', () => {
+  it('drops meta.simulate and keeps the rest, or returns the input untouched', () => {
+    const plain = { model: 'b2b' as const, meta: { ref: 'x' } };
+    expect(withoutSimulation(plain)).toBe(plain);
+    expect(
+      withoutSimulation({ model: 'b2b' as const, meta: { simulate: 'charge_fail', ref: 'x' } }),
+    ).toEqual(plain);
+    const bare: { model: 'b2b'; meta?: Record<string, unknown> } = { model: 'b2b' };
+    expect(withoutSimulation(bare)).toBe(bare);
+  });
+});
 
 describe('orderInputSchema', () => {
   it('requires a model and defaults the channel', () => {

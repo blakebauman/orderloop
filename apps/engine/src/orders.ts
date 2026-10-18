@@ -8,6 +8,7 @@ import {
   type StartOrderOnceResult,
   type StartOrderResult,
   startFingerprint,
+  withoutSimulation,
 } from '@orderloop/core';
 import { createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -35,10 +36,16 @@ export function startOrderOnce(env: Env, req: StartOrderOnceInput): Promise<Star
 
 async function start(
   env: Env,
-  req: StartOrderInput,
+  asked: StartOrderInput,
   key?: string,
   given?: string,
 ): Promise<StartOrderOnceResult> {
+  // Every way in (the web app, the REST API, inbound orders, email, A2A, UCP) starts here, so a
+  // simulated failure can't reach a deployment that doesn't allow them, whoever asks.
+  const req =
+    String(env.SIMULATE_FAILURES) === 'true'
+      ? asked
+      : { ...asked, input: withoutSimulation(asked.input) };
   const db = createDb(env.DB);
   const fingerprint = key ? (given ?? (await startFingerprint(req))) : null;
   const existing = async () =>
