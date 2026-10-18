@@ -177,7 +177,7 @@ export async function extractOrder(
       required: ['customerName', 'poNumber', 'lines'],
     },
     () => extractHeuristic(text),
-  ).then(({ value, source }) => {
+  ).then(({ value, ...via }) => {
     const { lines, rejected } = boundExtractedLines(
       Array.isArray(value.lines) ? value.lines : [],
       catalog.map((c) => c.sku),
@@ -190,7 +190,7 @@ export async function extractOrder(
         notes: boundText(value.notes, 1000),
         ...(rejected.length ? { rejected } : {}),
       },
-      source,
+      ...via,
     };
   });
 }

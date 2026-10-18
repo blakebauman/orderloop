@@ -211,6 +211,16 @@ code needs the newer schema. Time Travel keeps 30 days; for any other point in t
 `wrangler d1 time-travel info orderloop --timestamp=<RFC3339>` finds its bookmark. Durable Object
 state (live order state, assistant conversations) is not part of D1 and isn't restored.
 
+### AI evals
+
+`.github/workflows/evals.yml` runs the AI evals ([Testing](testing.md#evals)) against the live
+models on Mondays at 06:00 UTC, from the Actions tab (`workflow_dispatch`), and on pull requests
+that touch `apps/engine/src/ai.ts`, `apps/engine/wrangler.jsonc`,
+`apps/engine/evals/**`, or `packages/core/src/` `redact.ts`, `untrusted.ts` or `provenance.ts`. It
+uses the repository's `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` secrets and writes a table
+of every case to the run summary. It is not a required check, by design: a model is not
+deterministic. Run it and read it before changing a `*_MODEL` var or a prompt.
+
 ## The docs site
 
 The public docs, docs.orderloop.app, are `apps/docs` (`@orderloop/docs`), a static Starlight site served by a static-assets

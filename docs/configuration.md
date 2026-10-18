@@ -9,6 +9,8 @@ types: `pnpm --filter @orderloop/engine types` or `pnpm --filter @orderloop/web 
 
 Set in `vars` in `apps/engine/wrangler.jsonc`.
 
+Before changing `AI_MODEL`, `ASSISTANT_MODEL` or `ASSESS_MODEL`, run the [AI evals](testing.md#evals) (`.github/workflows/evals.yml`, or `pnpm --filter @orderloop/engine evals`); they read the models from these vars. They cover `AI_MODEL`'s tasks, not the assistant or Assess.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `AI_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI text model for every structured AI call (JSON mode) |
