@@ -29,7 +29,9 @@ them, and the back office shows them as "Digital, no stock".
 The workspace starts with two stores, both offering pickup and shipping, with coordinates: `loc_soho`
 (40.7233, -74.0030) and `loc_mission` (37.7599, -122.4148). `TEE-01` has no central stock and is stocked at both stores; `MON-27` has central
 stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Stores** table lists
-each store's flags and, per item, its available and on-hand stock.
+each store's flags and, per item, its available, reserved and on-hand stock; **Inventory** is the
+warehouse's, and notes how much of an item out there is still in stores. A reserved count links to
+the orders holding that stock (**Records**, **Stock holds**).
 
 An order names its store in `fulfillment`: `{ method, locationId? }`, where `method` is one of
 <Values of="fulfillment-methods" />. On a flow with a routing step, the **New order** form has a

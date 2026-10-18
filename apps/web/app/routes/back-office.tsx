@@ -5,6 +5,8 @@ import {
   type OrderState,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { Check, Mail, RefreshCw, Zap } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
@@ -15,6 +17,7 @@ import {
   useFetcher,
   useLoaderData,
   useNavigation,
+  useSearchParams,
 } from 'react-router';
 import { Ago, WaitingAt } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
@@ -29,6 +32,8 @@ import {
   recentInboundEmails,
   waitingOrders,
 } from '~/lib/orders.server';
+import { RECORD_KINDS, type RecordKind, type RecordRow, recordTone } from '~/lib/records';
+import { recentRecords } from '~/lib/records.server';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
 import type { Route } from './+types/back-office';
@@ -40,13 +45,15 @@ const CHECKED = 20;
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const [office, waiting, emails, configured, flows] = await Promise.all([
+  const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
+  const [office, waiting, emails, configured, flows, records] = await Promise.all([
     backOffice(),
     waitingOrders(),
     recentInboundEmails(),
     // The engine owns INTAKE_MAILBOXES; ask it rather than assume the defaults.
     engine().intakeMailboxes(),
     publishedFlows(),
+    recentRecords(q),
   ]);
   const host = new URL(request.url).hostname;
   const flowName = new Map(flows.map((f) => [f.id, f.name]));
@@ -82,7 +89,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         };
       }),
   );
-  return { ...office, events, partial: waiting.length > CHECKED, emails, mailboxes };
+  return { ...office, events, partial: waiting.length > CHECKED, emails, mailboxes, records, q };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -91,8 +98,11 @@ export async function action({ request }: Route.ActionArgs) {
     await engine().runReplenish();
     return { started: true as const };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return { started: false as const, error: `Could not start the stock review. ${detail}` };
+    console.error('stock review failed to start', err);
+    return {
+      started: false as const,
+      error: 'Could not start the stock review. Nothing was ordered; try again in a moment.',
+    };
   }
 }
 
@@ -114,27 +124,60 @@ type Office = Awaited<ReturnType<typeof backOffice>>;
 const eventKey = (e: Pick<EventItem, 'orderId' | 'nodeId'>) => `${e.orderId}-${e.nodeId}`;
 
 export default function BackOffice() {
-  const { products, customers, sellers, stores, pricing, events, partial, emails, mailboxes } =
-    useLoaderData<typeof loader>();
+  const {
+    products: allProducts,
+    customers: allCustomers,
+    sellers: allSellers,
+    stores: allStores,
+    pricing,
+    events: allEvents,
+    partial,
+    emails,
+    mailboxes,
+    records,
+    q,
+  } = useLoaderData<typeof loader>();
+  // One search narrows every section; records are searched on the server, the rest here.
+  const term = q.toLowerCase();
+  const has = (...s: (string | null | undefined)[]) =>
+    !term || s.some((x) => x?.toLowerCase().includes(term.replace(/^#/, '')));
+  const events = allEvents.filter((e) => has(e.title, e.customer, e.orderId));
+  const products = allProducts.filter((p) => has(p.name, p.sku));
+  const customers = allCustomers.filter((c) => has(c.name, c.id));
+  const sellers = allSellers.filter((s) => has(s.name, s.email, s.id));
+  const stores = allStores.map((l) => ({
+    ...l,
+    stock: l.stock.filter((s) =>
+      has(s.sku, allProducts.find((p) => p.sku === s.sku)?.name, l.name),
+    ),
+  }));
+  // What each store holds of each SKU, so the warehouse figure isn't read as the whole picture.
+  const inStores = new Map<string, number>();
+  for (const l of allStores)
+    for (const s of l.stock) inStores.set(s.sku, (inStores.get(s.sku) ?? 0) + s.stock - s.reserved);
   const review = useActionData<typeof action>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
   const [recorded, setRecorded] = useState<ReadonlySet<string>>(new Set());
   const open = events.filter((e) => !recorded.has(eventKey(e))).length;
-  const productName = new Map(products.map((p) => [p.sku, p.name]));
+  const productName = new Map(allProducts.map((p) => [p.sku, p.name]));
   // The stock review is the only form on this page that navigates.
   const reviewing = nav.state === 'submitting';
   return (
     <>
       <PageHeader
         title="Back office"
-        subtitle="Orders waiting on the outside world, and the stock, prices, customers and sellers the commerce steps work against."
+        subtitle="Orders waiting on the outside world, what orders have done (payments, shipments, stock held, messages), and the stock, prices, customers and sellers the commerce steps work against."
         actions={
           canOperate ? (
-            <Form method="post">
+            <Form method="post" className="flex flex-col items-end gap-1">
               <Button type="submit" variant="outline" disabled={reviewing}>
-                <RefreshCw /> {reviewing ? 'Starting review…' : 'Run stock review now'}
+                <RefreshCw aria-hidden="true" />{' '}
+                {reviewing ? 'Starting review…' : 'Run stock review now'}
               </Button>
+              <span className="max-w-64 text-right text-muted-foreground text-xs">
+                Starts a replenishment order for anything at or below its reorder point.
+              </span>
             </Form>
           ) : undefined
         }
@@ -159,14 +202,40 @@ export default function BackOffice() {
             )}
           </p>
         ) : null}
+        <Form method="get" className="mb-3 flex flex-wrap items-center gap-2" role="search">
+          <Input
+            name="q"
+            type="search"
+            defaultValue={q}
+            placeholder="Find an order, customer, SKU or seller"
+            aria-label="Find an order, customer, SKU or seller"
+            className="h-8 w-full sm:w-80"
+          />
+          <Button type="submit" size="sm" variant="outline">
+            Find
+          </Button>
+          {q ? (
+            <Link to="/back-office" className="text-link text-sm hover:underline">
+              Clear
+            </Link>
+          ) : null}
+          {q ? (
+            <p className="w-full text-muted-foreground text-xs" role="status">
+              Every section shows only what matches “{q}”.
+            </p>
+          ) : null}
+        </Form>
         <nav aria-label="On this page" className="mb-4 text-sm">
           <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
             {[
               ['#outside-events', 'Outside events'],
+              ['#records', 'Records'],
               ['#email-intake', 'Email intake'],
-              ['#stock', 'Stock'],
+              ['#stock', 'Inventory'],
+              ['#stores', 'Stores'],
               ['#pricing', 'Pricing'],
-              ['#customers', 'Customers and sellers'],
+              ['#customers', 'Customers'],
+              ['#sellers', 'Marketplace sellers'],
             ].map(([href, label]) => (
               <li key={href}>
                 <a href={href} className="inline-block py-1 text-link hover:underline">
@@ -203,7 +272,9 @@ export default function BackOffice() {
             </ul>
           ) : (
             <Empty>
-              No order is waiting for an outside event, such as a payment or a delivery.
+              {q
+                ? `No order matching “${q}” is waiting for an outside event.`
+                : 'No order is waiting for an outside event, such as a payment or a delivery.'}
             </Empty>
           )}
           {partial ? (
@@ -216,6 +287,7 @@ export default function BackOffice() {
             </p>
           ) : null}
         </Section>
+        <Records records={records} q={q} />
         <Section id="email-intake" title="Email intake" className="xl:col-span-2" flush>
           <div className="flex items-start gap-3 border-b px-4 py-2.5 text-sm">
             <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -241,7 +313,7 @@ export default function BackOffice() {
                   </li>
                 ))}
               </ul>
-              <p className="text-muted-foreground text-xs">
+              <p className="max-w-[75ch] text-muted-foreground text-xs">
                 Mail is accepted from customers’ own addresses, their company domains and senders an
                 administrator has allowed.
               </p>
@@ -255,7 +327,7 @@ export default function BackOffice() {
                   className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm"
                 >
                   <span
-                    className={`w-20 shrink-0 font-medium text-xs uppercase tracking-wide ${
+                    className={`w-20 shrink-0 font-medium text-xs ${
                       e.status === 'accepted'
                         ? 'text-ok'
                         : e.status === 'duplicate'
@@ -263,7 +335,7 @@ export default function BackOffice() {
                           : 'text-bad'
                     }`}
                   >
-                    {e.status}
+                    {humanize(e.status)}
                   </span>
                   <span className="min-w-0 flex-1 basis-56">
                     <span className="font-medium">{e.subject || '(no subject)'}</span>{' '}
@@ -296,6 +368,10 @@ export default function BackOffice() {
           )}
         </Section>
         <Section id="stock" title="Inventory" flush>
+          <p className="border-b px-4 py-2 text-muted-foreground text-xs">
+            Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from
+            the store. Reserved stock is held by running orders.
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b text-left">
@@ -323,7 +399,7 @@ export default function BackOffice() {
                   // The stock review reorders anything at or below its reorder point.
                   const level = available <= 0 ? 'Out' : available <= p.reorderPoint ? 'Low' : null;
                   return (
-                    <tr key={p.sku}>
+                    <tr key={p.sku} id={`sku-${p.sku}`} className="scroll-mt-20 target:bg-muted/60">
                       <td className="px-4 py-1.5">
                         {p.name}
                         <span className="ml-1.5 font-mono text-muted-foreground text-xs">
@@ -346,13 +422,23 @@ export default function BackOffice() {
                             }`}
                           >
                             {count(available)}
-                            {level ? <span className="ml-1.5 text-xs">{level}</span> : null}
+                            {level ? (
+                              <span className="ml-1.5 text-xs">
+                                {level === 'Out' ? 'out' : 'low'}
+                                <span className="sr-only"> stock</span>
+                              </span>
+                            ) : null}
+                            {level === 'Out' && inStores.get(p.sku) ? (
+                              <span className="block font-normal text-muted-foreground text-xs">
+                                {count(inStores.get(p.sku) ?? 0)} in stores
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-2 py-1.5 text-right text-muted-foreground tabular">
-                            {count(p.reserved)}
+                            <Held sku={p.sku} n={p.reserved} />
                           </td>
                           <td className="px-2 py-1.5 text-right text-muted-foreground tabular">
-                            {count(p.reorderPoint)}
+                            {p.reorderPoint ? count(p.reorderPoint) : 'Not reordered'}
                           </td>
                         </>
                       )}
@@ -360,11 +446,18 @@ export default function BackOffice() {
                     </tr>
                   );
                 })}
+                {q && !products.length ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-3 text-muted-foreground text-xs">
+                      Nothing here matches “{q}”.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </Section>
-        <Section title="Stores" flush>
+        <Section id="stores" title="Stores" flush>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b text-left">
@@ -375,6 +468,9 @@ export default function BackOffice() {
                   <th scope="col" className="caption px-2 py-2 text-right font-medium">
                     Available
                   </th>
+                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
+                    Reserved
+                  </th>
                   <th scope="col" className="caption px-4 py-2 text-right font-medium">
                     On hand
                   </th>
@@ -383,7 +479,7 @@ export default function BackOffice() {
               {stores.map((l) => (
                 <tbody key={l.id} className="border-b last:border-b-0 [&>tr:last-child>td]:pb-2.5">
                   <tr>
-                    <th scope="rowgroup" colSpan={3} className="px-4 pt-2 pb-0.5 text-left">
+                    <th scope="rowgroup" colSpan={4} className="px-4 pt-2 pb-0.5 text-left">
                       <span className="font-medium">{l.name}</span>
                       <span className="ml-2 font-normal text-muted-foreground text-xs">
                         {[l.pickup ? 'Pickup' : null, l.ships ? 'Ships orders' : null]
@@ -397,12 +493,18 @@ export default function BackOffice() {
                       <tr key={s.sku}>
                         <td className="py-1 pr-2 pl-8">
                           {productName.get(s.sku) ?? s.sku}
-                          <span className="ml-1.5 font-mono text-muted-foreground text-xs">
+                          <a
+                            href={`#sku-${s.sku}`}
+                            className="ml-1.5 font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
+                          >
                             {s.sku}
-                          </span>
+                          </a>
                         </td>
                         <td className="px-2 py-1 text-right tabular">
                           {count(s.stock - s.reserved)}
+                        </td>
+                        <td className="px-2 py-1 text-right text-muted-foreground tabular">
+                          <Held sku={s.sku} n={s.reserved} />
                         </td>
                         <td className="px-4 py-1 text-right text-muted-foreground tabular">
                           {count(s.stock)}
@@ -411,8 +513,8 @@ export default function BackOffice() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={3} className="py-1 pr-4 pl-8 text-muted-foreground text-xs">
-                        No stock held here.
+                      <td colSpan={4} className="py-1 pr-4 pl-8 text-muted-foreground text-xs">
+                        {q ? 'Nothing here matches.' : 'No stock held here.'}
                       </td>
                     </tr>
                   )}
@@ -444,10 +546,18 @@ export default function BackOffice() {
               <tbody className="divide-y">
                 {customers.map((c) => {
                   const over = !!c.creditLimit && c.balance > c.creditLimit;
+                  // Close enough that one more order could tip it over.
+                  const near = !over && !!c.creditLimit && c.balance >= c.creditLimit * 0.9;
                   return (
                     <tr key={c.id}>
                       <td className="px-4 py-1.5">
-                        {c.name}
+                        <Link
+                          to={`/orders?q=${encodeURIComponent(c.name)}`}
+                          className="hover:underline"
+                          title={`Orders for ${c.name}`}
+                        >
+                          {c.name}
+                        </Link>
                         <div className="text-muted-foreground text-xs">
                           {humanize(c.kind)}
                           {c.kind === 'business' ? ` · ${humanize(c.tier)}` : ''}
@@ -457,10 +567,15 @@ export default function BackOffice() {
                         {c.kind === 'business' ? humanize(c.terms) : 'Pays at checkout'}
                       </td>
                       <td
-                        className={`whitespace-nowrap px-2 py-1.5 text-right tabular ${over ? 'font-medium text-bad' : ''}`}
+                        className={cn(
+                          'whitespace-nowrap px-2 py-1.5 text-right tabular',
+                          over && 'font-medium text-bad',
+                          near && 'font-medium text-wait',
+                        )}
                       >
                         {money(c.balance)}
                         {over ? <span className="ml-1.5 text-xs">Over limit</span> : null}
+                        {near ? <span className="ml-1.5 text-xs">Near limit</span> : null}
                       </td>
                       <td className="px-4 py-1.5 text-right tabular">
                         {c.creditLimit ? (
@@ -472,11 +587,18 @@ export default function BackOffice() {
                     </tr>
                   );
                 })}
+                {q && !customers.length ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-3 text-muted-foreground text-xs">
+                      Nothing here matches “{q}”.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </Section>
-        <Section title="Marketplace sellers" flush>
+        <Section id="sellers" title="Marketplace sellers" flush>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b text-left">
@@ -496,9 +618,13 @@ export default function BackOffice() {
                 {sellers.map((s) => (
                   <tr key={s.id}>
                     <td className="px-4 py-1.5">
-                      <span className={s.active ? undefined : 'text-muted-foreground'}>
+                      <Link
+                        to={`/back-office?q=${encodeURIComponent(s.name)}#records`}
+                        className={cn('hover:underline', !s.active && 'text-muted-foreground')}
+                        title={`Seller orders and payouts for ${s.name}`}
+                      >
                         {s.name}
-                      </span>
+                      </Link>
                       {s.active ? null : <Off />}
                       <div className="break-all text-muted-foreground text-xs">{s.email}</div>
                     </td>
@@ -510,12 +636,166 @@ export default function BackOffice() {
                     </td>
                   </tr>
                 ))}
+                {q && !sellers.length ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-3 text-muted-foreground text-xs">
+                      Nothing here matches “{q}”.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </Section>
       </div>
     </>
+  );
+}
+
+/** Reserved stock, linked to the orders holding it (Records, Stock holds, for that SKU). */
+function Held({ sku, n }: { sku: string; n: number }) {
+  if (!n) return <>{count(0)}</>;
+  return (
+    <Link
+      to={`/back-office?q=${encodeURIComponent(sku)}&records=holds#records`}
+      className="text-link hover:underline"
+      aria-label={`${count(n)} reserved: see the orders holding ${sku}`}
+    >
+      {count(n)}
+    </Link>
+  );
+}
+
+const TONE_CLASS = {
+  ok: 'text-ok',
+  bad: 'text-bad',
+  undo: 'text-undo',
+  wait: 'text-wait',
+  idle: 'text-muted-foreground',
+} as const;
+
+/**
+ * What orders did to the outside world, by kind, newest first. Each row names its order and the
+ * step that wrote it: every connector write is keyed by its step, so a retry finds the same row.
+ */
+function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: string }) {
+  const [params] = useSearchParams();
+  const asked = RECORD_KINDS.find((k) => k.id === params.get('records'))?.id;
+  // With a search, open the first kind that has anything.
+  const first = RECORD_KINDS.find((k) => records[k.id].length)?.id ?? 'money';
+  const [kind, setKind] = useState<RecordKind>(asked ?? (q ? first : 'money'));
+  useEffect(() => {
+    setKind(asked ?? (q ? first : 'money'));
+  }, [asked, q, first]);
+  const rows = records[kind];
+  const tablistId = useId();
+  return (
+    <Section id="records" title="Records" className="xl:col-span-2" flush>
+      <div
+        role="tablist"
+        aria-label="Kinds of record"
+        id={tablistId}
+        className="flex flex-wrap gap-1 border-b px-3 py-2"
+      >
+        {RECORD_KINDS.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            role="tab"
+            id={`${tablistId}-${k.id}`}
+            aria-selected={kind === k.id}
+            aria-controls={`${tablistId}-panel`}
+            onClick={() => setKind(k.id)}
+            className={cn(
+              'min-h-8 rounded-md px-2.5 py-1 text-[13px]',
+              kind === k.id
+                ? 'bg-primary font-medium text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+          >
+            {k.label}{' '}
+            <span className={cn('tabular', kind === k.id ? 'opacity-80' : 'opacity-70')}>
+              {count(records[k.id].length)}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div id={`${tablistId}-panel`} role="tabpanel" aria-labelledby={`${tablistId}-${kind}`}>
+        {rows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left">
+                <tr>
+                  <th scope="col" className="caption px-4 py-2 font-medium">
+                    Record
+                  </th>
+                  <th scope="col" className="caption px-2 py-2 font-medium">
+                    Order
+                  </th>
+                  <th scope="col" className="caption px-2 py-2 font-medium">
+                    Status
+                  </th>
+                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
+                    Amount
+                  </th>
+                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
+                    When
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((r) => (
+                  <tr key={r.id} className="align-baseline">
+                    <td className="max-w-80 px-4 py-1.5">
+                      <div className="break-words">{r.what}</div>
+                      {r.detail || r.step ? (
+                        <div className="break-words text-muted-foreground text-xs">
+                          {r.detail}
+                          {r.detail && r.step ? ' · ' : ''}
+                          {r.step ? (
+                            <span title="The step that wrote it; a retry finds this same record">
+                              step <span className="font-mono">{r.step}</span>
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="max-w-72 px-2 py-1.5">
+                      <Link to={`/orders/${r.orderId}`} className="hover:underline">
+                        {r.orderTitle || 'Order'}
+                      </Link>{' '}
+                      <span className="font-mono text-muted-foreground text-xs">
+                        ref {r.orderId.slice(-6)}
+                      </span>
+                      {r.customer ? (
+                        <div className="truncate text-muted-foreground text-xs" title={r.customer}>
+                          {r.customer}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className={cn('px-2 py-1.5 text-xs', TONE_CLASS[recordTone(r.status)])}>
+                      {r.status ? humanize(r.status) : '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right tabular">
+                      {r.amount !== null ? money(r.amount, r.currency ?? undefined) : ''}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-1.5 text-right text-muted-foreground text-xs">
+                      <Ago ms={r.at} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty>
+            {q
+              ? `No ${RECORD_KINDS.find((k) => k.id === kind)?.label.toLowerCase()} match “${q}”.`
+              : 'Nothing yet. Orders write these as their steps run.'}
+          </Empty>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -605,7 +885,7 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
         <Link id={titleId} to={`/orders/${e.orderId}`} className="font-medium hover:underline">
           {e.title || 'Order'}{' '}
           <span className="font-mono font-normal text-muted-foreground text-xs">
-            {orderRef(e.orderId)}
+            ref {e.orderId.slice(-6)}
           </span>
         </Link>
         <p id={waitId} className="text-muted-foreground">
@@ -645,8 +925,12 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
             <Check className="size-4" aria-hidden="true" /> Recorded
           </span>
         ) : missed ? null : pendingAt !== null ? (
-          <div className="flex items-center gap-3" aria-live="polite">
-            <span>
+          <div className="flex items-center gap-3">
+            {/* Said once; the ticking number stays out of the live region. */}
+            <span className="sr-only" role="status">
+              {label} in {UNDO_MS / 1000} seconds. Press Undo or Escape to take it back.
+            </span>
+            <span aria-hidden="true">
               {label} in{' '}
               <span className="tabular" suppressHydrationWarning>
                 {Math.max(1, Math.ceil((pendingAt + UNDO_MS - now) / 1000))}s
@@ -723,7 +1007,11 @@ function Pricing({
                 {s.active ? null : <Off />}
                 <span className="text-muted-foreground text-xs">
                   priority {s.priority}
-                  {s.active ? (s.stopProcessing ? ' · stops the chain' : ' · keeps going') : ''}
+                  {s.active
+                    ? s.stopProcessing
+                      ? ' · a match here is the price; later sources are skipped'
+                      : ' · a match here can be adjusted by later sources'
+                    : ''}
                 </span>
               </div>
               {rows.length ? (
@@ -741,16 +1029,10 @@ function Pricing({
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.key}>
-                        <td
-                          className="w-2/5 break-words py-0.5 pr-2 pl-4 align-baseline sm:w-1/2 sm:truncate sm:pl-10"
-                          title={r.name}
-                        >
+                        <td className="w-2/5 break-words py-0.5 pr-2 pl-4 align-baseline sm:w-1/2 sm:pl-10">
                           {r.name}
                         </td>
-                        <td
-                          className="break-words px-2 py-0.5 align-baseline text-muted-foreground text-xs sm:truncate"
-                          title={r.scope}
-                        >
+                        <td className="break-words px-2 py-0.5 align-baseline text-muted-foreground text-xs">
                           {r.scope}
                         </td>
                         <td className="w-24 py-0.5 pr-4 pl-2 text-right align-baseline tabular">
@@ -776,12 +1058,17 @@ function Pricing({
       </ol>
       <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
         <span className="block max-w-[75ch]">
-          Prices are in {BASE_CURRENCY}. Orders in another currency convert at{' '}
+          Prices are in {BASE_CURRENCY}. Orders in another currency convert at the rate below, fixed
+          when the order is priced.
+        </span>
+        <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 tabular">
           {pricing.rates
             .filter((r) => r.currency !== BASE_CURRENCY)
-            .map((r) => `${r.rate} ${r.currency}`)
-            .join(', ')}{' '}
-          per {BASE_CURRENCY}, fixed when the order is priced.
+            .map((r) => (
+              <span key={r.currency}>
+                1 {BASE_CURRENCY} = {r.rate} {r.currency}
+              </span>
+            ))}
         </span>
       </p>
     </Section>
