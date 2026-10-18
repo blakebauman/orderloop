@@ -3,11 +3,12 @@
  * borrowed browser can't switch it off or lock its owner out. Sign-in itself is in `auth.server.ts`.
  */
 
-import type { Principal } from '@orderloop/core';
+import { type Principal, secretContext } from '@orderloop/core';
 import { recoveryCodes, users } from '@orderloop/db';
 import { count, eq } from 'drizzle-orm';
 import { audit } from './audit.server';
 import { reauthenticate } from './auth.server';
+import { sealSecret } from './data-key.server';
 import { db } from './env.server';
 import { clearPasskeys } from './passkeys.server';
 import { twoFactorRequirement } from './settings.server';
@@ -78,7 +79,11 @@ export async function enableTwoFactor(
     );
   await db()
     .update(users)
-    .set({ totpSecret: input.secret, totpEnabledAt: Date.now(), totpLastStep: step })
+    .set({
+      totpSecret: await sealSecret(input.secret, secretContext.totp(user.id)),
+      totpEnabledAt: Date.now(),
+      totpLastStep: step,
+    })
     .where(eq(users.id, user.id));
   const codes = await replaceRecoveryCodes(user.id);
   await audit(request, 'auth.two_factor_enabled', { actor: by, target: user.email });

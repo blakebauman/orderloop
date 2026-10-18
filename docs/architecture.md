@@ -105,6 +105,8 @@ explorer) are generated from the zod schemas the handlers validate with
 (`MAX_EVENT_PAYLOAD_BYTES`, `packages/core/src/api.ts`); the OrderAgent's `deliver`, `decide` and
 `cancel` enforce the same bounds on the live socket as the REST schemas do.
 
+Outbound webhook subscriptions have a `rotate` route beside create and delete; it audits `webhook.rotated`.
+
 Business events are audited at the first place that knows the actor: the web app's routes and API
 handlers write them with `audit` (`apps/web/app/lib/audit.server.ts`), the engine writes them with
 `recordAudit` (`apps/engine/src/audit.ts`) for the order socket (`via: 'app'`), the assistant, MCP
@@ -175,7 +177,10 @@ Both run JSON-RPC through the same `@a2a-js/sdk` `DefaultRequestHandler`, with S
 `CancelTask` cancels the order first, as the caller.
 
 Push notifications (`push.ts`) keep their configs in `push_configs` and a durable outbox in
-`push_outbox` in the same SQLite, retried on the object's alarm. Updates that happen with no
+`push_outbox` in the same SQLite, retried on the object's alarm. A config's `token` and
+`auth_credentials` and a queued notification's `headers` are stored encrypted under `DATA_KEY`
+(`apps/engine/src/data-key.ts`), bound to their row; a config is resealed when loaded, and one sealed
+under a key the deployment no longer has is dropped (logged) so the caller registers again. Updates that happen with no
 request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<A2AAgent name>)`,
 the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
 `A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
@@ -257,6 +262,27 @@ they expire (see [Retention](data-model.md#retention)). Audit actions `ucp.setti
 `ucp.platform_added` and `ucp.platform_revoked` (group `ucp`, "Agentic checkout") are written by the
 admin API (`/api/v1/ucp`, `handleUcpAdmin` in `api.server.ts`), which refuses a flow that
 `checkoutFlowProblem` rejects; demo mode locks `/api/v1/ucp`.
+
+## Secrets at rest
+
+Secrets the deployment stores are encrypted with `encryptSecret` (`packages/core/src/encryption.ts`):
+AES-256-GCM under a key HKDF-SHA256 derives from `DATA_KEY`, stored as `e1.<key id>.<iv>.<ciphertext>`
+(base64url). The key id is derived from the key, so `DATA_KEY_PREVIOUS` can still be read during a
+rotation. Each value is bound to its row as AES-GCM associated data (`secretContext`), so a
+ciphertext copied elsewhere doesn't open. A value without the prefix was stored before encryption
+and is read as it is. Covered: `users.totp_secret`, the `secret` and `previous_secret` of
+`integrations` and `webhook_subscriptions`, and the A2A push configs' credentials and queued headers
+(see [A2A](#a2a)). The web app seals and opens with `sealSecret` and `openSecret`
+(`apps/web/app/lib/data-key.server.ts`; in dev an unset key falls back to `DEV_DATA_KEY`, elsewhere it
+throws), the engine with `apps/engine/src/data-key.ts`, whose `resealSecrets` the daily retention
+sweep calls. See [Rotating the data key](operations.md#rotating-the-data-key).
+
+The outbox opens a subscription's secrets when it sends (`signingSecrets`, `apps/engine/src/outbox.ts`).
+`POST /api/v1/webhook-subscriptions/:id/rotate` (`rotateSubscription`, `apps/web/app/lib/webhooks.server.ts`)
+seals a new secret and moves the old, still sealed, to `previous_secret` with `previous_expires_at`
+`ROTATION_GRACE_MS` (24 hours) away; until then `signWebhook` receives both and the
+`X-OrderLoop-Signature` header carries a `v1=` for each. A secret no key opens fails that delivery
+(retried like any other), not the step.
 
 ## Bindings
 

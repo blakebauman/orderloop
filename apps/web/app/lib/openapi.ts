@@ -425,6 +425,15 @@ export function openApiDocument(serverUrl: string) {
           responses: { '200': ok('Deleted'), ...errors },
         },
       },
+      '/api/v1/webhook-subscriptions/{id}/rotate': {
+        post: {
+          summary: 'Rotate a subscription signing secret (admin)',
+          description:
+            'Returns a new secret, shown once. For 24 hours each delivery carries a signature from the previous secret as well, so the receiver can switch without rejecting any.',
+          parameters: [orderId],
+          responses: { '200': ok('{ subscription, secret }'), ...errors },
+        },
+      },
       '/api/v1/webhook-subscriptions/{id}/deliveries': {
         get: {
           summary: 'Recent deliveries, newest first (admin)',

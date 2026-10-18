@@ -51,15 +51,21 @@ export function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Builds the signature header value for `rawBody` (what a sender does). */
+/**
+ * Builds the signature header value for `rawBody` (what a sender does): one `v1` per secret, so
+ * while a secret is rotated the receiver can check with either the new one or the old.
+ */
 export async function signWebhook(
-  secret: string,
+  secret: string | readonly string[],
   rawBody: string,
   nowSec = Math.floor(Date.now() / 1000),
   keyId?: string,
 ) {
   const k = keyId ? `,k=${keyId}` : '';
-  return `t=${nowSec}${k},v1=${await hmacHex(secret, `${nowSec}.${rawBody}`)}`;
+  const sigs = await Promise.all(
+    (typeof secret === 'string' ? [secret] : secret).map((s) => hmacHex(s, `${nowSec}.${rawBody}`)),
+  );
+  return `t=${nowSec}${k}${sigs.map((v) => `,v1=${v}`).join('')}`;
 }
 
 /** `t=1,v1=a,v1=b` → `{t: ['1'], v1: ['a', 'b']}`: a key may repeat. */

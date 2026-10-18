@@ -56,6 +56,7 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `DELETE` | `/api/v1/ucp/platforms/:id` | | `{ ok: true }`, or `404` (admin) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
+| `POST` | `/api/v1/webhook-subscriptions/:id/rotate` | | `{ subscription, secret }` (admin) |
 | `DELETE` | `/api/v1/webhook-subscriptions/:id` | | `{ ok: true }` |
 | `GET` | `/api/v1/webhook-subscriptions/:id/deliveries` | | `{ deliveries }` |
 | `POST` | `/api/v1/webhooks/events` | `{ orderId, event, payload? }` | `200 { delivered: true, nodeId }`, `404` or `409` |
@@ -287,7 +288,8 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
 - `POST /api/v1/webhook-subscriptions` takes `url` (https, or plain http for `localhost`,
   `127.0.0.1` and `[::1]`) and `events`: any of <Values of="outbound-events" />, or `["*"]`
   (the default). It returns the subscription and its `secret`, once.
-- `GET` lists subscriptions without their secrets.
+- `GET` lists subscriptions without their secrets; `previousExpiresAt` is set while a rotation lasts.
+- `POST /api/v1/webhook-subscriptions/:id/rotate` returns a new `secret`, once. For 24 hours deliveries carry a `v1=` signature for the new secret and one for the old, so the receiver can switch without downtime. `404` for an unknown subscription.
 - `DELETE /api/v1/webhook-subscriptions/:id` deletes one (`404` if it doesn't exist).
 - `GET /api/v1/webhook-subscriptions/:id/deliveries` returns the latest 50 deliveries, newest first: `id`, `event`,
   `orderId`, `payload`, `status` (`pending`, `delivered` or `failed`), `attempts`, `responseStatus`,

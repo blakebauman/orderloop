@@ -413,10 +413,16 @@ export const messages = sqliteTable(
   (t) => [index('messages_order').on(t.orderId)],
 );
 
+/**
+ * Outbound webhook subscriptions. Secrets are stored encrypted (`encryptSecret` in @orderloop/core).
+ * A rotated-out secret still signs deliveries, beside the new one, until `previous_expires_at`.
+ */
 export const webhookSubscriptions = sqliteTable('webhook_subscriptions', {
   id: text('id').primaryKey(),
   url: text('url').notNull(),
   secret: text('secret').notNull(),
+  previousSecret: text('previous_secret'),
+  previousExpiresAt: integer('previous_expires_at'),
   /** JSON array of event names; "*" matches every event. */
   events: text('events').notNull().default('["*"]'),
   active: integer('active', { mode: 'boolean' }).notNull().default(true),
@@ -447,8 +453,8 @@ export const webhookDeliveries = sqliteTable(
 
 /**
  * External systems that sign webhooks, each with its own secret and scope (`IntegrationScope` in
- * @orderloop/core). A rotated-out secret keeps working until `previous_expires_at`. Revoking keeps
- * the row, so the audit log's references still resolve.
+ * @orderloop/core). Secrets are stored encrypted. A rotated-out secret keeps working until
+ * `previous_expires_at`. Revoking keeps the row, so the audit log's references still resolve.
  */
 export const integrations = sqliteTable('integrations', {
   id: text('id').primaryKey(),
@@ -503,7 +509,7 @@ export const users = sqliteTable(
     createdAt: integer('created_at').notNull(),
     lastLoginAt: integer('last_login_at'),
     disabledAt: integer('disabled_at'),
-    /** Authenticator-app secret (base32), set once two-factor sign-in is on. */
+    /** Authenticator-app secret (base32, stored encrypted), set once two-factor sign-in is on. */
     totpSecret: text('totp_secret'),
     totpEnabledAt: integer('totp_enabled_at'),
     /** The last 30-second step a code was accepted for; older or equal steps are refused. */

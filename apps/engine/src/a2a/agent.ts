@@ -83,8 +83,8 @@ export class A2AAgent extends DurableObject<Env> {
     const name = ctx.id.name;
     if (!name) throw new Error('A2AAgent must be addressed by name');
     this.store = new SqlTaskStore(ctx.storage.sql, env, name);
-    const pushStore = new SqlPushStore(ctx.storage.sql);
-    this.push = new PushSender(ctx.storage, pushStore);
+    const pushStore = new SqlPushStore(ctx.storage.sql, env);
+    this.push = new PushSender(ctx.storage, pushStore, env);
     const handler = new A2AHandler(
       env,
       this.store,

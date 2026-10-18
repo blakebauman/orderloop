@@ -43,7 +43,8 @@ vi.mock('~/lib/auth.server', () => ({
   actor: () => 'ops@example.com',
   forbidden: () => 'Forbidden',
 }));
-vi.mock('~/lib/webhooks.server', () => ({}));
+const webhooks = { rotateSubscription: vi.fn() };
+vi.mock('~/lib/webhooks.server', () => webhooks);
 
 const scope = { events: ['payment.received'], startOrders: false, flows: [], channel: null };
 const keys: Record<string, Record<string, unknown>> = {
@@ -312,6 +313,28 @@ describe('integrations over REST', () => {
       expect(
         (await handleApi(new Request(`https://app.test/api/v1/${path}`), operator)).status,
       ).toBe(403);
+  });
+});
+
+describe('webhook subscriptions over REST', () => {
+  beforeEach(() => audit.mockReset());
+
+  it('rotates a signing secret, shows it once and records who did; 404 for an unknown one', async () => {
+    webhooks.rotateSubscription.mockResolvedValueOnce({
+      subscription: { id: 'whs_1', url: 'https://hooks.example/a' },
+      secret: 'whsec_next',
+    });
+    const res = await post('webhook-subscriptions/whs_1/rotate', {}, admin);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ secret: 'whsec_next' });
+    expect(audit).toHaveBeenCalledWith(expect.any(Request), 'webhook.rotated', {
+      actor: admin,
+      target: 'https://hooks.example/a',
+      detail: { id: 'whs_1', via: 'api' },
+    });
+    webhooks.rotateSubscription.mockResolvedValueOnce(null);
+    expect((await post('webhook-subscriptions/whs_nope/rotate', {}, admin)).status).toBe(404);
+    expect((await post('webhook-subscriptions/whs_1/rotate', {}, operator)).status).toBe(403);
   });
 });
 

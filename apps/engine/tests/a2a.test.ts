@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import { AgentCard } from '@a2a-js/sdk';
 import {
   agentCard,
+  isEncrypted,
   type OrderInput,
   type OrderState,
   PRINCIPAL_HEADER,
@@ -395,6 +396,16 @@ describe('A2A push notifications', () => {
     const listed = await call(viewer, 'ListTaskPushNotificationConfigs', { taskId: task.id });
     expect(listed.result?.configs).toHaveLength(1);
     expect(listed.result?.configs[0]).toMatchObject({ url: 'https://hooks.example/cfg' });
+    // The credentials are stored encrypted, and read back in the clear.
+    const raw = await runInDurableObject(
+      env.A2A_AGENT.getByName(`user:${viewer.id}`),
+      async (_i, state) =>
+        state.storage.sql
+          .exec<{ auth_credentials: string }>('SELECT auth_credentials FROM push_configs')
+          .one().auth_credentials,
+    );
+    expect(isEncrypted(raw)).toBe(true);
+    expect(raw).not.toContain('s3cret');
 
     const unsafe = await call(viewer, 'CreateTaskPushNotificationConfig', {
       taskId: task.id,
@@ -626,7 +637,7 @@ describe('A2A 0.3 clients', () => {
       sql.exec(
         "INSERT INTO push_configs (task_id, id, url, created_at) VALUES ('t1', 'c1', 'https://x.example', 0)",
       );
-      const store = new SqlPushStore(sql);
+      const store = new SqlPushStore(sql, env);
       expect(await store.loadWithMetadata('t1')).toEqual([
         expect.objectContaining({ wireVersion: '1.0' }),
       ]);

@@ -4,8 +4,12 @@ import tailwindcss from '@tailwindcss/vite';
 import agents from 'agents/vite';
 import { defineConfig } from 'vite';
 
-/** Core's DEV_PRINCIPAL_KEY (Node can't load core's source here; tests/dev-key.test.ts keeps them equal). */
+/**
+ * Core's DEV_PRINCIPAL_KEY and DEV_DATA_KEY (Node can't load core's source here;
+ * tests/dev-key.test.ts keeps them equal).
+ */
 const DEV_PRINCIPAL_KEY = 'orderloop-local-dev-principal-key';
+const DEV_DATA_KEY = 'orderloop-local-dev-data-key';
 
 export default defineConfig({
   plugins: [
@@ -19,12 +23,18 @@ export default defineConfig({
       // OrderAgent Durable Objects and Workflows all work locally. It deploys on its own. Dev
       // compresses waits so scenarios finish in minutes (production runs in real time), calls
       // Workers AI directly rather than through production's AI Gateway and its rate limit, and
-      // checks the principal header with the dev key the web Worker signs with in dev.
+      // checks the principal header with, and encrypts secrets under, the dev keys the web Worker
+      // uses in dev.
       auxiliaryWorkers: [
         {
           configPath: '../engine/wrangler.jsonc',
           config: {
-            vars: { TIME_SCALE: '1440', AI_GATEWAY_ID: '', PRINCIPAL_KEY: DEV_PRINCIPAL_KEY },
+            vars: {
+              TIME_SCALE: '1440',
+              AI_GATEWAY_ID: '',
+              PRINCIPAL_KEY: DEV_PRINCIPAL_KEY,
+              DATA_KEY: DEV_DATA_KEY,
+            },
           },
           devOnly: true,
         },

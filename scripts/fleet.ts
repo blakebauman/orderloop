@@ -54,6 +54,8 @@ type Ring = (typeof RINGS)[number];
 const SECRETS = {
   web: [
     'PRINCIPAL_KEY',
+    'DATA_KEY',
+    'DATA_KEY_PREVIOUS',
     'SETUP_TOKEN',
     'SHOPIFY_WEBHOOK_SECRET',
     'STRIPE_WEBHOOK_SECRET',
@@ -62,6 +64,8 @@ const SECRETS = {
   engine: [
     'PRINCIPAL_KEY',
     'PRINCIPAL_KEY_PREVIOUS',
+    'DATA_KEY',
+    'DATA_KEY_PREVIOUS',
     'INTAKE_ALLOWLIST',
     'SHIPPING_CARRIER_AUTH',
     'STRIPE_SECRET_KEY',
@@ -70,10 +74,12 @@ const SECRETS = {
 } as const;
 
 /**
- * Secrets a deploy can't go without. PRINCIPAL_KEY signs every request the web Worker forwards to
- * the engine: without it in the environment the deploy stops here, before migrating anything.
+ * Secrets a deploy can't go without, so without them in the environment the deploy stops here,
+ * before migrating anything. PRINCIPAL_KEY signs every request the web Worker forwards to the
+ * engine; DATA_KEY encrypts the secrets both Workers store (two-factor, webhook and integration
+ * secrets, A2A push credentials).
  */
-const REQUIRED_SECRETS = ['PRINCIPAL_KEY'] as const;
+const REQUIRED_SECRETS = ['PRINCIPAL_KEY', 'DATA_KEY'] as const;
 
 export type Deployment = {
   id: string;

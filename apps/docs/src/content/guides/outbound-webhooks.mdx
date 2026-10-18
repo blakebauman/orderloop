@@ -12,7 +12,7 @@ OrderLoop POSTs signed order events to the endpoints you subscribe. The events a
 ## Subscribing
 
 Subscriptions are managed through the [REST API](/reference/rest-api/) with an `admin`
-[API token](/guides/team-and-roles/#api-tokens); there is no UI for them. Creating and deleting a subscription is recorded in the [audit log](/guides/team-and-roles/#audit-log).
+[API token](/guides/team-and-roles/#api-tokens); there is no UI for them. Creating, rotating and deleting a subscription is recorded in the [audit log](/guides/team-and-roles/#audit-log).
 
 ```bash
 curl -X POST https://orderloop.app/api/v1/webhook-subscriptions \
@@ -32,6 +32,7 @@ once**, here; listing subscriptions never shows it. Store it with the receiver.
 |---|---|
 | `GET /api/v1/webhook-subscriptions` | List subscriptions (no secrets), at most 500 |
 | `POST /api/v1/webhook-subscriptions` | Create one; returns the secret |
+| `POST /api/v1/webhook-subscriptions/:id/rotate` | Issue a new secret (admin); returns it once |
 | `DELETE /api/v1/webhook-subscriptions/:id` | Delete one |
 | `GET /api/v1/webhook-subscriptions/:id/deliveries` | The 50 most recent deliveries, newest first |
 
@@ -78,13 +79,21 @@ x-orderloop-delivery: whd_ord_…_ship_1_whs_…
 `order` is a summary: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `currency`, `subtotal`, `shipping`, `tax`, `total`
 (all in `currency`), `fxRate` (units of `currency` per USD) and `baseTotal` (the total in USD).
 
+## Rotating the secret
+
+`POST /api/v1/webhook-subscriptions/:id/rotate` (an `admin` token) returns `{ "subscription", "secret" }`
+with a new `secret`, shown once. For 24 hours each delivery is signed with both the new secret and
+the previous one, so the receiver can switch without rejecting any: the header then carries two
+`v1=` signatures (`t=1760340000,v1=<new>,v1=<previous>`). While that lasts, listing subscriptions
+shows `previousExpiresAt`. Rotating again replaces the overlap. `404` for an unknown id.
+
 ## Verifying the signature
 
 Each subscription signs with its own secret, in the same scheme as
 [signed inbound events](/guides/approvals-and-events/#signed-events):
 `t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`. Verify against the raw body,
 before parsing it: compute the HMAC of `` `${t}.${raw}` `` with the secret, compare it with `v1`
-in constant time, and reject a `t` more than 5 minutes from now. In Node:
+(any one of them, during a rotation) in constant time, and reject a `t` more than 5 minutes from now. In Node:
 
 ```ts
 import { createHmac, timingSafeEqual } from 'node:crypto';

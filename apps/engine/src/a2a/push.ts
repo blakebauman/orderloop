@@ -8,6 +8,10 @@
  * retried on the object's alarm with backoff, then left `failed`. The engine's fetch reaches only
  * public addresses (global_fetch_strictly_public), and a URL must be https (http only for
  * localhost).
+ *
+ * The caller's token and credentials are stored encrypted under `DATA_KEY` (@orderloop/core
+ * `encryptSecret`), in the config and in each queued notification's headers. One sealed under a key
+ * the deployment no longer has is dropped: the caller registers its URL again.
  */
 
 import type { StreamResponse, Task, TaskPushNotificationConfig } from '@a2a-js/sdk';
@@ -25,8 +29,11 @@ import {
   A2A_LEGACY_PROTOCOL_VERSION,
   isLegacyA2AVersion,
   isWebhookUrl,
+  SecretUnreadable,
+  sealedWithCurrent,
   WEBHOOK_URL_RULE,
 } from '@orderloop/core';
+import { dataKeys, openSecret, sealSecret } from '../data-key';
 
 /** Per task: enough for a caller and a backup, not a fan-out service. */
 const MAX_CONFIGS = 5;
@@ -46,8 +53,15 @@ type ConfigRow = {
   wire_version: string;
 };
 
+/** Where a config's token and credentials are sealed for. */
+const configContext = (taskId: string, id: string) => `push_configs:${taskId}/${id}`;
+const outboxContext = (id: string) => `push_outbox:${id}`;
+
 export class SqlPushStore implements PushNotificationStore {
-  constructor(private readonly sql: SqlStorage) {
+  constructor(
+    private readonly sql: SqlStorage,
+    private readonly env: Env,
+  ) {
     sql.exec(`CREATE TABLE IF NOT EXISTS push_configs (
       task_id TEXT NOT NULL,
       id TEXT NOT NULL,
@@ -85,6 +99,11 @@ export class SqlPushStore implements PushNotificationStore {
       .one().n;
     if (!exists && count >= MAX_CONFIGS)
       throw new RequestMalformedError(`A task takes at most ${MAX_CONFIGS} push URLs.`);
+    const sealedFor = configContext(taskId, config.id);
+    const token = config.token ? await sealSecret(this.env, config.token, sealedFor) : '';
+    const credentials = config.authentication?.credentials
+      ? await sealSecret(this.env, config.authentication.credentials, sealedFor)
+      : null;
     this.sql.exec(
       `INSERT INTO push_configs
          (task_id, id, url, token, auth_scheme, auth_credentials, created_at, wire_version)
@@ -95,9 +114,9 @@ export class SqlPushStore implements PushNotificationStore {
       taskId,
       config.id,
       config.url,
-      config.token ?? '',
+      token,
       config.authentication?.scheme || null,
-      config.authentication?.credentials || null,
+      credentials,
       Date.now(),
       // A URL registered over 0.3 gets 0.3-shaped notifications.
       isLegacyA2AVersion(context.requestedVersion) ? A2A_LEGACY_PROTOCOL_VERSION : '1.0',
@@ -112,22 +131,55 @@ export class SqlPushStore implements PushNotificationStore {
     taskId: string,
     _context?: ServerCallContext,
   ): Promise<StoredPushNotificationConfig[]> {
-    return this.sql
+    const rows = this.sql
       .exec<ConfigRow>('SELECT * FROM push_configs WHERE task_id = ? ORDER BY created_at', taskId)
-      .toArray()
-      .map((r) => ({
+      .toArray();
+    const stored: StoredPushNotificationConfig[] = [];
+    for (const r of rows) {
+      const context = configContext(r.task_id, r.id);
+      let token: string;
+      let credentials: string;
+      try {
+        token = r.token ? await openSecret(this.env, r.token, context) : '';
+        credentials = r.auth_credentials
+          ? await openSecret(this.env, r.auth_credentials, context)
+          : '';
+      } catch (err) {
+        if (!(err instanceof SecretUnreadable)) throw err;
+        console.error(`a2a push: dropping ${context}, sealed under a key this deployment lacks`);
+        this.sql.exec('DELETE FROM push_configs WHERE task_id = ? AND id = ?', r.task_id, r.id);
+        continue;
+      }
+      await this.reseal(r, token, credentials);
+      stored.push({
         wireVersion: r.wire_version,
         config: {
           tenant: '',
           id: r.id,
           taskId: r.task_id,
           url: r.url,
-          token: r.token,
-          authentication: r.auth_scheme
-            ? { scheme: r.auth_scheme, credentials: r.auth_credentials ?? '' }
-            : undefined,
+          token,
+          authentication: r.auth_scheme ? { scheme: r.auth_scheme, credentials } : undefined,
         },
-      }));
+      });
+    }
+    return stored;
+  }
+
+  /** Seals a config stored before encryption, or under the previous key, under the current one. */
+  private async reseal(r: ConfigRow, token: string, credentials: string) {
+    const keys = dataKeys(this.env);
+    if (!keys[0]) return;
+    const stale = async (v: string | null) => !!v && !(await sealedWithCurrent(keys, v));
+    if (!(await stale(r.token)) && !(await stale(r.auth_credentials))) return;
+    const context = configContext(r.task_id, r.id);
+    this.sql.exec(
+      'UPDATE push_configs SET token = ?, auth_credentials = ? WHERE task_id = ? AND id = ?',
+      token ? await sealSecret(this.env, token, context) : '',
+      r.auth_credentials ? await sealSecret(this.env, credentials, context) : null,
+      r.task_id,
+      r.id,
+    );
   }
 
   /** Removes a config (or all of a task's) and drops what is still queued for it. */
@@ -174,6 +226,7 @@ export class PushSender implements PushNotificationSender {
   constructor(
     private readonly storage: DurableObjectStorage,
     private readonly configs: SqlPushStore,
+    private readonly env: Env,
   ) {
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS push_outbox (
       id TEXT PRIMARY KEY,
@@ -207,14 +260,21 @@ export class PushSender implements PushNotificationSender {
     for (const { config, wireVersion } of configs) {
       const serializer = this.serializers[wireVersion] ?? this.serializers['1.0']!;
       const { body, contentType } = serializer.serialize(update, task);
+      const id = crypto.randomUUID();
+      // Sealed: they carry the caller's token or credentials.
+      const headers = await sealSecret(
+        this.env,
+        JSON.stringify({ 'content-type': contentType, ...authHeaders(config) }),
+        outboxContext(id),
+      );
       this.storage.sql.exec(
         `INSERT INTO push_outbox (id, task_id, config_id, url, headers, body, next_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        crypto.randomUUID(),
+        id,
         taskId,
         config.id,
         config.url,
-        JSON.stringify({ 'content-type': contentType, ...authHeaders(config) }),
+        headers,
         body,
         now,
         now,
@@ -275,9 +335,10 @@ export class PushSender implements PushNotificationSender {
     for (const row of due) {
       let error: string | null = null;
       try {
+        const headers = await openSecret(this.env, row.headers, outboxContext(row.id));
         const res = await fetch(row.url, {
           method: 'POST',
-          headers: JSON.parse(row.headers) as Record<string, string>,
+          headers: JSON.parse(headers) as Record<string, string>,
           body: row.body,
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });

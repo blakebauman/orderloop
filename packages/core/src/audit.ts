@@ -17,6 +17,7 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'flow.published': 'Published a flow',
   'webhook.subscribed': 'Subscribed to order events',
   'webhook.unsubscribed': 'Removed a webhook subscription',
+  'webhook.rotated': 'Rotated a webhook signing secret',
   'stock.review_run': 'Ran the stock review',
 } as const;
 

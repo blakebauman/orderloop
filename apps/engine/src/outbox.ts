@@ -12,11 +12,13 @@ import {
   type OutboundEvent,
   type OutboundPayload,
   SIGNATURE_HEADER,
+  secretContext,
   signWebhook,
   subscribedTo,
 } from '@orderloop/core';
 import { createDb, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { openSecret } from './data-key';
 
 const TIMEOUT_MS = 10_000;
 
@@ -61,7 +63,7 @@ export async function emit(
     open.map(async (row) => {
       const sub = secrets.get(row.subscriptionId);
       if (!sub) return null;
-      const res = await send(sub.url, sub.secret, row.id, row.event, row.payload);
+      const res = await send(env, sub, row.id, row.event, row.payload);
       return { row, res };
     }),
   );
@@ -85,13 +87,26 @@ export async function emit(
   return { delivered: ids.length - pending, pending };
 }
 
-async function send(url: string, secret: string, id: string, event: string, body: string) {
+type Subscription = typeof webhookSubscriptions.$inferSelect;
+
+/** The subscription's secret, and the one before it while a rotation's grace period lasts. */
+async function signingSecrets(env: Env, sub: Subscription) {
+  const context = secretContext.webhookSubscription(sub.id);
+  const current = await openSecret(env, sub.secret, context);
+  if (!sub.previousSecret || !sub.previousExpiresAt || sub.previousExpiresAt <= Date.now())
+    return [current];
+  return [current, await openSecret(env, sub.previousSecret, context)];
+}
+
+async function send(env: Env, sub: Subscription, id: string, event: string, body: string) {
   try {
-    const res = await fetch(url, {
+    // Inside the try: a secret no key opens fails this delivery, not the step.
+    const secrets = await signingSecrets(env, sub);
+    const res = await fetch(sub.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        [SIGNATURE_HEADER]: await signWebhook(secret, body),
+        [SIGNATURE_HEADER]: await signWebhook(secrets, body),
         [EVENT_HEADER]: event,
         [DELIVERY_HEADER]: id,
       },
