@@ -1,13 +1,12 @@
 import { ORDER_MODEL_LABELS, type OrderModel, type OrderState } from '@orderloop/core';
 import { ArrowRight, ChevronRight, Play } from 'lucide-react';
-import { Form, Link, redirect, useLoaderData, useNavigation } from 'react-router';
+import { Form, Link, useLoaderData, useNavigation } from 'react-router';
 import { Ago, WaitingAt } from '~/components/ago';
 import { DecisionContext } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { Performance } from '~/components/performance';
 import { StatusBadge } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
-import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
@@ -24,6 +23,7 @@ import {
   waitingOrders,
 } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
+import { startScenario } from '~/lib/scenarios.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/dashboard';
 
@@ -82,22 +82,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const me = await requireUser(request, 'operator');
-  const form = await request.formData();
-  const sc = SCENARIOS.find((s) => s.id === form.get('scenario'));
-  if (!sc || !(await demoAvailable()))
-    return { error: 'That demo scenario no longer exists. Reload the page.' };
-  await ensureSeeded();
-  const { orderId } = await engine().startOrder({
-    flowId: sc.flowId,
-    input: sc.input,
-    startedBy: me.id,
-  });
-  await audit(request, 'order.started', {
-    actor: me,
-    target: orderId,
-    detail: { flowId: sc.flowId, scenario: sc.id, via: 'app' },
-  });
-  return redirect(`/orders/${orderId}`);
+  return startScenario(request, me, String((await request.formData()).get('scenario') ?? ''));
 }
 
 export default function Dashboard() {
@@ -408,6 +393,12 @@ export default function Dashboard() {
                       </button>
                     </Form>
                   ))}
+                  <Link
+                    to="/orders/scenarios"
+                    className="block px-2 pt-1.5 pb-1 text-link text-sm hover:underline"
+                  >
+                    See what each one fails on, or edit one first
+                  </Link>
                 </div>
               </details>
             ) : null}

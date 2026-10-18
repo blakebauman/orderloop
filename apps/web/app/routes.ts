@@ -18,6 +18,8 @@ export default [
       index('routes/dashboard.tsx'),
       route('orders', 'routes/orders.tsx'),
       route('orders/new', 'routes/order-new.tsx'),
+      // Demo data only: one-click scenarios, some with a simulated failure.
+      route('orders/scenarios', 'routes/order-scenarios.tsx'),
       route('orders/:orderId', 'routes/order.tsx'),
       route('flows', 'routes/flows.tsx'),
       route('flows/:flowId', 'routes/flow-editor.tsx'),

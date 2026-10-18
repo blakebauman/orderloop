@@ -38,8 +38,10 @@ loads it from `packages/db/seed/0001_demo.sql` (`INSERT OR IGNORE`, so it can be
 catalog, sellers, stores and their stock, contract prices, price rules, and the EUR, GBP and CAD rates. The web
 app offers the scenarios only when that data is loaded (`demoAvailable()` in
 `apps/web/app/lib/orders.server.ts` checks that every scenario customer and SKU exists, cached for a minute).
-Without it the dashboard's **Demo scenarios** panel and the New order page's **Demo presets** are hidden, the
-New order form starts blank, and a flow's **Test run** starts an empty order.
+Without it the dashboard's **Demo scenarios** panel and the `/orders/scenarios` page are hidden (the page
+answers 404), and a flow's **Test run** starts an empty order. The New order form always starts blank and
+never sends `meta.simulate`; only a scenario does, from the server's list (`startScenario`,
+`apps/web/app/lib/scenarios.server.ts`), and **Edit first** fills the form from a scenario without it.
 
 With the demo data loaded, the dashboard lists 15 one-click scenarios, each a real order on a seeded flow: a guest checkout, a B2B purchase order
 read from an email, an order over its credit limit, an out-of-stock order that rolls back, a purchase

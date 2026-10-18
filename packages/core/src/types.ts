@@ -57,7 +57,7 @@ export const ORDER_CHANNEL_LABELS: Record<OrderChannel, string> = {
   email: 'Email',
   edi: 'EDI',
   api: 'API',
-  manual: 'Dashboard',
+  manual: 'Entered by hand',
   schedule: 'Schedule',
   agent: 'AI agent',
 };

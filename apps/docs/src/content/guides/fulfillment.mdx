@@ -32,8 +32,9 @@ stock and store stock; `EBK-101` and `GFT-25` are digital. The back office **Sto
 each store's flags and, per item, its available and on-hand stock.
 
 An order names its store in `fulfillment`: `{ method, locationId? }`, where `method` is one of
-<Values of="fulfillment-methods" />. The **New order** form has **Fulfillment** and **Store**
-selects, and the order header shows the method and the store once the order is routed.
+<Values of="fulfillment-methods" />. On a flow with a routing step, the **New order** form has a
+**Fulfillment** section: a **Method** (or leave it to the flow) and, for pickup and carry-out, the
+**Store**, which those two need. The order header shows the method and the store once the order is routed.
 
 ## Routing
 
