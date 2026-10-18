@@ -42,14 +42,25 @@ screen readers hear it once); within five seconds the undo window shortens to fi
 close, the buttons stay in place but disabled, any note is kept, and the card says where the order
 is going: "Decisions are closed; the order is going to Decline order".
 
-The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`. For a pending row it
-shows why a person is being asked (for a credit check: how far over the limit, the limit and the
-balance, all in USD, with a foreign-currency order shown in its own currency and in USD), and when the approval times out and to which step. Keyboard: `j`/`k` (or the arrow keys)
-move between rows, `a` approves, `r` rejects and `z` undoes.
+The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`. Each row
+says why a person is being asked, from the step that sent the order there:
+
+- a credit check: how far over the limit, the limit and the balance, all in USD, with a
+  foreign-currency order shown in its own currency and in USD;
+- a budget check: how far over the budget, and the budget;
+- a condition that compares the order total with a number: the threshold in words, e.g. "Over the
+  $5,000.00 threshold";
+- any other condition or step: the step's name and its answer.
+
+It also shows what the order is for (its first lines), any approval steps before this one and how
+they ended ("Before this: Manager approval timed out"), and when the approval times out and to which
+step. When an approval times out and the next one on the same order arrives, the new one takes the
+old row's place. Keyboard: `j`/`k` (or the arrow keys) move between rows, `a` approves, `r` rejects
+and `z` undoes.
 
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email; see [Team and roles](/guides/team-and-roles/#who-decided).
 
-If an admin has set **Who started an order** to **Can't approve it**, the person or token that started the order can't decide its approvals: the order page and the inbox show "You started this order, so someone else must decide its approvals." See [Approvals](/guides/team-and-roles/#approvals).
+If an admin has set **Who started an order** to **Can't approve it**, the person or token that started the order can't decide its approvals: the order page and the inbox show "You started this order, so someone else must decide its approvals." The inbox says so on the row before anyone tries, in place of the buttons. See [Approvals](/guides/team-and-roles/#approvals).
 
 From the **API**:
 

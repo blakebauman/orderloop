@@ -58,7 +58,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...a,
     ctx: states[i]
       ? approvalContext(states[i] as OrderState, a.nodeId)
-      : ({ facts: [] } as ApprovalContext),
+      : ({ facts: [], trail: [] } as ApprovalContext),
   }));
   // Where orders are piling up: open waits grouped by what they wait on.
   const lanes = new Map<string, number>();
