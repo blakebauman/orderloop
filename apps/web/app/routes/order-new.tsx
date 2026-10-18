@@ -234,6 +234,7 @@ export default function NewOrder() {
                   onChange={(e) => setFlowId(e.target.value)}
                   aria-invalid={!!serverError('flowId') || undefined}
                   aria-describedby="flow-summary"
+                  wrapperClassName="w-full"
                   className="h-9 w-full"
                 >
                   {flows.map((fl) => (
@@ -247,6 +248,7 @@ export default function NewOrder() {
                 <NativeSelect
                   name="channel"
                   defaultValue={input?.channel ?? 'manual'}
+                  wrapperClassName="w-full"
                   className="h-9 w-full"
                 >
                   {ORDER_CHANNELS.map((c) => (
@@ -304,6 +306,7 @@ export default function NewOrder() {
                     defaultValue={input?.customerId ?? ''}
                     aria-invalid={!!serverError('customerId') || undefined}
                     aria-describedby="customerId-error"
+                    wrapperClassName="w-full"
                     className="h-9 w-full"
                   >
                     <NativeSelectOption value="">
@@ -401,6 +404,7 @@ export default function NewOrder() {
                     name="fulfillment"
                     value={method}
                     onChange={(e) => setMethod(e.target.value)}
+                    wrapperClassName="w-full"
                     className="h-9 w-full"
                   >
                     <NativeSelectOption value="">Let the flow decide</NativeSelectOption>
@@ -420,6 +424,7 @@ export default function NewOrder() {
                         defaultValue={input?.fulfillment?.locationId ?? ''}
                         aria-invalid={!!serverError('locationId') || undefined}
                         aria-describedby="locationId-error"
+                        wrapperClassName="w-full"
                         className="h-9 w-full"
                       >
                         <NativeSelectOption value="" disabled>
@@ -456,6 +461,7 @@ export default function NewOrder() {
                     defaultValue={input?.currency ?? BASE_CURRENCY}
                     aria-invalid={!!serverError('currency') || undefined}
                     aria-describedby="currency-error"
+                    wrapperClassName="w-full"
                     className="h-9 w-full"
                   >
                     {codes.map((c) => (
