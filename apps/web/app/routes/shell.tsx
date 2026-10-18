@@ -154,7 +154,7 @@ function AssistantToggle() {
       aria-pressed={open}
       title={open ? 'Close the assistant (⌘J)' : 'Ask the assistant (⌘J)'}
       className={cn(
-        'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors',
+        'inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors md:h-8 md:min-w-0',
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
           : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -186,7 +186,7 @@ function ShellFrame() {
         <div className="flex h-[calc(3rem-1px)] items-center gap-3 px-4 sm:gap-6 sm:px-5">
           <Link
             to="/"
-            className="flex shrink-0 items-center gap-2 font-semibold tracking-title text-[16px]"
+            className="-mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-[16px]"
             aria-label="OrderLoop overview"
           >
             <Mark className="size-5" />
@@ -200,8 +200,10 @@ function ShellFrame() {
                 end={end}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground',
-                    isActive && 'border-foreground font-medium text-foreground',
+                    'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors',
+                    isActive
+                      ? 'border-foreground font-medium text-foreground'
+                      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
                   )
                 }
               >
@@ -229,7 +231,7 @@ function ShellFrame() {
             {operator ? (
               <Link
                 to="/orders/new"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 sm:px-3"
+                className="inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
               >
                 <Plus className="size-3.5" aria-hidden="true" />
                 <span className="sr-only sm:not-sr-only">New order</span>
@@ -237,7 +239,7 @@ function ShellFrame() {
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hidden size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:grid"
+                className="hidden size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:grid data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label={`Theme: ${THEMES.find((t) => t.value === theme.choice)?.label ?? theme.choice}`}
               >
                 <ThemeIcon className="size-4" />
@@ -249,7 +251,7 @@ function ShellFrame() {
             {/* Who is signed in, and the pages that belong to them and the team. */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hidden h-8 items-center gap-2 rounded-md border px-2 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground md:flex"
+                className="hidden h-8 items-center gap-2 rounded-md border px-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
               >
                 <UserRound className="size-4" aria-hidden="true" />
@@ -263,18 +265,22 @@ function ShellFrame() {
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+                className="grid size-10 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label="Menu"
               >
                 <Menu className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                {nav.map(({ to, label, badge }) => (
+                {nav.map(({ to, label, end, badge }) => (
                   <DropdownMenuItem key={to} asChild>
-                    <Link to={to} className="justify-between">
+                    <NavLink
+                      to={to}
+                      end={end}
+                      className="justify-between aria-[current=page]:font-medium"
+                    >
                       {label}
                       {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-                    </Link>
+                    </NavLink>
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
