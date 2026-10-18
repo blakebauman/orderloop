@@ -22,6 +22,8 @@ export const flows = sqliteTable('flows', {
   publishedVersion: integer('published_version'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+  /** When a never-published draft was archived out of the flows list; null otherwise. */
+  archivedAt: integer('archived_at'),
 });
 
 export const flowVersions = sqliteTable(

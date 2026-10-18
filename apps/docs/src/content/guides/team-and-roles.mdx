@@ -302,7 +302,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | API access | `api.token_expired`, at most hourly per token, when an expired token is used |
 | Orders | `order.started` (the flow, and the version, test run, scenario, restarted-from order, channel and external id where they apply), `order.cancelled` (the reason), `order.event_delivered` (the event and the node that was waiting) |
 | Approvals | `approval.decided` (the node, the decision and the note) |
-| Flows | `flow.saved` (a draft saved on purpose: **Save** or ⌘S, not an autosave), `flow.published` (name and version) |
+| Flows | `flow.saved` (a draft saved on purpose: **Save** or ⌘S, a new flow, or a duplicate with the flow it came `from`; not an autosave), `flow.published` (name and version), `flow.archived` and `flow.restored` (a never-published draft set aside or brought back) |
 | Webhooks | `webhook.subscribed` (the subscription's id and events), `webhook.rotated`, `webhook.unsubscribed` |
 | Stock review | `stock.review_run` (the Workflow instance) |
 | Personal data | `personal_data.exported`, `personal_data.erased` (the counts; the target is `subject:` and a hash of the person's address, so the log doesn't keep it) |

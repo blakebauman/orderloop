@@ -11,7 +11,7 @@ immutable, numbered version, and every order pins the version it started on.
 
 ## Creating a flow
 
-**New flow** on `/flows` takes a name, a [commerce model](/guides/commerce-models/) (<Values of="order-models" />) and a
+**New flow** on `/flows` takes a name (with Describe it, the first words of your description stand in if you leave it empty), a [commerce model](/guides/commerce-models/) (<Values of="order-models" />) and a
 starting point:
 
 | Start | What you get |
@@ -20,7 +20,27 @@ starting point:
 | Blank | One `trigger.manual` node named `start` |
 | Describe it | A graph drafted by the [copilot](/guides/ai/#the-flow-copilot) from your description, laid out automatically |
 
-The flow id is a slug of the name plus a short suffix. A new flow is a draft until you publish it.
+The flow id is a slug of the name plus a short suffix. A new flow is a draft until you publish it,
+and it gets no inbound orders until something routes to it (see below); you can always start orders
+on it by hand. **Duplicate** on a flow's card copies its current draft into a new, unpublished flow,
+which is also how to start from a built-in flow other than your model's default.
+
+## The flows list
+
+`/flows` groups flows by commerce model, selling and then buying, and filters by name, description
+or order type. Each card shows:
+
+- **Live v3**, with **unpublished changes** when the draft differs from the published version, or
+  **Draft, never published**;
+- **Receives**: the inbound orders that start it, from the routes your deployment sets for a model and
+  channel, the model's default flow (for the orders nothing else routes) and the email intake
+  mailboxes. A routed flow that was never published refuses those orders, and the card says so;
+- **Running**: how many orders are still running on it, and how many of those are on older versions,
+  linked to the orders list filtered to that flow;
+- **Steps**: whether a person decides, the events it waits for and how many steps it has.
+
+**Archive** sets aside a draft that was never published, so no order can be on it; **Archived drafts**
+lists them, and **Restore** brings one back.
 
 ## The editor
 

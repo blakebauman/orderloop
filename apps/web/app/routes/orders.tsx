@@ -24,6 +24,7 @@ import { Empty, PageHeader } from '~/components/page';
 import { StatusBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { decodeCursor, encodeCursor } from '~/lib/cursor';
+import { flowName } from '~/lib/flows.server';
 import {
   count,
   money,
@@ -65,6 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       status: q.get('status') || undefined,
       q: q.get('q') || undefined,
       attention: q.get('attention') === '1',
+      flow: q.get('flow') || undefined,
       after: after ?? undefined,
       sort,
     },
@@ -75,7 +77,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     declinedOrderIds(orders.map((o) => o.id)),
   ]);
   const last = orders.at(-1);
+  const flow = q.get('flow');
   return {
+    flow: flow ? { id: flow, name: (await flowName(flow)) ?? flow } : null,
     orders,
     names,
     sort,
@@ -86,7 +90,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Orders() {
-  const { orders, names, sort, declined, paged, older } = useLoaderData<typeof loader>();
+  const { orders, names, sort, declined, paged, older, flow } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const submit = useSubmit();
   const search = useRef<HTMLInputElement>(null);
@@ -97,7 +101,8 @@ export default function Orders() {
     params.get('channel') ||
     params.get('status') ||
     query ||
-    attention
+    attention ||
+    flow
   );
 
   const { revalidate } = useRevalidator();
@@ -146,6 +151,8 @@ export default function Orders() {
             submit(next, { replace: true });
           }}
         >
+          {/* Set from a flow's card; kept while the other filters change. */}
+          {flow ? <input type="hidden" name="flow" value={flow.id} /> : null}
           <NativeSelect
             name="model"
             defaultValue={params.get('model') ?? ''}
@@ -237,6 +244,26 @@ export default function Orders() {
             </Button>
           ) : null}
         </Form>
+        {flow ? (
+          <p className="-mt-2 mb-3 text-muted-foreground text-xs">
+            On the{' '}
+            <Link to={`/flows/${flow.id}`} className="text-link hover:underline">
+              {flow.name}
+            </Link>{' '}
+            flow, any version.{' '}
+            <Link
+              to={(() => {
+                const next = new URLSearchParams(params);
+                next.delete('flow');
+                const s = next.toString();
+                return s ? `?${s}` : '/orders';
+              })()}
+              className="text-link hover:underline"
+            >
+              All flows
+            </Link>
+          </p>
+        ) : null}
         {attention ? (
           <p className="-mt-2 mb-3 text-muted-foreground text-xs">
             Failed or rolled back, or waiting on a person to decide.

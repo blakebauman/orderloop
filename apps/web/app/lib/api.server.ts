@@ -152,7 +152,20 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
   };
   try {
     if (parts[0] === 'flows' && parts.length === 1 && request.method === 'GET') {
-      return json({ flows: await listFlows() });
+      const list = (await listFlows()).sort((a, b) => b.updatedAt - a.updatedAt);
+      return json({
+        flows: list.map((f) => ({
+          id: f.id,
+          name: f.name,
+          description: f.description,
+          model: f.model,
+          channels: f.channels,
+          publishedVersion: f.publishedVersion,
+          hasUnpublishedChanges: f.dirty,
+          updatedAt: f.updatedAt,
+          nodeCount: f.nodeCount,
+        })),
+      });
     }
     if (parts[0] === 'audit-events' && parts.length === 1 && request.method === 'GET') {
       const denied = need('admin');
