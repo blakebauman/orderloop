@@ -110,7 +110,8 @@ Idempotency-Key: po-NW-7781
   before the run starts.
 - `input.meta` is free-form and is the run context's `input`. Some keys mean something to nodes:
   `shipTo` (the `no_po_box` policy rule) and `simulate` (forces a failure path in the built-in
-  commerce steps; see [Built-in flows](/guides/templates/)).
+  commerce steps, only in workspaces that allow simulated failures and dropped elsewhere; see
+  [Simulating failures](/guides/templates/#simulating-failures)).
 - `vars` seeds the run's variables.
 
 **Idempotency.** With an `Idempotency-Key` header (at most 255 characters; longer returns `400`), a repeat of the key

@@ -34,6 +34,7 @@ export default defineConfig({
               AI_GATEWAY_ID: '',
               PRINCIPAL_KEY: DEV_PRINCIPAL_KEY,
               DATA_KEY: DEV_DATA_KEY,
+              SIMULATE_FAILURES: 'true',
             },
           },
           devOnly: true,

@@ -353,7 +353,10 @@ The saga compensations a failed order runs are `ROLLBACKS` in `apps/engine/src/n
 cancel runs `compensateOrder`, which releases, voids, cancels open shipments and staged pickups, revokes issued digital codes, voids unpaid Stripe invoices, restocks shipped stock once no shipment is live, reverses on-account charges, cancels seller orders and reverses scheduled payouts in one pass. A node
 type with `rollback: true` in the catalog must have a `ROLLBACKS` entry.
 
-To exercise failure paths, set `meta.simulate` on the order input:
+To exercise failure paths, set `meta.simulate` on the order input. The engine honours it only when
+`SIMULATE_FAILURES` is `"true"` (local dev, the engine tests and demo deployments); otherwise
+`start` in `apps/engine/src/orders.ts` drops it (`withoutSimulation`) before the order exists, for
+every caller: the web app, `/api/v1`, inbound orders, email intake, A2A and UCP.
 
 | `meta.simulate` | Effect |
 |---|---|

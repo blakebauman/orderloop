@@ -80,6 +80,10 @@
     // Divides every wait and timeout. "1" is real time; local dev overrides it to "1440" (a day
     // becomes a minute) in apps/web/vite.config.ts.
     "TIME_SCALE": "1",
+    // "true" honours `meta.simulate` (forced stockouts, declines, failed charges, invoice
+    // mismatches) from any caller; anything else drops it when an order starts. On in local dev
+    // (apps/web/vite.config.ts), the engine tests and demo deployments (scripts/fleet.ts).
+    "SIMULATE_FAILURES": "",
     // Email intake: mailbox local part → flow id. Empty = orders@/po@ → B2B, purchasing@ → requests.
     "INTAKE_MAILBOXES": "",
     // "false" accepts mail without a passing DMARC/DKIM/SPF result (never in production).

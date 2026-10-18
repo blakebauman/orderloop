@@ -121,6 +121,8 @@ test('a demo mocks models, speeds up time and turns on demo sign-in', () => {
   assert.equal(engine.vars.AI_MODE, 'mock');
   assert.equal(engine.vars.AI_GATEWAY_ID, '');
   assert.equal(engine.vars.TIME_SCALE, '1440');
+  assert.equal(engine.vars.SIMULATE_FAILURES, 'true');
+  assert.equal(renderEngine(base('engine'), acme).vars.SIMULATE_FAILURES, '');
   assert.equal(renderWeb(base('web'), demo).vars.DEMO_MODE, 'true');
   assert.equal(renderWeb(base('web'), acme).vars.DEMO_MODE, '');
 });
