@@ -130,6 +130,28 @@ const cleanWait = (s: string) =>
     .replace(/\s{2,}/g, ' ')
     .trim();
 
+/**
+ * Who or what an order's open waits are on, from the index's `waiting_for`: "Sales ops",
+ * "Payment", "a timer". An approval with no role is "an approver".
+ */
+export const waitingForLabel = (s: string | null | undefined): string =>
+  [
+    ...new Set(
+      (s ?? '')
+        .split(' · ')
+        .filter(Boolean)
+        .map((t) =>
+          t === 'timer'
+            ? 'a timer'
+            : t.startsWith('person:')
+              ? humanize(t.slice(7)) || 'an approver'
+              : t.startsWith('event:')
+                ? eventShort(t.slice(6)) || 'an event'
+                : t,
+        ),
+    ),
+  ].join(', ');
+
 /** A short, sayable reference that tells look-alike orders apart: "ord_mv65gsxyqcs34m" → "#qcs34m". */
 export const orderRef = (id: string) => `#${id.slice(-6)}`;
 

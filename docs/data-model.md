@@ -58,6 +58,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0038_scim.sql` | `users.scim_external_id`, `scim_groups` and `scim_group_members` (index `scim_group_members_user`), for SCIM provisioning |
 | `0039_ucp.sql` | `ucp_platforms`, `checkout_sessions` and `ucp_idempotency`, for [agentic checkout](architecture.md#ucp-agentic-checkout) |
 | `0040_webhook_rotation.sql` | `webhook_subscriptions.previous_secret` and `previous_expires_at`, for outbound secret rotation |
+| `0041_order_index_where.sql` | `orders.waiting_for`, `stopped_at` and `reason`, so the orders list can say who a wait is on and where and why an order ended |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -88,7 +89,7 @@ engine, `ensureSeeded` in the web app; see [Templates](https://docs.orderloop.ap
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `erased_at` (set by `eraseDataSubject`; null otherwise), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `waiting_for` (what the open waits are on: `person:<role>`, `event:<name>` or `timer`, joined with ` · `), `stopped_at` and `reason` (for an order that failed, rolled back, was declined or cancelled: the failed steps' labels and why), `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `erased_at` (set by `eraseDataSubject`; null otherwise), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)`,

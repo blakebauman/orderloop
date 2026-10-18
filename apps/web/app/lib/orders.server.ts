@@ -23,7 +23,7 @@ import {
   sellers,
   shipments,
 } from '@orderloop/db';
-import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, inArray, lt, or, sql } from 'drizzle-orm';
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
 import { SCENARIO_CUSTOMERS, SCENARIO_SKUS } from './scenarios';
@@ -33,13 +33,21 @@ export type OrderFilters = {
   channel?: string;
   status?: string;
   q?: string;
-  /** Newest first by default; "updated" and "total" sort descending too. */
-  sort?: 'created' | 'updated' | 'total';
+  /**
+   * Newest first by default. "oldest" is created ascending, "updated" most recent first, "total"
+   * largest first in the base currency, and "waiting" the longest-held first (orders not waiting
+   * last).
+   */
+  sort?: 'created' | 'oldest' | 'updated' | 'total' | 'waiting';
+  /** Only what needs a person: failed, rolled back, or waiting on a pending approval. */
+  attention?: boolean;
   /** Newest-first paging: only orders created before the previous page's last row. */
   after?: OrderCursor;
 };
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
+  // "#idz7qp" is how the app writes an order's reference (`orderRef`); search its id without the #.
+  const q = f.q?.trim().replace(/^#/, '');
   const where = and(
     f.after
       ? or(
@@ -49,20 +57,52 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
       : undefined,
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
-    f.status ? eq(orders.status, f.status) : undefined,
-    f.q
+    f.status === 'declined'
+      ? // Orders declined before `declined` existed were stored as cancelled (see `orderStatus`).
+        or(eq(orders.status, 'declined'), inArray(orders.id, declinedIds()))
+      : f.status
+        ? eq(orders.status, f.status)
+        : undefined,
+    f.attention
       ? or(
-          contains(orders.id, f.q),
-          contains(orders.title, f.q),
-          contains(orders.customerId, f.q),
-          contains(orders.contactEmail, f.q),
-          contains(orders.externalId, f.q),
+          inArray(orders.status, ['failed', 'rolled_back']),
+          inArray(
+            orders.id,
+            db()
+              .select({ id: approvals.orderId })
+              .from(approvals)
+              .where(eq(approvals.status, 'pending')),
+          ),
+        )
+      : undefined,
+    q
+      ? or(
+          contains(orders.id, q),
+          contains(orders.title, q),
+          contains(orders.customerId, q),
+          contains(customers.name, q),
+          contains(orders.contactEmail, q),
+          contains(orders.externalId, q),
         )
       : undefined,
   );
   const order =
-    f.sort === 'total' ? orders.total : f.sort === 'updated' ? orders.updatedAt : orders.createdAt;
-  return db().select().from(orders).where(where).orderBy(desc(order), desc(orders.id)).limit(limit);
+    f.sort === 'oldest'
+      ? [asc(orders.createdAt), asc(orders.id)]
+      : f.sort === 'total'
+        ? [desc(sql`${orders.total} / ${orders.fxRate}`), desc(orders.id)]
+        : f.sort === 'updated'
+          ? [desc(orders.updatedAt), desc(orders.id)]
+          : f.sort === 'waiting'
+            ? [sql`${orders.waitingSince} is null`, asc(orders.waitingSince), desc(orders.id)]
+            : [desc(orders.createdAt), desc(orders.id)];
+  return db()
+    .select(getTableColumns(orders))
+    .from(orders)
+    .leftJoin(customers, eq(customers.id, orders.customerId))
+    .where(where)
+    .orderBy(...order)
+    .limit(limit);
 }
 
 export async function dashboardStats() {
@@ -294,6 +334,14 @@ const declinedWhere = and(
   inArray(approvals.status, ['escalated', 'rejected']),
   eq(orders.status, 'cancelled'),
 );
+
+/** The ids of cancelled orders declined by policy, as a subquery. */
+const declinedIds = () =>
+  db()
+    .select({ id: approvals.orderId })
+    .from(approvals)
+    .innerJoin(orders, eq(orders.id, approvals.orderId))
+    .where(declinedWhere);
 
 /** The email intake log: every message the engine's email() entrypoint saw, newest first. */
 export async function recentInboundEmails(limit = 20) {

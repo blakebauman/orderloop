@@ -63,6 +63,15 @@ export const orders = sqliteTable(
     waitingAt: text('waiting_at'),
     /** When the oldest open wait began. */
     waitingSince: integer('waiting_since'),
+    /**
+     * What the open waits are on, joined with ` · `: `person:<role>` (role empty when unassigned),
+     * `event:<name>` or `timer`.
+     */
+    waitingFor: text('waiting_for'),
+    /** For a failed, rolled-back, declined or cancelled order: the labels of the steps that failed. */
+    stoppedAt: text('stopped_at'),
+    /** Why a failed, rolled-back, declined or cancelled order ended. */
+    reason: text('reason'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     idempotencyKey: text('idempotency_key'),

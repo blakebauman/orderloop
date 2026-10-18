@@ -252,11 +252,17 @@ export async function eraseOrders(
       continue;
     }
     result.documents += await deletePrefix(env, `orders/${o.id}/`);
-    // An order no agent holds (its title is all D1 has) is erased with the subject's terms.
+    // An order no agent holds (its title is all D1 has) is erased with the subject's terms, and
+    // loses its indexed reason, free text that may name them. A held order's agent re-indexed it.
     const title = erased.held ? erased.title : eraseText(o.title, terms);
     await db
       .update(orders)
-      .set({ contactEmail: null, title, erasedAt: Date.now() })
+      .set({
+        contactEmail: null,
+        title,
+        ...(erased.held ? {} : { reason: null }),
+        erasedAt: Date.now(),
+      })
       .where(eq(orders.id, o.id));
     done.push(o.id);
     result.orders++;

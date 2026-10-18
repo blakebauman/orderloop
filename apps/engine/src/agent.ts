@@ -94,6 +94,20 @@ export class OrderAgent extends Agent<Env, State> {
   private async syncIndex() {
     const s = this.state;
     if (!s.orderId || !s.order) return;
+    const label = (nodeId: string) => s.flow?.nodes.find((n) => n.id === nodeId)?.label ?? nodeId;
+    // A timer (control.wait) holds the order without a PendingWait; its node is marked waiting.
+    const timers = s.waits.length
+      ? []
+      : Object.entries(s.nodes).filter(([, r]) => r.status === 'waiting');
+    const ended = ['failed', 'rolled_back', 'declined', 'cancelled'].includes(s.status);
+    // Where an order that ended badly stopped: the steps that failed, or else the end it reached
+    // (an end step can fail the order and roll it back, e.g. "Out of stock").
+    const failedSteps = Object.entries(s.nodes).filter(([, r]) => r.status === 'failed' || r.error);
+    const endsReached = Object.entries(s.nodes).filter(
+      ([id, r]) =>
+        r.status === 'succeeded' && s.flow?.nodes.find((n) => n.id === id)?.type === 'control.end',
+    );
+    const failed = (failedSteps.length ? failedSteps : endsReached).map(([id]) => label(id));
     const row = {
       status: s.status,
       total: s.order.total,
@@ -104,10 +118,22 @@ export class OrderAgent extends Agent<Env, State> {
       generation: s.generation,
       waitingOn: s.waits.map((w) => w.title).join(' · ') || null,
       waitingAt:
-        s.waits
-          .map((w) => s.flow?.nodes.find((n) => n.id === w.nodeId)?.label ?? w.nodeId)
-          .join(' · ') || null,
-      waitingSince: s.waits.length ? Math.min(...s.waits.map((w) => w.since)) : null,
+        [...s.waits.map((w) => label(w.nodeId)), ...timers.map(([id]) => label(id))].join(' · ') ||
+        null,
+      waitingSince: s.waits.length
+        ? Math.min(...s.waits.map((w) => w.since))
+        : timers.length
+          ? Math.min(...timers.map(([, r]) => r.startedAt ?? s.updatedAt))
+          : null,
+      waitingFor:
+        [
+          ...s.waits.map((w) =>
+            w.kind === 'approval' ? `person:${w.assignee ?? ''}` : `event:${w.event ?? ''}`,
+          ),
+          ...timers.map(() => 'timer'),
+        ].join(' · ') || null,
+      stoppedAt: ended && failed.length ? failed.join(' · ') : null,
+      reason: ended ? (s.reason ?? null) : null,
     };
     const key = JSON.stringify(row);
     if (key === this.indexed) return;
