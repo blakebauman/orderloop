@@ -10,11 +10,13 @@ import {
   newWebhookSecret,
   type OrderChannel,
   ROTATION_GRACE_MS,
+  secretContext,
 } from '@orderloop/core';
 import { integrations, orders } from '@orderloop/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { integrationInput } from './api-schemas';
+import { openSecret, sealSecret } from './data-key.server';
 import { db } from './env.server';
 
 type Row = typeof integrations.$inferSelect;
@@ -60,12 +62,13 @@ export async function listIntegrations() {
 /** The secret is returned once, here; afterwards only the sender holds it. */
 export async function createIntegration(input: z.infer<typeof integrationInput>, by: string) {
   const secret = newWebhookSecret();
+  const id = newId('int');
   const [row] = await db()
     .insert(integrations)
     .values({
-      id: newId('int'),
+      id,
       name: input.name,
-      secret,
+      secret: await sealSecret(secret, secretContext.integration(id)),
       events: JSON.stringify(input.events),
       startOrders: input.startOrders,
       flows: JSON.stringify(input.flows),
@@ -88,7 +91,8 @@ export async function rotateIntegration(id: string) {
   const [row] = await db()
     .update(integrations)
     .set({
-      secret,
+      secret: await sealSecret(secret, secretContext.integration(id)),
+      // Still sealed for this row: it moves across as it is.
       previousSecret: current.secret,
       previousExpiresAt: Date.now() + ROTATION_GRACE_MS,
     })
@@ -122,8 +126,9 @@ export async function findIntegration(id: string): Promise<Integration | null> {
   return {
     id: r.id,
     name: r.name,
-    secret: r.secret,
-    previousSecret: r.previousSecret,
+    secret: await openSecret(r.secret, secretContext.integration(r.id)),
+    previousSecret:
+      r.previousSecret && (await openSecret(r.previousSecret, secretContext.integration(r.id))),
     previousExpiresAt: r.previousExpiresAt,
     ...scope(r),
   };

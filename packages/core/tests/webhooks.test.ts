@@ -42,6 +42,14 @@ describe('webhook signatures', () => {
 });
 
 describe('several v1 signatures', () => {
+  it('signs with each secret during a rotation, so either one verifies', async () => {
+    const header = await signWebhook([secret, 'whsec_old'], body, 1_000_000);
+    expect(header.match(/v1=/g)).toHaveLength(2);
+    const opts = { nowSec: 1_000_000 };
+    expect(await verifyWebhook(secret, body, header, opts)).toEqual({ ok: true });
+    expect(await verifyWebhook('whsec_old', body, header, opts)).toEqual({ ok: true });
+  });
+
   it('passes when any v1 matches, and fails when none does', async () => {
     const good = (await signWebhook(secret, body, 1_000_000)).split('v1=')[1]!;
     const other = (await signWebhook('whsec_old', body, 1_000_000)).split('v1=')[1]!;

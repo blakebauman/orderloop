@@ -24,6 +24,7 @@ import {
   SESSION_IDLE_MS,
   SESSION_MAX_MS,
   SESSION_TOUCH_MS,
+  secretContext,
 } from '@orderloop/core';
 import {
   apiTokens,
@@ -44,6 +45,7 @@ import {
   sha256Hex,
   verifyPassword,
 } from './credentials';
+import { openSecret } from './data-key.server';
 import { DEMO_USER, isDemo } from './demo.server';
 import { db } from './env.server';
 import { isLocalHost } from './origin';
@@ -568,7 +570,8 @@ async function useTotp(
   code: string,
 ) {
   if (!user.totpSecret) return false;
-  const step = await verifyTotp(user.totpSecret, code, Date.now(), user.totpLastStep);
+  const secret = await openSecret(user.totpSecret, secretContext.totp(user.id));
+  const step = await verifyTotp(secret, code, Date.now(), user.totpLastStep);
   if (step === null) return false;
   // Conditional, so two requests racing with the same code can't both win.
   const r = await db()

@@ -27,6 +27,8 @@ export default defineConfig(async () => {
             TIME_SCALE: '1',
             // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
             PRINCIPAL_KEY: 'test-principal-key',
+            // Encrypts secrets at rest (tests/secrets.test.ts rotates it).
+            DATA_KEY: 'test-data-key',
             // Signs UCP order webhooks in tests (a throwaway key, never a deployment's).
             UCP_SIGNING_KEY: JSON.stringify({
               kty: 'EC',

@@ -100,6 +100,7 @@ Subscribers receive signed order events: `order.paid`, `order.invoiced`, `order.
 ```
 GET    /api/v1/webhook-subscriptions
 POST   /api/v1/webhook-subscriptions               { "url": "https://…", "events": ["order.shipped"] }   ← returns the secret once
+POST   /api/v1/webhook-subscriptions/:id/rotate    ← new secret, returned once; the old one also signs for 24 hours (admin)
 DELETE /api/v1/webhook-subscriptions/:id
 GET    /api/v1/webhook-subscriptions/:id/deliveries
 ```
@@ -108,7 +109,7 @@ Privacy requests (admin): `POST /api/v1/data-subjects/export` and `POST /api/v1/
 
 Ending events cover every way an order ends: an End node, a cancel from the UI or API (`order.cancelled`, sent by the order's agent), and a node that throws (`order.failed`, with the node and its error).
 
-Each delivery is signed with the subscription's secret in the same `X-OrderLoop-Signature` scheme as inbound events, so `verifyWebhook` checks it. `X-OrderLoop-Delivery` stays the same across retries; use it to dedupe. A delivery runs in its own `${nodeId}#${run}:emit` step and is retried with backoff. If the endpoint is still down when retries run out, the delivery is left `failed` and the order carries on.
+Each delivery is signed with the subscription's secret in the same `X-OrderLoop-Signature` scheme as inbound events, so `verifyWebhook` checks it; for 24 hours after a rotation the header carries a `v1=` for the new secret and one for the old. `X-OrderLoop-Delivery` stays the same across retries; use it to dedupe. A delivery runs in its own `${nodeId}#${run}:emit` step and is retried with backoff. If the endpoint is still down when retries run out, the delivery is left `failed` and the order carries on.
 
 ### Signed webhooks
 

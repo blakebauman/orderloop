@@ -18,6 +18,7 @@
  *   GET    /api/v1/webhook-subscriptions
  *   POST   /api/v1/webhook-subscriptions        { url, events?: ["order.shipped", …] | ["*"] }
  *   DELETE /api/v1/webhook-subscriptions/:id
+ *   POST   /api/v1/webhook-subscriptions/:id/rotate  new secret; the old one also signs for 24 hours
  *   GET    /api/v1/webhook-subscriptions/:id/deliveries
  *
  *   POST   /api/v1/data-subjects/export     { email }  everything held about them, as JSON (admin)
@@ -120,6 +121,7 @@ import {
   deleteSubscription,
   listDeliveries,
   listSubscriptions,
+  rotateSubscription,
 } from './webhooks.server';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -367,6 +369,16 @@ async function handleSubscriptions(
       detail: { via: 'api' },
     });
     return json({ ok: true });
+  }
+  if (parts[2] === 'rotate' && parts.length === 3 && request.method === 'POST') {
+    const rotated = await rotateSubscription(id);
+    if (!rotated) return json({ error: 'Not found' }, 404);
+    await audit(request, 'webhook.rotated', {
+      actor: caller,
+      target: rotated.subscription.url,
+      detail: { id, via: 'api' },
+    });
+    return json(rotated);
   }
   if (parts[2] === 'deliveries' && parts.length === 3 && request.method === 'GET')
     return json({ deliveries: await listDeliveries(id) });

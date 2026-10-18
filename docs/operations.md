@@ -68,7 +68,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    database and R2 bucket (in the jurisdiction; the Durable Objects get theirs from the engine's `DATA_JURISDICTION`, rendered at deploy), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
-   It sets the environment's `PRINCIPAL_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks one, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
+   It sets the environment's `PRINCIPAL_KEY` and `DATA_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
@@ -191,6 +191,32 @@ Removing a secret from the environment does not remove it from the Worker: `flee
 only the ones set and `--secrets-file` never deletes, so also run
 `wrangler secret delete PRINCIPAL_KEY_PREVIOUS` against the deployment's engine Worker
 (`orderloop-engine-<id>`), or the old key stays accepted.
+
+## Rotating the data key
+
+`DATA_KEY` encrypts the secrets a deployment stores: two-factor secrets, integration and webhook
+subscription secrets, and the credentials of A2A push configs. A stored value names the key it was
+sealed under, so both keys can be read during a rotation and nothing needs to be re-entered:
+
+1. In the deployment's GitHub environment, set `DATA_KEY_PREVIOUS` to the current key and
+   `DATA_KEY` to a new one (`openssl rand -hex 32`). Deploy. New writes use the new key; values
+   under the old one are still read.
+2. Wait for the next daily retention sweep (03:30 UTC) or longer, and check its log shows
+   `secrets.unreadable` of 0. The sweep (`resealSecrets`) moves every value under
+   `DATA_KEY_PREVIOUS` onto `DATA_KEY`, writing conditionally so a concurrent rotation isn't undone;
+   `secrets.resealed` counts what it moved.
+3. Remove `DATA_KEY_PREVIOUS` from the environment, deploy again, and also run
+   `wrangler secret delete DATA_KEY_PREVIOUS` against both the deployment's web and engine Workers
+   (`orderloop-web-<id>`, `orderloop-engine-<id>`): `--secrets-file` never deletes, so the old key
+   would stay readable.
+
+A2A push configs live in each `A2AAgent`'s SQLite and are resealed when loaded, not by the sweep.
+A config on an idle task still under the old key is dropped once that key is gone (logged); the
+caller registers its URL again.
+
+Never lose `DATA_KEY`: values sealed under a key the deployment no longer has can't be recovered.
+Two-factor must be reset for those people, and integration and webhook secrets rotated. Values stored
+before encryption existed have no prefix, are read as they are, and are encrypted by the next sweep.
 
 ## Recovering admin access
 

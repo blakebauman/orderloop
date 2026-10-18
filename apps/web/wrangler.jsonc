@@ -79,6 +79,7 @@
   // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders.
   // STRIPE_WEBHOOK_SECRET — the Stripe webhook endpoint's signing secret (whsec_…); enables
   // POST /api/v1/webhooks/stripe. PRINCIPAL_KEY — signs what this Worker forwards to the engine.
+  // DATA_KEY (and DATA_KEY_PREVIOUS during a rotation) — encrypts the secrets stored in D1.
   // OIDC_CLIENT_SECRET — the identity provider's client secret for single sign-on. Signed webhooks
   // use integration keys (/api/v1/integrations), stored in D1, not a secret here.
 }

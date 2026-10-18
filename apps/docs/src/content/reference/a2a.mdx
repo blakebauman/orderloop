@@ -115,7 +115,7 @@ URL, is refused with an invalid-request error. Notifications reach public addres
 
 **Authenticating the sender.** With `authentication` set, the request carries
 `Authorization: <scheme> <credentials>`; otherwise, with `token` set, it carries
-`X-A2A-Notification-Token: <token>`. Check one of them on your receiver.
+`X-A2A-Notification-Token: <token>`. Check one of them on your receiver. The token and credentials are stored encrypted. If OrderLoop can no longer read a stored config (after an encryption key was lost), it drops it, and you register the URL again.
 
 **What triggers a push.** Updates from the request that creates or continues the task, and
 afterwards every change in the order the task follows: a status change or a change in what the

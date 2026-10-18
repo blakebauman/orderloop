@@ -10,6 +10,10 @@ interface Env {
   PRINCIPAL_KEY?: string;
   /** The key before a rotation, still accepted until the web Worker signs with the new one. */
   PRINCIPAL_KEY_PREVIOUS?: string;
+  /** Shared with the web Worker: encrypts secrets at rest (@orderloop/core encryptSecret). */
+  DATA_KEY?: string;
+  /** The key before a rotation, still read until the daily sweep has resealed everything. */
+  DATA_KEY_PREVIOUS?: string;
   /** Signs UCP order webhooks: a private P-256 JWK with a `kid`, published in /.well-known/ucp. */
   UCP_SIGNING_KEY?: string;
 }
