@@ -123,11 +123,14 @@ with a different body returns `422` and starts nothing.
 ## List orders
 
 `GET /api/v1/orders` returns a page of orders, newest first (by `created_at`, then `id`). `limit` is 1 to 200 (default 50); `nextCursor` is an opaque string to pass back as `cursor` for the next page, and is `null` on the last page. A `cursor` the API did not issue is `400`. Filter with
-`model`, `channel`, `status` (one of <Values of="order-statuses" />) and `q`, which matches the order id, title,
-customer id, contact email or external id. Each row has `id`, `model`, `channel`, `externalId`, `contactEmail`, `status`, `title`, `flowId`, `flowVersion`, `instanceId`,
+`model`, `channel`, `status` (one of <Values of="order-statuses" />) and `q`, which matches the order id (a
+leading `#`, as the app writes an order's reference, is ignored), title, customer id or name, contact email
+or external id. Each row has `id`, `model`, `channel`, `externalId`, `contactEmail`, `status`, `title`, `flowId`, `flowVersion`, `instanceId`,
 `generation`, `customerId`, `currency`, `total`, `waitingOn` (the open waits' titles),
-`waitingAt` (the labels of the steps holding them), `waitingSince`, `createdAt` and `updatedAt`
-(epoch milliseconds).
+`waitingAt` (the labels of the steps holding them), `waitingSince`, `waitingFor` (what each wait is on:
+`person:<role>`, `event:<name>` or `timer`, joined with ` · `), `stoppedAt` and `reason` (for an order
+that failed, rolled back, was declined or cancelled: where it stopped and why), `createdAt` and
+`updatedAt` (epoch milliseconds).
 
 ## Read an order
 

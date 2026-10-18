@@ -219,6 +219,9 @@ describe('B2B order', () => {
     expect(s.nodes.credit!.branches).toEqual(['over_limit']);
     const pending = await db().select().from(approvals).where(eq(approvals.orderId, orderId));
     expect(pending).toMatchObject([{ status: 'pending', assignee: 'sales_ops' }]);
+    // The orders list says who the wait is on.
+    const listed = await db().select().from(orders).where(eq(orders.id, orderId)).get();
+    expect(listed).toMatchObject({ waitingFor: 'person:sales_ops', stoppedAt: null, reason: null });
 
     await agent(orderId).decide('approval', 'rejected', 'dana', 'Over limit');
     const done = await settled(orderId);
@@ -240,6 +243,8 @@ describe('B2B order', () => {
     });
     const done = await settled(orderId);
     expect([done.status, done.reason]).toEqual(['declined', 'No approval decision in time']);
+    const listed = await db().select().from(orders).where(eq(orders.id, orderId)).get();
+    expect(listed).toMatchObject({ waitingFor: null, reason: 'No approval decision in time' });
     expect(done.nodes.approval!.branches).toEqual(['escalated']);
     expect(done.nodes.declined!.status).toBe('skipped');
   });
@@ -296,6 +301,10 @@ describe('B2B order', () => {
     expect(failed.reason).toContain('Insufficient stock');
     expect(failed.rollback).toEqual({ outcome: 'complete', error: null });
     expect(failed.nodes.reserve!.status).toBe('rolled_back');
+    const listed = await db().select().from(orders).where(eq(orders.id, orderId)).get();
+    // It took the "short" branch to the end that fails and rolls back.
+    expect(listed!.stoppedAt).toBe(failed.flow!.nodes.find((n) => n.id === 'backorder')!.label);
+    expect(listed!.reason).toContain('Insufficient stock');
   });
 
   it('drops meta.simulate where the deployment does not allow simulated failures', async () => {

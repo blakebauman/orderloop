@@ -1,6 +1,14 @@
 import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { ago, dateTime, duration, money, statusColor, waitLabel } from '../app/lib/format';
+import {
+  ago,
+  dateTime,
+  duration,
+  money,
+  statusColor,
+  waitingForLabel,
+  waitLabel,
+} from '../app/lib/format';
 import { SCENARIOS } from '../app/lib/scenarios';
 
 const templates = Object.values(TEMPLATES).map((t) => t());
@@ -30,6 +38,15 @@ describe('format', () => {
     );
     // An event a custom flow invents keeps its own name.
     expect(waitLabel('Waiting for invoice.signed')).toBe('invoice.signed');
+  });
+
+  it('says who an order waits on, from the index', () => {
+    expect(waitingForLabel('person:sales_ops')).toBe('Sales ops');
+    expect(waitingForLabel('person:')).toBe('an approver');
+    expect(waitingForLabel('event:payment.received · timer')).toBe('Payment, a timer');
+    expect(waitingForLabel('event:invoice.signed')).toBe('invoice.signed');
+    expect(waitingForLabel('person:manager · person:manager')).toBe('Manager');
+    expect(waitingForLabel(null)).toBe('');
   });
 
   it('formats money and relative time', () => {

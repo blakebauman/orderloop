@@ -1,4 +1,5 @@
 import { cn } from '@orderloop/ui/lib/utils';
+import { Undo2, X } from 'lucide-react';
 import { outcomeLabel, statusColor, statusLabel } from '~/lib/format';
 
 // Only running work pulses in badges and dots. A wait pulses once, on its step in the graph;
@@ -18,26 +19,60 @@ export function StatusDot({ status, className }: { status?: string; className?: 
   );
 }
 
-function Stamp({ color, label, live }: { color: string; label: string; live?: boolean }) {
+function Stamp({
+  color,
+  label,
+  live,
+  ended,
+}: {
+  color: string;
+  label: string;
+  live?: boolean;
+  /** Ended badly: ruled in the colour with a mark, so it reads apart from a tinted wait. */
+  ended?: 'failed' | 'undone';
+}) {
+  const Mark = ended === 'undone' ? Undo2 : X;
   return (
     <span
-      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium text-xs"
-      style={{ color, background: `color-mix(in oklch, ${color} 11%, transparent)` }}
+      className={cn(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium text-xs',
+        ended && 'border py-px',
+      )}
+      style={
+        ended
+          ? { color, borderColor: color }
+          : { color, background: `color-mix(in oklch, ${color} 11%, transparent)` }
+      }
     >
-      <span
-        aria-hidden="true"
-        className={cn('size-1.5 rounded-full', live && 'motion-safe:animate-pulse')}
-        style={{ background: color }}
-      />
+      {ended ? (
+        <Mark aria-hidden="true" className="size-3" strokeWidth={2.5} />
+      ) : (
+        <span
+          aria-hidden="true"
+          className={cn('size-1.5 rounded-full', live && 'motion-safe:animate-pulse')}
+          style={{ background: color }}
+        />
+      )}
       {label}
     </span>
   );
 }
 
-/** Order or step status: a small tinted stamp in the status colour. */
+const ENDED: Record<string, 'failed' | 'undone'> = {
+  failed: 'failed',
+  declined: 'failed',
+  rolled_back: 'undone',
+};
+
+/** Order or step status: a small tinted stamp in the status colour; a bad ending is ruled. */
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <Stamp color={statusColor(status)} label={statusLabel(status)} live={status === 'running'} />
+    <Stamp
+      color={statusColor(status)}
+      label={statusLabel(status)}
+      live={status === 'running'}
+      ended={ENDED[status]}
+    />
   );
 }
 
