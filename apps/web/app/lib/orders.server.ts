@@ -285,6 +285,47 @@ export async function publishedFlows() {
     .orderBy(flows.name);
 }
 
+/**
+ * What needs a person, for the overview: orders that failed or rolled back, newest first, with where
+ * and why they stopped; and every open wait counted by step and by what it waits on (the index's
+ * `waiting_for`), with the oldest. Counted in SQL, so it holds at any volume.
+ */
+export async function attentionSummary() {
+  const [failed, failedTotal, waits] = await Promise.all([
+    db()
+      .select({
+        id: orders.id,
+        title: orders.title,
+        model: orders.model,
+        status: orders.status,
+        stoppedAt: orders.stoppedAt,
+        reason: orders.reason,
+        updatedAt: orders.updatedAt,
+      })
+      .from(orders)
+      .where(inArray(orders.status, ['failed', 'rolled_back']))
+      .orderBy(desc(orders.updatedAt))
+      .limit(5),
+    db()
+      .select({ n: sql<number>`count(*)` })
+      .from(orders)
+      .where(inArray(orders.status, ['failed', 'rolled_back']))
+      .get(),
+    db()
+      .select({
+        at: orders.waitingAt,
+        on: orders.waitingOn,
+        for: orders.waitingFor,
+        n: sql<number>`count(*)`,
+        oldest: sql<number | null>`min(${orders.waitingSince})`,
+      })
+      .from(orders)
+      .where(eq(orders.status, 'waiting'))
+      .groupBy(orders.waitingAt, orders.waitingOn, orders.waitingFor),
+  ]);
+  return { failed, failedTotal: failedTotal?.n ?? 0, waits };
+}
+
 /** Orders still running (queued, running or waiting) per flow and version, for the flows list. */
 export async function runningByFlow(): Promise<Record<string, Record<number, number>>> {
   const rows = await db()
