@@ -104,6 +104,12 @@ waiting.
   seconds, so **Undo** takes it back; leaving the page sends it at once. The payload is
   `{ "source": "back-office" }`. Seller responses on a marketplace order are recorded per seller on
   the order page.
+
+The back office's **Records** section shows what orders have done outside the flow, newest first:
+money (payments, invoices and seller payouts), shipments, stock holds, seller orders, messages sent
+and documents. Each row names its order and, for connector writes, the step that wrote it
+(`capture#1`): a retried step finds that same record rather than writing another. The search box at
+the top of the page finds an order, customer, SKU or seller across every section.
 - **REST API**, with an API token of the `operator` role:
 
   ```bash
