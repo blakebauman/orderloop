@@ -1,5 +1,5 @@
 /**
- * What orders did to the outside world, for the back office: the shared shape of a record row,
+ * What orders did to the outside world, for the Commerce page: the shared shape of a record row,
  * how to read the step that wrote it from its id, and which status colour each outcome takes.
  * Pure; runs on both sides.
  */

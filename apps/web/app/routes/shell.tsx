@@ -107,7 +107,7 @@ const NAV = [
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals', badge: true },
   { to: '/flows', label: 'Flows' },
-  { to: '/back-office', label: 'Back office' },
+  { to: '/commerce', label: 'Commerce' },
 ];
 
 const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [

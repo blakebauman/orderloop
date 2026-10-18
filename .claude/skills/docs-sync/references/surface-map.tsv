@@ -42,7 +42,7 @@
 ^apps/engine/src/ai\.ts$	guides/ai	prose
 ^apps/engine/src/email\.ts$	guides/email-intake docs/architecture.md docs/data-model.md	prose
 ^packages/core/src/intake\.ts$	guides/email-intake	prose
-^apps/web/app/routes/back-office\.tsx$	guides/email-intake	prose
+^apps/web/app/routes/commerce\.tsx$	guides/email-intake	prose
 ^apps/engine/src/(orders|replenish|api|index)\.ts$	docs/architecture.md docs/workflow.md reference/rest-api	prose
 ^apps/(engine|web)/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md reference/a2a	prose
 ^apps/web/\.dev\.vars\.example$	docs/configuration.md docs/local-development.md	prose

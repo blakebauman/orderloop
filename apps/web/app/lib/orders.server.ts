@@ -237,7 +237,7 @@ export async function getOrderRow(orderId: string) {
   return db().select().from(orders).where(eq(orders.id, orderId)).get();
 }
 
-export async function backOffice() {
+export async function commerceData() {
   const [cust, prods, sources, rules, contracts, sellerRows, stores, storeStock] =
     await Promise.all([
       db().select().from(customers).orderBy(customers.name),
