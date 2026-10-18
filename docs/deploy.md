@@ -217,7 +217,9 @@ state (live order state, assistant conversations) is not part of D1 and isn't re
 models on Mondays at 06:00 UTC, from the Actions tab (`workflow_dispatch`), and on pull requests
 that touch `apps/engine/src/ai.ts`, `apps/engine/wrangler.jsonc`,
 `apps/engine/evals/**`, or `packages/core/src/` `redact.ts`, `untrusted.ts` or `provenance.ts`. It
-uses the repository's `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` secrets and writes a table
+uses the repository's `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_TOKEN` secrets (an API token with only
+the Workers AI Read permission; it falls back to `CLOUDFLARE_API_TOKEN`, which as a deploy token
+usually can't call Workers AI, so every case fails with a 401 fallback) and writes a table
 of every case to the run summary. It is not a required check, by design: a model is not
 deterministic. Run it and read it before changing a `*_MODEL` var or a prompt.
 
