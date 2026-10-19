@@ -7,8 +7,8 @@ packages:
 # A dependency used by exactly one package keeps its version in that package.json.
 catalog:
   # React
-  react: ^19.2.8
-  react-dom: ^19.2.8
+  react: ^19.3.1
+  react-dom: ^19.3.1
   '@types/react': ^19.2.0
   '@types/react-dom': ^19.2.0
 
@@ -32,8 +32,8 @@ catalog:
   agents: ^0.28.1
   '@cloudflare/ai-chat': 0.12.1
   ai: 7.0.139
-  '@ai-sdk/react': 4.0.142
-  '@ai-sdk/provider': 4.0.27
+  '@ai-sdk/react': 4.0.146
+  '@ai-sdk/provider': 4.0.28
   workers-ai-provider: 4.0.0
   streamdown: 2.7.0
 
@@ -43,9 +43,9 @@ catalog:
   vite: ^8.0.12
 
   # Cloudflare
-  wrangler: ^4.149.0
-  '@cloudflare/workers-types': ^5.20261009.1
-  '@cloudflare/vitest-plugin': ^1.4.0
+  wrangler: ^4.151.1
+  '@cloudflare/workers-types': ^5.20261016.1
+  '@cloudflare/vitest-plugin': ^1.4.4
 
 overrides:
   # GHSA: quadratic selector parsing (< 7.1.6). Starlight → expressive-code → postcss-nested@6

@@ -42,7 +42,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.63.1",
+    "@cloudflare/vite-plugin": "^1.64.0",
     "@orderloop/typescript-config": "workspace:*",
     "@react-router/dev": "^8.4.0",
     "@tailwindcss/vite": "catalog:",
