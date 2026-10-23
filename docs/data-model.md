@@ -214,6 +214,40 @@ See [Email intake](https://docs.orderloop.app/guides/email-intake/#the-intake-lo
 
 The web app serves them at `/docs/<key>` to signed-in users only.
 
+## Product catalog
+
+The catalog Worker ([Architecture](architecture.md#product-catalog)) keeps nothing in D1. Its
+source of truth is the SQLite storage of its Durable Objects, and what it publishes goes to its own
+R2 bucket (`orderloop-catalog`, not `orderloop-docs`) and KV namespace. Each object creates its
+tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files.
+
+`CatalogShard` (64, `shard-<n>`):
+
+| Table | Holds |
+|---|---|
+| `products` | Primary key `key`; `uid` (unique, from `productUid`: the shard number and a per-shard sequence packed into 32 bits), `type`, `type_version`, `status`, `version` (starts at 1, +1 per change), `hash` (content hash), `body` (the product as JSON), `created_at`, `updated_at`, `updated_by` |
+| `aliases` | `alias` (a SKU, GTIN or slug, as `productAliases` writes it) and its `owner` product key: the claims that hash to this shard (`aliasShard`), which may belong to products on other shards |
+| `outbox` | `seq`, `key`, `urgent`: products waiting to publish; the alarm deletes rows once their product is published |
+| `applied` | `batch` id, `at` and the `result` of every `apply` batch, so a retried batch returns its first answer. The alarm deletes rows older than 7 days (longer than a feed part waits for redelivery) |
+| `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published |
+| `settings` | `shard` (the number this object was first called as; a call as another number throws) and `seq` (the next `uid` sequence) |
+
+`CatalogMeta` (`meta`): `types` (`code`, `version`, `body`, `by`, `at`; every version is kept),
+`channels` and `categories` (`code`, `body`) and `settings` (`rev`, which moves on every type or
+channel change).
+
+Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a new tree (`paths` in
+`packages/core/src/product/render.ts`):
+
+| Where | Key | Holds |
+|---|---|---|
+| R2 | `docs/f1/<channel>/<locale>/p/<key>.json` | The product document for that channel and locale; custom metadata `version` |
+| R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
+| R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
+| KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
+
+Listing indexes (`idx/f1/<channel>/<category>.bin`) are defined in core but not written yet.
+
 ## Personal data
 
 Where personal data is stored, and where it goes. Order Loop holds no data about anyone beyond what
@@ -239,7 +273,7 @@ names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
 
 ### Data residency
 
-A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`.
+A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to `CatalogShard` and `CatalogMeta` (`apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
 
 Each is fixed when the resource is created. Set the jurisdiction before the deployment's first order: with a different value the Durable Objects get different ids, and existing orders' live state is stranded (D1 and R2 can't move either). Local dev and tests leave it empty; workerd doesn't implement jurisdictions.
 
@@ -339,7 +373,7 @@ Not covered by the redaction:
 - **AI Gateway** records every model call. With request logs on (the registry's `aiGatewayLogs`,
   default `true`) it keeps the prompts and responses, up to 100,000 entries. Turning logs off is
   set at creation by `provision.sh`; for an existing gateway it is changed in the dashboard.
-- **Workers logs** are on for both Workers (`observability` in `wrangler.jsonc`, invocation logs
+- **Workers logs** are on for the engine, web and catalog Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines
   outlive the D1 retention and are subject to Cloudflare's log retention instead.

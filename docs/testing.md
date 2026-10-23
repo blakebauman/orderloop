@@ -12,11 +12,12 @@ CI runs it after lint, type-check and build, then audits production dependencies
 | `packages/core` | Node | `packages/core/vitest.config.ts` |
 | `packages/design` | Node | `packages/design/vitest.config.ts` |
 | `apps/engine` | workerd, through `@cloudflare/vitest-plugin`; two projects, `engine` and `stripe` | `apps/engine/vitest.config.ts` |
+| `apps/catalog` | workerd, through `@cloudflare/vitest-plugin` | `apps/catalog/vitest.config.ts` |
 | `apps/web` | Node | `apps/web/vitest.config.ts` |
 
 :::caution
 vitest is pinned to `5.0.3` in the workspace catalog (`pnpm-workspace.yaml`): 5.0.4's module cache
-breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine suite.
+breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine and catalog suites.
 :::
 
 ## Core: the planner and pure logic
@@ -133,6 +134,25 @@ Tests drive orders through `startOrder`, then poll the agent's `snapshot()` unti
 (`until`, `waitingOn`, `settled`), and assert on D1 rows (`payments`, `reservations`, `location_stock`, `entitlements`, `shipments`,
 `approvals`, `webhook_deliveries`) as well as state.
 
+## Catalog: shards and publishing in workerd
+
+`apps/catalog/tests/catalog.test.ts` runs the real `CatalogApi`, `CatalogShard` and `CatalogMeta`
+against local Durable Objects, R2 and KV, from the catalog's own `wrangler.jsonc` with
+`remoteBindings: false` (no network or account; `testTimeout` is 60 seconds). It calls the entrypoint through
+`ProductCatalogRpc`, as the web app's binding will. `tests/helpers.ts` registers the `apparel`
+type, a `web` channel (`en` and `fr`, USD) and a two-level category tree once, builds
+products with unique keys, SKUs and slugs, and `settle()` runs every shard's alarm by hand until
+the outbox is empty, so a test reads the published R2 and KV objects deterministically. Product
+rendering and routing are covered in core (`product-*.test.ts`), not repeated here.
+
+| Group | Covers |
+|---|---|
+| writing products | A product stored at version 1 and published in every locale (the document, its enum labels per locale, an alias pointer per SKU and slug, the KV card, `getProduct`, `resolveAlias`); an unchanged product writes nothing and leaves the outbox empty, a change is version 2 and republished; invalid products are `rejected` with every issue beside valid ones in the same call (a bad enum value, an unknown type); a key repeated in one batch keeps the last row and rejects the earlier |
+| aliases | A SKU another product holds is refused with `already used by <key>` and a slug the refused product claimed first is given back; the SKU is free once its holder drops it; a claim whose product no longer holds it (a release that never happened) is taken over |
+| shard batches | A batch id is applied once (a repeat with different rows returns the first results and stores nothing new); a shard refuses to be called as another shard number |
+| unpublishing | A draft's documents, cards and alias pointers are deleted while it still owns its SKUs, and come back when it is active again; a dropped variant's pointer goes; deleting a product removes its documents and claims, and an unknown key is `unchanged` |
+| types, channels and categories | Types add versions only (a removed attribute is refused with a reason, a new type must start at 1) and an unversioned product pins to the latest; categories with an unknown parent or a cycle are refused and the published tree has localized names; a channel whose default locale isn't published is refused |
+
 ## Design
 
 `packages/design/tests/tokens.test.ts` holds the Ledger tokens in `packages/design/src/tokens.ts` to
@@ -176,7 +196,9 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `new-order.test.ts` | The New order lines grammar (each spelling, no number as one; no SKU, zero or negative, two numbers and SKUs outside the catalog are issues, not guesses); a catalog click adds a row or one more; `summarizeFlow` names where a flow asks a person, what it waits for and what it undoes, and whether it reads a document or routes fulfillment |
 | `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its model; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
-`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
+`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
+
+`scripts/fleet.test.ts` also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
 
 ## What isn't covered
 

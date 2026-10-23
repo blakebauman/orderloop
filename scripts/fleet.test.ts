@@ -6,6 +6,7 @@ import { parse } from 'jsonc-parser';
 import {
   loadDeployments,
   matrix,
+  renderCatalog,
   renderEngine,
   renderWeb,
   secretsProblem,
@@ -20,6 +21,7 @@ const acme = toDeployment({
   ring: 'canary',
   slot: 2,
   d1Id: 'd1-acme',
+  catalogKvId: 'a'.repeat(32),
   jurisdiction: 'eu',
 });
 
@@ -44,6 +46,19 @@ test('the engine config carries the deployment everywhere a name is account-wide
     jurisdiction: 'eu',
   });
   assert.equal(c.vars.AI_GATEWAY_ID, 'orderloop-acme');
+  assert.equal(c.workers_dev, false);
+});
+
+test('the catalog config has its own name, bucket, card namespace and jurisdiction', () => {
+  const c = renderCatalog(base('catalog'), acme);
+  assert.equal(c.name, 'orderloop-catalog-acme');
+  assert.deepEqual(c.r2_buckets[0], {
+    binding: 'PUBLISHED',
+    bucket_name: 'orderloop-catalog-acme',
+    jurisdiction: 'eu',
+  });
+  assert.deepEqual(c.kv_namespaces[0], { binding: 'CARDS', id: 'a'.repeat(32) });
+  assert.equal(c.vars.DATA_JURISDICTION, 'eu');
   assert.equal(c.workers_dev, false);
 });
 
@@ -73,6 +88,7 @@ test("a customer's limits replace the base budgets they name", () => {
 
 test("orderloop.app's own deployment renders the base configs unchanged", () => {
   const d = loadDeployments().find((x) => x.id === 'orderloop')!;
+  assert.deepEqual(renderCatalog(base('catalog'), d), base('catalog'));
   assert.deepEqual(renderEngine(base('engine'), d), base('engine'));
   assert.deepEqual(renderWeb(base('web'), d), base('web'));
 });
@@ -90,11 +106,25 @@ test('bad entries are refused', () => {
     () => renderEngine(base('engine'), toDeployment({ id: 'acme', ring: 'canary', slot: 2 })),
     /provision/,
   );
+  assert.throws(
+    () => toDeployment({ id: 'acme', ring: 'canary', slot: 2, catalogKvId: 'orderloop-cards' }),
+    /catalogKvId/,
+  );
+  assert.throws(
+    () =>
+      renderCatalog(
+        base('catalog'),
+        toDeployment({ id: 'acme', ring: 'canary', slot: 2, d1Id: 'x' }),
+      ),
+    /catalogKvId: run scripts\/provision.sh acme/,
+  );
 });
 
 test('an unprovisioned deployment blocks the matrix unless it is held', () => {
   const fresh = toDeployment({ id: 'new', ring: 'general', slot: 4 });
   assert.throws(() => matrix([acme, fresh]), /not provisioned/);
+  // D1 alone isn't enough: the catalog needs its card namespace too.
+  assert.throws(() => matrix([acme, { ...fresh, d1Id: 'x' }]), /not provisioned/);
   assert.deepEqual(matrix([acme, { ...fresh, hold: true }]).general, []);
 });
 

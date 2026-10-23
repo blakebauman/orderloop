@@ -13,7 +13,7 @@
  * Both parsers stream: memory stays flat however large the feed. Pure.
  */
 import { toMinor } from '../money';
-import type { AttributeDef, Channel, ProductInput, ProductType, VariantInput } from './model';
+import type { AttributeDef, Channel, Json, ProductInput, ProductType, VariantInput } from './model';
 import { parseTypeRef } from './model';
 
 /** RFC 4180 records from a byte stream: quoted fields, `""` escapes, CRLF or LF, a leading BOM. */
@@ -138,7 +138,7 @@ const BOOL: Record<string, boolean> = {
 };
 
 /** A CSV cell read as a value of `def`'s kind. Throws with a message on a bad cell. */
-export function readCell(def: AttributeDef, cell: string): unknown {
+export function readCell(def: AttributeDef, cell: string): Json {
   switch (def.kind) {
     case 'text':
     case 'enum':
@@ -173,7 +173,7 @@ export function readCell(def: AttributeDef, cell: string): unknown {
     }
     case 'json':
       try {
-        return JSON.parse(cell);
+        return JSON.parse(cell) as Json;
       } catch {
         throw new Error(`${def.code}: invalid JSON`);
       }
@@ -224,8 +224,8 @@ export async function* csvProducts(
       const type = resolveType(ref.code, ref.version);
       if (!type) throw new Error(`unknown type ${typeRef || '(none)'}`);
       const defs = new Map(type.attributes.map((a) => [a.code, a]));
-      const productAttrs: Record<string, unknown> = {};
-      const variantAttrs: Record<string, unknown> = {};
+      const productAttrs: Record<string, Json> = {};
+      const variantAttrs: Record<string, Json> = {};
       const localized: Record<string, Record<string, string>> = {};
       for (const [col, cell] of Object.entries(cells)) {
         if (!col.startsWith('attr.')) continue;

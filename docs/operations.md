@@ -25,7 +25,8 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `suffix` | `-<id>` | Added to every resource name. `orderloop` uses `""`, so its resources keep the base names |
 | `environment` | `deploy-<id>` | The GitHub environment holding the deployment's secrets. `orderloop` uses `production` |
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
-| `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 keep data, set when they are created, and where the engine's Durable Objects (`OrderAgent`, `AssistantAgent`, `A2AAgent`) are created. Rendered into the engine's `DATA_JURISDICTION`; `renderEngine` omits it when unset, leaving the base `""`. Fixed for a deployment's life: see [Data residency](data-model.md#data-residency) |
+| `catalogKvId` | none | The id (32 hex characters; anything else is refused) of the catalog's KV namespace of listing cards, written by `scripts/provision.sh` (`fleet.ts set-catalog-kv`). Like `d1Id`, required to render the catalog's config or to deploy |
+| `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 (the docs and the catalog's buckets) keep data, set when they are created, and where the engine's Durable Objects (`OrderAgent`, `AssistantAgent`, `A2AAgent`) and the catalog's (`CatalogShard`, `CatalogMeta`) are created. Rendered into the engine's and the catalog's `DATA_JURISDICTION`; `renderEngine` and `renderCatalog` omit it when unset, leaving the base `""`. KV has no jurisdictions. Fixed for a deployment's life: see [Data residency](data-model.md#data-residency) |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
@@ -45,14 +46,16 @@ With the suffix, deployment `acme` gets these resource names:
 |---|---|
 | Web Worker | `orderloop-web-acme`, at `acme.orderloop.app` |
 | Engine Worker | `orderloop-engine-acme` (the web Worker's `ENGINE` binding points at it) |
+| Catalog Worker | `orderloop-catalog-acme` |
 | Workflows | `orderloop-order-acme`, `orderloop-replenish-acme` (Workflow names are unique per account) |
 | D1 | `orderloop-acme` |
-| R2 | `orderloop-docs-acme` |
+| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents) |
+| Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
 | AI Gateway | `orderloop-acme` (`AI_GATEWAY_ID`) |
 | OAuth KV | created on the first deploy, bound to that web Worker |
 
-`node scripts/fleet.ts render <id>` writes `apps/engine/wrangler.<id>.json` and
-`apps/web/wrangler.<id>.json`: each app's `wrangler.jsonc` with the deployment's names, ids, domain
+`node scripts/fleet.ts render <id>` writes `apps/catalog/wrangler.<id>.json`,
+`apps/engine/wrangler.<id>.json` and `apps/web/wrangler.<id>.json`: each app's `wrangler.jsonc` with the deployment's names, ids, domain
 and namespaces filled in. They sit next to `wrangler.jsonc` so relative paths (`main`,
 `migrations_dir`) still resolve, and they are gitignored. The web build reads its rendered config
 when `ORDERLOOP_WRANGLER_CONFIG` names it (`apps/web/vite.config.ts`). Rendering `orderloop` gives
@@ -65,7 +68,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    it at creation, so adding or changing it after the first order strands that order's live state
    (see [Data residency](data-model.md#data-residency)).
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
-   database and R2 bucket (in the jurisdiction; the Durable Objects get theirs from the engine's `DATA_JURISDICTION`, rendered at deploy), the AI Gateway (with the `orderloop` gateway's settings:
+   database, the R2 bucket and the catalog's R2 bucket (in the jurisdiction; the Durable Objects get theirs from each Worker's `DATA_JURISDICTION`, rendered at deploy), the catalog's KV namespace (KV has none; its id is written as `catalogKvId`), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY` and `DATA_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
@@ -84,7 +87,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    creates their admin account and signs them in; they add their team from there. The code works
    once. Until then the workspace refuses every request but `/setup`.
 
-A deployment without `d1Id` stops the whole CI plan, so provision a customer before merging their
+A deployment without `d1Id` or `catalogKvId` stops the whole CI plan, so provision a customer before merging their
 file, or merge it with `"hold": true`.
 
 Email intake still needs Email Routing rules per deployment (see
@@ -102,11 +105,12 @@ Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's
 
 1. Render its configs and collect its secrets from the environment.
 2. Record a D1 Time Travel bookmark (in the run summary) and apply migrations to its D1.
-3. Deploy its engine, build and deploy its web app, each with `--secrets-file`. That adds the
+3. Deploy its catalog, then its engine, then build and deploy its web app; the engine and web app
+   each with `--secrets-file` (the catalog has no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`.
-5. If anything fails after the engine deployed, roll back each Worker that deployed. D1 isn't
-   rolled back (see [Restoring D1](deploy.md#restoring-d1)).
+5. If anything fails after the catalog deployed, roll back each Worker that deployed (the catalog
+   last, and not when it has no earlier version). D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
 
 To gate a ring, add a required reviewer to its deployments' environments: the `canary` jobs then
 wait for approval after `internal` succeeds.
@@ -248,8 +252,8 @@ needed. The setup code is the last resort.
 A deployment holds only that customer's data, so removing it is the erasure:
 
 1. Export what the contract requires first (a D1 export with
-   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes).
+   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
-3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, which removes their Durable
-   Objects and Workflow instances), the D1 database, the R2 bucket (empty it first), the AI
+3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, which removes their Durable
+   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the AI
    Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.

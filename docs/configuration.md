@@ -1,9 +1,9 @@
 # Configuration
 
-Variables, secrets and bindings for the engine and web Workers, and the local dev files.
+Variables, secrets and bindings for the engine, web and catalog Workers, and the local dev files.
 
-Both Workers are configured in their `wrangler.jsonc`. After changing one, regenerate its binding
-types: `pnpm --filter @orderloop/engine types` or `pnpm --filter @orderloop/web types`.
+Each Worker is configured in its `wrangler.jsonc`. After changing one, regenerate its binding
+types: `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types` or `pnpm --filter @orderloop/catalog types`.
 
 ## Engine variables
 
@@ -28,6 +28,14 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 | `DATA_JURISDICTION` | empty | Jurisdiction of the engine's Durable Objects (`OrderAgent`, `AssistantAgent`, `A2AAgent`): `eu` or `fedramp`, or empty for no jurisdiction; any other value throws on first use (`apps/engine/src/namespaces.ts`). The registry's `jurisdiction` sets it per deployment (`scripts/fleet.ts`). Local dev and tests leave it empty, since workerd has no jurisdictions. Set it before a deployment's first order: a different value gives different object ids, so existing orders' live state is unreachable. See [Data residency](data-model.md#data-residency) |
 | `PAYMENTS_MODE` | `mock` | The payment gateway for new payments (`apps/engine/src/payments.ts`). `mock` records payments in D1 only, and `meta.simulate` drives declines and failed charges. `stripe` authorizes, captures, charges, voids and refunds through Stripe with `STRIPE_SECRET_KEY`, and `commerce.invoice` with provider `stripe` issues Stripe invoices (`apps/engine/src/billing.ts`; in `mock` it records them only); without the key every payment step fails with a `NonRetryableError`. Any other value fails payment steps too. Voids, captures and refunds follow each payment row's own `provider`, so rows made before a switch are settled where they were made. Set per deployment by the registry's `payments`. See [Payments](https://docs.orderloop.app/guides/payments/) |
 | `STRIPE_PUBLISHABLE_KEY` | `""` | Stripe publishable key (`pk_…`) that a [UCP](https://docs.orderloop.app/reference/ucp/) platform tokenizes the buyer's card with. It is published in the `app.orderloop.stripe` payment handler's `config` (`paymentHandlers`, `apps/engine/src/ucp/config.ts`). With `PAYMENTS_MODE` `stripe` and no key, agentic checkout offers no payment handler; in `mock` it offers the test handler `app.orderloop.test` instead and ignores the key. Set per deployment by the registry's `stripePublishableKey` |
+
+## Catalog variables
+
+The catalog Worker has one variable and no secrets (`apps/catalog/wrangler.jsonc`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
 
 ## Compatibility flags
 
@@ -94,6 +102,10 @@ created through the API and stored in D1; they are not configuration.
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | Cron trigger | engine | `triggers.crons` `30 3 * * *`: `scheduled()` runs the daily [retention sweep](data-model.md#retention) |
 | `AI` | engine | Workers AI |
+| `SHARD` | catalog | Durable Object `CatalogShard` (SQLite-backed, migration `v1`), 64 shards named `shard-<n>` |
+| `META` | catalog | Durable Object `CatalogMeta` (SQLite-backed, migration `v1`), one, named `meta` |
+| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers and category trees. Strongly consistent, so a purge is never undone by a stale read |
+| `CARDS` | catalog | KV namespace of listing cards. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |
 | `API_LIMIT`, `AGENT_LIMIT`, `WEBHOOK_LIMIT` | web | Per-caller budgets (`app/lib/rate-limit.ts`): 600 requests a minute per principal on `/api/v1` (after authentication), 300 per principal on each of `/mcp` and `/a2a` (keyed `<path>:<principal id>`) and 300 per registered UCP platform on `/ucp` (`/ucp:<platform id>`, `AGENT_LIMIT`), and 1,200 per integration on the signed webhooks (after the signature verifies, so a forged request can't spend a sender's budget) or per shop on Shopify's. Over the limit answers `429` with `Retry-After: 60`. A deployment's `limits` in the registry replace these numbers ([Operations](operations.md#the-registry)). Counted per Cloudflare location, so they stop a runaway client rather than meter it exactly. Without the binding (unit tests) nothing is limited |
@@ -111,6 +123,9 @@ URLs: only the web app's service binding reaches it, plus Email Routing rules th
 (see [Email intake](deploy.md#email-intake)). The docs Worker (`apps/docs/wrangler.jsonc`)
 serves `docs.orderloop.app`, and likewise sets `workers_dev` and `preview_urls` to `false`.
 
+The catalog Worker has no routes, no `workers_dev` URL and no preview URLs, and nothing binds to it
+yet; it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
+
 Both app Workers answer `GET /health` with `{ ok: true, service }`. The web app's
 `GET /health/deep` also checks D1, R2 and the engine (see
 [Request routing](architecture.md#request-routing)). The web app sets `workers_dev` and
@@ -119,7 +134,7 @@ every request.
 
 ## Runtime limits and observability
 
-Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
+The catalog Worker turns `observability` on at the default sampling and sets no `limits`. Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
 and traces on); lower the rate once traffic makes the volume or cost matter. `limits.cpu_ms` stops a
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
 waits, such as model calls, don't count against it. The web app also sets `placement.mode` to `smart`, so
