@@ -85,17 +85,22 @@ Then read its live state with `GET /api/v1/orders/:id`.
 ## Checks
 
 ```bash
-pnpm test            # core planner tests (node), engine Workflow e2e (workerd), web tests
+pnpm test            # core planner tests (node), engine Workflow e2e and catalog (workerd), web tests
 pnpm lint            # Biome
 pnpm check-types     # tsc --noEmit (web runs react-router typegen first)
 ```
 
 After changing a `wrangler.jsonc`, regenerate that app's binding types with
-`pnpm --filter @orderloop/engine types` or `pnpm --filter @orderloop/web types`.
+`pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types` or
+`pnpm --filter @orderloop/catalog types`.
+
+`pnpm web:dev` doesn't start the catalog Worker, since nothing calls it yet. Run it on its own with
+`pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
+Durable Objects.
 
 ## Next
 
 - [Concepts](https://docs.orderloop.app/start/concepts/): flows, versions, orders, waits and rollback.
 - [Building flows](https://docs.orderloop.app/guides/building-flows/): the editor and the rules a flow must follow.
-- [Deploy](deploy.md): ship both Workers to your account.
+- [Deploy](deploy.md): ship the Workers to your account.
 - [Configuration](configuration.md): every variable, secret and binding.

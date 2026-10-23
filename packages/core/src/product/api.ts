@@ -61,7 +61,11 @@ export type FeedStatus = {
   failure?: string;
 };
 
-export type TypeResult = { ok: true; type: ProductType } | { ok: false; issues: string[] };
+/** Admin writes answer with what was stored, or why nothing was. */
+export type Result<T> = ({ ok: true } & T) | { ok: false; issues: string[] };
+export type TypeResult = Result<{ type: ProductType }>;
+export type ChannelResult = Result<{ channel: Channel }>;
+export type CategoriesResult = Result<{ categories: Category[] }>;
 
 export interface ProductCatalogRpc {
   /** Validates and stores products; unchanged ones write nothing. At most 500 per call. */
@@ -76,10 +80,11 @@ export interface ProductCatalogRpc {
   putType(type: ProductTypeInput, by: string): Promise<TypeResult>;
   /** Latest version of every type. */
   listTypes(): Promise<ProductType[]>;
-  putChannel(channel: Channel, by: string): Promise<Channel>;
+  /** A changed currency or locale list reaches published documents on the next reindex. */
+  putChannel(channel: Channel, by: string): Promise<ChannelResult>;
   listChannels(): Promise<Channel[]>;
   /** Upserts categories; the tree is republished once per call. */
-  putCategories(categories: CategoryInput[], by: string): Promise<Category[]>;
+  putCategories(categories: CategoryInput[], by: string): Promise<CategoriesResult>;
   listCategories(): Promise<Category[]>;
 
   /** Stores the feed and starts applying it in the background. */

@@ -1,12 +1,13 @@
 /**
  * The fleet: one OrderLoop deployment per customer, each listed in deployments/<id>.jsonc.
  *
- *   node scripts/fleet.ts render <id>             write apps/{engine,web}/wrangler.<id>.json
+ *   node scripts/fleet.ts render <id>             write apps/{catalog,engine,web}/wrangler.<id>.json
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
  *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
+ *   node scripts/fleet.ts set-catalog-kv <id> <kv id>  record the catalog's card KV namespace id
  *   node scripts/fleet.ts demos                   the provisioned demo deployments, for the nightly reset
  *
  * A rendered config is the app's wrangler.jsonc with the deployment's names, ids and domain put
@@ -94,6 +95,8 @@ export type Deployment = {
   environment: string;
   /** Set by scripts/provision.sh; required to render or deploy. */
   d1Id?: string;
+  /** The catalog's card KV namespace id. Set by scripts/provision.sh; required like d1Id. */
+  catalogKvId?: string;
   /** Data location for D1 and R2 (`eu`), set when they're created. */
   jurisdiction?: 'eu' | 'fedramp';
   /** Skipped by CI: stays on what it runs now. */
@@ -166,6 +169,11 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     throw new Error(`${file}: slot must be an integer from 1 to 999`);
   if (raw.d1Id !== undefined && (typeof raw.d1Id !== 'string' || !raw.d1Id))
     throw new Error(`${file}: d1Id must be the D1 database's id`);
+  if (
+    raw.catalogKvId !== undefined &&
+    (typeof raw.catalogKvId !== 'string' || !/^[0-9a-f]{32}$/.test(raw.catalogKvId))
+  )
+    throw new Error(`${file}: catalogKvId must be the KV namespace's 32-character id`);
   if (raw.jurisdiction !== undefined && raw.jurisdiction !== 'eu' && raw.jurisdiction !== 'fedramp')
     throw new Error(`${file}: jurisdiction must be "eu" or "fedramp"`);
   const limits = raw.limits as Record<string, unknown> | undefined;
@@ -234,6 +242,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     suffix: typeof raw.suffix === 'string' ? raw.suffix : `-${id}`,
     environment: typeof raw.environment === 'string' ? raw.environment : `deploy-${id}`,
     ...(raw.d1Id ? { d1Id: raw.d1Id as string } : {}),
+    ...(raw.catalogKvId ? { catalogKvId: raw.catalogKvId as string } : {}),
     ...(raw.jurisdiction ? { jurisdiction: raw.jurisdiction as 'eu' | 'fedramp' } : {}),
     hold: raw.hold === true,
     docs: raw.docs === true,
@@ -279,6 +288,9 @@ export const names = (d: Deployment) => ({
   d1: `orderloop${d.suffix}`,
   r2: `orderloop-docs${d.suffix}`,
   aiGateway: `orderloop${d.suffix}`,
+  catalog: `orderloop-catalog${d.suffix}`,
+  catalogR2: `orderloop-catalog${d.suffix}`,
+  catalogKv: `orderloop-catalog-cards${d.suffix}`,
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: a wrangler config is JSON read as is
@@ -336,6 +348,25 @@ export function renderEngine(base: Config, d: Deployment): Config {
   return config;
 }
 
+export function renderCatalog(base: Config, d: Deployment): Config {
+  if (!d.catalogKvId)
+    throw new Error(`${d.id} has no catalogKvId: run scripts/provision.sh ${d.id}`);
+  const config = structuredClone(base);
+  const n = names(d);
+  config.name = n.catalog;
+  config.r2_buckets = config.r2_buckets.map((b: Config) => ({
+    ...b,
+    bucket_name: n.catalogR2,
+    ...(d.jurisdiction ? { jurisdiction: d.jurisdiction } : {}),
+  }));
+  config.kv_namespaces = config.kv_namespaces.map((k: Config) =>
+    k.binding === 'CARDS' ? { ...k, id: d.catalogKvId } : k,
+  );
+  // The shards keep their data where the deployment's other data lives.
+  if (d.jurisdiction) config.vars = { ...config.vars, DATA_JURISDICTION: d.jurisdiction };
+  return config;
+}
+
 export function renderWeb(base: Config, d: Deployment): Config {
   const config = structuredClone(base);
   const n = names(d);
@@ -373,6 +404,7 @@ function byId(id: string | undefined): Deployment {
 function render(id: string | undefined) {
   const d = byId(id);
   for (const [app, fn] of [
+    ['catalog', renderCatalog],
     ['engine', renderEngine],
     ['web', renderWeb],
   ] as const) {
@@ -387,10 +419,10 @@ function render(id: string | undefined) {
 
 /** `{ staging: [...], internal: [...], ... }`, held deployments left out. */
 export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
-  const unprovisioned = list.filter((d) => !d.hold && !d.d1Id).map((d) => d.id);
+  const unprovisioned = list.filter((d) => !d.hold && (!d.d1Id || !d.catalogKvId)).map((d) => d.id);
   if (unprovisioned.length)
     throw new Error(
-      `not provisioned (no d1Id): ${unprovisioned.join(', ')}; provision or hold them`,
+      `not provisioned (no d1Id or catalogKvId): ${unprovisioned.join(', ')}; provision or hold them`,
     );
   return Object.fromEntries(
     RINGS.map((ring) => [ring, list.filter((d) => d.ring === ring && !d.hold)]),
@@ -438,6 +470,8 @@ function shellNames(id: string | undefined) {
     D1: n.d1,
     R2: n.r2,
     AI_GATEWAY: n.aiGateway,
+    CATALOG_R2: n.catalogR2,
+    CATALOG_KV: n.catalogKv,
     DOMAIN: d.domain,
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',
@@ -447,16 +481,25 @@ function shellNames(id: string | undefined) {
   for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
 }
 
-/** Writes `d1Id` into deployments/<id>.jsonc, keeping its comments. */
-function setD1(id: string | undefined, uuid: string | undefined) {
+/** Writes one field into deployments/<id>.jsonc, keeping its comments. */
+function setField(id: string | undefined, field: 'd1Id' | 'catalogKvId', value: string) {
   const d = byId(id);
-  if (!uuid || !/^[0-9a-f-]{36}$/.test(uuid)) throw new Error('set-d1 <id> <uuid>');
   const file = join(ROOT, 'deployments', `${d.id}.jsonc`);
   const text = readFileSync(file, 'utf8');
-  const edits = modify(text, ['d1Id'], uuid, {
+  const edits = modify(text, [field], value, {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   });
   writeFileSync(file, applyEdits(text, edits));
+}
+
+function setD1(id: string | undefined, uuid: string | undefined) {
+  if (!uuid || !/^[0-9a-f-]{36}$/.test(uuid)) throw new Error('set-d1 <id> <uuid>');
+  setField(id, 'd1Id', uuid);
+}
+
+function setCatalogKv(id: string | undefined, kvId: string | undefined) {
+  if (!kvId || !/^[0-9a-f]{32}$/.test(kvId)) throw new Error('set-catalog-kv <id> <namespace id>');
+  setField(id, 'catalogKvId', kvId);
 }
 
 async function status() {
@@ -486,10 +529,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'status') await status();
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
+    else if (cmd === 'set-catalog-kv') setCatalogKv(args[0], args[1]);
     else if (cmd === 'demos')
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
-      throw new Error('usage: fleet.ts render|matrix|secrets|status|names|set-d1 (see the header)');
+      throw new Error(
+        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv (see the header)',
+      );
   } catch (err) {
     console.error((err as Error).message);
     process.exit(1);

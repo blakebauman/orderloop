@@ -18,7 +18,7 @@ wrangler() { pnpm --filter @orderloop/engine exec wrangler "$@"; }
 j=()
 [ -n "$JURISDICTION" ] && j=(--jurisdiction "$JURISDICTION")
 
-echo "== $id: D1 $D1, R2 $R2, gateway $AI_GATEWAY, https://$DOMAIN, environment $ENVIRONMENT"
+echo "== $id: D1 $D1, R2 $R2 and $CATALOG_R2, KV $CATALOG_KV, gateway $AI_GATEWAY, https://$DOMAIN, environment $ENVIRONMENT"
 
 wrangler d1 create "$D1" ${j[@]+"${j[@]}"} || echo "D1 database $D1 already exists"
 uuid=$(wrangler d1 info "$D1" --json | jq -er .uuid)
@@ -26,6 +26,13 @@ node scripts/fleet.ts set-d1 "$id" "$uuid"
 echo "Recorded d1Id $uuid in deployments/$id.jsonc"
 
 wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already exists"
+
+# The catalog: published documents in R2, listing cards in KV (KV has no jurisdictions).
+wrangler r2 bucket create "$CATALOG_R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $CATALOG_R2 already exists"
+kv_id() { wrangler kv namespace list | jq -er --arg t "$CATALOG_KV" '.[] | select(.title == $t) | .id'; }
+kv=$(kv_id 2>/dev/null) || { wrangler kv namespace create "$CATALOG_KV" >/dev/null; kv=$(kv_id); }
+node scripts/fleet.ts set-catalog-kv "$id" "$kv"
+echo "Recorded catalogKvId $kv in deployments/$id.jsonc"
 
 # How long the R2 archive keeps audit events (auditArchiveDays): the rule is replaced on each run,
 # so a changed number takes effect; without one, archived events are kept.

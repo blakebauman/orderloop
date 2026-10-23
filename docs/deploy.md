@@ -1,30 +1,34 @@
 # Deploy
 
-Provision D1 and R2, apply migrations, set secrets and deploy the engine and web Workers, plus the docs site.
+Provision D1, R2 and KV, apply migrations, set secrets and deploy the catalog, engine and web Workers, plus the docs site.
 
-OrderLoop deploys as two Workers in one Cloudflare account:
+OrderLoop deploys as three Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
+| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard` and `CatalogMeta` Durable Objects, an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
 | `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
 | `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
 
-Both bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`).
+The engine and web bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`); the
+catalog binds neither.
 
 ## First deploy
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
-pnpm run deploy                                # engine first (web binds to it), then web
+pnpm run deploy                                # catalog, then engine (web binds to it), then web
 ```
 
 Production has no demo data (migration `0027` removed it and `packages/db/seed` is never applied remotely), so the
 dashboard's demo scenarios are hidden and only `USD` orders are accepted until an exchange rate is added to `fx_rates`.
 
-`provision.sh` records the database id in `deployments/orderloop.jsonc`; put it in the
-`d1_databases` entry of both `wrangler.jsonc` files too, since `orderloop` renders them unchanged.
+`provision.sh` records the database id (`d1Id`) and the catalog's KV namespace id (`catalogKvId`) in
+`deployments/orderloop.jsonc`; put the first in the `d1_databases` entry of both the engine's and the web
+app's `wrangler.jsonc`, and the second in the `CARDS` entry of the catalog's, since `orderloop`
+renders them unchanged (`pnpm test:fleet` fails when they differ).
 Change the web app's `routes` to your own hostname. To add a customer's deployment instead, see
 [Operations](operations.md#adding-a-customer).
 
@@ -37,7 +41,9 @@ something else entirely.
    table or column. Until the new Workers are live, the old code runs against the new schema, so a
    migration only adds (expand); dropping or renaming waits for a later change once nothing
    deployed uses it (contract).
-2. **Engine before web.** The web Worker's service binding needs the engine to exist.
+2. **Catalog, then engine, then web.** The web Worker's service binding needs the engine to exist.
+   The catalog has no callers yet; it goes first so that the Workers that come to bind to it always
+   find the version they expect.
 
 Workflow names (`orderloop-order`, `orderloop-replenish`) must be unique in the account.
 
@@ -170,10 +176,11 @@ type-check, build, tests, the fleet tests (`pnpm test:fleet`) and
 `pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
-D1, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login`
+D1, deploys its catalog, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login`
 and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
-deployment before its migration. If anything fails once the engine has deployed (the web deploy or
-the smoke test), the job runs `wrangler rollback` for each Worker that deployed. D1 is not rolled
+deployment before its migration. If anything fails once the catalog has deployed (the engine deploy,
+the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed;
+the catalog goes last, and a catalog with no earlier version (a deployment's first) is left as it is. D1 is not rolled
 back, which is why migrations only add; see [Restoring D1](#restoring-d1). The docs then get their
 own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with its canonical URL, a
 reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.

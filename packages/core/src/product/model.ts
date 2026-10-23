@@ -166,8 +166,12 @@ export const mediaSchema = z.object({
 });
 export type Media = z.infer<typeof mediaSchema>;
 
+/** Any JSON value. Typed as JSON (not `unknown`) so products cross RPC with their real type. */
+export const jsonSchema = z.json();
+export type Json = z.infer<typeof jsonSchema>;
+
 /** Attribute values as written. Their shape is checked against the product type. */
-export const attributeValuesSchema = z.record(codeSchema, z.unknown());
+export const attributeValuesSchema = z.record(codeSchema, jsonSchema);
 
 export const variantInputSchema = z.object({
   sku: codeSchema,
@@ -220,7 +224,7 @@ export const productInputSchema = z.object({
   variants: z.array(variantInputSchema).min(1).max(LIMITS.variants),
   channels: z.record(codeSchema, channelListingSchema).default({}),
   /** Unvalidated, unindexed passthrough data. */
-  extra: z.record(z.string(), z.unknown()).optional(),
+  extra: z.record(z.string(), jsonSchema).optional(),
 });
 export type ProductInput = z.input<typeof productInputSchema>;
 /** A product after defaults are applied and its type version is pinned. */

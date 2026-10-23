@@ -3,7 +3,7 @@
  * never merges translations, resolves enum labels or picks a price: the edge streams the stored
  * bytes. The same pass extracts what the listing and search indexes need. Pure.
  */
-import type { AttributeDef, Channel, Money, Product, ProductType } from './model';
+import type { AttributeDef, Channel, Json, Money, Product, ProductType } from './model';
 import { NUMERIC_KINDS, TERM_KINDS } from './model';
 import { compileType, pickLocale } from './validate';
 
@@ -14,7 +14,7 @@ export type PublishedVariant = {
   gtin?: string;
   status: string;
   options: Record<string, Option>;
-  attributes: Record<string, unknown>;
+  attributes: Record<string, Json>;
   price?: Money;
   media?: { src: string; alt?: string; width?: number; height?: number }[];
 };
@@ -31,12 +31,12 @@ export type ProductDoc = {
   categories: string[];
   primaryCategory?: string;
   media: { src: string; alt?: string; width?: number; height?: number; focus?: [number, number] }[];
-  attributes: Record<string, unknown>;
+  attributes: Record<string, Json>;
   variants: PublishedVariant[];
   price?: Money;
   compareAt?: Money;
   priceRange?: { min: Money; max: Money };
-  extra?: Record<string, unknown>;
+  extra?: Record<string, Json>;
 };
 
 /** What a listing shows per product: a few hundred bytes. */
@@ -51,7 +51,7 @@ export type ProductCard = {
   compareAt?: Money;
   priceRange?: { min: Money; max: Money };
   variants: number;
-  attributes: Record<string, unknown>;
+  attributes: Record<string, Json>;
 };
 
 /** What the listing index stores per product in one channel. */
@@ -110,7 +110,7 @@ function publishValue(
   if (def.kind === 'enum') return optionLabel(def, value as string, locale, fallback);
   if (def.kind === 'multi_enum')
     return (value as string[]).map((c) => optionLabel(def, c, locale, fallback));
-  return value;
+  return value as Json;
 }
 
 /** A numeric reading of a value for range filters and sorts. */
@@ -246,13 +246,13 @@ export function renderForChannel(
 
   const rendered: Rendered[] = channel.locales.map((locale) => {
     const attrs = (values: Record<string, unknown>, defs: CompiledDefs, skip?: Set<string>) => {
-      const out: Record<string, unknown> = {};
+      const out: Record<string, Json> = {};
       for (const [code, value] of Object.entries(values)) {
         if (skip?.has(code)) continue;
         const def = defs.get(code)?.def;
         if (!def) continue;
         const v = publishValue(def, value, locale, fallback);
-        if (v !== undefined) out[code] = v;
+        if (v !== undefined) out[code] = v as Json;
       }
       return out;
     };
@@ -307,7 +307,7 @@ export function renderForChannel(
       priceRange: range,
       extra: product.extra,
     };
-    const cardAttrs: Record<string, unknown> = {};
+    const cardAttrs: Record<string, Json> = {};
     for (const [code, value] of Object.entries(doc.attributes))
       if (c.product.get(code)?.def.card) cardAttrs[code] = value;
     const first = media[0];

@@ -93,3 +93,7 @@
 ^apps/engine/src/(retention|agent|env\.d)\.ts$	docs/data-model.md docs/order-agent.md docs/configuration.md reference/ucp	prose
 ^(packages/core/src/encryption|apps/engine/src/data-key|apps/web/app/lib/data-key\.server)\.ts$	docs/architecture.md docs/operations.md docs/configuration.md docs/data-model.md docs/testing.md guides/team-and-roles	prose
 ^scripts/(fleet\.ts|provision\.sh)$	docs/deploy.md docs/operations.md docs/configuration.md	prose
+^apps/catalog/src/	docs/architecture.md docs/data-model.md docs/configuration.md	prose
+^apps/catalog/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/data-model.md	prose
+^packages/core/src/product/	docs/architecture.md docs/data-model.md docs/testing.md	prose
+^deployments/	docs/operations.md	prose

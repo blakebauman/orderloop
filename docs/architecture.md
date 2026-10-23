@@ -1,8 +1,9 @@
 # Architecture
 
-The two Workers, the service binding between them, the packages, the bindings and the connectors.
+The Workers, the service binding between web and engine, the packages, the bindings and the connectors.
 
-OrderLoop is two Workers in one pnpm monorepo. `orderloop-web` serves the dashboard, the flow
+OrderLoop is two Workers in one pnpm monorepo, plus the product catalog's Worker (see
+[Product catalog](#product-catalog)). `orderloop-web` serves the dashboard, the flow
 editor and the REST API; `orderloop-engine` runs orders. The web app reaches the engine only
 through a service binding, and the engine has no public URL.
 
@@ -25,10 +26,11 @@ inbound mail ── Email Routing ──email()───────────
 
 | Path | Role |
 |---|---|
-| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. No bindings and no Cloudflare imports |
+| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index, feed parsing and the `ProductCatalogRpc` contract. No bindings and no Cloudflare imports |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
+| `apps/catalog` (`@orderloop/catalog`) | The product catalog Worker: `CatalogShard` and `CatalogMeta` Durable Objects, the publisher, `CatalogApi` |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, Commerce page, `/api/v1` |
 | `apps/docs` (`@orderloop/docs`) | This site |
 
@@ -284,6 +286,74 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 `X-OrderLoop-Signature` header carries a `v1=` for each. A secret no key opens fails that delivery
 (retried like any other), not the step.
 
+## Product catalog
+
+`orderloop-catalog` (`apps/catalog`) is the write side of a product catalog. The pure model lives
+in `@orderloop/core/product`; the Worker adds storage and publishing. It has no routes, no
+`workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers (the
+web app, and a read-side `catalog-edge` Worker) are meant to reach it through service bindings.
+Nothing binds to it yet, and the read side, feeds and reindexing are not built, so no published page
+or API exposes it.
+
+`CatalogApi` (`apps/catalog/src/api.ts`) is a `WorkerEntrypoint` implementing `ProductCatalogRpc`
+(`packages/core/src/product/api.ts`) except `startFeed`, `feedStatus`, `listFeeds` and `reindex`.
+It never touches storage itself:
+
+| Method | What it does |
+|---|---|
+| `putProducts(items, opts)` | At most 500 a call (`RangeError` over). Validates each against the type it names (`validateProduct`), reports a bad one as `rejected` with every issue beside the valid ones, groups the rest by `productShard(key)` and sends each shard one `apply` batch with a fresh batch id |
+| `deleteProducts(keys, opts)` | At most 500; one `remove` call per shard |
+| `getProduct`, `resolveAlias` | Read a product from its shard; read which product key holds a SKU, GTIN or slug from the alias's shard (`aliasShard`) |
+| `putType`, `listTypes` | Product types, through `CatalogMeta` |
+| `putChannel`, `listChannels`, `putCategories`, `listCategories` | Channels and categories, through `CatalogMeta`. The writes answer with a `Result` (`{ ok: true, … }` or `{ ok: false, issues }`), as `putType` does |
+
+The isolate keeps a copy of the config (every type version, every channel, the `rev` counter) for 2
+seconds. A product that names a type this copy lacks refreshes it once before being refused, and
+`putType` and `putChannel` drop it. A product without a type version is pinned to the latest the
+isolate has seen, which is always valid because versions only add.
+
+**`CatalogShard`** is the source of truth: 64 SQLite Durable Objects named `shard-<n>`, `n` from
+`productShard(key)` (frozen: a change strands stored products). A shard holds three things in one
+database: its products (`products`, with a per-shard `uid` from `productUid`, a content `hash` and
+a `version` that starts at 1 and counts changes), the alias claims that hash to it (`aliases`, so a
+SKU, GTIN or slug is unique without a global object) and the `outbox`.
+
+- `apply(batch)` is idempotent by `batchId`: the first call's results are stored in `applied` and a
+  repeat returns them without writing. A row whose content hash matches what is stored is
+  `unchanged` and writes nothing, so a daily full feed is cheap. A key repeated in a batch keeps its
+  last row; the earlier ones are `rejected`. A shard refuses to be called as a different shard number.
+- New aliases are claimed on their owning shards before the write transaction, never inside it and
+  never while holding the input gate, so two shards claiming from each other can't deadlock. A
+  claim another live product holds rejects the product with `already used by <key>`. A claim whose
+  holder no longer lists the alias (a release that failed) is taken over. The transaction re-checks
+  what it read: a product changed by another write meanwhile is rejected with `send it again`, and
+  what it claimed is given back. Aliases a product dropped are released after the commit, best effort.
+- Each change writes an `outbox` row in the same transaction. The shard's alarm publishes from it
+  (`publish.ts`), up to 100 products a pass, and sets itself again while rows remain, so a crash
+  between storing and publishing only delays publishing.
+
+**Publishing** renders each product once per channel and locale (`renderForChannel`) and writes:
+a product document and alias pointers to R2 (`PUBLISHED`, under `docs/f1/<channel>/…`, `f1` being
+`DOC_FORMAT`; every path carries it so a format change is a new tree) and a listing card to KV
+(`CARDS`, `c:f1:<channel>:<locale>:<uid in base 36>`). Slug aliases are published only in the
+channel's locales. What was published before and no longer is (a draft, a channel that no longer
+lists it, a dropped locale, SKU or variant, a deleted product) is deleted. Which locales and
+aliases are published per product and channel is kept in the shard's `published` table, and
+recorded only after every write succeeded, so a failed pass republishes in full. Publishing the
+same product twice writes the same bytes. Listing indexes (`idx/…`) are not produced yet.
+
+**`CatalogMeta`** is one Durable Object (`meta`) holding product types (every version), channels
+and categories, with a `rev` counter that moves on every type or channel change. A type's version
+may only add (`typeChangeIssues`), and a new type starts at version 1. A channel's `defaultLocale`
+must be one of its `locales`. Categories refuse unknown parents and cycles. It publishes each
+channel's category tree to R2 (`docs/f1/<channel>/<locale>/categories.json`) when a channel or
+categories change. A changed channel currency or locale list reaches documents already published
+only when they are re-rendered, which waits for `reindex`.
+
+Both Durable Object namespaces are reached only through `apps/catalog/src/config.ts` (`meta`,
+`shard`, `shardFor`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
+any other value throws). See [Data residency](data-model.md#data-residency).
+
 ## Bindings
 
 | Binding | Worker | Resource |
@@ -298,6 +368,10 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
+| `SHARD` | catalog | Durable Object `CatalogShard` (SQLite, migration tag `v1`), 64 of them |
+| `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
+| `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees |
+| `CARDS` | catalog | KV namespace of listing cards; created by `provision.sh` |
 
 Variables and secrets are listed in [Configuration](configuration.md).
 
@@ -388,6 +462,10 @@ Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `order
 | Order index for lists and filters (`orders` row) | D1, written by the agent's `syncIndex` |
 | Flows, versions, approvals, back office, webhook outbox, email intake log | D1 |
 | Invoices, POs, inbound documents and raw inbound email | R2 |
+| Products, alias claims and the publishing outbox | `CatalogShard`, one of 64 |
+| Product types, channels, categories | `CatalogMeta` |
+| Published product documents and category trees | R2 (`orderloop-catalog`) |
+| Published listing cards | KV (`CARDS`) |
 
 ## The assistant
 
