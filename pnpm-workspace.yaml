@@ -51,3 +51,6 @@ overrides:
   # GHSA: quadratic selector parsing (< 7.1.6). Starlight → expressive-code → postcss-nested@6
   # still asks for ^6, which has no patched release. Drop once postcss-nested moves to ^7.
   'postcss-nested>postcss-selector-parser': ^7.1.6
+  # GHSA-27r3-jxmh-p828: DoS via trailing bytes after a compressed body (< 2.4.0). express@5.3.0
+  # (via @a2a-js/sdk and the MCP SDK) allows ^2.3.0. Drop once express requires ^2.4.0.
+  'express>body-parser': ^2.4.0
