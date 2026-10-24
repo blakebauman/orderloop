@@ -246,7 +246,7 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 | `aliases` | `alias` (a SKU, GTIN or slug, as `productAliases` writes it: a GTIN in any length as its GTIN-14, `gtin14`) and its `owner` product key: the claims that hash to this shard (`aliasShard`), which may belong to products on other shards |
 | `outbox` | `seq`, `key`, `urgent`, `rev` (the config revision the write was validated against; null for a removal or a reindex) and `forced` (1 for a reindex, whose listing changes rebuild their indexes even when no entry changed): products waiting to publish; the alarm deletes rows once their product is published. Indexed on `key`. `rev` and `forced` were added later: the constructor adds them to a table that lacks them |
 | `applied` | `batch` id, `at` and the `result` of every `apply` batch, so a retried batch returns its first answer. The alarm deletes rows older than 7 days (longer than a feed part waits for redelivery). Indexed on `at` |
-| `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published |
+| `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published. Before a pass writes, the row holds the union of what was and what will be published (the old `uid` while one is recorded); after it, exactly what was |
 | `settings` | `shard` (the number this object was first called as; a call as another number throws) and `seq` (the next `uid` sequence) |
 
 `CatalogFeeds` (`feeds`): `feeds` (`id`, `created_at`, `body`: the `FeedStatus` as JSON, newest listed first), `chunks` (`feed`, `chunk`) and `parts` (`feed`, `part`), the last two being the keys that make recording a split chunk or an applied part idempotent. Feeds and their rows are kept; nothing deletes them.
@@ -269,7 +269,7 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
 | R2 | `idx/f1/<channel>/<category>/<segment>.bin` | One segment (`0` to `LISTING_SEGMENTS - 1`, 8 segments, `listingSegment(key)`) of the category's listing index (binary format 2, all locales' labels inside); custom metadata `members` and `builtAt`. A segment with no members yet has no object |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
-| KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes; `catalog-edge` turns a batch's keys into card keys with it |
+| KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes (and again under a new uid), deleted when the product is; `catalog-edge` turns a batch's keys into card keys with it |
 
 `catalog-edge` ([Architecture](architecture.md#catalog-edge)) reads these objects and writes none.
 It has no storage of its own besides Workers Caching, whose entries are tagged `p:<key>`,
