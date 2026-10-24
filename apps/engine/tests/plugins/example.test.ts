@@ -1,14 +1,28 @@
 import { applyD1Migrations, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
+import { NonRetryableError } from 'cloudflare:workflows';
 import type { D1Migration } from '@cloudflare/vitest-plugin';
-import { type OrderInput, type OrderState, validateGraph } from '@orderloop/core';
-import { createDb, publishFlow, reservations, webhookDeliveries } from '@orderloop/db';
+import {
+  type OrderInput,
+  type OrderState,
+  type PluginManifest,
+  validateGraph,
+  withPlugins,
+} from '@orderloop/core';
+import { createDb, orders, publishFlow, reservations, webhookDeliveries } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import { execPluginNode, pluginStatuses, registry } from '../../src/plugins';
+import {
+  deliverToPlugin,
+  execPluginNode,
+  flowManifests,
+  pluginStatuses,
+  pluginUsage,
+  registry,
+} from '../../src/plugins';
 import { node, probeFlow, settled, stampFlow, stampInput } from '../plugin-helpers';
 
 const testEnv = env as Env & {
@@ -173,8 +187,9 @@ describe('what the engine accepts from a plugin', () => {
 
   it('keeps its variables under its own name', async () => {
     const done = await probe('vars');
-    expect(done.vars).toMatchObject({ example: { probed: true } });
+    expect(done.vars).toMatchObject({ plugins: { example: { probed: true } } });
     expect(done.vars).not.toHaveProperty('probed');
+    expect(done.vars).not.toHaveProperty('example');
   });
 
   it('fails the node without retrying for fail, an oversized result or a branch it lacks', async () => {
@@ -204,5 +219,137 @@ describe('what the engine accepts from a plugin', () => {
     const [s] = await pluginStatuses(flaky, true);
     expect(s).toMatchObject({ healthy: false, error: 'connection reset' });
     expect(s!.manifest).toEqual(good);
+  });
+});
+
+/** A stand-in plugin binding: its manifest call and what it was sent. */
+const fake = (id: string, manifest: () => Promise<unknown>) => {
+  const sent: unknown[] = [];
+  const stub = {
+    fetch() {},
+    manifest,
+    deliver: async (p: unknown) => {
+      sent.push(p);
+    },
+  };
+  return { stub, sent, binding: `PLUGIN_${id.toUpperCase()}` };
+};
+const manifestOf = (id: string, over: Partial<PluginManifest> = {}) => ({
+  apiVersion: 1,
+  id,
+  name: id,
+  version: '1',
+  events: ['order.completed'],
+  ...over,
+});
+
+describe('a plugin that is down, redeployed or asks too much', () => {
+  it('retries planning while a bound plugin the flow uses has not answered', async () => {
+    const ghost = fake('ghost', () => Promise.reject(new Error('starting up')));
+    const e = { ...env, [ghost.binding]: ghost.stub } as unknown as Env;
+    const uses = { nodes: [node('g', 'ghost.thing')] };
+    await expect(flowManifests(e, uses)).rejects.toThrow(/Plugin “ghost” is not answering/);
+    // A plugin that isn't bound at all is left out, to fail its nodes as not installed.
+    await expect(flowManifests(env, { nodes: [node('x', 'absent.thing')] })).resolves.toBeDefined();
+  });
+
+  it('retries a node whose bound plugin is not answering, and fails it for good only when unbound', async () => {
+    const ghost = fake('ghost', () => Promise.reject(new Error('starting up')));
+    const e = { ...env, [ghost.binding]: ghost.stub } as unknown as Env;
+    const ctx = {
+      order: { ...stampInput(), id: 'ord_ghost' },
+      nodes: {},
+      vars: {},
+      input: {},
+      now: 0,
+      ref: 'x',
+    };
+    const run = (en: Env, type: string) =>
+      execPluginNode({
+        env: en,
+        node: node('n', type),
+        config: {},
+        ctx: ctx as never,
+        stepKey: 'n#1',
+      });
+    const down = await run(e, 'ghost.thing').catch((err) => err);
+    expect(down).toBeInstanceOf(Error);
+    expect(down).not.toBeInstanceOf(NonRetryableError);
+    await expect(run(env, 'absent.thing')).rejects.toBeInstanceOf(NonRetryableError);
+  });
+
+  it("checks a node's branch against the manifest the order was planned with", async () => {
+    const live = (await pluginStatuses(env))[0]!.manifest!;
+    // Planned when the stamp node's outputs were different: the live "ok" isn't one of them.
+    const planned = withPlugins([
+      {
+        ...live,
+        nodes: live.nodes.map((n) =>
+          n.type === 'example.stamp' ? { ...n, outputs: ['approved'] } : n,
+        ),
+      },
+    ]);
+    const ctx = {
+      order: { ...stampInput(), id: 'ord_planned' },
+      nodes: {},
+      vars: {},
+      input: {},
+      now: 0,
+      ref: 'x',
+    };
+    await expect(
+      execPluginNode({
+        env,
+        node: node('stamp', 'example.stamp'),
+        config: { note: 'n' },
+        ctx: ctx as never,
+        stepKey: 'stamp#1',
+        registry: planned,
+      }),
+    ).rejects.toThrow(/chose “ok”, which isn't one of its outputs/);
+  });
+
+  it('refuses a plugin that asks for buyer details its deployment does not grant', async () => {
+    const needy = fake('needy', async () => manifestOf('needy', { personalData: 'send' }));
+    const refused = await pluginStatuses({ [needy.binding]: needy.stub } as unknown as Env, true);
+    expect(refused[0]).toMatchObject({ manifest: null, healthy: false });
+    expect(refused[0]!.error).toMatch(/does not grant/);
+    const granted = await pluginStatuses(
+      {
+        [needy.binding]: needy.stub,
+        PLUGIN_GRANTS: '{"needy":{"personalData":"send"}}',
+      } as unknown as Env,
+      true,
+    );
+    expect(granted[0]).toMatchObject({ healthy: true, manifest: { personalData: 'send' } });
+    // Withdrawing the grant takes effect even though the plugin had a good manifest before.
+    const withdrawn = await pluginStatuses({ [needy.binding]: needy.stub } as unknown as Env, true);
+    expect(withdrawn[0]).toMatchObject({ manifest: null, healthy: false });
+  });
+
+  it("redacts an event's data for a plugin without buyer details", async () => {
+    const spy = fake('spy', async () => manifestOf('spy'));
+    const e = { [spy.binding]: spy.stub } as unknown as Env;
+    const res = await deliverToPlugin(e, 'spy', {
+      id: 'd1',
+      event: 'order.completed',
+      occurredAt: 0,
+      orderId: 'o1',
+      data: {
+        order: { id: 'o1', total: 5 },
+        node: { output: { contact: { email: 'a@b.co' }, code: 'X' } },
+      },
+    });
+    expect(res.ok).toBe(true);
+    expect(JSON.stringify(spy.sent)).not.toMatch(/a@b\.co|contact/);
+    expect(JSON.stringify(spy.sent)).toContain('"code":"X"');
+  });
+
+  it('counts a failed order as still using a plugin until it is rolled back', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, { flowId: 'test-stamp', input: stampInput() });
+    await settled(orderId);
+    await db().update(orders).set({ status: 'failed' }).where(eq(orders.id, orderId));
+    expect((await pluginUsage(env, 'example')).orders.map((o) => o.id)).toContain(orderId);
   });
 });

@@ -99,7 +99,10 @@ jobs:
         run: |
           node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json" "$ID"
           node scripts/fleet.ts secrets web "$RUNNER_TEMP/web-secrets.json"
-          node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-secrets.json"
+          # Each plugin gets only its own key, derived from PRINCIPAL_KEY; never the key itself.
+          for p in $PLUGINS; do
+            node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-$p-secrets.json" "$p"
+          done
       # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
       # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
       - name: Record D1 bookmark
@@ -137,7 +140,7 @@ jobs:
         run: |
           for p in $PLUGINS; do
             retry pnpm --filter "./plugins/$p" exec wrangler d1 migrations apply DB --remote --config "$CONFIG"
-            retry pnpm --filter "./plugins/$p" exec wrangler deploy --config "$CONFIG" --secrets-file "$RUNNER_TEMP/plugin-secrets.json"
+            retry pnpm --filter "./plugins/$p" exec wrangler deploy --config "$CONFIG" --secrets-file "$RUNNER_TEMP/plugin-$p-secrets.json"
             echo "$p" >> "$RUNNER_TEMP/plugins-deployed"
           done
       # The web Worker binds to the engine, so the engine goes first.

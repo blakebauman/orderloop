@@ -2,23 +2,29 @@ import {
   type PluginManifest,
   type PluginStatus,
   PRINCIPAL_HEADER,
+  pluginKey,
   verifyPrincipal,
 } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const pluginFetch = vi.fn(async (_r: Request) =>
-  Response.json(
-    { ok: true },
-    {
-      headers: {
-        'set-cookie': 'session=stolen; Path=/',
-        'x-frame-options': 'ALLOWALL',
-        'content-security-policy': "script-src 'unsafe-inline' https://evil.example",
-        connection: 'keep-alive',
-      },
-    },
-  ),
-);
+/** Headers a hostile or buggy plugin might send, none of which may reach the browser. */
+const HOSTILE = {
+  'set-cookie': 'session=stolen; Path=/',
+  'x-frame-options': 'ALLOWALL',
+  'content-security-policy': "script-src 'unsafe-inline' https://evil.example",
+  connection: 'keep-alive',
+  'service-worker-allowed': '/',
+  'strict-transport-security': 'max-age=0',
+  nel: '{"report_to":"x","max_age":86400}',
+  'report-to': '{"group":"x","endpoints":[{"url":"https://evil.example"}]}',
+  'reporting-endpoints': 'x="https://evil.example"',
+  'clear-site-data': '"*"',
+  'permissions-policy': 'camera=*',
+  'access-control-allow-origin': '*',
+};
+let reply: () => Response = () =>
+  Response.json({ ok: true }, { headers: { ...HOSTILE, 'cache-control': 'no-store' } });
+const pluginFetch = vi.fn(async (_r: Request) => reply());
 const env: Record<string, unknown> = {
   PRINCIPAL_KEY: 'web-test-key',
   PLUGIN_EXAMPLE: { fetch: pluginFetch },
@@ -87,23 +93,50 @@ describe('plugin pages on the web Worker', () => {
     const req = sent();
     expect(new URL(req.url).pathname).toBe('/plugins/example/');
     expect([...req.headers.keys()].sort()).toEqual(['accept', PRINCIPAL_HEADER]);
+    const header = req.headers.get(PRINCIPAL_HEADER);
+    // Signed with the plugin's own key, which the engine (the principal key) doesn't accept.
     const p = await verifyPrincipal(
-      ['web-test-key'],
-      req.headers.get(PRINCIPAL_HEADER),
+      [await pluginKey('web-test-key', 'example')],
+      header,
       '/plugins/example/',
     );
-    expect(p).toMatchObject({ id: 'usr_1', role: 'admin', session: 'sess-hash' });
+    expect(p).toMatchObject({ id: 'usr_1', role: 'admin' });
+    expect(p).not.toHaveProperty('session');
+    expect(await verifyPrincipal(['web-test-key'], header, '/plugins/example/')).toBeNull();
+    expect(overBudget).toHaveBeenCalledWith('API_LIMIT', 'plugin:example:usr_1');
   });
 
-  it("puts this app's rules on the plugin's response", async () => {
+  it("passes on only allowlisted response headers, under this app's rules", async () => {
     const res = await call('/plugins/example/');
-    expect(res.headers.get('set-cookie')).toBeNull();
-    expect(res.headers.get('connection')).toBeNull();
+    for (const h of Object.keys(HOSTILE).filter(
+      (k) => k !== 'x-frame-options' && k !== 'content-security-policy',
+    ))
+      expect(res.headers.get(h), h).toBeNull();
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('content-type')).toContain('application/json');
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     const csp = res.headers.get('content-security-policy')!;
-    expect(csp).toContain("script-src 'self';");
+    expect(csp).toContain("script-src 'none'");
+    expect(csp).toContain("worker-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain('evil.example');
+  });
+
+  it("keeps a plugin's redirects within its own pages", async () => {
+    reply = () => new Response(null, { status: 302, headers: { location: 'next?x=1' } });
+    const inside = await call('/plugins/example/form');
+    expect(inside.status).toBe(302);
+    expect(inside.headers.get('location')).toBe('/plugins/example/next?x=1');
+    for (const away of [
+      'https://evil.example/',
+      '/account',
+      '//evil.example/x',
+      '/plugins/other/',
+    ]) {
+      reply = () => new Response(null, { status: 302, headers: { location: away } });
+      expect((await call('/plugins/example/form')).status, away).toBe(502);
+    }
+    reply = () => Response.json({ ok: true });
   });
 
   it('refuses a page to someone not signed in, or below its page role', async () => {

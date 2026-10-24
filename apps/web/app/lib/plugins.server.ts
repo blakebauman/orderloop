@@ -8,8 +8,11 @@
  *   A page request carries the signed principal and needs the manifest's `pageRole`. The
  *   manifest's `publicPaths` go through with no principal, rate-limited per caller and size-capped,
  *   for callers that authenticate to the plugin themselves.
- * - Out: a plugin's response can't set cookies on the app's domain, and gets this app's strict
- *   content security policy and framing rules whatever it asked for.
+ * - Out: only an allowlist of response headers gets through (so nothing that acts on the whole
+ *   origin, such as cookies, HSTS or a service worker's scope), redirects stay within the plugin,
+ *   and the page gets this app's content security policy, which allows no script at all.
+ * - The principal is signed with the plugin's own key (`pluginKey`), which nothing else accepts,
+ *   and carries no session id.
  */
 
 import { env } from 'cloudflare:workers';
@@ -21,9 +24,9 @@ import {
   withPlugins,
 } from '@orderloop/core';
 import { clientIp } from './audit.server';
-import { principal, sessionId, setupDue } from './auth.server';
+import { principal, setupDue } from './auth.server';
 import { engine } from './env.server';
-import { setPrincipalHeader } from './principal.server';
+import { setPluginPrincipalHeader } from './principal.server';
 import { overBudget } from './rate-limit';
 
 /** `/plugins/<id>/…`: the only paths forwarded to a plugin. `/plugins` itself is the admin page. */
@@ -38,29 +41,37 @@ export const MAX_PLUGIN_BODY = 10 * 1024 * 1024;
 /** Request headers a plugin may see; everything else (cookies, credentials, proxies') stays here. */
 const FORWARDED = ['accept', 'accept-language', 'content-type', 'content-length', 'user-agent'];
 
-/** Response headers that describe the connection, not the page; never passed on. */
-const HOP_BY_HOP = [
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
+/**
+ * Response headers a plugin's page may set; every other one is dropped. Headers that act on the
+ * whole origin (cookies, HSTS, service-worker scope, reporting, site-data clearing, permissions)
+ * must never come from a plugin.
+ */
+const RESPONSE_ALLOWED = [
+  'cache-control',
+  'content-disposition',
+  'content-language',
+  'content-length',
+  'content-type',
+  'etag',
+  'expires',
+  'last-modified',
+  'vary',
 ];
 
 /**
- * What every plugin response carries, replacing anything the plugin set: scripts only from this
- * origin (no inline script), no plugins or framing, and forms that post back here.
+ * What every plugin response carries, replacing anything the plugin set: no script at all (a
+ * plugin's page is server-rendered HTML whose links and forms come back here, checked), styles and
+ * images only from this origin, no plugins or framing, and forms that post back here. A script
+ * from a plugin would run with the viewer's session on this origin.
  */
 const PLUGIN_RESPONSE_HEADERS: Record<string, string> = {
   'content-security-policy':
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
   'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
 };
 
 const STATUS_TTL_MS = 60_000;
@@ -111,11 +122,24 @@ function capped(body: ReadableStream<Uint8Array>, max: number) {
   );
 }
 
-/** The plugin's response with only what may reach the browser, under this app's rules. */
-function sanitized(res: Response): Response {
-  const headers = new Headers(res.headers);
-  headers.delete('set-cookie');
-  for (const h of HOP_BY_HOP) headers.delete(h);
+/**
+ * The plugin's response with only what may reach the browser, under this app's rules. A redirect
+ * may only lead to the plugin's own pages; any other is refused rather than followed from this
+ * origin.
+ */
+function sanitized(res: Response, id: string, origin: string): Response {
+  const headers = new Headers();
+  for (const h of RESPONSE_ALLOWED) {
+    const v = res.headers.get(h);
+    if (v !== null) headers.set(h, v);
+  }
+  const location = res.headers.get('location');
+  if (location !== null) {
+    const to = new URL(location, `${origin}/plugins/${id}/`);
+    if (to.origin !== origin || pluginPathId(to.pathname) !== id)
+      return new Response('A plugin may only redirect to its own pages', { status: 502 });
+    headers.set('location', `${to.pathname}${to.search}`);
+  }
   for (const [k, v] of Object.entries(PLUGIN_RESPONSE_HEADERS)) headers.set(k, v);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
@@ -145,8 +169,9 @@ export async function pluginFetch(request: Request): Promise<Response> {
     const due = setupDue(caller);
     if (due) return new Response(due, { status: 403 });
     if (!atLeast(caller.role, manifest.pageRole)) return new Response('Forbidden', { status: 403 });
-    const session = caller.kind === 'user' ? await sessionId(request) : undefined;
-    await setPrincipalHeader(headers, { ...caller, ...(session ? { session } : {}) }, url.pathname);
+    const limited = await overBudget('API_LIMIT', `plugin:${id}:${caller.id}`);
+    if (limited) return limited;
+    await setPluginPrincipalHeader(headers, caller, url.pathname, id);
   }
 
   const body =
@@ -161,5 +186,5 @@ export async function pluginFetch(request: Request): Promise<Response> {
     // A streamed body needs half duplex outside workerd (Node's fetch, in the tests).
     ...(body ? { duplex: 'half' } : {}),
   } as RequestInit);
-  return sanitized(await target.fetch(forwarded));
+  return sanitized(await target.fetch(forwarded), id, url.origin);
 }

@@ -21,7 +21,7 @@ import {
   validateFields,
 } from './catalog';
 import { conforms } from './json-schema';
-import { PERSONAL_DATA_MODES, scrubPersonal } from './redact';
+import { maskPersonalText, modelOrder, PERSONAL_DATA_MODES, scrubPersonal } from './redact';
 import { ROLES } from './roles';
 import type { Order } from './types';
 import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
@@ -42,6 +42,31 @@ export const PLUGIN_SUMMARY_MAX = 300;
 
 /** Largest `output` (and, separately, `vars`) a plugin node may return, serialized. */
 export const PLUGIN_RESULT_MAX_BYTES = 128 * 1024;
+
+/** Largest manifest the engine accepts, serialized. */
+export const PLUGIN_MANIFEST_MAX_BYTES = 64 * 1024;
+
+/** A nav or public path: plain characters only, so a link can't lead outside the plugin. */
+const PLUGIN_PAGE_PATH_RE = /^\/plugins\/[a-z][a-z0-9-]{1,30}\/[A-Za-z0-9._~/-]*$/;
+
+/**
+ * The key the web app signs a plugin's page requests with, and the only one the plugin holds: an
+ * HMAC of the deployment's principal key with the plugin's id. The engine and other plugins never
+ * accept it, so a plugin can't sign requests to them; scripts/fleet.ts derives the same value for
+ * the plugin's secrets.
+ */
+export async function pluginKey(principalKey: string, id: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(principalKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(`orderloop-plugin:${id}`));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /** The binding a plugin is reached by: "ledger" → "PLUGIN_LEDGER", "qbd-sync" → "PLUGIN_QBD_SYNC". */
 export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replace(/-/g, '_')}`;
@@ -91,7 +116,7 @@ const nodeSchema = z.object({
   description: z.string(),
   /** lucide-react icon name. */
   icon: z.string().min(1),
-  fields: z.array(fieldSchema),
+  fields: z.array(fieldSchema).max(50),
   outputs: z.array(z.string().min(1)).min(1),
   /** The plugin's `compensate` runs for this node when the order fails after it. */
   rollback: z.boolean().optional(),
@@ -110,7 +135,7 @@ export const pluginManifestSchema = z
     name: z.string().min(1),
     /** Changes whenever the manifest does; the engine caches manifests by it. */
     version: z.string().min(1),
-    nodes: z.array(nodeSchema).default([]),
+    nodes: z.array(nodeSchema).max(50).default([]),
     /** Outbound events delivered to the plugin's `deliver`; "*" for every one. */
     events: z.array(z.enum(['*', ...OUTBOUND_EVENTS])).default([]),
     /** Sidebar entries; each path is under the plugin's own `/plugins/<id>/`. */
@@ -152,8 +177,21 @@ export const pluginManifestSchema = z
       ['publicPaths', m.publicPaths],
     ] as const)
       for (const [i, p] of paths.entries())
-        if (!p.startsWith(prefix))
-          ctx.addIssue({ code: 'custom', path: [key, i], message: `Must start with ${prefix}` });
+        if (!p.startsWith(prefix) || !PLUGIN_PAGE_PATH_RE.test(p) || /(^|\/)\.\.?(\/|$)/.test(p))
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, i],
+            message: `Must be a plain path under ${prefix} (letters, digits, - _ . ~ /, no . or .. segments)`,
+          });
+    let bytes = 0;
+    try {
+      bytes = new TextEncoder().encode(JSON.stringify(m)).byteLength;
+    } catch {}
+    if (bytes > PLUGIN_MANIFEST_MAX_BYTES)
+      ctx.addIssue({
+        code: 'custom',
+        message: `The manifest is ${bytes} bytes; the limit is ${PLUGIN_MANIFEST_MAX_BYTES}`,
+      });
   });
 
 export type PluginManifest = z.output<typeof pluginManifestSchema>;
@@ -180,7 +218,8 @@ export type PluginExecRequest = {
   orderId: string;
   /** The node's config with defaults filled in, expressions not yet evaluated. */
   config: Record<string, unknown>;
-  order: Order;
+  /** The whole order with `personalData: 'send'`; otherwise `RedactedOrder` (see `pluginOrder`). */
+  order: Order | RedactedOrder;
   vars: Record<string, unknown>;
   /** Earlier nodes' outputs, by node id. */
   nodes: Record<string, unknown>;
@@ -219,9 +258,13 @@ const jsonSized = (what: string) =>
       });
   });
 
+/** Long text is cut, not refused: a long upstream error must not turn a retry into a failure. */
+const clip = (s: string) =>
+  s.length > PLUGIN_SUMMARY_MAX ? `${s.slice(0, PLUGIN_SUMMARY_MAX - 1)}…` : s;
+
 const failSchema = z.object({
   fail: z.object({
-    message: z.string().min(1).max(PLUGIN_SUMMARY_MAX),
+    message: z.string().min(1).transform(clip),
     retry: z.boolean().optional(),
   }),
 });
@@ -229,7 +272,7 @@ const failSchema = z.object({
 const doneSchema = z.object({
   branch: z.string().optional(),
   output: jsonSized('output').optional(),
-  summary: z.string().max(PLUGIN_SUMMARY_MAX).optional(),
+  summary: z.string().transform(clip).optional(),
   vars: z.record(z.string(), z.unknown()).and(jsonSized('vars')).optional(),
 });
 
@@ -280,18 +323,27 @@ export function pluginView<T>(manifest: Privacy, value: T): T {
   return manifest.personalData === 'send' ? value : (scrubPersonal(value) as T);
 }
 
+/** The order as a plugin that hasn't been granted buyer details sees it. */
+export type RedactedOrder = ReturnType<typeof modelOrder> & {
+  externalId?: string;
+  createdAt: number;
+};
+
 /**
- * The order as a plugin with this manifest is sent it. Redacted, it has no contact, names or
- * addresses, and emails and phone numbers in free text are masked; its lines keep their product
- * names, which identify goods, not people.
+ * The order as a plugin with this manifest is sent it. Redacted, it is built from an allowlist of
+ * commercial facts, as AI nodes get it: lines (with product names), amounts, currency, channel,
+ * fulfilment method and ship-to country; the title with emails and phone numbers masked. It has no
+ * contact, addresses, `meta`, inbound document text or payment ids.
  */
-export function pluginOrder(manifest: Privacy, order: Order): Order {
+export function pluginOrder(manifest: Privacy, order: Order): Order | RedactedOrder {
   if (manifest.personalData === 'send') return order;
-  const { lines, ...rest } = order;
+  const { meta: _meta, ...facts } = modelOrder(order, 'redact');
   return {
-    ...(scrubPersonal(rest) as Omit<Order, 'lines'>),
-    lines: lines.map((l) => ({ ...(scrubPersonal(l) as typeof l), name: l.name })),
-  };
+    ...facts,
+    title: order.title ? maskPersonalText(order.title) : undefined,
+    externalId: order.externalId,
+    createdAt: order.createdAt,
+  } as RedactedOrder;
 }
 
 export type PluginCompensateRequest = {

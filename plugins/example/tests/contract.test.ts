@@ -15,6 +15,7 @@ it('keeps the plugin contract', async () => {
       effects: (orderId) => count('SELECT count(*) AS n FROM stamps WHERE order_id = ?', orderId),
       deliveries: (id) => count('SELECT count(*) AS n FROM deliveries WHERE id = ?', id),
       principalKey: 'example-test-key',
+      noEffects: ['example.probe'],
     }),
   ).toEqual([]);
 });
