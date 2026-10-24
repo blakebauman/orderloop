@@ -14,6 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
+import { purgeEndedCarts, RETENTION } from '../src/retention';
 import { signed } from './principal';
 
 const db = () => createDb(env.DB);
@@ -421,5 +422,40 @@ describe('submitting a cart', () => {
     expect(await cart(id).cancelAs(staff(await who('viewer', 'vee')))).toMatchObject({ ok: false });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: true });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: false, error: 'The cart is canceled.' });
+  });
+});
+
+describe('cart retention', () => {
+  it('clears an ended cart’s chat and files after the retention, once, and keeps its lines', async () => {
+    const id = await open();
+    const ada = await who('operator', 'ada');
+    const ws = await socket(id, ada);
+    await cart(id).applyAs(staff(ada), { op: 'add', sku: 'WID-100', qty: 1 });
+    await ws.call('say', ['Ann at ann@northwind.example wants these Friday']);
+    await env.DOCS.put(`carts/${id}/att_r1`, '%PDF');
+    await api().attachToCart(
+      id,
+      { id: 'att_r1', name: 'po.pdf', type: 'application/pdf', size: 4, key: `carts/${id}/att_r1` },
+      staff(ada),
+    );
+    ws.close();
+    await cart(id).cancelAs(staff(ada));
+    // Not yet past the retention: kept.
+    expect(await purgeEndedCarts(env)).toBe(0);
+    const later = Date.now() + RETENTION.endedCartsMs + 1;
+    expect(await purgeEndedCarts(env, later)).toBeGreaterThanOrEqual(1);
+    const s = await state(id);
+    expect(s.chat).toEqual([]);
+    expect(s.attachments).toEqual([]);
+    expect(s.cart!.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 1 })]);
+    expect(await env.DOCS.get(`carts/${id}/att_r1`)).toBeNull();
+    const row = await db().select().from(carts).where(eq(carts.id, id)).get();
+    expect(row?.purgedAt).toEqual(expect.any(Number));
+    // Done once: the same cart isn't swept again.
+    const again = await purgeEndedCarts(env, later);
+    expect((await db().select().from(carts).where(eq(carts.id, id)).get())?.purgedAt).toBe(
+      row?.purgedAt,
+    );
+    expect(again).toBeGreaterThanOrEqual(0);
   });
 });

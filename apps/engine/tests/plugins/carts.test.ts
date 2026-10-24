@@ -15,6 +15,7 @@ import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import worker from '../../src/index';
 import { PluginHost } from '../../src/plugin-api';
+import { eraseDataSubject, exportDataSubject } from '../../src/subjects';
 
 const testEnv = env as Env & { EXAMPLE_DB: D1Database; TEST_EXAMPLE_MIGRATIONS: D1Migration[] };
 const db = () => createDb(env.DB);
@@ -346,5 +347,54 @@ describe('an external cart’s buyer', () => {
     expect((await api().cartSnapshot(c.cartId))?.cart?.status).toBe('canceled');
     expect((await guestSocket(c.cartId, guest)).status).toBe(410);
     expect(await cartAgent(c.cartId).issueStart()).toBeNull();
+  });
+});
+
+describe('a punchout buyer’s data subject request', () => {
+  it('exports their carts with what they said and sent, and erases it', async () => {
+    const email = `buyer-${crypto.randomUUID().slice(0, 6)}@northwind.example`;
+    const c = await open({ buyer: { id: email.toUpperCase(), name: 'Bea Buyer' } });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error('socket refused');
+    await ws.call('say', ['Please ship to my home, Bea Buyer']);
+    await env.DOCS.put(`carts/${c.cartId}/att_b1`, '%PDF');
+    await api().attachToCart(
+      c.cartId,
+      {
+        id: 'att_b1',
+        name: 'my-po.pdf',
+        type: 'application/pdf',
+        size: 4,
+        key: `carts/${c.cartId}/att_b1`,
+      },
+      { kind: 'guest', id: guest.id, name: guest.name },
+    );
+    const staffer = { kind: 'staff' as const, id: 'usr_ops', name: 'Ops', role: 'admin' as const };
+    await cartAgent(c.cartId).applyAs(staffer, { op: 'add', sku: 'WID-100', qty: 1 });
+
+    const exported = await exportDataSubject(env, email);
+    expect(exported.carts).toEqual([
+      expect.objectContaining({
+        id: c.cartId,
+        buyer: { id: email.toUpperCase(), name: 'Bea Buyer' },
+        messages: [expect.objectContaining({ body: 'Please ship to my home, Bea Buyer' })],
+        files: [expect.objectContaining({ name: 'my-po.pdf' })],
+      }),
+    ]);
+
+    const erased = await eraseDataSubject(env, email);
+    expect(erased).toMatchObject({ ok: true, carts: 1 });
+    const s = (await api().cartSnapshot(c.cartId))!;
+    expect(s.cart).toMatchObject({
+      status: 'canceled',
+      external: { buyer: { id: '[erased]', name: '[erased]' } },
+    });
+    expect(s.chat.map((m) => m.body)).not.toContain('Please ship to my home, Bea Buyer');
+    expect(s.attachments).toEqual([]);
+    expect(await env.DOCS.get(`carts/${c.cartId}/att_b1`)).toBeNull();
+    const row = await db().select().from(carts).where(eq(carts.id, c.cartId)).get();
+    expect(row?.buyerId).toBeNull();
+    expect((await exportDataSubject(env, email)).carts).toEqual([]);
   });
 });
