@@ -379,7 +379,9 @@ alias moves between products on two shards, the old owner's later publish can de
 owner's pointer, and the new owner's next publish puts it back. A `forced` row (a reindex) is marked
 `forced` on its listing changes, so its listings rebuild even when no entry changed. A write reads each stored row's `version`
 and `hash` first and parses the stored body (for the old aliases) only for rows whose hash changed.
-The pass's listing changes go to the `CHANGES` queue first (100 a `sendBatch`), before the outbox rows
+The pass's listing changes go to the `CHANGES` queue first (`sendChanges`: packed into messages of up to
+`CHANGES_MESSAGE_BYTES`, 64 KB, so a consumer batch of 100 messages holds thousands of changes and a
+root category takes one call for them, not one per hundred), before the outbox rows
 are deleted, so a crash between the two republishes and sends them again.
 
 ### Catalog admin API

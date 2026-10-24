@@ -113,7 +113,7 @@ created through the API and stored in D1; they are not configuration.
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite-backed, migration `v3`), one per channel and category, named `<channel>:<category>` |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite-backed, migration `v4`), 16 shards named `search-<n>` |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
-| `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, and the catalog Worker consumes them (`max_batch_size` 100, `max_batch_timeout` 2 seconds, `max_retries` 10, dead-letter queue `orderloop-catalog-changes-dlq`) |
+| `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, packed up to 64 KB a message, and the catalog Worker consumes them (`max_batch_size` 100 messages, `max_batch_timeout` 2 seconds, `max_retries` 10, dead-letter queue `orderloop-catalog-changes-dlq`) |
 | `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`) and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
 | `PURGE` | catalog | Queue producer for `orderloop-catalog-purge`: the alarm sends the cache tags (`PurgeMessage`) of urgent products after publishing them |
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |

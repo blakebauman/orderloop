@@ -4,7 +4,7 @@
  * listing changes to their indexers.
  */
 import { applyPart, type FeedPart, failPart } from './feed-import';
-import { applyChanges, type ListingChange } from './listings';
+import { applyChanges, changesIn } from './listings';
 import { applyOrders } from './orders';
 import { applySearch } from './search';
 
@@ -30,7 +30,7 @@ export default {
     if (batch.queue.startsWith('orderloop-catalog-changes')) {
       // One call per listing for the whole batch; a failure retries the batch (changes are
       // idempotent by `at`).
-      const changes = batch.messages.map((m) => m.body as ListingChange);
+      const changes = batch.messages.flatMap((m) => changesIn(m.body));
       await Promise.all([
         applyChanges(env, changes),
         applySearch(env, changes),

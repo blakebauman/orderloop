@@ -178,6 +178,7 @@ group reads what is sent.
 | moving | A product moved between categories leaves the old listing (through `left`) and enters the new; one that stops being listed is dropped |
 | ordering | The latest change by `at` wins when changes arrive out of order |
 | build pacing | `debounceMs` (15 s up to 300,000 members, a second per 20,000 beyond, at most 5 minutes); inside the indexer (`runInDurableObject`, `LISTING_DELAY_MS` set to `0`), the next build is due `debounceMs(members)` after the last; a change with the stored entry signature only moves `at` and doesn't set `dirty`, while an older one changes nothing and a new price does; a `forced` (reindex) change with the same entry, through `applyChanges`, sets `dirty` |
+| sending changes | `sendChanges` packs 3,000 changes into messages of at most `CHANGES_MESSAGE_BYTES` and `sendBatch` calls of at most 100 messages and 256 KB, in order; `changesIn` reads a single-change message from before packing |
 | `withAncestors` | Every ancestor once; a cycle stops |
 
 ### Keyword search
