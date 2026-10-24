@@ -31,12 +31,13 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 
 ## Catalog variables
 
-The catalog Worker has two variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
+The catalog Worker has three variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
 | `FEED_CHUNK` | `25000` | Products one `FeedImport` split step reads before handing off to the next (a string; `25000` when unset or not a number, `FEED_CHUNK` in core). Lower it only in tests, where `apps/catalog/vitest.config.ts` sets `300` so a small feed spans several steps |
+| `ORDERS_CHANNEL` | `web` | The channel code whose prices feed Order Loop's `products` table (`apps/catalog/src/orders.ts`, `publishKeys`): each active variant priced there in `BASE_CURRENCY` (`USD`) is upserted with its name and price. A channel in another currency writes nothing. Changing it applies to products as they next publish (or on `reindex`); rows already written stay. See [Order Loop's products](architecture.md#order-loops-products) |
 
 ## Compatibility flags
 
@@ -94,7 +95,7 @@ created through the API and stored in D1; they are not configuration.
 
 | Binding | Worker | Resource |
 |---|---|---|
-| `DB` | engine, web | D1 database `orderloop`; migrations in `packages/db/migrations` |
+| `DB` | engine, web, catalog | D1 database `orderloop`; migrations in `packages/db/migrations`. The catalog only writes `products.name`, `price` and `catalog_at`; a customer's database is rendered into the catalog's config at deploy (`renderCatalog`, which refuses a deployment without `d1Id`) |
 | `DOCS` | engine, web | R2 bucket `orderloop-docs`: invoices, POs and inbound documents |
 | `ORDER_AGENT` | engine | Durable Object `OrderAgent` (SQLite-backed), one per order |
 | `ASSISTANT_AGENT` | engine | Durable Object `AssistantAgent` (SQLite-backed, migration `v2`), one per person |
@@ -103,6 +104,7 @@ created through the API and stored in D1; they are not configuration.
 | `REPLENISH` | engine | Workflow `orderloop-replenish` (class `Replenish`), scheduled `0 6 * * *` |
 | Cron trigger | engine | `triggers.crons` `30 3 * * *`: `scheduled()` runs the daily [retention sweep](data-model.md#retention) |
 | `AI` | engine | Workers AI |
+| `CATALOG` | web | Service binding to `orderloop-catalog`, entrypoint `CatalogApi`: `/api/v1/catalog` ([Architecture](architecture.md#catalog-admin-api)). A customer's is `orderloop-catalog-<id>`, rendered at deploy (`renderWeb`) |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite-backed, migration `v1`), 64 shards named `shard-<n>` |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite-backed, migration `v1`), one, named `meta` |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite-backed, migration `v2`), one, named `feeds` |
@@ -138,7 +140,7 @@ URLs: only the web app's service binding reaches it, plus Email Routing rules th
 serves `docs.orderloop.app`, and likewise sets `workers_dev` and `preview_urls` to `false`.
 
 The catalog Worker has no routes, no `workers_dev` URL and no preview URLs, and only catalog-edge
-binds to it (`SearchApi`); it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
+(`SearchApi`) and the web app (`CatalogApi`) bind to it; it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
 
 The catalog-edge Worker serves `catalog.orderloop.app` as a custom domain (a customer's is the
 registry's `catalogDomain`, default `catalog.<domain>`, rendered at deploy), with `workers_dev` and

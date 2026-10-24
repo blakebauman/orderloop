@@ -21,6 +21,13 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'webhook.unsubscribed': 'Removed a webhook subscription',
   'webhook.rotated': 'Rotated a webhook signing secret',
   'stock.review_run': 'Ran the stock review',
+  'catalog.products_written': 'Wrote catalog products',
+  'catalog.products_deleted': 'Deleted catalog products',
+  'catalog.type_saved': 'Saved a product type',
+  'catalog.channel_saved': 'Saved a catalog channel',
+  'catalog.categories_saved': 'Saved catalog categories',
+  'catalog.feed_started': 'Started a catalog feed',
+  'catalog.reindexed': 'Republished the catalog',
 } as const;
 
 export type BusinessAuditAction = keyof typeof BUSINESS_AUDIT_ACTIONS;

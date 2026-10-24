@@ -141,10 +141,10 @@ Tests drive orders through `startOrder`, then poll the agent's `snapshot()` unti
 `apps/catalog/tests/catalog.test.ts` runs the real `CatalogApi`, `CatalogShard` and `CatalogMeta`
 against local Durable Objects, R2 and KV, from the catalog's own `wrangler.jsonc` with
 `remoteBindings: false` (no network or account; `testTimeout` is 60 seconds). It calls the entrypoint through
-`ProductCatalogRpc`, as the web app's binding will. `tests/helpers.ts` registers the `apparel`
+`ProductCatalogRpc`, as the web app's binding does. `tests/helpers.ts` registers the `apparel`
 type, a `web` channel (`en` and `fr`, USD) and a two-level category tree once, builds
 products with unique keys, SKUs and slugs, and `settle()` runs every shard's alarm by hand until
-the outbox is empty, so a test reads the published R2 and KV objects deterministically. Product
+the outbox is empty, so a test reads the published R2 and KV objects deterministically. `vitest.config.ts` applies Order Loop's D1 migrations to the test `DB` in `tests/setup.ts` (read with `readD1Migrations`, bound as `TEST_MIGRATIONS`), because publishing now writes `products` rows. Product
 rendering and routing are covered in core (`product-*.test.ts`), not repeated here.
 `tests/feeds.test.ts` covers feeds and reindexing in the same environment (below).
 
@@ -182,6 +182,8 @@ queue.
 | paging | Pages across the 16 shards come out in score order with the same `total`; syntax characters in a query are text |
 
 ### Feeds
+
+`apps/catalog/tests/orders.test.ts` covers Order Loop's `products` rows: publishing a product writes each variant's SKU with its name (`Field jacket (S)`) and price (a variant's own price over the product's), and leaves an existing row's `stock` alone; and `applyOrders` never lets an older change overwrite a newer one (`catalog_at`), across batches and within one.
 
 `apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
 
@@ -228,7 +230,8 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `two-factor.test.ts` | The `two_factor_required` setting is `operator` until an admin chooses otherwise, covers the chosen role and above, accepts only known values and is described in the audit log |
 | `audit.test.ts` (core) | The audit hash chain: events numbered from 1 and linked, an edited, removed or reordered event found, a pruned chain checked from its first remaining event or a known head, an unsealed event refused; retention defaults to 400 days and never goes under 90 |
 | `audit-log.test.ts` (engine) | One chain even when writers race; the database refuses to change an event or delete one younger than 90 days; `archiveAudit` writes events past the retention to R2 as NDJSON, deletes them and leaves an unbroken chain |
-| `audit.test.ts` | Audit events described in one line (role changes as from → to, token roles, failure reasons); every action belongs to a filter group, including `scim`, `integration`, `personal_data` and the business groups (`order`, `approval`, `flow`, `webhook`, `stock`) |
+| `audit.test.ts` | Audit events described in one line (role changes as from → to, token roles, failure reasons); every action belongs to a filter group, including `scim`, `integration`, `personal_data` and the business groups (`order`, `approval`, `flow`, `webhook`, `stock`, `catalog`) |
+| `catalog-api.test.ts` | `/api/v1/catalog` against a mocked `ProductCatalogRpc` (`~/lib/env.server`'s `catalog()`): an operator's product write is forwarded with `by` and `urgent` and audited with the created, updated, unchanged and rejected counts; a viewer can't write, a malformed body and 501 products are `400` and never reach the catalog; reads and alias lookups for a viewer, `404` when unknown; deletes; a type the catalog refuses is `409` with its reasons; channels and categories; a feed file streamed to `startFeed` with `202`; `reindex` for an admin only; anything else is `404` |
 | `tokens.test.ts` | API token lifetimes: 30 days, 90 days and 1 year, with no `never` or longer lifetime; token state active, expiring within 14 days, expired at its expiry time, revoked first |
 | `sessions.test.ts` | `describeAgent` names browser and system (Chrome, Edge, Safari on iOS, Firefox on Linux, curl, unknown); `sessionRef` |
 | `dev-key.test.ts` | The dev principal key and data key in `vite.config.ts` (the engine uses them) equal core's `DEV_PRINCIPAL_KEY` and `DEV_DATA_KEY` (the web app uses them) |
@@ -239,7 +242,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `new-order.test.ts` | The New order lines grammar (each spelling, no number as one; no SKU, zero or negative, two numbers and SKUs outside the catalog are issues, not guesses); a catalog click adds a row or one more; `summarizeFlow` names where a flow asks a person, what it waits for and what it undoes, and whether it reads a document or routes fulfillment |
 | `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its model; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
-`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, renders the changes queue as a producer and a second consumer (`orderloop-catalog-changes-<id>`), sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
+`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, renders the changes queue as a producer and a second consumer (`orderloop-catalog-changes-<id>`), sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, binds `DB` to the deployment's own D1 (`d1Id`, for the `products` rows it writes), and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
 
 `scripts/fleet.test.ts` also covers catalog-edge: `renderCatalogEdge` gives the Worker its own name (`orderloop-catalog-edge-<id>`), points its `CATALOG` service binding at the deployment's catalog (`orderloop-catalog-<id>`, entrypoint `SearchApi`), a custom-domain route for `catalogDomain` (default `catalog.<domain>`), the deployment's bucket (with its jurisdiction), `CARDS` namespace id, purge queue and dead-letter queue consumer (`max_concurrency` 1) and Analytics Engine dataset (`orderloop_catalog_edge_<id>`); the catalog's `PURGE` producer names the same queue; a `catalogDomain` that isn't a host name is refused; `orderloop` renders the committed `apps/catalog-edge/wrangler.jsonc` unchanged.
 

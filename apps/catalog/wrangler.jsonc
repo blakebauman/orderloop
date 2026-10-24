@@ -71,6 +71,15 @@
   // Published documents (product docs, alias pointers, category trees, listing indexes), read by
   // catalog-edge. Strongly consistent, so a purge is never undone by a stale read.
   "r2_buckets": [{ "binding": "PUBLISHED", "bucket_name": "orderloop-catalog" }],
+  // Order Loop's own database: the catalog keeps each variant's name and list price in `products`
+  // (orders.ts). Migrations are the web app's; the catalog only writes those columns.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orderloop",
+      "database_id": "958e09f6-63a9-4634-ac1e-18ae3b7ce044"
+    }
+  ],
   // Listing cards, read in bulk by catalog-edge.
   "kv_namespaces": [{ "binding": "CARDS", "id": "7f9656f155a848b690457d2360700e0d" }],
   "vars": {
@@ -79,6 +88,9 @@
     // first product: changing it later strands what exists.
     "DATA_JURISDICTION": "",
     // Products a feed step reads before handing off to the next one (tests make it small).
-    "FEED_CHUNK": "25000"
+    "FEED_CHUNK": "25000",
+    // The channel whose prices (in the base currency) Order Loop's orders use: its variants are
+    // kept in the `products` table.
+    "ORDERS_CHANNEL": "web"
   }
 }

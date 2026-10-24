@@ -382,6 +382,13 @@ export function renderCatalog(base: Config, d: Deployment): Config {
   config.kv_namespaces = config.kv_namespaces.map((k: Config) =>
     k.binding === 'CARDS' ? { ...k, id: d.catalogKvId } : k,
   );
+  // Order Loop's own database, for the variant names and prices the catalog keeps in `products`.
+  if (!d.d1Id) throw new Error(`${d.id} has no d1Id: run scripts/provision.sh ${d.id}`);
+  config.d1_databases = config.d1_databases.map((db: Config) => ({
+    ...db,
+    database_name: n.d1,
+    database_id: d.d1Id,
+  }));
   // Workflow and queue names are unique per account, so each deployment's carry its suffix.
   config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
   const queue = (name: string) => `${name}${d.suffix}`;
@@ -438,7 +445,11 @@ export function renderWeb(base: Config, d: Deployment): Config {
   config.workers_dev = false;
   config.preview_urls = false;
   config.services = config.services.map((s: Config) =>
-    s.binding === 'ENGINE' ? { ...s, service: n.engine } : s,
+    s.binding === 'ENGINE'
+      ? { ...s, service: n.engine }
+      : s.binding === 'CATALOG'
+        ? { ...s, service: n.catalog }
+        : s,
   );
   // Rate-limit namespaces are per account: slot 1 keeps the base ids (1001, 1002), slot 2 uses
   // 2001, 2002, and so on.

@@ -1,0 +1,213 @@
+---
+title: Product catalog
+description: Product types, variants, channels and categories; writing products through the API or a CSV or NDJSON feed; the public catalog API a storefront reads; how fresh changes are; and how the catalog feeds order prices.
+---
+
+import Values from '../../components/Values.astro';
+
+The product catalog is where a workspace keeps what it sells in a shape a storefront can read:
+products with typed attributes, variants, per-channel prices and categories. Integrators write it
+through `/api/v1/catalog/*` (see the [OpenAPI explorer](/api/) for every route and schema), and a
+storefront reads it from a separate, public, cached API. The catalog also keeps each variant's name and
+list price current for [orders](#orders).
+
+## The model
+
+| Concept | What it is |
+|---|---|
+| Product | A `key`, a `type`, localized `title`, `slug` and `description`, a `brand`, `categories`, `media`, attribute values, `variants`, and a listing per channel. `status` is one of <Values of="product-statuses" />; only `active` products are published. `extra` is passed through to readers but never indexed |
+| Product type | The shape of a product: its attributes and variant axes. Referenced as `code` (the latest version) or `code@version`; a stored product records the version it was validated against |
+| Variant | One sellable SKU. `sku` is unique within the product, `gtin` is optional (8, or 12 to 14 digits), and it can carry its own attribute values, prices and media. A product has 1 to 250 variants |
+| Channel | A place you sell: a `code`, a `name`, one `currency`, its `locales` and a `defaultLocale` that missing translations fall back to |
+| Category | A tree node: `code`, `parent` (or `null`), a localized `name`, an optional localized `slug` and a `position` |
+
+SKUs, GTINs and slugs identify one product: a product that claims one another product holds is
+rejected with `already used by <key>`. `GET /api/v1/catalog/aliases/:alias` finds the holder of
+`sku:<sku>`, `gtin:<gtin>` or `slug:<locale>:<slug>`.
+
+### Product types and versions
+
+A type changes by adding a version, never by editing one. The next version must be the current
+version plus one and may only add attributes, add enum values, relax `required`, or mark an
+attribute `deprecated`. Removing an attribute or an enum value, changing a kind, scope, unit or
+whether text is localized, making an attribute required, or changing the variant axes is refused
+with `409 { error: "Type refused", issues }`. Existing products keep validating against the
+version they name.
+
+An attribute has a `code`, a `kind`, a `scope` (`product` or `variant`) and these flags:
+
+| Field | Effect |
+|---|---|
+| `required` | A product (or variant, by scope) without a value is rejected |
+| `localized` | Text only: one value per locale, written as `{ "en": "…", "de": "…" }` |
+| `filterable` | Counted as facets and usable as `f.<code>` and `r.<code>` filters on category listings. Not available for `json` |
+| `searchable` | Its text goes into keyword search |
+| `sortable` | Offered as `sort=<code>_asc` and `_desc` on listings. Numeric kinds only |
+| `card` | Included on the cards listings and batch lookups return |
+| `values`, `unit`, `buckets` | The allowed values of an `enum` or `multi_enum` (with labels); the unit a `measure` is stored in; ascending edges for range facets |
+
+Attribute kinds: <Values of="attribute-kinds" />. Listings filter and count the kinds
+<Values of="term-kinds" /> as terms (not localized text), and filter by range and sort the kinds
+<Values of="numeric-kinds" />. Prices are always filterable and sortable.
+
+`variantAxes` (up to 5) name variant-scoped `enum` attributes that tell variants apart, such as size and
+color. A variant must give a value for every axis, and no two variants may have the same combination.
+
+### Prices
+
+A price is `{ "amount": 1999, "currency": "USD" }` in minor units (cents; whole units for
+zero-decimal currencies) and must be in the channel's currency, or it is ignored for that channel. A
+product's listing per channel is `{ visible, price?, compareAt? }` (`compareAt` is the struck-through
+"was" price); a variant's `prices.<channel>` overrides it. A product that isn't `visible` in a
+channel, isn't `active`, or has no active variant is not published there.
+
+### Categories
+
+A product lists under every category in `categories`, and also under each of their ancestors: a
+product in `tees`, a child of `tops`, appears in the listings of both. `primaryCategory` (one of
+`categories`, defaulting to the first) is the breadcrumb category. If you move a category, products
+already published keep their old ancestors until a [reindex](#freshness).
+
+## Writing products
+
+`POST /api/v1/catalog/products` takes `{ "products": [...], "urgent"?: true }` with 1 to 500 products
+and answers `{ "results": [{ "key", "status", "version"?, "issues"? }] }`, one per product. `status` is:
+
+| Result | Meaning |
+|---|---|
+| `created`, `updated` | Stored; `version` counts changes to the product, starting at 1 |
+| `unchanged` | The content is identical to what is stored. Nothing is written or republished, so sending a full file every night is cheap |
+| `rejected` | Not stored. `issues` lists each problem as a `path` and `message`; the valid products in the same call are stored |
+
+If a key appears twice in one call, the last one wins and the earlier ones are rejected.
+`POST /api/v1/catalog/products/delete` takes `{ "keys": [...], "urgent"?: true }` (1 to 500) and answers
+`deleted` per key. `GET /api/v1/catalog/products/:key` returns the stored product as written.
+Types, channels and categories are written with `POST /api/v1/catalog/types`, `/channels` and
+`/categories` (and listed with `GET`); categories are upserted, and the tree is republished once per call.
+
+```json
+{
+  "products": [
+    {
+      "key": "TEE-100",
+      "type": "tee",
+      "title": { "en": "Everyday tee" },
+      "categories": ["tees"],
+      "attributes": { "fabric": "cotton" },
+      "channels": { "web": { "price": { "amount": 1800, "currency": "USD" } } },
+      "variants": [
+        { "sku": "TEE-100-M", "attributes": { "size": "m" } },
+        { "sku": "TEE-100-L", "attributes": { "size": "l" } }
+      ]
+    }
+  ]
+}
+```
+
+Reading routes need `viewer`, writes `operator` and `reindex` `admin`; every write is in the
+[audit log](/guides/team-and-roles/#audit-log) under **Catalog**.
+
+## Feeds
+
+For a whole file, send it as the request body of
+`POST /api/v1/catalog/feeds?format=csv|ndjson&name=<label>` (`format` is one of
+<Values of="feed-formats" />). The feed is read as it arrives, so its size isn't limited by a request
+body. The answer is `202 { "feed": { "id", "state", … } }`; poll `GET /api/v1/catalog/feeds/:id`
+until `state` is `done` or `failed`. States: <Values of="feed-states" />. A feed reports `rows`,
+`created`, `updated`, `unchanged` and `rejected` counts and, for the first 100 rejected rows,
+`errors` with the `row` number, the product `key` when known and the `message`. When the whole feed
+fails (for example, a CSV without `key` and `sku` columns, or text that isn't UTF-8), `failure` says why. `GET /api/v1/catalog/feeds` lists recent feeds.
+
+The file must be UTF-8. **NDJSON** is one product per line, in the same shape as the products API,
+and can express everything. **CSV** has one row per variant, a header row and RFC 4180 quoting;
+all rows of a product must be contiguous (a key that appears again later replaces the earlier rows),
+and the product's own columns are read from its first row. The header must have `key` and `sku`.
+Row numbers in errors count the header as row 1.
+
+| Column | Meaning |
+|---|---|
+| `key`, `type`, `status`, `brand` | Product fields; `type` may be `code@version` |
+| `categories`, `media` | `\|`-separated lists of category codes and image URLs |
+| `title:<locale>`, `slug:<locale>`, `description:<locale>` | Localized text, one column per locale |
+| `price.<channel>`, `compareAt.<channel>` | Decimal prices in the channel's currency (`18.00`) |
+| `visible.<channel>` | `true` or `false`; a channel with a price column is visible unless this says otherwise |
+| `sku`, `gtin`, `variantPrice.<channel>` | Variant fields; `variantPrice` overrides the product price |
+| `attr.<code>`, `attr.<code>:<locale>` | An attribute, product- or variant-scoped as its type says; the `:<locale>` form is for localized text |
+
+Attribute cells are read by kind: `|` separates `multi_enum` values, money is `12.34 USD`, a measure
+is its number, booleans are `true` or `false`. A bad cell rejects that product, with the row in `errors`.
+
+```csv
+key,type,categories,title:en,price.web,sku,attr.size,attr.fabric
+TEE-100,tee,tees,Everyday tee,18.00,TEE-100-M,m,cotton
+TEE-100,,,,,TEE-100-L,l,
+```
+
+## Reading from the storefront
+
+Shoppers' reads don't go through `/api/v1`. The catalog is served read-only and without credentials
+at `https://catalog.<your domain>/v1/<channel>/<locale>/…` (`GET` and `HEAD`, open CORS). Other
+methods answer `405`; a missing product answers `404 { "error" }`. Prices are the channel's currency
+in minor units, and text is already in the requested locale (falling back to the channel's default).
+
+| Route | Answers |
+|---|---|
+| `products/<key>` | The product: `key`, `type`, `version`, `title`, `slug`, `description`, `brand`, `categories`, `primaryCategory`, `media`, `attributes`, `variants`, `price`, `compareAt`, `priceRange`, `extra`. Each variant has `sku`, `options` (each axis as `{ code, label }`), `attributes`, `price` and `media`; enum values are `{ code, label }` |
+| `skus/<sku>`, `slugs/<slug>` | The same document, found by a variant SKU or by the product's slug in that locale |
+| `products?keys=a,b,c` | `{ "products": [card or null, …] }` for up to 100 keys, in the order asked; `null` for one that isn't published |
+| `categories` | `{ "categories": [{ code, parent, name, slug, position }] }`, the whole tree, flat |
+| `categories/<code>/products` | A page of the category's listing, below |
+| `search?q=<words>` | Keyword search, best match first |
+
+A **card** is what lists show: `key`, `version`, `title`, `slug`, `brand`, `image`, `price`, `compareAt`,
+`priceRange` (when variants differ in price), `variants` (the count) and the attributes flagged `card`.
+
+A category listing takes:
+
+| Parameter | Meaning |
+|---|---|
+| `f.<attr>=a,b` | Products with any of these values of the attribute; different attributes all have to match. `brand` is always available |
+| `r.<attr>=lo..hi` | An inclusive numeric range; either end may be empty (`r.price=1000..`). `price` is always available |
+| `sort` | `newest` (default), or `<attr>_asc` or `<attr>_desc` for `price` and the `sortable` attributes. An unsupported sort answers `400` with the `sorts` that exist |
+| `cursor`, `limit` | Page with the previous answer's `next` as `cursor`; `limit` is 1 to 100 (24 by default) |
+
+The answer is `{ total, next, sorts, products, facets, ranges }`. `next` is `null` on the last page.
+`facets` maps each filterable attribute to `{ label, values: [{ value, label, count }] }` (at most 50
+values, most products first); each attribute's counts ignore its own filter, so choosing a brand still
+shows how many products every other brand has. `ranges` gives `min`, `max` and, where the attribute
+declares `buckets`, counts per bucket.
+
+Search takes `q`, `cursor` and `limit` the same way and answers `{ total, next, products }` (a
+`partial: true` marks an answer that couldn't reach every part of the index; retry shortly). Terms
+are all required and the last also matches as a prefix, so `blue cott` finds a blue cotton tee. Accents
+are ignored. It pages up to 1,000 results (`cursor` below 1,000). On the first page, a query that is a
+SKU puts the product with that SKU first.
+
+## Freshness
+
+Documents and listings are cached. A change appears within about a minute: published documents are
+fresh for 60 seconds, then revalidated with their `ETag` (an unchanged one costs a `304`), and a
+category's listing index is rebuilt at most every 15 seconds, however many products changed. Search
+and listings pick up a product once it is published, which follows its write by moments.
+
+Set `urgent: true` on a write or a delete for a takedown or a price correction: the cached copies of
+those products are purged as soon as they are republished. Purges are rationed, so use it
+sparingly; the rest of a feed shouldn't be urgent.
+
+A change to a channel's currency or locales, a category that moved, or an improvement to how documents are
+rendered reaches published products only on a reindex. `POST /api/v1/catalog/reindex` (`admin`) republishes
+every product and answers `202 { "queued" }`.
+
+## Orders
+
+Order Loop's orders price and name lines from its own products. The catalog keeps that table current
+for the channel the workspace's administrator has chosen for orders (`web` by default), when the
+channel is in the base currency (`USD`): each active variant with a price in that channel, its own or its
+product's, becomes a product with the variant's SKU, a list price in dollars, and a name made of the
+product title and the variant's option labels, such as `Everyday tee (M)`. A SKU that already exists
+keeps its stock, cost and other settings and gets the new name and price; a new one starts with no
+stock and zero cost, which stay managed in Order Loop.
+
+A change applies only if it is newer than the last one the catalog wrote for that SKU. A product that
+is archived, hidden in the channel or deleted keeps its rows, since orders may still name its SKUs.
+Variants without a price in that channel are not written.

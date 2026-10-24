@@ -8,6 +8,12 @@ import {
   payloadFits,
   WEBHOOK_URL_RULE,
 } from '@orderloop/core';
+import {
+  categorySchema,
+  channelSchema,
+  productInputSchema,
+  productTypeSchema,
+} from '@orderloop/core/product';
 import { z } from 'zod';
 
 const payload = z
@@ -61,3 +67,22 @@ export const platformInput = z.object({
     .max(500)
     .refine((u) => u.startsWith('https://'), 'The profile must be served over https'),
 });
+
+// The product catalog (/api/v1/catalog). Shapes only: the catalog checks products against their
+// product types, which the web app doesn't hold.
+export const catalogProductsInput = z.object({
+  products: z.array(productInputSchema).min(1).max(500),
+  /** Purge cached copies now (rationed) instead of within the minute; for takedowns and fixes. */
+  urgent: z.boolean().optional(),
+});
+
+export const catalogDeleteInput = z.object({
+  keys: z.array(z.string().min(1).max(128)).min(1).max(500),
+  urgent: z.boolean().optional(),
+});
+
+export const catalogCategoriesInput = z.object({
+  categories: z.array(categorySchema).min(1).max(500),
+});
+
+export { channelSchema as catalogChannelInput, productTypeSchema as catalogTypeInput };

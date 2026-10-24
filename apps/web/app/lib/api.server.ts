@@ -21,6 +21,8 @@
  *   POST   /api/v1/webhook-subscriptions/:id/rotate  new secret; the old one also signs for 24 hours
  *   GET    /api/v1/webhook-subscriptions/:id/deliveries
  *
+ *   /api/v1/catalog/*                         the product catalog (./catalog-api.server.ts)
+ *
  *   POST   /api/v1/data-subjects/export     { email }  everything held about them, as JSON (admin)
  *   POST   /api/v1/data-subjects/erase      { email }  erase them; repeat while done is false (admin)
  *
@@ -93,6 +95,7 @@ import { isAuditGroup } from './audit';
 import { audit, listAudit, verifyAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
+import { handleCatalog } from './catalog-api.server';
 import { decodeCursor, encodeCursor } from './cursor';
 import { db, engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
@@ -209,6 +212,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       return need('admin') ?? (await handleIntegrations(request, caller, parts, body));
     if (parts[0] === 'ucp')
       return need('admin') ?? (await handleUcpAdmin(request, caller, parts, body));
+    if (parts[0] === 'catalog') return await handleCatalog(request, caller, parts);
     if (parts[0] === 'data-subjects')
       return need('admin') ?? (await handleDataSubjects(request, caller, parts, body));
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);

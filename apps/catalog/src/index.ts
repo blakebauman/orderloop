@@ -5,6 +5,7 @@
  */
 import { applyPart, type FeedPart, failPart } from './feed-import';
 import { applyChanges, type ListingChange } from './listings';
+import { applyOrders } from './orders';
 import { applySearch } from './search';
 
 export { CatalogApi } from './api';
@@ -30,7 +31,11 @@ export default {
       // One call per listing for the whole batch; a failure retries the batch (changes are
       // idempotent by `at`).
       const changes = batch.messages.map((m) => m.body as ListingChange);
-      await Promise.all([applyChanges(env, changes), applySearch(env, changes)]);
+      await Promise.all([
+        applyChanges(env, changes),
+        applySearch(env, changes),
+        applyOrders(env, changes),
+      ]);
       batch.ackAll();
       return;
     }

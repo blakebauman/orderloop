@@ -11,6 +11,7 @@ through a service binding, and the engine has no public URL.
 browser ──► orderloop-web (apps/web, React Router on Workers)
               │  D1: flows + versions, orders index, approvals, back office
               │  R2: order documents
+              ├── CATALOG service binding ─RPC──► orderloop-catalog (apps/catalog, CatalogApi)
               ├── ENGINE service binding ──RPC──► orderloop-engine (apps/engine)
               │                                     ├─ EngineApi      WorkerEntrypoint (RPC)
               ├── /agents/order-agent/:id ─fetch─►  ├─ OrderAgent     Durable Object, one per order
@@ -293,8 +294,9 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 `orderloop-catalog-edge` (`apps/catalog-edge`) the read side. The pure model lives in
 `@orderloop/core/product`; the catalog Worker adds storage and publishing. It has no routes, no
 `workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers
-(the web app, later) are meant to reach it through a service binding. The web app doesn't bind to
-it yet, so no published page or API writes to it. `catalog-edge` shares its R2 bucket, KV namespace
+reach it through service bindings. The web app binds its `CatalogApi` entrypoint as `CATALOG` and
+forwards `/api/v1/catalog/*` to it ([Catalog admin API](#catalog-admin-api)); it is the only
+writer. `catalog-edge` shares its R2 bucket, KV namespace
 and purge queue with it and binds its `SearchApi` entrypoint for keyword search (see
 [Catalog edge](#catalog-edge)); every other read path never touches a Durable Object.
 
@@ -360,6 +362,60 @@ outbox rows were `urgent` to the `PURGE` queue (`PurgeMessage`: `{ tags }`), 100
 `sendBatch`. It sends after publishing so a purge never refills the cache from the old document.
 The pass's listing changes go to the `CHANGES` queue first (100 a `sendBatch`), before the outbox rows
 are deleted, so a crash between the two republishes and sends them again.
+
+### Catalog admin API
+
+`/api/v1/catalog/*` is the web app's front for `CatalogApi` (`apps/web/app/lib/catalog-api.server.ts`,
+`handleCatalog`, dispatched from `handleApi` in `api.server.ts`). `catalog()` in `env.server.ts` types
+`env.CATALOG` as `ProductCatalogRpc`. The web app never imports catalog source and checks only the
+shape of what it forwards; the catalog validates products against their types, which the web app
+doesn't hold. Roles: reads `viewer`, writes `operator`, `reindex` `admin` (`atLeast`, `403` with
+`forbidden(min)`). Every write is audited with `via: 'api'`.
+
+| Route | Calls | Notes |
+|---|---|---|
+| `GET products/:key` | `getProduct` | `{ product }`, `404` when unknown |
+| `POST products` | `putProducts` | `{ products, urgent? }`, 1 to 500 (`catalogProductsInput`), body read up to 8 MiB; `{ results }`. Audit `catalog.products_written` with the counts and `urgent` |
+| `POST products/delete` | `deleteProducts` | `{ keys, urgent? }`, 1 to 500; `catalog.products_deleted` |
+| `GET aliases/:alias` | `resolveAlias` | `{ key }` or `404` |
+| `GET`/`POST types` | `listTypes`, `putType` | A refused type is `409 { error: 'Type refused', issues }`; `201 { type }`; `catalog.type_saved` (target the code, detail `version`) |
+| `GET`/`POST channels` | `listChannels`, `putChannel` | `400` when refused; `catalog.channel_saved` |
+| `GET`/`POST categories` | `listCategories`, `putCategories` | `{ categories }`, 1 to 500; `catalog.categories_saved` |
+| `POST feeds?format=&name=` | `startFeed` | `format` is `csv` or `ndjson` (`FEED_FORMATS`), else `400`. The request body is passed to the catalog as a stream, so a feed of any size never sits in the Worker; `name` defaults to `feed.<format>` and is cut at 200 characters. `202 { feed }`; `catalog.feed_started` (target the feed id) |
+| `GET feeds`, `GET feeds/:id` | `listFeeds(limit)`, `feedStatus` | `limit` defaults to 20 |
+| `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
+
+The `catalog.*` actions are in `BUSINESS_AUDIT_ACTIONS` (`packages/core/src/audit.ts`) and the web
+audit filter group is `catalog` (`AUDIT_GROUPS` in `apps/web/app/lib/audit.ts`, label "Catalog"). The
+OpenAPI document (`openapi.ts`) lists these paths, with request bodies from the zod schemas in
+`api-schemas.ts`, which re-export core's `productTypeSchema` and `channelSchema` as the type and
+channel bodies.
+
+### Order Loop's products
+
+The catalog also keeps its half of the D1 `products` table (`apps/catalog/src/orders.ts`), through the
+catalog's own `DB` binding (the same database as the web app and engine; the migrations stay the web
+app's). Only one channel feeds it, `ORDERS_CHANNEL` (variable, default `web`), and only when that
+channel's currency is `BASE_CURRENCY` (`USD`), the currency of an order's list prices.
+
+1. `publishKeys` adds `order: orderLines(product, type, channel)` to the `ListingChange` of the
+   orders channel when the product has a type and renders there (is active, visible, with an active
+   variant). `orderLines` returns one `{ sku, name, price }` per active variant with a price in
+   `BASE_CURRENCY`: the variant's `prices.<channel>`, else the listing's `price`. The name is the
+   title in the channel's default locale, plus the variant's axis option labels in parentheses
+   (`Field jacket (S)`); the price is `fromMinor`, a decimal. A product that no longer lists carries
+   no `order`, so nothing is written or deleted: **a product that stops being listed keeps its rows**,
+   because orders may name its SKUs.
+2. The changes queue consumer runs `applyOrders` beside `applyChanges` and `applySearch`. It keeps the
+   newest change per SKU in the batch and upserts in batches of 100: `INSERT … ON CONFLICT (sku) DO
+   UPDATE SET name, price, catalog_at WHERE catalog_at IS NULL OR catalog_at < excluded.catalog_at`.
+   `catalog_at` is the change's `at`, so a change that arrives late, as queue delivery allows, never
+   overwrites a newer one. A new row has `cost` 0 and takes the column defaults (no stock, `kind`
+   `physical`); an existing row keeps `cost`, `stock`, `reserved`, reorder settings, `supplier`,
+   `seller_id` and `kind`.
+
+The engine, pricing and replenishment read `products` exactly as before. Rows the catalog never wrote
+have a null `catalog_at`. See [Data model](data-model.md#product-catalog).
 
 ### Listing indexes
 
@@ -558,6 +614,7 @@ Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `
 | `DOCS` | both | R2 `orderloop-docs` |
 | `AI` | engine | Workers AI |
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
+| `CATALOG` | web | Service `orderloop-catalog`, entrypoint `CatalogApi` (`/api/v1/catalog`) |
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite, migration tag `v1`), 64 of them |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
@@ -567,6 +624,7 @@ Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite, migration tag `v4`), 16 of them named `search-<n>` |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes` (dead-letter queue `orderloop-catalog-changes-dlq`); producer and consumer are the catalog Worker |
+| `DB` | catalog | D1 `orderloop` (the web app's database): the catalog writes `products.name`, `price` and `catalog_at` ([Order Loop's products](#order-loops-products)) |
 | `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes |
 | `PURGE` | catalog | Queue producer for `orderloop-catalog-purge` (`{ tags }` messages) |
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries; created by `provision.sh` |

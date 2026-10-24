@@ -88,6 +88,7 @@ export default defineConfig({
             { label: 'Fulfillment', slug: 'guides/fulfillment' },
             { label: 'Built-in flows', slug: 'guides/templates' },
             { label: 'Marketplace', slug: 'guides/marketplace' },
+            { label: 'Product catalog', slug: 'guides/product-catalog' },
             { label: 'Payments', slug: 'guides/payments' },
             { label: 'Approvals and events', slug: 'guides/approvals-and-events' },
             { label: 'Inbound orders', slug: 'guides/inbound-orders' },

@@ -6,13 +6,13 @@ OrderLoop deploys as four Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
-| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, `ListingIndexer` and `SearchShard` Durable Objects, queues for feed parts (`orderloop-catalog-feed-parts`) and listing changes (`orderloop-catalog-changes`), each with a dead-letter queue, an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; only catalog-edge binds to it (`SearchApi`, for keyword search) |
+| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, `ListingIndexer` and `SearchShard` Durable Objects, queues for feed parts (`orderloop-catalog-feed-parts`) and listing changes (`orderloop-catalog-changes`), each with a dead-letter queue, an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes, and it binds Order Loop's D1 database to keep variant names and prices in `products` (migration `0043` adds `catalog_at`, so it applies before this Worker deploys). No public URL and no secrets; catalog-edge binds to it (`SearchApi`, for keyword search) and the web app (`CatalogApi`, for `/api/v1/catalog`) |
 | `orderloop-catalog-edge` | `apps/catalog-edge/wrangler.jsonc` | The public, read-only catalog API at `catalog.orderloop.app` (custom domain): reads the catalog's R2 bucket and KV namespace behind Workers Caching, calls the catalog's `SearchApi` for keyword search through a service binding, consumes the purge queue (`orderloop-catalog-purge`, with a dead-letter queue) and writes request data points to an Analytics Engine dataset (`orderloop_catalog_edge`). No secrets |
 | `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
-| `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
+| `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) and the catalog as `CATALOG` (entrypoint `CatalogApi`, for `/api/v1/catalog`) |
 
-The engine and web bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`); the
-catalog and catalog-edge bind neither. They share the catalog's R2 bucket, KV namespace and purge queue, and catalog-edge binds the catalog Worker as a service.
+The engine and web bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`). The catalog binds the same D1
+database too, to write variant names and prices into `products`, but not the R2 bucket; catalog-edge binds neither. The catalog and catalog-edge share the catalog's R2 bucket, KV namespace and purge queue, and catalog-edge binds the catalog Worker as a service.
 
 ## First deploy
 
@@ -42,8 +42,8 @@ something else entirely.
    table or column. Until the new Workers are live, the old code runs against the new schema, so a
    migration only adds (expand); dropping or renaming waits for a later change once nothing
    deployed uses it (contract).
-2. **Catalog, then catalog-edge, then engine, then web.** The web Worker's service binding needs the
-   engine to exist. Only catalog-edge calls the catalog so far (its `CATALOG` service binding needs the
+2. **Catalog, then catalog-edge, then engine, then web.** The web Worker's service bindings need the
+   engine and the catalog to exist. Catalog-edge and the web app call the catalog (their `CATALOG` service bindings need the
    catalog to exist, which is why the catalog goes first); it goes first so that the Workers that come to
    bind to it always find the version they expect. Catalog-edge goes next because its queue
    consumer needs the purge queue (which `provision.sh` creates) and it reads what the catalog

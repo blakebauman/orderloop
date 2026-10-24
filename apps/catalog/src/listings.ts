@@ -23,6 +23,7 @@ import {
   type SearchEntry,
 } from '@orderloop/core/product';
 import { indexer, meta } from './config';
+import type { OrderLine } from './orders';
 
 /** One product's state in one channel's listings, from the publisher. */
 export type ListingChange = {
@@ -34,6 +35,8 @@ export type ListingChange = {
   entry: IndexEntry | null;
   /** The categories it was listed in before this change. */
   left: string[];
+  /** Order Loop's order lines for its variants (ORDERS_CHANNEL only; see orders.ts). */
+  order?: OrderLine[];
   /** What search indexes, per locale; null when it no longer lists in the channel. */
   search: (SearchEntry & { locale: string })[] | null;
 };
