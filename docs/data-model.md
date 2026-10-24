@@ -68,6 +68,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0048_carts_promotions.sql` | `carts` (the Carts index; unique `carts_session (plugin_id, session_ref)` where `plugin_id` is set), `promotions` (unique `promotions_code`) and `promotion_redemptions` |
 | `0049_plugin_drafts.sql` | `installed_plugins.request` and `cases`, for plugins the assistant drafts, and the unique index `installed_plugins_version (id, version)` |
 | `0050_cart_retention.sql` | `carts.buyer_id` (index `carts_buyer` where set) and `purged_at` (index `carts_purge` with `updated_at`), for data subject requests and the retention sweep |
+| `0051_product_dimensions.sql` | `products.weight_kg`, `length_cm`, `width_cm` and `height_cm` (nullable), for weight and dimensional-weight shipping rates |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -122,7 +123,7 @@ writes embeds its step key.
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order, once per step through `balance_entries`), payment `terms`; `stripe_customer_id` (unique when set; created once per account, idempotency key `cust_${customerId}`) and `stripe_payment_method_id` (the card a `verify` authorization saved, which `commerce.charge` uses off-session) |
-| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock), `catalog_at` (ms; when the product catalog last set the row's `name` and `price`, null for rows it never wrote; see [Product catalog](#product-catalog)) |
+| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock), `catalog_at` (ms; when the product catalog last set the row's `name` and `price`, null for rows it never wrote; see [Product catalog](#product-catalog)), `weight_kg`, `length_cm`, `width_cm`, `height_cm` (per-unit shipping weight and size, null when unknown; read by `commerce.shipping_rate` under the `weight` and `dim_weight` bases) |
 | `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](https://docs.orderloop.app/guides/marketplace/) |
 | `seller_orders` | One row per order and seller, id `so_${orderId}_${sellerId}` (first party is `first_party`): `status` (`pending`, `accepted`, `rejected` or `cancelled`), `lines` (JSON), `subtotal`, `reason`, `decided_at` |
 | `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
@@ -239,7 +240,8 @@ files with its chat ([retention](#retention)), and a buyer's data subject reques
 
 The catalog Worker ([Architecture](architecture.md#product-catalog)) owns no tables in D1. Its one
 D1 write is to Order Loop's `products` table: a row per variant SKU with its `name`, `price` and
-`catalog_at`, upserted by `apps/catalog/src/orders.ts` ([Order Loop's products](architecture.md#order-loops-products)).
+`catalog_at`, and its `weight_kg` and `length_cm`/`width_cm`/`height_cm` when the variant has them (`coalesce`d, so a change
+without them, including one queued before they existed, keeps the row's), upserted by `apps/catalog/src/orders.ts` ([Order Loop's products](architecture.md#order-loops-products)).
 A new row gets `cost` 0 and the column defaults; an existing row keeps everything else. `catalog_at`
 is the publish change's `at`, and an upsert applies only where it is null or older, so out-of-order
 queue delivery can't overwrite a newer name or price. Rows are never deleted when a product stops

@@ -50,6 +50,50 @@ describe("Order Loop's products", () => {
     expect(await until(m, (r) => !!r)).toMatchObject({ name: 'Field jacket (M)', price: 22.5 });
   });
 
+  it('carries a variant’s shipping weight and size, and a change without them keeps the row’s', async () => {
+    const p = product({
+      title: { en: 'Duffel' },
+      variants: [
+        {
+          sku: `${Date.now()}-duffel`,
+          attributes: { size: 'L' },
+          weightKg: 1.2,
+          dimensionsCm: { length: 60, width: 30, height: 30 },
+        },
+      ],
+    });
+    const sku = p.variants[0]!.sku;
+    await api.putProducts([p], { by });
+    await settle();
+    const sized = () =>
+      env.DB.prepare(
+        'SELECT name, weight_kg, length_cm, width_cm, height_cm FROM products WHERE sku = ?',
+      )
+        .bind(sku)
+        .first();
+    await until(sku, (r) => !!r);
+    expect(await sized()).toEqual({
+      name: 'Duffel (L)',
+      weight_kg: 1.2,
+      length_cm: 60,
+      width_cm: 30,
+      height_cm: 30,
+    });
+    // A newer change sent without them (one queued before they existed) renames, and keeps them.
+    await applyOrders(env, [
+      {
+        channel: 'web',
+        key: p.key,
+        at: Date.now() + 60_000,
+        entry: null,
+        left: [],
+        search: null,
+        order: [{ sku, name: 'Duffel bag', price: 1 }],
+      },
+    ]);
+    expect(await sized()).toMatchObject({ name: 'Duffel bag', weight_kg: 1.2, height_cm: 30 });
+  });
+
   it('never lets an older change overwrite a newer one', async () => {
     const sku = `order-${Date.now()}`;
     const line = (name: string) => [{ sku, name, price: 1 }];

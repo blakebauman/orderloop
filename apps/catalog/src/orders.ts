@@ -1,6 +1,8 @@
 /**
  * The catalog's half of Order Loop's `products` table (D1): one row per variant SKU, whose name
- * and list price the catalog keeps current. Stock, reservations, cost, reorder settings, seller and
+ * and list price the catalog keeps current, and its shipping weight and size when the variant has
+ * them (a variant without them leaves the row's as they are, so a change sent before they existed
+ * clears nothing). Stock, reservations, cost, reorder settings, seller and
  * kind stay Order Loop's own, so the engine's pricing, reservations and replenishment read exactly
  * what they always did.
  *
@@ -13,8 +15,16 @@ import { BASE_CURRENCY, fromMinor } from '@orderloop/core';
 import { type Channel, type Product, type ProductType, pickLocale } from '@orderloop/core/product';
 import type { ListingChange } from './listings';
 
-/** One variant as an order line sees it. */
-export type OrderLine = { sku: string; name: string; price: number };
+/** One variant as an order line sees it, with its per-unit shipping weight (kg) and size (cm). */
+export type OrderLine = {
+  sku: string;
+  name: string;
+  price: number;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+};
 
 /** The variants of `product` an order can name, priced in BASE_CURRENCY for `channel`. */
 export function orderLines(product: Product, type: ProductType, channel: Channel): OrderLine[] {
@@ -46,14 +56,28 @@ export function orderLines(product: Product, type: ProductType, channel: Channel
       sku: v.sku,
       name: options.length ? `${title} (${options.join(', ')})` : title,
       price: fromMinor(price.amount, BASE_CURRENCY),
+      ...(v.weightKg !== undefined ? { weightKg: v.weightKg } : {}),
+      ...(v.dimensionsCm
+        ? {
+            lengthCm: v.dimensionsCm.length,
+            widthCm: v.dimensionsCm.width,
+            heightCm: v.dimensionsCm.height,
+          }
+        : {}),
     });
   }
   return out;
 }
 
-const UPSERT = `INSERT INTO products (sku, name, price, cost, catalog_at) VALUES (?, ?, ?, 0, ?)
+const UPSERT = `INSERT INTO products
+    (sku, name, price, cost, catalog_at, weight_kg, length_cm, width_cm, height_cm)
+  VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
   ON CONFLICT (sku) DO UPDATE SET name = excluded.name, price = excluded.price,
-    catalog_at = excluded.catalog_at
+    catalog_at = excluded.catalog_at,
+    weight_kg = coalesce(excluded.weight_kg, products.weight_kg),
+    length_cm = coalesce(excluded.length_cm, products.length_cm),
+    width_cm = coalesce(excluded.width_cm, products.width_cm),
+    height_cm = coalesce(excluded.height_cm, products.height_cm)
   WHERE products.catalog_at IS NULL OR products.catalog_at < excluded.catalog_at`;
 
 /** Writes the order lines a batch of changes carries, newest change per SKU winning. */
@@ -66,7 +90,16 @@ export async function applyOrders(env: Env, changes: ListingChange[]): Promise<v
     }
   if (!latest.size) return;
   const statements = [...latest.values()].map(({ line, at }) =>
-    env.DB.prepare(UPSERT).bind(line.sku, line.name, line.price, at),
+    env.DB.prepare(UPSERT).bind(
+      line.sku,
+      line.name,
+      line.price,
+      at,
+      line.weightKg ?? null,
+      line.lengthCm ?? null,
+      line.widthCm ?? null,
+      line.heightCm ?? null,
+    ),
   );
   for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
 }

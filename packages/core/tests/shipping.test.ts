@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  billableKg,
   nodeSpec,
   parseCarrierQuote,
   pickOption,
@@ -45,6 +46,11 @@ describe('shipping config', () => {
     expect(c.liveCarriers).toEqual([]);
     expect(c.domesticCountries).toEqual(['US', 'CA']);
     expect(c.services[1]!.perItem).toBe(0);
+    // Unit-based unless a flow says otherwise.
+    expect(c).toMatchObject({ basis: 'units', dimDivisor: 5000, defaultKg: 1 });
+    expect(c.services[0]!.perKg).toBe(0);
+    expect(shippingConfigSchema.safeParse({ ...c, basis: 'volume' }).success).toBe(false);
+    expect(shippingConfigSchema.safeParse({ ...c, dimDivisor: 0 }).success).toBe(false);
   });
 
   it('rejects live carriers that are not https, and inverted delivery windows', () => {
@@ -86,6 +92,66 @@ describe('static rates', () => {
     expect(intl.map((o) => o.amount)).toEqual([16, 30, 11]);
     // No country counts as domestic; at least one unit is charged.
     expect(staticRates(c, { itemCount: 0, subtotal: 0 })[0]!.amount).toBe(6);
+  });
+});
+
+describe('billable weight', () => {
+  // 40 × 30 × 20 cm is 24,000 cm³: 4.8 kg at 5000 cm³/kg.
+  const box = { lengthCm: 40, widthCm: 30, heightCm: 20 };
+
+  it('weighs nothing under the units basis', () => {
+    expect(billableKg(config(), [{ qty: 2, weightKg: 3, ...box }])).toBeUndefined();
+  });
+
+  it('sums each unit’s weight under the weight basis, ignoring size', () => {
+    const c = config({ basis: 'weight' });
+    expect(
+      billableKg(c, [
+        { qty: 2, weightKg: 1.25, ...box },
+        { qty: 1, weightKg: 0.4 },
+      ]),
+    ).toEqual({ kg: 2.9, estimated: 0 });
+  });
+
+  it('charges the greater of weight and dimensional weight per unit', () => {
+    const c = config({ basis: 'dim_weight' });
+    // A light, bulky unit bills its dimensional weight; a dense, small one its actual weight.
+    expect(billableKg(c, [{ qty: 2, weightKg: 1, ...box }])).toEqual({ kg: 9.6, estimated: 0 });
+    expect(
+      billableKg(c, [{ qty: 1, weightKg: 10, lengthCm: 10, widthCm: 10, heightCm: 10 }]),
+    ).toEqual({ kg: 10, estimated: 0 });
+    // The divisor is the flow's: 6000 makes the same box 4 kg.
+    expect(
+      billableKg(config({ basis: 'dim_weight', dimDivisor: 6000 }), [{ qty: 1, ...box }]),
+    ).toEqual({ kg: 4, estimated: 0 });
+  });
+
+  it('uses what it knows, and defaultKg for a unit with neither weight nor size', () => {
+    const c = config({ basis: 'dim_weight', defaultKg: 2 });
+    expect(
+      billableKg(c, [
+        { qty: 1, ...box }, // size only: 4.8
+        { qty: 1, weightKg: 0.5 }, // weight only: 0.5
+        { qty: 3, weightKg: null, lengthCm: 10, widthCm: null, heightCm: 10 }, // partial size: 3 × 2
+      ]),
+    ).toEqual({ kg: 11.3, estimated: 3 });
+    // Under weight, a unit known only by its size is estimated too.
+    expect(billableKg(config({ basis: 'weight' }), [{ qty: 2, ...box }])).toEqual({
+      kg: 2,
+      estimated: 2,
+    });
+  });
+
+  it('adds perKg × billable kg to a static service, and nothing under units', () => {
+    const weighed = config({ basis: 'weight', intlMultiplier: 2 });
+    weighed.services[0]!.perKg = 2;
+    const req = { itemCount: 1, billableKg: 2.5, subtotal: 10 };
+    // standard: 5 + 1 × 1 + 2 × 2.5; services without perKg are unchanged.
+    expect(staticRates(weighed, req).map((o) => o.amount)).toEqual([11, 15, 4.5]);
+    expect(staticRates(weighed, { ...req, country: 'DE' })[0]!.amount).toBe(22);
+    const units = config();
+    units.services[0]!.perKg = 2;
+    expect(staticRates(units, req)[0]!.amount).toBe(6);
   });
 });
 

@@ -202,6 +202,16 @@ export const variantInputSchema = z.object({
   /** Overrides the product's price in a channel. */
   prices: z.record(codeSchema, moneySchema).optional(),
   media: z.array(mediaSchema).max(20).optional(),
+  /** One unit's shipping weight in kilograms, for Order Loop's weight-based shipping rates. */
+  weightKg: z.number().positive().max(100_000).optional(),
+  /** One unit's packed size in centimetres, for dimensional-weight shipping rates. */
+  dimensionsCm: z
+    .object({
+      length: z.number().positive().max(10_000),
+      width: z.number().positive().max(10_000),
+      height: z.number().positive().max(10_000),
+    })
+    .optional(),
 });
 export type VariantInput = z.input<typeof variantInputSchema>;
 export type Variant = z.infer<typeof variantInputSchema>;

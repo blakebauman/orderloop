@@ -225,6 +225,36 @@ describe('publishing', () => {
     expect(rendered?.[0]?.search.skus).toBe('TEE-S-RED 036000291452 CT-100-S TEE-M-RED');
   });
 
+  it('keeps a variant’s shipping weight and size, and leaves both out of what it publishes', () => {
+    const sized = {
+      sku: 'TEE-S-RED',
+      weightKg: 0.2,
+      dimensionsCm: { length: 30, width: 25, height: 2 },
+      attributes: { size: 'S', color: 'red' },
+    };
+    const v = validateProduct(tee({ variants: [sized] }), types);
+    expect(v.ok && v.data.variants[0]).toMatchObject({
+      weightKg: 0.2,
+      dimensionsCm: sized.dimensionsCm,
+    });
+    // Order Loop rates shipping from its own products table, so the document's shape is f1 still.
+    const plain = renderForChannel(
+      stored(tee({ variants: [{ ...sized, weightKg: undefined, dimensionsCm: undefined }] })),
+      apparel,
+      web,
+      { uid: 7, createdAt: 1 },
+    );
+    const withSize = renderForChannel(stored(tee({ variants: [sized] })), apparel, web, {
+      uid: 7,
+      createdAt: 1,
+    });
+    expect(withSize.rendered?.[0]?.doc).toBe(plain.rendered?.[0]?.doc);
+    for (const bad of [{ weightKg: 0 }, { dimensionsCm: { length: 1, width: 1 } }])
+      expect(validateProduct(tee({ variants: [{ ...sized, ...bad }] as never }), types).ok).toBe(
+        false,
+      );
+  });
+
   it('renders a doc per locale with labels resolved and the channel price picked', () => {
     const { rendered, index } = renderForChannel(stored(tee()), apparel, web, {
       uid: 7,

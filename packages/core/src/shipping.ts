@@ -6,8 +6,11 @@
  * the order's run read the same config. Amounts are in BASE_CURRENCY, like list prices; the engine
  * converts them at the order's rate.
  *
- * A static service costs `base + perItem × units`, times `intlMultiplier` when the ship-to country
- * is not one of `domesticCountries`. Live carriers are POSTed the cart and answer with options of
+ * A static service costs `base + perItem × units + perKg × billable kg`, times `intlMultiplier` when
+ * the ship-to country is not one of `domesticCountries`. `basis` says what the kilograms are:
+ * `units` (the default) rates by units alone, `weight` by each unit's weight, and `dim_weight` by
+ * each unit's billable weight, the greater of its weight and its volume over `dimDivisor`
+ * (`billableKg`). Live carriers are POSTed the cart and answer with options of
  * their own; when none answers, the static services are used. Options come back cheapest first, and
  * once the subtotal reaches `freeThreshold` the cheapest one is free.
  */
@@ -23,6 +26,8 @@ const serviceSchema = z.object({
   carrier: z.string().min(1).max(40),
   base: z.number().nonnegative(),
   perItem: z.number().nonnegative().default(0),
+  /** Per kilogram of billable weight; charged only when the basis is `weight` or `dim_weight`. */
+  perKg: z.number().nonnegative().default(0),
   minDays: z.number().int().nonnegative(),
   maxDays: z.number().int().nonnegative(),
 });
@@ -34,9 +39,18 @@ const liveCarrierSchema = z.object({
   url: z.url({ protocol: /^https$/, error: 'Live carrier URLs must be https URLs' }),
 });
 
+export const SHIPPING_BASES = ['units', 'weight', 'dim_weight'] as const;
+export type ShippingBasis = (typeof SHIPPING_BASES)[number];
+
 export const shippingConfigSchema = z
   .object({
     services: z.array(serviceSchema).min(1),
+    /** What a service's `perKg` and a carrier's `billableKg` are of; `units` weighs nothing. */
+    basis: z.enum(SHIPPING_BASES).default('units'),
+    /** cm³ per kg for dimensional weight: 5000 is the common carrier divisor for cm and kg. */
+    dimDivisor: z.number().positive().default(5000),
+    /** The kilograms a unit counts for when its product has neither weight nor dimensions. */
+    defaultKg: z.number().nonnegative().default(1),
     liveCarriers: z.array(liveCarrierSchema).default([]),
     intlMultiplier: z.number().positive().default(1),
     /** ISO 3166-1 alpha-2 codes. A ship-to with no country counts as domestic. */
@@ -67,8 +81,58 @@ export type ShippingOption = {
   free?: boolean;
 };
 
-/** What the rate is for: physical units, where they go and the subtotal, in BASE_CURRENCY. */
-export type RateRequest = { itemCount: number; country?: string; subtotal: number };
+/**
+ * What the rate is for: physical units, where they go and the subtotal, in BASE_CURRENCY.
+ * `billableKg` is set only when the basis weighs units (`weight` or `dim_weight`).
+ */
+export type RateRequest = {
+  itemCount: number;
+  billableKg?: number;
+  country?: string;
+  subtotal: number;
+};
+
+/** One line's units as the products table describes them: per-unit kg and cm, null when unknown. */
+export type ParcelLine = {
+  qty: number;
+  weightKg?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+};
+
+/**
+ * The billable kilograms of `lines` under the config's basis, summed per unit, to the gram. Under
+ * `weight` a unit counts its weight; under `dim_weight` the greater of its weight and its
+ * dimensional weight (length × width × height / `dimDivisor`), either alone when only one is known.
+ * A unit with nothing to go on counts `defaultKg`, and is counted in `estimated`. Under `units`
+ * nothing is weighed: undefined.
+ */
+export function billableKg(
+  config: Pick<ShippingConfig, 'basis' | 'dimDivisor' | 'defaultKg'>,
+  lines: ParcelLine[],
+): { kg: number; estimated: number } | undefined {
+  if (config.basis === 'units') return undefined;
+  const known = (n: number | null | undefined): n is number =>
+    typeof n === 'number' && Number.isFinite(n) && n >= 0;
+  let kg = 0;
+  let estimated = 0;
+  for (const l of lines) {
+    if (l.qty <= 0) continue;
+    const actual = known(l.weightKg) ? l.weightKg : undefined;
+    const dim =
+      config.basis === 'dim_weight' && known(l.lengthCm) && known(l.widthCm) && known(l.heightCm)
+        ? (l.lengthCm * l.widthCm * l.heightCm) / config.dimDivisor
+        : undefined;
+    const each =
+      actual === undefined && dim === undefined
+        ? config.defaultKg
+        : Math.max(actual ?? 0, dim ?? 0);
+    if (actual === undefined && dim === undefined) estimated += l.qty;
+    kg += each * l.qty;
+  }
+  return { kg: Math.round(kg * 1000) / 1000, estimated };
+}
 
 export const SHIPPING_SELECTIONS = ['from_order', 'cheapest', 'fastest'] as const;
 export type ShippingSelection = (typeof SHIPPING_SELECTIONS)[number];
@@ -119,11 +183,12 @@ export function regionalTaxRate(
 export function staticRates(config: ShippingConfig, req: RateRequest): ShippingOption[] {
   const multiplier = isDomestic(config, req.country) ? 1 : config.intlMultiplier;
   const units = Math.max(1, req.itemCount);
+  const kg = config.basis === 'units' ? 0 : (req.billableKg ?? 0);
   return config.services.map((s) => ({
     id: s.id,
     title: s.title,
     carrier: s.carrier,
-    amount: money((s.base + s.perItem * units) * multiplier),
+    amount: money((s.base + s.perItem * units + s.perKg * kg) * multiplier),
     minDays: s.minDays,
     maxDays: s.maxDays,
   }));

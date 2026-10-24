@@ -18,6 +18,7 @@ import {
   newId,
   type Order,
   type OrderLine,
+  type ParcelLine,
   PROMOTION_KINDS,
   PROVIDER_MAX_RATE,
   type PriceRule,
@@ -1037,10 +1038,19 @@ export async function reversePayouts(env: Env, orderId: string) {
 
 const CARRIER_TIMEOUT_MS = 5_000;
 
-/** Units that ship: digital lines don't. */
-export async function physicalUnits(env: Env, order: Order) {
-  const { lines } = await stockedLines(env, order);
-  return lines.reduce((n, [, l]) => n + l.qty, 0);
+/** The lines that ship (digital lines don't), with their products' per-unit weight and size. */
+export async function physicalLines(env: Env, order: Order): Promise<ParcelLine[]> {
+  const { bySku, lines } = await stockedLines(env, order);
+  return lines.map(([, l]) => {
+    const p = bySku.get(l.sku);
+    return {
+      qty: l.qty,
+      weightKg: p?.weightKg,
+      lengthCm: p?.lengthCm,
+      widthCm: p?.widthCm,
+      heightCm: p?.heightCm,
+    };
+  });
 }
 
 /** `SHIPPING_CARRIER_AUTH`: a JSON object of live carrier id → Authorization header value. */
@@ -1058,7 +1068,7 @@ function carrierAuth(env: Env): Record<string, string> {
 
 /**
  * Quotes one live carrier: POSTs `{ itemCount, country, subtotal, currency }` (amounts in the base
- * currency) and reads `{ options: [...] }`. Any failure (https only, 5 s, non-2xx, bad JSON)
+ * currency), plus `billableKg` when the basis weighs units, and reads `{ options: [...] }`. Any failure (https only, 5 s, non-2xx, bad JSON)
  * returns no options, so the caller falls back to the static services.
  */
 async function liveQuote(
@@ -1076,6 +1086,7 @@ async function liveQuote(
       },
       body: JSON.stringify({
         itemCount: req.itemCount,
+        ...(req.billableKg !== undefined ? { billableKg: req.billableKg } : {}),
         country: req.country ?? null,
         subtotal: req.subtotal,
         currency: BASE_CURRENCY,

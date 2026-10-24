@@ -6,7 +6,8 @@
  *   replaces the earlier rows). Columns: `key`, `type`, `status`, `brand`, `categories` and
  *   `media` (both `|`-separated), `title:<locale>`, `slug:<locale>`, `description:<locale>`,
  *   `price.<channel>` and `compareAt.<channel>` (decimal, in the channel's currency),
- *   `visible.<channel>`, `sku`, `gtin`, `mpn`, `variantPrice.<channel>`, and `attr.<code>` (or
+ *   `visible.<channel>`, `sku`, `gtin`, `mpn`, `variantPrice.<channel>`, `weightKg` and
+ *   `lengthCm`, `widthCm`, `heightCm` (all three or none), and `attr.<code>` (or
  *   `attr.<code>:<locale>` for localized text). Attribute cells are read according to the
  *   attribute's kind: `|` separates multi_enum values, money is `12.34 USD`, measure is `2.5`.
  *
@@ -343,6 +344,13 @@ export async function* csvProducts(
       const variant: VariantInput = { sku: cells.sku ?? '', attributes: variantAttrs };
       if (cells.gtin) variant.gtin = cells.gtin;
       if (cells.mpn) variant.mpn = cells.mpn;
+      if (cells.weightKg) variant.weightKg = Number(cells.weightKg);
+      const size = [cells.lengthCm, cells.widthCm, cells.heightCm];
+      if (size.some(Boolean)) {
+        if (!size.every(Boolean)) throw new Error('lengthCm, widthCm and heightCm go together');
+        const [length, width, height] = size.map(Number) as [number, number, number];
+        variant.dimensionsCm = { length, width, height };
+      }
       for (const [col, cell] of Object.entries(cells)) {
         if (!col.startsWith('variantPrice.')) continue;
         const ch = channels.get(col.slice(13));

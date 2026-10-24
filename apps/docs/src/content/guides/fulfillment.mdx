@@ -159,7 +159,10 @@ between pricing and tax on `tpl-storefront-order`, `tpl-marketplace-order`,
 
 | Key | Meaning |
 |---|---|
-| `services` | At least one `{ id, title, carrier, base, perItem?, minDays, maxDays }`. A service costs `base + perItem × units`, where units are the quantities of the physical lines |
+| `services` | At least one `{ id, title, carrier, base, perItem?, perKg?, minDays, maxDays }`. A service costs `base + perItem × units + perKg × billable kg`, where units are the quantities of the physical lines and the kilograms are counted as `basis` says |
+| `basis` | What shipping is rated by: `units` (the default: `perKg` is not charged and nothing is weighed), `weight` or `dim_weight`; see [Rating by weight](#rating-by-weight) |
+| `dimDivisor` | Cubic centimetres per billable kilogram for `dim_weight` (default `5000`) |
+| `defaultKg` | The kilograms a unit counts for when its product has no weight or size on record (default `1`) |
 | `liveCarriers` | Optional `{ id, carrier, url }` endpoints (https only) that quote rates themselves; see below |
 | `intlMultiplier` | Multiplies every rate when the ship-to country is not domestic (default `1`) |
 | `domesticCountries` | Two-letter country codes (default `["US"]`). The country comes from `order.meta.shipTo.country` (`USA`, `United Kingdom` and similar are normalised); an order without one is domestic |
@@ -184,6 +187,32 @@ option offered (`options`), the one charged (`option`) and whether they came fro
 the configured services (`source`). A pickup, carry-out or digital-only order ships free and takes
 `ok` without rating anything.
 
+### Rating by weight
+
+With `basis` set to `weight` or `dim_weight`, the node weighs the physical units from each product's
+per-unit weight (kg) and size (length, width and height in cm), which the [product
+catalog](/guides/product-catalog/#orders) keeps for the SKUs it lists:
+
+| `basis` | A unit counts |
+|---|---|
+| `weight` | Its weight |
+| `dim_weight` | The greater of its weight and its dimensional weight, `length × width × height / dimDivisor`: a 50 × 40 × 30 cm box weighing 1 kg bills 12 kg at the default divisor |
+
+The units' kilograms are summed (to the gram) into the order's billable weight. A unit whose product
+has neither a weight nor a full size counts `defaultKg`; under `dim_weight` a unit with only one of
+them counts that one, and under `weight` its size is not used. The node's output gives `basis`,
+`billableKg` and `estimatedUnits`, how many units were counted at `defaultKg`, so a flow can tell
+when rates rest on a guess. Under `units` none of these appear and rates are exactly as before.
+
+```json
+{
+  "basis": "dim_weight",
+  "services": [{ "id": "ground", "title": "Ground", "carrier": "ups", "base": 5, "perKg": 0.8, "minDays": 2, "maxDays": 5 }]
+}
+```
+
+Checkout quotes and carts are priced by the same node, so they charge the same weight-based rate.
+
 [`commerce.tax`](/reference/nodes/#commerce.tax) then taxes the subtotal plus shipping; set its
 `includeShipping` to `false` to tax the subtotal only. Its **Rates by region** gives rates for
 ship-to countries, or regions within them (`[{ "country": "US", "region": "CA", "rate": 0.0725 }]`):
@@ -196,7 +225,7 @@ when no shipping-rate node ran.
 
 Each live carrier is sent a `POST` to its `url` with
 `{ "itemCount": 3, "country": "DE", "subtotal": 42.5, "currency": "USD" }` (`country` is `null` when
-the order has no ship-to country) and must answer within 5 seconds with:
+the order has no ship-to country), plus `billableKg` when `basis` is `weight` or `dim_weight`, and must answer within 5 seconds with:
 
 ```json
 { "options": [{ "id": "ground", "amount": 7.25, "title": "Ground", "carrier": "acme", "minDays": 2, "maxDays": 4 }] }

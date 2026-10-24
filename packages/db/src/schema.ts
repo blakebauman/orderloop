@@ -165,6 +165,11 @@ export const products = sqliteTable('products', {
    * catalog's changes can arrive out of order: only a newer one applies.
    */
   catalogAt: integer('catalog_at'),
+  /** Per-unit shipping weight (kg) and size (cm), for weight-based shipping rates; null if unknown. */
+  weightKg: real('weight_kg'),
+  lengthCm: real('length_cm'),
+  widthCm: real('width_cm'),
+  heightCm: real('height_cm'),
 });
 
 /** A store that holds its own stock, for pickup, ship-from-store and point of sale. */
