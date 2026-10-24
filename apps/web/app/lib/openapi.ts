@@ -499,7 +499,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Import a feed file (operator)',
           description:
-            'The request body is the file, streamed to the catalog: CSV (one row per variant) or NDJSON (one product per line). Answers 202 at once; poll the feed for its counts and the first rejected rows.',
+            'The request body is the file, streamed to the catalog: CSV (one row per variant) or NDJSON (one product per line). Answers 202 once the file is stored; poll the feed for its counts and the first rejected rows. Answers 408, storing nothing, when the body stops arriving for 30 seconds.',
           parameters: [
             {
               name: 'format',
