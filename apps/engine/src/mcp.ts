@@ -15,7 +15,13 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
-import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from './assistant/tools';
+import {
+  isActionTool,
+  runTool,
+  TOOL_INPUTS,
+  TOOL_OUTPUTS,
+  type ToolInput,
+} from './assistant/tools';
 import { issueConfirmation, useConfirmation } from './confirmations';
 import { forwardedPrincipal } from './principal';
 
@@ -28,16 +34,22 @@ const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>(['draft_plugin']);
 const DESTRUCTIVE = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'publish_flow']);
 /** Calling these twice with the same input does nothing more the second time. */
 const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order']);
+/**
+ * These reach outside OrderLoop: cancelling voids payments and cancels shipments with the
+ * carrier, the stock review places supplier reorders, and an assessment may fetch an https image.
+ */
+const OPEN_WORLD = new Set<AssistantTool>(['cancel_order', 'run_stock_review', 'assess_order']);
 
-const result = (value: unknown) => {
-  const structured =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : { result: value };
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(value) }],
-    structuredContent: structured,
-  };
+/** Every tool returns an object (TOOL_OUTPUTS), sent as JSON text and as structured content. */
+const result = (value: Record<string, unknown>) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+  structuredContent: value,
+});
+
+/** These wait on a model; a client that asked for progress hears that it started. */
+const SLOW: Partial<Record<AssistantTool, string>> = {
+  assess_order: 'Assessing the order…',
+  propose_flow_change: 'Drafting the change…',
 };
 
 const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
@@ -46,6 +58,9 @@ function createServer(p: Principal) {
   const server = new McpServer(
     { name: 'orderloop', title: 'OrderLoop', version: '1.0.0' },
     {
+      // tools/list depends on the caller's role: cache it per client, briefly, so a demotion
+      // narrows the list within a minute.
+      cacheHints: { 'tools/list': { ttlMs: 60_000, cacheScope: 'private' } },
       instructions:
         'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Actions (deciding, delivering an event, cancelling, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
     },
@@ -72,17 +87,28 @@ function createServer(p: Principal) {
                 .describe('The code a first call returned, once the person has agreed'),
             })
           : TOOL_INPUTS[name],
+        outputSchema: TOOL_OUTPUTS[name],
         annotations: {
           title: t.title,
           readOnlyHint: readOnly,
           destructiveHint: !readOnly && DESTRUCTIVE.has(name),
           idempotentHint: readOnly || IDEMPOTENT.has(name),
-          openWorldHint: false,
+          openWorldHint: OPEN_WORLD.has(name),
         },
       },
-      async (raw: ToolInput<typeof name> & { confirmation?: string }) => {
+      async (raw: ToolInput<typeof name> & { confirmation?: string }, ctx) => {
         try {
-          if (!action) return result(await runTool(env, p, name, raw, { via: 'MCP' }));
+          const progressToken = ctx.mcpReq._meta?.progressToken;
+          const slow = SLOW[name];
+          if (slow && progressToken !== undefined)
+            await ctx.mcpReq.notify({
+              method: 'notifications/progress',
+              params: { progressToken, progress: 0, message: slow },
+            });
+          if (!action)
+            return result(
+              (await runTool(env, p, name, raw, { via: 'MCP' })) as Record<string, unknown>,
+            );
           const { confirmation, ...input } = raw;
           if (!confirmation) {
             const preview = await previewAction(env, p, name, input as never);
@@ -100,12 +126,16 @@ function createServer(p: Principal) {
               'That confirmation is not valid: it expired, was already used, or was for a different action or input. Call without it for a new preview.',
             );
           return result(
-            await runTool(env, p, name, input as ToolInput<typeof name>, { via: 'MCP' }),
+            (await runTool(env, p, name, input as ToolInput<typeof name>, {
+              via: 'MCP',
+            })) as Record<string, unknown>,
           );
         } catch (err) {
           // A refusal (wrong role, nothing waiting, already decided) is the model's to read.
           if (err instanceof Refused) return refusal(err.message);
-          throw err;
+          // Anything else stays here: a database or provider error is not the model's to see.
+          console.error('mcp tool', name, err);
+          return refusal('Something went wrong on OrderLoop’s side. Try again in a moment.');
         }
       },
     );

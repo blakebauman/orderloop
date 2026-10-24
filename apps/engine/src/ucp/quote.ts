@@ -147,6 +147,7 @@ export async function quoteCheckout(
         config: withDefaults(node.type, node.config),
         ctx,
         stepKey: `quote#${node.id}`,
+        dryRun: true,
       });
       if (r.order) ctx.order = { ...ctx.order, ...r.order };
       if (node.type === 'commerce.policy' && r.branches?.includes('fail'))
