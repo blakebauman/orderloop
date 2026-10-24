@@ -7,7 +7,7 @@
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
-import type { PluginStatus, PluginUsage } from './plugins';
+import type { PluginInstallView, PluginStatus, PluginUsage } from './plugins';
 import type {
   FlowGraph,
   FlowVersion,
@@ -263,4 +263,30 @@ export interface EngineRpc {
    * response rules to what comes back. 404 for a plugin that isn't installed sandboxed.
    */
   pluginFetch(id: string, request: Request): Promise<Response>;
+  /**
+   * Runtime installs (an admin's; the web app has authorized them, and checked a step-up before
+   * `approvePlugin`, `rollbackPlugin` and `uninstallPlugin`). A refusal comes back as
+   * `{ ok: false, error }`, a message to show as it is. See docs/plugins.md, "Installing at
+   * runtime".
+   */
+  listPluginInstalls(): Promise<PluginInstallView[]>;
+  uploadPlugin(bundle: string, by: string): Promise<Refusable<PluginInstallView>>;
+  approvePlugin(
+    id: string,
+    sha: string,
+    grant: { personalData: boolean },
+    by: string,
+  ): Promise<Refusable<{ id: string; version: string; sha: string; personalData: boolean }>>;
+  setPluginSecret(
+    id: string,
+    name: string,
+    value: string,
+    by: string,
+  ): Promise<Refusable<{ id: string; name: string }>>;
+  setPluginEnabled(id: string, enabled: boolean): Promise<Refusable<{ id: string }>>;
+  rollbackPlugin(id: string, sha: string): Promise<Refusable<{ id: string; version: string }>>;
+  uninstallPlugin(id: string): Promise<Refusable<{ id: string }>>;
 }
+
+/** What an engine call returns when it may be refused: its value, or why not (to show as it is). */
+export type Refusable<T> = { ok: true; value: T } | { ok: false; error: string };

@@ -394,6 +394,83 @@ Within a minute per isolate the plugin's nodes appear in the editor palette and 
 the shell (for people at or above its `pageRole`). Admins see what is installed at **Plugins**
 (`/plugins`, in the account menu), and `GET /api/v1/plugins` lists it.
 
+## Installing at runtime
+
+A deployment's admin can install a **sandboxed** plugin from the Plugins page, with no registry
+change and no deploy, if it is signed by a publisher the deployment trusts. The registry still
+decides who that is.
+
+**Publishers.** `pluginInstalls.publishers` in `deployments/<id>.jsonc` names each trusted
+publisher's Ed25519 public key (base64url, the raw 32 bytes):
+`"pluginInstalls": { "publishers": { "orderloop": "…43 characters…" } }`. `renderEngine` writes it
+to the engine's `PLUGIN_PUBLISHERS`. A deployment without it has runtime installs off: an upload is
+refused with `Runtime installs are off for this deployment`. Adding or rotating a key is a reviewed
+registry change ([Operations](operations.md#plugin-publishers)).
+
+**Packing and signing** (`scripts/plugin-pack.ts`, Node only, never near a deployment's secrets):
+
+```bash
+pnpm plugin:pack keygen acme acme.pem            # once: the private key stays with the publisher
+pnpm plugin:pack pack plugins/acme-carrier acme-carrier.olplugin --publisher acme --key acme.pem
+```
+
+`pack` builds the bundle as CI does (`buildSandboxBundle`) and writes a `.olplugin`: JSON
+`{ format: 1, id, version, sha, body, publisher, signature }` (`pluginBundleFileSchema`), where `body`
+is the bundle (`{ code, migrations, manifest }`), `sha` its SHA-256, and `signature` the Ed25519
+signature over `orderloop-plugin:1:<id>:<version>:<sha>` (`bundleSigningMessage`). At most 5 MiB
+(`PLUGIN_BUNDLE_MAX_BYTES`).
+
+**Uploading** (`uploadPlugin`, `apps/engine/src/plugin-installs.ts`) refuses, with a reason the page
+shows as it is: a file that isn't a bundle; a publisher not listed; a signature that isn't that
+publisher's; a `sha` that isn't the body's; a manifest whose id or version differs from what was
+signed; an id the deployment installs through its registry (registry plugins always win); an
+upgrade signed by another publisher than the installed one; a test fixture's id (`example`,
+`fixture-carrier`; the installs tests set `PLUGIN_TEST_FIXTURES`); malformed migrations; a version
+already uploaded (uploading a pending one again answers with its review, so a retry is safe); and a bundle
+whose code, loaded with no network and no capabilities (a dry run), answers with another manifest
+than the one sealed in it. A bundle that passes is stored in `DOCS` at `plugins/<id>/<sha>.json` and
+recorded `pending` in `installed_plugins`. It doesn't run: its nodes read as not installed. An id's
+first install (or its first since an uninstall) wipes the id's storage first, so it never reads what
+a removed registry plugin or an earlier install of that id left.
+
+**Review and approve.** The page shows what the pending upload adds and reaches (its nodes, events,
+pages, egress hosts, secrets and whether it asks for buyer details), signed by whom. Its secrets can
+be set before it runs. **Approve** (`approvePlugin`) needs every required secret set and, for a
+plugin that asks for buyer details, the admin's grant (a checkbox, off by default); the grant is
+stored on the row (`personal_data_granted`) and is the plugin's grant, as `PLUGIN_GRANTS` is for a
+registry plugin. The version that ran before is `superseded`. Approving, rolling back, turning on,
+uninstalling, and setting a secret of a plugin that runs each need a **step-up** (`stepUp`, `apps/web/app/lib/auth.server.ts`): a current
+two-factor code from someone with two-factor sign-in, otherwise their password, otherwise (single
+sign-on only) a sign-in within the last ten minutes; wrong answers are throttled. Each state change
+guards on the status it read (`activate`, `setPluginEnabled`), so two admins acting at once get
+`changed while you were looking` rather than two running versions, and the unique index
+`installed_plugins_running` (one `active` or `disabled` row per id) is the backstop. A version whose
+publisher is no longer in `PLUGIN_PUBLISHERS` can't be approved, rolled back to or turned on. A
+plugin's pages can only post forms to its own `/plugins/<id>/` (`form-action`), never to the page
+that installs plugins. The REST API can
+upload (`POST /api/v1/plugins`) and turn one off (`POST /api/v1/plugins/{id}/disable`), never
+approve.
+
+**Running.** The engine merges the active rows into its pins (`bundles`, cached 15 seconds per
+isolate, dropped by an install call in the same isolate) after `PLUGIN_BUNDLES`, so a runtime
+install runs exactly as a registry one: the bundle hashed against its pin, its sealed manifest
+enforced. Its status has `source: 'installed'`.
+
+**Secrets.** An admin enters each declared secret on the page (`setPluginSecret`): at most 4096
+characters, sealed with `DATA_KEY` into `plugin_secrets` (context `plugin_secrets:<id>:<name>`),
+never shown again, only "set" or "not set", and resealed by the key rotation sweep. `resolveSecret`
+reads the Secrets Store binding first, then `PLUGIN_SECRETS`, then `plugin_secrets`, which (like an
+install's buyer-details grant) never applies to a registry plugin of the same id (`registryOwns`).
+
+**Afterwards.** Turn it off and on (`setPluginEnabled`: off, it drops out of the pins and its nodes
+read as not installed); roll back to any `superseded` version (`rollbackPlugin`; its bundle is still
+in `DOCS`); uninstall (`uninstallPlugin`), refused while `pluginUsage` lists a published flow, a
+running order or a label not yet voided, which then wipes its storage, marks its rows `uninstalled`
+(kept, for the record) and deletes its secrets; the wipe goes first, so a failure can be retried.
+Other isolates may still run it for their cache's 15 seconds. A rollback runs the older code
+against the storage as the newer version's migrations left it (migrations only go forward). Every action, and every refusal, is in the audit
+log (`plugin.*`).
+
 ## The Plugins page
 
 `apps/web/app/routes/plugins.tsx` is an admin-only page. For each installed plugin
@@ -409,8 +486,10 @@ ended, and labels it couldn't void) and, for one with events or earlier deliveri
 recent deliveries (subscription `plugin:<id>`) with status, attempts and last error. A sandboxed
 plugin with exceptions also lists its ten most recent (`plugin_errors`, newest first). A refused
 plugin has no manifest but still has an id, and the page shows the same usage and deliveries, when
-its flows and orders matter most. It is read-only: installing and removing a plugin is a change to
-the deployment.
+its flows and orders matter most. A registry plugin is read-only there: installing and removing one
+is a change to the deployment. The page also uploads, reviews and approves runtime installs, and for
+each one sets its secrets, turns it off and on, rolls it back and uninstalls it
+([Installing at runtime](#installing-at-runtime)).
 
 ## Removing
 

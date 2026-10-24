@@ -21,6 +21,8 @@ export const secretContext = {
   totp: (userId: string) => `users.totp_secret:${userId}`,
   integration: (id: string) => `integrations:${id}`,
   webhookSubscription: (id: string) => `webhook_subscriptions:${id}`,
+  /** A secret an admin entered for a plugin installed at runtime. */
+  plugin: (pluginId: string, name: string) => `plugin_secrets:${pluginId}:${name}`,
 } as const;
 
 /** Local dev's and tests' key (`vite.config.ts` gives it to both Workers). Never a deployment's. */

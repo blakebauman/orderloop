@@ -25,6 +25,7 @@ import { orderAgent, scopedEnv } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins } from './plugin-host';
+import * as installs from './plugin-installs';
 import { manifests, plugin, pluginStatuses, pluginUsage } from './plugins';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
@@ -151,9 +152,37 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return pluginUsage(this.env, id);
   }
 
+  listPluginInstalls() {
+    return installs.listPluginInstalls(this.env);
+  }
+
+  uploadPlugin(bundle: string, by: string) {
+    return installs.refusable(() => installs.uploadPlugin(this.env, bundle, by));
+  }
+
+  approvePlugin(id: string, sha: string, grant: { personalData: boolean }, by: string) {
+    return installs.refusable(() => installs.approvePlugin(this.env, id, sha, grant, by));
+  }
+
+  setPluginSecret(id: string, name: string, value: string, by: string) {
+    return installs.refusable(() => installs.setPluginSecret(this.env, id, name, value, by));
+  }
+
+  setPluginEnabled(id: string, enabled: boolean) {
+    return installs.refusable(() => installs.setPluginEnabled(this.env, id, enabled));
+  }
+
+  rollbackPlugin(id: string, sha: string) {
+    return installs.refusable(() => installs.rollbackPlugin(this.env, id, sha));
+  }
+
+  uninstallPlugin(id: string) {
+    return installs.refusable(() => installs.uninstallPlugin(this.env, id));
+  }
+
   async pluginFetch(id: string, request: Request) {
     // Only a sandboxed plugin's pages come this way; a Worker plugin's the web app reaches itself.
-    if (!installedPlugins(this.env).some((p) => p.id === id && p.runtime === 'sandboxed'))
+    if (!(await installedPlugins(this.env)).some((p) => p.id === id && p.runtime === 'sandboxed'))
       return new Response('Not found', { status: 404 });
     await manifests(this.env);
     const stub = await plugin(this.env, id, 'serve');

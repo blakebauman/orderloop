@@ -57,6 +57,14 @@ export const AUDIT_ACTIONS = {
   'ucp.settings': 'Changed agentic checkout settings',
   'ucp.platform_added': 'Let in an AI shopping platform',
   'ucp.platform_revoked': 'Revoked an AI shopping platform',
+  'plugin.uploaded': 'Uploaded a plugin for review',
+  'plugin.approved': 'Installed a plugin',
+  'plugin.secret_set': 'Set a plugin’s secret',
+  'plugin.disabled': 'Turned off a plugin',
+  'plugin.enabled': 'Turned on a plugin',
+  'plugin.rolled_back': 'Rolled back a plugin',
+  'plugin.uninstalled': 'Uninstalled a plugin',
+  'plugin.refused': 'Plugin change refused',
   'personal_data.exported': "Exported a person's data",
   'personal_data.erased': 'Erased a person from orders and accounts',
   ...BUSINESS_AUDIT_ACTIONS,
@@ -80,6 +88,7 @@ export const AUDIT_GROUPS = {
   webhook: 'Webhooks',
   stock: 'Stock review',
   catalog: 'Catalog',
+  plugin: 'Plugins',
   personal_data: 'Personal data',
 } as const;
 
@@ -130,6 +139,13 @@ export function describe(e: AuditEvent): string {
   if (typeof d.decision === 'string') parts.push(d.decision);
   if (typeof d.event === 'string') parts.push(d.event);
   if (typeof d.version === 'number') parts.push(`v${d.version}`);
+  if (e.action.startsWith('plugin.')) {
+    if (typeof d.version === 'string') parts.push(`version ${d.version}`);
+    if (typeof d.publisher === 'string') parts.push(`signed by ${d.publisher}`);
+    if (typeof d.secret === 'string') parts.push(d.secret);
+    if (d.personalData === true) parts.push('buyer details granted');
+    if (typeof d.error === 'string') parts.push(d.error);
+  }
   if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))
     parts.push(`via ${AUDIT_VIA[d.via as AuditVia]}`);
   return parts.length ? `${label}: ${parts.join(', ')}` : label;

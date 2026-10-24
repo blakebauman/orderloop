@@ -584,6 +584,75 @@ export async function verifySecondFactor(request: Request, code: string): Promis
   return [await startSession(request, pending.id), clearChallengeCookie];
 }
 
+/** How recent a single sign-on must be to count as a step-up, for someone with no password. */
+const SSO_STEP_UP_MS = 10 * 60_000;
+
+/** What a step-up asks this person for: a two-factor code, their password, or a recent sign-in. */
+export type StepUpMethod = 'code' | 'password' | 'recent-sign-in';
+
+async function stepUpUser(by: Principal) {
+  if (by.kind !== 'user') return null;
+  const user = await db().select().from(users).where(eq(users.id, by.id)).get();
+  if (!user) return null;
+  const method: StepUpMethod =
+    user.totpEnabledAt && user.totpSecret
+      ? 'code'
+      : (await passwordInUse(user.passwordHash))
+        ? 'password'
+        : 'recent-sign-in';
+  return { user, method };
+}
+
+export async function stepUpMethod(by: Principal): Promise<StepUpMethod | null> {
+  return (await stepUpUser(by))?.method ?? null;
+}
+
+/**
+ * A step-up before a sensitive admin action (installing a plugin, rolling one back, removing it):
+ * a fresh two-factor code from someone who has two-factor sign-in, else their password, else (a
+ * single sign-on account with neither) a sign-in within the last ten minutes. Wrong answers are
+ * throttled per person. Returns null when it passes, or what to tell them.
+ */
+export async function stepUp(
+  request: Request,
+  by: Principal,
+  given: { code?: string; password?: string },
+): Promise<string | null> {
+  if (by.kind !== 'user') return 'This needs a person signed in, not a token.';
+  const key = [throttleKey('step-up', by.id)];
+  const wait = await waitFor(key);
+  if (wait) return `Too many tries: ${retryText(wait)}`;
+  const found = await stepUpUser(by);
+  if (!found) return 'Sign in again.';
+  const { user, method } = found;
+  if (method === 'code') {
+    if (given.code && looksLikeTotp(given.code) && (await useTotp(user, given.code))) return null;
+    await recordFailure(key);
+    return 'Enter a current code from your authenticator app.';
+  }
+  if (method === 'password') {
+    try {
+      if (
+        given.password &&
+        user.passwordHash &&
+        (await reauthenticate(user.id, given.password, user.passwordHash))
+      )
+        return null;
+    } catch (err) {
+      if (err instanceof Throttled) return err.message;
+      throw err;
+    }
+    await recordFailure(key);
+    return 'Your password is not right.';
+  }
+  const sid = await sessionId(request);
+  const session = sid
+    ? await db().select().from(sessions).where(eq(sessions.tokenHash, sid)).get()
+    : undefined;
+  if (session && Date.now() - session.createdAt < SSO_STEP_UP_MS) return null;
+  return 'Sign in again, then try within ten minutes.';
+}
+
 /** Accepts a code once: the step it matched must be later than the last one used. */
 async function useTotp(
   user: { id: string; totpSecret: string | null; totpLastStep: number | null },

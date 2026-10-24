@@ -35,6 +35,7 @@ import { createDb, flows, flowVersions, orders, shipments } from '@orderloop/db'
 import { and, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import type { ExecInput, NodeResult } from './nodes';
 import {
+  activeInstalls,
   type CallKind,
   installedPlugins,
   knownManifests,
@@ -42,6 +43,7 @@ import {
   type PluginStub,
   pinnedManifest,
   pluginStub,
+  registryOwns,
 } from './plugin-host';
 
 /** How long an isolate trusts the manifests it fetched; a redeployed plugin shows up after this. */
@@ -59,18 +61,22 @@ type Cached = { at: number; key: string; ttl: number; statuses: PluginStatus[] }
 const caches = new WeakMap<object, Cached>();
 
 /**
- * What the deployment grants each plugin beyond the defaults, from its registry entry
- * (`PLUGIN_GRANTS`, rendered by scripts/fleet.ts): `{ "<id>": { "personalData": "send" } }`. A
- * manifest can't grant itself buyer details.
+ * What the deployment grants each plugin beyond the defaults: from its registry entry
+ * (`PLUGIN_GRANTS`, rendered by scripts/fleet.ts: `{ "<id>": { "personalData": "send" } }`), or
+ * for a runtime install, what the admin approved. A manifest can't grant itself buyer details.
  */
-function grants(env: Env): Record<string, { personalData?: 'send' }> {
+async function grants(env: Env): Promise<Record<string, { personalData?: 'send' }>> {
   const raw = (env as unknown as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
+  let out: Record<string, { personalData?: 'send' }> = {};
   try {
-    return raw ? (JSON.parse(raw) as Record<string, { personalData?: 'send' }>) : {};
+    out = raw ? (JSON.parse(raw) as Record<string, { personalData?: 'send' }>) : {};
   } catch {
     console.error('PLUGIN_GRANTS is not JSON; granting nothing');
-    return {};
   }
+  // A runtime install's grant is its own: never one for a registry plugin of the same id.
+  for (const [id, a] of await activeInstalls(env))
+    if (a.personalData && !registryOwns(env, id)) out[id] = { personalData: 'send' };
+  return out;
 }
 /**
  * The last manifest each plugin answered with (`knownManifests`), kept while it can't answer
@@ -86,8 +92,8 @@ export function plugin(env: Env, id: string, kind: CallKind = 'call'): Promise<P
   return pluginStub(env, id, kind);
 }
 
-/** Whether this deployment installs any plugin (a binding or a pinned bundle). */
-export const hasPlugins = (env: Env) => installedPlugins(env).length > 0;
+/** Whether this deployment installs any plugin (a binding, a pinned bundle or a runtime install). */
+export const hasPlugins = async (env: Env) => (await installedPlugins(env)).length > 0;
 
 /** `text` without the plugin's secrets, or anything shaped like a credential. */
 export async function scrubbed(env: Env, id: string, text: string) {
@@ -149,14 +155,20 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
  * running. `fresh` skips the isolate's cache (deep health).
  */
 export async function pluginStatuses(env: Env, fresh = false): Promise<PluginStatus[]> {
-  const installed = installedPlugins(env);
+  const installed = await installedPlugins(env);
+  const granted = await grants(env);
   if (!installed.length) return [];
-  const key = installed.map((p) => `${p.id}:${p.runtime}`).join(',');
+  // The pin is part of the key, so a new version (an upgrade, a rollback) is read at once.
+  const key = installed.map((p) => `${p.id}:${p.runtime}:${p.source}:${p.sha ?? ''}`).join(',');
   // Deep health asks for fresh statuses, but at most every few seconds: it is a public route.
   const cached = caches.get(env);
   const age = cached && cached.key === key ? Date.now() - cached.at : Number.POSITIVE_INFINITY;
   if (cached && age < (fresh ? FRESH_MIN_MS : cached.ttl)) return cached.statuses;
-  const check = async ({ id, runtime }: (typeof installed)[number]): Promise<PluginStatus> => {
+  const check = async ({
+    id,
+    runtime,
+    source,
+  }: (typeof installed)[number]): Promise<PluginStatus> => {
     try {
       const stub = await pluginStub(env, id, 'serve');
       if (!stub) throw new Error('not installed');
@@ -169,22 +181,23 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
       const pinned = runtime === 'sandboxed' ? await pinnedManifest(env, id) : null;
       if (pinned && JSON.stringify(pinned) !== JSON.stringify(m))
         throw new Error('Its manifest differs from the one pinned with its bundle');
-      if (m.personalData === 'send' && grants(env)[m.id]?.personalData !== 'send')
+      if (m.personalData === 'send' && granted[m.id]?.personalData !== 'send')
         throw new Error(
           'It asks for buyer details (personalData: "send"), which this deployment does not grant',
         );
       lastGood.set(id, m);
-      return { id, runtime, manifest: m, healthy: true };
+      return { id, runtime, source, manifest: m, healthy: true };
     } catch (err) {
       console.error('plugin manifest refused', id, err);
       // The last good manifest stands in, but never past a grant the deployment has withdrawn.
       const fallback = lastGood.get(id);
       const allowed =
         fallback &&
-        (fallback.personalData !== 'send' || grants(env)[fallback.id]?.personalData === 'send');
+        (fallback.personalData !== 'send' || granted[fallback.id]?.personalData === 'send');
       return {
         id,
         runtime,
+        source,
         manifest: allowed ? fallback : null,
         healthy: false,
         error: message(err),

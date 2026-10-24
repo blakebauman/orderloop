@@ -197,6 +197,14 @@ The engine checks what a plugin returns (`checkExecResult`), times its calls out
 headers, and strips cookies from and forces its CSP and framing headers onto every plugin
 response (`apps/web/app/lib/plugins.server.ts`).
 
+A sandboxed plugin installed at runtime (`apps/engine/src/plugin-installs.ts`) comes only from a
+`.olplugin` signed by a publisher in the registry's `pluginInstalls` (`PLUGIN_PUBLISHERS`), whose
+sha and sealed manifest check out; a registry plugin always wins on its id. It runs only once an
+admin approves it after a step-up (`stepUp`; rolling back and uninstalling need one too), with buyer
+details only if that admin granted them. Admin-entered secrets are sealed in `plugin_secrets` and
+never returned to the web app. Every install call and refusal is audited (`plugin.*`). Test:
+`pnpm --filter @orderloop/engine exec vitest run --project installs`.
+
 The core never imports plugin code and keeps working with no plugin bound; the engine's default
 test project runs without one. `plugins/example` is a test fixture no deployment may install
 (check `deployments/*.jsonc`).

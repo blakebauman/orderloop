@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bundleSigningMessage,
   checkExecResult,
   checkProvideResult,
   egressAllows,
@@ -7,8 +8,10 @@ import {
   flowPlugins,
   type Order,
   PLUGIN_RESULT_MAX_BYTES,
+  PUBLISHER_KEY_RE,
   parseManifest,
   pluginBinding,
+  pluginBundleFileSchema,
   pluginKey,
   pluginOf,
   pluginOrder,
@@ -18,6 +21,7 @@ import {
   staticRegistry,
   TEMPLATES,
   validateGraph,
+  verifyBundleSignature,
   verifyPrincipal,
   withPlugins,
 } from '../src';
@@ -422,5 +426,67 @@ describe('sandboxed plugins', () => {
   it('reserves ids that would collide with the engine’s plugin variables', () => {
     for (const id of ['bundles', 'secrets', 'grants', 'key'])
       expect(() => parseManifest(manifest({ id }))).toThrow(/reserved/);
+  });
+});
+
+describe('signed bundles', () => {
+  const b64url = (bytes: ArrayBuffer) =>
+    btoa(String.fromCharCode(...new Uint8Array(bytes)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  type Pair = {
+    privateKey: Parameters<typeof crypto.subtle.sign>[1];
+    publicKey: Parameters<typeof crypto.subtle.exportKey>[1];
+  };
+  const keys = async () => {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as unknown as Pair;
+    return { pair, publicKey: b64url(await crypto.subtle.exportKey('raw', pair.publicKey)) };
+  };
+  const sign = async (pair: Pair, id: string, version: string, sha: string) =>
+    b64url(
+      await crypto.subtle.sign(
+        { name: 'Ed25519' },
+        pair.privateKey,
+        new TextEncoder().encode(bundleSigningMessage(id, version, sha)),
+      ),
+    );
+  const sha = 'a'.repeat(64);
+
+  it('verifies a publisher’s signature over the plugin, version and hash', async () => {
+    const { pair, publicKey } = await keys();
+    expect(publicKey).toMatch(PUBLISHER_KEY_RE);
+    const file = {
+      id: 'carrier',
+      version: '1.0.0',
+      sha,
+      signature: await sign(pair, 'carrier', '1.0.0', sha),
+    };
+    expect(await verifyBundleSignature(publicKey, file)).toBe(true);
+    // Anything signed for another version, plugin or hash, or by another key, fails.
+    expect(await verifyBundleSignature(publicKey, { ...file, version: '1.0.1' })).toBe(false);
+    expect(await verifyBundleSignature(publicKey, { ...file, id: 'other' })).toBe(false);
+    expect(await verifyBundleSignature(publicKey, { ...file, sha: 'b'.repeat(64) })).toBe(false);
+    expect(await verifyBundleSignature((await keys()).publicKey, file)).toBe(false);
+    expect(await verifyBundleSignature('short', file)).toBe(false);
+  });
+
+  it('parses a bundle file and refuses a malformed one', () => {
+    const file = {
+      format: 1,
+      id: 'carrier',
+      version: '1.0.0',
+      sha,
+      body: '{}',
+      publisher: 'acme',
+      signature: 'abc_-',
+    };
+    expect(pluginBundleFileSchema.parse(file)).toEqual(file);
+    expect(pluginBundleFileSchema.safeParse({ ...file, format: 2 }).success).toBe(false);
+    expect(pluginBundleFileSchema.safeParse({ ...file, sha: 'xyz' }).success).toBe(false);
+    expect(pluginBundleFileSchema.safeParse({ ...file, id: 'Bad' }).success).toBe(false);
   });
 });

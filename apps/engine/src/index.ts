@@ -27,6 +27,7 @@ export {
   PluginStorage,
   PluginTail,
 } from './plugin-host';
+export { DryRunSecrets } from './plugin-installs';
 export { Replenish } from './replenish';
 export { OrderLoop } from './workflow';
 

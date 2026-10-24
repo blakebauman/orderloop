@@ -167,6 +167,12 @@ export type Deployment = {
    * Leave it out on a shared account (one store and 100 secrets an account).
    */
   secretsStore?: { storeId: string };
+  /**
+   * Runtime installs: an admin may install a sandboxed plugin from its Plugins page when its bundle
+   * is signed by one of these publishers (name → Ed25519 public key, raw 32 bytes, base64url, as
+   * `pnpm plugin:pack keygen` prints it). Absent, runtime installs are off.
+   */
+  pluginInstalls?: { publishers: Record<string, string> };
 };
 
 export type PluginEntry = {
@@ -184,6 +190,7 @@ const RESERVED_PLUGIN_IDS = new Set([
   'key',
   'storage',
   'dev-bundles',
+  'publishers',
 ]);
 
 const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,62}$/;
@@ -346,6 +353,28 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
         `${file}: plugins.${p} must be { "d1Id"?, "personalData"?, "runtime"?, "secrets"? }`,
       );
   }
+  const installs = raw.pluginInstalls;
+  if (installs !== undefined) {
+    const pubs = (installs as { publishers?: unknown } | null)?.publishers;
+    if (
+      typeof installs !== 'object' ||
+      installs === null ||
+      Object.keys(installs).join() !== 'publishers' ||
+      typeof pubs !== 'object' ||
+      pubs === null ||
+      Array.isArray(pubs) ||
+      !Object.keys(pubs).length ||
+      Object.entries(pubs).some(
+        ([n, k]) =>
+          !/^[a-z][a-z0-9-]{0,39}$/.test(n) ||
+          typeof k !== 'string' ||
+          !/^[A-Za-z0-9_-]{43}$/.test(k),
+      )
+    )
+      throw new Error(
+        `${file}: pluginInstalls must be { "publishers": { "<name>": "<Ed25519 public key, base64url>" } }`,
+      );
+  }
   const store = raw.secretsStore;
   if (
     store !== undefined &&
@@ -393,6 +422,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
     plugins: plugins as Deployment['plugins'],
     ...(store ? { secretsStore: { storeId: (store as { storeId: string }).storeId } } : {}),
+    ...(installs ? { pluginInstalls: installs as Deployment['pluginInstalls'] & object } : {}),
   };
 }
 
@@ -562,6 +592,12 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
   const grants = pluginGrants(d);
   if (grants) config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
+  // The publishers whose signed bundles an admin may install at runtime.
+  if (d.pluginInstalls)
+    config.vars = {
+      ...config.vars,
+      PLUGIN_PUBLISHERS: JSON.stringify(d.pluginInstalls.publishers),
+    };
   // Sandboxed plugins' secrets, on a deployment with its own Secrets Store (else PLUGIN_SECRETS,
   // a secret the deploy writes). PLUGIN_BUNDLES is added by the deploy once it has published them.
   const store = storeSecrets(d, sandboxedPlugins(d), storeBinding);

@@ -49,6 +49,7 @@ const RESERVED_IDS = new Set([
   'key',
   'storage',
   'dev-bundles',
+  'publishers',
 ]);
 
 /**
@@ -751,6 +752,8 @@ export interface PluginRpc {
 export type PluginStatus = {
   id: string;
   runtime: PluginRuntime;
+  /** Pinned by the deployment's registry (CI), or installed by an admin at runtime. */
+  source: PluginSource;
   manifest: PluginManifest | null;
   healthy: boolean;
   error?: string;
@@ -853,3 +856,88 @@ export function missing(type: string): string {
   const plugin = pluginOf(type);
   return plugin ? `Plugin “${plugin}” is not installed` : `Unknown node type “${type}”`;
 }
+
+// ── Signed bundles (runtime installs) ───────────────────────────────────────
+
+/** Where an installed plugin came from: the deployment's registry (CI), or an admin at runtime. */
+export type PluginSource = 'deployment' | 'installed';
+
+/** The largest `.olplugin` file an admin may upload. */
+export const PLUGIN_BUNDLE_MAX_BYTES = 5 * 1024 * 1024;
+
+/** A runtime install's lifecycle; at most one `active` or `disabled` row per plugin id. */
+export const PLUGIN_INSTALL_STATUSES = [
+  'pending',
+  'active',
+  'disabled',
+  'superseded',
+  'uninstalled',
+] as const;
+export type PluginInstallStatus = (typeof PLUGIN_INSTALL_STATUSES)[number];
+
+const B64URL = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A signed bundle, as `scripts/plugin-pack.ts` writes it (`.olplugin`): the sandbox bundle's body
+ * exactly as CI would build it (`{ code, migrations, manifest }`), its SHA-256, and an Ed25519
+ * signature over `bundleSigningMessage` by a publisher the deployment lists.
+ */
+export const pluginBundleFileSchema = z.object({
+  format: z.literal(1),
+  id: pluginId,
+  version: z.string().min(1).max(64),
+  sha: z.string().regex(/^[0-9a-f]{64}$/, 'A SHA-256, hex'),
+  body: z.string().min(2),
+  publisher: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, 'A publisher name'),
+  signature: z.string().regex(B64URL, 'base64url').max(200),
+});
+export type PluginBundleFile = z.infer<typeof pluginBundleFileSchema>;
+
+/** What a publisher signs: the format, the plugin, its version and the bundle's hash. */
+export const bundleSigningMessage = (id: string, version: string, sha: string) =>
+  `orderloop-plugin:1:${id}:${version}:${sha}`;
+
+const fromB64url = (s: string) => {
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+};
+
+/** Whether `publicKey` (raw 32 bytes, base64url) signed this bundle file. */
+export async function verifyBundleSignature(
+  publicKey: string,
+  file: Pick<PluginBundleFile, 'id' | 'version' | 'sha' | 'signature'>,
+): Promise<boolean> {
+  try {
+    const raw = fromB64url(publicKey);
+    if (raw.length !== 32) return false;
+    const key = await crypto.subtle.importKey('raw', raw, { name: 'Ed25519' }, false, ['verify']);
+    return await crypto.subtle.verify(
+      { name: 'Ed25519' },
+      key,
+      fromB64url(file.signature),
+      new TextEncoder().encode(bundleSigningMessage(file.id, file.version, file.sha)),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** A publisher's key as the registry holds it: raw Ed25519, 32 bytes, base64url (43 characters). */
+export const PUBLISHER_KEY_RE = /^[A-Za-z0-9_-]{43}$/;
+
+/** What an admin reviews before approving: who signed it, what it is, and what it asks for. */
+export type PluginInstallView = {
+  id: string;
+  sha: string;
+  version: string;
+  publisher: string;
+  status: PluginInstallStatus;
+  personalDataGranted: boolean;
+  uploadedBy: string;
+  uploadedAt: number;
+  approvedBy: string | null;
+  approvedAt: number | null;
+  manifest: PluginManifest;
+  /** Never a value: whether each declared secret is set. */
+  secrets: { name: string; set: boolean }[];
+};

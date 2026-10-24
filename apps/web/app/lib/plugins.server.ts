@@ -62,12 +62,13 @@ const RESPONSE_ALLOWED = [
 /**
  * What every plugin response carries, replacing anything the plugin set: no script at all (a
  * plugin's page is server-rendered HTML whose links and forms come back here, checked), styles and
- * images only from this origin, no plugins or framing, and forms that post back here. A script
+ * images only from this origin, no plugins or framing, and forms that post only to the plugin's own
+ * pages (so never to an admin page, such as the one that installs plugins). A script
  * from a plugin would run with the viewer's session on this origin.
  */
 const PLUGIN_RESPONSE_HEADERS: Record<string, string> = {
   'content-security-policy':
-    "default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
@@ -142,6 +143,10 @@ function sanitized(res: Response, id: string, origin: string): Response {
     headers.set('location', `${to.pathname}${to.search}`);
   }
   for (const [k, v] of Object.entries(PLUGIN_RESPONSE_HEADERS)) headers.set(k, v);
+  headers.set(
+    'content-security-policy',
+    `${PLUGIN_RESPONSE_HEADERS['content-security-policy']}; form-action ${origin}/plugins/${id}/`,
+  );
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 

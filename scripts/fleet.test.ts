@@ -479,7 +479,7 @@ test('a sandboxed plugin has no Worker, binding or database of its own', () => {
 });
 
 test('plugin ids are refused when reserved or with a double dash', () => {
-  for (const id of ['bundles', 'secrets', 'grants', 'key'])
+  for (const id of ['bundles', 'secrets', 'grants', 'key', 'publishers'])
     assert.throws(() => toDeployment({ ...raw, plugins: { [id]: {} } }), /reserved/);
   assert.throws(() => toDeployment({ ...raw, plugins: { 'a--b': {} } }), /not a plugin id/);
   assert.throws(() => toDeployment({ ...raw, plugins: { 'ab-': {} } }), /not a plugin id/);
@@ -539,4 +539,43 @@ test('the deploy finds a plugin’s missing secrets, by name only', () => {
     ['HOOK'],
   );
   assert.deepEqual(missingPluginSecrets(own, 'carrier', ['API_KEY'], { stored: [] }), ['API_KEY']);
+});
+
+test('runtime installs are off unless the registry lists publishers', () => {
+  const key = 'gzGcgrEQxp3cOiLXbe8UXlTefRdy8Xrf_p9OxPz7dNI';
+  const on = toDeployment({ ...raw, pluginInstalls: { publishers: { acme: key } } });
+  assert.equal(renderEngine(base('engine'), on).vars.PLUGIN_PUBLISHERS, `{"acme":"${key}"}`);
+  assert.equal(renderEngine(base('engine'), toDeployment(raw)).vars.PLUGIN_PUBLISHERS, undefined);
+  for (const bad of [
+    { publishers: {} },
+    { publishers: { Acme: key } },
+    { publishers: { acme: 'short' } },
+    { publishers: { acme: key }, extra: true },
+  ])
+    assert.throws(() => toDeployment({ ...raw, pluginInstalls: bad }), /pluginInstalls/);
+});
+
+test('the publisher tool signs what core verifies', async () => {
+  const { keygen, signBundle, signingMessage } = await import('./plugin-pack.ts');
+  const { publicKey, privatePem } = keygen();
+  const file = signBundle(
+    { body: '{}', sha: 'a'.repeat(64), manifest: { id: 'carrier', version: '2' } },
+    'acme',
+    privatePem,
+  );
+  const key = await crypto.subtle.importKey(
+    'raw',
+    Buffer.from(publicKey, 'base64url'),
+    { name: 'Ed25519' },
+    false,
+    ['verify'],
+  );
+  const ok = await crypto.subtle.verify(
+    { name: 'Ed25519' },
+    key,
+    Buffer.from(file.signature, 'base64url'),
+    new TextEncoder().encode(signingMessage('carrier', '2', 'a'.repeat(64))),
+  );
+  assert.equal(ok, true);
+  assert.equal(signingMessage('a', 'b', 'c'), 'orderloop-plugin:1:a:b:c');
 });

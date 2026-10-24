@@ -393,6 +393,44 @@ export const payments = sqliteTable(
   ],
 );
 
+/** A sandboxed plugin version an admin installed at runtime from a signed bundle. */
+export const installedPlugins = sqliteTable(
+  'installed_plugins',
+  {
+    id: text('id').notNull(),
+    sha: text('sha').notNull(),
+    version: text('version').notNull(),
+    publisher: text('publisher').notNull(),
+    manifest: text('manifest').notNull(),
+    status: text('status').notNull(),
+    personalDataGranted: integer('personal_data_granted').notNull().default(0),
+    uploadedBy: text('uploaded_by').notNull(),
+    uploadedAt: integer('uploaded_at').notNull(),
+    approvedBy: text('approved_by'),
+    approvedAt: integer('approved_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.id, t.sha] }),
+    index('installed_plugins_status').on(t.status),
+    uniqueIndex('installed_plugins_running')
+      .on(t.id)
+      .where(sql`${t.status} IN ('active', 'disabled')`),
+  ],
+);
+
+/** A secret an admin entered for a runtime-installed plugin, sealed with DATA_KEY. */
+export const pluginSecrets = sqliteTable(
+  'plugin_secrets',
+  {
+    pluginId: text('plugin_id').notNull(),
+    name: text('name').notNull(),
+    value: text('value').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.pluginId, t.name] })],
+);
+
 /** A sandboxed plugin's latest exceptions (its Tail Worker), scrubbed; 100 kept per plugin. */
 export const pluginErrors = sqliteTable(
   'plugin_errors',

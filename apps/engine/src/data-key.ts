@@ -11,7 +11,7 @@ import {
   sealedWithCurrent,
   secretContext,
 } from '@orderloop/core';
-import { createDb, integrations, users, webhookSubscriptions } from '@orderloop/db';
+import { createDb, integrations, pluginSecrets, users, webhookSubscriptions } from '@orderloop/db';
 import { and, eq, isNotNull } from 'drizzle-orm';
 
 /** `DATA_KEY`, then `DATA_KEY_PREVIOUS` while a rotation finishes. */
@@ -102,6 +102,37 @@ const COLUMNS: Column[] = [
         .set({ previousSecret: next })
         .where(and(eq(integrations.id, id), eq(integrations.previousSecret, was))),
     context: secretContext.integration,
+  },
+  {
+    // A runtime-installed plugin's secrets: one row per plugin and name, keyed here as both.
+    name: 'plugin_secrets.value',
+    rows: async (db) =>
+      (
+        await db
+          .select({
+            pluginId: pluginSecrets.pluginId,
+            name: pluginSecrets.name,
+            value: pluginSecrets.value,
+          })
+          .from(pluginSecrets)
+      ).map((r) => ({ id: `${r.pluginId}/${r.name}`, value: r.value })),
+    write: (db, id, was, next) => {
+      const [pluginId, name] = id.split('/') as [string, string];
+      return db
+        .update(pluginSecrets)
+        .set({ value: next })
+        .where(
+          and(
+            eq(pluginSecrets.pluginId, pluginId),
+            eq(pluginSecrets.name, name),
+            eq(pluginSecrets.value, was),
+          ),
+        );
+    },
+    context: (id) => {
+      const [pluginId, name] = id.split('/') as [string, string];
+      return secretContext.plugin(pluginId, name);
+    },
   },
 ];
 

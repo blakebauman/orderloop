@@ -11,6 +11,7 @@ const engine = {
     {
       id: 'example',
       runtime: 'worker',
+      source: 'deployment',
       healthy: true,
       manifest: {
         id: 'example',
@@ -23,12 +24,16 @@ const engine = {
     {
       id: 'broken',
       runtime: 'sandboxed',
+      source: 'installed',
       healthy: false,
       manifest: null,
       error: 'apiVersion must be 1',
     },
   ]),
   pluginUsage: vi.fn(async () => ({ flows: [{ id: 'f1', version: 2 }], orders: [], labels: [] })),
+  uploadPlugin: vi.fn(),
+  setPluginEnabled: vi.fn(),
+  approvePlugin: vi.fn(),
 };
 
 const receipts = new Set<string>();
@@ -64,6 +69,7 @@ vi.mock('~/lib/audit.server', () => ({ audit, listAudit: async () => [] }));
 vi.mock('~/lib/auth.server', () => ({
   actor: () => 'ops@example.com',
   forbidden: () => 'Forbidden',
+  stepUp: async () => 'step-up needed',
 }));
 const webhooks = { rotateSubscription: vi.fn() };
 vi.mock('~/lib/webhooks.server', () => webhooks);
@@ -431,6 +437,7 @@ describe('plugins over REST', () => {
         {
           id: 'example',
           runtime: 'worker',
+          source: 'deployment',
           name: 'Example',
           version: '1',
           nodes: ['example.stamp'],
@@ -441,6 +448,7 @@ describe('plugins over REST', () => {
         {
           id: 'broken',
           runtime: 'sandboxed',
+          source: 'installed',
           name: null,
           version: null,
           nodes: [],
@@ -458,5 +466,71 @@ describe('plugins over REST', () => {
     });
     expect(engine.pluginUsage).toHaveBeenCalledWith('example');
     expect((await get('plugins/Not_An_Id/usage')).status).toBe(404);
+  });
+});
+
+describe('installing plugins over REST', () => {
+  const review = { id: 'acme-carrier', sha: 'a'.repeat(64), version: '2', publisher: 'acme' };
+  const upload = (text: string, as = admin) =>
+    handleApi(new Request('https://app.test/api/v1/plugins', { method: 'POST', body: text }), as);
+
+  beforeEach(() => {
+    audit.mockReset();
+    engine.uploadPlugin.mockReset();
+    engine.setPluginEnabled.mockReset();
+  });
+
+  it('uploads a signed file for review, and audits it', async () => {
+    engine.uploadPlugin.mockResolvedValueOnce({
+      ok: true,
+      value: { ...review, status: 'pending' },
+    });
+    expect((await upload('{}', operator)).status).toBe(403);
+    const res = await upload('{"format":1}');
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ id: 'acme-carrier', status: 'pending' });
+    expect(engine.uploadPlugin).toHaveBeenCalledWith('{"format":1}', admin.id);
+    expect(audit.mock.calls[0]?.[1]).toBe('plugin.uploaded');
+    expect(audit.mock.calls[0]?.[2]).toMatchObject({
+      target: 'acme-carrier',
+      detail: { version: '2', publisher: 'acme', sha: 'a'.repeat(12) },
+    });
+  });
+
+  it('answers a refusal with its reason, audited, and never approves', async () => {
+    engine.uploadPlugin.mockResolvedValueOnce({
+      ok: false,
+      error: '“nobody” is not a publisher this deployment trusts',
+    });
+    const res = await upload('{}');
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: '“nobody” is not a publisher this deployment trusts',
+    });
+    expect(audit.mock.calls[0]?.[1]).toBe('plugin.refused');
+    expect(engine.approvePlugin).not.toHaveBeenCalled();
+    expect((await post('plugins/acme-carrier/approve', {}, admin)).status).toBe(404);
+  });
+
+  it('refuses a file larger than a plugin may be, before the engine sees it', async () => {
+    const res = await upload('x'.repeat(5 * 1024 * 1024 + 2));
+    expect(res.status).toBe(413);
+    expect(engine.uploadPlugin).not.toHaveBeenCalled();
+  });
+
+  it('turns a plugin off', async () => {
+    engine.setPluginEnabled.mockResolvedValueOnce({ ok: true, value: { id: 'acme-carrier' } });
+    const res = await post('plugins/acme-carrier/disable', {}, admin);
+    expect(await res.json()).toEqual({ id: 'acme-carrier', status: 'disabled' });
+    expect(engine.setPluginEnabled).toHaveBeenCalledWith('acme-carrier', false);
+    expect(audit.mock.calls[0]?.[1]).toBe('plugin.disabled');
+    expect((await post('plugins/acme-carrier/disable', {}, operator)).status).toBe(403);
+    engine.setPluginEnabled.mockResolvedValueOnce({
+      ok: false,
+      error: 'example is not installed at runtime',
+    });
+    const registry = await post('plugins/example/disable', {}, admin);
+    expect(registry.status).toBe(400);
+    expect(await registry.json()).toEqual({ error: 'example is not installed at runtime' });
   });
 });

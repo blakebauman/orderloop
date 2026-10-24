@@ -11,6 +11,7 @@ import {
   ORDER_STATUSES,
   OUTBOUND_EVENTS,
   orderInputSchema,
+  pluginBundleFileSchema,
   startOrderSchema,
   ucpSettingsSchema,
 } from '@orderloop/core';
@@ -632,10 +633,32 @@ export function openApiDocument(serverUrl: string) {
             'The installed plugins, with their node types, the events they receive and whether they answer (admin)',
           responses: {
             '200': ok(
-              '{ plugins: [{ id, runtime, name, version, nodes, events, provides, healthy, error? }] }: runtime is worker (its own Worker) or sandboxed (loaded by the engine); name and version are null for a plugin whose manifest was refused; provides lists what it can do behind built-in nodes (shipping.rates, shipping.labels, tax, address)',
+              '{ plugins: [{ id, runtime, source, name, version, nodes, events, provides, healthy, error? }] }: runtime is worker (its own Worker) or sandboxed (loaded by the engine); source is deployment (installed with the workspace) or installed (from a file, by an admin); name and version are null for a plugin whose manifest was refused; provides lists what it can do behind built-in nodes (shipping.rates, shipping.labels, tax, address)',
             ),
             ...errors,
           },
+        },
+        post: {
+          summary: 'Upload a signed plugin file for review (admin)',
+          description:
+            'The body is a .olplugin file as its publisher signed it, at most 5 MiB. Refused unless its publisher is one this workspace trusts, its signature and contents check out, and it answers with the manifest it was signed with. An upload does not run: an admin reviews and approves it on the Plugins page, which asks them to confirm who they are.',
+          requestBody: body(pluginBundleFileSchema),
+          responses: {
+            '201': ok(
+              '{ id, sha, version, publisher, status: "pending", manifest, secrets: [{ name, set }] }: what it asks for, to review',
+            ),
+            '413': ok('Larger than a plugin file may be', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/plugins/{id}/disable': {
+        post: {
+          summary: 'Turn off a plugin installed from a file (admin)',
+          description:
+            'Its steps stop running at once and flows that use it can no longer be published. Turn it back on from the Plugins page.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ id, status: "disabled" }'), ...errors },
         },
       },
       '/api/v1/plugins/{id}/usage': {

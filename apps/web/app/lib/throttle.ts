@@ -19,6 +19,8 @@ export const LIMITS = {
   'two-factor': 5,
   /** Wrong current passwords from someone already signed in (Account page re-checks). */
   reauth: 5,
+  /** Wrong step-up answers (a code or password before a sensitive admin action). */
+  'step-up': 5,
 } as const;
 
 export type ThrottleKind = keyof typeof LIMITS;

@@ -1,0 +1,94 @@
+---
+title: Installing a plugin
+description: How an admin installs a sandboxed plugin from a signed file on the Plugins page, what the review shows, the identity check before it runs, and turning it off, rolling it back and uninstalling it.
+---
+
+A plugin adds node types to the flow editor (and can stand behind built-in nodes, see
+[Providers](/guides/fulfillment/#providers)). Besides the plugins your workspace was set up with,
+an admin can install a **sandboxed** plugin from a file, with no deploy. It runs inside OrderLoop
+and reaches only the outside hosts its manifest lists.
+
+The page is admin-only: **Plugins** in the account menu.
+
+## Before you start
+
+- The file is a `.olplugin`, at most 5 MiB, signed by its publisher.
+- The workspace must trust that publisher. Trusted publishers are set by the workspace administrator
+  as part of the workspace's setup; you can't add one from the page. If none is set, an upload is
+  refused with `Runtime installs are off for this deployment`.
+- A plugin the workspace already has from its setup can't be replaced by a file with the same id.
+
+## Install
+
+1. Under **Install from a file**, choose the file and select **Upload for review**. OrderLoop checks
+   that the publisher is trusted, that the signature is that publisher's and matches the contents,
+   that the manifest is the one that was signed, and that the plugin answers with that manifest when
+   loaded with no network access. A file that fails any check is refused with the reason, and
+   nothing is stored as a candidate. An upgrade must be signed by the publisher of the installed
+   version, and the same upload can't be made twice.
+2. A passing upload is **pending**. It does not run, and flows that name its nodes still read them
+   as not installed.
+3. Review it. The page lists what it adds and what it reaches, and who signed it:
+
+   | Review shows | Meaning |
+   |---|---|
+   | Nodes, events, pages | What it adds to flows, what it is sent, and the pages it serves |
+   | Outside hosts | The only hosts it may call; it can reach no others |
+   | Secrets | Each secret it declares, its description, and whether it is added to requests to one named host (the plugin never sees it) or readable by the plugin |
+   | Buyer details | Whether it asks to be sent names, emails and addresses |
+
+4. Set its secrets in the review (`Set`). A value is up to 4096 characters, is never shown again
+   (the page says only "Set" or "Not set"), and can be replaced. **Approve and install** stays
+   disabled until every required secret is set.
+5. If it asks for buyer details, a checkbox sends it them. It is off by default, and a plugin that
+   asks for them does not run without it.
+6. Confirm who you are and select **Approve and install**. Once approved, the plugin runs on every
+   order whose flow uses it. The version that ran before, if any, is kept as an earlier version.
+
+## Confirming who you are
+
+Approving, rolling back and uninstalling each ask you to prove you are the admin, because they change
+what runs on every order. The page asks for the first of these that applies to you:
+
+1. A current code from your authenticator app, if you sign in with two-factor.
+2. Your password.
+3. If the workspace is single sign-on only, nothing to type: the action works within ten minutes
+   of signing in. Sign in again if it has been longer.
+
+Wrong answers count against a limit and are throttled. Turning a plugin back on, and replacing a
+secret of a plugin that is installed, need the check too. Uploading, setting the secrets of a
+plugin under review and turning a plugin off need only your admin session.
+
+## After it is installed
+
+| Action | Effect |
+|---|---|
+| **Turn off** / **Turn on** | Off, its steps stop running at once and flows that use it can't be published; its nodes read as not installed. Nothing is deleted. Turning it on needs the identity check. |
+| **Roll back to** a version | Reinstalls an earlier version listed under **Earlier versions**. Needs the identity check. |
+| **Uninstall** | Refused while a published flow uses its nodes, an order that has not ended is running on it, or a label it made has not been voided yet; the page lists what is in the way (the same list as `GET /api/v1/plugins/:id/usage`). Otherwise it deletes the plugin's secrets and stored data. Needs the identity check. |
+| Replace a secret | Enter a new value next to the secret. Needs the identity check. |
+
+A version whose publisher this workspace no longer trusts can't be approved, rolled back to or
+turned on again; one already running keeps running until you turn it off or uninstall it.
+
+A plugin installed this way shows `source: installed` in `GET /api/v1/plugins`; one from the
+workspace's setup shows `deployment`, and can't be changed from the page.
+
+## From the API
+
+An admin token can upload a file for review and turn a plugin off. It can't approve: approval needs
+the identity check, so it happens only on the Plugins page.
+
+| Method | Path | Result |
+|---|---|---|
+| `POST` | `/api/v1/plugins` | The body is the `.olplugin` file. `201` with `{ id, sha, version, publisher, status: "pending", manifest, secrets }`; `400` with the reason when refused; `413` when larger than 5 MiB |
+| `POST` | `/api/v1/plugins/:id/disable` | `{ id, status: "disabled" }` |
+
+Both need `admin`. See the [REST API](/reference/rest-api/#routes).
+
+## Audit
+
+Every action, and every refusal, is recorded under **Plugins** in the
+[audit log](/guides/team-and-roles/#audit-log): `plugin.uploaded`, `plugin.approved`,
+`plugin.secret_set` (names the secret, never its value), `plugin.disabled`, `plugin.enabled`,
+`plugin.rolled_back`, `plugin.uninstalled` and `plugin.refused` (with the reason).
