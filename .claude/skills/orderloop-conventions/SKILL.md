@@ -1,6 +1,6 @@
 ---
 name: orderloop-conventions
-description: The invariants Order Loop's code must keep, each with why it holds and how to check it. Background knowledge for any change to the engine, web app, core, catalog, D1 schema, plugins or CI; preloaded by the engineer, test-engineer and code-reviewer agents. Use when writing or reviewing code here and you need the rule behind a CLAUDE.md line, or the grep or test that proves a change keeps it.
+description: The invariants Order Loop's code must keep, each with why it holds and how to check it. Background knowledge for any change to the engine, web app, core, catalog, D1 schema, plugins or CI; preloaded by the engineer, test-engineer and code-reviewer agents. Use when writing or reviewing code here and you need the rule behind an AGENTS.md line, or the grep or test that proves a change keeps it.
 license: MIT
 user-invocable: false
 metadata:

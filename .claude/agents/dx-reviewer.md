@@ -1,6 +1,6 @@
 ---
 name: dx-reviewer
-description: Reviews Order Loop's developer experience. Covers whether a new contributor (human or agent) can install, run, test and change the code from what the repo says, and finds drift between README, CLAUDE.md, AGENTS.md, docs/ and the actual scripts, configs and toolkit. Read-only; returns prioritized fixes. Delegate for an onboarding audit, after changing scripts, tooling or the .claude toolkit, or when instructions and reality seem to disagree.
+description: Reviews Order Loop's developer experience. Covers whether a new contributor (human or agent) can install, run, test and change the code from what the repo says, and finds drift between README, AGENTS.md (which CLAUDE.md imports), docs/ and the actual scripts, configs and toolkit. Read-only; returns prioritized fixes. Delegate for an onboarding audit, after changing scripts, tooling or the .claude toolkit, or when instructions and reality seem to disagree.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 color: purple
