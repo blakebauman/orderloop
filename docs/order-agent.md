@@ -20,9 +20,13 @@ syncs to browsers is kept small: `flow` is always `null` in it, and `timeline` h
 50 entries (`TIMELINE_BROADCAST`). The pinned flow and the whole timeline live in the object's own
 SQL (`order_flow` and `order_timeline`); `snapshot()` returns the state with both filled in, which is
 what `EngineApi.snapshot` and the REST API serve. The order page takes the flow from its loader's
-snapshot and folds each broadcast's timeline into the one it holds (`mergeTimeline` in core);
-`getFlow()` serves the flow to any other socket client. An agent whose state still holds the flow
-(an order begun before this split) moves it and its timeline into SQL the first time it runs.
+snapshot and folds each broadcast's timeline into the one it holds (`mergeTimeline` in core; when
+the broadcast starts past everything it holds, after an erasure or a long disconnect, it shows the
+broadcast alone). The page is keyed by order id, so moving to another order starts from that
+order's snapshot. `getFlow()` serves the flow to any other socket client. An agent whose state still
+holds the flow (an order begun before this split) moves it and its timeline into SQL the first time
+it runs. The move is one-way: an engine rolled back past it would serve those orders with no flow,
+so recover from a bad engine deploy by rolling forward.
 
 | Field | Meaning |
 |---|---|

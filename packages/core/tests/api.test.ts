@@ -83,9 +83,21 @@ describe('mergeTimeline', () => {
     expect(out).toHaveLength(80);
   });
 
-  it('keeps what it held when the broadcast starts past it, up to the cap', () => {
-    const out = mergeTimeline(range(0, TIMELINE_CAP), range(1000, 1000 + TIMELINE_BROADCAST));
+  it('keeps the older entries up to the cap', () => {
+    const held = range(0, TIMELINE_CAP);
+    const tail = range(TIMELINE_CAP - 10, TIMELINE_CAP - 10 + TIMELINE_BROADCAST);
+    const out = mergeTimeline(held, tail);
     expect(out).toHaveLength(TIMELINE_CAP);
-    expect(out.at(-1)).toEqual(entry(1000 + TIMELINE_BROADCAST - 1));
+    expect(out.at(-1)).toEqual(tail.at(-1));
+  });
+
+  it('shows only the broadcast when it starts past what the page holds', () => {
+    // A missed stretch, or an erasure (every message rewritten, so no entry matches).
+    const tail = range(1000, 1000 + TIMELINE_BROADCAST);
+    expect(mergeTimeline(range(0, TIMELINE_CAP), tail)).toEqual(tail);
+    const erased = range(0, 80).map((t) => ({ ...t, message: '[erased]' }));
+    expect(mergeTimeline(range(0, 80), erased.slice(-TIMELINE_BROADCAST))).toEqual(
+      erased.slice(-TIMELINE_BROADCAST),
+    );
   });
 });

@@ -85,14 +85,17 @@ const entryId = (t: TimelineEntry) => t.key ?? `${t.at}|${t.kind}|${t.nodeId ?? 
 /**
  * The timeline a page shows after a broadcast: the broadcast's entries (the newest, and
  * authoritative), after the older ones the page already held. A broadcast shorter than
- * `TIMELINE_BROADCAST` is the whole timeline.
+ * `TIMELINE_BROADCAST` is the whole timeline. When the page holds no entry the broadcast starts
+ * from, what it holds can't be trusted (the order was erased, which rewrites every entry, or the
+ * page missed more than a broadcast's worth), so the broadcast alone is shown.
  */
 export function mergeTimeline(held: TimelineEntry[], tail: TimelineEntry[]): TimelineEntry[] {
   if (tail.length < TIMELINE_BROADCAST) return tail;
   const ids = new Set(tail.map(entryId));
   const first = entryId(tail[0]!);
   const start = held.findIndex((t) => entryId(t) === first);
-  const older = (start < 0 ? held : held.slice(0, start)).filter((t) => !ids.has(entryId(t)));
+  if (start < 0) return tail;
+  const older = held.slice(0, start).filter((t) => !ids.has(entryId(t)));
   return [...older, ...tail].slice(-TIMELINE_CAP);
 }
 

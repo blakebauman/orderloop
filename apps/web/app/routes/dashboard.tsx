@@ -31,15 +31,15 @@ import type { Route } from './+types/dashboard';
 export const meta = () => [{ title: 'Overview · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
-  // The reads start alongside the sign-in check; nothing is returned unless it passes.
-  const [, , { stats, recent, approvals, attention, declinedTotal }, perf, demo] =
-    await Promise.all([
-      requireUser(request),
-      ensureSeeded(),
-      overview(),
-      performance(),
-      demoAvailable(),
-    ]);
+  // Signed in first (the shell shares this lookup), so a signed-out visitor costs no reads and
+  // gets the redirect, not an error from one of them.
+  await requireUser(request);
+  const [, { stats, recent, approvals, attention, declinedTotal }, perf, demo] = await Promise.all([
+    ensureSeeded(),
+    overview(),
+    performance(),
+    demoAvailable(),
+  ]);
   const top = approvals.slice(0, 5);
   const [names, declinedSet, states] = await Promise.all([
     customerNames(recent.map((o) => o.customerId)),
