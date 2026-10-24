@@ -139,7 +139,7 @@ export function openApiDocument(serverUrl: string) {
               in: 'header',
               schema: { type: 'string', maxLength: 255 },
               description:
-                'A repeat with the same key and body returns 200 and the order it created; a different body under the same key returns 422.',
+                "A repeat with the same key and body returns 200 and the order it created; a different body under the same key returns 422. A key starting with one of OrderLoop's own namespaces (cart:, ucp:, plugin:, order:, email:, a2a:, replenish:) returns 400.",
             },
           ],
           requestBody: body(startOrderSchema),
@@ -499,7 +499,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Import a feed file (operator)',
           description:
-            'The request body is the file, streamed to the catalog: CSV (one row per variant) or NDJSON (one product per line). Answers 202 at once; poll the feed for its counts and the first rejected rows.',
+            'The request body is the file, streamed to the catalog: CSV (one row per variant) or NDJSON (one product per line). Answers 202 once the file is stored; poll the feed for its counts and the first rejected rows. Answers 408, storing nothing, when the body stops arriving for 30 seconds.',
           parameters: [
             {
               name: 'format',

@@ -175,9 +175,13 @@ export type Deployment = {
   pluginInstalls?: { publishers: Record<string, string> };
 };
 
+/** What a plugin may ask of the core through ORDERLOOP (`PLUGIN_CAPABILITIES` in core). */
+const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start'];
+
 export type PluginEntry = {
   d1Id?: string;
   personalData?: 'send';
+  capabilities?: string[];
   runtime?: 'worker' | 'sandboxed';
   secrets?: string[];
 };
@@ -339,8 +343,18 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       throw new Error(
         `${file}: plugins.${p}.personalData can only be "send" (to grant buyer details)`,
       );
+    const caps = (v as { capabilities?: unknown } | null)?.capabilities;
+    if (
+      caps !== undefined &&
+      (!Array.isArray(caps) ||
+        caps.some((c) => !PLUGIN_CAPABILITIES.includes(c as string)) ||
+        new Set(caps).size !== caps.length)
+    )
+      throw new Error(
+        `${file}: plugins.${p}.capabilities must list each of ${PLUGIN_CAPABILITIES.join(', ')} at most once`,
+      );
     const extra = Object.keys((v as object) ?? {}).filter(
-      (k) => !['d1Id', 'personalData', 'runtime', 'secrets'].includes(k),
+      (k) => !['d1Id', 'personalData', 'capabilities', 'runtime', 'secrets'].includes(k),
     );
     if (extra.length)
       throw new Error(`${file}: plugins.${p} has unknown keys: ${extra.join(', ')}`);
@@ -350,7 +364,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       (d1 !== undefined && (typeof d1 !== 'string' || !d1))
     )
       throw new Error(
-        `${file}: plugins.${p} must be { "d1Id"?, "personalData"?, "runtime"?, "secrets"? }`,
+        `${file}: plugins.${p} must be { "d1Id"?, "personalData"?, "capabilities"?, "runtime"?, "secrets"? }`,
       );
   }
   const installs = raw.pluginInstalls;
@@ -543,6 +557,17 @@ export function renderPlugin(base: Config, d: Deployment, p: string): Config {
   // under its own name (`secret()` in the SDK reads either kind).
   const store = storeSecrets(d, [p], (_p, n) => n);
   if (store.length) config.secrets_store_secrets = store;
+  // The core's host API, as this plugin: props name it, so it can't act as another. Bound only
+  // when the deployment grants it a capability; the engine checks the grant on every call.
+  if (d.plugins[p]?.capabilities?.length)
+    config.services = [
+      {
+        binding: 'ORDERLOOP',
+        service: names(d).engine,
+        entrypoint: 'PluginHost',
+        props: { id: p },
+      },
+    ];
   return config;
 }
 
@@ -554,12 +579,16 @@ export function renderPlugin(base: Config, d: Deployment, p: string): Config {
 export const pluginKey = (principalKey: string, id: string) =>
   createHmac('sha256', principalKey).update(`orderloop-plugin:${id}`).digest('hex');
 
-/** What the engine grants plugins beyond the defaults, from the registry: buyer details. */
+/** What the engine grants plugins beyond the defaults, from the registry: buyer details, capabilities. */
 function pluginGrants(d: Deployment) {
   const grants = Object.fromEntries(
-    Object.entries(d.plugins).flatMap(([p, v]) =>
-      v.personalData === 'send' ? [[p, { personalData: 'send' }]] : [],
-    ),
+    Object.entries(d.plugins).flatMap(([p, v]) => {
+      const g = {
+        ...(v.personalData === 'send' ? { personalData: 'send' } : {}),
+        ...(v.capabilities?.length ? { capabilities: v.capabilities } : {}),
+      };
+      return Object.keys(g).length ? [[p, g]] : [];
+    }),
   );
   return Object.keys(grants).length ? JSON.stringify(grants) : '';
 }
@@ -604,6 +633,13 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (store.length)
     config.secrets_store_secrets = [...(config.secrets_store_secrets ?? []), ...store];
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
+  // The app's own origin (for links the engine hands out, an external cart's start link) and the
+  // hosts it serves, which an external cart must never post back to.
+  config.vars = {
+    ...config.vars,
+    APP_ORIGIN: `https://${d.domain}`,
+    OWN_HOSTS: [d.domain, d.catalogDomain].join(','),
+  };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };

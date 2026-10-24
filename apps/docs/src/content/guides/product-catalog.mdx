@@ -129,7 +129,8 @@ Reading routes need `viewer`, writes `operator` and `reindex` `admin`; every wri
 For a whole file, send it as the request body of
 `POST /api/v1/catalog/feeds?format=csv|ndjson&name=<label>` (`format` is one of
 <Values of="feed-formats" />). The feed is read as it arrives, so its size isn't limited by a request
-body. The answer is `202 { "feed": { "id", "state", … } }`; poll `GET /api/v1/catalog/feeds/:id`
+body. If the body stops arriving for 30 seconds, the answer is `408` and nothing is stored: send the
+file again. The answer is `202 { "feed": { "id", "state", … } }`; poll `GET /api/v1/catalog/feeds/:id`
 until `state` is `done` or `failed`. States: <Values of="feed-states" />. A feed reports `rows`,
 `created`, `updated`, `unchanged` and `rejected` counts and, for the first 100 rejected rows,
 `errors` with the `row` number, the product `key` when known and the `message`. When the whole feed

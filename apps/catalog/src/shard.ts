@@ -55,6 +55,12 @@ type Row = {
 
 /** Alarm passes: products published per pass. */
 const PUBLISH_BATCH = 100;
+/** Passes an alarm keeps in flight at once, on disjoint products. */
+const PUBLISH_PASSES = 4;
+/** How long one alarm keeps starting passes before it hands over to the next alarm. */
+const ALARM_WINDOW_MS = 60_000;
+
+type OutboxRow = { seq: number; key: string; urgent: number; rev: number | null; forced: number };
 /** Cache tags per purge message: what one purge call takes. */
 const PURGE_TAGS = 100;
 /** How long a shard trusts its copy of the config without a newer revision asking for more. */
@@ -501,18 +507,57 @@ export class CatalogShard extends DurableObject<Env> {
     return !!this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM outbox) AS e').one().e;
   }
 
+  /**
+   * Publishes the outbox with up to PUBLISH_PASSES passes in flight, each on its own products, and
+   * starts the next as soon as one finishes. A pass waits for the slowest of its publishers, so one
+   * pass at a time left the shard idle behind its slowest write. A product with a pass in flight is
+   * left for a later one, so its writes still never overlap or reorder. Hands over to a new alarm
+   * after ALARM_WINDOW_MS; a failed pass fails the alarm (retried) once the others are done.
+   */
   override async alarm() {
     this.sql.exec('DELETE FROM applied WHERE at < ?', Date.now() - APPLIED_TTL_MS);
+    const deadline = Date.now() + ALARM_WINDOW_MS;
+    const inFlight = new Set<string>();
+    const running = new Set<Promise<void>>();
+    let failure: unknown;
+    for (;;) {
+      while (running.size < PUBLISH_PASSES && failure === undefined && Date.now() < deadline) {
+        const rows = this.nextPass(inFlight);
+        if (!rows.length) break;
+        const keys = [...new Set(rows.map((r) => r.key))];
+        for (const k of keys) inFlight.add(k);
+        const pass: Promise<void> = this.publishPass(rows, keys)
+          .catch((err) => {
+            failure ??= err;
+          })
+          .finally(() => {
+            for (const k of keys) inFlight.delete(k);
+            running.delete(pass);
+          });
+        running.add(pass);
+      }
+      if (!running.size) break;
+      await Promise.race(running);
+    }
+    if (failure !== undefined) throw failure;
+    if (this.hasPending()) await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  /** The outbox rows of the next pass: up to PUBLISH_BATCH products, none of them in flight. */
+  private nextPass(inFlight: Set<string>): OutboxRow[] {
     const rows = this.sql
-      .exec<{ seq: number; key: string; urgent: number; rev: number | null; forced: number }>(
-        'SELECT seq, key, urgent, rev, forced FROM outbox ORDER BY seq LIMIT ?',
+      .exec<OutboxRow>(
+        `SELECT seq, key, urgent, rev, forced FROM outbox
+         WHERE key NOT IN (SELECT value FROM json_each(?)) ORDER BY seq LIMIT ?`,
+        JSON.stringify([...inFlight]),
         PUBLISH_BATCH * 4,
       )
       .toArray();
-    if (!rows.length) return;
-    const keys = [...new Set(rows.map((r) => r.key))].slice(0, PUBLISH_BATCH);
-    const included = new Set(keys);
-    const mine = rows.filter((r) => included.has(r.key));
+    const keys = new Set([...new Set(rows.map((r) => r.key))].slice(0, PUBLISH_BATCH));
+    return rows.filter((r) => keys.has(r.key));
+  }
+
+  private async publishPass(mine: OutboxRow[], keys: string[]): Promise<void> {
     const upTo = mine.at(-1)?.seq ?? 0;
     // The config these writes were validated against, or later; a row without a revision (a
     // removal, a reindex) takes the latest.
@@ -534,14 +579,13 @@ export class CatalogShard extends DurableObject<Env> {
     for (let i = 0; i < urgent.length; i += PURGE_TAGS)
       messages.push({ body: { tags: urgent.slice(i, i + PURGE_TAGS) } });
     if (messages.length) await this.env.PURGE.sendBatch(messages);
-    // Every outbox row up to the last one published is covered: later rows for the same key
-    // republish the same (latest) state.
+    // Every outbox row of these keys up to the last one published is covered: later rows for the
+    // same key (written meanwhile) republish the same, latest state on a later pass.
     this.sql.exec(
       'DELETE FROM outbox WHERE seq <= ? AND key IN (SELECT value FROM json_each(?))',
       upTo,
       JSON.stringify(keys),
     );
-    if (this.hasPending()) await this.ctx.storage.setAlarm(Date.now());
   }
 
   // --- Used by the publisher ---

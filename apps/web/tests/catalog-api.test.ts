@@ -21,7 +21,12 @@ const catalog = {
   deleteCategories: vi.fn(),
 };
 vi.mock('cloudflare:workers', () => ({ env: {} }));
-vi.mock('~/lib/env.server', () => ({ catalog: () => catalog, engine: () => ({}), db: () => ({}) }));
+vi.mock('~/lib/env.server', () => ({
+  catalog: () => catalog,
+  engine: () => ({}),
+  db: () => ({}),
+  afterResponse: () => {},
+}));
 vi.mock('~/lib/flows.server', () => ({ ensureSeeded: async () => {}, listFlows: async () => [] }));
 vi.mock('~/lib/orders.server', () => ({ currencies: async () => [], listOrders: async () => [] }));
 const audit = vi.fn();
@@ -187,6 +192,17 @@ describe('catalog setup over REST', () => {
       },
     });
     expect((await call('POST', 'feeds?format=xml', operator, 'x')).status).toBe(400);
+  });
+
+  it('answers 408 when the catalog gave up on a feed that stopped arriving', async () => {
+    catalog.startFeed.mockRejectedValue(new Error('upload stalled: no bytes for 30 s'));
+    const r = await call('POST', 'feeds?format=csv', operator, 'key,sku\nx,X1', 'text/csv');
+    expect(r.status).toBe(408);
+    expect(((await r.json()) as { error: string }).error).toContain('Send it again');
+    catalog.startFeed.mockRejectedValue(new Error('something else'));
+    expect((await call('POST', 'feeds?format=csv', operator, 'key,sku', 'text/csv')).status).toBe(
+      500,
+    );
   });
 
   it('reindexes only for an admin', async () => {

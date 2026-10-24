@@ -25,6 +25,7 @@ import {
   validateFields,
 } from './catalog';
 import { conforms } from './json-schema';
+import type { CartReturn, CartReturnRequest } from './plugin-host';
 import { maskPersonalText, modelOrder, PERSONAL_DATA_MODES, scrubPersonal } from './redact';
 import { ROLES } from './roles';
 import type { Order } from './types';
@@ -57,6 +58,15 @@ const RESERVED_IDS = new Set([
  * is a Dynamic Worker the engine loads (Worker Loader), with no bindings of its own, its outbound
  * requests through the engine's egress gateway and its CPU and subrequests capped per call.
  */
+/**
+ * What a plugin may ask the core to do through its host binding (`ORDERLOOP`, `PluginHostRpc`):
+ * open external carts for buyers it has authenticated (`carts:external`), and start orders
+ * (`orders:start`). A manifest declares them; each takes effect only with the deployment's grant
+ * (`plugins.<id>.capabilities` in its registry), as buyer details do.
+ */
+export const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start'] as const;
+export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[number];
+
 export const PLUGIN_RUNTIMES = ['worker', 'sandboxed'] as const;
 export type PluginRuntime = (typeof PLUGIN_RUNTIMES)[number];
 
@@ -286,6 +296,11 @@ export const pluginManifestSchema = z
      * node's Provider field, and the engine calls `provide` instead of the built-in connector.
      */
     provides: z.array(z.enum(PROVIDER_SURFACES)).default([]),
+    /** What it asks the core to do through `ORDERLOOP` (`PLUGIN_CAPABILITIES`), each granted per deployment. */
+    capabilities: z
+      .array(z.enum(PLUGIN_CAPABILITIES))
+      .default([])
+      .refine((c) => new Set(c).size === c.length, 'Each capability once'),
     /**
      * Hosts a sandboxed plugin may reach (a name, or `*.` and one); anything else is refused by
      * the engine's egress gateway, as are private and internal addresses whatever this says.
@@ -740,6 +755,12 @@ export interface PluginRpc {
   deliver(payload: OutboundPayload): Promise<void>;
   /** Does a built-in node's work for a surface in the manifest's `provides`. */
   provide(req: ProvideRequest): Promise<ProvideResult>;
+  /**
+   * With `carts:external`: the form fields that return an external cart this plugin opened to the
+   * buyer's own system (a punchout order message, say). The core posts them to the cart's
+   * `returnUrl`; checked by `checkCartReturn`.
+   */
+  renderReturn(req: CartReturnRequest): Promise<CartReturn>;
 }
 
 /**
