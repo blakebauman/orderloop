@@ -69,6 +69,13 @@ export default defineConfig(async () => {
       '../../plugins/fixture-carrier/migrations',
     ),
   };
+  // The punchout plugin, sandboxed, end to end with the host API (tests/punchout/).
+  const punchout = {
+    punchout: await buildSandboxBundle(
+      '../../plugins/punchout/src/index.ts',
+      '../../plugins/punchout/migrations',
+    ),
+  };
 
   /** One workerd project: the engine Worker with these extra bindings (and auxiliary Workers). */
   const project = (
@@ -96,6 +103,9 @@ export default defineConfig(async () => {
             SIMULATE_FAILURES: 'true',
             // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
             PRINCIPAL_KEY: 'test-principal-key',
+            // The app's origin and own hosts, for external carts' start links and returns.
+            APP_ORIGIN: 'https://app.orderloop.test',
+            OWN_HOSTS: 'app.orderloop.test,catalog.app.orderloop.test',
             // Encrypts secrets at rest (tests/secrets.test.ts rotates it).
             DATA_KEY: 'test-data-key',
             // Signs UCP order webhooks in tests (a throwaway key, never a deployment's).
@@ -157,7 +167,10 @@ export default defineConfig(async () => {
             TEST_CARRIER_MIGRATIONS: await readD1Migrations(
               '../../plugins/fixture-carrier/migrations',
             ),
-            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+            PLUGIN_GRANTS: JSON.stringify({
+              'fixture-carrier': { personalData: 'send' },
+              example: { capabilities: ['carts:external', 'orders:start'] },
+            }),
           },
           [
             await bundlePlugin('../../plugins/example/src/index.ts', {
@@ -185,7 +198,10 @@ export default defineConfig(async () => {
               Object.fromEntries(Object.entries(sandboxed).map(([id, b]) => [id, b.sha])),
             ),
             PLUGIN_SECRETS: JSON.stringify({ example: { PING_TOKEN: 'ping-secret-8f2d' } }),
-            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+            PLUGIN_GRANTS: JSON.stringify({
+              'fixture-carrier': { personalData: 'send' },
+              example: { capabilities: ['carts:external', 'orders:start'] },
+            }),
           },
           [],
           {
@@ -214,6 +230,15 @@ export default defineConfig(async () => {
           { outboundService: carrierUpstream },
         ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
+        // The punchout plugin sandboxed, granted both capabilities: a procurement system's setup,
+        // the buyer's cart and return, and its PO, against the real host API (tests/punchout/).
+        project('punchout', ['tests/punchout/**/*.test.ts'], {
+          TEST_BUNDLES: JSON.stringify(punchout),
+          PLUGIN_BUNDLES: JSON.stringify({ punchout: punchout.punchout.sha }),
+          PLUGIN_GRANTS: JSON.stringify({
+            punchout: { capabilities: ['carts:external', 'orders:start'] },
+          }),
+        }),
         project('stripe', ['tests/stripe/**/*.test.ts'], {
           PAYMENTS_MODE: 'stripe',
           STRIPE_SECRET_KEY: 'sk_test_fake',

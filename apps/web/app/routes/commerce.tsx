@@ -1059,7 +1059,11 @@ function Pricing({
       <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
         <span className="block max-w-[75ch]">
           Prices are in {BASE_CURRENCY}. Orders in another currency convert at the rate below, fixed
-          when the order is priced.
+          when the order is priced. Promotion codes are on the{' '}
+          <Link to="/promotions" className="text-link hover:underline">
+            Promotions
+          </Link>{' '}
+          page.
         </span>
         <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 tabular">
           {pricing.rates

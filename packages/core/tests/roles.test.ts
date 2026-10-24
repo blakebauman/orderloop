@@ -5,8 +5,12 @@ import {
   ownOrderRefusal,
   PRINCIPAL_TTL_MS,
   type Principal,
+  signCartGuest,
+  signCartGuestSession,
   signPlatform,
   signPrincipal,
+  verifyCartGuest,
+  verifyCartGuestSession,
   verifyPlatform,
   verifyPrincipal,
 } from '../src/roles';
@@ -126,5 +130,40 @@ describe('separation of duties', () => {
     // An order with no starter (a channel, an email, the stock review) is anyone's to decide.
     expect(ownOrderRefusal(true, null, 'usr_a')).toBeNull();
     expect(ownOrderRefusal(true, 'usr_a', undefined)).toBeNull();
+  });
+});
+
+describe('cart guest envelopes', () => {
+  const key = 'k';
+  const now = 1_000_000;
+  const g = { cartId: 'cart_1', id: 'guest:ann', name: 'Ann' };
+  const path = '/agents/cart-agent/cart_1';
+
+  it('admits a guest only on the path it was signed for, and never as anything else', async () => {
+    const header = await signCartGuest(key, g, path, now);
+    expect(await verifyCartGuest([key], header, path, now)).toEqual(g);
+    expect(await verifyCartGuest([key], header, '/agents/cart-agent/cart_2', now)).toBeNull();
+    expect(await verifyCartGuest([key], header, path, now + PRINCIPAL_TTL_MS + 1)).toBeNull();
+    expect(await verifyCartGuest(['other'], header, path, now)).toBeNull();
+    expect(await verifyPrincipal([key], header, path, now)).toBeNull();
+    expect(await verifyPlatform([key], header, path, now)).toBeNull();
+    const staff = await signPrincipal(
+      key,
+      { kind: 'user', id: 'usr_1', name: 'A', role: 'admin' },
+      path,
+      now,
+    );
+    expect(await verifyCartGuest([key], staff, path, now)).toBeNull();
+  });
+
+  it('keeps a guest session cookie to its cart until the cart closes', async () => {
+    const cookie = await signCartGuestSession(key, g, now + 60_000);
+    expect(await verifyCartGuestSession([key], cookie, 'cart_1', now)).toEqual(g);
+    expect(await verifyCartGuestSession([key], cookie, 'cart_2', now)).toBeNull();
+    expect(await verifyCartGuestSession([key], cookie, 'cart_1', now + 60_001)).toBeNull();
+    // The cookie is never a socket header, and a socket header never a cookie.
+    expect(await verifyCartGuest([key], cookie, path, now)).toBeNull();
+    const header = await signCartGuest(key, g, path, now);
+    expect(await verifyCartGuestSession([key], header, 'cart_1', now)).toBeNull();
   });
 });

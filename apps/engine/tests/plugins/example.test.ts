@@ -219,6 +219,11 @@ describe('what the engine accepts from a plugin', () => {
     const s = (await pluginStatuses(flaky, true)).find((x) => x.id === 'example');
     expect(s).toMatchObject({ healthy: false, error: 'connection reset' });
     expect(s!.manifest).toEqual(good);
+    // Never past a capability grant the deployment has withdrawn.
+    const ungranted = { ...flaky, PLUGIN_GRANTS: '' } as unknown as Env;
+    expect(
+      (await pluginStatuses(ungranted, true)).find((x) => x.id === 'example')!.manifest,
+    ).toBeNull();
   });
 });
 

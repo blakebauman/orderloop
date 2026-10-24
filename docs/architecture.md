@@ -85,7 +85,7 @@ engine source.
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
-| `/agents/order-agent/*`, `/agents/cart-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
+| `/agents/order-agent/*`, `/agents/cart-agent/*`, `/agents/assistant-agent/*` (a cart's socket with no staff sign-in takes its buyer's cookie instead and is signed as a `CartGuest`; see [External carts](#external-carts)) | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `GET /mcp/server-card`, `GET /.well-known/ai-catalog.json` | `mcpDiscovery` (`apps/web/app/lib/mcp-discovery.ts`), public: the MCP Server Card (SEP-2127; name `<reversed host>/mcp`, the `/mcp` remote and `MCP_PROTOCOL_VERSIONS`, no tools or capabilities) and the AI Catalog entry that links it. `application/mcp-server-card+json` / `application/ai-catalog+json`, `Access-Control-Allow-Origin: *`, `public, max-age=3600`, an `ETag` honoured with `304`, `OPTIONS` `204`, other methods `405` |
 | `GET /.well-known/ucp`, `/ucp`, `/ucp/*` | `ucpDiscovery` and `ucpFetch` (`apps/web/app/lib/ucp.server.ts`), before the OAuth paths. See [UCP](#ucp-agentic-checkout) |
@@ -346,7 +346,7 @@ and purge queue with it and binds its `SearchApi` entrypoint for keyword search 
 | `putChannel`, `listChannels`, `putCategories`, `listCategories` | Channels and categories, through `CatalogMeta`. The writes answer with a `Result` (`{ ok: true, … }` or `{ ok: false, issues }`), as `putType` does |
 | `deleteChannel(code, by)` | `CatalogMeta.deleteChannel` first (the channel leaves the config, so no shard publishes to it again, and its category trees are deleted from R2; `<code>: unknown channel` when absent), then every shard runs `forgetChannel(code, 500)` until it answers 0: it deletes the channel's documents, alias pointers and `CARDS` entries for the `published` rows, sends `ListingChange`s with `entry: null`, `left` the categories and `search: null` (so the indexers and search shards drop them), and clears the rows. Last it sweeps the R2 prefixes `idx/f1/<code>/` and `docs/f1/<code>/`. Answers `{ ok, code, unpublished }`. Products keep their listing data, so re-adding the channel and a `reindex` republishes it |
 | `deleteCategories(codes, by)` | Refuses with `<code>: N products are filed in it` (counted over the shards by `countUsing({ category })`), or when `CatalogMeta.deleteCategories` does (`unknown category`; `<parent>: still the parent of <child>` for a child outside the set). Otherwise deletes them, republishes the tree in every channel and deletes every segment of their `idx/` listing in every channel. Answers `{ ok, deleted }` |
-| `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part), records the feed in `CatalogFeeds` as `queued`, starts the `FeedImport` Workflow with the feed id as its instance id and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
+| `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part; a body that sends nothing for `UPLOAD_IDLE_MS` (30 s) is cancelled, its multipart upload aborted and `UploadStalled` thrown, rather than hanging until the runtime cancels the request), then records the feed in `CatalogFeeds` as `queued` and starts the `FeedImport` Workflow with the feed id as its instance id, both under `ctx.waitUntil` so a caller that disconnects after the upload can't leave a queued feed with no Workflow (and a Workflow that fails to start marks the feed `failed`), and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
 | `feedStatus(id)`, `listFeeds(limit)` | A feed's `FeedStatus` (`null` for an unknown id), or the most recent feeds first (20 by default, between 1 and 100) |
 | `reindex(by)` | Calls `republishAll` on all 64 shards, which queue every product not already waiting in their `outbox` for the publisher (so repeating it queues nothing twice), and answers `{ queued }`, the number of products on the shards. It waits for no publishing: each shard's alarm does that |
 
@@ -372,8 +372,13 @@ SKU, GTIN or slug is unique without a global object) and the `outbox`.
   what it read: a product changed by another write meanwhile is rejected with `send it again`, and
   what it claimed is given back. Aliases a product dropped are released after the commit, best effort.
 - Each change writes an `outbox` row in the same transaction. The shard's alarm publishes from it
-  (`publish.ts`), up to 100 products a pass, and sets itself again while rows remain, so a crash
-  between storing and publishing only delays publishing.
+  (`publish.ts`), up to 100 products a pass (`PUBLISH_BATCH`) and up to four passes in flight at
+  once (`PUBLISH_PASSES`), each on different products: a new pass starts as soon as one finishes,
+  rather than after the slowest write of the last. A product whose pass is in flight is left for a
+  later pass (`nextPass` skips it), so its writes never overlap. An alarm keeps starting passes for
+  a minute (`ALARM_WINDOW_MS`), then sets itself again while rows remain, so a crash between storing
+  and publishing only delays publishing. A failed pass fails the alarm, which is retried, once the
+  passes still in flight are done.
 
 **Publishing** renders each product once per channel and locale (`renderForChannel`) and writes:
 a product document and alias pointers to R2 (`PUBLISHED`, under `docs/f1/<channel>/…`, `f1` being
@@ -408,8 +413,8 @@ jurisdiction like the other objects), whose `write(ops)` starts them all at once
 queues those past six and starts each as a slot frees, so none waits for a slower one).
 `publishKeys` awaits every publisher and only then records `published` and returns the changes. With
 a fanout of 1 it runs the ops itself and makes no hop. One product's writes always go to the same
-publisher and the shard waits for every publisher before its next pass, so a product's writes are
-never reordered. The publishers hold no state.
+publisher and the product is in no other pass until every publisher of its pass is done, so a
+product's writes are never reordered. The publishers hold no state.
 
 Measured on production in October 2026 (a pass is 100 products, about 500 writes):
 
@@ -420,6 +425,9 @@ Measured on production in October 2026 (a pass is 100 products, about 500 writes
   took about a second from the publisher, while R2 and KV accepted about 1,200 writes a second with
   no errors. The listing changes queue kept up throughout (backlog under 250 messages, 2 to 8
   consumers).
+- With 32 publishers starting every write at once, republishing 1,000,000 products peaked near
+  1,000 a second (R2 about 3,200 puts a second) and averaged about 400. A pass waited for the
+  slowest of its 32 publishers (shard pass p50 8 to 14 s), which is why passes now overlap.
 
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel, and again when the key's uid changed (a key deleted and
@@ -468,7 +476,7 @@ doesn't hold. Roles: reads `viewer`, writes `operator`, `reindex` `admin` (`atLe
 | `POST categories/delete` | `deleteCategories` | `operator`; `{ codes }`, 1 to 500 (`catalogCategoriesDeleteInput`); `{ ok, deleted }`; `catalog.categories_deleted` (detail `codes`) |
 
 A refused delete is `404 { error: 'Not found', issues }` when the catalog answers `notFound: true` (nothing by that code), else `409 { error: '<The type|The channel|A category> is in use', issues }`. `deleteChannel` takes the channel's content down even when the channel is already gone from `CatalogMeta`, so a delete cut short finishes on a retry; it answers `notFound` only when the channel is unknown and nothing was left to take down.
-| `POST feeds?format=&name=` | `startFeed` | `format` is `csv` or `ndjson` (`FEED_FORMATS`), else `400`. The request body is passed to the catalog as a stream, so a feed of any size never sits in the Worker; `name` defaults to `feed.<format>` and is cut at 200 characters. `202 { feed }`; `catalog.feed_started` (target the feed id) |
+| `POST feeds?format=&name=` | `startFeed` | `format` is `csv` or `ndjson` (`FEED_FORMATS`), else `400`. The request body is passed to the catalog as a stream, so a feed of any size never sits in the Worker; `name` defaults to `feed.<format>` and is cut at 200 characters. `202 { feed }`; `catalog.feed_started` (target the feed id), written after the response so it is kept even if the caller disconnects. `408` when the catalog gave up on a body that stopped arriving (`upload stalled`; nothing was stored) |
 | `GET feeds`, `GET feeds/:id` | `listFeeds(limit)`, `feedStatus` | `limit` defaults to 20 |
 | `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
 
@@ -955,6 +963,44 @@ the rest is in its SQL, paged by `history`).
   every 30 seconds while anyone has the cart open and closes (`4401`) each socket whose person can
   no longer read it. Chat messages are posted as
   the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
+
+### External carts
+
+A plugin with the `carts:external` capability opens a cart for a buyer outside OrderLoop (a
+punchout session) through the host API ([Plugins](plugins.md#the-host-api)). The cart carries
+`external`: the plugin, its `sessionRef`, `expiresAt` (an alarm cancels it then), the `returnUrl`
+it goes back to, the origins that may frame it and the buyer. The plugin gets a one-time start path;
+redeeming it (`CartAgent.redeemStart`, the token kept only as a hash) admits the buyer as a
+`CartGuest`, whose socket header is its own envelope (`signCartGuest` / `verifyCartGuest`, `g1`)
+signed for that cart's path alone, which `cartGate` accepts only for an external cart that is
+still open (`410` once it was canceled). A guest edits lines (at most 20 changes in 10 seconds, each prices the cart) and chats, but can't
+lock, rename, submit or cancel; the cart's chat is shared with them. Guest sockets are checked
+every 30 seconds too, and closed once the cart is canceled, submitted or past its time, or the
+plugin loses its grant. A cart past `expiresAt` takes no start link and admits no guest even before
+its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
+`renderReturn`, keeps the fields (`returnForm` returns them again) and marks the cart `returned`.
+
+In the web app the start path is the route `/cart/start/:cartId/:token`: it redeems the link
+(`EngineRpc.redeemCartStart`) and sets a cookie for that cart alone (`ol_<cartId>`, the `gs1`
+envelope `signCartGuestSession`, `HttpOnly; Secure; SameSite=None; Partitioned`, until the cart
+expires), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
+`apps/web/app/components/cart-view.tsx`, shared with the staff page). That page's CSP lets the
+cart's `frameOrigins` frame it and its form post to the cart's `returnUrl` (`EMBED_HEADER`, folded
+in by `entry.server.tsx`; `withSecurityHeaders` then leaves out `X-Frame-Options`). Its socket is
+proxied with the cookie's guest signed for the path (`setGuestHeader`). Sending the cart back
+posts the fields from the page itself, in the same window, with a button if the post doesn't
+start.
+
+The return URL goes into `form-action` as its origin and path (`parseEmbed` in
+`apps/web/app/lib/csp.ts`; CSP ignores the query), with `;` `,` and `'` in the path
+percent-encoded, which CSP decodes before matching, so a URL like `/punchout;jsessionid=…` still
+admits the post. Both routes' refusals (`cartRefusal` in `apps/web/app/lib/cart-guest.server.ts`:
+a used or expired start link `410`, no cookie `401`, a cart that has closed `410`, which the page
+checks as `cartGate` does) are shown by their own `CartRefusal` boundary and may be framed by any
+https page (`frame-ancestors https:`): they carry only the message, and the buyer would otherwise
+see a blocked frame. Framed, the cookie is a partitioned third-party cookie (CHIPS), so a browser
+that blocks third-party cookies outright (Safari's default) can't keep the buyer on a framed cart;
+the buyer's system has to open it top-level there.
 
 ## The assistant
 

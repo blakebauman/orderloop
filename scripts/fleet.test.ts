@@ -454,6 +454,47 @@ test('buyer details are granted to a plugin only by its registry entry', () => {
   );
 });
 
+test('capabilities are granted by the registry, and bind the host API as the plugin itself', () => {
+  const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+  const d = toDeployment({
+    ...raw,
+    plugins: {
+      punchout: { d1Id: 'x', capabilities: ['carts:external', 'orders:start'] },
+      qbd: { d1Id: 'y' },
+    },
+  });
+  assert.equal(
+    renderEngine(base('engine'), d).vars.PLUGIN_GRANTS,
+    '{"punchout":{"capabilities":["carts:external","orders:start"]}}',
+  );
+  const pluginBase = { name: 'x', main: 'src/index.ts', d1_databases: [{ binding: 'DB' }] };
+  assert.deepEqual(renderPlugin(pluginBase, d, 'punchout').services, [
+    {
+      binding: 'ORDERLOOP',
+      service: renderEngine(base('engine'), d).name,
+      entrypoint: 'PluginHost',
+      props: { id: 'punchout' },
+    },
+  ]);
+  const vars = renderEngine(base('engine'), d).vars;
+  assert.equal(vars.APP_ORIGIN, 'https://acme.orderloop.app');
+  assert.equal(vars.OWN_HOSTS, 'acme.orderloop.app,catalog.acme.orderloop.app');
+  // No capability, no host binding.
+  assert.equal(renderPlugin(pluginBase, d, 'qbd').services, undefined);
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { punchout: { capabilities: ['orders:delete'] } } }),
+    /capabilities must list/,
+  );
+  assert.throws(
+    () =>
+      toDeployment({
+        ...raw,
+        plugins: { punchout: { capabilities: ['orders:start', 'orders:start'] } },
+      }),
+    /at most once/,
+  );
+});
+
 const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
 const STORE = '0123456789abcdef0123456789abcdef';
 

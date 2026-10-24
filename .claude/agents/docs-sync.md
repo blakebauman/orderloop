@@ -27,7 +27,7 @@ a page has to be added or moved, and **`docs-audit`** when asked to sweep a whol
   `apps/docs/DESIGN.md` and `apps/docs/src/data/runs/*.json`.
 - `packages/design/src/tokens.ts`, only to mirror a token change already made in
   `apps/web/app/app.css`, followed by `pnpm sync:theme`. Never edit the generated `theme.css`.
-- `README.md`, `ROADMAP.md`, and `CLAUDE.md` where they describe the same behaviour.
+- `README.md`, `ROADMAP.md`, and `AGENTS.md` (the rules; `CLAUDE.md` only imports it) where they describe the same behaviour.
 - The surface map, when you find a documented surface it misses.
 
 Never change runtime code in `apps/engine`, `apps/web` or `packages/*`, even when the docs reveal a

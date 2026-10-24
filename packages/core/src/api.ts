@@ -9,6 +9,7 @@ import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
 import type { PluginInstallView, PluginStatus, PluginUsage } from './plugins';
+import type { CartGuest } from './roles';
 import type {
   FlowGraph,
   FlowVersion,
@@ -293,6 +294,14 @@ export interface EngineRpc {
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   /** A cart as its agent holds it, or null for an id no cart has. */
   cartSnapshot(id: string): Promise<CartState | null>;
+  /**
+   * Redeems an external cart's one-time start link: the buyer it admits and when the cart closes,
+   * or null for a link that is unknown, used or expired, or a cart that has ended.
+   */
+  redeemCartStart(
+    cartId: string,
+    token: string,
+  ): Promise<{ guest: CartGuest; expiresAt: number } | null>;
 }
 
 /** What an engine call returns when it may be refused: its value, or why not (to show as it is). */

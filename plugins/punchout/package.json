@@ -1,0 +1,25 @@
+{
+  "name": "@orderloop/plugin-punchout",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "cXML and OCI punchout: procurement systems (Ariba, Coupa, SAP) open a cart for their buyer through the host API, get it back as a PunchOutOrderMessage or OCI fields, and send the PO as a cXML OrderRequest that starts the order once.",
+  "scripts": {
+    "types": "wrangler types",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@orderloop/core": "workspace:*",
+    "@orderloop/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

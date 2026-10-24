@@ -116,3 +116,5 @@
 ^(\.github/workflows/deploy\.yml|scripts/(fleet|provision)\.(ts|sh))$	docs/plugins.md	prose
 ^apps/(web/app/(routes/plugins|lib/plugin-installs\.server)|engine/src/plugin-installs)\.tsx?$	guides/installing-plugins reference/rest-api docs/plugins.md	prose
 ^(packages/core/src/cart|apps/engine/src/cart/.*|apps/web/app/(lib/carts\.server|routes/carts?))\.tsx?$	guides/carts docs/architecture.md docs/data-model.md	prose
+^(packages/core/src/promotions|apps/web/app/(lib/promotions\.server|routes/promotions))\.tsx?$	guides/promotions docs/data-model.md	prose
+^plugins/punchout/(src/.*|migrations/.*)$	guides/punchout docs/plugins.md docs/testing.md	prose

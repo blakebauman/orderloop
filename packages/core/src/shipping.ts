@@ -84,6 +84,37 @@ export function shipToCountry(order: Pick<Order, 'meta'>): string | undefined {
   return c && /^[A-Z]{2}$/.test(c) ? c : undefined;
 }
 
+/** Tax rates by ship-to place, for `commerce.tax`. */
+export const taxRegionsSchema = z
+  .array(
+    z.object({
+      country: z.string().regex(/^[A-Z]{2}$/, 'A two-letter country code'),
+      region: z.string().min(1).max(10).optional(),
+      rate: z.number().min(0).max(0.5),
+    }),
+  )
+  .max(200);
+export type TaxRegion = z.infer<typeof taxRegionsSchema>[number];
+
+/**
+ * The rate for an order shipped to `country` and `region`: a match on both first, then the
+ * country alone, then `fallback`.
+ */
+export function regionalTaxRate(
+  regions: TaxRegion[],
+  country: string | undefined,
+  region: string | undefined,
+  fallback: number,
+): number {
+  if (!country) return fallback;
+  const r = region?.toUpperCase();
+  return (
+    regions.find((x) => x.country === country && x.region && x.region.toUpperCase() === r)?.rate ??
+    regions.find((x) => x.country === country && !x.region)?.rate ??
+    fallback
+  );
+}
+
 /** The configured services' rates for a request, unsorted. */
 export function staticRates(config: ShippingConfig, req: RateRequest): ShippingOption[] {
   const multiplier = isDomestic(config, req.country) ? 1 : config.intlMultiplier;

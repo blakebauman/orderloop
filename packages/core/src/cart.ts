@@ -44,6 +44,12 @@ export type ExternalCart = {
   /** The plugin's own id for the session (a punchout BuyerCookie, say); unique per plugin. */
   sessionRef: string;
   expiresAt: number;
+  /** Where the cart goes back to: its return is posted here, and nowhere else. */
+  returnUrl: string;
+  /** Origins that may frame the cart's pages. */
+  frameOrigins: string[];
+  /** The buyer it was opened for, as the plugin authenticated them. */
+  buyer: { id: string; name: string };
 };
 
 export type Cart = {

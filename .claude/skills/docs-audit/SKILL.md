@@ -26,7 +26,7 @@ agent, one section per agent: Start, Guides, Reference, Internals.
    page says: a new route in `apps/web/app/lib/api.server.ts`, a new `vars` entry in
    `apps/engine/src/nodes.ts`, a new table in `packages/db/src/schema.ts`, a new binding or var in a
    `wrangler.jsonc`. Also check for source files that should be in the map but aren't.
-4. **Repo docs.** Compare `README.md`, `CLAUDE.md` and `ROADMAP.md` with the docs; they must not
+4. **Repo docs.** Compare `README.md`, `AGENTS.md` (the rules) and `ROADMAP.md` with the docs; they must not
    disagree. A roadmap item that has shipped is a doc change in two places.
 5. **Styling.** Diff the colour and font values in `apps/docs/src/styles/brand.css` (hand-written)
    and the generated `theme.css` against `apps/web/app/app.css`; record what changed in

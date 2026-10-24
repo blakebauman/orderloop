@@ -87,6 +87,7 @@ suite('audit vocabulary', () => {
       'flow',
       'webhook',
       'stock',
+      'promotion',
       'catalog',
       'plugin',
       'personal_data',

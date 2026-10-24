@@ -119,7 +119,7 @@ Idempotency-Key: po-NW-7781
   [Simulating failures](/guides/templates/#simulating-failures)).
 - `vars` seeds the run's variables.
 
-**Idempotency.** With an `Idempotency-Key` header (at most 255 characters; longer returns `400`), a repeat of the key
+**Idempotency.** With an `Idempotency-Key` header (at most 255 characters, and not starting `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:` or `replenish:`, which OrderLoop keeps for orders it starts itself; otherwise `400`), a repeat of the key
 returns `200` and the order the first request created, even when two requests race. If the first
 request failed after recording the order, the repeat finishes starting it. The key is bound to a
 SHA-256 fingerprint of the body (flow, version, input and vars, ignoring property order): a repeat
