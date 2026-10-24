@@ -162,6 +162,8 @@ rendering and routing are covered in core (`product-*.test.ts`), not repeated he
 | unpublishing | A draft's documents, cards and alias pointers are deleted while it still owns its SKUs, and come back when it is active again; a dropped variant's pointer goes; deleting a product removes its documents and claims, and an unknown key is `unchanged` |
 | types, channels and categories | Types add versions only (a removed attribute is refused with a reason, a new type must start at 1) and an unversioned product pins to the latest; categories with an unknown parent or a cycle are refused and the published tree has localized names; a channel whose default locale isn't published is refused |
 
+`apps/catalog/tests/publisher.test.ts` covers `CatalogPublisher`'s pieces: `publisherOf` sends a key to the same publisher every time and spreads 8,000 keys over 8 publishers within 150 of an even split, and `runOps` runs R2 and KV puts (with content type and `version` metadata) and deletes. The rest of the catalog suite publishes through the publishers (the default fanout of 8, real objects in workerd), so `settle()` and every published-object assertion also cover the shard-to-publisher path.
+
 `apps/catalog/tests/deletes.test.ts` covers the deletes: a type products use is refused with a count and an unused one loses every version (an unknown one is refused); a category with products or with children outside the set is refused, and leaves and their parent delete together; a channel's delete takes down its documents, alias pointers, cards and category tree and leaves other channels alone.
 
 The writing-products group also checks the `u:f1:<key>` uid entry in KV, and its second write is

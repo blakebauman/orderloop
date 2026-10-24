@@ -519,7 +519,7 @@ export class CatalogShard extends DurableObject<Env> {
       revs.includes(null) ? undefined : Math.max(...(revs as number[])),
     );
     const forced = new Set(mine.filter((r) => r.forced).map((r) => r.key));
-    const changes = await publishKeys(this, keys, config, forced);
+    const changes = await publishKeys(this, keys, config, forced, this.setting('shard') ?? 0);
     // Listing indexes follow from these (listings.ts). Sent before the outbox rows go, so a crash
     // here republishes and sends them again; indexers order changes by `at`.
     for (let i = 0; i < changes.length; i += 100)

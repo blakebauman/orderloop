@@ -21,14 +21,17 @@
       // One per channel and category: who is listed there, and its listing index.
       { "name": "LISTINGS", "class_name": "ListingIndexer" },
       // Keyword search, 16 shards by key (core's searchShard).
-      { "name": "SEARCH", "class_name": "SearchShard" }
+      { "name": "SEARCH", "class_name": "SearchShard" },
+      // The storage writes of each shard's publishes, PUBLISH_FANOUT per shard (publisher.ts).
+      { "name": "PUBLISHERS", "class_name": "CatalogPublisher" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["CatalogShard", "CatalogMeta"] },
     { "tag": "v2", "new_sqlite_classes": ["CatalogFeeds"] },
     { "tag": "v3", "new_sqlite_classes": ["ListingIndexer"] },
-    { "tag": "v4", "new_sqlite_classes": ["SearchShard"] }
+    { "tag": "v4", "new_sqlite_classes": ["SearchShard"] },
+    { "tag": "v5", "new_sqlite_classes": ["CatalogPublisher"] }
   ],
   "workflows": [
     {
@@ -94,6 +97,9 @@
     "ORDERS_CHANNEL": "web",
     // A minimum wait before a listing index builds. 0: a new category's index builds at once.
     // Tests set it to an hour and run builds themselves, so none is left running at teardown.
-    "LISTING_DELAY_MS": "0"
+    "LISTING_DELAY_MS": "0",
+    // Publishers each shard spreads its storage writes over: an invocation has only six writes in
+    // flight, so this multiplies how fast a shard publishes (publisher.ts).
+    "PUBLISH_FANOUT": "8"
   }
 }

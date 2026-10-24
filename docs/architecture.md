@@ -32,7 +32,7 @@ inbound mail ── Email Routing ──email()───────────
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
-| `apps/catalog` (`@orderloop/catalog`) | The product catalog Worker: `CatalogShard` and `CatalogMeta` Durable Objects, the publisher, `CatalogApi` |
+| `apps/catalog` (`@orderloop/catalog`) | The product catalog Worker: `CatalogShard`, `CatalogMeta` and `CatalogPublisher` Durable Objects, the publisher, `CatalogApi` |
 | `apps/catalog-edge` (`@orderloop/catalog-edge`) | The public, read-only catalog API: the gateway, the cached `Delivery` entrypoint and the purge queue consumer |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, Commerce page, `/api/v1` |
 | `apps/docs` (`@orderloop/docs`) | This site |
@@ -361,6 +361,21 @@ keyword search indexes, one `SearchEntry` (`title`, `brand`, `skus`, `body`) per
 the product no longer lists in the channel. See [Listing indexes](#listing-indexes) and
 [Keyword search](#keyword-search).
 
+The shard renders and plans the writes but does not do them. A Workers invocation, a Durable
+Object alarm included, can have only six storage calls waiting for response headers at once (R2, KV
+and Queues calls all count, and a write's headers arrive when it is stored), so one shard's alarm
+alone published only a few products a second. `publishKeys` builds each write as a `WriteOp`
+(`publisher.ts`: an R2 or KV put, or an R2 or KV delete, as plain data that crosses RPC) and groups
+them by `publisherOf(key, PUBLISH_FANOUT)`, the FNV hash of `w:<key>` modulo the fanout (default 8).
+Each group goes to `CatalogPublisher` `pub-<shard>-<n>` (`publisher()` in `config.ts`, scoped to the
+jurisdiction like the other objects), whose `write(ops)` runs them through `runOps`, 16 in flight.
+`publishKeys` awaits every publisher and only then records `published` and returns the changes. With
+a fanout of 1 it runs the ops itself and makes no hop. One product's writes always go to the same
+publisher and the shard waits for every publisher before its next pass, so a product's writes are
+never reordered. Measured on production in October 2026: about 330 products a second across the 64
+shards for a 250,000-product feed (an alarm pass's p99 about 18 seconds, CPU about 1%). The
+publishers hold no state.
+
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards
 by key. After the alarm has published a pass, it sends the cache tag `p:<key>` of every product whose
@@ -666,6 +681,7 @@ Bundle: about 32 KiB (9.4 KiB gzipped), because it imports only `@orderloop/core
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite, migration tag `v3`), one per channel and category |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite, migration tag `v4`), 16 of them named `search-<n>` |
+| `PUBLISHERS` | catalog | Durable Object `CatalogPublisher` (SQLite, migration tag `v5`), `PUBLISH_FANOUT` per shard named `pub-<shard>-<n>`: the shards' storage writes |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes` (dead-letter queue `orderloop-catalog-changes-dlq`); producer and consumer are the catalog Worker |
 | `DB` | catalog | D1 `orderloop` (the web app's database): the catalog writes `products.name`, `price` and `catalog_at` ([Order Loop's products](#order-loops-products)) |
