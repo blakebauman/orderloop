@@ -1,6 +1,7 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+  - 'plugins/*'
 
 # Single source of truth for every dependency used by more than one workspace
 # package. Bump the version here and it moves everywhere at once.

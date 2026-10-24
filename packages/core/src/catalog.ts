@@ -893,7 +893,11 @@ export function nodeOutputs(type: string, config: Record<string, unknown> = {}):
 
 /** Config with every missing field filled from its default. */
 export function withDefaults(type: string, config: Record<string, unknown> = {}) {
-  const spec = BY_TYPE.get(type);
+  return specDefaults(BY_TYPE.get(type), config);
+}
+
+/** `withDefaults` for a spec in hand (a plugin's, which isn't in the built-in catalog). */
+export function specDefaults(spec: NodeSpec | undefined, config: Record<string, unknown> = {}) {
   const out: Record<string, unknown> = {};
   for (const f of spec?.fields ?? []) {
     if (f.default !== undefined) out[f.key] = structuredClone(f.default);
@@ -926,8 +930,12 @@ function fieldSchema(f: ConfigField): z.ZodType {
 export function validateConfig(type: string, config: Record<string, unknown>): string[] {
   const spec = BY_TYPE.get(type);
   if (!spec) return [`Unknown node type “${type}”`];
+  return validateFields(spec, withDefaults(type, config));
+}
+
+/** Checks config (defaults already filled in) against a spec's fields, then its own `validate`. */
+export function validateFields(spec: NodeSpec, merged: Record<string, unknown>): string[] {
   const errors: string[] = [];
-  const merged = withDefaults(type, config);
   for (const f of spec.fields) {
     const v = merged[f.key];
     if (v === undefined || v === '') {

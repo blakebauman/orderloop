@@ -35,6 +35,7 @@ import {
   validateGraph,
   withDefaults,
 } from '@orderloop/core';
+import { registry } from './plugins';
 
 export type { AiSource } from '@orderloop/core';
 
@@ -510,7 +511,7 @@ Rules: exactly one trigger node. Edges: {id, source, target, sourceHandle}. sour
     () => copilotHeuristic(req),
   );
   const graph = normalizeGraph(value.graph, req.graph);
-  const { errors, warnings } = validateGraph(graph);
+  const { errors, warnings } = validateGraph(graph, await registry(env));
   return { graph, explanation: value.explanation, errors, warnings };
 }
 

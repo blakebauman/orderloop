@@ -23,6 +23,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { isDemo } from './demo.server';
 import { db } from './env.server';
 import { summarizeFlow } from './new-order';
+import { nodeRegistry } from './plugins.server';
 
 let seeded = false;
 
@@ -66,6 +67,7 @@ export async function listFlows({ archived = false } = {}) {
     )
     .where(archived ? sql`${flows.archivedAt} is not null` : isNull(flows.archivedAt))
     .orderBy(flows.name);
+  const nodes = await nodeRegistry();
   return rows.map(({ graphJson, publishedJson, channels, ...r }) => {
     const g = JSON.parse(graphJson) as FlowGraph;
     const live = publishedJson ? (JSON.parse(publishedJson) as FlowGraph) : null;
@@ -74,7 +76,7 @@ export async function listFlows({ archived = false } = {}) {
       model: r.model as OrderModel,
       channels: JSON.parse(channels) as OrderChannel[],
       nodeCount: g.nodes.length,
-      summary: summarizeFlow(g),
+      summary: summarizeFlow(g, nodes),
       /** Published, and the draft has changed since. */
       dirty: !!live && !sameGraph(g, { nodes: live.nodes, edges: live.edges }),
     };
@@ -160,12 +162,12 @@ export function parseFlow(input: unknown): Flow {
 
 export async function saveFlow(flow: Flow) {
   await saveDraft(db(), flow);
-  return validateGraph(flow);
+  return validateGraph(flow, await nodeRegistry());
 }
 
 /** Publishes a new version, recording who published it (as the audit trail names them). */
 export async function publish(flow: Flow, publishedBy: string) {
-  const issues = validateGraph(flow);
+  const issues = validateGraph(flow, await nodeRegistry());
   if (issues.errors.length) return { ...issues, version: null };
   const version = await publishFlow(db(), flow, Date.now(), { publishedBy });
   return { ...issues, version };

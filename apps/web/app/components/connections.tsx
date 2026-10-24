@@ -4,16 +4,11 @@
  * including the cycle check. Loop back-edges ("next") are still drawn on the canvas.
  */
 
-import {
-  type FlowGraph,
-  type FlowNode,
-  isBackEdge,
-  nodeOutputs,
-  withDefaults,
-} from '@orderloop/core';
+import { type FlowGraph, type FlowNode, isBackEdge } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { X } from 'lucide-react';
 import { useId, useState } from 'react';
+import { useNodes } from '~/lib/nodes';
 import { edgeId, wouldCycle } from './flow-canvas';
 
 export function Connections({
@@ -25,7 +20,8 @@ export function Connections({
   graph: FlowGraph;
   onChange: (g: FlowGraph) => void;
 }) {
-  const outputs = nodeOutputs(node.type, withDefaults(node.type, node.config));
+  const nodes = useNodes();
+  const outputs = nodes.outputs(node.type, nodes.withDefaults(node.type, node.config));
   const baseId = useId();
   if (!outputs.length) return null;
   const label = (id: string) => graph.nodes.find((n) => n.id === id)?.label ?? id;

@@ -29,6 +29,7 @@ import { docs, engine } from '../app/lib/env.server';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
+import { PLUGINS_PATH, pluginFetch } from '../app/lib/plugins.server';
 import { setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
@@ -196,6 +197,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       new Request(`https://engine${path}${url.search}`, new Request(request, { headers })),
     );
   }
+
+  // Installed plugins' pages, on their own Workers (app/lib/plugins.server.ts).
+  if (url.pathname.startsWith(PLUGINS_PATH)) return pluginFetch(request);
 
   // Order documents (invoices, POs, inbound POs) from R2.
   if (url.pathname.startsWith('/docs/orders/')) {

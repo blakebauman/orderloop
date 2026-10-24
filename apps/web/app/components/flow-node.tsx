@@ -5,11 +5,12 @@
  * set below 11px.
  */
 
-import { type NodeCategory, type NodeRun, nodeOutputs, nodeSpec } from '@orderloop/core';
+import type { NodeCategory, NodeRun } from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';
 import { memo } from 'react';
 import { statusColor, statusLabel } from '~/lib/format';
+import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
 export type FlowNodeData = {
@@ -34,9 +35,10 @@ const CATEGORY_NAME: Record<NodeCategory, string> = {
 };
 
 function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) {
-  const spec = nodeSpec(data.type);
+  const nodes = useNodes();
+  const spec = nodes.spec(data.type);
   const category = (spec?.category ?? 'control') as NodeCategory;
-  const outputs = nodeOutputs(data.type, data.config);
+  const outputs = nodes.outputs(data.type, data.config);
   const multi = outputs.length > 1 || (outputs.length === 1 && outputs[0] !== 'out');
   const status = data.run?.status;
   const started = status && status !== 'pending';

@@ -3,7 +3,13 @@
  * ask of people. Shared by the new-order form (live preview) and its action (the real check).
  */
 
-import { type FlowGraph, isTrigger, nodeSpec, type OrderLine } from '@orderloop/core';
+import {
+  type FlowGraph,
+  isTrigger,
+  type NodeRegistry,
+  type OrderLine,
+  staticRegistry,
+} from '@orderloop/core';
 
 export type LineIssue = { line: string; problem: string };
 
@@ -78,12 +84,13 @@ export type FlowSummary = {
   routesFulfillment: boolean;
 };
 
-export function summarizeFlow(graph: FlowGraph): FlowSummary {
+/** `nodes` knows the installed plugins' nodes (their labels, and which roll back). */
+export function summarizeFlow(graph: FlowGraph, nodes: NodeRegistry = staticRegistry): FlowSummary {
   const labels = (pick: (type: string) => boolean) => [
     ...new Set(
       graph.nodes
         .filter((n) => pick(n.type))
-        .map((n) => n.label || nodeSpec(n.type)?.label || n.type),
+        .map((n) => n.label || nodes.spec(n.type)?.label || n.type),
     ),
   ];
   const has = (type: string) => graph.nodes.some((n) => n.type === type);
@@ -91,7 +98,7 @@ export function summarizeFlow(graph: FlowGraph): FlowSummary {
     steps: graph.nodes.filter((n) => !isTrigger(n) && n.type !== 'control.end').length,
     approvals: labels((t) => t === 'control.approval'),
     waits: labels((t) => t === 'control.wait_event'),
-    rollbacks: labels((t) => !!nodeSpec(t)?.rollback),
+    rollbacks: labels((t) => !!nodes.spec(t)?.rollback),
     readsDocument: has('ai.extract'),
     routesFulfillment: has('commerce.route_fulfillment'),
   };

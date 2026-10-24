@@ -20,6 +20,7 @@ export * from './lines';
 export * from './logic';
 export * from './money';
 export * from './payments';
+export * from './plugins';
 export * from './policy';
 export * from './pricing';
 export * from './provenance';

@@ -2,19 +2,21 @@
  * The fleet: one OrderLoop deployment per customer, each listed in deployments/<id>.jsonc.
  *
  *   node scripts/fleet.ts render <id>             write apps/{catalog,catalog-edge,engine,web}/wrangler.<id>.json
+ *                                                 and plugins/<plugin>/wrangler.<id>.json for each plugin
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
- *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
+ *   node scripts/fleet.ts secrets <engine|web|plugin> <out>  write this app's secrets from the environment
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
  *   node scripts/fleet.ts set-catalog-kv <id> <kv id>  record the catalog's card KV namespace id
+ *   node scripts/fleet.ts set-plugin-d1 <id> <plugin> <uuid>  record a plugin's D1 database id
  *   node scripts/fleet.ts demos                   the provisioned demo deployments, for the nightly reset
  *
  * A rendered config is the app's wrangler.jsonc with the deployment's names, ids and domain put
  * in, written next to it so its relative paths still resolve. See docs/operations.md.
  */
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyEdits, modify, type ParseError, parse, printParseErrorCode } from 'jsonc-parser';
@@ -72,6 +74,8 @@ const SECRETS = {
     'STRIPE_SECRET_KEY',
     'UCP_SIGNING_KEY',
   ],
+  // A plugin verifies the principal the web Worker signs onto its pages (docs/plugins.md).
+  plugin: ['PRINCIPAL_KEY', 'PRINCIPAL_KEY_PREVIOUS'],
 } as const;
 
 /**
@@ -142,7 +146,19 @@ export type Deployment = {
    * handler is offered. Only with `payments: "stripe"`.
    */
   stripePublishableKey?: string;
+  /**
+   * Installed plugins (plugins/<id>/), each with its own Worker and D1 database, bound to the
+   * engine and the web Worker as PLUGIN_<ID>. `d1Id` is set by scripts/provision.sh. Removing an
+   * entry uninstalls the plugin on the next deploy; see docs/plugins.md.
+   */
+  plugins: Record<string, { d1Id?: string }>;
 };
+
+/** Test fixtures in plugins/ that no deployment may install. */
+const FIXTURE_PLUGINS = new Set(['example']);
+
+/** A plugin's binding name, as `pluginBinding` in @orderloop/core makes it: "qbd-sync" → "PLUGIN_QBD_SYNC". */
+export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replaceAll('-', '_')}`;
 
 /** The registry's `limits` keys, and the web Worker's rate-limit binding each one sets. */
 const LIMITS = { api: 'API_LIMIT', agents: 'AGENT_LIMIT', webhooks: 'WEBHOOK_LIMIT' } as const;
@@ -241,6 +257,23 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     if (payments !== 'stripe')
       throw new Error(`${file}: stripePublishableKey needs payments "stripe"`);
   }
+  const plugins = raw.plugins ?? {};
+  if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins))
+    throw new Error(`${file}: plugins must be an object of plugin id → { "d1Id"? }`);
+  for (const [p, v] of Object.entries(plugins as Record<string, unknown>)) {
+    if (!/^[a-z][a-z0-9-]{1,30}$/.test(p))
+      throw new Error(
+        `${file}: plugins.${p} is not a plugin id (lowercase letters, digits, dashes)`,
+      );
+    if (FIXTURE_PLUGINS.has(p)) throw new Error(`${file}: plugins.${p} is a test fixture`);
+    const d1 = (v as { d1Id?: unknown } | null)?.d1Id;
+    if (
+      typeof v !== 'object' ||
+      v === null ||
+      (d1 !== undefined && (typeof d1 !== 'string' || !d1))
+    )
+      throw new Error(`${file}: plugins.${p} must be { "d1Id"? }`);
+  }
   return {
     id,
     ring,
@@ -268,6 +301,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(sso ? { sso: { issuer: sso.issuer as string, clientId: sso.clientId as string } } : {}),
     payments,
     ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
+    plugins: plugins as Deployment['plugins'],
   };
 }
 
@@ -289,6 +323,10 @@ export function loadDeployments(dir = join(ROOT, 'deployments')): Deployment[] {
     }
   }
   if (list.filter((d) => d.docs).length > 1) throw new Error('only one deployment sets docs');
+  for (const d of list)
+    for (const p of Object.keys(d.plugins))
+      if (!existsSync(join(ROOT, 'plugins', p, 'wrangler.jsonc')))
+        throw new Error(`${d.id}: plugin "${p}" has no plugins/${p}/wrangler.jsonc`);
   return list;
 }
 
@@ -311,7 +349,31 @@ export const names = (d: Deployment) => ({
   catalogPurgeDlq: `orderloop-catalog-purge-dlq${d.suffix}`,
   // Analytics Engine dataset names allow letters, digits and underscores.
   catalogEdgeDataset: `orderloop_catalog_edge${d.suffix.replaceAll('-', '_')}`,
+  /** A plugin's Worker and its D1 database share a name. */
+  plugin: (p: string) => `orderloop-plugin-${p}${d.suffix}`,
 });
+
+/** The engine's and web Worker's service bindings to the deployment's plugins. */
+function pluginServices(d: Deployment) {
+  return Object.keys(d.plugins)
+    .sort()
+    .map((p) => ({ binding: pluginBinding(p), service: names(d).plugin(p) }));
+}
+
+export function renderPlugin(base: Config, d: Deployment, p: string): Config {
+  const d1Id = d.plugins[p]?.d1Id;
+  if (!d1Id) throw new Error(`${d.id}: plugin ${p} has no d1Id: run scripts/provision.sh ${d.id}`);
+  const config = structuredClone(base);
+  config.name = names(d).plugin(p);
+  config.workers_dev = false;
+  config.preview_urls = false;
+  config.d1_databases = (config.d1_databases ?? []).map((db: Config) => ({
+    ...db,
+    database_name: names(d).plugin(p),
+    database_id: d1Id,
+  }));
+  return config;
+}
 
 // biome-ignore lint/suspicious/noExplicitAny: a wrangler config is JSON read as is
 type Config = Record<string, any>;
@@ -337,6 +399,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   // Workflow names are unique per account, so each deployment's carry its suffix.
   config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
   storage(config, d);
+  const plugins = pluginServices(d);
+  if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
@@ -444,13 +508,16 @@ export function renderWeb(base: Config, d: Deployment): Config {
   config.routes = [{ pattern: d.domain, custom_domain: true }];
   config.workers_dev = false;
   config.preview_urls = false;
-  config.services = config.services.map((s: Config) =>
-    s.binding === 'ENGINE'
-      ? { ...s, service: n.engine }
-      : s.binding === 'CATALOG'
-        ? { ...s, service: n.catalog }
-        : s,
-  );
+  config.services = [
+    ...config.services.map((s: Config) =>
+      s.binding === 'ENGINE'
+        ? { ...s, service: n.engine }
+        : s.binding === 'CATALOG'
+          ? { ...s, service: n.catalog }
+          : s,
+    ),
+    ...pluginServices(d),
+  ];
   // Rate-limit namespaces are per account: slot 1 keeps the base ids (1001, 1002), slot 2 uses
   // 2001, 2002, and so on.
   // The registry's `limits` replace a binding's requests a minute; the period stays 60 seconds.
@@ -490,14 +557,25 @@ function render(id: string | undefined) {
     );
     console.log(out);
   }
+  for (const p of Object.keys(d.plugins)) {
+    const out = join(ROOT, 'plugins', p, `wrangler.${d.id}.json`);
+    const base = readJsonc(join(ROOT, 'plugins', p, 'wrangler.jsonc'));
+    writeFileSync(out, `${JSON.stringify(renderPlugin(base, d, p), null, 2)}\n`);
+    console.log(out);
+  }
 }
 
 /** `{ staging: [...], internal: [...], ... }`, held deployments left out. */
 export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
-  const unprovisioned = list.filter((d) => !d.hold && (!d.d1Id || !d.catalogKvId)).map((d) => d.id);
+  const unprovisioned = list
+    .filter(
+      (d) =>
+        !d.hold && (!d.d1Id || !d.catalogKvId || Object.values(d.plugins).some((p) => !p.d1Id)),
+    )
+    .map((d) => d.id);
   if (unprovisioned.length)
     throw new Error(
-      `not provisioned (no d1Id or catalogKvId): ${unprovisioned.join(', ')}; provision or hold them`,
+      `not provisioned (no d1Id, catalogKvId or plugin d1Id): ${unprovisioned.join(', ')}; provision or hold them`,
     );
   return Object.fromEntries(
     RINGS.map((ring) => [ring, list.filter((d) => d.ring === ring && !d.hold)]),
@@ -520,8 +598,9 @@ export function secretsProblem(d: Deployment, env: Record<string, string | undef
 }
 
 function secrets(app: string | undefined, out: string | undefined, id?: string) {
-  if (app !== 'web' && app !== 'engine') throw new Error('secrets <engine|web> <out> [id]');
-  if (!out) throw new Error('secrets <engine|web> <out> [id]');
+  if (app !== 'web' && app !== 'engine' && app !== 'plugin')
+    throw new Error('secrets <engine|web|plugin> <out> [id]');
+  if (!out) throw new Error('secrets <engine|web|plugin> <out> [id]');
   const missing = REQUIRED_SECRETS.filter((k) => !process.env[k]);
   if (missing.length)
     throw new Error(
@@ -559,6 +638,9 @@ function shellNames(id: string | undefined) {
     JURISDICTION: d.jurisdiction ?? '',
     AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
     AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
+    // Space-separated plugin ids; each one's D1 database is named orderloop-plugin-<id><suffix>.
+    PLUGINS: Object.keys(d.plugins).sort().join(' '),
+    SUFFIX: d.suffix,
   };
   for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
 }
@@ -569,6 +651,19 @@ function setField(id: string | undefined, field: 'd1Id' | 'catalogKvId', value: 
   const file = join(ROOT, 'deployments', `${d.id}.jsonc`);
   const text = readFileSync(file, 'utf8');
   const edits = modify(text, [field], value, {
+    formattingOptions: { insertSpaces: true, tabSize: 2 },
+  });
+  writeFileSync(file, applyEdits(text, edits));
+}
+
+function setPluginD1(id: string | undefined, plugin: string | undefined, uuid: string | undefined) {
+  if (!plugin || !uuid || !/^[0-9a-f-]{36}$/.test(uuid))
+    throw new Error('set-plugin-d1 <id> <plugin> <uuid>');
+  const d = byId(id);
+  if (!(plugin in d.plugins)) throw new Error(`${d.id} doesn't install plugin ${plugin}`);
+  const file = join(ROOT, 'deployments', `${d.id}.jsonc`);
+  const text = readFileSync(file, 'utf8');
+  const edits = modify(text, ['plugins', plugin, 'd1Id'], uuid, {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   });
   writeFileSync(file, applyEdits(text, edits));
@@ -612,11 +707,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
     else if (cmd === 'set-catalog-kv') setCatalogKv(args[0], args[1]);
+    else if (cmd === 'set-plugin-d1') setPluginD1(args[0], args[1], args[2]);
     else if (cmd === 'demos')
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv (see the header)',
+        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1 (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

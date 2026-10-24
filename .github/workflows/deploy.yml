@@ -74,7 +74,12 @@ jobs:
           chmod +x "$HOME/.local/bin/retry"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Render config
-        run: node scripts/fleet.ts render "$ID"
+        env:
+          DEPLOYMENT: ${{ inputs.deployment }}
+        run: |
+          node scripts/fleet.ts render "$ID"
+          # Installed plugins (plugins/<id>/), space-separated; empty for most deployments.
+          echo "PLUGINS=$(jq -r '.plugins // {} | keys | join(" ")' <<<"$DEPLOYMENT")" >> "$GITHUB_ENV"
       # Only the secrets set in the environment; `--secrets-file` adds to a Worker's secrets and
       # never removes one, so a secret set by hand survives.
       - name: Collect secrets
@@ -94,6 +99,7 @@ jobs:
         run: |
           node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json" "$ID"
           node scripts/fleet.ts secrets web "$RUNNER_TEMP/web-secrets.json"
+          node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-secrets.json"
       # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
       # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
       - name: Record D1 bookmark
@@ -122,6 +128,18 @@ jobs:
       - name: Deploy catalog-edge
         id: catalog_edge
         run: retry pnpm --filter @orderloop/catalog-edge exec wrangler deploy --config "$CONFIG"
+      # Each plugin's own D1 migrations, then its Worker: the engine and the web Worker bind to it,
+      # so it goes before them. Like the core's, a plugin's migrations must be additive. Each one
+      # deployed is listed, so a failure rolls it back with the rest.
+      - name: Deploy plugins
+        id: plugins
+        if: env.PLUGINS != ''
+        run: |
+          for p in $PLUGINS; do
+            retry pnpm --filter "./plugins/$p" exec wrangler d1 migrations apply DB --remote --config "$CONFIG"
+            retry pnpm --filter "./plugins/$p" exec wrangler deploy --config "$CONFIG" --secrets-file "$RUNNER_TEMP/plugin-secrets.json"
+            echo "$p" >> "$RUNNER_TEMP/plugins-deployed"
+          done
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
         id: engine
@@ -164,6 +182,11 @@ jobs:
           if [ "${{ steps.engine.outcome }}" = "success" ]; then
             retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg" --config "$CONFIG"
           fi
+          # A plugin's first deploy has no earlier version to go back to.
+          [ -f "$RUNNER_TEMP/plugins-deployed" ] && while read -r p; do
+            retry pnpm --filter "./plugins/$p" exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
+              || echo "No earlier version of plugin $p to roll back to"
+          done <"$RUNNER_TEMP/plugins-deployed"
           # A deployment's first catalog or catalog-edge has no earlier version to go back to.
           if [ "${{ steps.catalog_edge.outcome }}" = "success" ]; then
             retry pnpm --filter @orderloop/catalog-edge exec wrangler rollback -y -m "$msg" --config "$CONFIG" \

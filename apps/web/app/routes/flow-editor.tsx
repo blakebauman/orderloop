@@ -41,6 +41,7 @@ import { Palette } from '~/components/palette';
 import { useAssistant, usePageContext } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { getFlow } from '~/lib/flows.server';
+import { useNodes } from '~/lib/nodes';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/flow-editor';
 
@@ -117,7 +118,8 @@ export default function FlowEditor() {
   const save = useFetcher<ActionResult>();
 
   const dirty = JSON.stringify(flow) !== baseline;
-  const issues = useMemo(() => validateGraph(flow), [flow]);
+  const nodes = useNodes();
+  const issues = useMemo(() => validateGraph(flow, nodes), [flow, nodes]);
   const publishStatusId = useId();
   const nodeIssues = useMemo(
     () =>
@@ -228,7 +230,7 @@ export default function FlowEditor() {
     const pos =
       position ??
       (anchor ? { x: anchor.position.x + 280, y: anchor.position.y } : { x: 56, y: 160 });
-    const n = makeNode(flow, type, pos);
+    const n = makeNode(nodes, flow, type, pos);
     setFlow((f) => {
       const edges = [...f.edges];
       // Clicking a palette item with a single-output node selected wires it in after that node.

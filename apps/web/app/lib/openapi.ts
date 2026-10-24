@@ -590,6 +590,28 @@ export function openApiDocument(serverUrl: string) {
           responses: { '200': ok('Revoked'), ...errors },
         },
       },
+      '/api/v1/plugins': {
+        get: {
+          summary:
+            'The installed plugins, with their node types and the events they receive (admin)',
+          responses: {
+            '200': ok('{ plugins: [{ id, name, version, nodes, events }] }'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/plugins/{id}/usage': {
+        get: {
+          summary: "What uses a plugin's nodes: check this is empty before removing it (admin)",
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': ok(
+              '{ flows: [{ id, version }], orders: [{ id, flowId, version }] }: published flows and running orders',
+            ),
+            ...errors,
+          },
+        },
+      },
       '/api/v1/ucp': {
         get: {
           summary: 'Agentic checkout: its settings and the AI shopping platforms let in (admin)',

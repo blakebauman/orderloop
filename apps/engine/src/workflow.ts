@@ -26,17 +26,20 @@ import {
   initPlan,
   interpolate,
   NODE_EVENTS,
-  nodeSpec,
+  type NodeRegistry,
   type Order,
   type OrderStatus,
   type OutboundEvent,
   orderReference,
   type PendingWait,
   type PlanState,
+  type PluginManifest,
+  pluginOf,
   type RunContext,
   readyNodes,
+  staticRegistry,
   truthy,
-  withDefaults,
+  withPlugins,
 } from '@orderloop/core';
 import type { Report } from './agent';
 import { loadFlowVersion } from './flows';
@@ -44,6 +47,7 @@ import { orderAgent } from './namespaces';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
 import { instanceExists } from './orders';
 import { emit, orderSummary } from './outbox';
+import { execPluginNode, manifests, pluginRollback, usesPlugins } from './plugins';
 
 export type OrderLoopParams = {
   orderId: string;
@@ -82,6 +86,15 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         return JSON.stringify(f);
       }),
     ) as FlowVersion;
+    // A flow with plugin nodes reads the installed plugins' specs once, durably, so a replay sees
+    // the same specs even if a plugin is redeployed meanwhile. Other flows add no step.
+    const registry: NodeRegistry = usesPlugins(flow)
+      ? withPlugins(
+          JSON.parse(
+            await step.do('load-plugins', async () => JSON.stringify(await manifests(this.env))),
+          ) as PluginManifest[],
+        )
+      : staticRegistry;
 
     const plan = initPlan(flow);
     const ctx: RunContext = {
@@ -114,14 +127,14 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       const nodes = ready.map((id) => flow.nodes.find((n) => n.id === id)!);
       const keys = nodes.map((n) => beginNode(plan, n.id));
       for (const n of nodes)
-        if (nodeSpec(n.type)?.waits || n.type === 'control.wait')
+        if (registry.spec(n.type)?.waits || n.type === 'control.wait')
           plan.nodes[n.id]!.status = 'waiting';
       await snapshot(
         nodes.some((n) => plan.nodes[n.id]!.status === 'waiting') ? 'waiting' : 'running',
       );
 
       const outcomes = await Promise.all(
-        nodes.map((n, i) => this.runNode(step, plan, ctx, n, keys[i]!, p, report)),
+        nodes.map((n, i) => this.runNode(step, plan, ctx, n, keys[i]!, p, report, registry)),
       );
 
       // Apply in graph order so the plan is identical on replay.
@@ -191,11 +204,12 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     key: string,
     p: OrderLoopParams,
     report: (r: Omit<Report, 'seq' | 'generation'>, durable?: boolean) => Promise<void>,
+    registry: NodeRegistry,
   ): Promise<Outcome> {
     const env = this.env;
     const agent = orderAgent(env, p.orderId);
-    const spec = nodeSpec(node.type);
-    const config = withDefaults(node.type, node.config);
+    const spec = registry.spec(node.type);
+    const config = registry.withDefaults(node.type, node.config);
     const str = (v: unknown) => (typeof v === 'string' ? v : '');
     const fx = effectKey(p.generation, key);
 
@@ -332,9 +346,14 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         return { kind: 'continue' };
     }
 
-    const exec = EXECUTORS[node.type];
+    const fromPlugin = pluginOf(node.type) !== null;
+    const exec = EXECUTORS[node.type] ?? (fromPlugin ? execPluginNode : undefined);
     if (!exec) throw new NonRetryableError(`No executor for ${node.type}`);
-    const rollback = spec?.rollback ? ROLLBACKS[node.type] : undefined;
+    const rollback = !spec?.rollback
+      ? undefined
+      : fromPlugin
+        ? pluginRollback(node.type, node.id, fx)
+        : ROLLBACKS[node.type];
     const retries = node.retries ?? spec?.retries ?? 3;
     try {
       const result = (await step.do(

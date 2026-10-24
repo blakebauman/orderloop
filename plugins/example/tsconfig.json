@@ -1,0 +1,7 @@
+{
+  "extends": "@orderloop/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "worker-configuration.d.ts", "test-worker.ts"]
+}

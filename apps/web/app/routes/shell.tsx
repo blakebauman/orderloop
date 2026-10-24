@@ -25,13 +25,16 @@ import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
 import { db } from '~/lib/env.server';
+import { NodesProvider } from '~/lib/nodes';
+import { pluginManifests } from '~/lib/plugins.server';
 import { type ThemeChoice, useTheme } from '~/lib/theme';
 import type { Route } from './+types/shell';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
   // Until their two-factor sign-in is set up, a person sees only their Account page.
-  if (me.twoFactorDue || me.passwordChangeDue) return { pending: 0, auth: true, me, nav: false };
+  if (me.twoFactorDue || me.passwordChangeDue)
+    return { pending: 0, auth: true, me, nav: false, plugins: [] };
   const pending = await db()
     .select({ n: sql<number>`count(*)` })
     .from(approvals)
@@ -46,7 +49,15 @@ export async function loader({ request }: Route.LoaderArgs) {
         .where(and(eq(users.role, 'admin'), isNull(users.disabledAt)))
         .orderBy(users.name)
         .limit(3);
-  return { pending: pending?.n ?? 0, auth: await authEnabled(), me, nav: true, admins };
+  return {
+    pending: pending?.n ?? 0,
+    auth: await authEnabled(),
+    me,
+    nav: true,
+    admins,
+    // Installed plugins: their nodes in the editor, their pages in the nav.
+    plugins: await pluginManifests(),
+  };
 }
 
 /**
@@ -102,7 +113,9 @@ export function shouldRevalidate({
   return defaultShouldRevalidate;
 }
 
-const NAV = [
+type NavItem = { to: string; label: string; end?: boolean; badge?: boolean; document?: boolean };
+
+const NAV: NavItem[] = [
   { to: '/', label: 'Overview', end: true },
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals', badge: true },
@@ -126,10 +139,13 @@ function PendingCount({ n }: { n: number }) {
 }
 
 export default function Shell() {
+  const { plugins } = useLoaderData<typeof loader>();
   return (
-    <AssistantProvider>
-      <ShellFrame />
-    </AssistantProvider>
+    <NodesProvider plugins={plugins}>
+      <AssistantProvider>
+        <ShellFrame />
+      </AssistantProvider>
+    </NodesProvider>
   );
 }
 
@@ -168,9 +184,17 @@ function AssistantToggle() {
 }
 
 function ShellFrame() {
-  const { pending, auth, me, nav: showNav } = useLoaderData<typeof loader>();
+  const { pending, auth, me, nav: showNav, plugins } = useLoaderData<typeof loader>();
   const operator = showNav && atLeast(me.role, 'operator');
-  const nav = showNav ? NAV : [];
+  // A plugin's pages are served by its own Worker, so its links load a whole document.
+  const nav: NavItem[] = showNav
+    ? [
+        ...NAV,
+        ...plugins.flatMap((p) =>
+          p.nav.map((n) => ({ to: n.path, label: n.label, document: true })),
+        ),
+      ]
+    : [];
   const theme = useTheme();
   const ThemeIcon = THEMES.find((t) => t.value === theme.choice)?.icon ?? Sun;
   return (
@@ -193,11 +217,12 @@ function ShellFrame() {
             <span className="hidden sm:inline">OrderLoop</span>
           </Link>
           <nav aria-label="Main" className="-mb-px hidden h-full items-stretch gap-1 md:flex">
-            {nav.map(({ to, label, end, badge }) => (
+            {nav.map(({ to, label, end, badge, document }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={end}
+                reloadDocument={document}
                 className={({ isActive }) =>
                   cn(
                     'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors',
@@ -271,11 +296,12 @@ function ShellFrame() {
                 <Menu className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                {nav.map(({ to, label, end, badge }) => (
+                {nav.map(({ to, label, end, badge, document }) => (
                   <DropdownMenuItem key={to} asChild>
                     <NavLink
                       to={to}
                       end={end}
+                      reloadDocument={document}
                       className="justify-between aria-[current=page]:font-medium"
                     >
                       {label}

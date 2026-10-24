@@ -25,6 +25,7 @@ import { ensureSeeded } from '~/lib/flows.server';
 import { count, humanize } from '~/lib/format';
 import { addOne, describeIssues, parseLines, summarizeFlow } from '~/lib/new-order';
 import { commerceData, currencies, demoAvailable, publishedFlowGraphs } from '~/lib/orders.server';
+import { nodeRegistry } from '~/lib/plugins.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
@@ -33,17 +34,18 @@ export const meta = () => [{ title: 'New order · OrderLoop' }];
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request, 'operator');
   await ensureSeeded();
-  const [flows, office, demo] = await Promise.all([
+  const [flows, office, demo, nodes] = await Promise.all([
     publishedFlowGraphs(),
     commerceData(),
     demoAvailable(),
+    nodeRegistry(),
   ]);
   // "Edit first" on the scenarios page: the scenario's order without its simulated failure.
   const from = demo
     ? SCENARIOS.find((s) => s.id === new URL(request.url).searchParams.get('scenario'))
     : undefined;
   return {
-    flows: flows.map(({ graph, ...f }) => ({ ...f, summary: summarizeFlow(graph) })),
+    flows: flows.map(({ graph, ...f }) => ({ ...f, summary: summarizeFlow(graph, nodes) })),
     demo,
     from: from ? { label: from.label, flowId: from.flowId, input: from.input } : null,
     customers: office.customers,

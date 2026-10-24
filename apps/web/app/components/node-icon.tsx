@@ -27,6 +27,7 @@ import {
   PackageOpen,
   Percent,
   Play,
+  Puzzle,
   Repeat,
   RotateCw,
   Route,
@@ -113,7 +114,8 @@ export function NodeIcon({
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const Icon = ICONS[name] ?? Play;
+  // A plugin can name any icon; one this set doesn't have shows as a puzzle piece.
+  const Icon = ICONS[name] ?? Puzzle;
   return <Icon className={className} style={style} aria-hidden="true" />;
 }
 

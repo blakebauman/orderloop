@@ -27,6 +27,15 @@ echo "Recorded d1Id $uuid in deployments/$id.jsonc"
 
 wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already exists"
 
+# Each installed plugin's own D1 database (docs/plugins.md), named like its Worker.
+for p in $PLUGINS; do
+  pdb="orderloop-plugin-$p$SUFFIX"
+  wrangler d1 create "$pdb" ${j[@]+"${j[@]}"} || echo "D1 database $pdb already exists"
+  puuid=$(wrangler d1 info "$pdb" --json | jq -er .uuid)
+  node scripts/fleet.ts set-plugin-d1 "$id" "$p" "$puuid"
+  echo "Recorded plugins.$p.d1Id $puuid in deployments/$id.jsonc"
+done
+
 # The catalog: published documents in R2, listing cards in KV (KV has no jurisdictions).
 wrangler r2 bucket create "$CATALOG_R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $CATALOG_R2 already exists"
 kv_id() { wrangler kv namespace list | jq -er --arg t "$CATALOG_KV" '.[] | select(.title == $t) | .id'; }

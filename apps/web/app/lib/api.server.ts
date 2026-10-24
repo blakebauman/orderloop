@@ -31,6 +31,9 @@
  *   POST   /api/v1/integrations/:id/rotate      new secret; the old one works for 24 hours
  *   DELETE /api/v1/integrations/:id             revoke
  *
+ *   GET    /api/v1/plugins                      installed plugins and their node types (admin)
+ *   GET    /api/v1/plugins/:id/usage            flows and running orders using its nodes (admin)
+ *
  *   GET    /api/v1/ucp                          agentic checkout: settings and platforms (admin)
  *   POST   /api/v1/ucp/settings                 { checkoutFlowId, links?, orderUrl? }
  *   POST   /api/v1/ucp/platforms                { name, profileUrl } → API key, once
@@ -60,6 +63,7 @@ import {
   type InboundOrder,
   inboundFingerprint,
   inboundOrderSchema,
+  PLUGIN_ID_RE,
   type Principal,
   parseEdiPartners,
   parseOrderRoutes,
@@ -110,6 +114,7 @@ import {
   touchIntegration,
 } from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
+import { pluginManifests } from './plugins.server';
 import { overBudget } from './rate-limit';
 import {
   addPlatform,
@@ -215,6 +220,23 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     if (parts[0] === 'catalog') return await handleCatalog(request, caller, parts);
     if (parts[0] === 'data-subjects')
       return need('admin') ?? (await handleDataSubjects(request, caller, parts, body));
+    if (parts[0] === 'plugins' && request.method === 'GET') {
+      const denied = need('admin');
+      if (denied) return denied;
+      if (parts.length === 1)
+        return json({
+          plugins: (await pluginManifests()).map((m) => ({
+            id: m.id,
+            name: m.name,
+            version: m.version,
+            nodes: m.nodes.map((n) => n.type),
+            events: m.events,
+          })),
+        });
+      if (parts.length === 3 && parts[2] === 'usage' && PLUGIN_ID_RE.test(parts[1]!))
+        return json(await engine().pluginUsage(parts[1]!));
+      return json({ error: 'Not found' }, 404);
+    }
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {

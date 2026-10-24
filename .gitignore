@@ -21,3 +21,4 @@ worker-configuration.d.ts.bak
 
 # Rendered per deployment by scripts/fleet.ts render <id>
 apps/*/wrangler.*.json
+plugins/*/wrangler.*.json

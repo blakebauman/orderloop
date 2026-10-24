@@ -1,6 +1,8 @@
 /**
  * Outbound webhooks. `emit` records one delivery per matching subscription, keyed by the step that
- * emitted it, then attempts every delivery for that key that hasn't succeeded yet. It never throws:
+ * emitted it, then attempts every delivery for that key that hasn't succeeded yet. Installed
+ * plugins that subscribe to the event get a delivery too (subscription id `plugin:<id>`), sent
+ * over their binding instead of HTTP, with the same ids and retries. It never throws:
  * the caller's step throws on `pending > 0` so Workflows retries with backoff, and the interpreter
  * swallows the final failure so a dead endpoint can't fail an order.
  */
@@ -19,8 +21,11 @@ import {
 import { createDb, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { openSecret } from './data-key';
+import { deliverToPlugin, manifests } from './plugins';
 
 const TIMEOUT_MS = 10_000;
+/** The subscription id of a plugin's deliveries: `plugin:<id>`. */
+export const PLUGIN_SUBSCRIPTION = 'plugin:';
 
 export async function emit(
   env: Env,
@@ -33,12 +38,16 @@ export async function emit(
   const subs = (
     await d.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.active, true))
   ).filter((s) => subscribedTo(parseEvents(s.events), event));
-  if (!subs.length) return { delivered: 0, pending: 0 };
+  const plugins = (await manifests(env))
+    .filter((m) => subscribedTo(m.events, event))
+    .map((m) => ({ id: `${PLUGIN_SUBSCRIPTION}${m.id}` }));
+  const targets = [...subs, ...plugins];
+  if (!targets.length) return { delivered: 0, pending: 0 };
 
   const secrets = new Map(subs.map((s) => [s.id, s]));
-  const ids = subs.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
+  const ids = targets.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
   const now = Date.now();
-  const [first, ...rest] = subs.map((s, i) => {
+  const [first, ...rest] = targets.map((s, i) => {
     const payload: OutboundPayload = { id: ids[i]!, event, occurredAt: now, orderId, data };
     return d
       .insert(webhookDeliveries)
@@ -61,6 +70,11 @@ export async function emit(
   // Every subscriber at once: one slow receiver must not use up the step's time for the rest.
   const sent = await Promise.all(
     open.map(async (row) => {
+      if (row.subscriptionId.startsWith(PLUGIN_SUBSCRIPTION)) {
+        const id = row.subscriptionId.slice(PLUGIN_SUBSCRIPTION.length);
+        const res = await deliverToPlugin(env, id, JSON.parse(row.payload) as OutboundPayload);
+        return { row, res };
+      }
       const sub = secrets.get(row.subscriptionId);
       if (!sub) return null;
       const res = await send(env, sub, row.id, row.event, row.payload);

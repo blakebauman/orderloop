@@ -6,9 +6,11 @@ import { parse } from 'jsonc-parser';
 import {
   loadDeployments,
   matrix,
+  pluginBinding,
   renderCatalog,
   renderCatalogEdge,
   renderEngine,
+  renderPlugin,
   renderWeb,
   secretsProblem,
   toDeployment,
@@ -310,4 +312,54 @@ test('a Stripe deployment needs STRIPE_SECRET_KEY in the same mode as its publis
     /both test or both live/,
   );
   assert.equal(secretsProblem(stripe, { STRIPE_SECRET_KEY: 'rk_test_x' }), null);
+});
+
+const withLedger = toDeployment({
+  id: 'acme',
+  ring: 'canary',
+  slot: 2,
+  d1Id: 'd1-acme',
+  catalogKvId: 'a'.repeat(32),
+  plugins: { ledger: { d1Id: 'd1-ledger' } },
+});
+
+test('no plugins changes nothing in the engine and web configs', () => {
+  const none = toDeployment({ id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1-acme' });
+  assert.deepEqual(none.plugins, {});
+  assert.deepEqual(renderEngine(base('engine'), none).services, base('engine').services);
+  const bindings = (c: { services: { binding: string }[] }) => c.services.map((s) => s.binding);
+  assert.deepEqual(bindings(renderWeb(base('web'), none)), bindings(base('web')));
+});
+
+test('a plugin is bound to the engine and the web Worker by its own Worker name', () => {
+  const binding = { binding: 'PLUGIN_LEDGER', service: 'orderloop-plugin-ledger-acme' };
+  assert.deepEqual(renderEngine(base('engine'), withLedger).services.at(-1), binding);
+  assert.deepEqual(renderWeb(base('web'), withLedger).services.at(-1), binding);
+});
+
+test('a plugin config gets its own name and database', () => {
+  const pluginBase = { name: 'orderloop-plugin-ledger', d1_databases: [{ binding: 'DB' }] };
+  const c = renderPlugin(pluginBase, withLedger, 'ledger');
+  assert.equal(c.name, 'orderloop-plugin-ledger-acme');
+  assert.deepEqual(c.d1_databases[0], {
+    binding: 'DB',
+    database_name: 'orderloop-plugin-ledger-acme',
+    database_id: 'd1-ledger',
+  });
+  assert.throws(
+    () => renderPlugin(pluginBase, { ...withLedger, plugins: { ledger: {} } }, 'ledger'),
+    /no d1Id/,
+  );
+});
+
+test('plugins are checked: ids, fixtures and provisioning', () => {
+  const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+  assert.throws(() => toDeployment({ ...raw, plugins: ['ledger'] }), /plugins must be an object/);
+  assert.throws(() => toDeployment({ ...raw, plugins: { Bad_Id: {} } }), /not a plugin id/);
+  assert.throws(() => toDeployment({ ...raw, plugins: { example: {} } }), /test fixture/);
+  assert.throws(
+    () => matrix([toDeployment({ ...raw, plugins: { ledger: {} } })]),
+    /not provisioned/,
+  );
+  assert.equal(pluginBinding('qbd-sync'), 'PLUGIN_QBD_SYNC');
 });

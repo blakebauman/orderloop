@@ -11,7 +11,7 @@
  *   pending again; continuing the loop resets its body region for the next iteration.
  */
 
-import { nodeOutputs, nodeSpec, validateConfig } from './catalog';
+import { missing, type NodeRegistry, staticRegistry } from './plugins';
 import type { FlowEdge, FlowGraph, FlowNode, NodeStatus } from './types';
 
 export const LOOP_INPUT = 'next';
@@ -193,7 +193,12 @@ export function isSettled(graph: FlowGraph, state: PlanState): boolean {
 
 export type GraphIssue = { nodeId?: string; edgeId?: string; message: string };
 
-export function validateGraph(graph: FlowGraph): { errors: GraphIssue[]; warnings: GraphIssue[] } {
+/** `registry` holds the installed plugins' node types; without it only built-in types are known. */
+export function validateGraph(
+  graph: FlowGraph,
+  registry: NodeRegistry = staticRegistry,
+): { errors: GraphIssue[]; warnings: GraphIssue[] } {
+  const { spec, outputs } = registry;
   const errors: GraphIssue[] = [];
   const warnings: GraphIssue[] = [];
   const ids = new Set<string>();
@@ -203,11 +208,11 @@ export function validateGraph(graph: FlowGraph): { errors: GraphIssue[]; warning
     if (ids.has(n.id)) errors.push({ nodeId: n.id, message: `Duplicate node id “${n.id}”` });
     ids.add(n.id);
     byId.set(n.id, n);
-    if (!nodeSpec(n.type)) {
-      errors.push({ nodeId: n.id, message: `Unknown node type “${n.type}”` });
+    if (!spec(n.type)) {
+      errors.push({ nodeId: n.id, message: missing(n.type) });
       continue;
     }
-    for (const m of validateConfig(n.type, n.config)) {
+    for (const m of registry.validate(n.type, n.config)) {
       errors.push({ nodeId: n.id, message: `${n.label}: ${m}` });
     }
   }
@@ -228,14 +233,14 @@ export function validateGraph(graph: FlowGraph): { errors: GraphIssue[]; warning
     const key = `${e.source}:${edgeHandle(e)}→${e.target}:${e.targetHandle ?? ''}`;
     if (edgeKeys.has(key)) warnings.push({ edgeId: e.id, message: 'Duplicate edge' });
     edgeKeys.add(key);
-    if (nodeSpec(s.type) && !nodeOutputs(s.type, s.config).includes(edgeHandle(e))) {
+    if (spec(s.type) && !outputs(s.type, s.config).includes(edgeHandle(e))) {
       errors.push({
         edgeId: e.id,
         nodeId: s.id,
         message: `${s.label} has no “${edgeHandle(e)}” output`,
       });
     }
-    if (isBackEdge(e) && !nodeSpec(t.type)?.loop) {
+    if (isBackEdge(e) && !spec(t.type)?.loop) {
       errors.push({ edgeId: e.id, message: 'Only a Loop node accepts a “next” edge' });
     }
     if (isTrigger(t)) errors.push({ edgeId: e.id, message: 'Triggers cannot have inputs' });
@@ -269,7 +274,7 @@ export function validateGraph(graph: FlowGraph): { errors: GraphIssue[]; warning
     if (!forward.some((e) => e.target === n.id)) {
       errors.push({ nodeId: n.id, message: `${n.label} is not connected to anything upstream` });
     }
-    const outs = nodeSpec(n.type) ? nodeOutputs(n.type, n.config) : [];
+    const outs = spec(n.type) ? outputs(n.type, n.config) : [];
     if (outs.length && !graph.edges.some((e) => e.source === n.id)) {
       warnings.push({
         nodeId: n.id,
