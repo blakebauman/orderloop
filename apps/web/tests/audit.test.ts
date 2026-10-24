@@ -68,6 +68,7 @@ suite('audit vocabulary', () => {
       'flow',
       'webhook',
       'stock',
+      'catalog',
       'personal_data',
     ]);
     expect(isAuditGroup('orders')).toBe(false);

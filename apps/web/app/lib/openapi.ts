@@ -17,6 +17,11 @@ import {
 import { z } from 'zod';
 import {
   cancelInput,
+  catalogCategoriesInput,
+  catalogChannelInput,
+  catalogDeleteInput,
+  catalogProductsInput,
+  catalogTypeInput,
   dataSubjectInput,
   decisionInput,
   eventSchema,
@@ -375,6 +380,120 @@ export function openApiDocument(serverUrl: string) {
             },
           ],
           responses: { '200': ok('{ ok, checked, last?, next?, brokenAt?, reason? }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/products': {
+        post: {
+          summary: 'Write catalog products, up to 500 (operator)',
+          description:
+            "Validated against each product's type; an unchanged product writes nothing. Each result is `created`, `updated`, `unchanged` or `rejected` (with `issues`). Published documents follow within a minute; `urgent` purges cached copies sooner (purges are rationed, so keep it for takedowns and corrections).",
+          requestBody: body(catalogProductsInput),
+          responses: { '200': ok('{ results: [{ key, status, version?, issues? }] }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/products/{key}': {
+        get: {
+          summary: 'A stored catalog product',
+          parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ product }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/products/delete': {
+        post: {
+          summary: 'Delete catalog products (operator)',
+          requestBody: body(catalogDeleteInput),
+          responses: { '200': ok('{ results }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/aliases/{alias}': {
+        get: {
+          summary: 'The product holding a SKU, GTIN or slug (`sku:ABC`, `gtin:…`, `slug:en:…`)',
+          parameters: [{ name: 'alias', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ key }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/types': {
+        get: {
+          summary: 'Product types, latest version of each',
+          responses: { '200': ok('{ types }'), ...errors },
+        },
+        post: {
+          summary: 'Add a product type, or its next version (operator)',
+          description:
+            'A new type starts at version 1. A new version may only add: attributes, enum values, or relax `required` and deprecate. Anything else is refused with 409 and the reasons.',
+          requestBody: body(catalogTypeInput),
+          responses: {
+            '201': ok('{ type }'),
+            '409': ok('The change would break stored products', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/channels': {
+        get: { summary: 'Catalog channels', responses: { '200': ok('{ channels }'), ...errors } },
+        post: {
+          summary: 'Add or change a channel (operator)',
+          description:
+            'A changed currency or locale list reaches published documents on the next reindex.',
+          requestBody: body(catalogChannelInput),
+          responses: { '200': ok('{ channel }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/categories': {
+        get: {
+          summary: 'Catalog categories',
+          responses: { '200': ok('{ categories }'), ...errors },
+        },
+        post: {
+          summary: 'Add or change categories (operator)',
+          requestBody: body(catalogCategoriesInput),
+          responses: { '200': ok('{ categories }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/feeds': {
+        get: {
+          summary: 'Recent catalog feeds, newest first',
+          parameters: [
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          ],
+          responses: { '200': ok('{ feeds }'), ...errors },
+        },
+        post: {
+          summary: 'Import a feed file (operator)',
+          description:
+            'The request body is the file, streamed to the catalog: CSV (one row per variant) or NDJSON (one product per line). Answers 202 at once; poll the feed for its counts and the first rejected rows.',
+          parameters: [
+            {
+              name: 'format',
+              in: 'query',
+              required: true,
+              schema: { type: 'string', enum: ['csv', 'ndjson'] },
+            },
+            { name: 'name', in: 'query', schema: { type: 'string' } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'text/csv': { schema: { type: 'string' } },
+              'application/x-ndjson': { schema: { type: 'string' } },
+            },
+          },
+          responses: { '202': ok('{ feed }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/feeds/{id}': {
+        get: {
+          summary: "A feed's progress and result",
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ feed }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/reindex': {
+        post: {
+          summary: 'Republish every product (admin)',
+          description:
+            'After a channel or document change. Answers with how many products were queued.',
+          responses: { '202': ok('{ queued }'), ...errors },
         },
       },
       '/api/v1/data-subjects/export': {

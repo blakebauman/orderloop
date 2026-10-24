@@ -21,7 +21,7 @@ authenticated by an HMAC signature instead (see [signed events](#signed-events) 
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid field, with its `path`
 and `message`) on a `400` for an invalid body.
-`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` a caller over its requests a minute (below; see `Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
+`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` a caller over its requests a minute (below; see `Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI and 8 MiB for catalog product writes; a catalog feed has no cap of its own), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
 
 ### Rate limits
 
@@ -238,7 +238,7 @@ The order page enforces the same bounds.
 | `409` | No node is waiting for that event yet: `{ delivered: false }`. Retry later |
 | `200` | A replay: `{ delivered: true, duplicate: true }`, delivering nothing |
 | `400` | Body is not `{ orderId, event, payload? }` (`event` is 1 to 100 characters, `payload` at most 32 KiB of JSON) |
-| `413` | Body over 1 MiB |
+| `413` | Body over its cap (1 MiB; 8 MiB for catalog product writes) |
 | `401` | Missing, malformed, stale or wrong signature; no `k=`; an unknown or revoked integration |
 | `403` | The integration may not deliver that event, or is bound to a channel other than the order's |
 
@@ -271,7 +271,7 @@ not valid X12, `403` an unlisted sender or a caller below `operator`. Both start
 ## Audit events
 
 `GET /api/v1/audit-events` returns the audit log (sign-ins, team and token changes, and what was done to orders, approvals, flows and webhooks), newest first, for feeding a log
-system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook`, `stock` or `personal_data`; `limit` is
+system; it needs the `admin` role. `type` filters to `auth`, `team`, `token`, `api`, `oauth`, `integration`, `order`, `approval`, `flow`, `webhook`, `stock`, `catalog` or `personal_data`; `limit` is
 1 to 500 (default 100); `before` (milliseconds since the epoch) pages back: pass the oldest `at`
 you have. `after` (a `seq`) switches to export order: only hashed events after that `seq`, oldest first, so the last `seq` you received is the next cursor (`0` starts at the beginning); `before` and `after` aren't meant together. Each event has `id`, `at`, `action`, `actor`, `actorId`, `actorKind`, `target`, `detail`
 (an object or `null`), `ip` and, for hashed events, `seq`, `prevHash` and `hash` (all `null` on events from before the chain). See [Audit log](/guides/team-and-roles/#audit-log) for the actions. Business events carry `via` in `detail` (`app`, `api`, `webhook`, `assistant`, `mcp` or `a2a`).
@@ -299,6 +299,13 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
 - `GET /api/v1/webhook-subscriptions/:id/deliveries` returns the latest 50 deliveries, newest first: `id`, `event`,
   `orderId`, `payload`, `status` (`pending`, `delivered` or `failed`), `attempts`, `responseStatus`,
   `lastError`, `createdAt` and `deliveredAt`.
+
+## Product catalog
+
+`/api/v1/catalog/*` writes and reads the product catalog: products, product types, channels, categories,
+feeds and `reindex`. Reads need `viewer`, writes `operator` and `reindex` `admin`. The routes and
+schemas are in the [OpenAPI explorer](/api/); the model, the feed formats and what shoppers read are
+in [Product catalog](/guides/product-catalog/).
 
 ## Other endpoints
 

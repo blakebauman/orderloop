@@ -22,7 +22,7 @@
 ^packages/core/src/webhooks\.ts$	guides/outbound-webhooks guides/approvals-and-events reference/rest-api reference/a2a	gen
 ^(packages/core/src/integrations|apps/web/app/lib/integrations\.server)\.ts$	reference/rest-api guides/approvals-and-events guides/inbound-orders guides/marketplace guides/team-and-roles docs/data-model.md docs/configuration.md	prose
 ^apps/web/workers/app\.ts$	docs/architecture.md reference/rest-api guides/team-and-roles reference/a2a	prose
-^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders	gen
+^apps/web/app/lib/(api\.server|api-schemas|openapi)\.ts$	reference/rest-api guides/inbound-orders guides/product-catalog	gen
 ^packages/core/src/inbound\.ts$	guides/inbound-orders reference/rest-api docs/configuration.md	gen
 ^apps/web/app/lib/auth\.server\.ts$	guides/team-and-roles reference/rest-api docs/configuration.md docs/deploy.md docs/architecture.md	prose
 ^apps/web/app/lib/webhooks\.server\.ts$	guides/outbound-webhooks reference/rest-api	prose
@@ -93,10 +93,12 @@
 ^apps/engine/src/(retention|agent|env\.d)\.ts$	docs/data-model.md docs/order-agent.md docs/configuration.md reference/ucp	prose
 ^(packages/core/src/encryption|apps/engine/src/data-key|apps/web/app/lib/data-key\.server)\.ts$	docs/architecture.md docs/operations.md docs/configuration.md docs/data-model.md docs/testing.md guides/team-and-roles	prose
 ^scripts/(fleet\.ts|provision\.sh)$	docs/deploy.md docs/operations.md docs/configuration.md docs/testing.md	prose
-^apps/catalog/src/	docs/architecture.md docs/data-model.md docs/configuration.md docs/testing.md	prose
+^apps/catalog/src/	guides/product-catalog docs/architecture.md docs/data-model.md docs/configuration.md docs/testing.md	prose
 ^apps/catalog/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/data-model.md	prose
-^apps/catalog-edge/(src/|vitest\.config\.ts$)	docs/architecture.md docs/data-model.md docs/testing.md docs/local-development.md	prose
+^apps/catalog-edge/(src/|vitest\.config\.ts$)	guides/product-catalog docs/architecture.md docs/data-model.md docs/testing.md docs/local-development.md	prose
 ^apps/catalog-edge/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/operations.md	prose
-^packages/core/(src/product/|package\.json$)	docs/architecture.md docs/data-model.md docs/testing.md	prose
+^packages/core/(src/product/|package\.json$)	guides/product-catalog docs/architecture.md docs/data-model.md docs/testing.md	prose
 ^deployments/	docs/operations.md	prose
 ^packages/core/package\.json$	docs/architecture.md	prose
+^apps/web/app/lib/catalog-api\.server\.ts$	guides/product-catalog reference/rest-api guides/team-and-roles docs/architecture.md docs/configuration.md docs/testing.md	prose
+^packages/core/src/audit\.ts$	guides/team-and-roles reference/rest-api	prose

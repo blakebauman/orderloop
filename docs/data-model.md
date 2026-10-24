@@ -60,6 +60,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0040_webhook_rotation.sql` | `webhook_subscriptions.previous_secret` and `previous_expires_at`, for outbound secret rotation |
 | `0041_order_index_where.sql` | `orders.waiting_for`, `stopped_at` and `reason`, so the orders list can say who a wait is on and where and why an order ended |
 | `0042_flow_archived.sql` | `flows.archived_at`: a never-published draft archived out of the flows list |
+| `0043_products_catalog_at.sql` | `products.catalog_at` (nullable, ms): when the product catalog last set the row's name and price |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -114,7 +115,7 @@ writes embeds its step key.
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order, once per step through `balance_entries`), payment `terms`; `stripe_customer_id` (unique when set; created once per account, idempotency key `cust_${customerId}`) and `stripe_payment_method_id` (the card a `verify` authorization saved, which `commerce.charge` uses off-session) |
-| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock) |
+| `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock), `catalog_at` (ms; when the product catalog last set the row's `name` and `price`, null for rows it never wrote; see [Product catalog](#product-catalog)) |
 | `sellers` | Marketplace sellers: `name`, `email`, `commission_pct` (a fraction), `auto_accept`, `active`. See [Marketplace](https://docs.orderloop.app/guides/marketplace/) |
 | `seller_orders` | One row per order and seller, id `so_${orderId}_${sellerId}` (first party is `first_party`): `status` (`pending`, `accepted`, `rejected` or `cancelled`), `lines` (JSON), `subtotal`, `reason`, `decided_at` |
 | `payouts` | One row per order, seller and payout step: `gross`, `commission`, `refunded`, `net`; `status` is `scheduled`, `reversed` or `paid` |
@@ -216,10 +217,15 @@ The web app serves them at `/docs/<key>` to signed-in users only.
 
 ## Product catalog
 
-The catalog Worker ([Architecture](architecture.md#product-catalog)) keeps nothing in D1. Its
-source of truth is the SQLite storage of its Durable Objects, and what it publishes goes to its own
+The catalog Worker ([Architecture](architecture.md#product-catalog)) owns no tables in D1. Its one
+D1 write is to Order Loop's `products` table: a row per variant SKU with its `name`, `price` and
+`catalog_at`, upserted by `apps/catalog/src/orders.ts` ([Order Loop's products](architecture.md#order-loops-products)).
+A new row gets `cost` 0 and the column defaults; an existing row keeps everything else. `catalog_at`
+is the publish change's `at`, and an upsert applies only where it is null or older, so out-of-order
+queue delivery can't overwrite a newer name or price. Rows are never deleted when a product stops
+listing. The catalog's own source of truth is the SQLite storage of its Durable Objects, and what it publishes goes to its own
 R2 bucket (`orderloop-catalog`, not `orderloop-docs`) and KV namespace. Each object creates its
-tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files.
+tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files for them.
 
 `CatalogShard` (64, `shard-<n>`):
 

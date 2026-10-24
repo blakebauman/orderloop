@@ -160,6 +160,11 @@ export const products = sqliteTable('products', {
   sellerId: text('seller_id'),
   /** physical | digital. Digital goods hold no stock and are delivered as entitlements. */
   kind: text('kind').notNull().default('physical'),
+  /**
+   * When the catalog last set this row's name and price (ms); null for rows it never wrote. The
+   * catalog's changes can arrive out of order: only a newer one applies.
+   */
+  catalogAt: integer('catalog_at'),
 });
 
 /** A store that holds its own stock, for pickup, ship-from-store and point of sale. */

@@ -79,6 +79,7 @@ export const AUDIT_GROUPS = {
   flow: 'Flows',
   webhook: 'Webhooks',
   stock: 'Stock review',
+  catalog: 'Catalog',
   personal_data: 'Personal data',
 } as const;
 

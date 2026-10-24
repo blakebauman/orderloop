@@ -94,7 +94,7 @@ After changing a `wrangler.jsonc`, regenerate that app's binding types with
 `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types`,
 `pnpm --filter @orderloop/catalog types` or `pnpm --filter @orderloop/catalog-edge types`.
 
-`pnpm web:dev` doesn't start the catalog Worker, since the web app doesn't call it yet. Run it on its own with
+`pnpm web:dev` doesn't start the catalog Worker, so `/api/v1/catalog/*` fails locally unless it is running (the web app's `CATALOG` service binding resolves to it by name). Run it on its own with
 `pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
 Durable Objects (including the changes queue and the listing indexers; a test runs an indexer's alarm itself instead of waiting out the 15 second debounce).
 

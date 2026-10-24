@@ -36,7 +36,11 @@
   ],
   // Same bucket as the engine: the web app serves invoices, POs and inbound documents from it.
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
-  "services": [{ "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" }],
+  "services": [
+    { "binding": "ENGINE", "service": "orderloop-engine", "entrypoint": "EngineApi" },
+    // The product catalog's admin API (/api/v1/catalog).
+    { "binding": "CATALOG", "service": "orderloop-catalog", "entrypoint": "CatalogApi" }
+  ],
   // OAuth for MCP clients (@cloudflare/workers-oauth-provider): registered clients, grants and
   // tokens (hashed; props encrypted). No id: the namespace is created on first deploy.
   "kv_namespaces": [{ "binding": "OAUTH_KV" }],

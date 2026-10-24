@@ -75,6 +75,10 @@ test('the catalog config has its own name, bucket, card namespace and jurisdicti
   );
   assert.equal(c.vars.DATA_JURISDICTION, 'eu');
   assert.equal(c.workers_dev, false);
+  // It writes variant names and prices into the deployment's own D1.
+  assert.deepEqual(c.d1_databases, [
+    { binding: 'DB', database_name: 'orderloop-acme', database_id: 'd1-acme' },
+  ]);
 });
 
 test("catalog-edge serves catalog.<domain> from the deployment's bucket, cards and purge queue", () => {
@@ -115,6 +119,7 @@ test('the web config binds its own engine, domain and rate-limit namespaces', ()
   assert.equal(c.name, 'orderloop-web-acme');
   assert.deepEqual(c.routes, [{ pattern: 'acme.orderloop.app', custom_domain: true }]);
   assert.equal(c.services[0].service, 'orderloop-engine-acme');
+  assert.equal(c.services[1].service, 'orderloop-catalog-acme');
   assert.deepEqual(
     c.ratelimits.map((r: { namespace_id: string }) => r.namespace_id),
     ['2001', '2002', '2003', '2004', '2005'],

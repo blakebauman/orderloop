@@ -26,7 +26,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `suffix` | `-<id>` | Added to every resource name. `orderloop` uses `""`, so its resources keep the base names |
 | `environment` | `deploy-<id>` | The GitHub environment holding the deployment's secrets. `orderloop` uses `production` |
 | `d1Id` | none | The D1 database's id, written by `scripts/provision.sh` |
-| `catalogKvId` | none | The id (32 hex characters; anything else is refused) of the catalog's KV namespace of listing cards, written by `scripts/provision.sh` (`fleet.ts set-catalog-kv`). Like `d1Id`, required to render the catalog's config or to deploy |
+| `catalogKvId` | none | The id (32 hex characters; anything else is refused) of the catalog's KV namespace of listing cards, written by `scripts/provision.sh` (`fleet.ts set-catalog-kv`). Like `d1Id` (which the catalog's config also binds as its `DB`), required to render the catalog's config or to deploy |
 | `jurisdiction` | none | `eu` or `fedramp`: where D1 and R2 (the docs and the catalog's buckets) keep data, set when they are created, and where the engine's Durable Objects (`OrderAgent`, `AssistantAgent`, `A2AAgent`) and the catalog's (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`) are created. Rendered into the engine's and the catalog's `DATA_JURISDICTION`; `renderEngine` and `renderCatalog` omit it when unset, leaving the base `""`. KV has no jurisdictions. Fixed for a deployment's life: see [Data residency](data-model.md#data-residency) |
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
@@ -50,7 +50,7 @@ With the suffix, deployment `acme` gets these resource names:
 | Catalog Worker | `orderloop-catalog-acme` |
 | Catalog edge Worker | `orderloop-catalog-edge-acme`, at `catalog.acme.orderloop.app` |
 | Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme` (Workflow names are unique per account) |
-| D1 | `orderloop-acme` |
+| D1 | `orderloop-acme` (bound by the engine, web and catalog Workers; the catalog writes variant names and prices into `products`) |
 | R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents and feed files) |
 | Queues | `orderloop-catalog-feed-parts-acme` and its dead-letter queue `orderloop-catalog-feed-parts-dlq-acme`; the purge queue `orderloop-catalog-purge-acme` and its dead-letter queue `orderloop-catalog-purge-dlq-acme`; the listing-changes queue `orderloop-catalog-changes-acme` and its dead-letter queue `orderloop-catalog-changes-dlq-acme` (queue names are unique per account) |
 | Analytics Engine | dataset `orderloop_catalog_edge_acme` (dashes in the suffix become underscores) |

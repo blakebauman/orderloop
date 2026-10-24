@@ -14,6 +14,7 @@ import {
 } from '@orderloop/core/product';
 import { type CatalogConfig, typeResolver } from './config';
 import type { ListingChange } from './listings';
+import { orderLines } from './orders';
 import type { CatalogShard } from './shard';
 
 const JSON_TYPE = { contentType: 'application/json; charset=utf-8' };
@@ -124,6 +125,9 @@ export async function publishKeys(
           entry: pub.index,
           left: prev?.categories ?? [],
           search: pub.rendered?.map((r) => ({ ...r.search, locale: r.locale })) ?? null,
+          ...(channel.code === env.ORDERS_CHANNEL && current && type && pub.rendered
+            ? { order: orderLines(current.product, type, channel) }
+            : {}),
         });
     }
   }

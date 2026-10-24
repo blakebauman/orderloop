@@ -13,6 +13,14 @@ import {
   POLICY_RULES,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
+import {
+  ATTRIBUTE_KINDS,
+  FEED_FORMATS,
+  FEED_STATES,
+  NUMERIC_KINDS,
+  PRODUCT_STATUSES,
+  TERM_KINDS,
+} from '@orderloop/core/product';
 
 const SOURCES = {
   'node-statuses': NODE_STATUSES,
@@ -23,6 +31,12 @@ const SOURCES = {
   'fulfillment-methods': FULFILLMENT_METHODS,
   'outbound-events': OUTBOUND_EVENTS,
   'policy-rules': POLICY_RULES,
+  'product-statuses': PRODUCT_STATUSES,
+  'attribute-kinds': ATTRIBUTE_KINDS,
+  'term-kinds': TERM_KINDS,
+  'numeric-kinds': NUMERIC_KINDS,
+  'feed-formats': FEED_FORMATS,
+  'feed-states': FEED_STATES,
 } as const;
 
 interface Props {
