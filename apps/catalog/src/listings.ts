@@ -118,6 +118,50 @@ export function withAncestors(codes: string[], parents: Map<string, string | nul
   return out;
 }
 
+/**
+ * The most a CHANGES message carries (a message may be 128 KB) and a `sendBatch` sends (256 KB).
+ * Packing many changes into a message means a consumer batch (100 messages) holds thousands, so
+ * a root category, which every product reaches, takes one call per thousands of changes rather
+ * than per hundred: a feed no longer queues hundreds of concurrent calls on it.
+ */
+export const CHANGES_MESSAGE_BYTES = 64 * 1024;
+const CHANGES_BATCH_BYTES = 192 * 1024;
+
+/** Sends `changes` to the CHANGES queue, packed into as few messages as fit. */
+export async function sendChanges(
+  queue: Queue<ListingChange[]>,
+  changes: ListingChange[],
+): Promise<void> {
+  const encoder = new TextEncoder();
+  const messages: { body: ListingChange[]; bytes: number }[] = [];
+  let current: { body: ListingChange[]; bytes: number } | null = null;
+  for (const change of changes) {
+    const bytes = encoder.encode(JSON.stringify(change)).byteLength + 1;
+    if (!current || current.bytes + bytes > CHANGES_MESSAGE_BYTES) {
+      current = { body: [], bytes: 2 };
+      messages.push(current);
+    }
+    current.body.push(change);
+    current.bytes += bytes;
+  }
+  let batch: { body: ListingChange[] }[] = [];
+  let batchBytes = 0;
+  for (const m of messages) {
+    if (batch.length && (batch.length === 100 || batchBytes + m.bytes > CHANGES_BATCH_BYTES)) {
+      await queue.sendBatch(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push({ body: m.body });
+    batchBytes += m.bytes;
+  }
+  if (batch.length) await queue.sendBatch(batch);
+}
+
+/** The changes in a CHANGES message: a packed array, or one change (sent before packing). */
+export const changesIn = (body: unknown): ListingChange[] =>
+  Array.isArray(body) ? (body as ListingChange[]) : [body as ListingChange];
+
 /** Routes a batch of changes to the listings they touch, one call per listing. */
 export async function applyChanges(env: Env, changes: ListingChange[]): Promise<void> {
   const parents = await categoryParents(env);

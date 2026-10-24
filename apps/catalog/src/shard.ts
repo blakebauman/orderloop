@@ -29,7 +29,7 @@ import {
   type WriteResult,
 } from '@orderloop/core/product';
 import { type CatalogConfig, meta, shard } from './config';
-import type { ListingChange } from './listings';
+import { type ListingChange, sendChanges } from './listings';
 import { publishKeys } from './publish';
 
 export type ApplyBatch = {
@@ -364,8 +364,7 @@ export class CatalogShard extends DurableObject<Env> {
       await this.env.PUBLISHED.delete(deletes.slice(i, i + 1000));
     for (let i = 0; i < cards.length; i += 32)
       await Promise.all(cards.slice(i, i + 32).map((k) => this.env.CARDS.delete(k)));
-    for (let i = 0; i < changes.length; i += 100)
-      await this.env.CHANGES.sendBatch(changes.slice(i, i + 100).map((body) => ({ body })));
+    await sendChanges(this.env.CHANGES, changes);
     for (const { key } of rows) this.recordPublished(key, channel, null);
     return rows.length;
   }
@@ -525,8 +524,7 @@ export class CatalogShard extends DurableObject<Env> {
     const changes = await publishKeys(this, keys, config, forced);
     // Listing indexes follow from these (listings.ts). Sent before the outbox rows go, so a crash
     // here republishes and sends them again; indexers order changes by `at`.
-    for (let i = 0; i < changes.length; i += 100)
-      await this.env.CHANGES.sendBatch(changes.slice(i, i + 100).map((body) => ({ body })));
+    await sendChanges(this.env.CHANGES, changes);
     // Urgent changes don't wait out the edge cache's minute: their tags go to catalog-edge's purge
     // queue, which it drains at the rate Cloudflare allows (a call of up to 100 tags at a time, so
     // a message carries that many). Sent after publishing, so a purge never refills from the old

@@ -4,9 +4,13 @@ import { DOC_FORMAT, ListingIndex, paths } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   applyChanges,
+  CHANGES_MESSAGE_BYTES,
+  changesIn,
   DEBOUNCE_MS,
   debounceMs,
+  type ListingChange,
   type ListingIndexer,
+  sendChanges,
   withAncestors,
 } from '../src/listings';
 import { api, by, product, settle, setup } from './helpers';
@@ -215,5 +219,37 @@ describe('category ancestors', () => {
     ]);
     expect([...withAncestors(['caps'], parents)]).toEqual(['caps', 'hats', 'shop']);
     expect([...withAncestors(['a'], parents)]).toEqual(['a', 'b']);
+  });
+});
+
+describe('sending changes', () => {
+  it('packs changes into messages of up to 64 KB, and batches within the queue limits', async () => {
+    const changes: ListingChange[] = Array.from({ length: 3000 }, (_, i) => ({
+      channel: 'web',
+      key: `p${i}`,
+      at: i,
+      entry: null,
+      left: ['shop'],
+      search: [{ locale: 'en', title: 'x'.repeat(500) } as never],
+    }));
+    const batches: { body: ListingChange[] }[][] = [];
+    await sendChanges(
+      { sendBatch: async (b: { body: ListingChange[] }[]) => void batches.push(b) } as never,
+      changes,
+    );
+    const size = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).byteLength;
+    const messages = batches.flat();
+    expect(messages.length).toBeLessThan(changes.length / 50);
+    for (const m of messages) expect(size(m.body)).toBeLessThanOrEqual(CHANGES_MESSAGE_BYTES);
+    for (const b of batches) {
+      expect(b.length).toBeLessThanOrEqual(100);
+      expect(size(b.map((m) => m.body))).toBeLessThanOrEqual(256 * 1024);
+    }
+    expect(messages.flatMap((m) => changesIn(m.body))).toEqual(changes);
+  });
+
+  it('reads a message from before packing as one change', () => {
+    const one = { channel: 'web', key: 'k', at: 1, entry: null, left: [], search: null };
+    expect(changesIn(one)).toEqual([one]);
   });
 });
