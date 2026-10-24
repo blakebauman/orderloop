@@ -1,0 +1,148 @@
+import { env } from 'cloudflare:workers';
+import type { FeedStatus } from '@orderloop/core/product';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { storeStream } from '../src/upload';
+import { api, by, doc, product, settle, setup } from './helpers';
+
+beforeAll(setup);
+
+function body(text: string, chunk = 4096): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  let at = 0;
+  return new ReadableStream({
+    pull(c) {
+      if (at >= bytes.length) return c.close();
+      c.enqueue(bytes.slice(at, at + chunk));
+      at += chunk;
+    },
+  });
+}
+
+async function finished(id: string): Promise<FeedStatus> {
+  for (let i = 0; i < 300; i++) {
+    const s = await api.feedStatus(id);
+    if (s && (s.state === 'done' || s.state === 'failed')) return s;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`feed ${id} never finished: ${JSON.stringify(await api.feedStatus(id))}`);
+}
+
+/** A CSV of `n` products with two variant rows each; rows named in `bad` get a bad material. */
+function csv(prefix: string, n: number, bad: number[] = []) {
+  const lines = ['key,type,title:en,title:fr,categories,price.web,sku,attr.material,attr.size'];
+  for (let i = 0; i < n; i++) {
+    const material = bad.includes(i) ? 'silk' : 'cotton';
+    lines.push(
+      `${prefix}-${i},apparel,"Tee, no. ${i}",T-shirt ${i},tees,19.99,${prefix}-${i}-S,${material},S`,
+    );
+    lines.push(`${prefix}-${i},,,,,,${prefix}-${i}-M,,M`);
+  }
+  return lines.join('\r\n');
+}
+
+describe('feeds', () => {
+  it('imports a CSV feed across several steps, reporting rejected rows by number', async () => {
+    const prefix = `csv${Date.now().toString(36)}`;
+    const started = await api.startFeed(body(csv(prefix, 1_000, [10, 700])), {
+      name: 'supplier.csv',
+      format: 'csv',
+      by,
+    });
+    expect(started).toMatchObject({ state: 'queued', format: 'csv', name: 'supplier.csv' });
+    const s = await finished(started.id);
+    expect(s).toMatchObject({ state: 'done', rows: 1_000, created: 998, rejected: 2, updated: 0 });
+    expect(s.parts).toBe(s.partsDone);
+    // Product 10 starts on row 22 (a header, then two rows per product).
+    expect(s.errors.map((e) => [e.row, e.key])).toEqual([
+      [22, `${prefix}-10`],
+      [1402, `${prefix}-700`],
+    ]);
+    expect(s.errors[0]?.message).toContain('attributes.material');
+
+    expect(await api.getProduct(`${prefix}-999`)).toMatchObject({
+      title: { en: 'Tee, no. 999', fr: 'T-shirt 999' },
+      variants: [{ sku: `${prefix}-999-S` }, { sku: `${prefix}-999-M` }],
+    });
+    await settle();
+    expect(await doc(`${prefix}-0`)).toMatchObject({ title: 'Tee, no. 0' });
+
+    // The same file again changes nothing.
+    const again = await finished(
+      (
+        await api.startFeed(body(csv(prefix, 1_000, [10, 700])), {
+          name: 'again',
+          format: 'csv',
+          by,
+        })
+      ).id,
+    );
+    expect(again).toMatchObject({
+      state: 'done',
+      created: 0,
+      updated: 0,
+      unchanged: 998,
+      rejected: 2,
+    });
+    expect((await api.listFeeds(2)).map((f) => f.id)).toEqual([again.id, started.id]);
+  });
+
+  it('imports NDJSON and reports a shard-level refusal with its line', async () => {
+    const prefix = `nd${Date.now().toString(36)}`;
+    const product = (i: number, sku = `${prefix}-${i}-S`) =>
+      JSON.stringify({
+        key: `${prefix}-${i}`,
+        type: 'apparel',
+        title: { en: `P ${i}` },
+        attributes: { material: 'wool' },
+        variants: [{ sku, attributes: { size: 'S' } }],
+        channels: { web: { visible: true, price: { amount: 500, currency: 'USD' } } },
+      });
+    // Line 3 reuses line 1's SKU (whichever shard applies first keeps it); line 4 isn't JSON.
+    const text = [product(1), product(2), product(3, `${prefix}-1-S`), '{oops', product(5)].join(
+      '\n',
+    );
+    const s = await finished(
+      (await api.startFeed(body(text, 7), { name: 'x.ndjson', format: 'ndjson', by })).id,
+    );
+    expect(s).toMatchObject({ state: 'done', rows: 5, created: 3, rejected: 2 });
+    const [conflict, json] = s.errors;
+    expect([1, 3]).toContain(conflict?.row);
+    expect(conflict).toMatchObject({
+      key: `${prefix}-${conflict?.row}`,
+      message: expect.stringContaining('already used'),
+    });
+    expect(json).toEqual({ row: 4, message: 'invalid JSON' });
+  });
+
+  it('fails a feed whose file has no header it can use', async () => {
+    const s = await finished(
+      (await api.startFeed(body('name,price\nx,1'), { name: 'bad', format: 'csv', by })).id,
+    );
+    expect(s).toMatchObject({
+      state: 'failed',
+      failure: expect.stringContaining('"key" and "sku"'),
+    });
+  });
+});
+
+describe('storing streams', () => {
+  it('stores a stream over one part as a multipart upload', async () => {
+    const big = 'x'.repeat(10 * 1024 * 1024 + 123);
+    expect(await storeStream(env.PUBLISHED, 'test/big', body(big, 1024 * 1024))).toBe(big.length);
+    expect((await env.PUBLISHED.head('test/big'))?.size).toBe(big.length);
+  });
+});
+
+describe('reindex', () => {
+  it('queues every product on every shard for publishing', async () => {
+    const p = product();
+    await api.putProducts([p], { by });
+    await settle();
+    await env.PUBLISHED.delete(`docs/f1/web/en/p/${p.key}.json`);
+    const { queued } = await api.reindex(by);
+    expect(queued).toBeGreaterThanOrEqual(1);
+    await settle();
+    // Republished: the document is back.
+    expect(await doc(p.key)).toMatchObject({ key: p.key });
+  });
+});

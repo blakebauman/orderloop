@@ -33,6 +33,16 @@ kv_id() { wrangler kv namespace list | jq -er --arg t "$CATALOG_KV" '.[] | selec
 kv=$(kv_id 2>/dev/null) || { wrangler kv namespace create "$CATALOG_KV" >/dev/null; kv=$(kv_id); }
 node scripts/fleet.ts set-catalog-kv "$id" "$kv"
 echo "Recorded catalogKvId $kv in deployments/$id.jsonc"
+# Feed files and their parts are only needed while a feed imports. Replaced on each run, like the
+# audit rule above.
+wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name feeds ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$CATALOG_R2" feeds feeds/ --expire-days 30 --force ${j[@]+"${j[@]}"}
+# The queue feed parts go through, and the one parts that keep failing land in. A deploy fails if
+# the consumer's queue is missing, so a queue that can't be created or found stops provisioning.
+for q in "$CATALOG_FEED_PARTS" "$CATALOG_FEED_PARTS_DLQ"; do
+  if wrangler queues info "$q" >/dev/null 2>&1; then echo "Queue $q already exists"
+  else wrangler queues create "$q"; fi
+done
 
 # How long the R2 archive keeps audit events (auditArchiveDays): the rule is replaced on each run,
 # so a changed number takes effect; without one, archived events are kept.

@@ -31,11 +31,12 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 
 ## Catalog variables
 
-The catalog Worker has one variable and no secrets (`apps/catalog/wrangler.jsonc`):
+The catalog Worker has two variables and no secrets (`apps/catalog/wrangler.jsonc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
+| `FEED_CHUNK` | `25000` | Products one `FeedImport` split step reads before handing off to the next (a string; `25000` when unset or not a number, `FEED_CHUNK` in core). Lower it only in tests, where `apps/catalog/vitest.config.ts` sets `300` so a small feed spans several steps |
 
 ## Compatibility flags
 
@@ -104,7 +105,10 @@ created through the API and stored in D1; they are not configuration.
 | `AI` | engine | Workers AI |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite-backed, migration `v1`), 64 shards named `shard-<n>` |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite-backed, migration `v1`), one, named `meta` |
-| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers and category trees. Strongly consistent, so a purge is never undone by a stale read |
+| `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite-backed, migration `v2`), one, named `feeds` |
+| `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
+| `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
+| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
 | `CARDS` | catalog | KV namespace of listing cards. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |
@@ -134,7 +138,7 @@ every request.
 
 ## Runtime limits and observability
 
-The catalog Worker turns `observability` on at the default sampling and sets no `limits`. Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
+The catalog Worker turns `observability` on at the default sampling and sets `limits.cpu_ms` to 300,000, since a feed step parses and validates up to 25,000 products. Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
 and traces on); lower the rate once traffic makes the volume or cost matter. `limits.cpu_ms` stops a
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
 waits, such as model calls, don't count against it. The web app also sets `placement.mode` to `smart`, so

@@ -261,6 +261,19 @@ export class CatalogShard extends DurableObject<Env> {
     return results;
   }
 
+  /** Queues every product for the publisher (a reindex), once each. Returns how many. */
+  async republishAll(n: number): Promise<number> {
+    this.shardNumber(n);
+    const count = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM products').one().n;
+    if (!count) return 0;
+    // A product already waiting publishes its latest state anyway: don't queue it twice.
+    this.sql.exec(
+      'INSERT INTO outbox (key, urgent) SELECT key, 0 FROM products WHERE key NOT IN (SELECT key FROM outbox)',
+    );
+    await this.schedulePublish();
+    return count;
+  }
+
   get(key: string): Product | null {
     const row = this.sql
       .exec<Row & { updated_at: number }>('SELECT * FROM products WHERE key = ?', key)

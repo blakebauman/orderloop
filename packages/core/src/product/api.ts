@@ -38,6 +38,11 @@ export type FeedFormat = (typeof FEED_FORMATS)[number];
 export const FEED_STATES = ['queued', 'splitting', 'applying', 'done', 'failed'] as const;
 export type FeedState = (typeof FEED_STATES)[number];
 
+/** Products a feed step reads before handing off to the next step. */
+export const FEED_CHUNK = 25_000;
+/** Rejected rows a feed keeps the reasons of. */
+export const FEED_ERRORS = 100;
+
 export type FeedStatus = {
   id: string;
   name: string;
@@ -95,6 +100,9 @@ export interface ProductCatalogRpc {
   feedStatus(id: string): Promise<FeedStatus | null>;
   /** Most recent first. */
   listFeeds(limit?: number): Promise<FeedStatus[]>;
-  /** Re-renders every published document and index (after a document format change). */
-  reindex(by: string): Promise<{ instanceId: string }>;
+  /**
+   * Republishes every product (after a document format, channel or renderer change): each shard
+   * queues all its products for its publisher. Returns how many were queued.
+   */
+  reindex(by: string): Promise<{ queued: number }>;
 }

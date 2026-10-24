@@ -16,11 +16,34 @@ import { toMinor } from '../money';
 import type { AttributeDef, Channel, Json, ProductInput, ProductType, VariantInput } from './model';
 import { parseTypeRef } from './model';
 
-/** RFC 4180 records from a byte stream: quoted fields, `""` escapes, CRLF or LF, a leading BOM. */
+/** A CSV record and the byte offset just past it (its line break included). */
+export type CsvRecord = { record: string[]; end: number };
+
+/** UTF-8 bytes of the UTF-16 code unit `c` (a surrogate pair counts 4 on its high half). */
+const utf8Bytes = (c: number) =>
+  c < 0x80
+    ? 1
+    : c < 0x800
+      ? 2
+      : c >= 0xd800 && c <= 0xdbff
+        ? 4
+        : c >= 0xdc00 && c <= 0xdfff
+          ? 0
+          : 3;
+
+/**
+ * RFC 4180 records from a byte stream: quoted fields, `""` escapes, CRLF or LF, a leading BOM.
+ * Each record carries the byte offset just past it, counted from `start` (where the stream begins
+ * in the file), so a reader can stop after any record and resume there with a range read
+ * (stopping early cancels the stream). The
+ * feed must be UTF-8: invalid bytes would make the offsets wrong, so they fail the parse.
+ */
 export async function* csvRecords(
   stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<string[], void, undefined> {
-  const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: false });
+  start = 0,
+): AsyncGenerator<CsvRecord, void, undefined> {
+  // ignoreBOM keeps a BOM as a character, so its three bytes are counted like any other.
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let field = '';
   let record: string[] = [];
   let quoted = false;
@@ -28,6 +51,9 @@ export async function* csvRecords(
   let quoteSeen = false;
   let started = false;
   let pendingCR = false;
+  let bytes = start;
+  let first = start === 0;
+  let finished = false;
   const reader = stream.getReader();
   const endRecord = function* () {
     record.push(field);
@@ -35,13 +61,24 @@ export async function* csvRecords(
     const r = record;
     record = [];
     started = false;
-    if (!(r.length === 1 && r[0] === '')) yield r;
+    if (!(r.length === 1 && r[0] === '')) yield { record: r, end: bytes };
   };
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      const text = done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let text: string;
+      try {
+        text = done ? decoder.decode() : decoder.decode(value, { stream: true });
+      } catch {
+        throw new SyntaxError(`the feed is not valid UTF-8 (near byte ${bytes})`);
+      }
       for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        bytes += utf8Bytes(code);
+        if (first) {
+          first = false;
+          if (code === 0xfeff) continue;
+        }
         const ch = text[i] as string;
         if (pendingCR) {
           pendingCR = false;
@@ -72,7 +109,15 @@ export async function* csvRecords(
           field = '';
           started = false;
         } else if (ch === '\n' || ch === '\r') {
-          if (ch === '\r') pendingCR = true;
+          if (ch === '\r') {
+            pendingCR = true;
+            // A CRLF record ends after its LF: count it now, so `end` lands past the line break.
+            if (text[i + 1] === '\n') {
+              bytes += 1;
+              i++;
+              pendingCR = false;
+            }
+          }
           yield* endRecord();
         } else {
           field += ch;
@@ -81,52 +126,91 @@ export async function* csvRecords(
       }
       if (done) break;
     }
+    finished = true;
     if (quoted && !quoteSeen) throw new SyntaxError('unterminated quoted field at end of feed');
     if (field !== '' || record.length) yield* endRecord();
   } finally {
-    reader.releaseLock();
+    // Stopped early (a chunk is full, or an error): cancel the rest of the stream.
+    if (finished) reader.releaseLock();
+    else await reader.cancel().catch(() => {});
   }
 }
 
-/** Non-empty lines of an NDJSON stream, parsed, with 1-based line numbers. */
+export type NdjsonRecord = { line: number; value?: unknown; error?: string; end: number };
+
+/**
+ * Non-empty lines of an NDJSON stream, parsed, with 1-based line numbers (from `firstLine`) and
+ * the byte offset just past each line (from `start`).
+ */
 export async function* ndjsonRecords(
   stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<{ line: number; value?: unknown; error?: string }, void, undefined> {
-  const decoder = new TextDecoder();
+  start = 0,
+  firstLine = 1,
+): AsyncGenerator<NdjsonRecord, void, undefined> {
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
   const reader = stream.getReader();
-  let buffered = '';
-  let line = 0;
-  const parse = (text: string) => {
+  let buffered = new Uint8Array(0);
+  let bufferStart = start;
+  let line = firstLine - 1;
+  let finished = false;
+  const parse = (bytes: Uint8Array, end: number): NdjsonRecord | undefined => {
     line++;
-    const trimmed = text.trim();
-    if (!trimmed) return undefined;
+    let text: string;
     try {
-      return { line, value: JSON.parse(trimmed) as unknown };
+      text = decoder.decode(bytes).trim();
     } catch {
-      return { line, error: 'invalid JSON' };
+      return { line, error: 'not valid UTF-8', end };
+    }
+    if (!text) return undefined;
+    try {
+      return { line, value: JSON.parse(text) as unknown, end };
+    } catch {
+      return { line, error: 'invalid JSON', end };
     }
   };
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      buffered += done ? decoder.decode() : decoder.decode(value, { stream: true });
-      let nl = buffered.indexOf('\n');
-      while (nl >= 0) {
-        const r = parse(buffered.slice(0, nl));
-        if (r) yield r;
-        buffered = buffered.slice(nl + 1);
-        nl = buffered.indexOf('\n');
+      if (value?.length) {
+        const joined = new Uint8Array(buffered.length + value.length);
+        joined.set(buffered);
+        joined.set(value, buffered.length);
+        buffered = joined;
       }
+      let from = 0;
+      let nl = buffered.indexOf(0x0a);
+      while (nl >= 0) {
+        const r = parse(buffered.subarray(from, nl), bufferStart + nl + 1);
+        if (r) yield r;
+        from = nl + 1;
+        nl = buffered.indexOf(0x0a, from);
+      }
+      bufferStart += from;
+      buffered = buffered.slice(from);
       if (done) break;
     }
-    const r = parse(buffered);
-    if (r) yield r;
+    finished = true;
+    if (buffered.length) {
+      const r = parse(buffered, bufferStart + buffered.length);
+      if (r) yield r;
+    }
   } finally {
-    reader.releaseLock();
+    // Stopped early: cancel the rest of the stream.
+    if (finished) reader.releaseLock();
+    else await reader.cancel().catch(() => {});
   }
 }
 
-export type FeedRow = { row: number; product?: ProductInput; error?: string };
+export type FeedRow = {
+  /** The product's first row (CSV) or its line (NDJSON). */
+  row: number;
+  /** The product's last row: a resumed read numbers rows from the one after it. */
+  last: number;
+  product?: ProductInput;
+  error?: string;
+  /** Byte offset just past the product's last row: where a resumed read starts. */
+  end: number;
+};
 
 const BOOL: Record<string, boolean> = {
   true: true,
@@ -188,24 +272,39 @@ const list = (cell: string | undefined) =>
         .filter(Boolean)
     : [];
 
+/** The CSV header's columns, checked: a feed needs `key` and `sku`. */
+export function csvHeader(record: string[]): string[] {
+  const header = record.map((h) => h.trim());
+  if (!header.includes('key') || !header.includes('sku'))
+    throw new SyntaxError('CSV feed needs "key" and "sku" columns');
+  return header;
+}
+
 /**
- * Products from CSV records (the first record is the header). Consecutive rows with the same `key`
- * are one product's variants; product-level columns are read from its first row.
+ * Products from CSV records. Consecutive rows with the same `key` are one product's variants;
+ * product-level columns are read from its first row. Without `opts.header` the first record is the
+ * header; with it (resuming mid-file), every record is data and rows are numbered from
+ * `opts.firstRow`.
  */
 export async function* csvProducts(
-  records: AsyncIterable<string[]>,
+  records: AsyncIterable<CsvRecord>,
   resolveType: (code: string, version?: number) => ProductType | undefined,
   channels: Map<string, Channel>,
+  opts: { header?: string[]; firstRow?: number } = {},
 ): AsyncGenerator<FeedRow, void, undefined> {
-  let header: string[] | undefined;
-  let current: { row: number; product: ProductInput; error?: string } | undefined;
-  let row = 0;
-  for await (const record of records) {
+  let header = opts.header;
+  let current:
+    | { row: number; last: number; product: ProductInput; error?: string; end: number }
+    | undefined;
+  let row = (opts.firstRow ?? 1) - 1;
+  const done = (c: NonNullable<typeof current>): FeedRow =>
+    c.error
+      ? { row: c.row, last: c.last, error: c.error, end: c.end }
+      : { row: c.row, last: c.last, product: c.product, end: c.end };
+  for await (const { record, end } of records) {
     row++;
     if (!header) {
-      header = record.map((h) => h.trim());
-      if (!header.includes('key') || !header.includes('sku'))
-        throw new SyntaxError('CSV feed needs "key" and "sku" columns');
+      header = csvHeader(record);
       continue;
     }
     const cells: Record<string, string> = {};
@@ -215,7 +314,7 @@ export async function* csvProducts(
     });
     const key = cells.key ?? '';
     if (current && current.product.key !== key) {
-      yield current.error ? { row: current.row, error: current.error } : current;
+      yield done(current);
       current = undefined;
     }
     try {
@@ -255,6 +354,8 @@ export async function* csvProducts(
       }
       if (current) {
         current.product.variants.push(variant);
+        current.end = end;
+        current.last = row;
         continue;
       }
       const localizedCol = (prefix: string) => {
@@ -299,12 +400,22 @@ export async function* csvProducts(
           };
         (product.channels as Record<string, typeof listing>)[ch.code] = listing;
       }
-      current = { row, product };
+      current = { row, last: row, product, end };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (current) current.error ??= `row ${row}: ${message}`;
-      else current = { row, product: { key, type: '', title: {}, variants: [] }, error: message };
+      if (current) {
+        current.error ??= `row ${row}: ${message}`;
+        current.end = end;
+        current.last = row;
+      } else
+        current = {
+          row,
+          last: row,
+          product: { key, type: '', title: {}, variants: [] },
+          error: message,
+          end,
+        };
     }
   }
-  if (current) yield current.error ? { row: current.row, error: current.error } : current;
+  if (current) yield done(current);
 }

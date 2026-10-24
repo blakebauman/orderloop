@@ -3,9 +3,11 @@
  * bindings only. It validates products against the types they name, groups them by shard and
  * sends each shard one batch; it never touches storage itself.
  *
- * Feeds and reindexing arrive with the FeedImport and Reindex Workflows.
+ * A feed is stored in R2 as it streams in, then imported by the FeedImport Workflow
+ * (feed-import.ts); its progress is kept by CatalogFeeds.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
+import { newId } from '@orderloop/core';
 import {
   aliasShard,
   type CategoriesResult,
@@ -13,6 +15,10 @@ import {
   type CategoryInput,
   type Channel,
   type ChannelResult,
+  FEED_FORMATS,
+  type FeedFormat,
+  type FeedStatus,
+  PRODUCT_SHARDS,
   type Product,
   type ProductCatalogRpc,
   type ProductData,
@@ -26,6 +32,8 @@ import {
   type WriteResult,
 } from '@orderloop/core/product';
 import { type CatalogConfig, meta, shard, shardFor, typeResolver } from './config';
+import { feeds } from './feed-import';
+import { storeStream } from './upload';
 
 /** Products per putProducts call. */
 export const MAX_WRITE = 500;
@@ -37,9 +45,7 @@ const CONFIG_TTL_MS = 2_000;
 
 let cached: { config: CatalogConfig; at: number } | undefined;
 
-type Implemented = Omit<ProductCatalogRpc, 'startFeed' | 'feedStatus' | 'listFeeds' | 'reindex'>;
-
-export class CatalogApi extends WorkerEntrypoint<Env> implements Implemented {
+export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogRpc {
   private async config(fresh = false): Promise<CatalogConfig> {
     if (!fresh && cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.config;
     cached = { config: await meta(this.env).getConfig(), at: Date.now() };
@@ -154,5 +160,39 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements Implemented {
 
   async listCategories(): Promise<Category[]> {
     return meta(this.env).listCategories();
+  }
+
+  async startFeed(
+    body: ReadableStream<Uint8Array>,
+    m: { name: string; format: FeedFormat; by: string },
+  ): Promise<FeedStatus> {
+    if (!FEED_FORMATS.includes(m.format))
+      throw new RangeError(`format must be ${FEED_FORMATS.join(' or ')}`);
+    const id = newId('feed');
+    const key = `feeds/${id}/source.${m.format}`;
+    await storeStream(this.env.PUBLISHED, key, body);
+    const status = await feeds(this.env).create({
+      id,
+      name: m.name.slice(0, 200),
+      format: m.format,
+      by: m.by,
+    });
+    await this.env.FEED_IMPORT.create({ id, params: { id, format: m.format, key, by: m.by } });
+    return status;
+  }
+
+  async feedStatus(id: string): Promise<FeedStatus | null> {
+    return feeds(this.env).get(id);
+  }
+
+  async listFeeds(limit = 20): Promise<FeedStatus[]> {
+    return feeds(this.env).list(Math.min(Math.max(1, limit), 100));
+  }
+
+  async reindex(_by: string): Promise<{ queued: number }> {
+    const counts = await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, (_, n) => shard(this.env, n).republishAll(n)),
+    );
+    return { queued: counts.reduce((a, b) => a + b, 0) };
   }
 }
