@@ -16,6 +16,9 @@ const catalog = {
   feedStatus: vi.fn(),
   listFeeds: vi.fn(),
   reindex: vi.fn(),
+  deleteType: vi.fn(),
+  deleteChannel: vi.fn(),
+  deleteCategories: vi.fn(),
 };
 vi.mock('cloudflare:workers', () => ({ env: {} }));
 vi.mock('~/lib/env.server', () => ({ catalog: () => catalog, engine: () => ({}), db: () => ({}) }));
@@ -194,8 +197,65 @@ describe('catalog setup over REST', () => {
     expect(await r.json()).toEqual({ queued: 12 });
   });
 
+  it('deletes types, channels (admin only) and categories, with 404 and 409 when refused', async () => {
+    catalog.deleteType.mockResolvedValueOnce({
+      ok: false,
+      issues: ['3 products use apparel: delete or move them first'],
+    });
+    expect((await call('DELETE', 'types/apparel', operator)).status).toBe(409);
+    catalog.deleteType.mockResolvedValueOnce({
+      ok: false,
+      issues: ['nope: unknown type'],
+      notFound: true,
+    });
+    expect((await call('DELETE', 'types/nope', operator)).status).toBe(404);
+    catalog.deleteType.mockResolvedValueOnce({ ok: true, code: 'spare', versions: 2 });
+    expect(await (await call('DELETE', 'types/spare', operator)).json()).toEqual({
+      ok: true,
+      code: 'spare',
+      versions: 2,
+    });
+    expect(audit).toHaveBeenCalledWith(
+      expect.anything(),
+      'catalog.type_deleted',
+      expect.objectContaining({ target: 'spare' }),
+    );
+
+    expect((await call('DELETE', 'channels/outlet', operator)).status).toBe(403);
+    catalog.deleteChannel.mockResolvedValueOnce({ ok: true, code: 'outlet', unpublished: 12 });
+    expect(await (await call('DELETE', 'channels/outlet', admin)).json()).toEqual({
+      ok: true,
+      code: 'outlet',
+      unpublished: 12,
+    });
+
+    catalog.deleteCategories.mockResolvedValueOnce({
+      ok: false,
+      issues: ['tops: still the parent of tees'],
+    });
+    expect(
+      (await call('POST', 'categories/delete', operator, JSON.stringify({ codes: ['tops'] })))
+        .status,
+    ).toBe(409);
+    catalog.deleteCategories.mockResolvedValueOnce({ ok: true, deleted: ['tees', 'tops'] });
+    expect(
+      (
+        await call(
+          'POST',
+          'categories/delete',
+          operator,
+          JSON.stringify({ codes: ['tees', 'tops'] }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (await call('POST', 'categories/delete', operator, JSON.stringify({ codes: [] }))).status,
+    ).toBe(400);
+  });
+
   it('answers 404 for anything else', async () => {
     expect((await call('GET', 'widgets', admin)).status).toBe(404);
     expect((await call('DELETE', 'products/tee', admin)).status).toBe(404);
+    expect((await call('DELETE', 'categories/tees', admin)).status).toBe(404);
   });
 });

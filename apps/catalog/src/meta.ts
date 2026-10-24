@@ -12,6 +12,7 @@ import {
   type ChannelResult,
   categorySchema,
   channelSchema,
+  type DeleteResult,
   DOC_FORMAT,
   type ProductType,
   type ProductTypeInput,
@@ -81,6 +82,19 @@ export class CatalogMeta extends DurableObject<Env> {
     return { ok: true, type };
   }
 
+  /** Removes every version of a type (the caller checked no product uses it). */
+  deleteType(code: string): { versions: number } {
+    const versions = this.sql
+      .exec<{ n: number }>('SELECT COUNT(*) AS n FROM types WHERE code = ?', code)
+      .one().n;
+    if (versions)
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec('DELETE FROM types WHERE code = ?', code);
+        this.bump();
+      });
+    return { versions };
+  }
+
   listTypes(): ProductType[] {
     return this.sql
       .exec<{ body: string }>(
@@ -111,6 +125,20 @@ export class CatalogMeta extends DurableObject<Env> {
     });
     await this.publishCategories([channel]);
     return { ok: true, channel };
+  }
+
+  /** Removes a channel and its category trees. Returns it, or null when there was none. */
+  async deleteChannel(code: string): Promise<Channel | null> {
+    const channel = this.channels().find((c) => c.code === code) ?? null;
+    if (!channel) return null;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM channels WHERE code = ?', code);
+      this.bump();
+    });
+    await this.env.PUBLISHED.delete(
+      channel.locales.map((locale) => paths.categories(DOC_FORMAT, code, locale)),
+    );
+    return channel;
   }
 
   channels(): Channel[] {
@@ -154,6 +182,34 @@ export class CatalogMeta extends DurableObject<Env> {
     });
     await this.publishCategories(this.channels());
     return { ok: true, categories: incoming };
+  }
+
+  /**
+   * Removes categories (the caller checked no product is filed in them) and republishes the
+   * tree. Refused when a code is unknown or a category keeps children outside the set.
+   */
+  async deleteCategories(codes: string[]): Promise<DeleteResult<{ categories: Category[] }>> {
+    const all = this.listCategories();
+    const gone = new Set(codes);
+    const issues: string[] = [];
+    const unknown = [...gone].filter((code) => !all.some((c) => c.code === code));
+    for (const code of unknown) issues.push(`${code}: unknown category`);
+    for (const c of all)
+      if (c.parent && gone.has(c.parent) && !gone.has(c.code))
+        issues.push(`${c.parent}: still the parent of ${c.code}`);
+    // Not found only when every problem is a code that doesn't exist.
+    if (issues.length)
+      return {
+        ok: false,
+        issues,
+        ...(unknown.length === issues.length ? { notFound: true as const } : {}),
+      };
+    const deleted = all.filter((c) => gone.has(c.code));
+    this.ctx.storage.transactionSync(() => {
+      for (const code of gone) this.sql.exec('DELETE FROM categories WHERE code = ?', code);
+    });
+    await this.publishCategories(this.channels());
+    return { ok: true, categories: deleted };
   }
 
   listCategories(): Category[] {

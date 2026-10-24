@@ -28,6 +28,9 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'catalog.categories_saved': 'Saved catalog categories',
   'catalog.feed_started': 'Started a catalog feed',
   'catalog.reindexed': 'Republished the catalog',
+  'catalog.type_deleted': 'Deleted a product type',
+  'catalog.channel_deleted': 'Deleted a catalog channel',
+  'catalog.categories_deleted': 'Deleted catalog categories',
 } as const;
 
 export type BusinessAuditAction = keyof typeof BUSINESS_AUDIT_ACTIONS;

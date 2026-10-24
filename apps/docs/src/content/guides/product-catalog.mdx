@@ -85,6 +85,18 @@ If a key appears twice in one call, the last one wins and the earlier ones are r
 Types, channels and categories are written with `POST /api/v1/catalog/types`, `/channels` and
 `/categories` (and listed with `GET`); categories are upserted, and the tree is republished once per call.
 
+### Deleting types, channels and categories
+
+| Request | Needs | Effect |
+|---|---|---|
+| `DELETE /api/v1/catalog/types/:code` | `operator` | Removes every version of the type and answers `{ ok, code, versions }`. Refused with `409` while any product uses the type (`N products use <code>: delete or move them first`) |
+| `POST /api/v1/catalog/categories/delete` with `{ "codes": [...] }` (1 to 500) | `operator` | Deletes the categories, republishes each channel's tree and removes their listings, and answers `{ ok, deleted }`. Refused with `409` while a product is filed in one, or one is still the parent of a category outside the set; delete a parent and its children in one call |
+| `DELETE /api/v1/catalog/channels/:code` | `admin` | Removes the channel and its category trees, then takes down everything published in it: product documents, SKU and slug lookups, listing cards, category listings and search entries. Answers `{ ok, code, unpublished }`, the number of products taken down |
+
+An unknown code answers `404`; any other refusal is `409` with its `issues`. Deleting a channel doesn't
+touch the products: they keep their listing for it, so adding the channel again and running a
+[reindex](#freshness) publishes it once more. Each delete is recorded in the audit log.
+
 ```json
 {
   "products": [
