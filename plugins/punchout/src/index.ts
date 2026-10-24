@@ -41,7 +41,9 @@ import { XmlError } from './xml';
 const HOST = 'orderloop';
 const xml = (body: string, status = 200) =>
   new Response(body, { status, headers: { 'content-type': 'text/xml; charset=UTF-8' } });
-const refuse = (status: number, text: string) => xml(statusResponse(HOST, status, text), status);
+// cXML answers every request it could read with HTTP 200 and its own Status code: procurement
+// networks take any other HTTP status for a transport failure, and retry.
+const refuse = (status: number, text: string) => xml(statusResponse(HOST, status, text));
 
 /** The buyer, as the procurement system names them in its Extrinsics. */
 function buyerOf(extrinsics: Record<string, string>, fallback: string) {
@@ -88,12 +90,25 @@ async function cxmlSetup(request: Request, env: Env): Promise<Response> {
   if (!returnAllowed(partner, req.browserFormPost))
     return refuse(403, 'BrowserFormPost is not one of this buyer’s hosts');
   const lines = req.items.filter((i) => i.sku).map(({ sku, qty }) => ({ sku, qty }));
-  const opened = await openCart(env, partner, {
-    sessionRef: `${partner.id}:${req.buyerCookie}`.slice(0, 200),
+  const session = {
     buyer: buyerOf(req.extrinsics, req.buyerCookie),
     returnUrl: req.browserFormPost,
     lines: req.operation === 'create' ? [] : lines,
+  };
+  // The same BuyerCookie finds the cart it opened; once that cart has gone back (an `edit` of a
+  // returned cart reuses the cookie on some systems), this request opens a new one.
+  let opened = await openCart(env, partner, {
+    sessionRef: `${partner.id}:${req.buyerCookie}`.slice(0, 200),
+    ...session,
   });
+  if (!opened.ok && /^That session’s cart (is|has)/.test(opened.error))
+    opened = await openCart(env, partner, {
+      sessionRef: `${partner.id}:${req.buyerCookie}:${req.payloadId || crypto.randomUUID()}`.slice(
+        0,
+        200,
+      ),
+      ...session,
+    });
   if (!opened.ok) return refuse(400, opened.error);
   if (!opened.cart.startUrl) return refuse(500, 'The app’s origin is not configured');
   await recordSession(env, {
@@ -178,24 +193,19 @@ async function ociSetup(request: Request, env: Env): Promise<Response> {
     buyer: { id: setup.username, name: setup.username },
     returnUrl: setup.hookUrl,
   });
-  if (!opened.ok || !opened.cart.startUrl)
-    return page(
-      400,
-      `<p>${opened.ok ? 'The app’s origin is not configured.' : escapeHtml(opened.error)}</p>`,
-    );
+  if (!opened.ok) return page(400, `<p>${escapeHtml(opened.error)}</p>`);
   await recordSession(env, {
     cartId: opened.cart.cartId,
     partnerId: partner.id,
     buyerCookie: '',
     operation: 'create',
   });
-  // Plugin pages can't redirect off their own paths or run script; a refresh can.
-  const start = escapeHtml(opened.cart.startUrl);
-  return page(
-    200,
-    `<p><a href="${start}">Open the catalog</a></p>`,
-    `<meta http-equiv="refresh" content="0;url=${start}">`,
-  );
+  // To the cart's start link: the one place off its own pages a plugin may redirect, so a system
+  // that frames the catalog lands on the cart's page, which the partner's frame origins may frame.
+  return new Response(null, {
+    status: 302,
+    headers: { location: opened.cart.startPath, 'cache-control': 'no-store' },
+  });
 }
 
 const escapeHtml = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);

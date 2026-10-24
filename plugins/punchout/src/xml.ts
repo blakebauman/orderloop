@@ -20,11 +20,18 @@ export type XmlElement = {
 export class XmlError extends Error {}
 
 const NAME = /^[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?/;
-const ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+// No prototype: `&toString;` is not an entity.
+const ENTITIES: Record<string, string> = Object.assign(Object.create(null), {
+  lt: '<',
+  gt: '>',
+  amp: '&',
+  quot: '"',
+  apos: "'",
+});
 
 function decode(raw: string): string {
   return raw.replace(/&([^;\s&]{1,10});/g, (_, ref: string) => {
-    if (ref in ENTITIES) return ENTITIES[ref]!;
+    if (Object.hasOwn(ENTITIES, ref)) return ENTITIES[ref]!;
     const code = /^#x[0-9a-f]+$/i.test(ref)
       ? Number.parseInt(ref.slice(2), 16)
       : /^#\d+$/.test(ref)

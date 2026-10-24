@@ -138,7 +138,10 @@ function sanitized(res: Response, id: string, origin: string): Response {
   const location = res.headers.get('location');
   if (location !== null) {
     const to = new URL(location, `${origin}/plugins/${id}/`);
-    if (to.origin !== origin || pluginPathId(to.pathname) !== id)
+    // Its own pages, or an external cart's start link (which only the plugin that opened the cart
+    // was given): a punchout system opening the catalog in a frame follows it there.
+    const start = /^\/cart\/start\/cart_[a-z0-9]+\/[0-9a-f]+$/.test(to.pathname) && !to.search;
+    if (to.origin !== origin || (pluginPathId(to.pathname) !== id && !start))
       return new Response('A plugin may only redirect to its own pages', { status: 502 });
     headers.set('location', `${to.pathname}${to.search}`);
   }
