@@ -168,11 +168,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleApi(request, caller);
   }
 
-  // The order page's live connection to its OrderAgent, and the assistant panel's to the
-  // person's own AssistantAgent (Agents SDK WebSocket + RPC, and the chat's message fetch).
+  // The order page's live connection to its OrderAgent, a cart page's to its CartAgent, and the
+  // assistant panel's to the person's own AssistantAgent (Agents SDK WebSocket + RPC, and the
+  // chat's message fetch).
   const order = url.pathname.startsWith('/agents/order-agent/');
+  const cart = url.pathname.startsWith('/agents/cart-agent/');
   const assistant = url.pathname.startsWith('/agents/assistant-agent/');
-  if (order || assistant) {
+  if (order || cart || assistant) {
     const caller = await principal(request);
     if (!caller) return new Response('Unauthorized', { status: 401 });
     const due = setupDue(caller);

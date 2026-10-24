@@ -1,0 +1,57 @@
+---
+title: Carts
+description: Build an order with your team before it starts, priced by its flow as you go, with everyone who has the cart open seeing each change and talking it over in the cart's chat.
+---
+
+A cart is a list of lines you and your team put together before it becomes an order: a quarterly
+restock, a quote a customer asked for, a large B2B order three people need to agree on. Everyone
+who has a cart open sees each change as it happens, who else is there, and the cart's chat.
+
+Open **Carts** from the main navigation.
+
+## Opening a cart
+
+Operators open a cart with a **title**, the **flow** it will run on, and optionally a
+**customer**. Only published flows that price orders (they have a
+[Price lines](/reference/nodes/#commerce.price) step) are offered.
+
+The flow and the customer decide the price: a cart for a customer with contract prices shows
+those prices, exactly as the order will charge them.
+
+## Lines and prices
+
+A line is a SKU and a quantity. Nobody types a price: after every change the cart is priced
+again by its flow's own pricing steps (validate, price, shipping rate, tax and policy), the same
+way an order on that flow is priced. Until the new price is in, the cart shows **Pricing…**.
+
+- Adding a SKU the cart already has adds to that line.
+- Setting a quantity to 0 removes the line.
+- A cart holds at most 100 lines, and a line at most 10,000 units.
+- A SKU the store doesn't sell, or a line that is short of stock, shows its problem under the line.
+  A policy the cart breaks (an order minimum, say) shows under the price.
+
+## Working on a cart together
+
+**Here now** lists everyone with the cart open. The **chat** is for the cart's own conversation:
+messages are signed with your name, and you can edit or delete only your own. Earlier messages
+load a page at a time.
+
+| Role | Can |
+|---|---|
+| Viewer and Approver | Open carts, see their lines and price, and chat |
+| Operator and Admin | Also open carts, change lines, lock and unlock, submit and cancel |
+
+Signing out, being disabled or losing access closes the cart on any page you still have open
+within about 30 seconds.
+
+## Locking, submitting and cancelling
+
+**Lock** stops anyone changing lines while you check the cart; **Unlock** lets them
+again. A locked cart can still be submitted.
+
+**Submit as order** starts an order on the cart's flow with the cart's lines and customer, and the cart then links to it. The order is priced again by its flow and goes through
+whatever the flow does next, approvals included: a cart is not approved on its own. A cart can be
+submitted only once its price is current and shows no problems, and only once: after that, and
+after **Cancel cart**, nothing changes it.
+
+Orders started from a cart have the **Manual** channel, and their external id is the cart's id.
