@@ -21,7 +21,7 @@ import {
 import { A2A_PATH, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
-import { cartSnapshot, createCart } from './cart/carts';
+import { cartSnapshot, createCart, redeemCartStart } from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
 import { orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
@@ -195,5 +195,9 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   cartSnapshot(id: string) {
     return cartSnapshot(this.env, id);
+  }
+
+  redeemCartStart(cartId: string, token: string) {
+    return redeemCartStart(this.env, cartId, token);
   }
 }

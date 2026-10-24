@@ -55,3 +55,19 @@ submitted only once its price is current and shows no problems, and only once: a
 after **Cancel cart**, nothing changes it.
 
 Orders started from a cart have the **Manual** channel, and their external id is the cart's id.
+
+## Carts your customers open from their own systems
+
+Some customers buy from inside their own purchasing system. An integration installed on your
+workspace (punchout, say) opens a cart for their buyer and sends them to it, on a page outside
+the app that works only for that buyer and that cart, and can be shown inside their system.
+The buyer adds and changes lines and chats; staff see the same cart on the Carts page, where
+they can help in the chat. When the buyer is done, **Return cart to your system** sends the
+priced lines back to their purchasing system, which raises the purchase order from them, and
+the cart reads **Returned to the buyer**. A cart the buyer never sends back closes on its own
+when the session expires.
+
+Inside the purchasing system's frame, the cart keeps its buyer signed in with a cookie kept for
+that system's site alone (a partitioned third-party cookie). A browser that blocks third-party
+cookies outright, as Safari does by default, doesn't keep it, so there the buyer can't use the
+cart in a frame; the purchasing system has to open it in its own window or tab.

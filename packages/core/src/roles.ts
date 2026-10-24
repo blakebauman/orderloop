@@ -209,6 +209,33 @@ export function signCartGuest(
   return seal(secret, GUEST_VERSION, { g, path, exp: now + PRINCIPAL_TTL_MS });
 }
 
+const GUEST_SESSION_VERSION = 'gs1';
+
+/**
+ * The cookie that keeps a redeemed start link's buyer on their cart (set by the web app, never
+ * sent to the engine): its own envelope (`gs1`), bound to that cart and expiring with it.
+ */
+export function signCartGuestSession(
+  secret: string,
+  g: CartGuest,
+  expiresAt: number,
+): Promise<string> {
+  return seal(secret, GUEST_SESSION_VERSION, { g, path: `cart:${g.cartId}`, exp: expiresAt });
+}
+
+export async function verifyCartGuestSession(
+  secrets: readonly (string | undefined)[],
+  value: string | null | undefined,
+  cartId: string,
+  now = Date.now(),
+): Promise<CartGuest | null> {
+  const body = await unseal(secrets, GUEST_SESSION_VERSION, value, `cart:${cartId}`, now);
+  const g = body?.g as Partial<CartGuest> | undefined;
+  if (!g || g.cartId !== cartId || typeof g.id !== 'string' || typeof g.name !== 'string')
+    return null;
+  return { cartId: g.cartId, id: g.id, name: g.name };
+}
+
 /** The cart guest a forwarded request is from, or null (see `verifyPrincipal`). */
 export async function verifyCartGuest(
   secrets: readonly (string | undefined)[],

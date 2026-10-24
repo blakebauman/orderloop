@@ -2,7 +2,7 @@ import { isbot } from 'isbot';
 import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext, RouterContextProvider } from 'react-router';
 import { ServerRouter } from 'react-router';
-import { contentSecurityPolicy, NonceContext, newNonce } from './lib/csp';
+import { contentSecurityPolicy, EMBED_HEADER, NonceContext, newNonce, parseEmbed } from './lib/csp';
 
 export const streamTimeout = 5_000;
 
@@ -42,8 +42,11 @@ export default async function handleRequest(
   if ((userAgent && isbot(userAgent)) || routerContext.isSpaMode) await body.allReady;
 
   responseHeaders.set('Content-Type', 'text/html');
+  // An external cart's page may be framed by the buyer's system and post its return there.
+  const embed = parseEmbed(responseHeaders.get(EMBED_HEADER));
+  responseHeaders.delete(EMBED_HEADER);
   // Vite's dev server injects its own inline scripts, which carry no nonce.
   if (!import.meta.env.DEV)
-    responseHeaders.set('Content-Security-Policy', contentSecurityPolicy(nonce));
+    responseHeaders.set('Content-Security-Policy', contentSecurityPolicy(nonce, embed));
   return new Response(body, { headers: responseHeaders, status: responseStatusCode });
 }

@@ -151,6 +151,18 @@ export async function openExternalCart(
   };
 }
 
+/** The buyer an external cart's start link admits, once (`CartAgent.redeemStart`). */
+export async function redeemCartStart(env: Env, cartId: string, token: string) {
+  const row = await createDb(env.DB)
+    .select({ pluginId: carts.pluginId, expiresAt: carts.expiresAt })
+    .from(carts)
+    .where(eq(carts.id, cartId))
+    .get();
+  if (!row?.pluginId || !row.expiresAt) return null;
+  const guest = await cartAgent(env, cartId).redeemStart(token);
+  return guest ? { guest, expiresAt: row.expiresAt } : null;
+}
+
 /** A cart as the plugin that opened it sees it, or null for anyone else's. */
 export async function pluginCart(
   env: Env,
