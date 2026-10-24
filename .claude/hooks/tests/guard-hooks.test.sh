@@ -76,6 +76,7 @@ check "a MultiEdit adding /livez is denied" "$DENY" "$(jq -cn --arg f "$root/app
 check "/health is allowed" "" "$(edit_in "$root/apps/web/app/routes.ts" "route('/health', 'routes/health.ts')")"
 check "a word ending in z is allowed" "" "$(edit_in "$root/apps/web/app/x.ts" "'/quiz'")"
 check "CLAUDE.md may name the rule" "" "$(edit_in "$root/CLAUDE.md" 'not `/healthz`')"
+check "AGENTS.md may name the rule" "" "$(edit_in "$root/AGENTS.md" 'not `/healthz`')"
 
 # ── rules-impact: path rules, once per file per session ───────────────────────
 rules_in() { jq -cn --arg s "$1" --arg f "$2" '{session_id:$s,tool_input:{file_path:$f}}' | "$hooks/rules-impact.sh"; }

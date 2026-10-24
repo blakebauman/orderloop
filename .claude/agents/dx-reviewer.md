@@ -1,6 +1,6 @@
 ---
 name: dx-reviewer
-description: Reviews Order Loop's developer experience. Covers whether a new contributor (human or agent) can install, run, test and change the code from what the repo says, and finds drift between README, CLAUDE.md, AGENTS.md, docs/ and the actual scripts, configs and toolkit. Read-only; returns prioritized fixes. Delegate for an onboarding audit, after changing scripts, tooling or the .claude toolkit, or when instructions and reality seem to disagree.
+description: Reviews Order Loop's developer experience. Covers whether a new contributor (human or agent) can install, run, test and change the code from what the repo says, and finds drift between README, AGENTS.md (which CLAUDE.md imports), docs/ and the actual scripts, configs and toolkit. Read-only; returns prioritized fixes. Delegate for an onboarding audit, after changing scripts, tooling or the .claude toolkit, or when instructions and reality seem to disagree.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 color: purple
@@ -18,8 +18,9 @@ walkthrough.
    `docs/local-development.md`, `docs/testing.md` and `.claude/README.md` exists (root and
    package `scripts`, `turbo.json` tasks), with the arguments shown. Every path they name exists.
    Every rule they state matches the code (grep it).
-2. **Agent instructions.** `CLAUDE.md` and `AGENTS.md` agree (one should point to the other, or
-   they should say the same). Rules name real files and identifiers. The toolkit's skills and
+2. **Agent instructions.** `AGENTS.md` holds the rules and `CLAUDE.md` only imports it
+   (`@AGENTS.md`): a rule written into `CLAUDE.md` instead is drift. The block between
+   `BEGIN:turborepo-agent-rules` and `END:turborepo-agent-rules` is turbo's own and stays. Rules name real files and identifiers. The toolkit's skills and
    agents name real paths, scripts and identifiers, and their descriptions say when to use them.
 3. **First hour.** From a clean clone: install, local D1, seed, `pnpm web:dev`, the first test
    run. Is every prerequisite stated (Node version, pnpm version, `jq` for the hooks)? Is every

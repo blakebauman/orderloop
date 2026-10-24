@@ -7,6 +7,7 @@
 #   - agents: name = file name, a description, every preloaded skill exists and can be preloaded
 #   - settings.json: every hook command is an executable script that parses (bash -n)
 #   - the rules and surface maps: two columns where expected, and every regex compiles
+#   - CLAUDE.md only imports AGENTS.md (the rules live there): an `@AGENTS.md` line, no rule bullets
 set -u
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is not installed: the hooks need it (and do nothing without it). Install it (brew install jq) and re-run."; exit 1; }
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -82,5 +83,9 @@ check_map() { # file, expected columns
 check_map "$kit/skills/orderloop-conventions/references/rules-map.tsv" 2
 check_map "$kit/skills/docs-sync/references/surface-map.tsv" 2
 
-[ $fail -eq 0 ] && echo "ok   toolkit: skills, agents, hooks and maps"
+for f in AGENTS.md CLAUDE.md; do [ -f "$root/$f" ] && [ ! -L "$root/$f" ] || bad "$f is missing or a symlink"; done
+grep -qx '@AGENTS.md' "$root/CLAUDE.md" 2>/dev/null || bad "CLAUDE.md doesn't import AGENTS.md (a line '@AGENTS.md')"
+grep -q '^- ' "$root/CLAUDE.md" 2>/dev/null && bad "CLAUDE.md has rules of its own: write them in AGENTS.md"
+
+[ $fail -eq 0 ] && echo "ok   toolkit: skills, agents, hooks, maps and CLAUDE.md"
 exit $fail
