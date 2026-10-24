@@ -18,9 +18,6 @@ export type WriteOp =
   | { delete: 'r2'; keys: string[] }
   | { delete: 'kv'; key: string };
 
-/** Writes in flight per publisher: more than six only queues, but keeps the six busy. */
-const CONCURRENCY = 16;
-
 /** Which of a shard's `fanout` publishers handles `key`. */
 export function publisherOf(key: string, fanout: number): number {
   const [, lo] = fnv1a64Parts(`w:${key}`);
@@ -38,8 +35,9 @@ export async function runOps(env: Env, ops: WriteOp[]): Promise<void> {
         : env.CARDS.put(op.key, op.value);
     return op.delete === 'r2' ? env.PUBLISHED.delete(op.keys) : env.CARDS.delete(op.key);
   };
-  for (let i = 0; i < ops.length; i += CONCURRENCY)
-    await Promise.all(ops.slice(i, i + CONCURRENCY).map(run));
+  // All at once: the runtime queues those past six and starts each as a slot frees, so no write
+  // waits for a slower one in its group (a call carries one pass's share, a few dozen writes).
+  await Promise.all(ops.map(run));
 }
 
 export class CatalogPublisher extends DurableObject<Env> {

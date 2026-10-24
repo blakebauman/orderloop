@@ -100,6 +100,6 @@
     "LISTING_DELAY_MS": "0",
     // Publishers each shard spreads its storage writes over: an invocation has only six writes in
     // flight, so this multiplies how fast a shard publishes (publisher.ts).
-    "PUBLISH_FANOUT": "8"
+    "PUBLISH_FANOUT": "32"
   }
 }
