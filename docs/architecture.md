@@ -144,8 +144,9 @@ token (one not shaped `<user>:<grant>:<secret>`) is checked as an `ol_live_` tok
 refused, and the role is the lower of granted and current), refuses a pending two-factor setup,
 deletes `authorization` and `cookie`, signs the caller into `x-orderloop-principal` for that path (`setPrincipalHeader`, `PRINCIPAL_KEY`) and fetches the engine over the
 `ENGINE` binding. The engine's `fetch` and `EngineApi.fetch` hand `/mcp` to `handleMcp`
-(`apps/engine/src/mcp.ts`): `createMcpHandler` from `agents/mcp/server`, a fresh
-`McpServer` (`@modelcontextprotocol/server`) per request, no session. It registers only the
+(`apps/engine/src/mcp.ts`): `createMcpHandler` from `@modelcontextprotocol/server` (`legacy: 'stateless'`), a fresh
+`McpServer` per request, no session: 2026-07-28 requests carry their envelope, and 2025-era ones
+are served statelessly. It registers only the
 `ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS` and `runTool` from `assistant/tools.ts`, the
 code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`.
 
