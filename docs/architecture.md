@@ -308,8 +308,10 @@ and purge queue with it and binds its `SearchApi` entrypoint for keyword search 
 | `putProducts(items, opts)` | At most 500 a call (`RangeError` over). Validates each against the type it names (`validateProduct`), reports a bad one as `rejected` with every issue beside the valid ones, groups the rest by `productShard(key)` and sends each shard one `apply` batch with a fresh batch id |
 | `deleteProducts(keys, opts)` | At most 500; one `remove` call per shard |
 | `getProduct`, `resolveAlias` | Read a product from its shard; read which product key holds a SKU, GTIN or slug from the alias's shard (`aliasShard`) |
-| `putType`, `listTypes` | Product types, through `CatalogMeta` |
+| `putType`, `deleteType`, `listTypes` | Product types, through `CatalogMeta`. `deleteType` sums `CatalogShard.countUsing({ type })` over all 64 shards and refuses with `N products use <code>: delete or move them first`; else `CatalogMeta.deleteType` removes every version (`<code>: unknown type` when there were none) |
 | `putChannel`, `listChannels`, `putCategories`, `listCategories` | Channels and categories, through `CatalogMeta`. The writes answer with a `Result` (`{ ok: true, … }` or `{ ok: false, issues }`), as `putType` does |
+| `deleteChannel(code, by)` | `CatalogMeta.deleteChannel` first (the channel leaves the config, so no shard publishes to it again, and its category trees are deleted from R2; `<code>: unknown channel` when absent), then every shard runs `forgetChannel(code, 500)` until it answers 0: it deletes the channel's documents, alias pointers and `CARDS` entries for the `published` rows, sends `ListingChange`s with `entry: null`, `left` the categories and `search: null` (so the indexers and search shards drop them), and clears the rows. Last it sweeps the R2 prefixes `idx/f1/<code>/` and `docs/f1/<code>/`. Answers `{ ok, code, unpublished }`. Products keep their listing data, so re-adding the channel and a `reindex` republishes it |
+| `deleteCategories(codes, by)` | Refuses with `<code>: N products are filed in it` (counted over the shards by `countUsing({ category })`), or when `CatalogMeta.deleteCategories` does (`unknown category`; `<parent>: still the parent of <child>` for a child outside the set). Otherwise deletes them, republishes the tree in every channel and deletes their `idx/` listing in every channel. Answers `{ ok, deleted }` |
 | `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part), records the feed in `CatalogFeeds` as `queued`, starts the `FeedImport` Workflow with the feed id as its instance id and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
 | `feedStatus(id)`, `listFeeds(limit)` | A feed's `FeedStatus` (`null` for an unknown id), or the most recent feeds first (20 by default, between 1 and 100) |
 | `reindex(by)` | Calls `republishAll` on all 64 shards, which queue every product not already waiting in their `outbox` for the publisher (so repeating it queues nothing twice), and answers `{ queued }`, the number of products on the shards. It waits for no publishing: each shard's alarm does that |
@@ -381,6 +383,11 @@ doesn't hold. Roles: reads `viewer`, writes `operator`, `reindex` `admin` (`atLe
 | `GET`/`POST types` | `listTypes`, `putType` | A refused type is `409 { error: 'Type refused', issues }`; `201 { type }`; `catalog.type_saved` (target the code, detail `version`) |
 | `GET`/`POST channels` | `listChannels`, `putChannel` | `400` when refused; `catalog.channel_saved` |
 | `GET`/`POST categories` | `listCategories`, `putCategories` | `{ categories }`, 1 to 500; `catalog.categories_saved` |
+| `DELETE types/:code` | `deleteType` | `operator`; `{ ok, code, versions }`; `catalog.type_deleted` (target the code, detail `versions`) |
+| `DELETE channels/:code` | `deleteChannel` | `admin`, since it takes a storefront's catalog down; `{ ok, code, unpublished }`; `catalog.channel_deleted` (detail `unpublished`) |
+| `POST categories/delete` | `deleteCategories` | `operator`; `{ codes }`, 1 to 500 (`catalogCategoriesDeleteInput`); `{ ok, deleted }`; `catalog.categories_deleted` (detail `codes`) |
+
+A refused delete is `404 { error: 'Not found', issues }` when the catalog answers `notFound: true` (nothing by that code), else `409 { error: '<The type|The channel|A category> is in use', issues }`. `deleteChannel` takes the channel's content down even when the channel is already gone from `CatalogMeta`, so a delete cut short finishes on a retry; it answers `notFound` only when the channel is unknown and nothing was left to take down.
 | `POST feeds?format=&name=` | `startFeed` | `format` is `csv` or `ndjson` (`FEED_FORMATS`), else `400`. The request body is passed to the catalog as a stream, so a feed of any size never sits in the Worker; `name` defaults to `feed.<format>` and is cut at 200 characters. `202 { feed }`; `catalog.feed_started` (target the feed id) |
 | `GET feeds`, `GET feeds/:id` | `listFeeds(limit)`, `feedStatus` | `limit` defaults to 20 |
 | `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
@@ -492,7 +499,9 @@ may only add (`typeChangeIssues`), and a new type starts at version 1. A channel
 must be one of its `locales`. Categories refuse unknown parents and cycles. It publishes each
 channel's category tree to R2 (`docs/f1/<channel>/<locale>/categories.json`) when a channel or
 categories change. A changed channel currency or locale list reaches documents already published
-only when they are re-rendered, which `reindex` does.
+only when they are re-rendered, which `reindex` does. Deleting a type, a channel or categories is
+described under [Catalog admin API](#catalog-admin-api) and `CatalogApi`; `deleteType` and
+`deleteChannel` bump `rev`, and deleting categories republishes the trees.
 
 ### Feed import
 

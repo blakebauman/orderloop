@@ -303,7 +303,7 @@ See [Outbound webhooks](/guides/outbound-webhooks/) for the events, payloads and
 ## Product catalog
 
 `/api/v1/catalog/*` writes and reads the product catalog: products, product types, channels, categories,
-feeds and `reindex`. Reads need `viewer`, writes `operator` and `reindex` `admin`. The routes and
+feeds and `reindex`. Reads need `viewer`, writes `operator`, and `reindex` and deleting a channel (`DELETE /api/v1/catalog/channels/:code`) `admin`. Types and categories are deleted with `DELETE /api/v1/catalog/types/:code` and `POST /api/v1/catalog/categories/delete`; a refused delete answers `404` when the code is unknown and `409` when products or child categories still use it. The routes and
 schemas are in the [OpenAPI explorer](/api/); the model, the feed formats and what shoppers read are
 in [Product catalog](/guides/product-catalog/).
 

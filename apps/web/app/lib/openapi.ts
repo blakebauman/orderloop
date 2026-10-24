@@ -17,6 +17,7 @@ import {
 import { z } from 'zod';
 import {
   cancelInput,
+  catalogCategoriesDeleteInput,
   catalogCategoriesInput,
   catalogChannelInput,
   catalogDeleteInput,
@@ -425,6 +426,41 @@ export function openApiDocument(serverUrl: string) {
           responses: {
             '201': ok('{ type }'),
             '409': ok('The change would break stored products', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/types/{code}': {
+        delete: {
+          summary: 'Delete a product type, every version (operator)',
+          description:
+            'Refused with 409 while any product uses the type: delete or move them first.',
+          parameters: [{ name: 'code', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': ok('{ ok, code, versions }'),
+            '409': ok('Products use it', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/channels/{code}': {
+        delete: {
+          summary: 'Delete a channel and take down everything it published (admin)',
+          description:
+            'Removes the channel and unpublishes its product documents, SKU and slug lookups, listing cards, category listings, search entries and category trees. Products keep their data for the channel, so adding it again and reindexing brings it back.',
+          parameters: [{ name: 'code', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ ok, code, unpublished }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/categories/delete': {
+        post: {
+          summary: 'Delete categories (operator)',
+          description:
+            'Refused with 409 while a category has children not being deleted with it, or has products filed in it.',
+          requestBody: body(catalogCategoriesDeleteInput),
+          responses: {
+            '200': ok('{ ok, deleted }'),
+            '409': ok('Still in use', '#/components/schemas/Error'),
             ...errors,
           },
         },

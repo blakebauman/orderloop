@@ -9,8 +9,11 @@
  *   GET  /api/v1/catalog/aliases/:alias          which product holds a SKU, GTIN or slug
  *   GET  /api/v1/catalog/types                   latest version of each type
  *   POST /api/v1/catalog/types                   a type, or its next (additive) version
+ *   DELETE /api/v1/catalog/types/:code           every version; 409 while products use it
  *   GET  /api/v1/catalog/channels  POST …        channels
+ *   DELETE /api/v1/catalog/channels/:code        takes down all it published (admin)
  *   GET  /api/v1/catalog/categories  POST …      { categories: [...] }
+ *   POST /api/v1/catalog/categories/delete       { codes }; 409 while one has children or products
  *   POST /api/v1/catalog/feeds?format=csv|ndjson&name=…   the file as the body; 202 and its status
  *   GET  /api/v1/catalog/feeds                   recent feeds;  GET …/feeds/:id  one feed
  *   POST /api/v1/catalog/reindex                 republish everything (admin)
@@ -18,6 +21,7 @@
 import { atLeast, type Principal, type Role } from '@orderloop/core';
 import { FEED_FORMATS, type FeedFormat } from '@orderloop/core/product';
 import {
+  catalogCategoriesDeleteInput,
   catalogCategoriesInput,
   catalogChannelInput,
   catalogDeleteInput,
@@ -43,6 +47,12 @@ async function readJson(request: Request, limit?: number): Promise<unknown> {
 }
 
 const invalid = (what: string, issues: unknown) => json({ error: `Invalid ${what}`, issues }, 400);
+
+/** A refused delete: 404 when there was nothing to delete, 409 when something still depends on it. */
+const refusedDelete = (what: string, r: { issues: string[]; notFound?: true }) =>
+  r.notFound
+    ? json({ error: 'Not found', issues: r.issues }, 404)
+    : json({ error: `${what} is in use`, issues: r.issues }, 409);
 
 export async function handleCatalog(
   request: Request,
@@ -121,6 +131,47 @@ export async function handleCatalog(
       });
       return json({ type: r.type }, 201);
     }
+  }
+
+  if (section === 'types' && id && !sub && request.method === 'DELETE') {
+    const blocked = need('operator');
+    if (blocked) return blocked;
+    const r = await c.deleteType(id, by);
+    if (!r.ok) return refusedDelete('The type', r);
+    await audit(request, 'catalog.type_deleted', {
+      actor: caller,
+      target: id,
+      detail: { versions: r.versions, via: 'api' },
+    });
+    return json(r);
+  }
+
+  if (section === 'channels' && id && !sub && request.method === 'DELETE') {
+    // Takes a storefront's whole catalog down: admin only.
+    const blocked = need('admin');
+    if (blocked) return blocked;
+    const r = await c.deleteChannel(id, by);
+    if (!r.ok) return refusedDelete('The channel', r);
+    await audit(request, 'catalog.channel_deleted', {
+      actor: caller,
+      target: id,
+      detail: { unpublished: r.unpublished, via: 'api' },
+    });
+    return json(r);
+  }
+
+  if (section === 'categories' && id === 'delete' && !sub && post) {
+    const blocked = need('operator');
+    if (blocked) return blocked;
+    const parsed = catalogCategoriesDeleteInput.safeParse(await readJson(request));
+    if (!parsed.success) return invalid('delete', parsed.error.issues);
+    const r = await c.deleteCategories(parsed.data.codes, by);
+    if (!r.ok) return refusedDelete('A category', r);
+    await audit(request, 'catalog.categories_deleted', {
+      actor: caller,
+      detail: { codes: r.deleted, via: 'api' },
+    });
+    return json(r);
   }
 
   if (section === 'channels' && !id) {

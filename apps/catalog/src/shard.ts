@@ -16,10 +16,12 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   aliasShard,
   contentHash,
+  DOC_FORMAT,
   type Issue,
   type Product,
   type ProductData,
   type PurgeMessage,
+  paths,
   productAliases,
   productShard,
   productUid,
@@ -27,6 +29,7 @@ import {
   type WriteResult,
 } from '@orderloop/core/product';
 import { type CatalogConfig, meta, shard } from './config';
+import type { ListingChange } from './listings';
 import { publishKeys } from './publish';
 
 export type ApplyBatch = {
@@ -261,6 +264,57 @@ export class CatalogShard extends DurableObject<Env> {
     await this.releaseOn(input.shard, releases);
     await this.schedulePublish();
     return results;
+  }
+
+  /** How many of this shard's products use a type, or are filed in a category. */
+  countUsing(q: { type?: string; category?: string }): number {
+    if (q.type)
+      return this.sql
+        .exec<{ n: number }>('SELECT COUNT(*) AS n FROM products WHERE type = ?', q.type)
+        .one().n;
+    if (q.category)
+      return this.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM products
+           WHERE EXISTS (SELECT 1 FROM json_each(json_extract(body, '$.categories')) WHERE value = ?)`,
+          q.category,
+        )
+        .one().n;
+    return 0;
+  }
+
+  /**
+   * Takes down up to `limit` of this shard's products published in a deleted channel: their
+   * documents, alias pointers and cards, and (through the changes queue) their listings and search
+   * entries. Returns how many it took down; call again until it answers 0.
+   */
+  async forgetChannel(channel: string, limit: number): Promise<number> {
+    const rows = this.sql
+      .exec<{ key: string }>('SELECT key FROM published WHERE channel = ? LIMIT ?', channel, limit)
+      .toArray();
+    if (!rows.length) return 0;
+    const at = Date.now();
+    const deletes: string[] = [];
+    const cards: string[] = [];
+    const changes: ListingChange[] = [];
+    for (const { key } of rows) {
+      const state = this.publishedState(key).find((s) => s.channel === channel);
+      if (!state) continue;
+      for (const locale of state.locales) {
+        deletes.push(paths.doc(DOC_FORMAT, channel, locale, key));
+        cards.push(paths.card(DOC_FORMAT, channel, locale, state.uid));
+      }
+      for (const alias of state.aliases) deletes.push(paths.alias(DOC_FORMAT, channel, alias));
+      changes.push({ channel, key, at, entry: null, left: state.categories, search: null });
+    }
+    for (let i = 0; i < deletes.length; i += 1000)
+      await this.env.PUBLISHED.delete(deletes.slice(i, i + 1000));
+    for (let i = 0; i < cards.length; i += 32)
+      await Promise.all(cards.slice(i, i + 32).map((k) => this.env.CARDS.delete(k)));
+    for (let i = 0; i < changes.length; i += 100)
+      await this.env.CHANGES.sendBatch(changes.slice(i, i + 100).map((body) => ({ body })));
+    for (const { key } of rows) this.recordPublished(key, channel, null);
+    return rows.length;
   }
 
   /** Queues every product for the publisher (a reindex), once each. Returns how many. */

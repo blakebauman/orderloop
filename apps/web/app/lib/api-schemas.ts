@@ -81,6 +81,10 @@ export const catalogDeleteInput = z.object({
   urgent: z.boolean().optional(),
 });
 
+export const catalogCategoriesDeleteInput = z.object({
+  codes: z.array(z.string().min(1).max(128)).min(1).max(500),
+});
+
 export const catalogCategoriesInput = z.object({
   categories: z.array(categorySchema).min(1).max(500),
 });

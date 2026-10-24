@@ -74,6 +74,11 @@ export type Result<T> = ({ ok: true } & T) | { ok: false; issues: string[] };
 export type TypeResult = Result<{ type: ProductType }>;
 export type ChannelResult = Result<{ channel: Channel }>;
 export type CategoriesResult = Result<{ categories: Category[] }>;
+/** A refused delete says whether there was nothing to delete (`notFound`) or it's still in use. */
+export type DeleteResult<T> = ({ ok: true } & T) | { ok: false; issues: string[]; notFound?: true };
+export type DeleteTypeResult = DeleteResult<{ code: string; versions: number }>;
+export type DeleteChannelResult = DeleteResult<{ code: string; unpublished: number }>;
+export type DeleteCategoriesResult = DeleteResult<{ deleted: string[] }>;
 
 export interface ProductCatalogRpc {
   /** Validates and stores products; unchanged ones write nothing. At most 500 per call. */
@@ -86,13 +91,22 @@ export interface ProductCatalogRpc {
 
   /** Adds a type, or its next version; a new version may only add (see `typeChangeIssues`). */
   putType(type: ProductTypeInput, by: string): Promise<TypeResult>;
+  /** Removes every version of a type; refused while any product uses it. */
+  deleteType(code: string, by: string): Promise<DeleteTypeResult>;
   /** Latest version of every type. */
   listTypes(): Promise<ProductType[]>;
   /** A changed currency or locale list reaches published documents on the next reindex. */
   putChannel(channel: Channel, by: string): Promise<ChannelResult>;
+  /**
+   * Removes a channel and takes down everything published in it (documents, alias pointers,
+   * cards, listings, search, category trees). Products keep their listing data for it.
+   */
+  deleteChannel(code: string, by: string): Promise<DeleteChannelResult>;
   listChannels(): Promise<Channel[]>;
   /** Upserts categories; the tree is republished once per call. */
   putCategories(categories: CategoryInput[], by: string): Promise<CategoriesResult>;
+  /** Removes categories; refused while one has children outside the set or products in it. */
+  deleteCategories(codes: string[], by: string): Promise<DeleteCategoriesResult>;
   listCategories(): Promise<Category[]>;
 
   /** Stores the feed and starts applying it in the background. */

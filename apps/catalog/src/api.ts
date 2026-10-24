@@ -15,6 +15,10 @@ import {
   type CategoryInput,
   type Channel,
   type ChannelResult,
+  type DeleteCategoriesResult,
+  type DeleteChannelResult,
+  type DeleteTypeResult,
+  DOC_FORMAT,
   FEED_FORMATS,
   type FeedFormat,
   type FeedStatus,
@@ -25,6 +29,7 @@ import {
   type ProductInput,
   type ProductType,
   type ProductTypeInput,
+  paths,
   productShard,
   type TypeResult,
   validateProduct,
@@ -193,5 +198,74 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
       Array.from({ length: PRODUCT_SHARDS }, (_, n) => shard(this.env, n).republishAll(n)),
     );
     return { queued: counts.reduce((a, b) => a + b, 0) };
+  }
+
+  /** How many products, across every shard, use a type or are filed in a category. */
+  private async using(q: { type?: string; category?: string }): Promise<number> {
+    const counts = await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, (_, n) => shard(this.env, n).countUsing(q)),
+    );
+    return counts.reduce((a, b) => a + b, 0);
+  }
+
+  /** Deletes every R2 object under `prefix`, a listing page at a time. */
+  private async sweep(prefix: string): Promise<void> {
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.PUBLISHED.list({ prefix, cursor, limit: 1000 });
+      if (page.objects.length) await this.env.PUBLISHED.delete(page.objects.map((o) => o.key));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+
+  async deleteType(code: string, _by: string): Promise<DeleteTypeResult> {
+    const n = await this.using({ type: code });
+    if (n) return { ok: false, issues: [`${n} products use ${code}: delete or move them first`] };
+    const { versions } = await meta(this.env).deleteType(code);
+    cached = undefined;
+    if (!versions) return { ok: false, issues: [`${code}: unknown type`], notFound: true };
+    return { ok: true, code, versions };
+  }
+
+  async deleteChannel(code: string, _by: string): Promise<DeleteChannelResult> {
+    // Out of the config first, so no shard publishes to it again; then take down what it had.
+    // A channel already gone still gets the takedown: that's how a delete cut short is finished.
+    const channel = await meta(this.env).deleteChannel(code);
+    cached = undefined;
+    const taken = await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, async (_, n) => {
+        let total = 0;
+        for (;;) {
+          const k = await shard(this.env, n).forgetChannel(code, 500);
+          if (!k) return total;
+          total += k;
+        }
+      }),
+    );
+    // Listing indexes, and anything a crashed publish left behind.
+    await this.sweep(`idx/${DOC_FORMAT}/${code}/`);
+    await this.sweep(`docs/${DOC_FORMAT}/${code}/`);
+    const unpublished = taken.reduce((a, b) => a + b, 0);
+    if (!channel && !unpublished)
+      return { ok: false, issues: [`${code}: unknown channel`], notFound: true };
+    return { ok: true, code, unpublished };
+  }
+
+  async deleteCategories(codes: string[], _by: string): Promise<DeleteCategoriesResult> {
+    const unique = [...new Set(codes)];
+    const counts = await Promise.all(unique.map((c) => this.using({ category: c })));
+    const issues = unique.flatMap((c, i) =>
+      counts[i] ? [`${c}: ${counts[i]} products are filed in it`] : [],
+    );
+    if (issues.length) return { ok: false, issues };
+    const r = await meta(this.env).deleteCategories(unique);
+    if (!r.ok) return r;
+    const channels = await meta(this.env).channels();
+    await Promise.all(
+      channels.flatMap((ch) =>
+        unique.map((c) => this.env.PUBLISHED.delete(paths.listing(DOC_FORMAT, ch.code, c))),
+      ),
+    );
+    return { ok: true, deleted: r.categories.map((c) => c.code) };
   }
 }

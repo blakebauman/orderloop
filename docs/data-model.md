@@ -242,7 +242,11 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 
 `CatalogMeta` (`meta`): `types` (`code`, `version`, `body`, `by`, `at`; every version is kept),
 `channels` and `categories` (`code`, `body`) and `settings` (`rev`, which moves on every type or
-channel change).
+channel change). Types, channels and categories can be deleted (`DELETE` on `types`, `channels`,
+`categories`), which bumps `rev` for types and channels. A channel's delete also clears its `published`
+rows on every shard, and deletes its `docs/f1/<channel>/` and `idx/f1/<channel>/` objects, its KV cards
+and its category trees; deleting categories deletes their `idx/f1/<channel>/<category>.bin` in every
+channel. Products keep their `channels` listing.
 
 Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a new tree (`paths` in
 `packages/core/src/product/paths.ts`):
