@@ -4,6 +4,9 @@ description: Keeps the Order Loop docs site (apps/docs) in sync with the code. D
 tools: Bash, Read, Grep, Glob, Edit, Write
 model: sonnet
 color: blue
+skills:
+  - docs-sync
+  - docs-page
 ---
 
 You keep **Order Loop's documentation** true to the code at the current commit.

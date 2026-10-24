@@ -295,6 +295,18 @@ headers, `304`s) and not hits, misses, stale serving or tag purges: `Delivery.pu
 without it, so the test only checks the acknowledgement. Nothing in the repository tests those; the
 deploy's smoke test requests only `/health`, which the gateway answers without the cache.
 
+## The Claude Code toolkit
+
+`pnpm test:toolkit` checks `.claude/` (see `.claude/README.md`), in bash, with `jq` and git:
+
+| Script | Covers |
+|---|---|
+| `.claude/scripts/toolkit-check.sh` | Each skill's name matches its directory and the Agent Skills rules (lowercase-hyphen, at most 64 characters, a description of at most 1,024), `SKILL.md` under 500 lines and its `references/` links resolving; each agent's name matches its file and every skill it preloads exists and can be preloaded; every hook in `settings.json` is an executable script that parses; the rules and surface maps have their columns and every regex compiles |
+| `.claude/hooks/tests/docs-hooks.test.sh` | `docs-impact` naming pages once per file per session, `docs-drift` counting only the session's uncommitted edits, `block-generated` denying `theme.css` and `worker-configuration.d.ts` |
+| `.claude/hooks/tests/guard-hooks.test.sh` | `guard-bash` denying deploys, rollbacks, remote migrations, Time Travel restores and resource deletes (also chained after another command) and asking before pushing `main`, force pushes, `gh pr merge`, remote D1 SQL, Worker secrets and provisioning; `guard-invariants` denying an edit to a migration already on `origin/main` (a throwaway repo), the vendored UCP schemas and z-suffixed routes, and asking before the routing golden test; `rules-impact` once per file; `format` fixing and reporting through Biome; `session-context` in a plain checkout and a worktree |
+
+CI runs it in the verify job.
+
 ## What isn't covered
 
 The flow editor canvas and the live order page are not under test; verify UI changes by running
