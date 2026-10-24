@@ -141,7 +141,7 @@ the approver and the role they chose. A bearer that is not an issued
 token (one not shaped `<user>:<grant>:<secret>`) is checked as an `ol_live_` token by
 `apiPrincipal`, with its expiry (anything else is `401`), on either endpoint.
 
-`forward` resolves the caller (for a grant, `grantPrincipal` re-reads the person: disabled means
+`forward` refuses a malformed `Origin` (`badOrigin`: present and not `http`/`https`) and accepts any other on purpose: every request carries a bearer token and cookies are deleted, so DNS rebinding, the case the MCP Origin rule guards, gains nothing. It then resolves the caller (for a grant, `grantPrincipal` re-reads the person: disabled means
 refused, and the role is the lower of granted and current), refuses a pending two-factor setup,
 deletes `authorization` and `cookie`, signs the caller into `x-orderloop-principal` for that path (`setPrincipalHeader`, `PRINCIPAL_KEY`) and fetches the engine over the
 `ENGINE` binding. The engine's `fetch` and `EngineApi.fetch` hand `/mcp` to `handleMcp`
@@ -185,8 +185,10 @@ Skills: `createServer` attaches the role's `SkillCatalog`
 (`@modelcontextprotocol/server/ext/skills`, built once per isolate per role from
 `mcpSkillFiles(role)`, `MCP_SKILLS` in `packages/core/src/mcp-skills.ts`), which declares
 `resources` and `io.modelcontextprotocol/skills` and serves `skills/list`, `skills/get` and
-`resources/read` on `skill://<name>/SKILL.md` with SHA-256 digests, a private five-minute cache hint
-and no `directoryRead`. A skill is offered to roles at or above its `role`;
+`resources/read` on `skill://<name>/SKILL.md` with SHA-256 digests and a private five-minute cache
+hint. The catalog also declares `directoryRead` and answers `resources/directory/read` for skill
+folders. The extension is declared to every revision, so 2025-era clients can list and read skills
+as well. A skill is offered to roles at or above its `role`;
 `tests/mcp-skills.test.ts` in core checks every tool it names exists and is within that role.
 
 ## A2A

@@ -168,8 +168,9 @@ offered only the skills your role can follow:
 
 A skill is instructions, not an extra permission. Its actions still wait for you, as above. Each
 skill is a `SKILL.md` at `skill://<name>/SKILL.md`, listed with its digest and size so your client
-can check what it loads, and may be cached by the client for five minutes. A client on an earlier
-revision doesn't see them.
+can check what it loads, and may be cached by the client for five minutes. Clients on the 2025
+revisions can list and read them too; whether a client offers them to you depends on its support
+for the extension.
 
 ## Who did it
 
@@ -207,6 +208,11 @@ tokens 30 days.
 - **Credentials stay at the edge.** OrderLoop resolves the caller before the request reaches the
   tools; `Authorization` and cookies go no further, and the model never sees a token.
 - **Origin.** A request whose `Origin` is not an `http` or `https` origin is refused with `403`.
+  Other origins are accepted on purpose. The Origin check in the MCP specification guards against
+  DNS rebinding, where a web page reaches a server that trusts the browser it runs in. `/mcp` trusts
+  no browser: every request needs a bearer token, which a browser never attaches by itself, and
+  cookies are removed before the request reaches the tools. A page on another origin can't call it
+  as you unless it already holds your token.
 - **Rate limits.** Each caller (a person's grant or an API token) has 300 requests a minute on
   `/mcp`, and another 300 on `/a2a`; over that it answers `429` with `Retry-After: 60`.
   `/oauth/register` allows 10 requests a minute and `/oauth/token` 60, per address; over that it
