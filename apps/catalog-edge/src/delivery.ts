@@ -9,7 +9,8 @@
  * through `purge`, called by the gateway's queue consumer.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { DOC_FORMAT, paths, tags } from '@orderloop/core/product/paths';
+import { ListingIndex } from '@orderloop/core/product/listing';
+import { CODE, DOC_FORMAT, paths, tags } from '@orderloop/core/product/paths';
 import { parse, type Route } from './routes';
 
 /** Fresh a minute; served stale for a day while revalidating, or a week if R2 fails. */
@@ -17,6 +18,34 @@ export const FRESH = 'public, max-age=60, stale-while-revalidate=86400, stale-if
 /** A miss is remembered briefly, so a product that appears is seen within half a minute. */
 export const MISSING = 'public, max-age=30';
 const JSON_TYPE = 'application/json; charset=utf-8';
+/** Listing indexes: rebuilt at most every 15 s, so cached for 30. */
+const INDEX_FRESH = 'public, max-age=30, stale-while-revalidate=300';
+/** Where Delivery fetches a listing index from itself, through the cache. Not a public route. */
+const INDEX_PATH = '/_idx/';
+/** Decoded indexes an isolate keeps, by bytes. */
+const INDEX_BUDGET = 64 * 1024 * 1024;
+/** How long an isolate trusts a decoded index before revalidating it. */
+const INDEX_TRUST_MS = 30_000;
+/** Facet values returned per attribute, most frequent first. */
+const FACET_VALUES = 50;
+
+type Held = { index: ListingIndex; etag: string; bytes: number; checked: number };
+const held = new Map<string, Held>();
+let heldBytes = 0;
+
+function keep(id: string, h: Held) {
+  const old = held.get(id);
+  if (old) heldBytes -= old.bytes;
+  held.delete(id);
+  held.set(id, h);
+  heldBytes += h.bytes;
+  // Least recently used out first (a Map iterates in insertion order).
+  for (const [k, v] of held) {
+    if (heldBytes <= INDEX_BUDGET || k === id) break;
+    held.delete(k);
+    heldBytes -= v.bytes;
+  }
+}
 
 type CachePurge = {
   purge(o: { tags: string[] }): Promise<{ success: boolean; errors: unknown[] }>;
@@ -35,7 +64,9 @@ function missing(error: string, cacheTags: string[]) {
 
 export class Delivery extends WorkerEntrypoint<Env> {
   override async fetch(request: Request): Promise<Response> {
-    const parsed = parse(new URL(request.url));
+    const url = new URL(request.url);
+    if (url.pathname.startsWith(INDEX_PATH)) return this.indexBlob(request, url);
+    const parsed = parse(url);
     if (!parsed.ok) return json(JSON.stringify({ error: parsed.error }), parsed.status, {});
     const route = parsed.route;
     switch (route.kind) {
@@ -52,6 +83,8 @@ export class Delivery extends WorkerEntrypoint<Env> {
       }
       case 'batch':
         return this.batch(route);
+      case 'listing':
+        return this.listing(route);
       case 'categories': {
         const object = await this.env.PUBLISHED.get(
           paths.categories(DOC_FORMAT, route.channel, route.locale),
@@ -107,6 +140,109 @@ export class Delivery extends WorkerEntrypoint<Env> {
       'cache-control': FRESH,
       'cache-tag': [tags.channel(route.channel), ...route.keys.map(tags.product)].join(','),
     });
+  }
+
+  /** A listing index's bytes from R2 (only ever asked for by `loadIndex`, through the cache). */
+  private async indexBlob(request: Request, url: URL): Promise<Response> {
+    const [channel = '', category = ''] = url.pathname.slice(INDEX_PATH.length).split('/');
+    if (!CODE.test(channel) || !CODE.test(category)) return new Response(null, { status: 404 });
+    const object = await this.env.PUBLISHED.get(paths.listing(DOC_FORMAT, channel, category), {
+      onlyIf: request.headers,
+    });
+    const headers = {
+      'cache-control': INDEX_FRESH,
+      'cache-tag': [tags.category(category), tags.channel(channel)].join(','),
+    };
+    if (!object)
+      return new Response(null, { status: 404, headers: { ...headers, 'cache-control': MISSING } });
+    if (!('body' in object))
+      return new Response(null, { status: 304, headers: { ...headers, etag: object.httpEtag } });
+    return new Response(object.body, {
+      headers: { ...headers, etag: object.httpEtag, 'content-type': 'application/octet-stream' },
+    });
+  }
+
+  /**
+   * A category's decoded index. Held per isolate, revalidated every 30 s through the cache with
+   * its ETag (an unchanged index is a 304: nothing is downloaded or decoded again).
+   */
+  private async loadIndex(channel: string, category: string): Promise<ListingIndex | null> {
+    const id = `${channel}/${category}`;
+    const h = held.get(id);
+    if (h && Date.now() - h.checked < INDEX_TRUST_MS) return h.index;
+    const self = (this.ctx as unknown as { exports: { Delivery: Fetcher } }).exports.Delivery;
+    const r = await self.fetch(
+      new Request(`https://catalog.internal${INDEX_PATH}${id}`, {
+        headers: h ? { 'if-none-match': h.etag } : {},
+      }),
+    );
+    if (r.status === 304 && h) {
+      keep(id, { ...h, checked: Date.now() });
+      return h.index;
+    }
+    if (!r.ok) {
+      if (h) held.delete(id);
+      return null;
+    }
+    const buffer = await r.arrayBuffer();
+    const index = new ListingIndex(buffer);
+    keep(id, {
+      index,
+      etag: r.headers.get('etag') ?? '',
+      bytes: buffer.byteLength,
+      checked: Date.now(),
+    });
+    return index;
+  }
+
+  /** One page of a category: filtered, sorted, faceted over the whole result, cards in order. */
+  private async listing(route: Extract<Route, { kind: 'listing' }>): Promise<Response> {
+    const cacheTags = [tags.category(route.category), tags.channel(route.channel)];
+    const index = await this.loadIndex(route.channel, route.category);
+    if (!index) return missing('no such category', cacheTags);
+    if (route.sort !== 'newest' && !index.sorts.includes(route.sort))
+      return json(
+        JSON.stringify({ error: 'unsupported sort', sorts: ['newest', ...index.sorts] }),
+        400,
+        {
+          'cache-control': MISSING,
+        },
+      );
+    const r = index.query({
+      terms: route.terms,
+      ranges: route.ranges,
+      sort: route.sort,
+      cursor: route.cursor,
+      limit: route.limit,
+    });
+    const keys = r.uids.map((uid) => paths.card(DOC_FORMAT, route.channel, route.locale, uid));
+    const cards = keys.length ? await this.env.CARDS.get(keys) : new Map<string, string | null>();
+    const labels = index.labels[route.locale];
+    const facets = Object.fromEntries(
+      Object.entries(r.terms).map(([attr, counts]) => [
+        attr,
+        {
+          label: labels?.attributes[attr] ?? attr,
+          values: counts.slice(0, FACET_VALUES).map((c) => ({
+            value: c.value,
+            label: labels?.values[attr]?.[c.value] ?? c.value,
+            count: c.count,
+          })),
+        },
+      ]),
+    );
+    const ranges = Object.fromEntries(
+      Object.entries(r.ranges).map(([attr, range]) => [
+        attr,
+        { label: labels?.attributes[attr] ?? attr, ...range },
+      ]),
+    );
+    // Cards are stored serialized: join them as they are (a card missing from KV is skipped).
+    const products = keys.map((k) => cards.get(k)).filter((c): c is string => !!c);
+    const body =
+      `{"total":${r.total},"next":${r.next ?? 'null'},"sorts":${JSON.stringify(['newest', ...index.sorts])},` +
+      `"products":[${products.join(',')}],"facets":${JSON.stringify(facets)},"ranges":${JSON.stringify(ranges)}}`;
+    return json(body, 200, { 'cache-control': FRESH, 'cache-tag': cacheTags.join(',') });
   }
 
   /** Purges cached responses by tag. Workers Caching scopes a purge to the entrypoint calling it. */

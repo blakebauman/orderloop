@@ -13,6 +13,7 @@ import {
   renderForChannel,
 } from '@orderloop/core/product';
 import { type CatalogConfig, typeResolver } from './config';
+import type { ListingChange } from './listings';
 import type { CatalogShard } from './shard';
 
 const JSON_TYPE = { contentType: 'application/json; charset=utf-8' };
@@ -31,11 +32,18 @@ function channelAliases(all: string[], channel: Channel): string[] {
   );
 }
 
-export async function publishKeys(shard: CatalogShard, keys: string[], config: CatalogConfig) {
+/** Publishes `keys` and returns the listing changes they make (send them once this returns). */
+export async function publishKeys(
+  shard: CatalogShard,
+  keys: string[],
+  config: CatalogConfig,
+): Promise<ListingChange[]> {
   const env = shard.publishEnv;
   const resolve = typeResolver(config);
   const tasks: (() => Promise<unknown>)[] = [];
   const records: (() => void)[] = [];
+  const changes: ListingChange[] = [];
+  const at = Date.now();
 
   for (const key of keys) {
     const current = shard.publishable(key);
@@ -99,13 +107,27 @@ export async function publishKeys(shard: CatalogShard, keys: string[], config: C
           key,
           channel.code,
           pub.rendered && current
-            ? { locales: nextLocales, aliases: nextAliases, uid: current.uid }
+            ? {
+                locales: nextLocales,
+                aliases: nextAliases,
+                uid: current.uid,
+                categories: current.product.categories,
+              }
             : null,
         ),
       );
+      if (pub.index || prev)
+        changes.push({
+          channel: channel.code,
+          key,
+          at,
+          entry: pub.index,
+          left: prev?.categories ?? [],
+        });
     }
   }
   await inBatches(tasks);
   // Recorded only once everything above is stored, so a failed pass republishes in full.
   for (const record of records) record();
+  return changes;
 }

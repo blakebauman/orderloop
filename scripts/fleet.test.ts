@@ -66,6 +66,13 @@ test('the catalog config has its own name, bucket, card namespace and jurisdicti
   assert.equal(c.queues.producers[0].queue, 'orderloop-catalog-feed-parts-acme');
   assert.equal(c.queues.consumers[0].queue, 'orderloop-catalog-feed-parts-acme');
   assert.equal(c.queues.consumers[0].dead_letter_queue, 'orderloop-catalog-feed-parts-dlq-acme');
+  assert.deepEqual(
+    c.queues.consumers.map((q: { queue: string }) => q.queue),
+    ['orderloop-catalog-feed-parts-acme', 'orderloop-catalog-changes-acme'],
+  );
+  assert.ok(
+    c.queues.producers.some((p: { queue: string }) => p.queue === 'orderloop-catalog-changes-acme'),
+  );
   assert.equal(c.vars.DATA_JURISDICTION, 'eu');
   assert.equal(c.workers_dev, false);
 });

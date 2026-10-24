@@ -31,8 +31,7 @@ import {
   type WriteOptions,
   type WriteResult,
 } from '@orderloop/core/product';
-import { type CatalogConfig, meta, shard, shardFor, typeResolver } from './config';
-import { feeds } from './feed-import';
+import { type CatalogConfig, feeds, meta, shard, shardFor, typeResolver } from './config';
 import { storeStream } from './upload';
 
 /** Products per putProducts call. */

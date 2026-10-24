@@ -6,6 +6,7 @@
 export * from './api';
 export * from './feed';
 export * from './listing-index';
+export * from './listing-spec';
 export * from './model';
 export * from './paths';
 export * from './render';

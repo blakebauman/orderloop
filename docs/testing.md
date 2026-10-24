@@ -54,7 +54,7 @@ breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine and
 | `webhooks.test.ts` | `signWebhook` / `verifyWebhook`: a valid signature, a tampered body, a wrong secret, a missing header, a replay outside the tolerance; several `v1` signatures (any one passes, in either order); `constantTimeEqual`; `verifyStripeSignature` on a header in Stripe's shape (two `v1`s during a secret roll and a `v0`) |
 | `product-routing.test.ts` | The catalog's frozen layout: FNV-1a 64 against the published vectors and a BigInt reference for UTF-8; golden shard, alias-shard and search-shard numbers for fixed keys (never update them: a change strands stored products); 64 and 16 shards; even spread; `productUid` packing into 32 bits and refusing to overflow; `canonicalJson` and `contentHash` ignoring key order and seeing any change |
 | `product-model.test.ts` | Product types refused when they can't be indexed or told apart (enum without values, localized non-text, sorting non-numbers, duplicate codes, json filters, bad variant axes); `typeChangeIssues` allowing only additions; `validateProduct` pinning the type version, defaulting the primary category and naming each bad attribute, duplicate SKU, repeated or missing variant options, bad slug and unknown type; `productAliases`; `renderForChannel` resolving locales with fallback, enum labels, channel and variant prices, cards, search text and the index entry, and publishing nothing for drafts or unlisted products (fixture: `tests/fixtures/product.ts`) |
-| `product-listing.test.ts` | The binary listing index against a brute-force oracle on 3,000 pseudo-random products: dense (bitset) and sparse (list) term filters, ranges, both price sorts, disjunctive facet counts; cursor paging to the last page; range buckets with min and max; an unknown sort and foreign bytes refused; an empty category |
+| `product-listing.test.ts` | The binary listing index against a brute-force oracle on 3,000 pseudo-random products: dense (bitset) and sparse (list) term filters, ranges, both price sorts, disjunctive facet counts; cursor paging to the last page; range buckets with min and max; an unknown sort and foreign bytes refused; an empty category; `listingSpec` (terms, numbers, sorts, buckets and per-locale labels from the types) and a built index keeping `buckets` and `labels` and counting the stored buckets by default |
 | `product-feed.test.ts` | Streaming CSV records (quotes, `""`, newlines inside fields, CRLF, BOM, UTF-8 split across chunks, an unterminated quote, bytes that aren't UTF-8 failing) and NDJSON lines (bad lines reported by number); each record's `end` offset as a cursor: a ranged read from the `end` of any record yields exactly the records after it, at the same offsets, for CSV and NDJSON; CSV rows grouped into products with cells read by attribute kind and channel prices in minor units; a bad row reported against its product while later rows still parse; resuming mid-file from a product boundary with the saved header gives the rest of the products; `key` and `sku` columns required |
 
 ### Adding a planner test
@@ -159,6 +159,17 @@ The writing-products group also checks the `u:f1:<key>` uid entry in KV, and its
 urgent (`putProducts(…, { urgent: true })`) so the alarm's purge send runs; no test reads the purge
 queue.
 
+### Listing indexes
+
+`apps/catalog/tests/listings.test.ts` uses the real shards, the `CHANGES` queue (local, consumed by the Worker's `queue` handler) and `ListingIndexer`. `listing(category, n)` waits for the indexer to hold `n` members, runs its alarm by hand (`runDurableObjectAlarm`) and decodes the `idx/` object from R2 with `ListingIndex`.
+
+| Test | Covers |
+|---|---|
+| ancestors | A product is listed in its category and every ancestor, with facets and sorts in the index |
+| moving | A product moved between categories leaves the old listing (through `left`) and enters the new; one that stops being listed is dropped |
+| ordering | The latest change by `at` wins when changes arrive out of order |
+| `withAncestors` | Every ancestor once; a cycle stops |
+
 ### Feeds
 
 `apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
@@ -217,7 +228,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `new-order.test.ts` | The New order lines grammar (each spelling, no number as one; no SKU, zero or negative, two numbers and SKUs outside the catalog are issues, not guesses); a catalog click adds a row or one more; `summarizeFlow` names where a flow asks a person, what it waits for and what it undoes, and whether it reads a document or routes fulfillment |
 | `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its model; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
-`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
+`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, renders the changes queue as a producer and a second consumer (`orderloop-catalog-changes-<id>`), sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
 
 `scripts/fleet.test.ts` also covers catalog-edge: `renderCatalogEdge` gives the Worker its own name (`orderloop-catalog-edge-<id>`), a custom-domain route for `catalogDomain` (default `catalog.<domain>`), the deployment's bucket (with its jurisdiction), `CARDS` namespace id, purge queue and dead-letter queue consumer (`max_concurrency` 1) and Analytics Engine dataset (`orderloop_catalog_edge_<id>`); the catalog's `PURGE` producer names the same queue; a `catalogDomain` that isn't a host name is refused; `orderloop` renders the committed `apps/catalog-edge/wrangler.jsonc` unchanged.
 
@@ -237,6 +248,16 @@ entrypoint through `exports`.
 | batches | Cards in the order asked, `null` for unknown keys, a repeated key once; no `keys`, 101 keys or a malformed key is `400` (`at most 100 keys`) |
 | the gateway | `POST` is `405`; `OPTIONS` is `204` allowing `if-none-match`; a wrong version prefix or unknown kind is `404`; a bad channel, locale or slug is `400`; `/health` is `{ ok: true }` |
 | purging | A queue batch with a repeated tag is acknowledged (`ackAll`, no retry) |
+
+`apps/catalog-edge/tests/listing.test.ts` writes a listing index (built with core's `buildListingIndex` and `listingSpec`) and its cards, and requests `categories/<code>/products` through the gateway:
+
+| Group | Covers |
+|---|---|
+| pages | Newest first with `total` and `next`, facets over the whole result with labels, range `min`, `max` and buckets |
+| filters and sorts | Term and range filters, price sorts, facet counts that stay disjunctive |
+| refusals | A sort the index lacks, bad filters, ranges, cursors and limits (`400`) and an unknown category (`404`) |
+| the internal path | `/_idx/…` is not reachable through the gateway |
+| cache keys | Equivalent pages (filter order, value order, default `sort`, `cursor` and `limit` spelled out) have one canonical URL |
 
 Workers Caching isn't emulated locally, so these tests check what reaches the cache (canonical URLs,
 headers, `304`s) and not hits, misses, stale serving or tag purges: `Delivery.purge` is a no-op

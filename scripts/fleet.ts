@@ -306,6 +306,8 @@ export const names = (d: Deployment) => ({
   catalogFeedPartsDlq: `orderloop-catalog-feed-parts-dlq${d.suffix}`,
   catalogEdge: `orderloop-catalog-edge${d.suffix}`,
   catalogPurge: `orderloop-catalog-purge${d.suffix}`,
+  catalogChanges: `orderloop-catalog-changes${d.suffix}`,
+  catalogChangesDlq: `orderloop-catalog-changes-dlq${d.suffix}`,
   catalogPurgeDlq: `orderloop-catalog-purge-dlq${d.suffix}`,
   // Analytics Engine dataset names allow letters, digits and underscores.
   catalogEdgeDataset: `orderloop_catalog_edge${d.suffix.replaceAll('-', '_')}`,
@@ -535,6 +537,8 @@ function shellNames(id: string | undefined) {
     CATALOG_FEED_PARTS_DLQ: n.catalogFeedPartsDlq,
     CATALOG_PURGE: n.catalogPurge,
     CATALOG_PURGE_DLQ: n.catalogPurgeDlq,
+    CATALOG_CHANGES: n.catalogChanges,
+    CATALOG_CHANGES_DLQ: n.catalogChangesDlq,
     CATALOG_DOMAIN: d.catalogDomain,
     DOMAIN: d.domain,
     ENVIRONMENT: d.environment,

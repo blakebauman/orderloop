@@ -402,7 +402,11 @@ export class CatalogShard extends DurableObject<Env> {
     const keys = [...new Set(rows.map((r) => r.key))].slice(0, PUBLISH_BATCH);
     const included = new Set(keys);
     const upTo = rows.filter((r) => included.has(r.key)).at(-1)?.seq ?? 0;
-    await publishKeys(this, keys, config);
+    const changes = await publishKeys(this, keys, config);
+    // Listing indexes follow from these (listings.ts). Sent before the outbox rows go, so a crash
+    // here republishes and sends them again; indexers order changes by `at`.
+    for (let i = 0; i < changes.length; i += 100)
+      await this.env.CHANGES.sendBatch(changes.slice(i, i + 100).map((body) => ({ body })));
     // Urgent changes don't wait out the edge cache's minute: their tags go to catalog-edge's purge
     // queue, which it drains at the rate Cloudflare allows. Sent after publishing, so a purge never
     // refills from the old document.
@@ -445,9 +449,13 @@ export class CatalogShard extends DurableObject<Env> {
     };
   }
 
-  publishedState(
-    key: string,
-  ): { channel: string; locales: string[]; aliases: string[]; uid: number }[] {
+  publishedState(key: string): {
+    channel: string;
+    locales: string[];
+    aliases: string[];
+    uid: number;
+    categories: string[];
+  }[] {
     return this.sql
       .exec<{ channel: string; locales: string; aliases: string }>(
         'SELECT channel, locales, aliases FROM published WHERE key = ?',
@@ -455,12 +463,17 @@ export class CatalogShard extends DurableObject<Env> {
       )
       .toArray()
       .map((r) => {
-        const parsed = JSON.parse(r.aliases) as { uid: number; aliases: string[] };
+        const parsed = JSON.parse(r.aliases) as {
+          uid: number;
+          aliases: string[];
+          categories?: string[];
+        };
         return {
           channel: r.channel,
           locales: JSON.parse(r.locales) as string[],
           aliases: parsed.aliases,
           uid: parsed.uid,
+          categories: parsed.categories ?? [],
         };
       });
   }
@@ -468,7 +481,7 @@ export class CatalogShard extends DurableObject<Env> {
   recordPublished(
     key: string,
     channel: string,
-    state: { locales: string[]; aliases: string[]; uid: number } | null,
+    state: { locales: string[]; aliases: string[]; uid: number; categories: string[] } | null,
   ) {
     if (!state) this.sql.exec('DELETE FROM published WHERE key = ? AND channel = ?', key, channel);
     else
@@ -477,7 +490,7 @@ export class CatalogShard extends DurableObject<Env> {
         key,
         channel,
         JSON.stringify(state.locales),
-        JSON.stringify({ uid: state.uid, aliases: state.aliases }),
+        JSON.stringify({ uid: state.uid, aliases: state.aliases, categories: state.categories }),
       );
   }
 

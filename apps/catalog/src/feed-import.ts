@@ -25,7 +25,7 @@ import {
   productShard,
   validateProduct,
 } from '@orderloop/core/product';
-import { meta, shard, typeResolver } from './config';
+import { feeds, meta, shard, typeResolver } from './config';
 import type { FeedError, PartCounts } from './feeds';
 
 export type FeedParams = { id: string; format: FeedFormat; key: string; by: string };
@@ -53,7 +53,6 @@ type Chunk = {
   done: boolean;
 };
 
-export const feeds = (env: Env) => env.FEEDS.getByName('feeds');
 export const partKey = (feed: string, part: string) => `feeds/${feed}/parts/${part}.ndjson`;
 
 /** Products from the file, starting at `offset` (a product boundary). */
