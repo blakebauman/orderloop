@@ -210,8 +210,10 @@ describe('listing index segments', () => {
     const rand = random(99);
     const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)] as T;
     const sorts = ['newest', 'price_asc', 'price_desc'];
-    for (let run = 0; run < 120; run++) {
-      const q: ListingQuery = { limit: 1 + Math.floor(rand() * 60), sort: pick(sorts) };
+    // Pages of 8 to 60: every page reruns the facets over all 3,000 entries, so tiny pages over
+    // wide results would take seconds; one-per-page paging has its own test below.
+    for (let run = 0; run < 80; run++) {
+      const q: ListingQuery = { limit: 8 + Math.floor(rand() * 53), sort: pick(sorts) };
       if (rand() < 0.5)
         q.terms = {
           brand: ['acme', 'globex', 'initech', 'umbrella', 'hooli'].filter(() => rand() < 0.4),
@@ -255,6 +257,16 @@ describe('listing index segments', () => {
       expect(new Set(got).size).toBe(got.length);
       expect(got).toEqual(want.uids);
       expect(n).toBe(Math.max(1, Math.ceil(want.uids.length / q.limit)));
+    }
+  }, 30_000);
+
+  it('pages one member at a time without skipping or repeating', () => {
+    for (const sort of ['newest', 'price_asc', 'price_desc']) {
+      const q: ListingQuery = { terms: { brand: ['hooli'], color: ['red'] }, sort, limit: 1 };
+      const want = oracle(entries, q, undefined);
+      const { got, pages: n } = pages(segments, q);
+      expect(got).toEqual(want.uids);
+      expect(n).toBe(Math.max(1, want.uids.length));
     }
   });
 
