@@ -111,3 +111,4 @@
 ^apps/web/app/lib/(api\.server|openapi)\.ts$	docs/plugins.md	prose
 ^apps/engine/src/outbox\.ts$	docs/plugins.md	prose
 ^(\.github/workflows/deploy\.yml|scripts/(fleet|provision)\.(ts|sh))$	docs/plugins.md	prose
+^apps/(web/app/(routes/plugins|lib/plugin-installs\.server)|engine/src/plugin-installs)\.tsx?$	guides/installing-plugins reference/rest-api docs/plugins.md	prose

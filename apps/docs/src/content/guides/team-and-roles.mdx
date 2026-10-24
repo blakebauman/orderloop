@@ -11,7 +11,7 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 | `viewer` | See orders, flows, approvals and the Commerce page; use the [assistant](/guides/assistant/) to read |
 | `approver` | Also approve and reject approvals, including through the assistant |
 | `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, write the [product catalog](/guides/product-catalog/) (deleting a channel needs `admin`), and have the assistant do those and draft flow changes |
-| `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, republish the catalog, read the audit log, and see the installed plugins at **Plugins** in the account menu |
+| `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, republish the catalog, read the audit log, and install and manage plugins at **Plugins** in the account menu ([Installing a plugin](/guides/installing-plugins/)) |
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
@@ -306,6 +306,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Webhooks | `webhook.subscribed` (the subscription's id and events), `webhook.rotated`, `webhook.unsubscribed` |
 | Stock review | `stock.review_run` (the Workflow instance) |
 | Catalog | `catalog.products_written` (counts of created, updated, unchanged and rejected products, and `urgent`), `catalog.products_deleted`, `catalog.type_saved` (the target is the type's code; the detail has its version), `catalog.channel_saved`, `catalog.categories_saved`, `catalog.type_deleted`, `catalog.channel_deleted`, `catalog.categories_deleted`, `catalog.feed_started` (the target is the feed id), `catalog.reindexed` |
+| Plugins | `plugin.uploaded` (version and publisher), `plugin.approved` (also notes when buyer details were granted), `plugin.secret_set` (the secret's name, never its value), `plugin.disabled`, `plugin.enabled`, `plugin.rolled_back`, `plugin.uninstalled`, `plugin.refused` (the reason). See [Installing a plugin](/guides/installing-plugins/) |
 | Personal data | `personal_data.exported`, `personal_data.erased` (the counts; the target is `subject:` and a hash of the person's address, so the log doesn't keep it) |
 
 ### Business events

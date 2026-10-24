@@ -38,8 +38,9 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `assistantDailyTokens` | `1000000` | Whole number of model tokens each person's assistant conversations may use per UTC day; `0` is no limit (negative or fractional is refused). Rendered into the engine's `ASSISTANT_DAILY_TOKENS` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `sso` | none | `{ "issuer": "https://…", "clientId": "…" }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). Rendered into the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
-| `plugins` | none | `{ "<plugin id>": { "d1Id": "…", "personalData": "send", "runtime": "sandboxed", "secrets": ["API_KEY"] } }`: the plugins (`plugins/<id>/`) this deployment installs. `runtime` is `worker` (the default) or `sandboxed`. A `worker` plugin is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`; `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. A `sandboxed` plugin has no Worker, binding or database: CI publishes its bundle and the engine loads it (Worker Loader), and a `d1Id` on one is refused. `personalData` is optional and can only be `"send"`: it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. `secrets` lists the plugin's secret names (upper case, not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS` or `STORAGE`) and is needed only with `secretsStore`, because Secrets Store bindings are per secret. Any other key, an unknown `runtime`, ids that aren't plugin ids or are the engine's own variable names (`bundles`, `secrets`, `grants`, `key`), the `example` and `fixture-carrier` fixtures, and ids without `plugins/<id>/wrangler.jsonc` are refused. A `worker` plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. See [Plugins](plugins.md) |
+| `plugins` | none | `{ "<plugin id>": { "d1Id": "…", "personalData": "send", "runtime": "sandboxed", "secrets": ["API_KEY"] } }`: the plugins (`plugins/<id>/`) this deployment installs. `runtime` is `worker` (the default) or `sandboxed`. A `worker` plugin is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`; `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. A `sandboxed` plugin has no Worker, binding or database: CI publishes its bundle and the engine loads it (Worker Loader), and a `d1Id` on one is refused. `personalData` is optional and can only be `"send"`: it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. `secrets` lists the plugin's secret names (upper case, not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS` or `STORAGE`) and is needed only with `secretsStore`, because Secrets Store bindings are per secret. Any other key, an unknown `runtime`, ids that aren't plugin ids or are the engine's own variable names (`bundles`, `secrets`, `grants`, `key`, `storage`, `dev-bundles`, `publishers`), the `example` and `fixture-carrier` fixtures, and ids without `plugins/<id>/wrangler.jsonc` are refused. A `worker` plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. See [Plugins](plugins.md) |
 | `secretsStore` | none | `{ "storeId": "<32 hex characters>" }` (anything else is refused): the Cloudflare Secrets Store of a deployment on its own Cloudflare account, where its plugins' secrets live as `PLUGIN_<ID>_<NAME>` instead of in the GitHub environment. Leave it out on a shared account (one store and 100 secrets an account). Rendered as `secrets_store_secrets` bindings for each plugin's listed `secrets`. See [Plugin secrets](#plugin-secrets) |
+| `pluginInstalls` | none (off) | `{ "publishers": { "<name>": "<Ed25519 public key>" } }`: who may sign a sandboxed plugin an admin installs at runtime from the Plugins page. A name is lowercase letters, digits and hyphens; a key is the raw 32 bytes in base64url (43 characters, from `pnpm plugin:pack keygen`). Rendered into the engine's `PLUGIN_PUBLISHERS`. Without it, runtime installs are off. See [Plugin publishers](#plugin-publishers) |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -195,6 +196,23 @@ then fails its deploy. Delete each first (`wrangler secret delete <NAME> --name
 orderloop-plugin-<id><suffix>`), then merge the registry change. Two deployments must never share
 a `secretsStore`: its names (`PLUGIN_<ID>_<NAME>`) aren't per deployment.
 
+### Plugin publishers
+
+Runtime installs ([Plugins](plugins.md#installing-at-runtime)) are off until the registry lists who
+may publish them. To trust a publisher, they run `pnpm plugin:pack keygen <name> <name>.pem`, keep the
+PEM and send the public key it prints; add it in a reviewed registry PR:
+`"pluginInstalls": { "publishers": { "<name>": "<public key>" } }`. `loadDeployments` refuses a name
+that isn't lowercase letters, digits and hyphens, or a key that isn't 43 base64url characters.
+Merging deploys the engine with `PLUGIN_PUBLISHERS`.
+
+To rotate a key, list the new one under a second name (`acme-2026`) next to the old, have the
+publisher sign with it, then remove the old name. An upgrade must come from the publisher that
+signed the installed version, so a publisher that changes name has its plugin uninstalled and
+installed again. Removing a publisher stops new uploads from it and the approving, rolling back to
+or turning on of any of its versions; one already running keeps running.
+A leaked publisher key: remove it from the registry and merge, then review, and if need be turn
+off, each plugin it signed (the Plugins page names the publisher).
+
 ## Holding and checking deployments
 
 - **Hold a customer** on what they run now (a change freeze, an incident) with `"hold": true` in
@@ -281,7 +299,8 @@ only the ones set and `--secrets-file` never deletes, so also run
 ## Rotating the data key
 
 `DATA_KEY` encrypts the secrets a deployment stores: two-factor secrets, integration and webhook
-subscription secrets, and the credentials of A2A push configs. A stored value names the key it was
+subscription secrets, the secrets admins enter for plugins installed at runtime, and the credentials
+of A2A push configs. A stored value names the key it was
 sealed under, so both keys can be read during a rotation and nothing needs to be re-entered:
 
 1. In the deployment's GitHub environment, set `DATA_KEY_PREVIOUS` to the current key and
@@ -301,7 +320,7 @@ A config on an idle task still under the old key is dropped once that key is gon
 caller registers its URL again.
 
 Never lose `DATA_KEY`: values sealed under a key the deployment no longer has can't be recovered.
-Two-factor must be reset for those people, and integration and webhook secrets rotated. Values stored
+Two-factor must be reset for those people, and integration, webhook and plugin secrets rotated. Values stored
 before encryption existed have no prefix, are read as they are, and are encrypted by the next sweep.
 
 ## Recovering admin access

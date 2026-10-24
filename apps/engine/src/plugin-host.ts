@@ -9,9 +9,10 @@
  *   each call is capped in CPU and subrequests (`PLUGIN_LIMIT_CAPS`).
  *
  * Secrets for a plugin come from the deployment's Secrets Store when it has one (own Cloudflare
- * account: `PLUGIN_SECRET_<ID>__<NAME>` bindings) or from `PLUGIN_SECRETS` (shared account: JSON
- * the deploy writes from `PLUGIN_<ID>_<NAME>` in the GitHub environment). See docs/plugins.md,
- * "Runtimes" and "Secrets".
+ * account: `PLUGIN_SECRET_<ID>__<NAME>` bindings), from `PLUGIN_SECRETS` (shared account: JSON
+ * the deploy writes from `PLUGIN_<ID>_<NAME>` in the GitHub environment), or for a plugin an admin
+ * installed at runtime, from `plugin_secrets` (sealed with DATA_KEY). Runtime installs' pins come
+ * from `installed_plugins`. See docs/plugins.md, "Runtimes", "Secrets" and "Installing at runtime".
  */
 
 import { DurableObject, WorkerEntrypoint, exports as workerExports } from 'cloudflare:workers';
@@ -22,13 +23,21 @@ import {
   type PluginManifest,
   type PluginRpc,
   type PluginRuntime,
+  type PluginSource,
   parseManifest,
   pluginBinding,
   pluginKey,
   scrubCredentials,
+  secretContext,
 } from '@orderloop/core';
-import { createDb, pluginErrors } from '@orderloop/db';
+import {
+  createDb,
+  installedPlugins as installedPluginRows,
+  pluginErrors,
+  pluginSecrets,
+} from '@orderloop/db';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
+import { openSecret } from './data-key';
 import { pluginStorage } from './namespaces';
 
 export type PluginStub = Fetcher & { [K in keyof PluginRpc]: PluginRpc[K] };
@@ -44,8 +53,8 @@ const SANDBOX_COMPAT_DATE = '2026-10-01';
 /** Redirects the egress gateway follows for a plugin, each checked again. */
 const MAX_REDIRECTS = 5;
 
-/** The bundles this deployment pins, by plugin id. */
-function bundles(env: Env): Record<string, string> {
+/** The bundles the deployment's registry pins (CI, `PLUGIN_BUNDLES`), by plugin id. */
+export function deploymentBundles(env: Env): Record<string, string> {
   const raw = (env as unknown as Vars).PLUGIN_BUNDLES;
   if (typeof raw !== 'string' || !raw) return {};
   try {
@@ -61,16 +70,77 @@ function bundles(env: Env): Record<string, string> {
   }
 }
 
-/** Every plugin this deployment installs: its `PLUGIN_*` service bindings and pinned bundles. */
-export function installedPlugins(env: Env): { id: string; runtime: PluginRuntime }[] {
-  const out = new Map<string, PluginRuntime>();
+/** A plugin bound as its own Worker (`PLUGIN_<ID>`), by id. */
+export function boundPlugins(env: Env): string[] {
+  const out: string[] = [];
   // A plugin's binding never holds "__" (ids have no "--"), so a Secrets Store binding for a
   // plugin's secret (`storeBinding`) is never taken for a plugin.
   for (const [k, v] of Object.entries(env as unknown as Vars))
     if (k.startsWith('PLUGIN_') && !k.includes('__') && typeof (v as Fetcher)?.fetch === 'function')
-      out.set(k.slice('PLUGIN_'.length).toLowerCase().replaceAll('_', '-'), 'worker');
-  for (const id of Object.keys(bundles(env))) if (!out.has(id)) out.set(id, 'sandboxed');
-  return [...out].map(([id, runtime]) => ({ id, runtime }));
+      out.push(k.slice('PLUGIN_'.length).toLowerCase().replaceAll('_', '-'));
+  return out;
+}
+
+/** A runtime install that is active: its pin, and the buyer-details grant its admin approved. */
+type Active = { sha: string; personalData: boolean };
+
+/** How long an isolate trusts its read of the active runtime installs. */
+const INSTALLS_TTL_MS = 15_000;
+let installsCache: { at: number; rows: Map<string, Active> } | null = null;
+
+/** Forgets the active installs read, after an install RPC changed them (this isolate). */
+export const dropInstallsCache = () => {
+  installsCache = null;
+};
+
+/** The runtime installs that are active, by plugin id (cached for `INSTALLS_TTL_MS`). */
+export async function activeInstalls(env: Env): Promise<Map<string, Active>> {
+  if (installsCache && Date.now() - installsCache.at < INSTALLS_TTL_MS) return installsCache.rows;
+  const rows = await createDb(env.DB)
+    .select({
+      id: installedPluginRows.id,
+      sha: installedPluginRows.sha,
+      personalData: installedPluginRows.personalDataGranted,
+    })
+    .from(installedPluginRows)
+    .where(eq(installedPluginRows.status, 'active'));
+  const out = new Map(rows.map((r) => [r.id, { sha: r.sha, personalData: r.personalData === 1 }]));
+  installsCache = { at: Date.now(), rows: out };
+  return out;
+}
+
+/**
+ * Whether the deployment's registry installs `id` (pins its bundle, or binds its Worker). A
+ * registry plugin always wins on its id: a runtime install of the same id, and the grant and
+ * secrets an admin gave it, don't apply.
+ */
+export const registryOwns = (env: Env, id: string) =>
+  id in deploymentBundles(env) || boundPlugins(env).includes(id);
+
+/**
+ * Every sandboxed plugin's pin: the deployment's (CI) and the active runtime installs'. One the
+ * deployment pins, or binds as a Worker, is never taken from a runtime install.
+ */
+export async function bundles(
+  env: Env,
+): Promise<Record<string, { sha: string; source: PluginSource }>> {
+  const out: Record<string, { sha: string; source: PluginSource }> = {};
+  for (const [id, a] of await activeInstalls(env))
+    if (!registryOwns(env, id)) out[id] = { sha: a.sha, source: 'installed' };
+  for (const [id, sha] of Object.entries(deploymentBundles(env)))
+    out[id] = { sha, source: 'deployment' };
+  return out;
+}
+
+/** Every plugin this deployment installs: Worker plugins, then sandboxed ones by their pins. */
+export async function installedPlugins(
+  env: Env,
+): Promise<{ id: string; runtime: PluginRuntime; source: PluginSource; sha?: string }[]> {
+  const out = new Map<string, { runtime: PluginRuntime; source: PluginSource; sha?: string }>();
+  for (const id of boundPlugins(env)) out.set(id, { runtime: 'worker', source: 'deployment' });
+  for (const [id, b] of Object.entries(await bundles(env)))
+    if (!out.has(id)) out.set(id, { runtime: 'sandboxed', source: b.source, sha: b.sha });
+  return [...out].map(([id, v]) => ({ id, ...v }));
 }
 
 /**
@@ -85,7 +155,7 @@ export const knownManifests = new Map<string, PluginManifest>();
  * the engine enforces. Null for a plugin that isn't sandboxed here.
  */
 export async function pinnedManifest(env: Env, id: string): Promise<PluginManifest | null> {
-  const sha = bundles(env)[id];
+  const sha = (await bundles(env))[id]?.sha;
   return sha ? (await verifiedBundle(env, id, sha)).manifest : null;
 }
 
@@ -172,7 +242,7 @@ export async function pluginStub(
 ): Promise<PluginStub | null> {
   const bound = (env as unknown as Vars)[pluginBinding(id)];
   if (typeof (bound as Fetcher | undefined)?.fetch === 'function') return bound as PluginStub;
-  const sha = bundles(env)[id];
+  const sha = (await bundles(env))[id]?.sha;
   if (!sha) return null;
   const bundle = await verifiedBundle(env, id, sha);
   const keys = await sandboxKeys(env, id);
@@ -234,9 +304,22 @@ export async function resolveSecret(env: Env, id: string, name: string) {
   try {
     const all = JSON.parse(typeof e.PLUGIN_SECRETS === 'string' ? e.PLUGIN_SECRETS : '{}');
     const v = (all as Record<string, Record<string, unknown>>)[id]?.[name];
-    return typeof v === 'string' && v ? v : undefined;
+    if (typeof v === 'string' && v) return v;
   } catch {
     console.error('PLUGIN_SECRETS is not JSON; no plugin secret is set');
+  }
+  // One an admin entered for a runtime install, sealed with DATA_KEY; never a registry plugin's.
+  if (registryOwns(env, id)) return undefined;
+  const row = await createDb(env.DB)
+    .select({ value: pluginSecrets.value })
+    .from(pluginSecrets)
+    .where(and(eq(pluginSecrets.pluginId, id), eq(pluginSecrets.name, name)))
+    .get();
+  if (!row) return undefined;
+  try {
+    return (await openSecret(env, row.value, secretContext.plugin(id, name))) || undefined;
+  } catch (err) {
+    console.error(`plugin secret ${id}.${name} can't be opened`, err);
     return undefined;
   }
 }
@@ -472,6 +555,12 @@ export class PluginStorage extends DurableObject<Env> {
   async query(id: string, sha: string, statement: Statement): Promise<Result> {
     await this.#migrate(id, sha);
     return this.#run(statement);
+  }
+
+  /** Uninstall: the plugin's whole database, gone. Reached only by the engine (not `PluginDb`). */
+  async destroy() {
+    await this.ctx.storage.deleteAll();
+    this.#migrated.clear();
   }
 
   async batch(id: string, sha: string, statements: Statement[]): Promise<Result[]> {

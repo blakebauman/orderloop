@@ -51,6 +51,25 @@ suite('audit vocabulary', () => {
     );
   });
 
+  it('describes a plugin change by its version, publisher and grant', () => {
+    expect(
+      describe({
+        action: 'plugin.approved',
+        actor: 'usr_1',
+        target: 'acme-carrier',
+        detail: { version: '2', publisher: 'acme', personalData: true },
+      }),
+    ).toBe('Installed a plugin: acme-carrier, version 2, signed by acme, buyer details granted');
+    expect(
+      describe({
+        action: 'plugin.secret_set',
+        actor: 'usr_1',
+        target: 'acme-carrier',
+        detail: { secret: 'API_KEY' },
+      }),
+    ).toBe('Set a plugin’s secret: acme-carrier, API_KEY');
+  });
+
   it('puts every action in a filter group', () => {
     for (const action of Object.keys(AUDIT_ACTIONS))
       expect(isAuditGroup(action.slice(0, action.indexOf('.')))).toBe(true);
@@ -69,6 +88,7 @@ suite('audit vocabulary', () => {
       'webhook',
       'stock',
       'catalog',
+      'plugin',
       'personal_data',
     ]);
     expect(isAuditGroup('orders')).toBe(false);

@@ -30,6 +30,15 @@ const pluginServices = devPlugins.map((p) => ({
   binding: `PLUGIN_${p.toUpperCase().replaceAll('-', '_')}`,
   service: `orderloop-plugin-${p}`,
 }));
+/**
+ * A publisher dev trusts for runtime installs (`ORDERLOOP_DEV_PUBLISHER=<name>:<public key>`, from
+ * `pnpm plugin:pack keygen`), as a deployment's registry lists them in `pluginInstalls`.
+ */
+const devPublisher = process.env.ORDERLOOP_DEV_PUBLISHER?.split(':');
+const publisherVars: Record<string, string> =
+  devPublisher?.length === 2
+    ? { PLUGIN_PUBLISHERS: JSON.stringify({ [devPublisher[0]!]: devPublisher[1] }) }
+    : {};
 const withPlugins = (services: { binding: string; service: string }[] = []) => [
   ...services,
   ...pluginServices,
@@ -79,6 +88,7 @@ export default defineConfig(async () => {
                 DATA_KEY: DEV_DATA_KEY,
                 SIMULATE_FAILURES: 'true',
                 ...sandboxVars,
+                ...publisherVars,
               },
               ...(devPlugins.length ? { services: withPlugins(c.services) } : {}),
             }),

@@ -1,5 +1,6 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
-import { buildSandboxBundle, bundlePlugin } from '@orderloop/plugin-sdk/testing';
+import { buildSandboxBundle, bundlePlugin, sealBundle } from '@orderloop/plugin-sdk/testing';
 import agents from 'agents/vite';
 import { defineConfig } from 'vitest/config';
 
@@ -36,6 +37,27 @@ export default defineConfig(async () => {
   const seed = await readD1Migrations('../../packages/db/seed');
   // The demo deployment's nightly reset (.github/workflows/demo-reset.yml).
   const demoReset = await readD1Migrations('../../packages/db/reset');
+  // A publisher for the runtime-install tests (as `pnpm plugin:pack keygen` makes one).
+  const pair = generateKeyPairSync('ed25519');
+  const publisher = {
+    publicKey: pair.publicKey.export({ format: 'jwk' }).x as string,
+    privateJwk: pair.privateKey.export({ format: 'jwk' }),
+  };
+  // The carrier as version 1, and a version 2 whose code answers with "2".
+  const carrierV1 = await buildSandboxBundle(
+    '../../plugins/fixture-carrier/src/index.ts',
+    '../../plugins/fixture-carrier/migrations',
+  );
+  const v1 = JSON.parse(carrierV1.body) as { code: string; migrations: []; manifest: object };
+  const carrierV2 = sealBundle({
+    code: v1.code.replace('version: "1"', 'version: "2"'),
+    migrations: v1.migrations,
+    manifest: { ...v1.manifest, version: '2' } as never,
+  });
+  const installBundles = {
+    v1: { body: carrierV1.body, sha: carrierV1.sha },
+    v2: { body: carrierV2.body, sha: carrierV2.sha },
+  };
   // The plugins as sandbox bundles (what CI's scripts/plugin-bundle.ts builds).
   const sandboxed = {
     example: await buildSandboxBundle(
@@ -175,6 +197,21 @@ export default defineConfig(async () => {
             },
             outboundService: carrierUpstream,
           },
+        ),
+        // Runtime installs (tests/installs/): no plugin pinned by the deployment, one trusted
+        // publisher whose private key the tests sign with, and the carrier at two versions.
+        project(
+          'installs',
+          ['tests/installs/**/*.test.ts'],
+          {
+            PLUGIN_PUBLISHERS: JSON.stringify({ acme: publisher.publicKey }),
+            // The fixture carrier is what these tests install; a deployment never may.
+            PLUGIN_TEST_FIXTURES: 'true',
+            TEST_PUBLISHER_JWK: JSON.stringify(publisher.privateJwk),
+            TEST_INSTALL_BUNDLES: JSON.stringify(installBundles),
+          },
+          [],
+          { outboundService: carrierUpstream },
         ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
         project('stripe', ['tests/stripe/**/*.test.ts'], {

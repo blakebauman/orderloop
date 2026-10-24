@@ -43,7 +43,7 @@ export async function emit(
     .filter((m) => subscribedTo(m.events, event))
     .map((m) => ({ id: `${PLUGIN_SUBSCRIPTION}${m.id}` }));
   const targets = [...subs, ...plugins];
-  if (!targets.length && !hasPlugins(env)) return { delivered: 0, pending: 0 };
+  if (!targets.length && !(await hasPlugins(env))) return { delivered: 0, pending: 0 };
 
   const secrets = new Map(subs.map((s) => [s.id, s]));
   const ids = targets.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
@@ -99,7 +99,7 @@ export async function emit(
   // request has in flight); every other subscriber at once, so one slow receiver must not use up
   // the step's time for the rest.
   const sandboxed = new Set(
-    installedPlugins(env).flatMap((p) => (p.runtime === 'sandboxed' ? [p.id] : [])),
+    (await installedPlugins(env)).flatMap((p) => (p.runtime === 'sandboxed' ? [p.id] : [])),
   );
   const isSandboxed = (row: (typeof open)[number]) =>
     row.subscriptionId.startsWith(PLUGIN_SUBSCRIPTION) &&

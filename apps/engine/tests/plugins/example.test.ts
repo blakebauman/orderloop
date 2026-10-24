@@ -215,8 +215,8 @@ describe('what the engine accepts from a plugin', () => {
   it('keeps the last good manifest while a plugin cannot answer, and reports it unhealthy', async () => {
     const good = (await pluginStatuses(env, true))[0]!.manifest;
     const manifest = vi.fn().mockRejectedValue(new Error('connection reset'));
-    const flaky = { PLUGIN_EXAMPLE: { fetch() {}, manifest } } as unknown as Env;
-    const [s] = await pluginStatuses(flaky, true);
+    const flaky = { ...env, PLUGIN_EXAMPLE: { fetch() {}, manifest } } as unknown as Env;
+    const s = (await pluginStatuses(flaky, true)).find((x) => x.id === 'example');
     expect(s).toMatchObject({ healthy: false, error: 'connection reset' });
     expect(s!.manifest).toEqual(good);
   });

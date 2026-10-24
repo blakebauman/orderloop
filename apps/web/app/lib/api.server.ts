@@ -33,6 +33,8 @@
  *
  *   GET    /api/v1/plugins                      installed plugins and their node types (admin)
  *   GET    /api/v1/plugins/:id/usage            flows and running orders using its nodes (admin)
+ *   POST   /api/v1/plugins                      upload a signed .olplugin for review (admin; approve in the app)
+ *   POST   /api/v1/plugins/:id/disable          turn off a plugin installed at runtime (admin)
  *
  *   GET    /api/v1/ucp                          agentic checkout: settings and platforms (admin)
  *   POST   /api/v1/ucp/settings                 { checkoutFlowId, links?, orderUrl? }
@@ -63,6 +65,7 @@ import {
   type InboundOrder,
   inboundFingerprint,
   inboundOrderSchema,
+  PLUGIN_BUNDLE_MAX_BYTES,
   PLUGIN_ID_RE,
   type Principal,
   parseEdiPartners,
@@ -114,6 +117,7 @@ import {
   touchIntegration,
 } from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
+import { pluginAction, uploadBundle } from './plugin-installs.server';
 import { pluginStatuses } from './plugins.server';
 import { overBudget } from './rate-limit';
 import {
@@ -220,22 +224,45 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
     if (parts[0] === 'catalog') return await handleCatalog(request, caller, parts);
     if (parts[0] === 'data-subjects')
       return need('admin') ?? (await handleDataSubjects(request, caller, parts, body));
+    if (parts[0] === 'plugins' && request.method === 'POST') {
+      const denied = need('admin');
+      if (denied) return denied;
+      if (parts.length === 1) {
+        const r = await uploadBundle(
+          request,
+          caller,
+          await readText(request, PLUGIN_BUNDLE_MAX_BYTES + 1),
+        );
+        return r.ok ? json(r.value, 201) : json({ error: r.error }, 400);
+      }
+      if (parts.length === 3 && parts[2] === 'disable' && PLUGIN_ID_RE.test(parts[1]!)) {
+        const f = new FormData();
+        f.set('intent', 'disable');
+        f.set('id', parts[1]!);
+        const r = await pluginAction(request, caller, f);
+        return r.ok ? json({ id: parts[1], status: 'disabled' }) : json({ error: r.error }, 400);
+      }
+      return json({ error: 'Not found' }, 404);
+    }
     if (parts[0] === 'plugins' && request.method === 'GET') {
       const denied = need('admin');
       if (denied) return denied;
       if (parts.length === 1)
         return json({
-          plugins: (await pluginStatuses()).map(({ id, runtime, manifest: m, healthy, error }) => ({
-            id,
-            runtime,
-            name: m?.name ?? null,
-            version: m?.version ?? null,
-            nodes: m?.nodes.map((n) => n.type) ?? [],
-            events: m?.events ?? [],
-            provides: m?.provides ?? [],
-            healthy,
-            ...(error ? { error } : {}),
-          })),
+          plugins: (await pluginStatuses()).map(
+            ({ id, runtime, source, manifest: m, healthy, error }) => ({
+              id,
+              runtime,
+              source,
+              name: m?.name ?? null,
+              version: m?.version ?? null,
+              nodes: m?.nodes.map((n) => n.type) ?? [],
+              events: m?.events ?? [],
+              provides: m?.provides ?? [],
+              healthy,
+              ...(error ? { error } : {}),
+            }),
+          ),
         });
       if (parts.length === 3 && parts[2] === 'usage' && PLUGIN_ID_RE.test(parts[1]!))
         return json(await engine().pluginUsage(parts[1]!));

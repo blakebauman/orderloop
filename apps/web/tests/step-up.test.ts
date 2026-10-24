@@ -1,0 +1,139 @@
+import type { Principal } from '@orderloop/core';
+import { authFailures, sessions, users } from '@orderloop/db';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { hashPassword } from '../app/lib/credentials';
+import { fromBase32, newTotpSecret, totpCode, totpStep } from '../app/lib/totp';
+
+vi.mock('cloudflare:workers', () => ({ env: {} }));
+
+type User = {
+  id: string;
+  totpEnabledAt: number | null;
+  totpSecret: string | null;
+  totpLastStep: number | null;
+  passwordHash: string | null;
+};
+let user: User;
+let session: { createdAt: number } | undefined;
+let ssoOnly = false;
+const failures = new Map<string, { key: string; count: number; windowStart: number }>();
+
+/**
+ * Just enough of drizzle for `stepUp`: the person, their session, the failure counts, and the
+ * conditional write that spends a two-factor code (only a later step than the last one wins).
+ */
+const select = () => {
+  let table: unknown;
+  const q = {
+    from: (t: unknown) => {
+      table = t;
+      return q;
+    },
+    where: () => q,
+    get: async () => (table === users ? user : table === sessions ? session : undefined),
+    // biome-ignore lint/suspicious/noThenProperty: drizzle's queries are awaited directly
+    then: (ok: (rows: unknown[]) => unknown) =>
+      ok(table === authFailures ? [...failures.values()] : []),
+  };
+  return q;
+};
+const insert = () => ({
+  values: (v: { key: string; windowStart: number }) => ({
+    onConflictDoUpdate: async () => {
+      const was = failures.get(v.key);
+      failures.set(v.key, { ...v, count: (was?.count ?? 0) + 1 });
+    },
+  }),
+});
+const update = () => ({
+  set: (v: { totpLastStep: number }) => ({
+    where: () => ({
+      run: async () => {
+        const won = user.totpLastStep === null || v.totpLastStep > user.totpLastStep;
+        if (won) user.totpLastStep = v.totpLastStep;
+        return { meta: { changes: won ? 1 : 0 } };
+      },
+    }),
+  }),
+});
+const del = () => ({ where: async () => {} });
+vi.mock('~/lib/env.server', () => ({
+  db: () => ({ select, insert, update, delete: del }),
+  afterResponse: () => {},
+}));
+vi.mock('~/lib/data-key.server', () => ({ openSecret: async (v: string) => v }));
+vi.mock('~/lib/audit.server', () => ({ audit: vi.fn(), clientIp: () => '203.0.113.7' }));
+vi.mock('~/lib/demo.server', () => ({ isDemo: () => false, DEMO_USER: { id: 'usr_demo' } }));
+vi.mock('~/lib/settings.server', () => ({
+  ssoOnlyInEffect: async () => ssoOnly,
+  twoFactorRequirement: async () => 'off',
+}));
+
+const { stepUp, stepUpMethod } = await import('~/lib/auth.server');
+
+const admin: Principal = { kind: 'user', id: 'usr_1', name: 'Ann', role: 'admin' };
+const request = new Request('https://app.test/plugins', {
+  method: 'POST',
+  headers: { cookie: '__Host-ol_session=tok_abc' },
+});
+
+beforeEach(() => {
+  failures.clear();
+  ssoOnly = false;
+  session = { createdAt: Date.now() - 60 * 60_000 };
+  user = {
+    id: 'usr_1',
+    totpEnabledAt: null,
+    totpSecret: null,
+    totpLastStep: null,
+    passwordHash: null,
+  };
+});
+
+describe('stepUp', () => {
+  it('takes a current two-factor code once, from someone who has two-factor sign-in', async () => {
+    const secret = newTotpSecret();
+    user = {
+      ...user,
+      totpEnabledAt: 1,
+      totpSecret: secret,
+      passwordHash: await hashPassword('pw'),
+    };
+    expect(await stepUpMethod(admin)).toBe('code');
+    const code = await totpCode(fromBase32(secret)!, totpStep(Date.now()));
+    // Their password isn't enough once they have two-factor sign-in.
+    expect(await stepUp(request, admin, { password: 'pw' })).toMatch(/authenticator/);
+    expect(await stepUp(request, admin, { code })).toBeNull();
+    // The same code again (a replay, or one already used to sign in) is refused.
+    expect(await stepUp(request, admin, { code })).toMatch(/authenticator/);
+  });
+
+  it('takes the password of someone without two-factor sign-in, unless passwords are off', async () => {
+    user = { ...user, passwordHash: await hashPassword('right horse') };
+    expect(await stepUpMethod(admin)).toBe('password');
+    expect(await stepUp(request, admin, { password: 'wrong' })).toMatch(/password is not right/);
+    expect(await stepUp(request, admin, { password: 'right horse' })).toBeNull();
+    ssoOnly = true;
+    expect(await stepUpMethod(admin)).toBe('recent-sign-in');
+    expect(await stepUp(request, admin, { password: 'right horse' })).toMatch(/Sign in again/);
+  });
+
+  it('takes a single sign-on within the last ten minutes, from someone with neither', async () => {
+    expect(await stepUpMethod(admin)).toBe('recent-sign-in');
+    expect(await stepUp(request, admin, {})).toMatch(/Sign in again/);
+    session = { createdAt: Date.now() - 5 * 60_000 };
+    expect(await stepUp(request, admin, {})).toBeNull();
+  });
+
+  it('stops answering after five wrong tries', async () => {
+    user = { ...user, passwordHash: await hashPassword('pw') };
+    for (let i = 0; i < 5; i++) await stepUp(request, admin, { password: 'nope' });
+    expect(await stepUp(request, admin, { password: 'pw' })).toMatch(/Too many tries/);
+  });
+
+  it('refuses a token, which has no one to ask', async () => {
+    const token: Principal = { kind: 'token', id: 'tok_1', name: 'ci', role: 'admin' };
+    expect(await stepUpMethod(token)).toBeNull();
+    expect(await stepUp(request, token, { password: 'x' })).toMatch(/person signed in/);
+  });
+});

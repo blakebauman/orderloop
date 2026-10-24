@@ -97,6 +97,7 @@ export default defineConfig({
             { label: 'Outbound webhooks', slug: 'guides/outbound-webhooks' },
             { label: 'AI nodes and the assistant', slug: 'guides/ai' },
             { label: 'The assistant', slug: 'guides/assistant' },
+            { label: 'Installing a plugin', slug: 'guides/installing-plugins' },
             { label: 'Team and roles', slug: 'guides/team-and-roles' },
           ],
         },

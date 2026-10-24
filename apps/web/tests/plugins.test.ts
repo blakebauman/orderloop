@@ -49,8 +49,14 @@ const manifest: PluginManifest = {
 const sandboxedManifest: PluginManifest = { ...manifest, id: 'sbx', publicPaths: [] };
 const pluginCatalog = vi.fn(
   async (): Promise<PluginStatus[]> => [
-    { id: 'example', runtime: 'worker', manifest, healthy: true },
-    { id: 'sbx', runtime: 'sandboxed', manifest: sandboxedManifest, healthy: true },
+    { id: 'example', runtime: 'worker', source: 'deployment', manifest, healthy: true },
+    {
+      id: 'sbx',
+      runtime: 'sandboxed',
+      source: 'deployment',
+      manifest: sandboxedManifest,
+      healthy: true,
+    },
   ],
 );
 // The engine serves a sandboxed plugin's pages (EngineRpc.pluginFetch).
@@ -135,6 +141,10 @@ describe('plugin pages on the web Worker', () => {
     expect(p).toMatchObject({ id: 'usr_1' });
     expect(res.headers.get('set-cookie')).toBeNull();
     expect(res.headers.get('content-security-policy')).toContain("script-src 'none'");
+    // Its forms post only to its own pages, never to /plugins (where plugins are installed).
+    expect(res.headers.get('content-security-policy')).toMatch(
+      /; form-action https?:\/\/[^/ ]+\/plugins\/sbx\/$/,
+    );
   });
 
   it("passes on only allowlisted response headers, under this app's rules", async () => {
