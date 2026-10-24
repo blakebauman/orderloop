@@ -32,6 +32,8 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'catalog.type_deleted': 'Deleted a product type',
   'catalog.channel_deleted': 'Deleted a catalog channel',
   'catalog.categories_deleted': 'Deleted catalog categories',
+  'plugin.drafted': 'The assistant drafted a plugin',
+  'plugin.draft_refused': 'The assistant’s plugin draft was refused',
 } as const;
 
 export type BusinessAuditAction = keyof typeof BUSINESS_AUDIT_ACTIONS;

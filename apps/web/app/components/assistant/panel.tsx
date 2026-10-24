@@ -33,7 +33,7 @@ import { Link } from 'react-router';
 import { contextLabel, useAssistant } from '~/lib/assistant';
 import { orderRef, plural } from '~/lib/format';
 import { useMe } from '~/lib/use-me';
-import { ActionCard, ProposalCard, Prose, ReadRow } from './parts';
+import { ActionCard, PluginDraftCard, ProposalCard, Prose, ReadRow } from './parts';
 
 /**
  * The docked panel. On wide screens it takes a column beside the page (the page narrows; nothing is
@@ -358,6 +358,7 @@ function AssistantMessage({
           if (ACTION.has(name))
             return <ActionCard key={p.toolCallId} part={p} preview={preview} respond={respond} />;
           if (name === 'propose_flow_change') return <ProposalCard key={p.toolCallId} part={p} />;
+          if (name === 'draft_plugin') return <PluginDraftCard key={p.toolCallId} part={p} />;
           if (isAssistantTool(name)) return <ReadRow key={p.toolCallId} part={p} />;
         }
         return null;

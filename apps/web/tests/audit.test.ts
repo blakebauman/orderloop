@@ -68,6 +68,16 @@ suite('audit vocabulary', () => {
         detail: { secret: 'API_KEY' },
       }),
     ).toBe('Set a plugin’s secret: acme-carrier, API_KEY');
+    expect(
+      describe({
+        action: 'plugin.drafted',
+        actor: 'usr_1',
+        target: 'ai-threshold',
+        detail: { version: '2', via: 'assistant', cases: '2/2' },
+      }),
+    ).toBe(
+      'The assistant drafted a plugin: ai-threshold, version 2, 2/2 cases pass, via the assistant',
+    );
   });
 
   it('puts every action in a filter group', () => {

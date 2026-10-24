@@ -53,6 +53,7 @@ export type AssistantTool =
   | 'list_flows'
   | 'get_flow'
   | 'propose_flow_change'
+  | 'draft_plugin'
   | 'decide_approval'
   | 'deliver_event'
   | 'cancel_order'
@@ -132,6 +133,14 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Draft a change to a flow from an instruction. Nothing is saved: a person reviews the proposal in the flow editor and applies it there.',
   },
+  draft_plugin: {
+    role: 'admin',
+    confirm: false,
+    label: 'Drafted a plugin',
+    title: 'Draft a business-rule plugin',
+    description:
+      'Draft a plugin of business-rule flow steps from an instruction (e.g. “hold orders over $5,000 shipping outside the US”), with test cases. Nothing runs: an admin reviews it on the Plugins page, runs its cases and approves it there. Give pluginId to revise a drafted plugin.',
+  },
   decide_approval: {
     role: 'approver',
     confirm: true,
@@ -184,6 +193,20 @@ export type ActionPreview = {
   blocked?: string;
   /** Where to look, e.g. `/orders/ord_…`. */
   href?: string;
+};
+
+/** What `draft_plugin` returns: a pending draft to review on the Plugins page, never running. */
+export type PluginDraftResult = {
+  id: string;
+  sha: string;
+  name: string;
+  version: string;
+  explanation: string;
+  /** The flow steps it adds: type and label. */
+  nodes: { type: string; label: string }[];
+  cases: { total: number; passed: number };
+  /** Where to review and approve it. */
+  href: string;
 };
 
 /** What `propose_flow_change` returns: a whole graph to review in the editor, never saved. */

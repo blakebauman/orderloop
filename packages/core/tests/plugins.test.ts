@@ -12,11 +12,13 @@ import {
   parseManifest,
   pluginBinding,
   pluginBundleFileSchema,
+  pluginCasesSchema,
   pluginKey,
   pluginOf,
   pluginOrder,
   pluginSecretVar,
   pluginView,
+  sampleRedactedOrder,
   signPrincipal,
   staticRegistry,
   TEMPLATES,
@@ -489,5 +491,47 @@ describe('signed bundles', () => {
     expect(pluginBundleFileSchema.safeParse({ ...file, format: 2 }).success).toBe(false);
     expect(pluginBundleFileSchema.safeParse({ ...file, sha: 'xyz' }).success).toBe(false);
     expect(pluginBundleFileSchema.safeParse({ ...file, id: 'Bad' }).success).toBe(false);
+  });
+});
+
+describe('drafted rule cases', () => {
+  it('fills a case’s order from a plain one-line US order', () => {
+    const o = sampleRedactedOrder({ shipToCountry: 'DE' });
+    expect(o).toMatchObject({
+      total: 100,
+      currency: 'USD',
+      shipToCountry: 'DE',
+      lines: [{ qty: 1 }],
+    });
+    // Totals follow the lines unless a case sets them.
+    expect(
+      sampleRedactedOrder({ lines: [{ sku: 'A', name: 'A', qty: 3, unitPrice: 50 }] }).total,
+    ).toBe(150);
+    expect(sampleRedactedOrder({ total: 9000 }).total).toBe(9000);
+    // Never anyone's details: a redacted order has none to fill.
+    expect(o).not.toHaveProperty('contact');
+  });
+
+  it('reads cases, and drops what a case last gave', () => {
+    const [c] = pluginCasesSchema.parse([
+      {
+        name: 'big',
+        node: 'over_limit',
+        expect: { branch: 'hold' },
+        pass: true,
+        got: { branch: 'ok' },
+      },
+    ]);
+    expect(c).toEqual({
+      name: 'big',
+      node: 'over_limit',
+      order: {},
+      config: {},
+      expect: { branch: 'hold' },
+    });
+    expect(
+      pluginCasesSchema.safeParse([{ name: 'x', node: 'Bad-Name', expect: { branch: 'a' } }])
+        .success,
+    ).toBe(false);
   });
 });

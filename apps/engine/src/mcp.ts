@@ -43,6 +43,9 @@ import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
 
+/** Tools that save something without a confirm (nothing they save runs until someone approves it). */
+const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>(['draft_plugin']);
+
 /** Actions that can't be taken back by calling them again: a client should confirm them. */
 const DESTRUCTIVE = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'publish_flow']);
 /** Calling these twice with the same input does nothing more the second time. */
@@ -134,7 +137,8 @@ async function createServer(p: Principal) {
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {
     const t = ASSISTANT_TOOLS[name];
     if (!atLeast(p.role, t.role)) continue;
-    const readOnly = !t.confirm;
+    // A draft runs without a confirm, but it writes (a pending plugin), so it isn't read-only.
+    const readOnly = !t.confirm && !WRITES_WITHOUT_CONFIRM.has(name);
     const action = isActionTool(name);
     server.registerTool(
       name,

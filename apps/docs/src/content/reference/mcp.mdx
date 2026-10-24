@@ -28,7 +28,7 @@ authorization server, registers itself and opens OrderLoop's consent page in you
 2. Check which app is asking and where access will be sent. An app that registered itself is
    marked as unverified; an app on your own computer gets an extra warning.
 3. Choose a role. You are offered your own role and the roles below it, lowest first, and the
-   lowest (`viewer`) is selected. `admin` is never offered: MCP has no admin tools. That role is the grant's scope.
+   lowest (`viewer`) is selected. `admin` is never offered, so a connected app can't use `draft_plugin`; an admin API token can. That role is the grant's scope.
 4. Select **Connect**. **Cancel** refuses the app.
 
 ### Claude Code
@@ -140,7 +140,7 @@ input (key order doesn't matter), or one that expired or was used, is refused wi
 call without it for a new preview. The role and the order's state are checked again when the
 action runs.
 
-Reads and `propose_flow_change` do not take a code. Over [A2A](/reference/a2a/), typed skills
+Reads, `propose_flow_change` and `draft_plugin` do not take a code. Over [A2A](/reference/a2a/), typed skills
 (and `place_order`) run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
 
 Annotations also tell a client when to confirm:
@@ -148,6 +148,7 @@ Annotations also tell a client when to confirm:
 | Tools | Hints |
 |---|---|
 | Reads and `propose_flow_change` | `readOnlyHint: true` |
+| `draft_plugin` | saves a pending draft (nothing runs until an admin approves it): not read-only, not destructive, not idempotent |
 | `decide_approval`, `cancel_order`, `publish_flow` | `destructiveHint: true`; the first two are also `idempotentHint: true` |
 | `deliver_event`, `run_stock_review` | writes, not destructive |
 

@@ -8,6 +8,7 @@ const engine = {
   rollbackPlugin: vi.fn(),
   uninstallPlugin: vi.fn(),
   uploadPlugin: vi.fn(),
+  runPluginCases: vi.fn(),
   listPluginInstalls: vi.fn(async () => [] as { id: string; status: string }[]),
 };
 const audit = vi.fn();
@@ -137,6 +138,40 @@ describe('the Plugins page’s install actions', () => {
       'usr_1',
     );
     expect(JSON.stringify(audit.mock.calls)).not.toContain('sk-live');
+  });
+
+  it('runs a draft’s edited cases without a step-up, and audits how many pass', async () => {
+    const cases = [
+      { name: 'big', node: 'over_limit', order: { total: 500 }, expect: { branch: 'hold' } },
+      { name: 'small', node: 'over_limit', order: { total: 5 }, expect: { branch: 'ok' } },
+    ];
+    engine.runPluginCases.mockResolvedValueOnce({
+      ok: true,
+      value: [
+        { ...cases[0], pass: true, got: { branch: 'hold' } },
+        { ...cases[1], pass: false, got: { branch: 'hold' } },
+      ],
+    });
+    const r = await pluginAction(
+      request,
+      admin,
+      form({ intent: 'cases', id: 'ai-threshold', sha, cases: JSON.stringify(cases) }),
+    );
+    expect(r).toEqual({ ok: true, done: '1 of 2 cases pass.' });
+    expect(stepUp).not.toHaveBeenCalled();
+    expect(engine.runPluginCases).toHaveBeenCalledWith('ai-threshold', sha, cases, 'usr_1');
+    expect(audit).toHaveBeenCalledWith(request, 'plugin.cases_run', {
+      actor: admin,
+      target: 'ai-threshold',
+      detail: { cases: '1/2' },
+    });
+    expect(
+      await pluginAction(
+        request,
+        admin,
+        form({ intent: 'cases', id: 'ai-threshold', sha, cases: '{not json' }),
+      ),
+    ).toEqual({ ok: false, error: 'The cases aren’t JSON.' });
   });
 
   it('refuses an unknown action or plugin id', async () => {

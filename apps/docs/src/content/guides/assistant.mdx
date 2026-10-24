@@ -5,7 +5,7 @@ description: The workspace assistant — opening it, what it can read, which act
 
 The assistant is a chat panel for the whole workspace. Ask what needs attention, find orders,
 check stock, read a flow, or have it decide an approval, deliver an event, cancel an order, publish
-a flow or run the stock review. It answers from live data through tools, and anything that changes
+a flow or run the stock review, or (as an admin) draft a plugin. It answers from live data through tools, and anything that changes
 something stops for your confirmation first.
 
 One assistant serves every page.
@@ -74,9 +74,9 @@ check. The audit trail names the actor as `<email> via assistant`: that string i
 
 ## Roles
 
-The assistant works within your role (`viewer`, `approver`, `operator`, `admin`, in order; no assistant tool needs `admin`). A tool your role can't use is
+The assistant works within your role (`viewer`, `approver`, `operator`, `admin`, in order; only `draft_plugin` needs `admin`). A tool your role can't use is
 not offered to the model, and is refused if it is called anyway; the assistant says which role can.
-Every role can use the read tools. The role is re-read from your session when a tool runs, so a
+Every role can use the read tools; plugin drafts are for admins. The role is re-read from your session when a tool runs, so a
 role change, a sign-out or a disabled account applies to an open panel at once. See
 [Team and roles](/guides/team-and-roles/).
 
@@ -90,6 +90,19 @@ accepting it is one undoable edit that you can still save and publish. In the ed
 builds on the graph on screen. A request that changes nothing says so, with no card.
 
 Creating a flow from a description still happens on the Flows page.
+
+## Plugin drafts
+
+An admin can ask for a business rule ("hold orders over $5,000 shipping outside the US") and the
+`draft_plugin` tool (`admin`) drafts a [plugin](/guides/installing-plugins/#drafts-from-the-assistant)
+of rule steps with test cases. It runs directly, with no confirm card, because nothing it writes
+runs. The card in the panel shows the plugin's name and version, the steps it adds, and how many
+test cases pass, with a **Review** button that opens the Plugins page. Approving happens only there.
+
+The draft sees only an order's commercial facts, never names, emails or addresses, and can't reach
+outside hosts, secrets or storage. To revise a draft, ask again naming the plugin; the assistant
+drafts its next version. If the workspace hasn't had this turned on by OrderLoop, the assistant says
+it can't.
 
 ## Daily allowance
 
@@ -113,7 +126,7 @@ credit check"), not open questions.
 ## Over MCP
 
 The same tools are served to MCP clients such as Claude, Claude Code and Cursor at `/mcp`, with the
-same roles. There is no confirm card: an action's first call changes nothing. A client that can
+same roles. `draft_plugin` needs `admin`, which a connected app is never granted, so only an admin [API token](/guides/team-and-roles/#api-tokens) reaches it. There is no confirm card: an action's first call changes nothing. A client that can
 ask you shows the preview and acts only once you agree; any other client gets a preview and a
 one-time code, and the action runs only when it calls again with the code (see
 [Actions wait for the person](/reference/mcp/#actions-wait-for-the-person)). The
