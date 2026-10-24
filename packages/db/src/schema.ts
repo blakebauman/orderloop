@@ -408,10 +408,15 @@ export const installedPlugins = sqliteTable(
     uploadedAt: integer('uploaded_at').notNull(),
     approvedBy: text('approved_by'),
     approvedAt: integer('approved_at'),
+    /** An assistant draft's: the admin's instruction. */
+    request: text('request'),
+    /** An assistant draft's test cases and their last results (JSON). */
+    cases: text('cases'),
   },
   (t) => [
     primaryKey({ columns: [t.id, t.sha] }),
     index('installed_plugins_status').on(t.status),
+    uniqueIndex('installed_plugins_version').on(t.id, t.version),
     uniqueIndex('installed_plugins_running')
       .on(t.id)
       .where(sql`${t.status} IN ('active', 'disabled')`),

@@ -223,6 +223,8 @@ export default defineConfig(async () => {
             PLUGIN_PUBLISHERS: JSON.stringify({ acme: publisher.publicKey }),
             // The fixture carrier is what these tests install; a deployment never may.
             PLUGIN_TEST_FIXTURES: 'true',
+            // The assistant may draft rule plugins (tests/installs/drafts.test.ts).
+            ASSISTANT_PLUGINS: 'on',
             TEST_PUBLISHER_JWK: JSON.stringify(publisher.privateJwk),
             TEST_INSTALL_BUNDLES: JSON.stringify(installBundles),
           },

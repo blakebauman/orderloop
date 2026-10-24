@@ -961,4 +961,73 @@ export type PluginInstallView = {
   manifest: PluginManifest;
   /** Never a value: whether each declared secret is set. */
   secrets: { name: string; set: boolean }[];
+  /** An assistant draft's: what the admin asked for. */
+  request: string | null;
+  /** An assistant draft's test cases, with their last results. */
+  cases: PluginCaseResult[] | null;
+  /** An assistant draft's rule code, to review (an uploaded file's code isn't shown). */
+  code: string | null;
 };
+
+/** The publisher an assistant draft is staged under (never a key in the registry). */
+export const ASSISTANT_PUBLISHER = 'assistant';
+
+/**
+ * A test case of an assistant-drafted rule: an order (a `RedactedOrder`, any field left out
+ * taken from `sampleRedactedOrder`), the node's config, and the branch (and variables) it must give.
+ */
+export const pluginCaseSchema = z.object({
+  name: z.string().min(1).max(120),
+  node: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  order: z.record(z.string(), z.unknown()).default({}),
+  config: z.record(z.string(), z.unknown()).default({}),
+  expect: z.object({
+    branch: z.string().min(1),
+    vars: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
+export type PluginCase = z.infer<typeof pluginCaseSchema>;
+
+/** At most this many cases a draft. */
+export const PLUGIN_CASES_MAX = 30;
+
+export const pluginCasesSchema = z.array(pluginCaseSchema).max(PLUGIN_CASES_MAX);
+
+/** A case and what the rule gave: `pass`, or what it did instead. */
+export type PluginCaseResult = PluginCase & {
+  pass: boolean;
+  /** The branch taken, or null when the rule failed. */
+  got: { branch: string | null; vars?: Record<string, unknown>; error?: string };
+};
+
+/**
+ * A plausible redacted order for a rule's test case: one line, USD, web channel, shipping to the
+ * US, with `over` replacing any field. Totals follow the lines unless `over` sets them.
+ */
+export function sampleRedactedOrder(over: Record<string, unknown> = {}): RedactedOrder {
+  const lines: RedactedOrder['lines'] = Array.isArray(over.lines)
+    ? (over.lines as RedactedOrder['lines'])
+    : [{ sku: 'SKU-1', name: 'Sample item', qty: 1, unitPrice: 100 }];
+  const subtotal = lines.reduce((t, l) => t + l.qty * (l.unitPrice ?? 0), 0);
+  return {
+    id: 'ord_case',
+    model: 'b2c',
+    channel: 'web',
+    customerId: undefined,
+    lines,
+    subtotal,
+    shipping: 0,
+    shippingOption: undefined,
+    tax: 0,
+    total: subtotal,
+    baseTotal: subtotal,
+    currency: 'USD',
+    fulfillment: undefined,
+    title: 'Test order',
+    guest: false,
+    shipToCountry: 'US',
+    meta: {},
+    createdAt: 0,
+    ...over,
+  } as unknown as RedactedOrder;
+}

@@ -11,6 +11,7 @@ import {
   type EngineRpc,
   type OrderState,
   type PaymentEvent,
+  type PluginCase,
   parseMailboxes,
   pluginBinding,
   runHealthChecks,
@@ -26,7 +27,7 @@ import { handleMcp, MCP_PATH } from './mcp';
 import { orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
-import { installedPlugins } from './plugin-host';
+import { installedPlugins, pinnedManifest } from './plugin-host';
 import * as installs from './plugin-installs';
 import { manifests, plugin, pluginStatuses, pluginUsage } from './plugins';
 import { separationRefusal } from './separation';
@@ -179,11 +180,20 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return installs.refusable(() => installs.uninstallPlugin(this.env, id));
   }
 
+  runPluginCases(id: string, sha: string, cases: PluginCase[], _by: string) {
+    return installs.refusable(() => installs.runPluginCases(this.env, id, sha, cases));
+  }
+
   async pluginFetch(id: string, request: Request) {
     // Only a sandboxed plugin's pages come this way; a Worker plugin's the web app reaches itself.
     if (!(await installedPlugins(this.env)).some((p) => p.id === id && p.runtime === 'sandboxed'))
       return new Response('Not found', { status: 404 });
     await manifests(this.env);
+    // Only a plugin whose pinned manifest has pages: one without (an assistant draft's rules, say)
+    // serves none, whatever its code answers.
+    const m = await pinnedManifest(this.env, id);
+    if (!m || (!m.nav.length && !m.publicPaths.length))
+      return new Response('Not found', { status: 404 });
     const stub = await plugin(this.env, id, 'serve');
     if (!stub) return new Response('Not found', { status: 404 });
     return stub.fetch(request);

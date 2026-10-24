@@ -997,7 +997,9 @@ directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
 `OrderAgent` (`decide`, `deliver`, `cancel`) or the `REPLENISH` Workflow as `<email> via
 assistant`. Every tool re-reads the person's session first (`livePrincipal` in
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
-with the copilot and never saves. The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
+with the copilot and never saves. `draft_plugin` (admins, with `ASSISTANT_PLUGINS` on) drafts a
+business-rule plugin and stages it pending, for an admin to review and approve on the Plugins page
+([Plugins](plugins.md#assistant-drafted-plugins)). The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
 deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.app/guides/assistant/).
 
 The `AssistantAgent` instance is named after the person's user id, which the web app sets from the

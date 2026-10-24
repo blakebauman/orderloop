@@ -15,6 +15,7 @@ export const AI_PROMPTS = {
   copilot: 1,
   assess: 1,
   assistant: 1,
+  plugin_draft: 1,
 } as const;
 
 export type AiPrompt = keyof typeof AI_PROMPTS;

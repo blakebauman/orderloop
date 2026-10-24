@@ -240,6 +240,13 @@ describe('MCP', () => {
     expect(operator.find((t) => t.name === 'publish_flow')).toMatchObject({
       annotations: { openWorldHint: false },
     });
+    // An admin also drafts plugins: no confirm, but it saves a draft, so it isn't read-only.
+    const admin = await tools(person('admin', 'ann@example.com'));
+    expect(admin).toHaveLength(14);
+    expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      outputSchema: { type: 'object', properties: { id: {}, cases: {}, href: {} } },
+    });
   });
 
   it('keeps an internal error to itself', async () => {

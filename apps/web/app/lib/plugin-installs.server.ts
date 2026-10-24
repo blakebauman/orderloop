@@ -11,6 +11,7 @@ import {
   type AuditActor,
   PLUGIN_BUNDLE_MAX_BYTES,
   PLUGIN_ID_RE,
+  type PluginCase,
   type Principal,
   type Refusable,
 } from '@orderloop/core';
@@ -30,6 +31,7 @@ const INTENTS = [
   'enable',
   'rollback',
   'uninstall',
+  'cases',
 ] as const;
 export type PluginIntent = (typeof INTENTS)[number];
 export const isPluginIntent = (v: unknown): v is PluginIntent =>
@@ -157,6 +159,29 @@ export async function pluginAction(
         }),
       );
       return r.refusal ?? { ok: true, done: `${id} is back to version ${r.value.version}.` };
+    }
+    case 'cases': {
+      let cases: unknown;
+      try {
+        cases = JSON.parse(str('cases'));
+      } catch {
+        return { ok: false, error: 'The cases aren’t JSON.' };
+      }
+      if (!Array.isArray(cases)) return { ok: false, error: 'The cases are a list ([ … ]).' };
+      const r = await answered(
+        engine().runPluginCases(id, str('sha'), cases as PluginCase[], by.id),
+        'plugin.cases_run',
+        (v) => ({ cases: `${v.filter((c) => c.pass).length}/${v.length}` }),
+      );
+      if (r.refusal) return r.refusal;
+      const passed = r.value.filter((c) => c.pass).length;
+      return {
+        ok: true,
+        done:
+          passed === r.value.length
+            ? `All ${passed} cases pass.`
+            : `${passed} of ${r.value.length} cases pass.`,
+      };
     }
     case 'uninstall': {
       const r = await answered(engine().uninstallPlugin(id), 'plugin.uninstalled', () => ({}));

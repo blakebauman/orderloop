@@ -1,5 +1,7 @@
 import {
+  ASSISTANT_PUBLISHER,
   CATEGORY_LABELS,
+  type PluginCaseResult,
   type PluginInstallView,
   type PluginManifest,
   type PluginRuntime,
@@ -7,8 +9,10 @@ import {
   pluginSecretVar,
   ROLE_LABELS,
 } from '@orderloop/core';
+import { users } from '@orderloop/db';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { inArray } from 'drizzle-orm';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Field } from '~/components/inspector';
@@ -16,7 +20,7 @@ import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { requireUser, type StepUpMethod, stepUpMethod } from '~/lib/auth.server';
 import { BodyTooLarge, readText } from '~/lib/body';
-import { engine } from '~/lib/env.server';
+import { db, engine } from '~/lib/env.server';
 import { PLUGIN_FORM_MAX_BYTES, pluginAction } from '~/lib/plugin-installs.server';
 import { listDeliveries, listPluginErrors } from '~/lib/webhooks.server';
 import type { Route } from './+types/plugins';
@@ -58,7 +62,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       };
     }),
   );
-  return { plugins, installs: installs.filter((i) => i.status !== 'uninstalled'), stepUp };
+  const shown = installs.filter((i) => i.status !== 'uninstalled');
+  // Who uploaded each (or asked the assistant for it), by name.
+  const ids = [...new Set(shown.map((i) => i.uploadedBy))];
+  const people = ids.length
+    ? await db()
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, ids))
+    : [];
+  const names = Object.fromEntries(people.map((u) => [u.id, u.name]));
+  return { plugins, installs: shown, stepUp, names };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -80,7 +94,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Plugins() {
-  const { plugins, installs, stepUp } = useLoaderData<typeof loader>();
+  const { plugins, installs, stepUp, names } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const pending = installs.filter((i) => i.status === 'pending');
   // A plugin turned off is out of the catalog, but still installed: it keeps its controls.
@@ -104,7 +118,7 @@ export default function Plugins() {
         ) : null}
         <Upload />
         {pending.map((i) => (
-          <Review key={i.sha} install={i} stepUp={stepUp} />
+          <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
         ))}
         {plugins.length || off.length ? (
           <>
@@ -241,17 +255,27 @@ function SecretForm({
 function Review({
   install: i,
   stepUp,
+  by,
 }: {
   install: PluginInstallView;
   stepUp: StepUpMethod | null;
+  /** Who uploaded it, or asked the assistant for it. */
+  by?: string;
 }) {
   const nav = useNavigation();
   const m = i.manifest;
   const missing = m.secrets.filter(
     (s) => !s.optional && !i.secrets.find((x) => x.name === s.name)?.set,
   );
+  const drafted = i.publisher === ASSISTANT_PUBLISHER;
+  const failing =
+    drafted &&
+    (!i.cases?.length ||
+      i.cases.some((c) => !c.pass) ||
+      m.nodes.some((n) => !i.cases?.some((c) => `${i.id}.${c.node}` === n.type)));
   return (
     <Section
+      id={i.id}
       title={
         <>
           Review {m.name}{' '}
@@ -262,7 +286,10 @@ function Review({
       }
       actions={
         <span className="text-muted-foreground text-sm">
-          Signed by {i.publisher} · uploaded <Ago ms={i.uploadedAt} />
+          {drafted
+            ? `Drafted by the assistant for ${by ?? 'an admin'}`
+            : `Signed by ${i.publisher}`}{' '}
+          · {drafted ? 'drafted' : `uploaded${by ? ` by ${by}` : ''}`} <Ago ms={i.uploadedAt} />
         </span>
       }
     >
@@ -270,7 +297,19 @@ function Review({
         Not running yet. Check what it adds and what it reaches before you approve it: once
         approved, it runs on every order whose flow uses it.
       </p>
+      {drafted && i.request ? (
+        <p className="mb-3 text-sm">
+          Asked for: <q>{i.request}</q>
+        </p>
+      ) : null}
+      {drafted ? (
+        <p className="mb-3 text-muted-foreground text-sm">
+          The assistant wrote this code. Its test cases show what it does on the orders they
+          describe, not that it is safe: read the code before you approve it.
+        </p>
+      ) : null}
       <ManifestDetails m={m} runtime="sandboxed" secrets={i.secrets} />
+      {drafted ? <DraftReview install={i} /> : null}
       {m.secrets.length ? (
         <div className="mt-4 grid gap-3 border-t pt-3">
           <h3 className="caption">Secrets</h3>
@@ -298,16 +337,112 @@ function Review({
           </label>
         ) : null}
         <StepUpField method={stepUp} />
-        <Button type="submit" disabled={missing.length > 0 || busyWith(nav, 'approve', i.sha)}>
+        <Button
+          type="submit"
+          disabled={missing.length > 0 || failing || busyWith(nav, 'approve', i.sha)}
+        >
           Approve and install
         </Button>
         {missing.length ? (
           <span className="text-muted-foreground text-xs">
             Set {missing.map((x) => x.name).join(', ')} first.
           </span>
+        ) : failing ? (
+          <span className="text-muted-foreground text-xs">
+            Every step needs a test case, and every case must pass first.
+          </span>
         ) : null}
       </Form>
     </Section>
+  );
+}
+
+/** The cases as an admin edits them: what each one is, without what it last gave. */
+const editableCases = (cases: PluginCaseResult[] | null) =>
+  JSON.stringify(
+    (cases ?? []).map(({ name, node, order, config, expect }) => ({
+      name,
+      node,
+      order,
+      config,
+      expect,
+    })),
+    null,
+    2,
+  );
+
+/** An assistant draft: its rule code to read, and its test cases to check, edit and run. */
+function DraftReview({ install: i }: { install: PluginInstallView }) {
+  const nav = useNavigation();
+  return (
+    <div className="mt-4 grid gap-3 border-t pt-3 text-sm">
+      <details>
+        <summary className="cursor-pointer">Rule code, as the assistant wrote it</summary>
+        <pre className="mt-2 max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
+          {i.code ?? 'Not available'}
+        </pre>
+      </details>
+      <div>
+        <h3 className="caption mb-1.5">Test cases</h3>
+        {i.cases?.length ? (
+          <table className="w-full text-xs">
+            <thead className="text-left text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3 font-normal">Case</th>
+                <th className="py-1 pr-3 font-normal">Step</th>
+                <th className="py-1 pr-3 font-normal">Expected</th>
+                <th className="py-1 pr-3 font-normal">Got</th>
+              </tr>
+            </thead>
+            <tbody>
+              {i.cases.map((c, n) => (
+                <tr key={`${c.name}-${n}`} className="border-t">
+                  <td className="py-1 pr-3">
+                    <StatusDot status={c.pass ? 'completed' : 'failed'} /> {c.name}
+                  </td>
+                  <td className="py-1 pr-3">
+                    <code>{c.node}</code>
+                  </td>
+                  <td className="py-1 pr-3">{c.expect.branch}</td>
+                  <td className={c.pass ? 'py-1 pr-3' : 'py-1 pr-3 text-destructive'}>
+                    {c.got.branch ?? c.got.error ?? 'nothing'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-muted-foreground">No cases yet: add at least one below.</p>
+        )}
+      </div>
+      <Form method="post" className="grid gap-2">
+        <input type="hidden" name="intent" value="cases" />
+        <input type="hidden" name="id" value={i.id} />
+        <input type="hidden" name="sha" value={i.sha} />
+        <Field
+          label="Edit the cases"
+          hint="Each case: a name, the step, the order fields that matter (the rest are a one-line US order of 100 USD), its settings, and the branch it must take."
+        >
+          <textarea
+            name="cases"
+            defaultValue={editableCases(i.cases)}
+            rows={10}
+            spellCheck={false}
+            className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+          />
+        </Field>
+        <div>
+          <Button
+            type="submit"
+            size="sm"
+            variant="outline"
+            disabled={busyWith(nav, 'cases', i.sha)}
+          >
+            Run cases
+          </Button>
+        </div>
+      </Form>
+    </div>
   );
 }
 
