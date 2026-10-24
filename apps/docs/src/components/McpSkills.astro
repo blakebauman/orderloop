@@ -1,0 +1,40 @@
+---
+/*
+ * The skills MCP clients are offered, rendered from MCP_SKILLS in @orderloop/core: the same files
+ * the engine serves, so a new skill or a changed role shows up here on rebuild.
+ */
+// biome-ignore lint/correctness/noUnusedImports: ROLE_LABELS is used in the markup
+import { MCP_SKILLS, ROLE_LABELS } from '@orderloop/core';
+
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
+const skills = Object.entries(MCP_SKILLS).map(([name, s]) => ({
+  name,
+  role: s.role,
+  description: /^description: (.+)$/m.exec(s.files['SKILL.md'] ?? '')?.[1] ?? '',
+}));
+---
+
+<table>
+  <thead>
+    <tr>
+      <th>Skill</th>
+      <th>Role</th>
+      <th>Does</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      skills.map((s) => (
+        <tr>
+          <td>
+            <code>{s.name}</code>
+          </td>
+          <td>
+            <code>{s.role}</code> ({ROLE_LABELS[s.role]})
+          </td>
+          <td>{s.description}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

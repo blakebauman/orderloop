@@ -3,6 +3,7 @@ title: MCP server
 description: Connect Claude, Claude Code, Cursor or any MCP client to OrderLoop at /mcp, with the same tools as the assistant, limited by role.
 ---
 
+import McpSkills from '../../components/McpSkills.astro';
 import McpTools from '../../components/McpTools.astro';
 
 OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
@@ -147,6 +148,21 @@ Annotations also tell a client when to confirm:
 `cancel_order`, `run_stock_review` and `assess_order` set `openWorldHint: true`: cancelling voids
 payments and cancels shipments with the carrier, the stock review places reorders with suppliers,
 and an assessment may fetch an `https` image. The other tools set it to `false`.
+
+## Skills
+
+OrderLoop also serves skills: written workflows that combine the tools above, such as triaging
+what needs attention or reviewing an approval. A client that supports the
+[Skills extension](https://modelcontextprotocol.io/extensions/skills/overview) on the 2026-07-28
+revision can list them and load one when it fits, or when you pick it. As with tools, you are
+offered only the skills your role can follow:
+
+<McpSkills />
+
+A skill is instructions, not an extra permission. Its actions still wait for you, as above. Each
+skill is a `SKILL.md` at `skill://<name>/SKILL.md`, listed with its digest and size so your client
+can check what it loads, and may be cached by the client for five minutes. A client on an earlier
+revision doesn't see them.
 
 ## Who did it
 

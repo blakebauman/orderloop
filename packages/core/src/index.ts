@@ -20,6 +20,7 @@ export * from './json-schema';
 export * from './layout';
 export * from './lines';
 export * from './logic';
+export * from './mcp-skills';
 export * from './money';
 export * from './payments';
 export * from './plugins';
