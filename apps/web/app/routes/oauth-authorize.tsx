@@ -17,7 +17,7 @@ import { data, Form, Link, useActionData, useLoaderData, useLocation } from 'rea
 import { Mark } from '~/components/mark';
 import { audit } from '~/lib/audit.server';
 import { type GrantProps, requireUser } from '~/lib/auth.server';
-import { channelOf, oauthApi } from '~/lib/oauth.server';
+import { channelOf, type GRANTABLE_ROLES, oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/oauth-authorize';
 
 export const meta = ({ loaderData: d }: Route.MetaArgs) => [
@@ -35,12 +35,12 @@ export const headers: Route.HeadersFunction = ({ loaderHeaders, actionHeaders })
   return h;
 };
 
-/** What an app may be granted. Admin isn't offered: MCP and A2A have no admin tools. */
+/** What an app may be granted (`GRANTABLE_ROLES`). Admin isn't offered. */
 const ROLE_SCOPE: Partial<Record<Role, string>> = {
   viewer: 'Read orders, flows, approvals and stock',
   approver: 'Also approve or reject approvals',
   operator: 'Also deliver events, cancel orders, publish flows and run the stock review',
-};
+} satisfies Record<(typeof GRANTABLE_ROLES)[number], string>;
 const grantable = (r: Role) => r in ROLE_SCOPE;
 
 /**
