@@ -20,15 +20,24 @@ beforeAll(async () => {
 
 const indexer = (category: string) => env.LISTINGS.getByName(`web:${category}`);
 
-/** Waits for the changes queue to bring `category` to `n` members, then builds its index. */
+/**
+ * Waits for the changes queue to bring `category` to `n` members, then for an index of those `n`.
+ * The indexer's first alarm is due at once, so miniflare may already be running it: run it when
+ * it's pending, and read the index only once its recorded member count is right.
+ */
 async function listing(category: string, n: number): Promise<ListingIndex> {
   for (let i = 0; i < 200 && (await indexer(category).count()) !== n; i++)
     await new Promise((r) => setTimeout(r, 50));
   expect(await indexer(category).count()).toBe(n);
-  await runDurableObjectAlarm(indexer(category));
-  const object = await env.PUBLISHED.get(paths.listing(DOC_FORMAT, 'web', category));
-  if (!object) throw new Error(`no index for ${category}`);
-  return new ListingIndex(await object.arrayBuffer());
+  for (let i = 0; i < 200; i++) {
+    await runDurableObjectAlarm(indexer(category));
+    const object = await env.PUBLISHED.get(paths.listing(DOC_FORMAT, 'web', category));
+    if (object?.customMetadata?.members === String(n))
+      return new ListingIndex(await object.arrayBuffer());
+    await object?.body.cancel();
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`no index of ${n} for ${category}`);
 }
 
 const uidOf = async (key: string) => Number(await env.CARDS.get(paths.uid(DOC_FORMAT, key)));
