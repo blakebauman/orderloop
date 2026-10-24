@@ -3,6 +3,12 @@
 # before it does anything. The main checkout is shared between sessions that switch branches, so
 # when it sits on main the advice is to branch in a worktree rather than switch it. Local git only,
 # no network. Fails open.
+# Without jq every hook here exits silently, guards included, so say so once at the start. Plain
+# stdout from a SessionStart hook reaches Claude as context, so this needs no jq to say it.
+command -v jq >/dev/null 2>&1 || {
+  echo "jq is not installed, so the Order Loop hooks in .claude/hooks (the deploy and migration guards, the docs and rules reminders) are all off this session. Tell the user to install jq (brew install jq) and start a new session."
+  exit 0
+}
 . "$(dirname "$0")/lib.sh"
 dir=${CLAUDE_PROJECT_DIR:-$(field .cwd)}
 top=$(git -C "${dir:-.}" rev-parse --show-toplevel 2>/dev/null) || exit 0

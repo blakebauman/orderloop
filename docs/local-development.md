@@ -8,7 +8,10 @@ OrderAgent Durable Objects and both Workflows all work on your machine.
 
 ## Requirements
 
-- Node.js 22 or later, and pnpm (the version is pinned in the root `package.json`)
+- Node.js 22.18 or later (`.nvmrc`): the repo's scripts run `.ts` files directly, which needs Node's
+  built-in type stripping. pnpm's version is pinned in the root `package.json`.
+- `jq`, for the Claude Code hooks in `.claude/` (`brew install jq`). Without it they do nothing,
+  including the guards that stop hand deploys, and `pnpm test:toolkit` fails.
 - A Cloudflare account, if you want live AI. Workers AI always calls your account, even in local dev.
   Without one, set `AI_MODE` to `"mock"` (see [Configuration](configuration.md)).
 
@@ -88,7 +91,16 @@ Then read its live state with `GET /api/v1/orders/:id`.
 pnpm test            # core planner tests (node), engine Workflow e2e and catalog and catalog-edge (workerd), web tests
 pnpm lint            # Biome
 pnpm check-types     # tsc --noEmit (web runs react-router typegen first)
+pnpm test:fleet      # the deployment registry and the configs rendered from it
+pnpm test:toolkit    # the .claude/ toolkit: skill and agent lint, hook tests
+
+pnpm --filter @orderloop/core test                        # one package
+pnpm --filter @orderloop/engine exec vitest run --project engine tests/ucp.test.ts  # one file
+pnpm turbo run lint check-types test --filter='...[origin/main]'  # what changed, plus dependents
 ```
+
+`pnpm engine:dev` runs the engine Worker on its own (`wrangler dev`, port 8788), without the web
+app; `pnpm web:dev` already runs it inside the Vite session.
 
 After changing a `wrangler.jsonc`, regenerate that app's binding types with
 `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types`,

@@ -162,7 +162,7 @@ pnpm docs:deploy     # build and deploy the orderloop-docs Worker
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs lint, type-check, build, tests, the fleet tests and a dependency audit on every push and PR. Production deploys from CI: each customer has a dedicated deployment listed in `deployments/` (at `<id>.orderloop.app`; OrderLoop's own is `orderloop.app`), and on `main` CI deploys them ring by ring (staging, internal, canary, general). For each one it records a D1 restore point, migrates D1, deploys the engine and the web app, smoke-tests `/health/deep`, and rolls back any Worker it deployed if a later step fails; see [docs/operations.md](docs/operations.md). Each deployment's job runs in its GitHub environment, which holds its secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
+`.github/workflows/ci.yml` runs lint, type-check, build, tests, the fleet tests, the Claude Code toolkit's tests and a dependency audit on every push and PR. Production deploys from CI: each customer has a dedicated deployment listed in `deployments/` (at `<id>.orderloop.app`; OrderLoop's own is `orderloop.app`), and on `main` CI deploys them ring by ring (staging, internal, canary, general). For each one it records a D1 restore point, migrates D1, deploys the engine and the web app, smoke-tests `/health/deep`, and rolls back any Worker it deployed if a later step fails; see [docs/operations.md](docs/operations.md). Each deployment's job runs in its GitHub environment, which holds its secrets. If a deploy fails, re-run the failed job in GitHub Actions; the manual commands below are for a first deploy to a new account.
 
 ## Deploy
 
@@ -174,6 +174,21 @@ pnpm run deploy                                # engine first (web binds to it),
 ```
 
 Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wrangler.jsonc`). Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`), which logs them and rate-limits them; create a gateway with that id in a new account before deploying, or set the var to `""` to call Workers AI directly.
+
+## Contributing
+
+Start with [docs/local-development.md](docs/local-development.md) (requirements, install, checks) and
+[CLAUDE.md](CLAUDE.md), the rules every change keeps (`AGENTS.md` is the same file). A few things the
+code doesn't tell you:
+
+- **Branch in a worktree.** Several sessions, human and Claude, can share one checkout, so don't switch
+  its branch: `git worktree add ../orderloop-<topic> -b <branch> origin/main`, then open the PR with
+  `gh pr create --head <branch>`.
+- **Merging is releasing.** A merge to `main` deploys every customer's deployment, ring by ring. Never
+  deploy or migrate a remote database by hand.
+- **Claude Code toolkit.** `.claude/` holds agents, skills and hooks for this repo; see
+  [.claude/README.md](.claude/README.md). The hooks need `jq`, and deny hand deploys, remote migrations
+  and edits to applied migrations. `pnpm test:toolkit` tests them.
 
 ## Security
 

@@ -79,7 +79,8 @@ push), so Claude runs them only when you ask.
 | `PostToolUse` (Edit/Write) | `rules-impact.sh` | Names the rules an edit to that path must keep (from `rules-map.tsv`), once per file. Advisory |
 | `Stop` | `docs-drift.sh` | **Blocks once** per drift-set when this session changed documented surfaces, still uncommitted, and no docs |
 
-All hooks are bash + `jq`, fail open (exit 0, silent) on anything unexpected, and share
+All hooks are bash + `jq` (required: without it every hook is a silent no-op, and the session
+start says so), fail open (exit 0, silent) on anything unexpected, and share
 `lib.sh` (`field`, `deny`, `ask`, `context`, `once`, `repo_path`), except the older docs hooks,
 which stand alone. The docs hooks keep their edit log per git root, so another session's
 uncommitted work in a shared checkout never trips them. Edits made through Bash (`sed`,
@@ -114,7 +115,7 @@ Personal settings (notifications, extra allows) go in `settings.local.json`, whi
 pnpm test:toolkit
 ```
 
-This runs `scripts/toolkit-check.sh` (skill and agent frontmatter against the Agent Skills spec,
+This runs `.claude/scripts/toolkit-check.sh` (skill and agent frontmatter against the Agent Skills spec,
 preloads that exist, hook scripts executable and parseable, map regexes that compile), then the
 two hook suites in `hooks/tests/`. CI runs it in the verify job. Changes to `settings.json` take
 effect in a new session; skills and agents reload on their own.
