@@ -628,7 +628,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   const plugins = pluginServices(d);
   if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
   const grants = pluginGrants(d);
-  if (grants) config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
+  // Always set, so a deployment that grants nothing doesn't keep the base config's grants.
+  config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
   // The publishers whose signed bundles an admin may install at runtime.
   if (d.pluginInstalls?.publishers)
     config.vars = {

@@ -127,6 +127,10 @@
     // commercial record stays). Empty keeps it; at least 30. The registry's
     // personalDataRetentionDays sets it per deployment.
     "PERSONAL_DATA_RETENTION_DAYS": "",
+    // What the deployment grants its plugins beyond the defaults (buyer details, capabilities), as
+    // JSON by plugin id. scripts/fleet.ts renders it from the registry's plugins; this is
+    // orderloop.app's (deployments/orderloop.jsonc). It matters only for an installed plugin.
+    "PLUGIN_GRANTS": "{\"punchout\":{\"capabilities\":[\"carts:external\",\"orders:start\"]}}",
     // Where Durable Objects (orders, assistants, A2A tasks) live: "eu" or "fedramp", from the
     // registry's jurisdiction, like D1 and R2. Empty: anywhere. Set before the first order only.
     "DATA_JURISDICTION": "",

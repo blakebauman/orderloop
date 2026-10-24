@@ -443,7 +443,7 @@ test('buyer details are granted to a plugin only by its registry entry', () => {
     renderEngine(base('engine'), granted).vars.PLUGIN_GRANTS,
     '{"ledger":{"personalData":"send"}}',
   );
-  assert.equal(renderEngine(base('engine'), withLedger).vars.PLUGIN_GRANTS, undefined);
+  assert.equal(renderEngine(base('engine'), withLedger).vars.PLUGIN_GRANTS, '');
   assert.throws(
     () => toDeployment({ ...raw, plugins: { ledger: { personalData: 'yes' } } }),
     /can only be "send"/,
