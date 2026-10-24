@@ -85,6 +85,103 @@ export const TOOL_INPUTS = {
 
 export type ToolInput<T extends AssistantTool> = z.infer<(typeof TOOL_INPUTS)[T]>;
 
+// What each tool returns, as MCP's `outputSchema`. Loose objects: they name the fields a client
+// can rely on and let a later field through, so adding one never fails a call.
+const row = <T extends z.ZodRawShape>(shape: T) => z.looseObject(shape);
+const href = z.string().describe('Where to look in OrderLoop, e.g. /orders/ord_…');
+const money = z.string().describe('Formatted in the order’s currency, e.g. $1,250.00');
+const orderRow = row({
+  id: z.string(),
+  ref: z.string(),
+  title: z.string(),
+  status: z.string(),
+  total: money,
+  href,
+});
+
+/** An action's result: a preview and code on the first call, what was done on the second. */
+const actionOutput = row({
+  preview: row({
+    title: z.string(),
+    consequences: z.array(z.string()),
+    href: z.string().optional(),
+  }).optional(),
+  confirmation: z.string().optional().describe('Send it back with the same input once agreed'),
+  expiresAt: z.number().optional(),
+  next: z.string().optional(),
+  done: z.string().optional().describe('What happened, once the action ran'),
+  href: z.string().optional(),
+});
+
+export const TOOL_OUTPUTS = {
+  needs_attention: row({
+    approvals: z.array(row({ id: z.string(), orderId: z.string(), title: z.string() })),
+    failed: z.array(row({ id: z.string(), title: z.string(), status: z.string() })),
+    stalled: z.array(row({ id: z.string(), title: z.string() })),
+    counts: row({ approvals: z.number(), failed: z.number(), stalled: z.number() }),
+  }),
+  find_orders: row({
+    count: z.number().describe('All matches, not only the rows shown'),
+    total: money.describe('The total of all matches, in USD'),
+    shown: z.number(),
+    orders: z.array(orderRow),
+  }),
+  get_order: row({
+    id: z.string(),
+    ref: z.string(),
+    href,
+    title: z.string(),
+    status: z.string(),
+    total: money,
+    waits: z.array(row({ nodeId: z.string(), kind: z.string(), title: z.string() })),
+    steps: z.array(row({ nodeId: z.string(), step: z.string(), status: z.string() })),
+    recent: z.array(row({ at: z.string(), message: z.string() })),
+  }),
+  assess_order: row({
+    id: z.string(),
+    ref: z.string(),
+    answers: z.record(z.string(), row({ type: z.string() })),
+    images: z.number().describe('Images the assessment used'),
+    notes: z.array(z.string()),
+    source: z.enum(['model', 'heuristic']),
+  }),
+  find_products: row({
+    products: z.array(
+      row({ sku: z.string(), name: z.string(), stock: z.number(), available: z.number() }),
+    ),
+    href,
+  }),
+  list_flows: row({
+    flows: z.array(row({ id: z.string(), name: z.string(), href })),
+  }),
+  get_flow: row({
+    id: z.string(),
+    name: z.string(),
+    href,
+    steps: z.array(row({ id: z.string(), type: z.string(), label: z.string() })),
+    connections: z.array(z.string()),
+    errors: z.array(z.string()),
+    warnings: z.array(z.string()),
+  }),
+  propose_flow_change: row({
+    flowId: z.string(),
+    flowName: z.string(),
+    explanation: z.string(),
+    graph: row({ nodes: z.array(row({})), edges: z.array(row({})) }),
+    changes: row({
+      added: z.number(),
+      removed: z.number(),
+      edited: z.number(),
+      rewired: z.number(),
+    }),
+  }),
+  decide_approval: actionOutput,
+  deliver_event: actionOutput,
+  cancel_order: actionOutput,
+  publish_flow: actionOutput,
+  run_stock_review: actionOutput,
+} satisfies Record<AssistantTool, z.ZodObject>;
+
 export const ACTION_TOOLS: ActionTool[] = [
   'decide_approval',
   'deliver_event',

@@ -147,8 +147,14 @@ deletes `authorization` and `cookie`, signs the caller into `x-orderloop-princip
 (`apps/engine/src/mcp.ts`): `createMcpHandler` from `@modelcontextprotocol/server` (`legacy: 'stateless'`), a fresh
 `McpServer` per request, no session: 2026-07-28 requests carry their envelope, and 2025-era ones
 are served statelessly. It registers only the
-`ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS` and `runTool` from `assistant/tools.ts`, the
-code the assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`.
+`ASSISTANT_TOOLS` the role allows, with `TOOL_INPUTS`, `TOOL_OUTPUTS` (loose zod objects, served as
+`outputSchema` and checked by the SDK) and `runTool` from `assistant/tools.ts`, the code the
+assistant runs too, and passes `via: 'MCP'` so `runAction` records `<email> via MCP`. Hints come
+from `DESTRUCTIVE`, `IDEMPOTENT` and `OPEN_WORLD` in `mcp.ts`; `tools/list` carries a private
+60-second cache hint on 2026-07-28. A `Refused` is the tool error the model reads; any other throw
+is logged and answered with a generic tool error, so database or provider messages never reach the
+client. `assess_order` and `propose_flow_change` send one progress notification when the request
+has a progress token.
 
 An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
 `run_stock_review`) never runs on the first call, because a client may not ask its person. Its
