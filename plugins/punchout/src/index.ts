@@ -1,0 +1,267 @@
+/**
+ * Punchout: buyers shop from inside their procurement system (Ariba, Coupa, SAP and others).
+ *
+ * - cXML: the system posts a PunchOutSetupRequest to `/plugins/punchout/cxml/setup`; the plugin
+ *   finds the partner by its From credential, checks the Sender's SharedSecret and that the
+ *   BrowserFormPost URL is one of the partner's hosts, opens an external cart through the core
+ *   (`openExternalCart`) and answers the cart's start link as the StartPage. When the buyer sends
+ *   the cart back, `renderReturn` gives the PunchOutOrderMessage the core posts to BrowserFormPost.
+ *   The PO then arrives as an OrderRequest at `/plugins/punchout/cxml/order`, which starts the
+ *   order once per payload id (`startOrder`).
+ * - OCI: the system opens `/plugins/punchout/oci/setup?USERNAME=…&PASSWORD=…&HOOK_URL=…`; the
+ *   cart goes back to HOOK_URL as OCI fields.
+ *
+ * Partners and their secrets are kept here (src/partners.ts) and managed on the plugin's admin page.
+ */
+
+import type { PluginCart } from '@orderloop/core';
+import { definePlugin, host } from '@orderloop/plugin-sdk';
+import {
+  CxmlError,
+  orderMessage,
+  parseOrderRequest,
+  parseSetupRequest,
+  setupResponse,
+  statusResponse,
+} from './cxml';
+import manifest from './manifest';
+import { ociFields, parseOciSetup } from './oci';
+import { adminPages } from './pages';
+import {
+  findPartner,
+  getPartner,
+  type Partner,
+  recordSession,
+  returnAllowed,
+  secretMatches,
+  sessionOf,
+} from './partners';
+import { XmlError } from './xml';
+
+const HOST = 'orderloop';
+const xml = (body: string, status = 200) =>
+  new Response(body, { status, headers: { 'content-type': 'text/xml; charset=UTF-8' } });
+const refuse = (status: number, text: string) => xml(statusResponse(HOST, status, text), status);
+
+/** The buyer, as the procurement system names them in its Extrinsics. */
+function buyerOf(extrinsics: Record<string, string>, fallback: string) {
+  const email = extrinsics.UserEmail || extrinsics.Email;
+  const id = email || extrinsics.UniqueName || extrinsics.UserId || fallback;
+  const name = extrinsics.UserFullName || extrinsics.UserPrintableName || email || id;
+  return { id: id.slice(0, 200), name: name.slice(0, 120) };
+}
+
+async function openCart(
+  env: Env,
+  p: Partner,
+  s: {
+    sessionRef: string;
+    buyer: { id: string; name: string };
+    returnUrl: string;
+    lines?: { sku: string; qty: number }[];
+  },
+) {
+  return host(env).openExternalCart({
+    sessionRef: s.sessionRef,
+    title: `${p.name} punchout`,
+    flowId: p.flowId,
+    customerId: p.customerId,
+    buyer: s.buyer,
+    returnUrl: s.returnUrl,
+    frameOrigins: p.frameOrigins,
+    expiresAt: Date.now() + Math.min(p.sessionMinutes, 24 * 60) * 60_000,
+    ...(s.lines?.length ? { lines: s.lines } : {}),
+  });
+}
+
+async function cxmlSetup(request: Request, env: Env): Promise<Response> {
+  let req: ReturnType<typeof parseSetupRequest>;
+  try {
+    req = parseSetupRequest(await request.text());
+  } catch (err) {
+    if (err instanceof XmlError || err instanceof CxmlError) return refuse(400, err.message);
+    throw err;
+  }
+  const partner = await findPartner(env, 'cxml', req.from);
+  if (!partner || !(await secretMatches(partner, req.sharedSecret)))
+    return refuse(401, 'Unknown buyer or wrong shared secret');
+  if (!returnAllowed(partner, req.browserFormPost))
+    return refuse(403, 'BrowserFormPost is not one of this buyer’s hosts');
+  const lines = req.items.filter((i) => i.sku).map(({ sku, qty }) => ({ sku, qty }));
+  const opened = await openCart(env, partner, {
+    sessionRef: `${partner.id}:${req.buyerCookie}`.slice(0, 200),
+    buyer: buyerOf(req.extrinsics, req.buyerCookie),
+    returnUrl: req.browserFormPost,
+    lines: req.operation === 'create' ? [] : lines,
+  });
+  if (!opened.ok) return refuse(400, opened.error);
+  if (!opened.cart.startUrl) return refuse(500, 'The app’s origin is not configured');
+  await recordSession(env, {
+    cartId: opened.cart.cartId,
+    partnerId: partner.id,
+    buyerCookie: req.buyerCookie,
+    operation: req.operation,
+  });
+  return xml(setupResponse(HOST, opened.cart.startUrl));
+}
+
+async function cxmlOrder(request: Request, env: Env): Promise<Response> {
+  let po: ReturnType<typeof parseOrderRequest>;
+  try {
+    po = parseOrderRequest(await request.text());
+  } catch (err) {
+    if (err instanceof XmlError || err instanceof CxmlError) return refuse(400, err.message);
+    throw err;
+  }
+  const partner = await findPartner(env, 'cxml', po.from);
+  if (!partner || !(await secretMatches(partner, po.sharedSecret)))
+    return refuse(401, 'Unknown buyer or wrong shared secret');
+  if (po.type !== 'new') return refuse(406, `Order type “${po.type}” is not supported`);
+  if (!po.payloadId) return refuse(400, 'The order has no payloadID');
+  // Which carts the PO came from, by the SupplierPartAuxiliaryID each returned line carried.
+  const carts = [
+    ...new Set(po.items.map((i) => i.aux?.split(':')[0]).filter((c) => c?.startsWith('cart_'))),
+  ];
+  const contact =
+    po.shipTo?.email && /^[^\s@]+@[^\s@]+$/.test(po.shipTo.email)
+      ? {
+          email: po.shipTo.email,
+          ...(po.shipTo.name ? { name: po.shipTo.name } : {}),
+          ...(po.shipTo.phone ? { phone: po.shipTo.phone } : {}),
+        }
+      : undefined;
+  const started = await host(env).startOrder({
+    key: `cxml:${partner.id}:${po.payloadId}`.slice(0, 200),
+    flowId: partner.flowId,
+    input: {
+      model: partner.model as 'b2b',
+      channel: 'edi',
+      externalId: po.orderId,
+      title: `PO ${po.orderId}`,
+      ...(partner.customerId ? { customerId: partner.customerId } : {}),
+      currency: po.currency,
+      lines: po.items.map((i) => ({
+        sku: i.sku,
+        qty: i.qty,
+        ...(i.description ? { name: i.description } : {}),
+      })),
+      ...(contact ? { contact } : {}),
+      meta: {
+        ...(po.shipTo ? { shipTo: po.shipTo } : {}),
+        punchout: { partnerId: partner.id, orderId: po.orderId, carts },
+      },
+    },
+  });
+  if (!started.ok) return refuse(400, started.error);
+  return xml(statusResponse(HOST, 200, 'OK', started.orderId));
+}
+
+async function ociSetup(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const setup = parseOciSetup(url.searchParams);
+  const page = (status: number, body: string, head = '') =>
+    new Response(
+      `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">${head}<title>Punchout</title></head><body>${body}</body></html>`,
+      {
+        status,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      },
+    );
+  if (!setup) return page(400, '<p>USERNAME, PASSWORD and HOOK_URL are required.</p>');
+  const partner = await findPartner(env, 'oci', [{ domain: '', identity: setup.username }]);
+  if (!partner || !(await secretMatches(partner, setup.password)))
+    return page(401, '<p>Unknown user or wrong password.</p>');
+  if (!returnAllowed(partner, setup.hookUrl))
+    return page(403, '<p>HOOK_URL is not one of this buyer’s hosts.</p>');
+  const opened = await openCart(env, partner, {
+    sessionRef: `${partner.id}:oci:${crypto.randomUUID()}`,
+    buyer: { id: setup.username, name: setup.username },
+    returnUrl: setup.hookUrl,
+  });
+  if (!opened.ok || !opened.cart.startUrl)
+    return page(
+      400,
+      `<p>${opened.ok ? 'The app’s origin is not configured.' : escapeHtml(opened.error)}</p>`,
+    );
+  await recordSession(env, {
+    cartId: opened.cart.cartId,
+    partnerId: partner.id,
+    buyerCookie: '',
+    operation: 'create',
+  });
+  // Plugin pages can't redirect off their own paths or run script; a refresh can.
+  const start = escapeHtml(opened.cart.startUrl);
+  return page(
+    200,
+    `<p><a href="${start}">Open the catalog</a></p>`,
+    `<meta http-equiv="refresh" content="0;url=${start}">`,
+  );
+}
+
+const escapeHtml = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** The cart's lines as priced, with a reference back to the cart line. */
+function priced(cart: PluginCart) {
+  const q = cart.quote;
+  if (!q) throw new Error('The cart has no price');
+  return {
+    currency: q.currency,
+    total: q.subtotal,
+    lines: q.lines.map((l) => ({
+      qty: l.qty,
+      sku: l.sku,
+      aux: `${cart.id}:${l.id}`,
+      unitPrice: l.unitPrice,
+      description: l.title,
+    })),
+  };
+}
+
+export default definePlugin<Env>({
+  manifest,
+
+  async renderReturn({ cart }, env) {
+    const session = await sessionOf(env, cart.id);
+    const partner = session ? await getPartner(env, session.partner_id) : null;
+    if (!session || !partner) throw new Error(`No punchout session for ${cart.id}`);
+    const p = priced(cart);
+    if (partner.protocol === 'oci')
+      return {
+        fields: ociFields(
+          p.lines.map((l) => ({
+            sku: l.sku,
+            description: l.description,
+            qty: l.qty,
+            unitPrice: l.unitPrice,
+            currency: p.currency,
+            ref: l.aux,
+          })),
+        ),
+      };
+    return {
+      fields: {
+        'cxml-urlencoded': orderMessage({
+          host: HOST,
+          from: { domain: partner.supplierDomain, identity: partner.supplierIdentity },
+          to: { domain: partner.fromDomain, identity: partner.identity },
+          buyerCookie: session.buyer_cookie,
+          currency: p.currency,
+          total: p.total,
+          lines: p.lines,
+        }),
+      },
+    };
+  },
+
+  async pages(request, { env, principal }) {
+    const path = new URL(request.url).pathname;
+    if (path === '/plugins/punchout/cxml/setup' && request.method === 'POST')
+      return cxmlSetup(request, env);
+    if (path === '/plugins/punchout/cxml/order' && request.method === 'POST')
+      return cxmlOrder(request, env);
+    if (path === '/plugins/punchout/oci/setup' && request.method === 'GET')
+      return ociSetup(request, env);
+    if (!principal) return new Response('Not found', { status: 404 });
+    return adminPages(request, env);
+  },
+});

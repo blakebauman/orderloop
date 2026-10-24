@@ -353,6 +353,11 @@ takes effect at once and a runtime install of the same id never inherits it.
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
 | `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys in any namespace the core starts orders under (`RESERVED_ORDER_KEY_PREFIXES`: `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:`, `replenish:`). A replay answers the same order with `replayed: true`; the same key with a different request is refused |
 
+`plugins/punchout` is the plugin that uses it: cXML and OCI punchout, installed with
+`"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }` (and its `d1Id`, or
+`"runtime": "sandboxed"`). Its partners and their secret hashes are in its own database; see the
+[Punchout guide](https://docs.orderloop.app/guides/punchout/).
+
 When an external cart's buyer sends it back (`CartAgent.transferAs`; only the buyer, since the fields are posted from the browser that asked), the core
 holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (`checkCartReturn`:
 string fields only, at most 2,000 and 1 MiB) and keeps it, marks the cart `returned`, and posts the
