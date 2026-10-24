@@ -179,8 +179,12 @@ Plugins (`plugins/<id>/`, contract in `packages/core/src/plugins.ts`, see `docs/
   `definePlugin` (it checks the manifest against the handlers and the page principal and role);
 - declare `apiVersion` (`PLUGIN_API_VERSION`), and get buyer details only with
   `personalData: 'send'`;
-- read credentials only from the `secrets` their manifest declares, which each deployment sets as
-  `PLUGIN_<ID>_<NAME>` and the deploy hands to that plugin alone (`pluginOwnSecrets`);
+- read credentials only from the `secrets` their manifest declares, through `secret()` (a Worker
+  secret, a Secrets Store binding, or the sandbox's `SECRETS`), which each deployment sets as
+  `PLUGIN_<ID>_<NAME>` and which reach that plugin alone (`pluginOwnSecrets`, `storeBinding`);
+- read their database through `pluginDb()` and keep their manifest in `src/manifest.ts`;
+- sandboxed, get capabilities only (`STORAGE`, `SECRETS`, `PLUGIN_KEY`; never a binding), reach only
+  their manifest's `egress` through `PluginEgress`, and run only a bundle matching its pin;
 - own their D1 database and migrations (the core schema never holds a plugin's tables);
 - namespace node types `<id>.<name>`;
 - key every write and compensation by order id + step key (the SDK's `key`), every delivery by its

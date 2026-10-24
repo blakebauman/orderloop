@@ -362,3 +362,51 @@ describe('providers', () => {
     ).toEqual({ fail: { message: "carrier doesn't provide tax calculate" } });
   });
 });
+
+describe('secret() and pluginDb(), whichever way a plugin runs', () => {
+  it('reads a Worker secret, a Secrets Store binding, or the sandbox’s capability', async () => {
+    const { secret, hasSecret } = await import('../src/index');
+    expect(await secret({ API_KEY: 'plain' }, 'API_KEY')).toBe('plain');
+    expect(await secret({ API_KEY: '' }, 'API_KEY')).toBeUndefined();
+    expect(await secret({ API_KEY: { get: async () => 'stored' } }, 'API_KEY')).toBe('stored');
+    expect(
+      await secret(
+        { API_KEY: { get: async () => Promise.reject(new Error('not found')) } },
+        'API_KEY',
+      ),
+    ).toBeUndefined();
+    const SECRETS = {
+      has: async (n: string) => n === 'API_KEY',
+      get: async (n: string) => (n === 'HOOK' ? 'h' : null),
+    };
+    const sandbox = { __ORDERLOOP_SANDBOX: true, SECRETS, API_KEY: 'ignored' };
+    expect(await secret(sandbox, 'API_KEY')).toBeUndefined();
+    expect(await secret(sandbox, 'HOOK')).toBe('h');
+    expect(await hasSecret(sandbox, 'API_KEY')).toBe(true);
+    // Without the sandbox flag, an RPC-like SECRETS binding is not taken for the capability.
+    expect(await secret({ SECRETS }, 'HOOK')).toBeUndefined();
+  });
+
+  it('runs D1-shaped statements against the sandbox’s storage', async () => {
+    const { pluginDb } = await import('../src/index');
+    const calls: unknown[] = [];
+    const STORAGE = {
+      query: async (sql: string, params: unknown[]) => {
+        calls.push([sql, params]);
+        return { rows: [{ n: 2, note: 'hi' }], changes: 1 };
+      },
+      batch: async (statements: { sql: string; params: unknown[] }[]) =>
+        statements.map(() => ({ rows: [], changes: 1 })),
+    };
+    const db = pluginDb({ __ORDERLOOP_SANDBOX: true, STORAGE });
+    expect(await db.prepare('SELECT ? AS n').bind(2).first()).toEqual({ n: 2, note: 'hi' });
+    expect(await db.prepare('SELECT 1').first('note')).toBe('hi');
+    expect((await db.prepare('SELECT 1').all()).results).toEqual([{ n: 2, note: 'hi' }]);
+    expect((await db.prepare('UPDATE t SET a = 1').run()).meta.changes).toBe(1);
+    expect(await db.batch([db.prepare('A').bind(1), db.prepare('B')])).toHaveLength(2);
+    expect(calls[0]).toEqual(['SELECT ? AS n', [2]]);
+    const d1 = { prepare: () => 'd1' };
+    expect(pluginDb({ DB: d1 })).toBe(d1);
+    expect(() => pluginDb({})).toThrow(/no database/);
+  });
+});

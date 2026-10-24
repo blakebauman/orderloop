@@ -1,7 +1,7 @@
 /** Outbound webhook subscriptions. The engine's outbox (apps/engine/src/outbox.ts) delivers. */
 
 import { newId, ROTATION_GRACE_MS, secretContext } from '@orderloop/core';
-import { webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
+import { pluginErrors, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
 import { desc, eq } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { subscriptionInput } from './api-schemas';
@@ -86,6 +86,16 @@ export async function deleteSubscription(id: string) {
     .where(eq(webhookSubscriptions.id, id))
     .returning();
   return res.length > 0;
+}
+
+/** A sandboxed plugin's latest exceptions (its Tail Worker keeps them, scrubbed), newest first. */
+export async function listPluginErrors(pluginId: string, limit = 10) {
+  return db()
+    .select()
+    .from(pluginErrors)
+    .where(eq(pluginErrors.pluginId, pluginId))
+    .orderBy(desc(pluginErrors.at))
+    .limit(limit);
 }
 
 export async function listDeliveries(subscriptionId: string, limit = 50) {

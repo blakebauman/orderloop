@@ -43,15 +43,25 @@ const manifest: PluginManifest = {
   personalData: 'redact',
   secrets: [],
   provides: [],
+  egress: [],
+  limits: {},
 };
+const sandboxedManifest: PluginManifest = { ...manifest, id: 'sbx', publicPaths: [] };
 const pluginCatalog = vi.fn(
-  async (): Promise<PluginStatus[]> => [{ binding: 'PLUGIN_EXAMPLE', manifest, healthy: true }],
+  async (): Promise<PluginStatus[]> => [
+    { id: 'example', runtime: 'worker', manifest, healthy: true },
+    { id: 'sbx', runtime: 'sandboxed', manifest: sandboxedManifest, healthy: true },
+  ],
 );
+// The engine serves a sandboxed plugin's pages (EngineRpc.pluginFetch).
+const enginePluginFetch = vi.fn(async (_id: string, _r: Request) => reply());
 let caller: Record<string, unknown> | null;
 let limited = false;
 
 vi.mock('cloudflare:workers', () => ({ env }));
-vi.mock('~/lib/env.server', () => ({ engine: () => ({ pluginCatalog }) }));
+vi.mock('~/lib/env.server', () => ({
+  engine: () => ({ pluginCatalog, pluginFetch: enginePluginFetch }),
+}));
 vi.mock('~/lib/auth.server', () => ({
   principal: async () => caller,
   sessionId: async () => 'sess-hash',
@@ -106,6 +116,25 @@ describe('plugin pages on the web Worker', () => {
     expect(p).not.toHaveProperty('session');
     expect(await verifyPrincipal(['web-test-key'], header, '/plugins/example/')).toBeNull();
     expect(overBudget).toHaveBeenCalledWith('API_LIMIT', 'plugin:example:usr_1');
+  });
+
+  it('sends a sandboxed plugin’s pages through the engine, under the same rules', async () => {
+    const res = await call('/plugins/sbx/', {
+      headers: { cookie: 'session=abc', accept: 'text/html' },
+    });
+    expect(res.status).toBe(200);
+    expect(enginePluginFetch).toHaveBeenCalledTimes(1);
+    const [id, req] = enginePluginFetch.mock.calls[0]!;
+    expect(id).toBe('sbx');
+    expect([...req.headers.keys()].sort()).toEqual(['accept', PRINCIPAL_HEADER]);
+    const p = await verifyPrincipal(
+      [await pluginKey('web-test-key', 'sbx')],
+      req.headers.get(PRINCIPAL_HEADER),
+      '/plugins/sbx/',
+    );
+    expect(p).toMatchObject({ id: 'usr_1' });
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(res.headers.get('content-security-policy')).toContain("script-src 'none'");
   });
 
   it("passes on only allowlisted response headers, under this app's rules", async () => {

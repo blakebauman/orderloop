@@ -6,6 +6,7 @@ import { parse } from 'jsonc-parser';
 import {
   loadDeployments,
   matrix,
+  missingPluginSecrets,
   pluginBinding,
   pluginKey,
   pluginOwnSecrets,
@@ -14,8 +15,10 @@ import {
   renderEngine,
   renderPlugin,
   renderWeb,
+  sandboxedPlugins,
   secretsProblem,
   toDeployment,
+  workerPlugins,
 } from './fleet.ts';
 
 const base = (app: string) =>
@@ -449,4 +452,91 @@ test('buyer details are granted to a plugin only by its registry entry', () => {
     () => toDeployment({ ...raw, plugins: { ledger: { events: ['*'] } } }),
     /unknown keys: events/,
   );
+});
+
+const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+const STORE = '0123456789abcdef0123456789abcdef';
+
+test('a sandboxed plugin has no Worker, binding or database of its own', () => {
+  const d = toDeployment({
+    ...raw,
+    plugins: { ledger: { d1Id: 'd1-ledger' }, carrier: { runtime: 'sandboxed' } },
+  });
+  assert.deepEqual(workerPlugins(d), ['ledger']);
+  assert.deepEqual(sandboxedPlugins(d), ['carrier']);
+  const bindings = (c: { services?: { binding: string }[] }) =>
+    (c.services ?? []).map((s) => s.binding).filter((b) => b.startsWith('PLUGIN_'));
+  assert.deepEqual(bindings(renderEngine(base('engine'), d)), ['PLUGIN_LEDGER']);
+  assert.deepEqual(bindings(renderWeb(base('web'), d)), ['PLUGIN_LEDGER']);
+  assert.throws(() => renderPlugin({}, d, 'carrier'), /sandboxed: no Worker/);
+  // Needs no d1Id to deploy.
+  assert.doesNotThrow(() => matrix([d]));
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { carrier: { runtime: 'sandboxed', d1Id: 'x' } } }),
+    /sandboxed: it has no D1 database/,
+  );
+  assert.throws(() => toDeployment({ ...raw, plugins: { carrier: { runtime: 'vm' } } }), /runtime/);
+});
+
+test('plugin ids are refused when reserved or with a double dash', () => {
+  for (const id of ['bundles', 'secrets', 'grants', 'key'])
+    assert.throws(() => toDeployment({ ...raw, plugins: { [id]: {} } }), /reserved/);
+  assert.throws(() => toDeployment({ ...raw, plugins: { 'a--b': {} } }), /not a plugin id/);
+  assert.throws(() => toDeployment({ ...raw, plugins: { 'ab-': {} } }), /not a plugin id/);
+});
+
+test('on its own account, plugin secrets are bound from the Secrets Store', () => {
+  const d = toDeployment({
+    ...raw,
+    secretsStore: { storeId: STORE },
+    plugins: {
+      ledger: { d1Id: 'd1-ledger', secrets: ['API_KEY'] },
+      carrier: { runtime: 'sandboxed', secrets: ['API_KEY', 'HOOK'] },
+    },
+  });
+  assert.deepEqual(renderEngine(base('engine'), d).secrets_store_secrets, [
+    {
+      binding: 'PLUGIN_SECRET_CARRIER__API_KEY',
+      store_id: STORE,
+      secret_name: 'PLUGIN_CARRIER_API_KEY',
+    },
+    { binding: 'PLUGIN_SECRET_CARRIER__HOOK', store_id: STORE, secret_name: 'PLUGIN_CARRIER_HOOK' },
+  ]);
+  const plugin = renderPlugin({ name: 'x', d1_databases: [{ binding: 'DB' }] }, d, 'ledger');
+  assert.deepEqual(plugin.secrets_store_secrets, [
+    { binding: 'API_KEY', store_id: STORE, secret_name: 'PLUGIN_LEDGER_API_KEY' },
+  ]);
+  assert.throws(() => toDeployment({ ...raw, secretsStore: { storeId: 'nope' } }), /secretsStore/);
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { carrier: { secrets: ['lower'] } } }),
+    /secret names/,
+  );
+});
+
+test('a shared account binds no Secrets Store', () => {
+  const d = toDeployment({ ...raw, plugins: { carrier: { runtime: 'sandboxed' } } });
+  assert.equal(renderEngine(base('engine'), d).secrets_store_secrets, undefined);
+});
+
+test('the deploy finds a plugin’s missing secrets, by name only', () => {
+  const shared = toDeployment({ ...raw, plugins: { carrier: { runtime: 'sandboxed' } } });
+  assert.deepEqual(
+    missingPluginSecrets(shared, 'carrier', ['API_KEY', 'HOOK'], {
+      env: { PLUGIN_CARRIER_API_KEY: 'k', PLUGIN_CARRIER_HOOK: '' },
+    }),
+    ['HOOK'],
+  );
+  const own = toDeployment({
+    ...raw,
+    secretsStore: { storeId: STORE },
+    plugins: { carrier: { runtime: 'sandboxed', secrets: ['API_KEY'] } },
+  });
+  assert.deepEqual(
+    missingPluginSecrets(own, 'carrier', ['API_KEY', 'HOOK'], {
+      stored: ['PLUGIN_CARRIER_API_KEY', 'PLUGIN_CARRIER_HOOK'],
+    }),
+    // HOOK is in the store but not listed in the registry, so nothing binds it.
+    ['HOOK'],
+  );
+  assert.deepEqual(missingPluginSecrets(own, 'carrier', ['API_KEY'], { stored: [] }), ['API_KEY']);
 });

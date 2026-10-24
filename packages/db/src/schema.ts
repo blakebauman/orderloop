@@ -393,6 +393,18 @@ export const payments = sqliteTable(
   ],
 );
 
+/** A sandboxed plugin's latest exceptions (its Tail Worker), scrubbed; 100 kept per plugin. */
+export const pluginErrors = sqliteTable(
+  'plugin_errors',
+  {
+    id: text('id').primaryKey(),
+    pluginId: text('plugin_id').notNull(),
+    message: text('message').notNull(),
+    at: integer('at').notNull(),
+  },
+  (t) => [index('plugin_errors_plugin').on(t.pluginId, t.at)],
+);
+
 export const shipments = sqliteTable(
   'shipments',
   {

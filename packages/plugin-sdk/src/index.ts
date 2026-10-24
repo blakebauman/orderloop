@@ -40,6 +40,16 @@ import {
   verifyPrincipal,
 } from '@orderloop/core';
 import type { z } from 'zod';
+import { hasSecret } from './runtime';
+
+export {
+  hasSecret,
+  type PluginDatabase,
+  pluginDb,
+  type SecretsCapability,
+  type StorageCapability,
+  secret,
+} from './runtime';
 
 /**
  * What every plugin's environment carries: its own key the web app signs page requests with
@@ -124,12 +134,12 @@ export type PluginDefinition<E> = {
 /** The ops each surface has. */
 const opsOf = (surface: ProviderSurface) => Object.keys(PROVIDE_RESULT_SCHEMAS[surface]);
 
-/** The declared secrets, not `optional`, that `env` lacks. */
-export function missingSecrets(manifest: PluginManifest, env: object): string[] {
-  const e = env as Record<string, unknown>;
-  return manifest.secrets
-    .filter((s) => !s.optional && (typeof e[s.name] !== 'string' || e[s.name] === ''))
-    .map((s) => s.name);
+/** The declared secrets, not `optional`, that aren't set, wherever this runtime keeps them. */
+export async function missingSecrets(manifest: PluginManifest, env: object): Promise<string[]> {
+  const set = await Promise.all(
+    manifest.secrets.map(async (s) => s.optional || (await hasSecret(env, s.name))),
+  );
+  return manifest.secrets.filter((_, i) => !set[i]).map((s) => s.name);
 }
 
 /** The writes key for one node run. */
@@ -179,7 +189,7 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
 
   return class Plugin extends WorkerEntrypoint<E> implements PluginRpc {
     async manifest() {
-      const missing = missingSecrets(manifest, this.env);
+      const missing = await missingSecrets(manifest, this.env);
       if (missing.length)
         throw new Error(
           `${manifest.id} is missing ${missing.length === 1 ? 'a secret' : 'secrets'}: set ${missing

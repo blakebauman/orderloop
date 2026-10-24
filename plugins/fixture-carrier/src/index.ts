@@ -14,7 +14,8 @@
  * Labels, tax and the address need the buyer's address, so it asks for buyer details.
  */
 
-import { definePlugin } from '@orderloop/plugin-sdk';
+import { definePlugin, pluginDb } from '@orderloop/plugin-sdk';
+import manifest from './manifest';
 
 type ShipTo = { city?: string; postalCode?: string; country?: string; [k: string]: unknown };
 
@@ -23,19 +24,16 @@ const shipTo = (order: { meta?: Record<string, unknown> }) => (order.meta?.shipT
 const labelId = (key: string, ref: string) => `fx_${key}_${ref}`.replace(/[^\w-]/g, '_');
 
 export default definePlugin<Env>({
-  manifest: {
-    apiVersion: 1,
-    id: 'fixture-carrier',
-    name: 'Fixture carrier',
-    version: '1',
-    personalData: 'send',
-    provides: ['shipping.rates', 'shipping.labels', 'tax', 'address'],
-  },
+  manifest,
 
   providers: {
     'shipping.rates': {
-      quote({ req }) {
+      async quote({ req }) {
         if (req.order.meta?.simulate === 'provider_down') throw new Error('carrier unreachable');
+        if (req.order.meta?.simulate === 'live_rates') {
+          const res = await fetch('https://api.carrier.test/rates', { method: 'POST' });
+          return (await res.json()) as { options: unknown[] };
+        }
         return {
           options: [
             {
@@ -60,9 +58,10 @@ export default definePlugin<Env>({
           const ref = simulate === 'label_wrong_ref' ? `${p.ref}_other` : p.ref;
           const id = labelId(key, ref);
           const tracking = `FX${id.length.toString().padStart(4, '0')}${ref.slice(-6)}`;
-          await env.DB.prepare(
-            'INSERT OR IGNORE INTO labels (id, order_id, step_key, ref, kind, tracking, fail_void, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          )
+          await pluginDb(env)
+            .prepare(
+              'INSERT OR IGNORE INTO labels (id, order_id, step_key, ref, kind, tracking, fail_void, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            )
             .bind(
               id,
               req.orderId,
@@ -80,13 +79,14 @@ export default definePlugin<Env>({
       },
       async void({ req, env, fail }) {
         for (const l of req.input.labels) {
-          const row = await env.DB.prepare('SELECT fail_void FROM labels WHERE id = ?')
+          const row = await pluginDb(env)
+            .prepare('SELECT fail_void FROM labels WHERE id = ?')
             .bind(l.id)
             .first<{ fail_void: number }>();
           if (row?.fail_void) return fail('the carrier refused the void', { retry: true });
         }
         for (const l of req.input.labels)
-          await env.DB.prepare('UPDATE labels SET voided = 1 WHERE id = ?').bind(l.id).run();
+          await pluginDb(env).prepare('UPDATE labels SET voided = 1 WHERE id = ?').bind(l.id).run();
         return { summary: `Voided ${req.input.labels.length}` };
       },
     },

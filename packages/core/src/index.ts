@@ -8,6 +8,7 @@ export * from './catalog';
 export * from './channels/shopify';
 export * from './channels/x12';
 export * from './checkout';
+export * from './credentials';
 export * from './encryption';
 export * from './erasure';
 export * from './fulfillment';

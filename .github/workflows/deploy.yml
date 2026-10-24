@@ -78,8 +78,15 @@ jobs:
           DEPLOYMENT: ${{ inputs.deployment }}
         run: |
           node scripts/fleet.ts render "$ID"
-          # Installed plugins (plugins/<id>/), space-separated; empty for most deployments.
-          echo "PLUGINS=$(jq -r '.plugins // {} | keys | join(" ")' <<<"$DEPLOYMENT")" >> "$GITHUB_ENV"
+          # Installed plugins (plugins/<id>/), space-separated; empty for most deployments. Worker
+          # plugins are deployed as their own Workers; sandboxed ones are bundles the engine loads.
+          runtime='.plugins // {} | to_entries | map(select((.value.runtime // "worker") == $r) | .key) | sort | join(" ")'
+          {
+            echo "PLUGINS=$(jq -r --arg r worker "$runtime" <<<"$DEPLOYMENT")"
+            echo "SANDBOXED_PLUGINS=$(jq -r --arg r sandboxed "$runtime" <<<"$DEPLOYMENT")"
+            # A deployment on its own Cloudflare account keeps plugin secrets in its Secrets Store.
+            echo "SECRETS_STORE=$(jq -r '.secretsStore.storeId // ""' <<<"$DEPLOYMENT")"
+          } >> "$GITHUB_ENV"
       # Only the secrets set in the environment; `--secrets-file` adds to a Worker's secrets and
       # never removes one, so a secret set by hand survives.
       - name: Collect secrets
@@ -99,18 +106,45 @@ jobs:
         run: |
           node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json" "$ID"
           node scripts/fleet.ts secrets web "$RUNNER_TEMP/web-secrets.json"
-      # Each plugin gets its own key, derived from PRINCIPAL_KEY (never the key itself), and the
-      # environment's PLUGIN_<ID>_* secrets under their own names. Plugin secrets aren't listed
-      # one by one, so only this step, and only with plugins installed, sees all of them.
+      # Each Worker plugin gets its own key, derived from PRINCIPAL_KEY (never the key itself), and
+      # the environment's PLUGIN_<ID>_* secrets under their own names; sandboxed plugins' secrets
+      # go to the engine as PLUGIN_SECRETS. With a Secrets Store, plugin secrets are bound from it
+      # instead. Plugin secrets aren't listed one by one, so only this step, and only with plugins
+      # installed, sees all of them.
       - name: Collect plugin secrets
-        if: env.PLUGINS != ''
+        if: env.PLUGINS != '' || env.SANDBOXED_PLUGINS != ''
         env:
           PRINCIPAL_KEY: ${{ secrets.PRINCIPAL_KEY }}
           PRINCIPAL_KEY_PREVIOUS: ${{ secrets.PRINCIPAL_KEY_PREVIOUS }}
           ENV_SECRETS: ${{ toJSON(secrets) }}
         run: |
           for p in $PLUGINS; do
-            node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-$p-secrets.json" "$p"
+            node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-$p-secrets.json" "$p" "$ID"
+          done
+          node scripts/fleet.ts secrets sandboxed "$RUNNER_TEMP/engine-secrets.json" "$ID"
+      # Before anything deploys: each plugin's manifest (read from its src/manifest.ts) is checked
+      # against what the deployment has, so a missing secret stops the deploy here rather than
+      # failing the smoke test. Sandboxed plugins' bundles are built now, published below.
+      - name: Check plugin secrets
+        if: env.PLUGINS != '' || env.SANDBOXED_PLUGINS != ''
+        env:
+          ENV_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          if [ -n "$SECRETS_STORE" ]; then
+            # Names only. Listing a store needs the token's Account Secrets Store Read (Edit to
+            # deploy a Worker that binds one).
+            if ! names=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/secrets_store/stores/$SECRETS_STORE/secrets?per_page=100" \
+              | jq -c '[.result[].name]'); then
+              echo "::error::Can't list Secrets Store $SECRETS_STORE: CLOUDFLARE_API_TOKEN needs Account Secrets Store Edit"
+              exit 1
+            fi
+            export STORE_SECRET_NAMES="$names"
+          fi
+          for p in $PLUGINS $SANDBOXED_PLUGINS; do
+            sha=$(node scripts/plugin-bundle.ts "plugins/$p" "$RUNNER_TEMP/bundle-$p.json" "$RUNNER_TEMP/manifest-$p.json")
+            echo "$p $sha" >> "$RUNNER_TEMP/bundles"
+            node scripts/fleet.ts check-plugin-secrets "$ID" "$p" "$RUNNER_TEMP/manifest-$p.json"
           done
       # The restore point for this deploy: a migration can't be rolled back, but D1 Time Travel
       # can restore the database to this bookmark (docs/deploy.md, "Restoring D1").
@@ -152,6 +186,24 @@ jobs:
             retry pnpm --filter "./plugins/$p" exec wrangler deploy --config "$CONFIG" --secrets-file "$RUNNER_TEMP/plugin-$p-secrets.json"
             echo "$p" >> "$RUNNER_TEMP/plugins-deployed"
           done
+      # Each sandboxed plugin's bundle goes to the deployment's DOCS bucket under its sha, and the
+      # engine's config pins those shas (PLUGIN_BUNDLES): the engine loads only what CI built and
+      # checked. Bundles are never removed here, so rolling the engine back restores its pins.
+      - name: Publish sandboxed plugins
+        id: sandboxed
+        if: env.SANDBOXED_PLUGINS != ''
+        run: |
+          eval "$(node scripts/fleet.ts names "$ID")"
+          pins='{}'
+          for p in $SANDBOXED_PLUGINS; do
+            sha=$(awk -v p="$p" '$1 == p { print $2 }' "$RUNNER_TEMP/bundles")
+            retry pnpm --filter @orderloop/engine exec wrangler r2 object put "$R2/plugins/$p/$sha.json" \
+              --file "$RUNNER_TEMP/bundle-$p.json" --content-type application/json --remote
+            pins=$(jq -c --arg p "$p" --arg s "$sha" '. + {($p): $s}' <<<"$pins")
+          done
+          config="apps/engine/$CONFIG"
+          jq --arg b "$pins" '.vars.PLUGIN_BUNDLES = $b' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+          echo "Sandboxed plugins pinned: $pins" >> "$GITHUB_STEP_SUMMARY"
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
         id: engine

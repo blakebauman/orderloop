@@ -251,10 +251,16 @@ export interface EngineRpc {
    */
   ucpProfile(origin: string): Promise<Record<string, unknown> | null>;
   /**
-   * Every plugin binding: the manifest the deployment runs (node types, nav entries, public paths),
-   * whether it answered just now, and why not.
+   * Every installed plugin: how it runs, the manifest the deployment runs (node types, nav
+   * entries, public paths), whether it answered just now, and why not.
    */
   pluginCatalog(): Promise<PluginStatus[]>;
-  /** The published flows and running orders that use a plugin's nodes (`pnpm plugin:check`). */
+  /** What still uses a plugin: flows, running orders, labels it couldn't void (`pnpm plugin:check`). */
   pluginUsage(id: string): Promise<PluginUsage>;
+  /**
+   * A sandboxed plugin's page: the web app forwards the request it built (signed principal,
+   * allowlisted headers) here, since only the engine can load the plugin; it applies its own
+   * response rules to what comes back. 404 for a plugin that isn't installed sandboxed.
+   */
+  pluginFetch(id: string, request: Request): Promise<Response>;
 }

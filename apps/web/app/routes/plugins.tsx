@@ -10,7 +10,7 @@ import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { listDeliveries } from '~/lib/webhooks.server';
+import { listDeliveries, listPluginErrors } from '~/lib/webhooks.server';
 import type { Route } from './+types/plugins';
 
 export const meta = () => [{ title: 'Plugins · OrderLoop' }];
@@ -22,17 +22,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   const statuses = await engine().pluginCatalog();
   const plugins = await Promise.all(
     statuses.map(async (s) => {
-      // A refused plugin has no manifest, but its id follows from its binding: that is when its
-      // flows and running orders matter most.
-      const id =
-        s.manifest?.id ?? s.binding.slice('PLUGIN_'.length).toLowerCase().replaceAll('_', '-');
-      const [usage, deliveries] = await Promise.all([
+      // A refused plugin has no manifest, but its id is known: that is when its flows and
+      // running orders matter most.
+      const id = s.id;
+      const [usage, deliveries, errors] = await Promise.all([
         engine().pluginUsage(id),
         listDeliveries(`plugin:${id}`, RECENT),
+        s.runtime === 'sandboxed' ? listPluginErrors(id, RECENT) : Promise.resolve([]),
       ]);
       return {
         ...s,
         usage,
+        errors: errors.map((e) => ({ id: e.id, message: e.message, at: e.at })),
         deliveries: deliveries.map((d) => ({
           id: d.id,
           event: d.event,
@@ -58,7 +59,7 @@ export default function Plugins() {
       />
       <Body className="space-y-4">
         {plugins.length ? (
-          plugins.map((p) => <PluginSection key={p.binding} plugin={p} />)
+          plugins.map((p) => <PluginSection key={p.id} plugin={p} />)
         ) : (
           <Section title="Installed">
             <Empty>No plugins are installed on this workspace.</Empty>
@@ -81,7 +82,7 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
       </span>
     </>
   ) : (
-    p.binding
+    p.id
   );
   return (
     <Section
@@ -99,6 +100,15 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5">
             <dt className="text-muted-foreground">Contract</dt>
             <dd className="tabular">v{m.apiVersion}</dd>
+            <dt className="text-muted-foreground">Runs</dt>
+            <dd>
+              {p.runtime === 'sandboxed' ? 'Sandboxed in the engine' : 'As its own Worker'}
+              {p.runtime === 'sandboxed' ? (
+                <span className="block text-muted-foreground text-xs">
+                  Reaches {m.egress.length ? m.egress.join(', ') : 'no outside hosts'}
+                </span>
+              ) : null}
+            </dd>
             <dt className="text-muted-foreground">Buyer details</dt>
             <dd>{m.personalData === 'send' ? 'Sent to the plugin' : 'Redacted'}</dd>
             <dt className="text-muted-foreground">Pages</dt>
@@ -131,6 +141,14 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
                       <code className="text-xs">{pluginSecretVar(m.id, x.name)}</code>
                       {x.optional ? (
                         <span className="text-muted-foreground"> (optional)</span>
+                      ) : null}
+                      {x.inject ? (
+                        <span className="text-muted-foreground">
+                          {' '}
+                          · added to requests to {x.inject.host}
+                        </span>
+                      ) : x.expose ? (
+                        <span className="text-wait"> · readable by the plugin</span>
                       ) : null}
                       {x.description ? (
                         <span className="block text-muted-foreground text-xs">{x.description}</span>
@@ -169,6 +187,7 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
       ) : null}
       {p.usage ? <Usage usage={p.usage} /> : null}
       {m?.events.length || p.deliveries.length ? <Deliveries deliveries={p.deliveries} /> : null}
+      {p.errors.length ? <Errors errors={p.errors} /> : null}
     </Section>
   );
 }
@@ -205,6 +224,24 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
           No published flow or running order uses it, so it could be removed.
         </p>
       )}
+    </div>
+  );
+}
+
+function Errors({ errors }: { errors: Plugin['errors'] }) {
+  return (
+    <div className="mt-4 border-t pt-3 text-sm">
+      <h3 className="caption mb-1.5">Recent errors</h3>
+      <ul className="grid gap-1">
+        {errors.map((e) => (
+          <li key={e.id} className="flex gap-3">
+            <span className="shrink-0 text-muted-foreground text-xs">
+              <Ago ms={e.at} />
+            </span>
+            <code className="break-all text-xs">{e.message}</code>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
