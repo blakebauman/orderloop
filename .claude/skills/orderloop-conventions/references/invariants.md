@@ -91,7 +91,7 @@ terminal statuses. A new report kind gets a case there.
 |---|---|---|
 | `packages/core` has no bindings and no Cloudflare imports | It runs in node tests, the browser and the docs build | `grep -rnE "from '(cloudflare:\|@cloudflare/)" packages/core/src` |
 | The web app never imports engine source | Separate Workers; the contract is `EngineRpc` (`packages/core/src/api.ts`) | `grep -rnE "from '[^']*(apps/engine\|@orderloop/engine)" apps/web/app` |
-| catalog-edge's runtime imports from core are zod-free subpaths (`product/paths`, `product/listing`, `product/search`); `@orderloop/core/product` only as `import type` | Its bundle stays ~10 KiB | `grep -rnE "^import [^t].*from '@orderloop/core(/product)?'" apps/catalog-edge/src` |
+| catalog-edge's runtime imports from core are zod-free subpaths (`product/paths`, `product/listing`, `product/search`); `@orderloop/core/product` only as `import type` | Its bundle stays ~10 KiB gzipped (`docs/architecture.md`) | `grep -rnE "^import [^t].*from '@orderloop/core(/product)?'" apps/catalog-edge/src` |
 | The core never imports plugin code | A deployment works with no plugin bound | `grep -rnE "from '[^']*plugins/" packages/core/src apps/engine/src apps/web/app` |
 | The docs import only `@orderloop/core` and `apps/web/app/lib/openapi.ts` | The site builds without engine source | `grep -rnE "from '[^']*(apps/engine\|@orderloop/engine)" apps/docs/src` |
 
