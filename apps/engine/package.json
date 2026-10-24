@@ -10,7 +10,8 @@
     "types": "wrangler types",
     "test": "vitest run",
     "lint": "biome check .",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "evals": "vitest run --config vitest.evals.config.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.3.0",

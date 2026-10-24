@@ -402,6 +402,37 @@ deploy's smoke test requests only `/health`, which the gateway answers without t
 
 CI runs it in the verify job.
 
+## Evals
+
+The unit tests run AI nodes in `AI_MODE=mock`, so they never judge a model. The evals do:
+`apps/engine/evals/` runs a golden set through the real prompt code (`extractOrder`, `route` and
+`riskScore` in `apps/engine/src/ai.ts`) against the live models named in the `vars` of
+`apps/engine/wrangler.jsonc`.
+
+| Task | Cases (`evals/cases.ts`) | A case passes when |
+|---|---|---|
+| `extract` | 5: plain SKUs, products by name, an order form, an item not in the catalog (left out), an injection attempt in the email (data, not a command) | The model answered (not the heuristic), the lines match (SKU and quantity, any order) and, where the case names one, the PO number matches |
+| `router` | 4: a routine order, a large order, no customer account, a steering note in `meta` | The model answered and chose the route the instructions give |
+| `risk` | 3: a known customer in credit, a guest's very large first order, a customer far over their limit | The model answered and the score is in the band: low is below 40, high is 60 or more |
+
+A task passes at 80% of its cases (`PASS_RATE` in `evals/ai.eval.ts`). An answer from the heuristic
+fallback counts as a failure: the eval measures the model. Every run prints a table of each case's
+result and answer, and appends it to the GitHub run summary when `GITHUB_STEP_SUMMARY` is set.
+
+- **Run.** `CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… pnpm --filter @orderloop/engine evals`.
+  It uses `apps/engine/vitest.evals.config.ts` (`evals/**/*.eval.ts`, Node environment, five-minute
+  timeout), not workerd. `evals/live-env.ts` builds an `Env` whose `AI.run` calls the Workers AI REST
+  API, with `AI_MODE=live`, `AI_PERSONAL_DATA=redact` and no AI Gateway, so evals don't spend
+  production's rate limit. Without both variables the suite skips with a message. It is not part of
+  `pnpm test`.
+- **In CI.** `.github/workflows/evals.yml`; see [Deploy](deploy.md#ai-evals). It is never a required
+  check, because a model is not deterministic: a failure is a reason to look.
+- **Add a case.** When a model gets something wrong in production, add an unambiguous case to
+  `evals/cases.ts` (`EXTRACT`, `ROUTER` or `RISK`), so a failure means the model, not the case.
+  The extract catalog is the demo data's.
+- **Change a model or a prompt.** Run the evals and read the table first, and bump the prompt's
+  version in `AI_PROMPTS` ([AI calls](architecture.md#ai-calls)).
+
 ## What isn't covered
 
 The flow editor canvas and the live order page are not under test; verify UI changes by running

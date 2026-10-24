@@ -990,6 +990,10 @@ nodes were added, then returns `validateGraph`'s errors and warnings with the gr
 call, the assistant's and Assess's included, goes through AI Gateway when `AI_GATEWAY_ID` is set.
 User-facing behaviour: [AI nodes and the assistant](https://docs.orderloop.app/guides/ai/).
 
+Extract order keeps its provenance (`source`, `model`, `prompt`, `fallback`) through its bounding
+step, so the node's output records them like every other AI node. The golden-set evals that judge
+the prompts and models against the live Workers AI are in [Testing](testing.md#evals).
+
 ## Template seeding
 
 `seedFlows` (`packages/db/src/flows.ts`) publishes each template in `TEMPLATES`

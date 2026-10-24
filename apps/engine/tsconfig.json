@@ -4,5 +4,12 @@
     "experimentalDecorators": false,
     "types": ["@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "tests", "worker-configuration.d.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "evals",
+    "worker-configuration.d.ts",
+    "vitest.config.ts",
+    "vitest.evals.config.ts"
+  ]
 }

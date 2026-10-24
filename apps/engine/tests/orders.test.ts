@@ -157,6 +157,10 @@ describe('B2B order', () => {
       prompt: 'router@1',
       fallback: 'mock',
     });
+    expect(waiting.nodes.extract!.output).toMatchObject({
+      source: 'heuristic',
+      prompt: 'extract@1',
+    });
     expect(waiting.nodes.approval!.status).toBe('skipped');
   });
 
