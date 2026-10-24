@@ -42,7 +42,7 @@ something else entirely.
    table or column. Until the new Workers are live, the old code runs against the new schema, so a
    migration only adds (expand); dropping or renaming waits for a later change once nothing
    deployed uses it (contract).
-2. **Catalog, then catalog-edge, then engine, then web.** The web Worker's service bindings need the
+2. **Catalog, then catalog-edge, then plugins, then engine, then web.** The engine and the web Worker bind each installed plugin (`PLUGIN_<ID>`), so a plugin goes before them; a deployment with none skips that step. The web Worker's service bindings need the
    engine and the catalog to exist. Catalog-edge and the web app call the catalog (their `CATALOG` service bindings need the
    catalog to exist, which is why the catalog goes first); it goes first so that the Workers that come to
    bind to it always find the version they expect. Catalog-edge goes next because its queue
@@ -180,11 +180,11 @@ type-check, build, tests, the fleet tests (`pnpm test:fleet`) and
 `pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
-D1, deploys its catalog, deploys its catalog-edge, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's
+D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's
 and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
 deployment before its migration. If anything fails once the catalog has deployed (the engine deploy,
 the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed;
-catalog-edge and then the catalog go last, and one with no earlier version (a deployment's first) is left as it is. D1 is not rolled
+the plugins, catalog-edge and then the catalog go last, and one with no earlier version (a deployment's first) is left as it is. D1 is not rolled
 back, which is why migrations only add; see [Restoring D1](#restoring-d1). The docs then get their
 own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with its canonical URL, a
 reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.

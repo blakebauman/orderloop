@@ -38,6 +38,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `assistantDailyTokens` | `1000000` | Whole number of model tokens each person's assistant conversations may use per UTC day; `0` is no limit (negative or fractional is refused). Rendered into the engine's `ASSISTANT_DAILY_TOKENS` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `sso` | none | `{ "issuer": "https://…", "clientId": "…" }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). Rendered into the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
+| `plugins` | none | `{ "<plugin id>": { "d1Id": "…" } }`: the plugins (`plugins/<id>/`) this deployment installs. Each is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`. `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy; ids that aren't plugin ids, the `example` fixture, and ids without `plugins/<id>/wrangler.jsonc` are refused. See [Plugins](plugins.md) |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -50,6 +51,7 @@ With the suffix, deployment `acme` gets these resource names:
 | Catalog Worker | `orderloop-catalog-acme` |
 | Catalog edge Worker | `orderloop-catalog-edge-acme`, at `catalog.acme.orderloop.app` |
 | Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme` (Workflow names are unique per account) |
+| Plugin Worker and D1 | `orderloop-plugin-<id>-acme` for each installed plugin (the Worker and its database share the name) |
 | D1 | `orderloop-acme` (bound by the engine, web and catalog Workers; the catalog writes variant names and prices into `products`) |
 | R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents and feed files) |
 | Queues | `orderloop-catalog-feed-parts-acme` and its dead-letter queue `orderloop-catalog-feed-parts-dlq-acme`; the purge queue `orderloop-catalog-purge-acme` and its dead-letter queue `orderloop-catalog-purge-dlq-acme`; the listing-changes queue `orderloop-catalog-changes-acme` and its dead-letter queue `orderloop-catalog-changes-dlq-acme` (queue names are unique per account) |
@@ -59,7 +61,7 @@ With the suffix, deployment `acme` gets these resource names:
 | OAuth KV | created on the first deploy, bound to that web Worker |
 
 `node scripts/fleet.ts render <id>` writes `apps/catalog/wrangler.<id>.json`,
-`apps/catalog-edge/wrangler.<id>.json`, `apps/engine/wrangler.<id>.json` and `apps/web/wrangler.<id>.json`: each app's `wrangler.jsonc` with the deployment's names, ids, domain
+`apps/catalog-edge/wrangler.<id>.json`, `apps/engine/wrangler.<id>.json` and `apps/web/wrangler.<id>.json`, and `plugins/<plugin>/wrangler.<id>.json` for each installed plugin: each app's `wrangler.jsonc` with the deployment's names, ids, domain
 and namespaces filled in. They sit next to `wrangler.jsonc` so relative paths (`main`,
 `migrations_dir`) still resolve, and they are gitignored. The web build reads its rendered config
 when `ORDERLOOP_WRANGLER_CONFIG` names it (`apps/web/vite.config.ts`). Rendering `orderloop` gives
@@ -74,6 +76,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database, the R2 bucket and the catalog's R2 bucket (in the jurisdiction; the Durable Objects get theirs from each Worker's `DATA_JURISDICTION`, rendered at deploy), the catalog's KV namespace (KV has none; its id is written as `catalogKvId`), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
+   For each plugin in the file's `plugins` it creates the D1 database `orderloop-plugin-<plugin><suffix>` and writes its id as `plugins.<plugin>.d1Id` (see [Plugins](plugins.md#installing)).
    It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist) and adds a lifecycle rule `feeds` on the catalog bucket that expires `feeds/` (uploaded feed files and their parts) after 30 days; both are skipped with a message when they already exist.
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY` and `DATA_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
@@ -94,7 +97,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 
 **Deployments that predate feeds.** Provisioning only runs when you run it, and CI never does. A deployment provisioned before the catalog's feed import needs the queues and the `feeds/` rule too, and one that predates the public catalog API needs the two purge queues before the deploy that carries `catalog-edge`, and one that predates listing indexes needs the two changes queues before the deploy that carries them: run `./scripts/provision.sh <id>` again, before the deploy that carries the feed code (re-running is safe and sets no secrets once the web Worker exists). The script keeps a queue that already exists (`queues info`) and stops if one can neither be found nor created, since a deploy fails without its consumer's queue; it replaces the `feeds` lifecycle rule on each run. Keyword search needs no new resource (its Durable Objects come with the deploy and the `CATALOG` service binding resolves to the deployment's own catalog), but it fills only from changes published after it deploys: run `reindex` once for products already published. The `orderloop` deployment's queues and `feeds` rule were created through the Cloudflare API rather than by `provision.sh` (on 2026-10-23), and so were its purge queues, `orderloop-catalog-purge` and `orderloop-catalog-purge-dlq` (also on 2026-10-23), and its changes queues, `orderloop-catalog-changes` and `orderloop-catalog-changes-dlq` (also on 2026-10-23); re-running the script for it changes nothing.
 
-A deployment without `d1Id` or `catalogKvId` stops the whole CI plan, so provision a customer before merging their
+A deployment without `d1Id`, `catalogKvId` or a plugin's `d1Id` stops the whole CI plan, so provision a customer before merging their
 file, or merge it with `"hold": true`.
 
 Email intake still needs Email Routing rules per deployment (see
@@ -112,15 +115,25 @@ Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's
 
 1. Render its configs and collect its secrets from the environment.
 2. Record a D1 Time Travel bookmark (in the run summary) and apply migrations to its D1.
-3. Deploy its catalog, then its catalog-edge, then its engine, then build and deploy its web app; the engine and web app
+3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with `--secrets-file`; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
    each with `--secrets-file` (the catalog and catalog-edge have no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`, then `https://<catalogDomain>/health`.
-5. If anything fails after the catalog deployed, roll back each Worker that deployed (catalog-edge,
+5. If anything fails after the catalog deployed, roll back each Worker that deployed (the web app, the engine, the plugins, catalog-edge,
    then the catalog last, and not when either has no earlier version). D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
 
 To gate a ring, add a required reviewer to its deployments' environments: the `canary` jobs then
 wait for approval after `internal` succeeds.
+
+## Plugins
+
+A plugin is installed by listing it under `plugins` in a deployment's file (see the registry above
+and [Plugins](plugins.md)). To install one: add it, run `./scripts/provision.sh <id>` (it creates the
+plugin's D1 database), and merge. To remove one from a deployment: run
+`ORDERLOOP_API_TOKEN=ol_… pnpm plugin:check <id> <plugin>` with an admin's API token, which fails
+while a published flow or a running order uses the plugin's nodes; take it out of `plugins` and merge
+so CI deploys without it; then delete its Worker `orderloop-plugin-<plugin><suffix>` and its D1
+database. Delete `plugins/<plugin>/` once no deployment lists it.
 
 ## Holding and checking deployments
 
@@ -261,6 +274,6 @@ A deployment holds only that customer's data, so removing it is the erasure:
 1. Export what the contract requires first (a D1 export with
    `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
-3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>`, which removes their Durable
-   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, the AI
+3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>` and `orderloop-plugin-<plugin>-<id>` for each plugin, which removes their Durable
+   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
    Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.

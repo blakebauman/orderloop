@@ -18,6 +18,7 @@ type Usage = {
 const [id, plugin] = process.argv.slice(2);
 try {
   if (!id || !plugin) throw new Error('usage: plugin-check.ts <deployment id> <plugin id>');
+  // biome-ignore lint/suspicious/noUndeclaredEnvVars: run by hand, not as a turbo task.
   const token = process.env.ORDERLOOP_API_TOKEN;
   if (!token) throw new Error("ORDERLOOP_API_TOKEN not set: use an admin's API token");
   const d = loadDeployments().find((x) => x.id === id);

@@ -17,12 +17,20 @@ export const PLUGINS_PATH = '/plugins/';
 const MANIFEST_TTL_MS = 60_000;
 let cached: { at: number; manifests: PluginManifest[] } | null = null;
 
-/** The installed plugins' manifests, cached for a minute per isolate. */
+/**
+ * The installed plugins' manifests, cached for a minute per isolate. If the engine can't say, the
+ * app carries on as if none were installed rather than failing every page.
+ */
 export async function pluginManifests(): Promise<PluginManifest[]> {
   if (cached && Date.now() - cached.at < MANIFEST_TTL_MS) return cached.manifests;
-  const manifests = await engine().pluginCatalog();
-  cached = { at: Date.now(), manifests };
-  return manifests;
+  try {
+    const manifests = await engine().pluginCatalog();
+    cached = { at: Date.now(), manifests };
+    return manifests;
+  } catch (err) {
+    console.error('plugin catalog unavailable', err);
+    return cached?.manifests ?? [];
+  }
 }
 
 /** Node lookups with the installed plugins' nodes, for validating flows. */
