@@ -3,6 +3,7 @@ title: MCP server
 description: Connect Claude, Claude Code, Cursor or any MCP client to OrderLoop at /mcp, with the same tools as the assistant, limited by role.
 ---
 
+import McpSkills from '../../components/McpSkills.astro';
 import McpTools from '../../components/McpTools.astro';
 
 OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
@@ -65,6 +66,12 @@ A client that runs OAuth itself finds the authorization server from
 `/oauth/register` or with a Client ID Metadata Document (an `https` `client_id`), sends the person
 to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.
 
+A client or directory that discovers servers before connecting can read the
+[Server Card](https://modelcontextprotocol.io/seps/2127-mcp-server-cards) at
+`https://orderloop.app/mcp/server-card`, listed in `/.well-known/ai-catalog.json`. It names the
+server, the endpoint and the protocol revisions it speaks. It lists no tools: those depend on who
+connects, so a client learns them once connected.
+
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
 credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens. These work on `/a2a` too. A bearer that isn't a valid token is `401`, and an expired token is
 refused (`401` with the reason), as there.
@@ -86,10 +93,29 @@ protocol error. Any other failure is a tool error saying something went wrong on
 without the details. A tool the role can't use is not listed, and calling it by name fails as
 unknown. On 2026-07-28 the tool list may be cached by the client for a minute.
 
-## Actions take two calls
+## Actions wait for the person
 
 An action (`decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
-`run_stock_review`) never runs on the first call, whatever the client does. The first call
+`run_stock_review`) never runs on the first call, whatever the client does. How the person
+agrees depends on the client.
+
+### Clients that ask their person
+
+A client on the 2026-07-28 revision that declares form elicitation is asked to confirm. The
+first call changes nothing and returns `input_required` with one elicitation, `confirm`: its
+message is the preview (what will happen), and it asks for `{ "confirm": true }`. The client shows
+it to the person, then retries the same call with their answer and the `requestState` it was
+given. The action runs only if the person accepted with `confirm: true`; a decline, a cancel or
+any other answer is a tool error, nothing happens, and that request state is used up. The same
+rules as a code apply to the request state: it belongs to the same person, tool and input, lasts
+5 minutes and works once. It is not a code: sent as `confirmation` it is refused, a code from the
+two-call flow is refused as request state, and on a client that elicits any `confirmation` is
+refused. So a model can't confirm on the person's behalf; what remains trusted is the client,
+which shows the question and reports the answer.
+
+### Other clients: two calls
+
+Any other client, including every 2025-era one, gets a preview and a code. The first call
 changes nothing and returns:
 
 ```json
@@ -105,7 +131,8 @@ The `preview` is what the assistant's confirm card shows: the order or flow, and
 action leads. If the action is blocked (for example, you started the order and the workspace
 separates approvals), the call returns a tool error with the reason and no code. The tool
 descriptions and the server's instructions tell the model to show the preview to the person and to
-call again only once they agree.
+call again only once they agree. Here the model relays the code, so it is the model that is
+trusted to ask: prefer a client that elicits for anyone who can approve, cancel or publish.
 
 The action runs when the same person calls again with the same input plus `confirmation`, within
 5 minutes. A code works once. A code used by someone else, for another tool or with a different
@@ -128,6 +155,21 @@ Annotations also tell a client when to confirm:
 `cancel_order`, `run_stock_review` and `assess_order` set `openWorldHint: true`: cancelling voids
 payments and cancels shipments with the carrier, the stock review places reorders with suppliers,
 and an assessment may fetch an `https` image. The other tools set it to `false`.
+
+## Skills
+
+OrderLoop also serves skills: written workflows that combine the tools above, such as triaging
+what needs attention or reviewing an approval. A client that supports the
+[Skills extension](https://modelcontextprotocol.io/extensions/skills/overview) on the 2026-07-28
+revision can list them and load one when it fits, or when you pick it. As with tools, you are
+offered only the skills your role can follow:
+
+<McpSkills />
+
+A skill is instructions, not an extra permission. Its actions still wait for you, as above. Each
+skill is a `SKILL.md` at `skill://<name>/SKILL.md`, listed with its digest and size so your client
+can check what it loads, and may be cached by the client for five minutes. A client on an earlier
+revision doesn't see them.
 
 ## Who did it
 

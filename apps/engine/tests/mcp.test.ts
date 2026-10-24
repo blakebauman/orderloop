@@ -74,6 +74,7 @@ async function rpc(
   method: string,
   params: Record<string, unknown> = {},
   revision: Revision = '2025-06-18',
+  capabilities: Record<string, unknown> = {},
 ) {
   const headers = new Headers({
     'content-type': 'application/json',
@@ -84,12 +85,14 @@ async function rpc(
   if (revision === '2026-07-28') {
     // Each request names itself in headers and carries the client in `_meta`.
     headers.set('mcp-method', method);
-    if (typeof params.name === 'string') headers.set('mcp-name', params.name);
+    // Mcp-Name is the tool or prompt name, or the resource's uri.
+    const named = params.name ?? params.uri;
+    if (typeof named === 'string') headers.set('mcp-name', named);
     body = {
       ...params,
       _meta: {
         'io.modelcontextprotocol/protocolVersion': revision,
-        'io.modelcontextprotocol/clientCapabilities': {},
+        'io.modelcontextprotocol/clientCapabilities': capabilities,
         'io.modelcontextprotocol/clientInfo': { name: 'test', version: '0' },
       },
     };
@@ -345,5 +348,161 @@ describe('MCP', () => {
       return s.waits.some((w) => w.kind === 'approval') ? false : s;
     }, 'the decision');
     expect(JSON.stringify(s)).toContain('ann@example.com via MCP');
+  });
+
+  it('asks the person through a client that elicits, and acts once they agree', async () => {
+    const orderId = await waitingOrder();
+    const approver = person('approver', 'ann@example.com');
+    const decide = { orderId, decision: 'approved' };
+    const elicits = { elicitation: { form: {} } };
+    const ask = async (extra: Record<string, unknown> = {}, args = decide) =>
+      (
+        (await rpc(
+          approver,
+          'tools/call',
+          { name: 'decide_approval', arguments: args, ...extra },
+          '2026-07-28',
+          elicits,
+        )) as { body: { result: Record<string, unknown> } }
+      ).body.result;
+    const waiting = async () => (await state(orderId)).waits.some((w) => w.kind === 'approval');
+
+    // The first call asks; the model gets no code to send back itself.
+    const first = await ask();
+    expect(first).toMatchObject({
+      resultType: 'input_required',
+      inputRequests: {
+        confirm: { method: 'elicitation/create', params: { message: expect.any(String) } },
+      },
+    });
+    expect(JSON.stringify(first.inputRequests)).not.toContain('cfm_');
+    expect(JSON.stringify(first.inputRequests)).toContain(
+      'OrderLoop asks you to confirm: Decide an approval.',
+    );
+    const requestState = first.requestState as string;
+    expect(await waiting()).toBe(true);
+
+    const accept = { confirm: { action: 'accept', content: { confirm: true } } };
+    // A no is final: the same state can't be accepted afterwards.
+    expect(
+      (await ask({ requestState, inputResponses: { confirm: { action: 'decline' } } })).isError,
+    ).toBe(true);
+    expect((await ask({ requestState, inputResponses: accept })).isError).toBe(true);
+    expect(await waiting()).toBe(true);
+
+    const second = (await ask()).requestState as string;
+    // The state is not a code the model could send itself, on this client or as the argument.
+    expect((await ask({}, { ...decide, confirmation: second } as typeof decide)).isError).toBe(
+      true,
+    );
+    expect(
+      (await call(approver, 'decide_approval', { ...decide, confirmation: second })).isError,
+    ).toBe(true);
+    // And a two-call code is not a request state.
+    const code = (await call(approver, 'decide_approval', decide)).structuredContent!
+      .confirmation as string;
+    expect((await ask({ requestState: code, inputResponses: accept })).isError).toBe(true);
+    // Forged, someone else's, or for another input: nothing happens.
+    expect((await ask({ requestState: 'cfm_nope', inputResponses: accept })).isError).toBe(true);
+    const bob = await rpc(
+      person('approver', 'bob@example.com'),
+      'tools/call',
+      {
+        name: 'decide_approval',
+        arguments: decide,
+        requestState: second,
+        inputResponses: accept,
+      },
+      '2026-07-28',
+      elicits,
+    );
+    expect((bob.body as { result: { isError?: boolean } }).result.isError).toBe(true);
+    expect(
+      (
+        await ask(
+          { requestState: second, inputResponses: accept },
+          { ...decide, decision: 'rejected' },
+        )
+      ).isError,
+    ).toBe(true);
+    expect(await waiting()).toBe(true);
+
+    const done = await ask({ requestState: second, inputResponses: accept });
+    expect(done.isError).toBeFalsy();
+    expect(done.structuredContent).toMatchObject({ done: expect.any(String) });
+    // Once.
+    expect((await ask({ requestState: second, inputResponses: accept })).isError).toBe(true);
+    await until(async () => !(await waiting()), 'the decision');
+    expect(JSON.stringify(await state(orderId))).toContain('ann@example.com via MCP');
+  });
+
+  it('falls back to the code on a 2026-07-28 client that cannot elicit', async () => {
+    const orderId = await waitingOrder();
+    const first = await call(
+      person('approver', 'ann@example.com'),
+      'decide_approval',
+      { orderId, decision: 'approved' },
+      '2026-07-28',
+    );
+    expect(first.structuredContent).toMatchObject({
+      confirmation: expect.stringMatching(/^cfm_/),
+    });
+  });
+
+  it('serves the skills a role can follow, with the Skills extension', async () => {
+    const viewer = person('viewer', 'vic@example.com');
+    const operator = person('operator', 'ops@example.com');
+    const modern = async (p: Principal, method: string, params: Record<string, unknown> = {}) =>
+      (await rpc(p, method, params, '2026-07-28')).body as {
+        result?: Record<string, unknown>;
+        error?: { code: number };
+      };
+
+    expect((await modern(viewer, 'server/discover')).result).toMatchObject({
+      capabilities: {
+        resources: {},
+        extensions: { 'io.modelcontextprotocol/skills': {} },
+      },
+    });
+
+    type Entry = {
+      uri: string;
+      frontmatter: { name: string };
+      resources: { uri: string; digest: string; size: number }[];
+    };
+    const names = async (p: Principal) =>
+      ((await modern(p, 'skills/list')).result!.skills as Entry[]).map((e) => e.frontmatter.name);
+    expect(await names(viewer)).toEqual(['triage-attention']);
+    expect((await names(operator)).sort()).toEqual([
+      'change-a-flow',
+      'review-approval',
+      'stock-review',
+      'triage-attention',
+    ]);
+
+    const listed = await modern(viewer, 'skills/list');
+    expect(listed.result).toMatchObject({ ttlMs: 300_000, cacheScope: 'private' });
+    const [entry] = listed.result!.skills as Entry[];
+    expect(entry).toMatchObject({ uri: 'skill://triage-attention/SKILL.md' });
+    const [file] = entry!.resources;
+
+    // The bytes served are the ones the manifest's digest and size describe.
+    const read = await modern(viewer, 'resources/read', { uri: file!.uri });
+    const text = (read.result!.contents as { text: string }[])[0]!.text;
+    const bytes = new TextEncoder().encode(text);
+    const hex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join('');
+    expect(file!.digest).toBe(`sha256:${hex}`);
+    expect(file!.size).toBe(bytes.length);
+    expect(text).toContain('needs_attention');
+
+    // A viewer is not served an operator's skill, listed or not.
+    const unknown = { uri: 'skill://stock-review/SKILL.md' };
+    expect((await modern(viewer, 'skills/get', unknown)).error).toMatchObject({ code: -32602 });
+    expect((await modern(operator, 'skills/get', unknown)).result).toMatchObject({
+      skill: { frontmatter: { name: 'stock-review' } },
+    });
+    expect((await modern(viewer, 'resources/read', unknown)).error).toBeDefined();
   });
 });

@@ -27,6 +27,7 @@ import { cartGuest } from '../app/lib/cart-guest.server';
 import { withSecurityHeaders } from '../app/lib/csp';
 import { demoRefusal } from '../app/lib/demo.server';
 import { docs, engine } from '../app/lib/env.server';
+import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
@@ -99,6 +100,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       headers: { 'cache-control': 'public, max-age=300', vary: 'A2A-Version' },
     });
   }
+
+  // MCP discovery before connecting: the Server Card and the AI Catalog listing it are public.
+  const discovered = await mcpDiscovery(request);
+  if (discovered) return discovered;
 
   // UCP (agentic checkout): the business profile is public; checkout and orders under /ucp take
   // a registered platform's key (app/lib/ucp.server.ts).

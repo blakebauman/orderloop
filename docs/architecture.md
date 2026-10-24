@@ -87,6 +87,7 @@ engine source.
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
 | `/agents/order-agent/*`, `/agents/cart-agent/*`, `/agents/assistant-agent/*` (a cart's socket with no staff sign-in takes its buyer's cookie instead and is signed as a `CartGuest`; see [External carts](#external-carts)) | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
+| `GET /mcp/server-card`, `GET /.well-known/ai-catalog.json` | `mcpDiscovery` (`apps/web/app/lib/mcp-discovery.ts`), public: the MCP Server Card (SEP-2127; name `<reversed host>/mcp`, the `/mcp` remote and `MCP_PROTOCOL_VERSIONS`, no tools or capabilities) and the AI Catalog entry that links it. `application/mcp-server-card+json` / `application/ai-catalog+json`, `Access-Control-Allow-Origin: *`, `public, max-age=3600`, an `ETag` honoured with `304`, `OPTIONS` `204`, other methods `405` |
 | `GET /.well-known/ucp`, `/ucp`, `/ucp/*` | `ucpDiscovery` and `ucpFetch` (`apps/web/app/lib/ucp.server.ts`), before the OAuth paths. See [UCP](#ucp-agentic-checkout) |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
 | `/docs/orders/*` | `principal`, then the R2 object, served with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'`, its `etag` and `cache-control: private, no-cache` (so each view checks the sign-in); a matching `If-None-Match` is a `304` without the body (R2 `onlyIf`) |
@@ -157,7 +158,18 @@ client. `assess_order` and `propose_flow_change` send one progress notification 
 has a progress token.
 
 An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
-`run_stock_review`) never runs on the first call, because a client may not ask its person. Its
+`run_stock_review`) never runs on the first call, because a client may not ask its person. When
+the request is 2026-07-28 and its envelope's client capabilities declare form elicitation
+(`canElicit` in `mcp.ts`), the first call returns `inputRequired` with a `confirm` elicitation
+built from `previewAction`, and the `cfm_…` code from `issueConfirmation` as `requestState`.
+The retry runs only when `acceptedContent(…, 'confirm', CONFIRM)` is `confirm: true` and
+`useConfirmation` accepts the returned state, which the SDK does not verify: the D1 row is what
+binds it to the principal, tool and input, once. The elicited code is issued and used for the
+input plus `ELICITED` (a key input schemas strip, so callers can't send it), so it is never
+accepted as a `confirmation` argument and a two-call code is never accepted as request state; a
+`confirmation` on a request that can elicit is refused, and a declined answer uses the code up.
+The elicitation message is a fixed line naming the tool, then the preview lines through
+`boundText`. Otherwise the two-call code flow below applies. Its
 schema gains an optional `confirmation`, and its description and the server `instructions` say to
 show the preview first. Without a code, the handler returns `previewAction` (the assistant's confirm
 card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmation`
@@ -168,6 +180,14 @@ the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 `pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
 the call, as with REST); A2A chat has its own `{ confirm }`. See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
+
+Skills: `createServer` attaches the role's `SkillCatalog`
+(`@modelcontextprotocol/server/ext/skills`, built once per isolate per role from
+`mcpSkillFiles(role)`, `MCP_SKILLS` in `packages/core/src/mcp-skills.ts`), which declares
+`resources` and `io.modelcontextprotocol/skills` and serves `skills/list`, `skills/get` and
+`resources/read` on `skill://<name>/SKILL.md` with SHA-256 digests, a private five-minute cache hint
+and no `directoryRead`. A skill is offered to roles at or above its `role`;
+`tests/mcp-skills.test.ts` in core checks every tool it names exists and is within that role.
 
 ## A2A
 

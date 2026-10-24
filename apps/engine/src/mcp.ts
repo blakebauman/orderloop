@@ -11,8 +11,24 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
-import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
+import {
+  acceptedContent,
+  CLIENT_CAPABILITIES_META_KEY,
+  createMcpHandler,
+  inputRequired,
+  McpServer,
+} from '@modelcontextprotocol/server';
+import { memorySkillFiles, SkillCatalog } from '@modelcontextprotocol/server/ext/skills';
+import {
+  type ActionPreview,
+  ASSISTANT_TOOLS,
+  type AssistantTool,
+  atLeast,
+  boundText,
+  mcpSkillFiles,
+  type Principal,
+  type Role,
+} from '@orderloop/core';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
 import {
@@ -52,9 +68,62 @@ const SLOW: Partial<Record<AssistantTool, string>> = {
   propose_flow_change: 'Drafting the change…',
 };
 
+/** What the person answers when their client asks them to confirm an action. */
+const CONFIRM = z.object({ confirm: z.boolean().describe('Go ahead with this') });
+
+/**
+ * Whether the client asks its person itself (a 2026-07-28 request declaring form elicitation).
+ * Then an action's first call is an elicitation the client shows, not a code for the model.
+ */
+function canElicit(ctx: { mcpReq: { envelope?: object } }) {
+  const caps = (ctx.mcpReq.envelope as Record<string, unknown> | undefined)?.[
+    CLIENT_CAPABILITIES_META_KEY
+  ] as { elicitation?: { form?: object; url?: object } } | undefined;
+  const e = caps?.elicitation;
+  return !!e && (!!e.form || !e.url);
+}
+
+/** Marks the input an elicited confirmation is bound to (see the action branch below). */
+const ELICITED = '@confirmedBy:elicitation';
+
+/**
+ * The question a client shows its person: a fixed line naming the action, then the preview, whose
+ * text can come from orders and customers, so each line is one bounded line.
+ */
+function confirmMessage(name: AssistantTool, preview: ActionPreview) {
+  const lines = [preview.title, ...preview.consequences]
+    .map((l) => boundText(l, 200))
+    .filter((l): l is string => !!l);
+  return [
+    `OrderLoop asks you to confirm: ${ASSISTANT_TOOLS[name].title}.`,
+    ...lines.map((l) => `• ${l}`),
+  ].join('\n');
+}
+
 const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
-function createServer(p: Principal) {
+/**
+ * The skills a role can follow (MCP_SKILLS in @orderloop/core), served with the Skills extension:
+ * `skills/list`, `skills/get` and `resources/read` on `skill://<name>/SKILL.md`, with the
+ * digests and sizes the SDK computes. One catalog per role, built once per isolate.
+ */
+const catalogs = new Map<Role, Promise<SkillCatalog>>();
+function catalogFor(role: Role) {
+  let c = catalogs.get(role);
+  if (!c) {
+    c = SkillCatalog.load(memorySkillFiles(mcpSkillFiles(role)), {
+      strict: true,
+      // Per role, so per client; the skills change only with a deploy.
+      cacheHint: { ttlMs: 300_000, cacheScope: 'private' },
+    });
+    // A failed build is retried on the next request rather than cached.
+    c.catch(() => catalogs.delete(role));
+    catalogs.set(role, c);
+  }
+  return c;
+}
+
+async function createServer(p: Principal) {
   const server = new McpServer(
     { name: 'orderloop', title: 'OrderLoop', version: '1.0.0' },
     {
@@ -110,6 +179,50 @@ function createServer(p: Principal) {
               (await runTool(env, p, name, raw, { via: 'MCP' })) as Record<string, unknown>,
             );
           const { confirmation, ...input } = raw;
+          if (canElicit(ctx)) {
+            // The model never holds a code here, so it can't send one in place of the person.
+            if (confirmation)
+              return refusal(
+                'This client asks the person to confirm. Call again without `confirmation`.',
+              );
+            // Bound to a different fingerprint than the two-call code, so neither path accepts
+            // the other's code. Input schemas strip unknown keys, so a caller can't add this one.
+            const asked = { ...input, [ELICITED]: true };
+            // The retry carries the code back as request state, with the person's answer.
+            const code = ctx.mcpReq.requestState<string>();
+            if (typeof code === 'string' && code) {
+              if (
+                acceptedContent(ctx.mcpReq.inputResponses, 'confirm', CONFIRM)?.confirm !== true
+              ) {
+                // A no is final: use the code up so a later "yes" with it does nothing.
+                await useConfirmation(env, p, name, asked, code);
+                return refusal('The person did not confirm. Nothing happened.');
+              }
+              if (!(await useConfirmation(env, p, name, asked, code)))
+                return refusal(
+                  'That confirmation expired or was already used, or the input changed. Call again for a new preview.',
+                );
+              return result(
+                (await runTool(env, p, name, input as ToolInput<typeof name>, {
+                  via: 'MCP',
+                })) as Record<string, unknown>,
+              );
+            }
+            const preview = await previewAction(env, p, name, input as never);
+            if (preview.blocked) return refusal(preview.blocked);
+            const issued = await issueConfirmation(env, p, name, asked);
+            return inputRequired({
+              inputRequests: {
+                confirm: inputRequired.elicit({
+                  message: confirmMessage(name, preview),
+                  requestedSchema: CONFIRM,
+                }),
+              },
+              // Not trusted on the way back: useConfirmation checks it is this person's unused
+              // code for this tool and input.
+              requestState: issued.code,
+            });
+          }
           if (!confirmation) {
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
@@ -140,6 +253,8 @@ function createServer(p: Principal) {
       },
     );
   }
+  // @experimental in the SDK: how an extension attaches may change in a minor release.
+  (await catalogFor(p.role)).attach(server);
   return server;
 }
 
