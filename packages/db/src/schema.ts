@@ -921,3 +921,77 @@ export const ucpIdempotency = sqliteTable(
     index('ucp_idempotency_created').on(t.createdAt),
   ],
 );
+
+/**
+ * Carts the Carts page lists (`packages/core/src/cart.ts`), id `cart_…`. The lines, quote and chat
+ * live in each cart's CartAgent, which writes this row when the title or status changes. An
+ * external cart (opened by a plugin) carries `pluginId` and `sessionRef`, unique together.
+ */
+export const carts = sqliteTable(
+  'carts',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    status: text('status').notNull(),
+    customerId: text('customer_id'),
+    flowId: text('flow_id').notNull(),
+    pluginId: text('plugin_id'),
+    sessionRef: text('session_ref'),
+    orderId: text('order_id'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    expiresAt: integer('expires_at'),
+  },
+  (t) => [
+    index('carts_updated').on(t.updatedAt),
+    index('carts_status').on(t.status, t.updatedAt),
+    uniqueIndex('carts_session').on(t.pluginId, t.sessionRef).where(sql`${t.pluginId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Promotion codes the `commerce.discount` node applies. `kind` is `pct` (`value` a percentage),
+ * `amount` (`value` off the subtotal) or `free_shipping`; `skus` a JSON array the discount is
+ * limited to, or null for every line.
+ */
+export const promotions = sqliteTable(
+  'promotions',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(),
+    name: text('name').notNull().default(''),
+    kind: text('kind').notNull(),
+    value: real('value').notNull().default(0),
+    currency: text('currency'),
+    minSubtotal: real('min_subtotal'),
+    skus: text('skus'),
+    customerId: text('customer_id'),
+    validFrom: integer('valid_from'),
+    validTo: integer('valid_to'),
+    maxRedemptions: integer('max_redemptions'),
+    perCustomerLimit: integer('per_customer_limit'),
+    status: text('status').notNull().default('active'),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('promotions_code').on(t.code)],
+);
+
+/** One per promotion per order, written by the discount node's step, so a retry redeems once. */
+export const promotionRedemptions = sqliteTable(
+  'promotion_redemptions',
+  {
+    promotionId: text('promotion_id').notNull(),
+    orderId: text('order_id').notNull(),
+    customerId: text('customer_id'),
+    amount: real('amount').notNull(),
+    stepKey: text('step_key').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.promotionId, t.orderId] }),
+    index('promotion_redemptions_customer').on(t.promotionId, t.customerId),
+  ],
+);
