@@ -99,9 +99,12 @@ first call changes nothing and returns `input_required` with one elicitation, `c
 message is the preview (what will happen), and it asks for `{ "confirm": true }`. The client shows
 it to the person, then retries the same call with their answer and the `requestState` it was
 given. The action runs only if the person accepted with `confirm: true`; a decline, a cancel or
-any other answer is a tool error and nothing happens. The model is never given a code, so it
-can't confirm on the person's behalf. The same rules as a code apply to the request state: it
-belongs to the same person, tool and input, lasts 5 minutes and works once.
+any other answer is a tool error, nothing happens, and that request state is used up. The same
+rules as a code apply to the request state: it belongs to the same person, tool and input, lasts
+5 minutes and works once. It is not a code: sent as `confirmation` it is refused, a code from the
+two-call flow is refused as request state, and on a client that elicits any `confirmation` is
+refused. So a model can't confirm on the person's behalf; what remains trusted is the client,
+which shows the question and reports the answer.
 
 ### Other clients: two calls
 

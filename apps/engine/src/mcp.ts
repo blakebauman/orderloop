@@ -18,7 +18,14 @@ import {
   inputRequired,
   McpServer,
 } from '@modelcontextprotocol/server';
-import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
+import {
+  type ActionPreview,
+  ASSISTANT_TOOLS,
+  type AssistantTool,
+  atLeast,
+  boundText,
+  type Principal,
+} from '@orderloop/core';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
 import {
@@ -68,6 +75,23 @@ function canElicit(ctx: { mcpReq: { envelope?: object } }) {
   ] as { elicitation?: { form?: object; url?: object } } | undefined;
   const e = caps?.elicitation;
   return !!e && (!!e.form || !e.url);
+}
+
+/** Marks the input an elicited confirmation is bound to (see the action branch below). */
+const ELICITED = '@confirmedBy:elicitation';
+
+/**
+ * The question a client shows its person: a fixed line naming the action, then the preview, whose
+ * text can come from orders and customers, so each line is one bounded line.
+ */
+function confirmMessage(name: AssistantTool, preview: ActionPreview) {
+  const lines = [preview.title, ...preview.consequences]
+    .map((l) => boundText(l, 200))
+    .filter((l): l is string => !!l);
+  return [
+    `OrderLoop asks you to confirm: ${ASSISTANT_TOOLS[name].title}.`,
+    ...lines.map((l) => `• ${l}`),
+  ].join('\n');
 }
 
 const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
@@ -127,13 +151,26 @@ function createServer(p: Principal) {
               (await runTool(env, p, name, raw, { via: 'MCP' })) as Record<string, unknown>,
             );
           const { confirmation, ...input } = raw;
-          if (!confirmation && canElicit(ctx)) {
+          if (canElicit(ctx)) {
+            // The model never holds a code here, so it can't send one in place of the person.
+            if (confirmation)
+              return refusal(
+                'This client asks the person to confirm. Call again without `confirmation`.',
+              );
+            // Bound to a different fingerprint than the two-call code, so neither path accepts
+            // the other's code. Input schemas strip unknown keys, so a caller can't add this one.
+            const asked = { ...input, [ELICITED]: true };
             // The retry carries the code back as request state, with the person's answer.
             const code = ctx.mcpReq.requestState<string>();
             if (typeof code === 'string' && code) {
-              if (acceptedContent(ctx.mcpReq.inputResponses, 'confirm', CONFIRM)?.confirm !== true)
+              if (
+                acceptedContent(ctx.mcpReq.inputResponses, 'confirm', CONFIRM)?.confirm !== true
+              ) {
+                // A no is final: use the code up so a later "yes" with it does nothing.
+                await useConfirmation(env, p, name, asked, code);
                 return refusal('The person did not confirm. Nothing happened.');
-              if (!(await useConfirmation(env, p, name, input, code)))
+              }
+              if (!(await useConfirmation(env, p, name, asked, code)))
                 return refusal(
                   'That confirmation expired or was already used, or the input changed. Call again for a new preview.',
                 );
@@ -145,11 +182,11 @@ function createServer(p: Principal) {
             }
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
-            const issued = await issueConfirmation(env, p, name, input);
+            const issued = await issueConfirmation(env, p, name, asked);
             return inputRequired({
               inputRequests: {
                 confirm: inputRequired.elicit({
-                  message: [preview.title, ...preview.consequences.map((c) => `• ${c}`)].join('\n'),
+                  message: confirmMessage(name, preview),
                   requestedSchema: CONFIRM,
                 }),
               },

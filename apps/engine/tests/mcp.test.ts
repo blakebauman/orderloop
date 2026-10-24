@@ -367,26 +367,62 @@ describe('MCP', () => {
       },
     });
     expect(JSON.stringify(first.inputRequests)).not.toContain('cfm_');
+    expect(JSON.stringify(first.inputRequests)).toContain(
+      'OrderLoop asks you to confirm: Decide an approval.',
+    );
     const requestState = first.requestState as string;
     expect(await waiting()).toBe(true);
 
     const accept = { confirm: { action: 'accept', content: { confirm: true } } };
-    // Declined, a forged state, or another input: nothing happens.
+    // A no is final: the same state can't be accepted afterwards.
     expect(
       (await ask({ requestState, inputResponses: { confirm: { action: 'decline' } } })).isError,
     ).toBe(true);
-    expect((await ask({ requestState: 'cfm_nope', inputResponses: accept })).isError).toBe(true);
+    expect((await ask({ requestState, inputResponses: accept })).isError).toBe(true);
+    expect(await waiting()).toBe(true);
+
+    const second = (await ask()).requestState as string;
+    // The state is not a code the model could send itself, on this client or as the argument.
+    expect((await ask({}, { ...decide, confirmation: second } as typeof decide)).isError).toBe(
+      true,
+    );
     expect(
-      (await ask({ requestState, inputResponses: accept }, { ...decide, decision: 'rejected' }))
-        .isError,
+      (await call(approver, 'decide_approval', { ...decide, confirmation: second })).isError,
+    ).toBe(true);
+    // And a two-call code is not a request state.
+    const code = (await call(approver, 'decide_approval', decide)).structuredContent!
+      .confirmation as string;
+    expect((await ask({ requestState: code, inputResponses: accept })).isError).toBe(true);
+    // Forged, someone else's, or for another input: nothing happens.
+    expect((await ask({ requestState: 'cfm_nope', inputResponses: accept })).isError).toBe(true);
+    const bob = await rpc(
+      person('approver', 'bob@example.com'),
+      'tools/call',
+      {
+        name: 'decide_approval',
+        arguments: decide,
+        requestState: second,
+        inputResponses: accept,
+      },
+      '2026-07-28',
+      elicits,
+    );
+    expect((bob.body as { result: { isError?: boolean } }).result.isError).toBe(true);
+    expect(
+      (
+        await ask(
+          { requestState: second, inputResponses: accept },
+          { ...decide, decision: 'rejected' },
+        )
+      ).isError,
     ).toBe(true);
     expect(await waiting()).toBe(true);
 
-    const done = await ask({ requestState, inputResponses: accept });
+    const done = await ask({ requestState: second, inputResponses: accept });
     expect(done.isError).toBeFalsy();
     expect(done.structuredContent).toMatchObject({ done: expect.any(String) });
     // Once.
-    expect((await ask({ requestState, inputResponses: accept })).isError).toBe(true);
+    expect((await ask({ requestState: second, inputResponses: accept })).isError).toBe(true);
     await until(async () => !(await waiting()), 'the decision');
     expect(JSON.stringify(await state(orderId))).toContain('ann@example.com via MCP');
   });

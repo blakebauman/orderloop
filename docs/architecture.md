@@ -163,7 +163,12 @@ the request is 2026-07-28 and its envelope's client capabilities declare form el
 built from `previewAction`, and the `cfm_…` code from `issueConfirmation` as `requestState`.
 The retry runs only when `acceptedContent(…, 'confirm', CONFIRM)` is `confirm: true` and
 `useConfirmation` accepts the returned state, which the SDK does not verify: the D1 row is what
-binds it to the principal, tool and input, once. Otherwise the two-call code flow below applies. Its
+binds it to the principal, tool and input, once. The elicited code is issued and used for the
+input plus `ELICITED` (a key input schemas strip, so callers can't send it), so it is never
+accepted as a `confirmation` argument and a two-call code is never accepted as request state; a
+`confirmation` on a request that can elicit is refused, and a declined answer uses the code up.
+The elicitation message is a fixed line naming the tool, then the preview lines through
+`boundText`. Otherwise the two-call code flow below applies. Its
 schema gains an optional `confirmation`, and its description and the server `instructions` say to
 show the preview first. Without a code, the handler returns `previewAction` (the assistant's confirm
 card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmation`
