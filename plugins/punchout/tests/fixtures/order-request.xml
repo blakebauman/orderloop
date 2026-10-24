@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE cXML SYSTEM "http://xml.cxml.org/schemas/cXML/1.2.069/cXML.dtd">
+<cXML payloadID="1729770000.9876@buyer.example" timestamp="2026-10-24T11:00:00-07:00">
+  <Header>
+    <From><Credential domain="NetworkID"><Identity>AN01000000001</Identity></Credential></From>
+    <To><Credential domain="NetworkID"><Identity>orderloop</Identity></Credential></To>
+    <Sender>
+      <Credential domain="NetworkID">
+        <Identity>AN01000000001</Identity>
+        <SharedSecret>SECRET</SharedSecret>
+      </Credential>
+      <UserAgent>Procurement 2026</UserAgent>
+    </Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-7781" orderDate="2026-10-24T10:58:00-07:00" type="new">
+        <Total><Money currency="USD">107.50</Money></Total>
+        <ShipTo>
+          <Address isoCountryCode="US" addressID="DC-1">
+            <Name xml:lang="en">Northwind Receiving</Name>
+            <PostalAddress name="default">
+              <DeliverTo>Dock 4</DeliverTo>
+              <Street>1 Harbor Way</Street>
+              <City>Oakland</City>
+              <State>CA</State>
+              <PostalCode>94607</PostalCode>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+            <Email name="default">receiving@northwind.example</Email>
+          </Address>
+        </ShipTo>
+      </OrderRequestHeader>
+      <ItemOut quantity="5" lineNumber="1">
+        <ItemID>
+          <SupplierPartID>WID-100</SupplierPartID>
+          <SupplierPartAuxiliaryID>CARTID:li_1</SupplierPartAuxiliaryID>
+        </ItemID>
+        <ItemDetail>
+          <UnitPrice><Money currency="USD">21.50</Money></UnitPrice>
+          <Description xml:lang="en">Industrial widget</Description>
+          <UnitOfMeasure>EA</UnitOfMeasure>
+        </ItemDetail>
+      </ItemOut>
+    </OrderRequest>
+  </Request>
+</cXML>

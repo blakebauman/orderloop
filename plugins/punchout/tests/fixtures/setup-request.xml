@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE cXML SYSTEM "http://xml.cxml.org/schemas/cXML/1.2.069/cXML.dtd">
+<cXML payloadID="1729760000.4321@buyer.example" timestamp="2026-10-24T09:00:00-07:00" xml:lang="en-US">
+  <Header>
+    <From>
+      <Credential domain="NetworkID">
+        <Identity>AN01000000001</Identity>
+      </Credential>
+    </From>
+    <To>
+      <Credential domain="NetworkID">
+        <Identity>orderloop</Identity>
+      </Credential>
+    </To>
+    <Sender>
+      <Credential domain="NetworkID">
+        <Identity>AN01000000001</Identity>
+        <SharedSecret>SECRET</SharedSecret>
+      </Credential>
+      <UserAgent>Procurement 2026</UserAgent>
+    </Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <PunchOutSetupRequest operation="create">
+      <BuyerCookie>34234234ADFSDF234234</BuyerCookie>
+      <Extrinsic name="UserEmail">ann.buyer@northwind.example</Extrinsic>
+      <Extrinsic name="UniqueName">ann</Extrinsic>
+      <Extrinsic name="UserFullName">Ann &amp; Co. Buyer</Extrinsic>
+      <BrowserFormPost>
+        <URL>https://buyer.example/punchout/return?session=1&amp;x=2</URL>
+      </BrowserFormPost>
+      <Contact role="endUser">
+        <Name xml:lang="en">Ann Buyer</Name>
+        <Email>ann.buyer@northwind.example</Email>
+      </Contact>
+      <SupplierSetup>
+        <URL>https://app.orderloop.test/plugins/punchout/cxml/setup</URL>
+      </SupplierSetup>
+    </PunchOutSetupRequest>
+  </Request>
+</cXML>
