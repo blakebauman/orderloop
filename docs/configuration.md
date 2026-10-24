@@ -31,13 +31,14 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 
 ## Catalog variables
 
-The catalog Worker has three variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
+The catalog Worker has four variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
 | `FEED_CHUNK` | `25000` | Products one `FeedImport` split step reads before handing off to the next (a string; `25000` when unset or not a number, `FEED_CHUNK` in core). Lower it only in tests, where `apps/catalog/vitest.config.ts` sets `300` so a small feed spans several steps |
 | `ORDERS_CHANNEL` | `web` | The channel code whose prices feed Order Loop's `products` table (`apps/catalog/src/orders.ts`, `publishKeys`): each active variant priced there in `BASE_CURRENCY` (`USD`) is upserted with its name and price. A channel in another currency writes nothing. Changing it applies to products as they next publish (or on `reindex`); rows already written stay. See [Order Loop's products](architecture.md#order-loops-products) |
+| `LISTING_DELAY_MS` | `0` | The least time before a listing index builds after a change (`ListingIndexer.apply`, `apps/catalog/src/listings.ts`), on top of the 15 s debounce. `0` builds a new category's index at once. The tests set it to an hour and run each build themselves (`runDurableObjectAlarm`), so no build is left running when a test file ends |
 
 ## Compatibility flags
 

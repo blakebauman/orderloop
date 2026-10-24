@@ -91,6 +91,9 @@
     "FEED_CHUNK": "25000",
     // The channel whose prices (in the base currency) Order Loop's orders use: its variants are
     // kept in the `products` table.
-    "ORDERS_CHANNEL": "web"
+    "ORDERS_CHANNEL": "web",
+    // A minimum wait before a listing index builds. 0: a new category's index builds at once.
+    // Tests set it to an hour and run builds themselves, so none is left running at teardown.
+    "LISTING_DELAY_MS": "0"
   }
 }
