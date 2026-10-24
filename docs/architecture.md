@@ -292,12 +292,10 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 in `@orderloop/core/product`; the Worker adds storage and publishing. It has no routes, no
 `workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers (the
 web app, and a read-side `catalog-edge` Worker) are meant to reach it through service bindings.
-Nothing binds to it yet, and the read side, feeds and reindexing are not built, so no published page
-or API exposes it.
+Nothing binds to it yet and the read side is not built, so no published page or API exposes it.
 
 `CatalogApi` (`apps/catalog/src/api.ts`) is a `WorkerEntrypoint` implementing `ProductCatalogRpc`
-(`packages/core/src/product/api.ts`) except `startFeed`, `feedStatus`, `listFeeds` and `reindex`.
-It never touches storage itself:
+(`packages/core/src/product/api.ts`). It never touches storage itself:
 
 | Method | What it does |
 |---|---|
@@ -306,6 +304,9 @@ It never touches storage itself:
 | `getProduct`, `resolveAlias` | Read a product from its shard; read which product key holds a SKU, GTIN or slug from the alias's shard (`aliasShard`) |
 | `putType`, `listTypes` | Product types, through `CatalogMeta` |
 | `putChannel`, `listChannels`, `putCategories`, `listCategories` | Channels and categories, through `CatalogMeta`. The writes answer with a `Result` (`{ ok: true, … }` or `{ ok: false, issues }`), as `putType` does |
+| `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part), records the feed in `CatalogFeeds` as `queued`, starts the `FeedImport` Workflow with the feed id as its instance id and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
+| `feedStatus(id)`, `listFeeds(limit)` | A feed's `FeedStatus` (`null` for an unknown id), or the most recent feeds first (20 by default, between 1 and 100) |
+| `reindex(by)` | Calls `republishAll` on all 64 shards, which queue every product not already waiting in their `outbox` for the publisher (so repeating it queues nothing twice), and answers `{ queued }`, the number of products on the shards. It waits for no publishing: each shard's alarm does that |
 
 The isolate keeps a copy of the config (every type version, every channel, the `rev` counter) for 2
 seconds. A product that names a type this copy lacks refreshes it once before being refused, and
@@ -348,7 +349,40 @@ may only add (`typeChangeIssues`), and a new type starts at version 1. A channel
 must be one of its `locales`. Categories refuse unknown parents and cycles. It publishes each
 channel's category tree to R2 (`docs/f1/<channel>/<locale>/categories.json`) when a channel or
 categories change. A changed channel currency or locale list reaches documents already published
-only when they are re-rendered, which waits for `reindex`.
+only when they are re-rendered, which `reindex` does.
+
+### Feed import
+
+A feed is a CSV or NDJSON file of products. `CatalogApi.startFeed` stores it, and the `FeedImport`
+Workflow (`orderloop-catalog-feed`, `apps/catalog/src/feed-import.ts`; up to 10,000 steps) turns it
+into shard batches in steps that each read a bounded slice of the file:
+
+1. `read header` reads the first MiB of a CSV for its header row (`csvHeader`: the `key` and `sku` columns are required, else the feed fails) and the file's size. An NDJSON feed has no header and starts at byte 0, line 1.
+2. `split <n>` reads up to `FEED_CHUNK` products (25,000; the `FEED_CHUNK` variable) from the byte offset the last chunk ended at, always a product boundary, with a ranged R2 read. It validates each product against the catalog's types (`validateProduct`), groups the valid ones by `productShard`, writes one part per shard to R2 (`feeds/<id>/parts/<chunk>-<shard>.ndjson`) and sends one `FEED_PARTS` queue message per part (in sends of 100). It returns the offset and row to resume from, so a feed of any size is many short steps; the step retries up to 3 times (10 seconds, exponential).
+3. `record <n>` adds the chunk's rows, parts, rejected rows and error samples to `CatalogFeeds` (by chunk number, so a replay counts once).
+4. After the last chunk, `split done` moves the feed to `applying`. A `check <n>` step then compares parts applied with parts produced; until they match the Workflow waits for an `applied` event (`applied <n>`, up to a minute, then looks again). `finish` marks the feed `done`. Any error marks it `failed` (`fail`, with the message as `failure`) and rethrows.
+
+`CsvRecord` and `NdjsonRecord` carry `end`, the byte offset past each record, which is what makes the
+offsets a resumable cursor; the parsers therefore require UTF-8 and fail on invalid bytes, and they
+cancel the stream when the reader stops early (a full chunk). A row's number is its CSV record or
+NDJSON line number (the header is row 1), and a product's rows are numbered from its first.
+
+The queue consumer (`queue` in `index.ts`, batches of 10, `max_batch_timeout` 1 second) calls
+`applyPart` for each message: it reads the part from R2, sends the shard one `apply` batch with the
+batch id `<feed>:<part>` and the config `rev` the chunk was validated against, counts the results
+(`created`, `updated`, `unchanged`, `rejected`) and records the part with `CatalogFeeds`; the part
+that completes an `applying` feed wakes the Workflow with `sendEvent`. A failed delivery retries
+after `10 * attempts` seconds; the fifth failed delivery (queue `max_retries` 4) calls `failPart`,
+which records the part's rows as rejected with one error (`part <id> failed: …`) and acks. The queue has a
+dead-letter queue (`orderloop-catalog-feed-parts-dlq`), but `failPart` acks first, so a message
+reaches it only if the handler itself throws (`failPart` failing, say) until the queue gives up.
+Part ids are deterministic and the shard batch id is the part id, so a retried step or a redelivered
+message never applies a row twice.
+
+**`CatalogFeeds`** is one Durable Object (`feeds`) holding every feed's `FeedStatus`: `queued`,
+`splitting`, `applying`, `done` or `failed`, with `rows`, `parts`, `partsDone`, the four counts and
+at most 100 `errors` (`FEED_ERRORS`, by row). Rejected rows come from validation (the Workflow) or
+from a shard (`already used by <key>`).
 
 Both Durable Object namespaces are reached only through `apps/catalog/src/config.ts` (`meta`,
 `shard`, `shardFor`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
@@ -370,6 +404,9 @@ any other value throws). See [Data residency](data-model.md#data-residency).
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite, migration tag `v1`), 64 of them |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
+| `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
+| `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
+| `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees |
 | `CARDS` | catalog | KV namespace of listing cards; created by `provision.sh` |
 

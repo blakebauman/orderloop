@@ -6,7 +6,7 @@ OrderLoop deploys as three Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
-| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard` and `CatalogMeta` Durable Objects, an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
+| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, a queue for feed parts (`orderloop-catalog-feed-parts`, with a dead-letter queue), an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
 | `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
 | `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
 
@@ -17,7 +17,7 @@ catalog binds neither.
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts queue and its dead-letter queue, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm run deploy                                # catalog, then engine (web binds to it), then web
 ```
@@ -45,7 +45,7 @@ something else entirely.
    The catalog has no callers yet; it goes first so that the Workers that come to bind to it always
    find the version they expect.
 
-Workflow names (`orderloop-order`, `orderloop-replenish`) must be unique in the account.
+Workflow names (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`) and queue names must be unique in the account. The catalog's queue consumer needs its queue to exist, so run `provision.sh` before the first deploy that carries the feed code; an existing deployment re-runs it (see [Operations](operations.md#adding-a-customer)).
 
 ## Email intake
 

@@ -54,7 +54,7 @@ breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine and
 | `product-routing.test.ts` | The catalog's frozen layout: FNV-1a 64 against the published vectors and a BigInt reference for UTF-8; golden shard, alias-shard and search-shard numbers for fixed keys (never update them: a change strands stored products); 64 and 16 shards; even spread; `productUid` packing into 32 bits and refusing to overflow; `canonicalJson` and `contentHash` ignoring key order and seeing any change |
 | `product-model.test.ts` | Product types refused when they can't be indexed or told apart (enum without values, localized non-text, sorting non-numbers, duplicate codes, json filters, bad variant axes); `typeChangeIssues` allowing only additions; `validateProduct` pinning the type version, defaulting the primary category and naming each bad attribute, duplicate SKU, repeated or missing variant options, bad slug and unknown type; `productAliases`; `renderForChannel` resolving locales with fallback, enum labels, channel and variant prices, cards, search text and the index entry, and publishing nothing for drafts or unlisted products (fixture: `tests/fixtures/product.ts`) |
 | `product-listing.test.ts` | The binary listing index against a brute-force oracle on 3,000 pseudo-random products: dense (bitset) and sparse (list) term filters, ranges, both price sorts, disjunctive facet counts; cursor paging to the last page; range buckets with min and max; an unknown sort and foreign bytes refused; an empty category |
-| `product-feed.test.ts` | Streaming CSV records (quotes, `""`, newlines inside fields, CRLF, BOM, UTF-8 split across chunks, an unterminated quote) and NDJSON lines (bad lines reported by number); CSV rows grouped into products with cells read by attribute kind and channel prices in minor units; a bad row reported against its product while later rows still parse; `key` and `sku` columns required |
+| `product-feed.test.ts` | Streaming CSV records (quotes, `""`, newlines inside fields, CRLF, BOM, UTF-8 split across chunks, an unterminated quote, bytes that aren't UTF-8 failing) and NDJSON lines (bad lines reported by number); each record's `end` offset as a cursor: a ranged read from the `end` of any record yields exactly the records after it, at the same offsets, for CSV and NDJSON; CSV rows grouped into products with cells read by attribute kind and channel prices in minor units; a bad row reported against its product while later rows still parse; resuming mid-file from a product boundary with the saved header gives the rest of the products; `key` and `sku` columns required |
 
 ### Adding a planner test
 
@@ -144,6 +144,7 @@ type, a `web` channel (`en` and `fr`, USD) and a two-level category tree once, b
 products with unique keys, SKUs and slugs, and `settle()` runs every shard's alarm by hand until
 the outbox is empty, so a test reads the published R2 and KV objects deterministically. Product
 rendering and routing are covered in core (`product-*.test.ts`), not repeated here.
+`tests/feeds.test.ts` covers feeds and reindexing in the same environment (below).
 
 | Group | Covers |
 |---|---|
@@ -152,6 +153,21 @@ rendering and routing are covered in core (`product-*.test.ts`), not repeated he
 | shard batches | A batch id is applied once (a repeat with different rows returns the first results and stores nothing new); a shard refuses to be called as another shard number |
 | unpublishing | A draft's documents, cards and alias pointers are deleted while it still owns its SKUs, and come back when it is active again; a dropped variant's pointer goes; deleting a product removes its documents and claims, and an unknown key is `unchanged` |
 | types, channels and categories | Types add versions only (a removed attribute is refused with a reason, a new type must start at 1) and an unversioned product pins to the latest; categories with an unknown parent or a cycle are refused and the published tree has localized names; a channel whose default locale isn't published is refused |
+
+### Feeds
+
+`apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
+
+| Test | Covers |
+|---|---|
+| CSV feed | 1,000 products of two variant rows each across several steps: counts of `created` and `rejected`, `parts` equal to `partsDone`, rejected rows reported by their row number and product key with the attribute named; a product stored with both variants; the file again gives `unchanged` for every valid product and the same rejections; `listFeeds` newest first |
+| NDJSON feed | A SKU claimed twice across shards is a shard-level refusal reported with its line (`already used`), and a line that isn't JSON is `{ row, message: 'invalid JSON' }`, in a file delivered in 7-byte reads |
+| unusable header | A CSV with no `key` and `sku` columns ends `failed` with the reason in `failure` |
+| `storeStream` | A stream just over 10 MiB is stored as a multipart upload, with the right size |
+| reindex | A published document deleted from R2 is back after `reindex` and the shards' alarms, and `queued` counts the products |
+
+miniflare logs "Worker's code had hung" once per Workflow instance in these tests (the engine's
+Workflow tests log it too, 34 times in `orders.test.ts`). It is harmless: the tests pass.
 
 ## Design
 
@@ -196,7 +212,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `new-order.test.ts` | The New order lines grammar (each spelling, no number as one; no SKU, zero or negative, two numbers and SKUs outside the catalog are issues, not guesses); a catalog click adds a row or one more; `summarizeFlow` names where a flow asks a person, what it waits for and what it undoes, and whether it reads a document or routes fulfillment |
 | `scenarios.test.ts` | Every demo scenario targets a valid seeded flow of its model; money, relative time, UTC date and duration formatting; status-to-token mapping |
 
-`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
+`scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
 
 `scripts/fleet.test.ts` also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
 

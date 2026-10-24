@@ -15,10 +15,39 @@
       // The source of truth: products and alias claims, 64 shards by key (core's productShard).
       { "name": "SHARD", "class_name": "CatalogShard" },
       // One object: product types, channels and categories.
-      { "name": "META", "class_name": "CatalogMeta" }
+      { "name": "META", "class_name": "CatalogMeta" },
+      // One object: every feed's progress.
+      { "name": "FEEDS", "class_name": "CatalogFeeds" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CatalogShard", "CatalogMeta"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CatalogShard", "CatalogMeta"] },
+    { "tag": "v2", "new_sqlite_classes": ["CatalogFeeds"] }
+  ],
+  "workflows": [
+    {
+      // Splits one feed file into shard parts, a chunk of products per step.
+      "name": "orderloop-catalog-feed",
+      "binding": "FEED_IMPORT",
+      "class_name": "FeedImport",
+      "limits": { "steps": 10000 }
+    }
+  ],
+  "queues": {
+    "producers": [{ "binding": "FEED_PARTS", "queue": "orderloop-catalog-feed-parts" }],
+    "consumers": [
+      {
+        // Each message is one feed part for one shard.
+        "queue": "orderloop-catalog-feed-parts",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 4,
+        "dead_letter_queue": "orderloop-catalog-feed-parts-dlq"
+      }
+    ]
+  },
+  // Feed steps parse and validate thousands of products each.
+  "limits": { "cpu_ms": 300000 },
   // Published documents (product docs, alias pointers, category trees, listing indexes), read by
   // catalog-edge. Strongly consistent, so a purge is never undone by a stale read.
   "r2_buckets": [{ "binding": "PUBLISHED", "bucket_name": "orderloop-catalog" }],
@@ -28,6 +57,8 @@
     // Where the shards keep their data (`eu`, `fedramp`), as the deployment's D1 and R2 do; set
     // from the registry. Empty leaves them where Cloudflare places them. Set it only before the
     // first product: changing it later strands what exists.
-    "DATA_JURISDICTION": ""
+    "DATA_JURISDICTION": "",
+    // Products a feed step reads before handing off to the next one (tests make it small).
+    "FEED_CHUNK": "25000"
   }
 }

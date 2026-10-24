@@ -232,6 +232,8 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 | `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published |
 | `settings` | `shard` (the number this object was first called as; a call as another number throws) and `seq` (the next `uid` sequence) |
 
+`CatalogFeeds` (`feeds`): `feeds` (`id`, `created_at`, `body`: the `FeedStatus` as JSON, newest listed first), `chunks` (`feed`, `chunk`) and `parts` (`feed`, `part`), the last two being the keys that make recording a split chunk or an applied part idempotent. Feeds and their rows are kept; nothing deletes them.
+
 `CatalogMeta` (`meta`): `types` (`code`, `version`, `body`, `by`, `at`; every version is kept),
 `channels` and `categories` (`code`, `body`) and `settings` (`rev`, which moves on every type or
 channel change).
@@ -245,6 +247,15 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
+
+Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and expire:
+
+| Key | Holds |
+|---|---|
+| `feeds/<id>/source.<csv or ndjson>` | The uploaded feed, as streamed in |
+| `feeds/<id>/parts/<chunk>-<shard>.ndjson` | One chunk's validated products for one shard, a `{ row, data }` JSON object a line |
+
+`scripts/provision.sh` adds an R2 lifecycle rule named `feeds` on that prefix that expires objects after 30 days, so a feed is retained only for as long as an import can need it (see [Operations](operations.md#adding-a-customer)).
 
 Listing indexes (`idx/f1/<channel>/<category>.bin`) are defined in core but not written yet.
 

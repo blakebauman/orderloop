@@ -47,9 +47,10 @@ With the suffix, deployment `acme` gets these resource names:
 | Web Worker | `orderloop-web-acme`, at `acme.orderloop.app` |
 | Engine Worker | `orderloop-engine-acme` (the web Worker's `ENGINE` binding points at it) |
 | Catalog Worker | `orderloop-catalog-acme` |
-| Workflows | `orderloop-order-acme`, `orderloop-replenish-acme` (Workflow names are unique per account) |
+| Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme` (Workflow names are unique per account) |
 | D1 | `orderloop-acme` |
-| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents) |
+| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents and feed files) |
+| Queues | `orderloop-catalog-feed-parts-acme` and its dead-letter queue `orderloop-catalog-feed-parts-dlq-acme` (queue names are unique per account) |
 | Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
 | AI Gateway | `orderloop-acme` (`AI_GATEWAY_ID`) |
 | OAuth KV | created on the first deploy, bound to that web Worker |
@@ -70,6 +71,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database, the R2 bucket and the catalog's R2 bucket (in the jurisdiction; the Durable Objects get theirs from each Worker's `DATA_JURISDICTION`, rendered at deploy), the catalog's KV namespace (KV has none; its id is written as `catalogKvId`), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs on unless `aiGatewayLogs` is `false`), and the GitHub environment. For a gateway that already exists, it compares the gateway's log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway, so change it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**).
+   It creates the catalog's two feed queues (the catalog's deploy fails while its consumer queue doesn't exist) and adds a lifecycle rule `feeds` on the catalog bucket that expires `feeds/` (uploaded feed files and their parts) after 30 days; both are skipped with a message when they already exist.
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY` and `DATA_KEY` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without it. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
@@ -86,6 +88,8 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    `.secrets/<id>/setup-code`. They enter it with their email and a password of their own, which
    creates their admin account and signs them in; they add their team from there. The code works
    once. Until then the workspace refuses every request but `/setup`.
+
+**Deployments that predate feeds.** Provisioning only runs when you run it, and CI never does. A deployment provisioned before the catalog's feed import needs the queues and the `feeds/` rule too: run `./scripts/provision.sh <id>` again, before the deploy that carries the feed code (re-running is safe and sets no secrets once the web Worker exists). The script keeps a queue that already exists (`queues info`) and stops if one can neither be found nor created, since a deploy fails without its consumer's queue; it replaces the `feeds` lifecycle rule on each run. The `orderloop` deployment's queues and `feeds` rule were created through the Cloudflare API rather than by `provision.sh` (on 2026-10-23); re-running the script for it changes nothing.
 
 A deployment without `d1Id` or `catalogKvId` stops the whole CI plan, so provision a customer before merging their
 file, or merge it with `"hold": true`.
@@ -255,5 +259,5 @@ A deployment holds only that customer's data, so removing it is the erasure:
    `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, which removes their Durable
-   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the AI
+   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the two feed queues, the AI
    Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.

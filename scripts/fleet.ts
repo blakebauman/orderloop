@@ -291,6 +291,8 @@ export const names = (d: Deployment) => ({
   catalog: `orderloop-catalog${d.suffix}`,
   catalogR2: `orderloop-catalog${d.suffix}`,
   catalogKv: `orderloop-catalog-cards${d.suffix}`,
+  catalogFeedParts: `orderloop-catalog-feed-parts${d.suffix}`,
+  catalogFeedPartsDlq: `orderloop-catalog-feed-parts-dlq${d.suffix}`,
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: a wrangler config is JSON read as is
@@ -362,6 +364,17 @@ export function renderCatalog(base: Config, d: Deployment): Config {
   config.kv_namespaces = config.kv_namespaces.map((k: Config) =>
     k.binding === 'CARDS' ? { ...k, id: d.catalogKvId } : k,
   );
+  // Workflow and queue names are unique per account, so each deployment's carry its suffix.
+  config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
+  const queue = (name: string) => `${name}${d.suffix}`;
+  config.queues = {
+    producers: config.queues.producers.map((p: Config) => ({ ...p, queue: queue(p.queue) })),
+    consumers: config.queues.consumers.map((c: Config) => ({
+      ...c,
+      queue: queue(c.queue),
+      ...(c.dead_letter_queue ? { dead_letter_queue: queue(c.dead_letter_queue) } : {}),
+    })),
+  };
   // The shards keep their data where the deployment's other data lives.
   if (d.jurisdiction) config.vars = { ...config.vars, DATA_JURISDICTION: d.jurisdiction };
   return config;
@@ -472,6 +485,8 @@ function shellNames(id: string | undefined) {
     AI_GATEWAY: n.aiGateway,
     CATALOG_R2: n.catalogR2,
     CATALOG_KV: n.catalogKv,
+    CATALOG_FEED_PARTS: n.catalogFeedParts,
+    CATALOG_FEED_PARTS_DLQ: n.catalogFeedPartsDlq,
     DOMAIN: d.domain,
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',
