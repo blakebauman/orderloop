@@ -11,6 +11,7 @@ import {
   type OrderState,
   type PaymentEvent,
   parseMailboxes,
+  pluginBinding,
   runHealthChecks,
   type StartOrderInput,
   type StartOrderOnceInput,
@@ -23,7 +24,8 @@ import { handleMcp, MCP_PATH } from './mcp';
 import { orderAgent, scopedEnv } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
-import { pluginStatuses, pluginUsage } from './plugins';
+import { installedPlugins } from './plugin-host';
+import { manifests, plugin, pluginStatuses, pluginUsage } from './plugins';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
 import { ucpProfile } from './ucp/config';
@@ -124,7 +126,7 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     const statuses = await pluginStatuses(this.env, true);
     const plugins = Object.fromEntries(
       statuses.map((p) => [
-        p.binding.toLowerCase(),
+        pluginBinding(p.id).toLowerCase(),
         async () => {
           if (!p.healthy) throw new Error(p.error);
         },
@@ -147,5 +149,15 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   pluginUsage(id: string) {
     return pluginUsage(this.env, id);
+  }
+
+  async pluginFetch(id: string, request: Request) {
+    // Only a sandboxed plugin's pages come this way; a Worker plugin's the web app reaches itself.
+    if (!installedPlugins(this.env).some((p) => p.id === id && p.runtime === 'sandboxed'))
+      return new Response('Not found', { status: 404 });
+    await manifests(this.env);
+    const stub = await plugin(this.env, id, 'serve');
+    if (!stub) return new Response('Not found', { status: 404 });
+    return stub.fetch(request);
   }
 }

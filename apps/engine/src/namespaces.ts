@@ -32,6 +32,10 @@ export const orderAgent = (env: Env, orderId: string) =>
 
 export const a2aAgent = (env: Env, name: string) => scope(env, env.A2A_AGENT).getByName(name);
 
+/** A sandboxed plugin's own storage, in the deployment's jurisdiction like every other object. */
+export const pluginStorage = (env: Env, pluginId: string) =>
+  scope(env, env.PLUGIN_STORAGE).getByName(pluginId);
+
 /** `env` with each namespace in the jurisdiction, for the Agents SDK's own routing. */
 export const scopedEnv = (env: Env): Env => ({
   ...env,

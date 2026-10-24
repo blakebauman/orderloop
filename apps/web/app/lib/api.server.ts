@@ -225,9 +225,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (denied) return denied;
       if (parts.length === 1)
         return json({
-          plugins: (await pluginStatuses()).map(({ binding, manifest: m, healthy, error }) => ({
-            binding,
-            id: m?.id ?? null,
+          plugins: (await pluginStatuses()).map(({ id, runtime, manifest: m, healthy, error }) => ({
+            id,
+            runtime,
             name: m?.name ?? null,
             version: m?.version ?? null,
             nodes: m?.nodes.map((n) => n.type) ?? [],

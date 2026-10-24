@@ -35,6 +35,20 @@ for p in $PLUGINS; do
   node scripts/fleet.ts set-plugin-d1 "$id" "$p" "$puuid"
   echo "Recorded plugins.$p.d1Id $puuid in deployments/$id.jsonc"
 done
+# A deployment on its own Cloudflare account keeps plugin secrets in that account's Secrets Store
+# (docs/plugins.md, "Secrets"): one store an account, made in the dashboard or with
+# `wrangler secrets-store store create <name> --remote`; its id goes in the registry's secretsStore.
+if [ -n "$SECRETS_STORE" ]; then
+  if wrangler secrets-store store list --remote 2>/dev/null | grep -q "$SECRETS_STORE"; then
+    echo "Secrets Store $SECRETS_STORE found; add each plugin's PLUGIN_<ID>_<NAME> to it"
+  else
+    echo "Secrets Store $SECRETS_STORE not found in this account: create it, or fix secretsStore.storeId" >&2
+    exit 1
+  fi
+fi
+for p in $SANDBOXED_PLUGINS; do
+  echo "Plugin $p is sandboxed: nothing to create (the deploy publishes its bundle)"
+done
 
 # The catalog: published documents in R2, listing cards in KV (KV has no jurisdictions).
 wrangler r2 bucket create "$CATALOG_R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $CATALOG_R2 already exists"

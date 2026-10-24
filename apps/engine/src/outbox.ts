@@ -21,7 +21,8 @@ import {
 import { createDb, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
 import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { openSecret } from './data-key';
-import { deliverToPlugin, manifests, pluginBindings } from './plugins';
+import { installedPlugins } from './plugin-host';
+import { deliverToPlugin, hasPlugins, manifests } from './plugins';
 
 const TIMEOUT_MS = 10_000;
 /** The subscription id of a plugin's deliveries: `plugin:<id>`. */
@@ -42,7 +43,7 @@ export async function emit(
     .filter((m) => subscribedTo(m.events, event))
     .map((m) => ({ id: `${PLUGIN_SUBSCRIPTION}${m.id}` }));
   const targets = [...subs, ...plugins];
-  if (!targets.length && !pluginBindings(env).length) return { delivered: 0, pending: 0 };
+  if (!targets.length && !hasPlugins(env)) return { delivered: 0, pending: 0 };
 
   const secrets = new Map(subs.map((s) => [s.id, s]));
   const ids = targets.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
@@ -83,20 +84,35 @@ export async function emit(
         ),
       ),
     );
-  // Every subscriber at once: one slow receiver must not use up the step's time for the rest.
-  const sent = await Promise.all(
-    open.map(async (row) => {
-      if (row.subscriptionId.startsWith(PLUGIN_SUBSCRIPTION)) {
-        const id = row.subscriptionId.slice(PLUGIN_SUBSCRIPTION.length);
-        const res = await deliverToPlugin(env, id, JSON.parse(row.payload) as OutboundPayload);
-        return { row, res };
-      }
-      const sub = secrets.get(row.subscriptionId);
-      if (!sub) return null;
-      const res = await send(env, sub, row.id, row.event, row.payload);
+  const deliver = async (row: (typeof open)[number]) => {
+    if (row.subscriptionId.startsWith(PLUGIN_SUBSCRIPTION)) {
+      const id = row.subscriptionId.slice(PLUGIN_SUBSCRIPTION.length);
+      const res = await deliverToPlugin(env, id, JSON.parse(row.payload) as OutboundPayload);
       return { row, res };
-    }),
+    }
+    const sub = secrets.get(row.subscriptionId);
+    if (!sub) return null;
+    const res = await send(env, sub, row.id, row.event, row.payload);
+    return { row, res };
+  };
+  // Sandboxed plugins one delivery at a time (Worker Loader limits how many Dynamic Workers one
+  // request has in flight); every other subscriber at once, so one slow receiver must not use up
+  // the step's time for the rest.
+  const sandboxed = new Set(
+    installedPlugins(env).flatMap((p) => (p.runtime === 'sandboxed' ? [p.id] : [])),
   );
+  const isSandboxed = (row: (typeof open)[number]) =>
+    row.subscriptionId.startsWith(PLUGIN_SUBSCRIPTION) &&
+    sandboxed.has(row.subscriptionId.slice(PLUGIN_SUBSCRIPTION.length));
+  const [sent, inTurn] = await Promise.all([
+    Promise.all(open.filter((r) => !isSandboxed(r)).map(deliver)),
+    (async () => {
+      const out = [];
+      for (const row of open.filter(isSandboxed)) out.push(await deliver(row));
+      return out;
+    })(),
+  ]);
+  sent.push(...inTurn);
   const done = sent.filter((x) => x !== null);
   if (done.length) {
     const [u, ...us] = done.map(({ row, res }) =>

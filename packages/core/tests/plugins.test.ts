@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   checkExecResult,
   checkProvideResult,
+  egressAllows,
   type FlowGraph,
   flowPlugins,
   type Order,
@@ -77,6 +78,8 @@ describe('plugin manifests', () => {
       personalData: 'redact',
       secrets: [],
       provides: [],
+      egress: [],
+      limits: {},
     });
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
   });
@@ -358,5 +361,66 @@ describe('providers', () => {
         options: ['x'.repeat(PLUGIN_RESULT_MAX_BYTES)],
       }),
     ).toThrow(/limit/);
+  });
+});
+
+describe('sandboxed plugins', () => {
+  const sandboxed = (over: Record<string, unknown> = {}) =>
+    parseManifest(
+      manifest({
+        id: 'carrier',
+        nodes: [],
+        nav: [],
+        publicPaths: [],
+        egress: ['api.carrier.test'],
+        ...over,
+      }),
+    );
+
+  it('declares egress hosts, limits, and secrets injected into one of them', () => {
+    const m = sandboxed({
+      egress: ['api.carrier.test', '*.labels.test'],
+      limits: { cpuMs: 100 },
+      secrets: [
+        {
+          name: 'API_KEY',
+          inject: { host: 'api.carrier.test', header: 'Authorization', format: 'Bearer {}' },
+        },
+        { name: 'HOOK', expose: true },
+      ],
+    });
+    expect(m.limits).toEqual({ cpuMs: 100 });
+    expect(egressAllows(m.egress, 'api.carrier.test')).toBe(true);
+    expect(egressAllows(m.egress, 'eu.labels.test')).toBe(true);
+    expect(egressAllows(m.egress, 'labels.test')).toBe(true);
+    expect(egressAllows(m.egress, 'api.carrier.test.evil')).toBe(false);
+    expect(egressAllows(m.egress, 'xlabels.test')).toBe(false);
+  });
+
+  it('refuses injection outside egress, both modes at once, bad headers and limits over the caps', () => {
+    const inject = (host: string, header = 'Authorization', format = 'Bearer {}') => ({
+      secrets: [{ name: 'K', inject: { host, header, format } }],
+    });
+    expect(() => sandboxed(inject('other.test'))).toThrow(/Inject only into a host in egress/);
+    expect(() => sandboxed(inject('api.carrier.test', 'Cookie'))).toThrow(/not allowed/);
+    expect(() => sandboxed(inject('api.carrier.test', 'Authorization', 'Bearer'))).toThrow(/\{\}/);
+    expect(() =>
+      sandboxed({
+        secrets: [
+          {
+            name: 'K',
+            expose: true,
+            inject: { host: 'api.carrier.test', header: 'X', format: '{}' },
+          },
+        ],
+      }),
+    ).toThrow(/either injected or exposed/);
+    expect(() => sandboxed({ limits: { cpuMs: 5000 } })).toThrow(/limits/);
+    expect(() => sandboxed({ egress: ['http://x.test'] })).toThrow(/egress/);
+  });
+
+  it('reserves ids that would collide with the engine’s plugin variables', () => {
+    for (const id of ['bundles', 'secrets', 'grants', 'key'])
+      expect(() => parseManifest(manifest({ id }))).toThrow(/reserved/);
   });
 });

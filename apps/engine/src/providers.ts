@@ -15,8 +15,10 @@ import {
   type ProvideRequest,
   type ProviderSurface,
   pluginOrder,
+  scrubCredentials,
 } from '@orderloop/core';
-import { manifests, plugin, withTimeout } from './plugins';
+import { knownSecretValues } from './plugin-host';
+import { callPlugin, manifests, plugin, scrubbedValue } from './plugins';
 
 type Ask = Extract<ProvideRequest, { surface: ProviderSurface }>;
 
@@ -57,7 +59,13 @@ export async function provide<R extends Ask>(
   req: ProviderCall<R>,
 ): Promise<Value<R>> {
   const what = `${PROVIDER_SURFACE_LABELS[req.surface]} provider “${id}”`;
-  const stub = plugin(env, id);
+  let stub: Awaited<ReturnType<typeof plugin>>;
+  try {
+    stub = await plugin(env, id);
+  } catch (err) {
+    // A sandboxed bundle that can't be loaded (unpublished, not its pin, an R2 blip): retried.
+    throw fromProvider(new Error(`${what}: ${message(err)}`), id);
+  }
   if (typeof stub?.provide !== 'function')
     throw fromProvider(new NonRetryableError(`${what} is not installed`), id);
   const manifest = (await manifests(env)).find((m) => m.id === id);
@@ -70,7 +78,9 @@ export async function provide<R extends Ask>(
   const quoting = req.stepKey.startsWith('quote#');
   let result: unknown;
   try {
-    result = await withTimeout(
+    result = await callPlugin(
+      env,
+      id,
       stub.provide(sent),
       `${id} (${req.surface} ${req.op})`,
       quoting ? QUOTE_CALL_MS : undefined,
@@ -86,8 +96,8 @@ export async function provide<R extends Ask>(
     throw fromProvider(new NonRetryableError(message(err)), id);
   }
   if (outcome.kind === 'fail') {
-    const failed = `${what}: ${outcome.message}`;
+    const failed = `${what}: ${scrubCredentials(outcome.message, await knownSecretValues(env, id))}`;
     throw fromProvider(outcome.retry ? new Error(failed) : new NonRetryableError(failed), id);
   }
-  return outcome.value;
+  return scrubbedValue(env, id, outcome.value);
 }

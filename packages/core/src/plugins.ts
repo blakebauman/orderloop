@@ -31,9 +31,55 @@ import type { Order } from './types';
 import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
 
 /** Node type prefixes the built-in catalog uses; no plugin may take one as its id. */
-const RESERVED_IDS = new Set(['trigger', 'commerce', 'control', 'ai', 'core', 'orderloop']);
+/**
+ * Ids no plugin may take: the built-in catalog's type prefixes, and those whose binding name would
+ * be one of the engine's own plugin variables (`PLUGIN_BUNDLES`, `PLUGIN_SECRETS`, `PLUGIN_GRANTS`,
+ * `PLUGIN_KEY`).
+ */
+const RESERVED_IDS = new Set([
+  'trigger',
+  'commerce',
+  'control',
+  'ai',
+  'core',
+  'orderloop',
+  'bundles',
+  'secrets',
+  'grants',
+  'key',
+  'storage',
+  'dev-bundles',
+]);
 
-export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{1,30}$/;
+/**
+ * How a deployment runs a plugin: `worker` is its own Worker, bound as `PLUGIN_<ID>`; `sandboxed`
+ * is a Dynamic Worker the engine loads (Worker Loader), with no bindings of its own, its outbound
+ * requests through the engine's egress gateway and its CPU and subrequests capped per call.
+ */
+export const PLUGIN_RUNTIMES = ['worker', 'sandboxed'] as const;
+export type PluginRuntime = (typeof PLUGIN_RUNTIMES)[number];
+
+/** The most a sandboxed plugin may use per call, by what the call is for; the defaults are these. */
+export const PLUGIN_LIMIT_CAPS = {
+  /** A node, a provider op or a compensation, inside an order's step. */
+  call: { cpuMs: 200, subRequests: 20 },
+  /** A page or an event delivery. */
+  serve: { cpuMs: 1000, subRequests: 20 },
+} as const;
+
+/** An egress host: a DNS name, or `*.` and one (which also matches the name itself). */
+const EGRESS_HOST_RE = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** Whether `host` is one of the manifest's `egress` entries. */
+export function egressAllows(egress: readonly string[], host: string): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  return egress.some((e) =>
+    e.startsWith('*.') ? h === e.slice(2) || h.endsWith(e.slice(1)) : h === e,
+  );
+}
+
+/** Lower case, digits and single dashes inside: "qbd-sync", never "a--b" or "a-". */
+export const PLUGIN_ID_RE = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,30}$/;
 
 /**
  * The contract version this OrderLoop speaks. A manifest declares the one it was written for, and
@@ -91,7 +137,14 @@ export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replace(
 export const PLUGIN_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,62}$/;
 
 /** Names a plugin's env already has from the deployment, which no secret may take. */
-export const RESERVED_PLUGIN_ENV = new Set(['PLUGIN_KEY', 'PLUGIN_KEY_PREVIOUS', 'DB']);
+export const RESERVED_PLUGIN_ENV = new Set([
+  'PLUGIN_KEY',
+  'PLUGIN_KEY_PREVIOUS',
+  'DB',
+  // The sandbox's capabilities (`secret()` and `pluginDb()` in @orderloop/plugin-sdk).
+  'SECRETS',
+  'STORAGE',
+]);
 
 /**
  * Where a deployment keeps one of a plugin's secrets: in its GitHub environment, named by the
@@ -198,6 +251,31 @@ export const pluginManifestSchema = z
             .regex(PLUGIN_SECRET_NAME_RE, 'Use upper-case letters, digits and underscores'),
           description: z.string().max(200).optional(),
           optional: z.boolean().optional(),
+          /**
+           * Sandboxed plugins: the egress gateway adds the secret to requests to `host` as `header`
+           * (`format` with `{}` for the value), and the plugin itself never sees it.
+           */
+          inject: z
+            .object({
+              // An exact host: a credential never goes to every subdomain of a shared suffix.
+              host: z
+                .string()
+                .regex(EGRESS_HOST_RE, 'A host name')
+                .refine((h) => !h.startsWith('*.'), { message: 'Inject into one exact host' }),
+              header: z
+                .string()
+                .regex(/^[A-Za-z0-9-]{1,64}$/, 'A header name')
+                .refine((h) => !['host', 'cookie', 'content-length'].includes(h.toLowerCase()), {
+                  message: 'That header is not allowed',
+                }),
+              format: z
+                .string()
+                .max(200)
+                .includes('{}', { message: 'Put {} where the value goes' }),
+            })
+            .optional(),
+          /** Sandboxed plugins: readable by the plugin's code (`secret()`), e.g. to verify a signature. */
+          expose: z.boolean().optional(),
         }),
       )
       .max(20)
@@ -207,6 +285,21 @@ export const pluginManifestSchema = z
      * node's Provider field, and the engine calls `provide` instead of the built-in connector.
      */
     provides: z.array(z.enum(PROVIDER_SURFACES)).default([]),
+    /**
+     * Hosts a sandboxed plugin may reach (a name, or `*.` and one); anything else is refused by
+     * the engine's egress gateway, as are private and internal addresses whatever this says.
+     */
+    egress: z
+      .array(z.string().regex(EGRESS_HOST_RE, 'A host name, or *. and one'))
+      .max(20)
+      .default([]),
+    /** What a sandboxed plugin may use per call, at most `PLUGIN_LIMIT_CAPS`. */
+    limits: z
+      .object({
+        cpuMs: z.number().int().positive().max(PLUGIN_LIMIT_CAPS.serve.cpuMs).optional(),
+        subRequests: z.number().int().min(0).max(PLUGIN_LIMIT_CAPS.serve.subRequests).optional(),
+      })
+      .default({}),
   })
   .superRefine((m, ctx) => {
     const prefix = `/plugins/${m.id}/`;
@@ -232,6 +325,20 @@ export const pluginManifestSchema = z
           message: RESERVED_PLUGIN_ENV.has(name) ? 'That name is reserved' : 'Duplicate secret',
         });
       names.add(name);
+    }
+    for (const [i, x] of m.secrets.entries()) {
+      if (x.inject && x.expose)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['secrets', i],
+          message: 'A secret is either injected or exposed, not both',
+        });
+      if (x.inject && !egressAllows(m.egress, x.inject.host))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['secrets', i, 'inject', 'host'],
+          message: 'Inject only into a host in egress',
+        });
     }
     for (const [i, surface] of m.provides.entries()) {
       if (m.provides.indexOf(surface) !== i)
@@ -635,13 +742,15 @@ export interface PluginRpc {
 }
 
 /**
- * One `PLUGIN_*` binding as the engine sees it. `manifest` is what the deployment runs: null when
- * the plugin is refused (its manifest doesn't parse, its id doesn't match the binding, a plugin it
- * requires is missing), and the last good one while the plugin is unreachable. `healthy` is whether
- * the plugin answered with a usable manifest just now.
+ * One installed plugin as the engine sees it: a `PLUGIN_<ID>` binding (`worker`) or a bundle the
+ * deployment pins (`sandboxed`). `manifest` is what the deployment runs: null when the plugin is
+ * refused (its manifest doesn't parse, its id doesn't match, a plugin it requires is missing), and
+ * the last good one while the plugin is unreachable. `healthy` is whether the plugin answered with
+ * a usable manifest just now.
  */
 export type PluginStatus = {
-  binding: string;
+  id: string;
+  runtime: PluginRuntime;
   manifest: PluginManifest | null;
   healthy: boolean;
   error?: string;

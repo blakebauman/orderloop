@@ -76,7 +76,7 @@ afterEach(async () => {
 describe('an installed plugin', () => {
   it('lists its manifest and passes the deep health check', async () => {
     const [s] = await api().pluginCatalog();
-    expect(s).toMatchObject({ binding: 'PLUGIN_EXAMPLE', healthy: true });
+    expect(s).toMatchObject({ id: 'example', runtime: 'worker', healthy: true });
     expect(s!.manifest).toMatchObject({ id: 'example', apiVersion: 1, personalData: 'redact' });
     expect(s!.manifest!.nodes.map((n) => n.type)).toEqual(['example.stamp', 'example.probe']);
     expect((await api().health()).checks).toMatchObject({ plugin_example: 'ok' });

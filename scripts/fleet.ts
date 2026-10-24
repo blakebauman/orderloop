@@ -5,8 +5,13 @@
  *                                                 and plugins/<plugin>/wrangler.<id>.json for each plugin
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
  *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
- *   node scripts/fleet.ts secrets plugin <out> <plugin>  write a plugin's own keys, derived, and its
- *                                                 PLUGIN_<ID>_* secrets from ENV_SECRETS
+ *   node scripts/fleet.ts secrets plugin <out> <plugin> [id]  write a plugin's own keys, derived, and
+ *                                                 its PLUGIN_<ID>_* secrets from ENV_SECRETS (none
+ *                                                 when deployment <id> has a Secrets Store)
+ *   node scripts/fleet.ts secrets sandboxed <engine secrets file> <id>  add PLUGIN_SECRETS for its
+ *                                                 sandboxed plugins (shared account)
+ *   node scripts/fleet.ts check-plugin-secrets <id> <plugin> <manifest.json>  fail if a secret the
+ *                                                 plugin needs isn't set (STORE_SECRET_NAMES or ENV_SECRETS)
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
@@ -148,12 +153,51 @@ export type Deployment = {
    */
   stripePublishableKey?: string;
   /**
-   * Installed plugins (plugins/<id>/), each with its own Worker and D1 database, bound to the
-   * engine and the web Worker as PLUGIN_<ID>. `d1Id` is set by scripts/provision.sh. Removing an
-   * entry uninstalls the plugin on the next deploy; see docs/plugins.md.
+   * Installed plugins (plugins/<id>/). A `worker` plugin (the default `runtime`) has its own Worker
+   * and D1 database, bound to the engine and the web Worker as PLUGIN_<ID>; `d1Id` is set by
+   * scripts/provision.sh. A `sandboxed` one is a bundle CI publishes to the deployment's DOCS
+   * bucket, pinned in the engine's PLUGIN_BUNDLES, and loaded by the engine; it needs no Worker,
+   * binding or database of its own. `secrets` names the plugin's secrets, needed with
+   * `secretsStore`. Removing an entry uninstalls the plugin on the next deploy; see docs/plugins.md.
    */
-  plugins: Record<string, { d1Id?: string; personalData?: 'send' }>;
+  plugins: Record<string, PluginEntry>;
+  /**
+   * The deployment's Cloudflare Secrets Store, for a deployment on its own Cloudflare account:
+   * plugin secrets are then read from it (as PLUGIN_<ID>_<NAME>) instead of the GitHub environment.
+   * Leave it out on a shared account (one store and 100 secrets an account).
+   */
+  secretsStore?: { storeId: string };
 };
+
+export type PluginEntry = {
+  d1Id?: string;
+  personalData?: 'send';
+  runtime?: 'worker' | 'sandboxed';
+  secrets?: string[];
+};
+
+/** Ids whose binding would be one of the engine's plugin variables (`RESERVED_IDS` in core). */
+const RESERVED_PLUGIN_IDS = new Set([
+  'bundles',
+  'secrets',
+  'grants',
+  'key',
+  'storage',
+  'dev-bundles',
+]);
+
+const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,62}$/;
+
+/** How a deployment runs a plugin. */
+export const runtimeOf = (d: Deployment, p: string) => d.plugins[p]?.runtime ?? 'worker';
+export const workerPlugins = (d: Deployment) =>
+  Object.keys(d.plugins)
+    .filter((p) => runtimeOf(d, p) === 'worker')
+    .sort();
+export const sandboxedPlugins = (d: Deployment) =>
+  Object.keys(d.plugins)
+    .filter((p) => runtimeOf(d, p) === 'sandboxed')
+    .sort();
 
 /** Test fixtures in plugins/ that no deployment may install. */
 const FIXTURE_PLUGINS = new Set(['example', 'fixture-carrier']);
@@ -177,7 +221,7 @@ function readJsonc(path: string): Record<string, unknown> {
 
 export function toDeployment(raw: Record<string, unknown>, file = 'deployment'): Deployment {
   const id = raw.id;
-  if (typeof id !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(id))
+  if (typeof id !== 'string' || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,30}$/.test(id))
     throw new Error(`${file}: id must be lowercase letters, digits and dashes`);
   // OrderLoop's own deployments name their domain; a customer's comes from the id.
   if (RESERVED.has(id) && typeof raw.domain !== 'string')
@@ -262,11 +306,26 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins))
     throw new Error(`${file}: plugins must be an object of plugin id → { "d1Id"? }`);
   for (const [p, v] of Object.entries(plugins as Record<string, unknown>)) {
-    if (!/^[a-z][a-z0-9-]{1,30}$/.test(p))
+    if (!/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,30}$/.test(p))
       throw new Error(
         `${file}: plugins.${p} is not a plugin id (lowercase letters, digits, dashes)`,
       );
     if (FIXTURE_PLUGINS.has(p)) throw new Error(`${file}: plugins.${p} is a test fixture`);
+    if (RESERVED_PLUGIN_IDS.has(p)) throw new Error(`${file}: plugins.${p} is a reserved id`);
+    const rt = (v as { runtime?: unknown } | null)?.runtime;
+    if (rt !== undefined && rt !== 'worker' && rt !== 'sandboxed')
+      throw new Error(`${file}: plugins.${p}.runtime must be "worker" or "sandboxed"`);
+    const names = (v as { secrets?: unknown } | null)?.secrets;
+    if (
+      names !== undefined &&
+      (!Array.isArray(names) ||
+        names.some(
+          (n) => typeof n !== 'string' || !SECRET_NAME_RE.test(n) || PLUGIN_RESERVED_ENV.has(n),
+        ))
+    )
+      throw new Error(`${file}: plugins.${p}.secrets must be a list of secret names (upper case)`);
+    if (rt === 'sandboxed' && (v as { d1Id?: unknown }).d1Id !== undefined)
+      throw new Error(`${file}: plugins.${p} is sandboxed: it has no D1 database (drop d1Id)`);
     const d1 = (v as { d1Id?: unknown } | null)?.d1Id;
     const pd = (v as { personalData?: unknown } | null)?.personalData;
     if (pd !== undefined && pd !== 'send')
@@ -274,7 +333,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
         `${file}: plugins.${p}.personalData can only be "send" (to grant buyer details)`,
       );
     const extra = Object.keys((v as object) ?? {}).filter(
-      (k) => k !== 'd1Id' && k !== 'personalData',
+      (k) => !['d1Id', 'personalData', 'runtime', 'secrets'].includes(k),
     );
     if (extra.length)
       throw new Error(`${file}: plugins.${p} has unknown keys: ${extra.join(', ')}`);
@@ -283,8 +342,20 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       v === null ||
       (d1 !== undefined && (typeof d1 !== 'string' || !d1))
     )
-      throw new Error(`${file}: plugins.${p} must be { "d1Id"?, "personalData"? }`);
+      throw new Error(
+        `${file}: plugins.${p} must be { "d1Id"?, "personalData"?, "runtime"?, "secrets"? }`,
+      );
   }
+  const store = raw.secretsStore;
+  if (
+    store !== undefined &&
+    (typeof store !== 'object' ||
+      store === null ||
+      Object.keys(store).join() !== 'storeId' ||
+      typeof (store as { storeId?: unknown }).storeId !== 'string' ||
+      !/^[0-9a-f]{32}$/.test((store as { storeId: string }).storeId))
+  )
+    throw new Error(`${file}: secretsStore must be { "storeId": "<32 hex characters>" }`);
   // A plugin's secrets are PLUGIN_<ID>_<NAME>, so with ids "a" and "a-b" both installed,
   // PLUGIN_A_B_X would be a's B_X and b's X at once.
   for (const a of Object.keys(plugins))
@@ -321,6 +392,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     payments,
     ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
     plugins: plugins as Deployment['plugins'],
+    ...(store ? { secretsStore: { storeId: (store as { storeId: string }).storeId } } : {}),
   };
 }
 
@@ -343,7 +415,7 @@ export function loadDeployments(dir = join(ROOT, 'deployments')): Deployment[] {
   }
   if (list.filter((d) => d.docs).length > 1) throw new Error('only one deployment sets docs');
   for (const d of list)
-    for (const p of Object.keys(d.plugins))
+    for (const p of workerPlugins(d))
       if (!existsSync(join(ROOT, 'plugins', p, 'wrangler.jsonc')))
         throw new Error(`${d.id}: plugin "${p}" has no plugins/${p}/wrangler.jsonc`);
   return list;
@@ -372,11 +444,29 @@ export const names = (d: Deployment) => ({
   plugin: (p: string) => `orderloop-plugin-${p}${d.suffix}`,
 });
 
-/** The engine's and web Worker's service bindings to the deployment's plugins. */
+/** The engine's and web Worker's service bindings to the deployment's Worker plugins. */
 function pluginServices(d: Deployment) {
-  return Object.keys(d.plugins)
-    .sort()
-    .map((p) => ({ binding: pluginBinding(p), service: names(d).plugin(p) }));
+  return workerPlugins(d).map((p) => ({ binding: pluginBinding(p), service: names(d).plugin(p) }));
+}
+
+/** A plugin secret's name in the deployment's Secrets Store (and its GitHub environment). */
+export const pluginSecretVar = (p: string, name: string) => `${pluginBinding(p)}_${name}`;
+
+/** The engine's binding for a sandboxed plugin's secret in the Secrets Store (`storeBinding`). */
+export const storeBinding = (p: string, name: string) =>
+  `PLUGIN_SECRET_${pluginBinding(p).slice('PLUGIN_'.length)}__${name}`;
+
+/** Secrets Store bindings: `binding(name)` for each of these plugins' listed secrets. */
+function storeSecrets(d: Deployment, plugins: string[], binding: (p: string, n: string) => string) {
+  const storeId = d.secretsStore?.storeId;
+  if (!storeId) return [];
+  return plugins.flatMap((p) =>
+    (d.plugins[p]?.secrets ?? []).map((n) => ({
+      binding: binding(p, n),
+      store_id: storeId,
+      secret_name: pluginSecretVar(p, n),
+    })),
+  );
 }
 
 /**
@@ -399,6 +489,7 @@ const PLUGIN_CONFIG_KEYS = new Set([
 ]);
 
 export function renderPlugin(base: Config, d: Deployment, p: string): Config {
+  if (runtimeOf(d, p) !== 'worker') throw new Error(`${d.id}: plugin ${p} is sandboxed: no Worker`);
   const d1Id = d.plugins[p]?.d1Id;
   if (!d1Id) throw new Error(`${d.id}: plugin ${p} has no d1Id: run scripts/provision.sh ${d.id}`);
   const extra = Object.keys(base).filter((k) => !PLUGIN_CONFIG_KEYS.has(k));
@@ -418,6 +509,10 @@ export function renderPlugin(base: Config, d: Deployment, p: string): Config {
     database_name: names(d).plugin(p),
     database_id: d1Id,
   }));
+  // On its own account, the deployment's Secrets Store holds the plugin's secrets: each is bound
+  // under its own name (`secret()` in the SDK reads either kind).
+  const store = storeSecrets(d, [p], (_p, n) => n);
+  if (store.length) config.secrets_store_secrets = store;
   return config;
 }
 
@@ -467,6 +562,11 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
   const grants = pluginGrants(d);
   if (grants) config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
+  // Sandboxed plugins' secrets, on a deployment with its own Secrets Store (else PLUGIN_SECRETS,
+  // a secret the deploy writes). PLUGIN_BUNDLES is added by the deploy once it has published them.
+  const store = storeSecrets(d, sandboxedPlugins(d), storeBinding);
+  if (store.length)
+    config.secrets_store_secrets = [...(config.secrets_store_secrets ?? []), ...store];
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
@@ -623,7 +723,7 @@ function render(id: string | undefined) {
     );
     console.log(out);
   }
-  for (const p of Object.keys(d.plugins)) {
+  for (const p of workerPlugins(d)) {
     const out = join(ROOT, 'plugins', p, `wrangler.${d.id}.json`);
     const base = readJsonc(join(ROOT, 'plugins', p, 'wrangler.jsonc'));
     writeFileSync(out, `${JSON.stringify(renderPlugin(base, d, p), null, 2)}\n`);
@@ -636,7 +736,7 @@ export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
   const unprovisioned = list
     .filter(
       (d) =>
-        !d.hold && (!d.d1Id || !d.catalogKvId || Object.values(d.plugins).some((p) => !p.d1Id)),
+        !d.hold && (!d.d1Id || !d.catalogKvId || workerPlugins(d).some((p) => !d.plugins[p]!.d1Id)),
     )
     .map((d) => d.id);
   if (unprovisioned.length)
@@ -663,11 +763,13 @@ export function secretsProblem(d: Deployment, env: Record<string, string | undef
   return null;
 }
 
-function secrets(app: string | undefined, out: string | undefined, id?: string) {
-  if (app !== 'web' && app !== 'engine' && app !== 'plugin')
-    throw new Error('secrets <engine|web|plugin> <out> [id | plugin id]');
-  if (!out) throw new Error('secrets <engine|web|plugin> <out> [id | plugin id]');
-  if (app === 'plugin') return pluginSecrets(out, id);
+function secrets(app: string | undefined, out: string | undefined, id?: string, more?: string) {
+  const usage = 'secrets <engine|web|plugin|sandboxed> <out> [id | plugin id]';
+  if (app !== 'web' && app !== 'engine' && app !== 'plugin' && app !== 'sandboxed')
+    throw new Error(usage);
+  if (!out) throw new Error(usage);
+  if (app === 'plugin') return pluginSecrets(out, id, more);
+  if (app === 'sandboxed') return sandboxedSecrets(out, id);
   const missing = REQUIRED_SECRETS.filter((k) => !process.env[k]);
   if (missing.length)
     throw new Error(
@@ -684,7 +786,13 @@ function secrets(app: string | undefined, out: string | undefined, id?: string) 
 }
 
 /** Names a plugin's env already has from the deployment (`RESERVED_PLUGIN_ENV` in @orderloop/core). */
-const PLUGIN_RESERVED_ENV = new Set(['PLUGIN_KEY', 'PLUGIN_KEY_PREVIOUS', 'DB']);
+const PLUGIN_RESERVED_ENV = new Set([
+  'PLUGIN_KEY',
+  'PLUGIN_KEY_PREVIOUS',
+  'DB',
+  'SECRETS',
+  'STORAGE',
+]);
 
 /**
  * A plugin's own secrets among the deployment's: each `PLUGIN_<ID>_<NAME>` (`pluginSecretVar` in
@@ -704,18 +812,98 @@ export function pluginOwnSecrets(plugin: string, source: Record<string, unknown>
 }
 
 /**
+ * Sandboxed plugins' secrets, added to the engine's secrets file as PLUGIN_SECRETS (`{ "<id>":
+ * { "<NAME>": "…" } }`, each from the environment's PLUGIN_<ID>_* by `pluginOwnSecrets`). A
+ * deployment with a Secrets Store reads them from it instead, so nothing is written for it.
+ */
+function sandboxedSecrets(out: string, id: string | undefined) {
+  const d = byId(id);
+  const plugins = sandboxedPlugins(d);
+  if (!plugins.length || d.secretsStore) {
+    console.log(`sandboxed: ${d.secretsStore ? 'secrets come from the Secrets Store' : 'none'}`);
+    return;
+  }
+  const all = process.env.ENV_SECRETS ? JSON.parse(process.env.ENV_SECRETS) : process.env;
+  const values = Object.fromEntries(plugins.map((p) => [p, pluginOwnSecrets(p, all)]));
+  const file = existsSync(out)
+    ? (JSON.parse(readFileSync(out, 'utf8')) as Record<string, string>)
+    : {};
+  writeFileSync(out, JSON.stringify({ ...file, PLUGIN_SECRETS: JSON.stringify(values) }), {
+    mode: 0o600,
+  });
+  console.log(
+    `sandboxed: ${plugins.map((p) => `${p} (${Object.keys(values[p]!).join(', ') || 'no secrets'})`).join('; ')}`,
+  );
+}
+
+/**
+ * The secrets a plugin's manifest needs (`required`, its non-optional names) that the deployment
+ * doesn't have: from the environment (PLUGIN_<ID>_<NAME>, shared account), or for a deployment
+ * with a Secrets Store, missing from its registry entry's `secrets` or from `stored` (the store's
+ * secret names). Presence only: no value is read.
+ */
+export function missingPluginSecrets(
+  d: Deployment,
+  p: string,
+  required: string[],
+  source: { env?: Record<string, unknown>; stored?: string[] },
+): string[] {
+  if (d.secretsStore) {
+    const listed = new Set(d.plugins[p]?.secrets ?? []);
+    const stored = new Set(source.stored ?? []);
+    return required.filter((n) => !listed.has(n) || !stored.has(pluginSecretVar(p, n)));
+  }
+  const env = source.env ?? {};
+  return required.filter((n) => {
+    const v = env[pluginSecretVar(p, n)];
+    return typeof v !== 'string' || !v;
+  });
+}
+
+/**
+ * CI's check, before anything deploys: every secret the plugin's manifest (as `scripts/plugin-
+ * bundle.ts` extracted it) needs is set. With a Secrets Store, STORE_SECRET_NAMES is the JSON list
+ * of the store's secret names; else ENV_SECRETS (the job's secrets) or the environment is checked.
+ */
+function checkPluginSecrets(id: string | undefined, plugin: string | undefined, manifest?: string) {
+  if (!plugin || !manifest) throw new Error('check-plugin-secrets <id> <plugin> <manifest.json>');
+  const d = byId(id);
+  if (!(plugin in d.plugins)) throw new Error(`${d.id} doesn't install plugin ${plugin}`);
+  const m = JSON.parse(readFileSync(manifest, 'utf8')) as {
+    id: string;
+    secrets: { name: string; optional?: boolean }[];
+  };
+  if (m.id !== plugin)
+    throw new Error(`${manifest}: the manifest's id is "${m.id}", not "${plugin}"`);
+  const required = m.secrets.filter((s) => !s.optional).map((s) => s.name);
+  const missing = missingPluginSecrets(d, plugin, required, {
+    env: process.env.ENV_SECRETS ? JSON.parse(process.env.ENV_SECRETS) : process.env,
+    stored: process.env.STORE_SECRET_NAMES ? JSON.parse(process.env.STORE_SECRET_NAMES) : [],
+  });
+  if (missing.length)
+    throw new Error(
+      d.secretsStore
+        ? `${d.id}: plugin ${plugin} needs ${missing.map((n) => pluginSecretVar(plugin, n)).join(', ')}: list them under plugins.${plugin}.secrets and add them to the Secrets Store`
+        : `${d.id}: plugin ${plugin} needs ${missing.map((n) => pluginSecretVar(plugin, n)).join(', ')} in the ${d.environment} GitHub environment`,
+    );
+  console.log(`${plugin}: ${required.length ? required.join(', ') : 'no required secrets'} set`);
+}
+
+/**
  * A plugin's secrets: its own keys derived from PRINCIPAL_KEY (and the one before a rotation), and
  * its PLUGIN_<ID>_* secrets from ENV_SECRETS (the job's `toJSON(secrets)`), else the environment.
  */
-function pluginSecrets(out: string, plugin: string | undefined) {
-  if (!plugin || !/^[a-z][a-z0-9-]{1,30}$/.test(plugin))
-    throw new Error('secrets plugin <out> <plugin id>');
+function pluginSecrets(out: string, plugin: string | undefined, id?: string) {
+  if (!plugin || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,30}$/.test(plugin))
+    throw new Error('secrets plugin <out> <plugin id> [deployment id]');
+  // With a Secrets Store its own secrets are bound from the store (renderPlugin), not written here.
+  const fromStore = id ? !!byId(id).secretsStore : false;
   const current = process.env.PRINCIPAL_KEY;
   if (!current) throw new Error("PRINCIPAL_KEY not set: a plugin's key is derived from it");
   const previous = process.env.PRINCIPAL_KEY_PREVIOUS;
   const all = process.env.ENV_SECRETS ? JSON.parse(process.env.ENV_SECRETS) : process.env;
   const values = {
-    ...pluginOwnSecrets(plugin, all),
+    ...(fromStore ? {} : pluginOwnSecrets(plugin, all)),
     PLUGIN_KEY: pluginKey(current, plugin),
     ...(previous ? { PLUGIN_KEY_PREVIOUS: pluginKey(previous, plugin) } : {}),
   };
@@ -746,7 +934,11 @@ function shellNames(id: string | undefined) {
     AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
     AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
     // Space-separated plugin ids; each one's D1 database is named orderloop-plugin-<id><suffix>.
-    PLUGINS: Object.keys(d.plugins).sort().join(' '),
+    PLUGINS: workerPlugins(d).join(' '),
+    // The deployment's own Secrets Store (own Cloudflare account), when its registry names one.
+    SECRETS_STORE: d.secretsStore?.storeId ?? '',
+    // Plugins the engine loads from a bundle: no Worker or D1 to create.
+    SANDBOXED_PLUGINS: sandboxedPlugins(d).join(' '),
     SUFFIX: d.suffix,
   };
   for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
@@ -809,7 +1001,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     if (cmd === 'render') render(args[0]);
     else if (cmd === 'matrix') console.log(JSON.stringify(matrix(loadDeployments())));
-    else if (cmd === 'secrets') secrets(args[0], args[1], args[2]);
+    else if (cmd === 'secrets') secrets(args[0], args[1], args[2], args[3]);
+    else if (cmd === 'check-plugin-secrets') checkPluginSecrets(args[0], args[1], args[2]);
     else if (cmd === 'status') await status();
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
@@ -819,7 +1012,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
+        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

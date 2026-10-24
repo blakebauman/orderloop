@@ -19,6 +19,7 @@ import { env } from 'cloudflare:workers';
 import {
   atLeast,
   type PluginManifest,
+  type PluginRuntime,
   type PluginStatus,
   pluginBinding,
   withPlugins,
@@ -144,13 +145,23 @@ function sanitized(res: Response, id: string, origin: string): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+/**
+ * Where a plugin's pages are served: its own Worker's binding, or for a sandboxed plugin the
+ * engine (`EngineRpc.pluginFetch`), the only Worker that can load it.
+ */
+function target(id: string, runtime: PluginRuntime): Pick<Fetcher, 'fetch'> | undefined {
+  if (runtime === 'sandboxed') return { fetch: (r: Request) => engine().pluginFetch(id, r) };
+  return binding(id);
+}
+
 /** Forwards a request under `/plugins/<id>/` to that plugin, or 404 when it isn't installed. */
 export async function pluginFetch(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const id = pluginPathId(url.pathname);
-  const target = id ? binding(id) : undefined;
-  const manifest = id ? (await pluginManifests()).find((m) => m.id === id) : undefined;
-  if (!id || !target || !manifest) return new Response('Not found', { status: 404 });
+  const status = id ? (await pluginStatuses()).find((s) => s.id === id) : undefined;
+  const manifest = status?.manifest ?? undefined;
+  const to = id && status ? target(id, status.runtime) : undefined;
+  if (!id || !to || !manifest) return new Response('Not found', { status: 404 });
 
   const length = Number(request.headers.get('content-length') ?? 0);
   if (length > MAX_PLUGIN_BODY) return new Response('Request body too large', { status: 413 });
@@ -186,5 +197,5 @@ export async function pluginFetch(request: Request): Promise<Response> {
     // A streamed body needs half duplex outside workerd (Node's fetch, in the tests).
     ...(body ? { duplex: 'half' } : {}),
   } as RequestInit);
-  return sanitized(await target.fetch(forwarded), id, url.origin);
+  return sanitized(await to.fetch(forwarded), id, url.origin);
 }

@@ -19,6 +19,14 @@ export { A2AAgent } from './a2a/agent';
 export { OrderAgent } from './agent';
 export { EngineApi } from './api';
 export { AssistantAgent } from './assistant/agent';
+// The sandbox's capabilities, reached as `ctx.exports` by the plugins it loads (plugin-host.ts).
+export {
+  PluginDb,
+  PluginEgress,
+  PluginSecrets,
+  PluginStorage,
+  PluginTail,
+} from './plugin-host';
 export { Replenish } from './replenish';
 export { OrderLoop } from './workflow';
 

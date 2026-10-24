@@ -38,7 +38,8 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `assistantDailyTokens` | `1000000` | Whole number of model tokens each person's assistant conversations may use per UTC day; `0` is no limit (negative or fractional is refused). Rendered into the engine's `ASSISTANT_DAILY_TOKENS` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `sso` | none | `{ "issuer": "https://…", "clientId": "…" }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). Rendered into the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
-| `plugins` | none | `{ "<plugin id>": { "d1Id": "…", "personalData": "send" } }`: the plugins (`plugins/<id>/`) this deployment installs. Each is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`. `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. `personalData` is optional and can only be `"send"` (anything else, and any other key, is refused): it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. A plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. Ids that aren't plugin ids, the `example` fixture, and ids without `plugins/<id>/wrangler.jsonc` are refused. See [Plugins](plugins.md) |
+| `plugins` | none | `{ "<plugin id>": { "d1Id": "…", "personalData": "send", "runtime": "sandboxed", "secrets": ["API_KEY"] } }`: the plugins (`plugins/<id>/`) this deployment installs. `runtime` is `worker` (the default) or `sandboxed`. A `worker` plugin is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`; `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. A `sandboxed` plugin has no Worker, binding or database: CI publishes its bundle and the engine loads it (Worker Loader), and a `d1Id` on one is refused. `personalData` is optional and can only be `"send"`: it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. `secrets` lists the plugin's secret names (upper case, not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS` or `STORAGE`) and is needed only with `secretsStore`, because Secrets Store bindings are per secret. Any other key, an unknown `runtime`, ids that aren't plugin ids or are the engine's own variable names (`bundles`, `secrets`, `grants`, `key`), the `example` and `fixture-carrier` fixtures, and ids without `plugins/<id>/wrangler.jsonc` are refused. A `worker` plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. See [Plugins](plugins.md) |
+| `secretsStore` | none | `{ "storeId": "<32 hex characters>" }` (anything else is refused): the Cloudflare Secrets Store of a deployment on its own Cloudflare account, where its plugins' secrets live as `PLUGIN_<ID>_<NAME>` instead of in the GitHub environment. Leave it out on a shared account (one store and 100 secrets an account). Rendered as `secrets_store_secrets` bindings for each plugin's listed `secrets`. See [Plugin secrets](#plugin-secrets) |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -113,14 +114,14 @@ the others in its ring, but it does stop later rings.
 
 Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's environment:
 
-1. Render its configs and collect its secrets from the environment.
+1. Render its configs and collect its secrets from the environment. With plugins installed, the **Collect plugin secrets** step also writes each Worker plugin's secrets file and, for sandboxed plugins on a shared account, the engine's `PLUGIN_SECRETS`. Then **Check plugin secrets** builds each plugin's bundle, reads its manifest and fails the deploy, before anything changes, if a required (not `optional`) secret isn't set: in the environment, or on a `secretsStore` deployment listed in the registry and present in the store (names only).
 2. Record a D1 Time Travel bookmark (in the run summary) and apply migrations to its D1.
-3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with its own `--secrets-file`: `PLUGIN_KEY` derived from `PRINCIPAL_KEY` for that plugin alone, and the environment's `PLUGIN_<ID>_*` secrets under their own names; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
+3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with its own `--secrets-file`: `PLUGIN_KEY` derived from `PRINCIPAL_KEY` for that plugin alone, and the environment's `PLUGIN_<ID>_*` secrets under their own names, unless the deployment has a `secretsStore`; the engine and web Worker bind to it), then **Publish sandboxed plugins** (each sandboxed plugin's bundle goes to the deployment's `DOCS` bucket as `plugins/<id>/<sha>.json` and the shas are pinned in the engine config's `PLUGIN_BUNDLES`), then its engine, then build and deploy its web app; the engine and web app
    each with `--secrets-file` (the catalog and catalog-edge have no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`, then `https://<catalogDomain>/health`.
 5. If anything fails after the catalog deployed, roll back each Worker that deployed (the web app, the engine, the plugins, catalog-edge,
-   then the catalog last, and not when either has no earlier version). D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
+   then the catalog last, and not when either has no earlier version). Rolling the engine back restores its previous `PLUGIN_BUNDLES` pins; the bundles stay in `DOCS` (nothing removes them), so the old version finds the ones it pins. D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
 
 To gate a ring, add a required reviewer to its deployments' environments: the `canary` jobs then
 wait for approval after `internal` succeeds.
@@ -143,6 +144,56 @@ principal key rotates them too, and each plugin's secrets are written per plugin
 (`fleet.ts secrets plugin <out> <plugin>`). The old `PLUGIN_KEY_PREVIOUS` is not removed from the
 plugin's Worker when it stops being written: run `wrangler secret delete PLUGIN_KEY_PREVIOUS`
 against `orderloop-plugin-<plugin><suffix>` after the rotation.
+
+A sandboxed plugin is installed the same way with `"runtime": "sandboxed"`: there is nothing to
+provision (`provision.sh` skips it) and no Worker or database to delete on removal; take it out of
+`plugins` and merge, and the engine stops loading it. Its pinned bundles stay in the `DOCS` bucket
+as `plugins/<plugin>/<sha>.json`; delete them by hand if you want them gone. Its storage (the engine's
+`PluginStorage` object for that id) stays too, so reinstalling finds its data. Worker Loader, which
+runs sandboxed plugins, is in open beta and needs Workers Paid; the engine's `LOADER` binding is
+declared in every deployment and unused until one is installed. Cloudflare enforces the per-call CPU
+and subrequest limits; local workerd does not.
+
+### Plugin secrets
+
+A plugin's secrets are named `PLUGIN_<ID>_<NAME>` (`API_KEY` of `shipstation` is
+`PLUGIN_SHIPSTATION_API_KEY`) and live where the deployment's Cloudflare account puts them
+([Plugins](plugins.md#secrets)).
+
+**Shared account** (no `secretsStore`): set `PLUGIN_<ID>_<NAME>` in the deployment's GitHub
+environment (`deploy-<id>`), e.g. `gh secret set PLUGIN_SHIPSTATION_API_KEY --env deploy-acme`, and
+deploy. A Worker plugin gets it as `<NAME>` in its secrets file; a sandboxed plugin's go to the
+engine as `PLUGIN_SECRETS`. To rotate, change the value and redeploy (merge, or re-run the
+deployment's job). `--secrets-file` never removes a secret, so one you stop setting stays on the
+Worker: delete it with `wrangler secret delete <NAME>` against the plugin's Worker (or, for a
+sandboxed plugin, rotate it at its issuer; `PLUGIN_SECRETS` is rewritten whole on each deploy).
+
+**Own account** (`secretsStore` in the registry): put the secret in the account's Secrets Store
+under the same `PLUGIN_<ID>_<NAME>` name, with the Workers scope, and list its `<NAME>` under
+`plugins.<id>.secrets`:
+
+```sh
+wrangler secrets-store secret create <store id> --name PLUGIN_SHIPSTATION_API_KEY --scopes workers --remote
+```
+
+or use the dashboard (Secrets Store). Rotate it in the store (`wrangler secrets-store secret update`,
+or the dashboard): the plugin reads the new value on its next call, with no deploy. To revoke,
+delete or rotate it in the store. `provision.sh` checks the store exists (create it with
+`wrangler secrets-store store create <name> --remote`; one store an account) and reminds you to add
+each plugin's secrets.
+
+The deployment's CI token (`CLOUDFLARE_API_TOKEN`) needs **Account Secrets Store Edit** for any
+deployment with a `secretsStore`: **Check plugin secrets** lists the store's secret names with it
+(Read is enough for that) and deploying a Worker that binds a store needs Edit. Without it the
+check stops the deploy with `CLOUDFLARE_API_TOKEN needs Account Secrets Store Edit`. A deploy also
+stops, naming the missing `PLUGIN_<ID>_<NAME>`, when a required secret isn't set. A required
+secret removed afterwards fails the plugin's manifest, so deep health names it.
+
+Moving a deployment onto its own account's Secrets Store: a Worker plugin's old plain secrets stay
+on its Worker (`--secrets-file` never removes one), and a Secrets Store binding of the same name
+then fails its deploy. Delete each first (`wrangler secret delete <NAME> --name
+orderloop-plugin-<id><suffix>`), then merge the registry change. Two deployments must never share
+a `secretsStore`: its names (`PLUGIN_<ID>_<NAME>`) aren't per deployment.
 
 ## Holding and checking deployments
 

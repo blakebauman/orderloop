@@ -1,7 +1,34 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
-import { bundlePlugin } from '@orderloop/plugin-sdk/testing';
+import { buildSandboxBundle, bundlePlugin } from '@orderloop/plugin-sdk/testing';
 import agents from 'agents/vite';
 import { defineConfig } from 'vitest/config';
+
+/**
+ * The outside world a sandboxed plugin reaches through the engine's egress gateway, in the
+ * `sandboxed` project: the carrier's live rates (naming the key it was sent by its last four
+ * characters) and an allowed host that also redirects off its allowlist.
+ */
+async function carrierUpstream(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.hostname === 'api.carrier.test' && url.pathname === '/echo')
+    return Response.json({
+      options: [{ id: 'echo', title: `sent ${request.headers.get('authorization')}`, amount: 8 }],
+    });
+  if (url.hostname === 'api.carrier.test' && url.pathname === '/rates') {
+    const auth = request.headers.get('authorization') ?? '';
+    return Response.json({
+      options: [
+        { id: 'live', title: `key ${auth.slice(-4) || 'none'}`, amount: 7, minDays: 1, maxDays: 3 },
+      ],
+    });
+  }
+  if (url.hostname.endsWith('allowed.test')) {
+    if (url.pathname === '/redirect')
+      return new Response(null, { status: 302, headers: { location: 'https://evil.test/' } });
+    return new Response(`ok ${request.headers.get('authorization') ?? 'no auth'}`);
+  }
+  return new Response('unexpected upstream', { status: 599 });
+}
 
 export default defineConfig(async () => {
   const migrations = await readD1Migrations('../../packages/db/migrations');
@@ -9,6 +36,17 @@ export default defineConfig(async () => {
   const seed = await readD1Migrations('../../packages/db/seed');
   // The demo deployment's nightly reset (.github/workflows/demo-reset.yml).
   const demoReset = await readD1Migrations('../../packages/db/reset');
+  // The plugins as sandbox bundles (what CI's scripts/plugin-bundle.ts builds).
+  const sandboxed = {
+    example: await buildSandboxBundle(
+      '../../plugins/example/src/index.ts',
+      '../../plugins/example/migrations',
+    ),
+    'fixture-carrier': await buildSandboxBundle(
+      '../../plugins/fixture-carrier/src/index.ts',
+      '../../plugins/fixture-carrier/migrations',
+    ),
+  };
 
   /** One workerd project: the engine Worker with these extra bindings (and auxiliary Workers). */
   const project = (
@@ -16,6 +54,7 @@ export default defineConfig(async () => {
     include: string[],
     bindings: Record<string, unknown> = {},
     plugins: Awaited<ReturnType<typeof bundlePlugin>>[] = [],
+    extra: Record<string, unknown> = {},
   ) => ({
     plugins: [
       // TC39 decorators (`@callable()`): Oxc doesn't transform them yet.
@@ -59,6 +98,7 @@ export default defineConfig(async () => {
               ? { EXAMPLE_DB: 'plugin-example', CARRIER_DB: 'plugin-fixture-carrier' }
               : {}),
           },
+          ...extra,
           ...(plugins.length
             ? {
                 workers: plugins,
@@ -109,6 +149,32 @@ export default defineConfig(async () => {
               bindings: { PLUGIN_KEY: 'test-carrier-key' },
             }),
           ],
+        ),
+        // The same plugins sandboxed: bundles the tests stage in DOCS, pinned in PLUGIN_BUNDLES and
+        // loaded through Worker Loader (tests/sandboxed/). The example's secrets come from
+        // PLUGIN_SECRETS (a shared account), the carrier's API_KEY from a Secrets Store binding
+        // (its own account); api.carrier.test and *.allowed.test answer from `carrierUpstream`.
+        project(
+          'sandboxed',
+          ['tests/sandboxed/**/*.test.ts'],
+          {
+            TEST_BUNDLES: JSON.stringify(sandboxed),
+            PLUGIN_BUNDLES: JSON.stringify(
+              Object.fromEntries(Object.entries(sandboxed).map(([id, b]) => [id, b.sha])),
+            ),
+            PLUGIN_SECRETS: JSON.stringify({ example: { PING_TOKEN: 'ping-secret-8f2d' } }),
+            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+          },
+          [],
+          {
+            secretsStoreSecrets: {
+              PLUGIN_SECRET_FIXTURE_CARRIER__API_KEY: {
+                store_id: '0123456789abcdef0123456789abcdef',
+                secret_name: 'PLUGIN_FIXTURE_CARRIER_API_KEY',
+              },
+            },
+            outboundService: carrierUpstream,
+          },
         ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
         project('stripe', ['tests/stripe/**/*.test.ts'], {

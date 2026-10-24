@@ -70,8 +70,10 @@ The manifest (`pluginManifestSchema`) has:
 | `requires` | Ids of plugins that must also be installed |
 | `pageRole` | The least role that may open the plugin's pages and see its nav entries; default `operator` |
 | `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
+| `egress` | Hosts a sandboxed plugin may reach (a name, or `*.` and one), at most 20 ([Runtimes](#runtimes)) |
+| `limits` | `{ cpuMs?, subRequests? }` per call for a sandboxed plugin, within `PLUGIN_LIMIT_CAPS` |
 | `provides` | Surfaces from `PROVIDER_SURFACES` (`shipping.rates`, `shipping.labels`, `tax`, `address`) the plugin can do behind built-in nodes. All but `shipping.rates` need `personalData: 'send'` (`SURFACE_NEEDS_BUYER`) ([Providers](#providers)) |
-| `secrets` | Up to 20 `{ name, description?, optional? }`: env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
+| `secrets` | Up to 20 `{ name, description?, optional?, inject?, expose? }` (`inject: { host, header, format }`, a host in `egress`: added by the egress gateway, never seen by a sandboxed plugin; `expose`: readable by a sandboxed plugin's code; not both): env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
 
 A manifest over `PLUGIN_MANIFEST_MAX_BYTES` (64 KiB) serialized is refused.
 
@@ -254,8 +256,8 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
 
 1. Add the plugin to the deployment's registry file, `deployments/<id>.jsonc`:
    `"plugins": { "qbd-sync": {} }`. `loadDeployments` refuses an id that isn't a plugin id, one that is a
-   fixture (`example`, `fixture-carrier`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id` and
-   `personalData`, and no other key.
+   fixture (`example`, `fixture-carrier`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id`,
+   `personalData`, `runtime` (`worker` or `sandboxed`, see [Runtimes](#runtimes)) and `secrets`, and no other key. A deployment on its own Cloudflare account also sets `secretsStore: { storeId }` at the top level ([Secrets](#secrets)).
    **Granting buyer details**: a plugin whose manifest says `personalData: 'send'` is refused (its
    status is `healthy: false` with `error` `It asks for buyer details…`) unless its entry says
    `"personalData": "send"`: `"plugins": { "qbd-sync": { "personalData": "send" } }`. Only that value
@@ -263,16 +265,19 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
    (`{"qbd-sync":{"personalData":"send"}}`), which the engine reads on every status check. Removing
    the grant refuses the plugin on the next deploy, even if its last good manifest asked for `send`.
    Grant it only after reviewing what the plugin does with buyer details.
-2. Run `./scripts/provision.sh <deployment>`. For each plugin it creates the D1 database
+2. Run `./scripts/provision.sh <deployment>`. For each `worker` plugin it creates the D1 database
    `orderloop-plugin-<id><suffix>` and records its id with `fleet.ts set-plugin-d1`, as `plugins.<id>.d1Id`.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
+   A sandboxed plugin needs nothing created; with a `secretsStore` it checks the store exists.
 3. Merge. CI's deploy job (`.github/workflows/deploy.yml`) renders `plugins/<id>/wrangler.<deployment>.json`,
    writes one secrets file per plugin (`fleet.ts secrets plugin <out> <plugin>`), holding that
    plugin's own `PLUGIN_KEY`, during a rotation `PLUGIN_KEY_PREVIOUS`, and its own secrets
    ([Secrets](#secrets)); then in the **Deploy
    plugins** step applies each plugin's D1 migrations and deploys its Worker with its file, all
    before the engine, because the engine and web Worker bind
-   to it. The engine's and web Worker's configs gain a service binding per plugin.
+   to it. The engine's and web Worker's configs gain a service binding per `worker` plugin. A
+   sandboxed plugin has no Worker: **Publish sandboxed plugins** puts its bundle in `DOCS` and pins
+   its sha in the engine's `PLUGIN_BUNDLES` ([Runtimes](#runtimes)).
 
 A plugin never holds `PRINCIPAL_KEY`. `pluginKey(principalKey, id)` (`packages/core/src/plugins.ts`,
 mirrored by `scripts/fleet.ts`; `scripts/fleet.test.ts` holds both to the same vector) is the
@@ -285,22 +290,102 @@ principal signed for this one, and a plugin can't sign requests to them. Rotatin
 ### Secrets
 
 A plugin that calls another service declares the secrets it reads in its manifest's `secrets`, and
-each deployment sets them in its GitHub environment (`deploy-<id>`) as `PLUGIN_<ID>_<NAME>`
-(`pluginSecretVar`): `API_KEY` of `shipstation` is `PLUGIN_SHIPSTATION_API_KEY`. The deploy's
-**Collect plugin secrets** step, which runs only when the deployment installs a plugin, reads the
-environment's secrets (`toJSON(secrets)`, as `ENV_SECRETS`), and `pluginOwnSecrets` hands each
-plugin those with its own prefix, under `<NAME>`: never another plugin's, nor the core's. A
-`PLUGIN_<ID>_` secret whose name isn't a secret name, or is reserved, fails the deploy.
+reads them with `secret(env, name)` from `@orderloop/plugin-sdk` (never `env.NAME`), which finds
+them wherever its runtime and the deployment's account keep them. Each secret is named
+`PLUGIN_<ID>_<NAME>` for the deployment (`pluginSecretVar`): `API_KEY` of `shipstation` is
+`PLUGIN_SHIPSTATION_API_KEY`. Where the deployment keeps the values depends on its Cloudflare
+account:
 
+| | Shared account (no `secretsStore`) | Own account (`"secretsStore": { "storeId": "…" }`) |
+|---|---|---|
+| Where values live | The deployment's GitHub environment (`deploy-<id>`) | The account's Cloudflare Secrets Store (one store an account, 100 secrets) |
+| Worker plugin | Written to its Worker's secrets by the deploy (`pluginOwnSecrets`, under `<NAME>`) | Bound from the store under `<NAME>` (`renderPlugin` adds `secrets_store_secrets`) |
+| Sandboxed plugin | Written to the engine as `PLUGIN_SECRETS` (`fleet.ts secrets sandboxed`) | Bound to the engine as `PLUGIN_SECRET_<ID>__<NAME>` (`storeBinding`) |
+| Registry | Nothing to list | List the names in `plugins.<id>.secrets` (Secrets Store bindings are per secret) |
+| Rotating | Change it in the environment and redeploy | Change it in the store: read on the next call, no redeploy |
+| Revoking | `--secrets-file` never removes: rotate it at its issuer | Delete or rotate it in the store |
+
+- The deploy's **Collect plugin secrets** step (only with plugins installed) reads the environment's
+  secrets (`toJSON(secrets)`, as `ENV_SECRETS`); each plugin gets only those with its own prefix,
+  never another plugin's nor the core's. A `PLUGIN_<ID>_` secret whose name isn't a secret name, or
+  is reserved (`PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS`, `STORAGE`), fails the deploy.
+- **Check plugin secrets** runs before anything deploys: each plugin's manifest, as the
+  `plugin-bundles` job read it from its `src/manifest.ts` (`readManifest`, by
+  `scripts/plugin-bundle.ts`, in a job with no environment, no secrets and no Cloudflare token,
+  since reading a manifest runs the plugin's code), and every secret it needs
+  (not `optional`) must be set: in the environment, or listed in the registry and present in the
+  store (`missingPluginSecrets`, by name only, through the Secrets Store API). The CI token then
+  needs Account Secrets Store Edit (also needed to deploy a Worker that binds the store).
+- A required secret missing at run time (removed from the store, say) fails the plugin's
+  `manifest()` (`missingSecrets`), so it reads as not installed and deep health names the secret.
 - Two installed plugins whose ids would share a prefix (`ship` and `ship-rates`:
   `PLUGIN_SHIP_RATES_X` is both `ship`'s `RATES_X` and `ship-rates`'s `X`) are refused by
-  `loadDeployments`.
-- A required secret that is not set doesn't stop the deploy itself, but the plugin's `manifest()`
-  then fails, so `/health/deep` does and the smoke test rolls the deploy back, naming the secret.
-- `--secrets-file` adds and replaces, and never removes: deleting a secret from the environment
-  leaves its last value on the Worker. To revoke one, rotate it at the service that issued it.
-- Secret values never reach the engine or the web app. The Plugins page shows each declared
-  secret's environment name and description, not its value.
+  `loadDeployments`. Ids have no `--`, so a binding name never holds `__` and a Secrets Store
+  binding is never taken for a plugin.
+- Secret values never reach the web app. The Plugins page shows each declared secret's name, how
+  it reaches the plugin (injected for a host, or readable by the plugin) and its description, never
+  its value.
+
+## Runtimes
+
+A deployment runs each plugin one of two ways, set by `plugins.<id>.runtime` in its registry:
+
+- **`worker`** (the default): its own Worker and D1 database, bound to the engine and the web
+  Worker as `PLUGIN_<ID>`, as above. Trusted as code in this repo is.
+- **`sandboxed`**: a Dynamic Worker the engine loads itself (Worker Loader, `LOADER`; open beta, on
+  Workers Paid). It has no Worker, binding or D1 of its own, and the same source runs either way.
+
+A sandboxed plugin, in `apps/engine/src/plugin-host.ts`:
+
+- **Bundle and pin.** CI's `plugin-bundles` job (no secrets) builds it (`scripts/plugin-bundle.ts`:
+  its code as one module, its migrations, and its manifest from `src/manifest.ts`); the deploy job
+  checks the hash again, publishes it to the deployment's `DOCS` bucket (in its jurisdiction) as
+  `plugins/<id>/<sha>.json`, and pins the shas in the engine's `PLUGIN_BUNDLES` (**Publish
+  sandboxed plugins**, before the engine deploys). The engine loads a bundle only if it hashes to
+  its pin, before Worker Loader runs it. Bundles are never removed, so rolling the engine back
+  restores the old pins.
+- **Its pinned manifest is its rules.** Egress, `inject` and `expose`, and limits are enforced from
+  the manifest sealed in the bundle (`pinnedManifest`), never from what its code answers with; a
+  plugin whose `manifest()` answers otherwise is refused (`pluginStatuses`: "differs from the one
+  pinned"). The Plugins page and the editor still show the answered manifest, which then matches.
+- **Its env is capabilities only**: `STORAGE` (`PluginDb`, SQL against its own `PluginStorage`
+  SQLite Durable Object; `pluginDb(env)` in the SDK gives it D1's `prepare().bind().first/all/run`
+  and `batch`), `SECRETS` (`PluginSecrets`: `has` for any declared secret, `get` only for one marked
+  `expose`), and `PLUGIN_KEY` (derived from `PRINCIPAL_KEY` as a Worker plugin's is). The bundle's
+  migrations are applied to its storage once each, forward only, each file whole, with no other
+  request let in meanwhile. Its storage is in the deployment's jurisdiction (`pluginStorage`), and
+  only `query` and `batch` answer over RPC (the rest is JS-private).
+- **Egress** (`globalOutbound` is `PluginEgress`): https only, to a public host in its manifest's
+  `egress` (a name, or `*.` and one); never a private, loopback, link-local, CGNAT, multicast or
+  metadata address, an internal name or a wildcard-DNS service (`egressRefusal`, whatever `egress`
+  says), nor a URL with credentials. Redirects are followed by the gateway, at most 5, each
+  checked again; when one leaves the origin, `authorization`, `cookie` and `proxy-authorization`
+  are dropped. A secret declared `inject: { host, header, format }` (an exact host, never `*.`) is
+  added for that host as `header` (`format` with `{}` for the value) and stripped from anything
+  else, so the plugin never sees it. A request body over 10 MiB is refused with `413`. A refusal is
+  a `403` the plugin sees, and a log line naming the plugin, the origin and path (no query).
+- **Limits per call** (`limitsFor`): the manifest's `limits`, within `PLUGIN_LIMIT_CAPS`: 200 ms of
+  CPU and 20 subrequests for a node, provider op or compensation; 1,000 ms for a page or delivery.
+  Local workerd doesn't enforce them; Cloudflare does.
+- **Logs** (`tails` is `PluginTail`): its console goes to the engine's logs tagged with the plugin,
+  and its exceptions to `plugin_errors` (migration `0046`, the latest 100 per plugin), shown on the
+  Plugins page; both scrubbed of its secrets first.
+- **Scrubbing.** Text a plugin returns (a `fail` message, a summary, a compensation's line, an error
+  it throws, a provider's failure, its manifest error) passes `scrubCredentials`
+  (`packages/core/src/credentials.ts`) with its own secrets' values: those values exactly, then
+  anything shaped like a credential (prefixed keys, private keys, JWTs, URL credentials,
+  `secret=…` pairs, long random runs). Its data (a node's `output` and `vars`, a provider's answer)
+  has its secrets' exact values replaced (`scrubbedValue`), so an upstream that echoes a request
+  can't land one in an order. Both apply to Worker plugins too.
+- **Pages** go through the engine: the web app builds the request as for any plugin (signed
+  principal, allowlisted headers, its CSP on the response) and calls `EngineRpc.pluginFetch`.
+- **Deliveries** to sandboxed plugins, and their manifest checks, run one at a time (Worker Loader
+  limits how many Dynamic Workers a request has in flight).
+
+Write a plugin for either runtime the same way: `definePlugin`, `pluginDb(env)` for its database,
+`secret(env, name)` for secrets, and its manifest in `src/manifest.ts` (no Worker imports) for CI
+to read. In dev, `ORDERLOOP_DEV_PLUGINS=<id>:sandboxed pnpm web:dev` runs it sandboxed (the
+bundle is built at startup and handed to the engine as `PLUGIN_DEV_BUNDLES`, checked like any).
 
 A plugin's first deploy has no earlier version to roll back to; a failed deploy rolls back the plugins
 that did deploy, with the rest.
@@ -311,15 +396,21 @@ the shell (for people at or above its `pageRole`). Admins see what is installed 
 
 ## The Plugins page
 
-`apps/web/app/routes/plugins.tsx` is an admin-only page. For each `PLUGIN_*` binding
-(`EngineRpc.pluginCatalog`) it shows whether the plugin is answering, refused, or not answering
-while running its last manifest, with the `error`; its contract version, whether buyer details are
-redacted or sent, who may open its pages and its public paths, its events, what it `requires`, and
-its nodes with their category, outputs and whether they roll back. For a plugin with a manifest it
-adds what uses it (`pluginUsage`: published flows and the number of orders not yet ended) and, for one
-with events or earlier deliveries, its ten most recent deliveries (subscription `plugin:<id>`) with
-status, attempts and last error. A refused plugin has no manifest, so its id comes from its binding
-and the page shows the same usage and deliveries, when its flows and orders matter most. It is read-only: installing and removing a plugin is a change to the deployment.
+`apps/web/app/routes/plugins.tsx` is an admin-only page. For each installed plugin
+(`EngineRpc.pluginCatalog`, a `PluginStatus` with its `id` and `runtime`) it shows whether the plugin
+is answering, refused, or not answering while running its last manifest, with the `error`; its
+contract version, how it runs (as its own Worker, or sandboxed in the engine, with the hosts its
+`egress` allows), whether buyer details are redacted or sent, who may open its pages and its public
+paths, its events, what it `provides` behind built-in nodes, what it `requires`, its secrets (name,
+description and how each reaches the plugin: added to requests to a host, or readable by the plugin;
+never a value), and its nodes with their category, outputs and whether they roll back. For a plugin
+with a manifest it adds what uses it (`pluginUsage`: published flows, the number of orders not yet
+ended, and labels it couldn't void) and, for one with events or earlier deliveries, its ten most
+recent deliveries (subscription `plugin:<id>`) with status, attempts and last error. A sandboxed
+plugin with exceptions also lists its ten most recent (`plugin_errors`, newest first). A refused
+plugin has no manifest but still has an id, and the page shows the same usage and deliveries, when
+its flows and orders matter most. It is read-only: installing and removing a plugin is a change to
+the deployment.
 
 ## Removing
 
