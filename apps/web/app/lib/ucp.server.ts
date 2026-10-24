@@ -91,9 +91,11 @@ let cachedSettings: { value: UcpSettings; at: number } | null = null;
 /**
  * Agentic checkout's settings; off (no checkout flow) until an admin sets them. Every `/ucp`
  * call checks them and they change rarely, so each isolate keeps what it read for 30 seconds.
+ * `fresh` reads D1 regardless, for the admin API: what an admin sees or changes is never a
+ * copy another isolate read before their last save.
  */
-export async function ucpSettings(): Promise<UcpSettings> {
-  if (cachedSettings && Date.now() - cachedSettings.at < SETTINGS_CACHE_MS)
+export async function ucpSettings({ fresh = false } = {}): Promise<UcpSettings> {
+  if (!fresh && cachedSettings && Date.now() - cachedSettings.at < SETTINGS_CACHE_MS)
     return cachedSettings.value;
   const row = await db()
     .select({ value: workspaceSettings.value })

@@ -525,7 +525,7 @@ async function handleUcpAdmin(
   body: () => Promise<unknown>,
 ): Promise<Response> {
   if (parts.length === 1 && request.method === 'GET')
-    return json({ settings: await ucpSettings(), platforms: await listPlatforms() });
+    return json({ settings: await ucpSettings({ fresh: true }), platforms: await listPlatforms() });
   if (parts[1] === 'settings' && parts.length === 2 && request.method === 'POST') {
     const parsed = ucpSettingsSchema.safeParse(await body());
     if (!parsed.success)
@@ -533,7 +533,7 @@ async function handleUcpAdmin(
     const flowId = parsed.data.checkoutFlowId;
     const refusal = flowId ? await checkoutFlowRefusal(flowId) : null;
     if (refusal) return json({ error: refusal }, 422);
-    const from = await ucpSettings();
+    const from = await ucpSettings({ fresh: true });
     await setUcpSettings(parsed.data, actor(caller));
     await audit(request, 'ucp.settings', {
       actor: caller,

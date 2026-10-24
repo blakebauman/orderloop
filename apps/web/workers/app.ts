@@ -218,8 +218,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream',
       'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
       etag: obj.httpEtag,
-      // Only this browser may keep it (it took a sign-in), and only briefly without asking.
-      'cache-control': 'private, max-age=300',
+      // Only this browser may keep it, and it asks every time, so the sign-in is checked on each
+      // view (a signed-out or disabled person can't reopen it); an unchanged one is a 304.
+      'cache-control': 'private, no-cache',
     };
     if (!('body' in obj)) return new Response(null, { status: 304, headers });
     return new Response(obj.body, { headers });

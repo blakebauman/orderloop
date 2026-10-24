@@ -134,7 +134,16 @@ const shownStatus = (s: OrderState) =>
 const rolledBack = (s: OrderState) =>
   !!s.rollback || Object.values(s.nodes).some((n) => n.status === 'rolled_back');
 
+/**
+ * Keyed by order: the route stays mounted when it moves to another order (a restart, say), and the
+ * live state starts over from that order's snapshot rather than keeping the last one's flow.
+ */
 export default function OrderPage() {
+  const { snapshot } = useLoaderData<typeof loader>();
+  return <OrderView key={snapshot.orderId} />;
+}
+
+function OrderView() {
   const canOperate = useCan('operator');
   const {
     snapshot,
