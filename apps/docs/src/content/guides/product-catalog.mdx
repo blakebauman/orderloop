@@ -181,18 +181,20 @@ A category listing takes:
 | `f.<attr>=a,b` | Products with any of these values of the attribute; different attributes all have to match. `brand` is always available |
 | `r.<attr>=lo..hi` | An inclusive numeric range; either end may be empty (`r.price=1000..`). `price` is always available |
 | `sort` | `newest` (default), or `<attr>_asc` or `<attr>_desc` for `price` and the `sortable` attributes. An unsupported sort answers `400` with the `sorts` that exist |
-| `cursor`, `limit` | Page with the previous answer's `next` as `cursor`; `limit` is 1 to 100 (24 by default) |
+| `cursor`, `limit` | Page with the previous answer's `next` as `cursor`, passed back exactly as it came: it is an opaque token (a malformed one answers `400`), and pages followed this way never skip or repeat a product. `limit` is 1 to 100 (24 by default) |
 
-The answer is `{ total, next, sorts, products, facets, ranges }`. `next` is `null` on the last page.
+The answer is `{ total, next, sorts, products, facets, ranges }`. `next` is a string, `null` on the
+last page.
 `facets` maps each filterable attribute to `{ label, values: [{ value, label, count }] }` (at most 50
 values, most products first); each attribute's counts ignore its own filter, so choosing a brand still
 shows how many products every other brand has. `ranges` gives `min`, `max` and, where the attribute
 declares `buckets`, counts per bucket.
 
-Search takes `q`, `cursor` and `limit` the same way and answers `{ total, next, products }` (a
+Search takes `q`, `cursor` and `limit` and answers `{ total, next, products }` (a
 `partial: true` marks an answer that couldn't reach every part of the index; retry shortly). Terms
 are all required and the last also matches as a prefix, so `blue cott` finds a blue cotton tee. Accents
-are ignored. It pages up to 1,000 results (`cursor` below 1,000). On the first page, a query that is a
+are ignored. Its `cursor` is a number, the previous answer's `next` (an offset below 1,000), so it
+pages up to 1,000 results. On the first page, a query that is a
 SKU puts the product with that SKU first.
 
 ## Freshness

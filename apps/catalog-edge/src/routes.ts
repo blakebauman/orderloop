@@ -10,12 +10,15 @@
  *   GET /v1/<channel>/<locale>/slugs/<slug>        the product with a slug in that locale
  *   GET /v1/<channel>/<locale>/categories          the category tree
  *   GET /v1/<channel>/<locale>/categories/<code>/products?f.<attr>=a,b&r.<attr>=lo..hi
- *       &sort=<newest|attr_asc|attr_desc>&cursor=<n>&limit=<1-100>
- *                                                  a filtered, faceted, sorted category page
+ *       &sort=<newest|attr_asc|attr_desc>&cursor=<next>&limit=<1-100>
+ *                                                  a filtered, faceted, sorted category page;
+ *                                                  `cursor` is the previous page's opaque `next`
+ *                                                  (a position per listing segment)
  *   GET /v1/<channel>/<locale>/search?q=<words>&cursor=<n>&limit=<1-100>
  *                                                  keyword search, best match first
  */
 // The zod-free part of core only: this Worker's bundle stays small.
+import { decodeListingCursor } from '@orderloop/core/product/listing';
 import { BATCH_MAX, CODE, LOCALE, SLUG } from '@orderloop/core/product/paths';
 import { normalizeQuery, queryTerms, SEARCH_DEPTH } from '@orderloop/core/product/search';
 
@@ -34,7 +37,8 @@ export type Route =
       terms: Record<string, string[]>;
       ranges: Record<string, [number | null, number | null]>;
       sort: string;
-      cursor: number;
+      /** The listing cursor in its one spelling, or null for the first page. */
+      cursor: string | null;
       limit: number;
     };
 
@@ -84,8 +88,11 @@ function listingQuery(
   if (filters > MAX_FILTERS) return bad(`at most ${MAX_FILTERS} filters`);
   const sort = url.searchParams.get('sort') ?? 'newest';
   if (!SORT.test(sort)) return bad('bad sort');
-  const cursor = Number(url.searchParams.get('cursor') ?? 0);
-  if (!Number.isSafeInteger(cursor) || cursor < 0) return bad('bad cursor');
+  // Strict, so a cursor has one spelling (and so one cache entry); the first page's is dropped.
+  const raw = url.searchParams.get('cursor');
+  const positions = raw === null ? [] : decodeListingCursor(raw);
+  if (!positions) return bad('bad cursor');
+  const cursor = positions.some((p) => p > 0) ? raw : null;
   const limit = Number(url.searchParams.get('limit') ?? PAGE.default);
   if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max)
     return bad(`limit is 1 to ${PAGE.max}`);
@@ -196,7 +203,7 @@ export function canonical(route: Route): string {
         q.set(`r.${attr}`, `${lo ?? ''}..${hi ?? ''}`);
       }
       if (route.sort !== 'newest') q.set('sort', route.sort);
-      if (route.cursor) q.set('cursor', String(route.cursor));
+      if (route.cursor) q.set('cursor', route.cursor);
       if (route.limit !== PAGE.default) q.set('limit', String(route.limit));
       const query = q.toString();
       return `${base}/categories/${route.category}/products${query ? `?${query}` : ''}`;

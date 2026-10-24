@@ -22,6 +22,7 @@ import {
   FEED_FORMATS,
   type FeedFormat,
   type FeedStatus,
+  LISTING_SEGMENTS,
   PRODUCT_SHARDS,
   type Product,
   type ProductCatalogRpc,
@@ -261,9 +262,16 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     const r = await meta(this.env).deleteCategories(unique);
     if (!r.ok) return r;
     const channels = await meta(this.env).channels();
+    // Every segment of each listing, one call per listing (a delete takes up to 1,000 keys).
     await Promise.all(
       channels.flatMap((ch) =>
-        unique.map((c) => this.env.PUBLISHED.delete(paths.listing(DOC_FORMAT, ch.code, c))),
+        unique.map((c) =>
+          this.env.PUBLISHED.delete(
+            Array.from({ length: LISTING_SEGMENTS }, (_, s) =>
+              paths.listing(DOC_FORMAT, ch.code, c, s),
+            ),
+          ),
+        ),
       ),
     );
     return { ok: true, deleted: r.categories.map((c) => c.code) };

@@ -246,8 +246,8 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 channel change). Types, channels and categories can be deleted (`DELETE` on `types`, `channels`,
 `categories`), which bumps `rev` for types and channels. A channel's delete also clears its `published`
 rows on every shard, and deletes its `docs/f1/<channel>/` and `idx/f1/<channel>/` objects, its KV cards
-and its category trees; deleting categories deletes their `idx/f1/<channel>/<category>.bin` in every
-channel. Products keep their `channels` listing.
+and its category trees; deleting categories deletes every segment of their listing,
+`idx/f1/<channel>/<category>/<segment>.bin`, in every channel. Products keep their `channels` listing.
 
 Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a new tree (`paths` in
 `packages/core/src/product/paths.ts`):
@@ -257,7 +257,7 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/<locale>/p/<key>.json` | The product document for that channel and locale; custom metadata `version` |
 | R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
-| R2 | `idx/f1/<channel>/<category>.bin` | The category's listing index (binary, all locales' labels inside); custom metadata `members` and `builtAt` |
+| R2 | `idx/f1/<channel>/<category>/<segment>.bin` | One segment (`0` to `LISTING_SEGMENTS - 1`, 8 segments, `listingSegment(key)`) of the category's listing index (binary format 2, all locales' labels inside); custom metadata `members` and `builtAt`. A segment with no members yet has no object |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
 | KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes; `catalog-edge` turns a batch's keys into card keys with it |
 
@@ -275,14 +275,14 @@ Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and e
 
 `scripts/provision.sh` adds an R2 lifecycle rule named `feeds` on that prefix that expires objects after 30 days, so a feed is retained only for as long as an import can need it (see [Operations](operations.md#adding-a-customer)).
 
-A listing index is rebuilt from `ListingIndexer`, the Durable Object for one channel and category
-(`<channel>:<category>`), which holds the listing's members in SQLite: `members` (`key` primary key,
+A listing index segment is rebuilt from `ListingIndexer`, the Durable Object for one channel,
+category and segment (`<channel>:<category>:<segment>`), which holds that segment's members in SQLite: `members` (`key` primary key,
 `uid`, `at`, `created_at`, `live`, and `sig`, the entry's `entrySignature`, added to older tables by
 the constructor), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
-(`channel`, `category`, `dirty`, `built`, `members` at the last build, and `rev`, the highest config
+(`channel`, `category`, `segment`, `dirty`, `built`, `members` at the last build, and `rev`, the highest config
 revision its changes carried). A member holds the latest change by `at`; a removed
 one stays as a tombstone (`live` 0) for 24 hours. A product is a member of its categories and
-all their ancestors. See [Architecture](architecture.md#listing-indexes).
+all their ancestors, always in its key's segment. See [Architecture](architecture.md#listing-indexes).
 
 `SearchShard` (16, `search-<n>`, `n` from `searchShard(key)`): one FTS5 virtual table per channel and
 locale, `fts_<channel>__<locale>` (non-alphanumerics in either become `_`), created on first use, with

@@ -4,6 +4,8 @@ import {
   canonicalJson,
   contentHash,
   fnv1a64,
+  LISTING_SEGMENTS,
+  listingSegment,
   PRODUCT_SHARDS,
   productShard,
   productUid,
@@ -36,6 +38,21 @@ describe('product routing', () => {
       [25, 1, 6],
       [53, 29, 0],
     ]);
+  });
+
+  // Frozen too: every built listing segment holds the keys these name. Changing the count or the
+  // hash strands every segment, so it needs a full listing rebuild. Don't update the values.
+  it('keeps every key in the listing segment it has always had', () => {
+    expect(LISTING_SEGMENTS).toBe(8);
+    expect(['WIDGET-001', 'tee-classic', 'sku-42', 'X'].map(listingSegment)).toEqual([1, 2, 5, 1]);
+    const counts = new Array<number>(LISTING_SEGMENTS).fill(0);
+    const n = 80_000;
+    for (let i = 0; i < n; i++) {
+      const s = listingSegment(`SKU-${i}`);
+      counts[s] = (counts[s] ?? 0) + 1;
+    }
+    for (const c of counts)
+      expect(Math.abs(c - n / LISTING_SEGMENTS)).toBeLessThan(n / LISTING_SEGMENTS / 50);
   });
 
   it('numbers products into 32 bits per shard, and refuses to overflow', () => {
