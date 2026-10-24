@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { FeedStatus } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { storeStream } from '../src/upload';
+import { storeStream, UploadStalled } from '../src/upload';
 import { api, by, doc, product, settle, setup } from './helpers';
 
 beforeAll(setup);
@@ -130,6 +130,30 @@ describe('storing streams', () => {
     const big = 'x'.repeat(10 * 1024 * 1024 + 123);
     expect(await storeStream(env.PUBLISHED, 'test/big', body(big, 1024 * 1024))).toBe(big.length);
     expect((await env.PUBLISHED.head('test/big'))?.size).toBe(big.length);
+  });
+
+  it('gives up on a stream that stops sending, storing nothing', async () => {
+    // A part's worth arrives (so a multipart upload has begun), then nothing, never closed.
+    const part = new Uint8Array(10 * 1024 * 1024 + 1);
+    let sent = false;
+    let cancelled: unknown;
+    const stalled = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (!sent) c.enqueue(part);
+        sent = true;
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    await expect(storeStream(env.PUBLISHED, 'test/stalled', stalled, 200)).rejects.toThrow(
+      'upload stalled',
+    );
+    expect(cancelled).toBeInstanceOf(UploadStalled);
+    expect(await env.PUBLISHED.head('test/stalled')).toBeNull();
+    const pending = await env.PUBLISHED.list({ prefix: 'test/stalled', include: [] });
+    expect(pending.objects).toEqual([]);
   });
 });
 

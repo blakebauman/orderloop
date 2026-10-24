@@ -232,7 +232,18 @@ export async function handleCatalog(
       if (!request.body) return json({ error: 'The feed file is the request body' }, 400);
       const name = (q.get('name') ?? `feed.${format}`).slice(0, 200);
       // Streamed to the catalog as it arrives: a feed of any size never sits in this Worker.
-      const feed = await c.startFeed(request.body, { name, format, by });
+      let feed: Awaited<ReturnType<typeof c.startFeed>>;
+      try {
+        feed = await c.startFeed(request.body, { name, format, by });
+      } catch (err) {
+        // The catalog gave up on a body that stopped arriving: nothing was stored, send it again.
+        if (err instanceof Error && err.message.startsWith('upload stalled'))
+          return json(
+            { error: 'The feed stopped arriving; nothing was stored. Send it again.' },
+            408,
+          );
+        throw err;
+      }
       await audit(request, 'catalog.feed_started', {
         actor: caller,
         target: feed.id,

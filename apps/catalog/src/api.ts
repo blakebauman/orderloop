@@ -179,14 +179,20 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     const id = newId('feed');
     const key = `feeds/${id}/source.${m.format}`;
     await storeStream(this.env.PUBLISHED, key, body);
-    const status = await feeds(this.env).create({
-      id,
-      name: m.name.slice(0, 200),
-      format: m.format,
-      by: m.by,
-    });
-    await this.env.FEED_IMPORT.create({ id, params: { id, format: m.format, key, by: m.by } });
-    return status;
+    // Once the file is stored, its record and its import start together even if the caller has
+    // gone meanwhile: cancelled between the two, a feed would stay queued with nothing to run it.
+    const started = (async () => {
+      const status = await feeds(this.env).create({
+        id,
+        name: m.name.slice(0, 200),
+        format: m.format,
+        by: m.by,
+      });
+      await this.env.FEED_IMPORT.create({ id, params: { id, format: m.format, key, by: m.by } });
+      return status;
+    })();
+    this.ctx.waitUntil(started.catch(() => {}));
+    return started;
   }
 
   async feedStatus(id: string): Promise<FeedStatus | null> {
