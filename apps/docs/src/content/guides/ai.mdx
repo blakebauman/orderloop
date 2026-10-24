@@ -179,5 +179,6 @@ The [workspace assistant](/guides/assistant/) is the chat panel available on eve
 a multi-turn, tool-calling conversation, with up to 6 tool steps per message, and offers only the
 tools your role can use. Its `assess_order` tool runs the same Assess call as the node on one order
 (`questions`, optional `images`) and returns the probabilities; its `propose_flow_change` tool uses
-the copilot above. Without the model, a rule-based fallback takes the turn; see
+the copilot above, and its admin-only `draft_plugin` tool writes a rule plugin for review (see
+[Plugin drafts](/guides/assistant/#plugin-drafts)). Without the model, a rule-based fallback takes the turn; see
 [Without the model](/guides/assistant/#without-the-model).

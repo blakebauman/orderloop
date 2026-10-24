@@ -10,6 +10,7 @@ import {
   describeDiff,
   type FlowProposal,
   isAssistantTool,
+  type PluginDraftResult,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { cn } from '@orderloop/ui/lib/utils';
@@ -23,6 +24,7 @@ import {
   Inbox,
   type LucideIcon,
   PenLine,
+  Puzzle,
   Search,
   Workflow,
 } from 'lucide-react';
@@ -82,6 +84,7 @@ const ICONS: Record<string, LucideIcon> = {
   list_flows: Workflow,
   get_flow: Workflow,
   propose_flow_change: PenLine,
+  draft_plugin: Puzzle,
 };
 
 const RUNNING: Record<string, string> = {
@@ -92,6 +95,7 @@ const RUNNING: Record<string, string> = {
   list_flows: 'Listing flows',
   get_flow: 'Reading the flow',
   propose_flow_change: 'Drafting a flow change',
+  draft_plugin: 'Drafting a plugin',
 };
 
 const n = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -358,6 +362,56 @@ function Settled({
     </Link>
   ) : (
     <div className={cls}>{body}</div>
+  );
+}
+
+// ── Plugin drafts ──────────────────────────────────────────────────────────
+
+/** What a draft's footer says: whether its cases pass, and that nothing runs yet. */
+export function draftStatus(d: Pick<PluginDraftResult, 'cases'>): string {
+  const { total, passed } = d.cases;
+  if (!total) return 'It has no test cases yet: add some on the Plugins page.';
+  return passed === total
+    ? `All ${total} test cases pass.`
+    : `${passed} of ${total} test cases pass: fix them before approving.`;
+}
+
+/** A drafted plugin. Reviewing, testing and approving happen on the Plugins page. */
+export function PluginDraftCard({ part }: { part: Part }) {
+  const navigate = useNavigate();
+  if (part.state !== 'output-available') return <ReadRow part={part} />;
+  const d = part.output as PluginDraftResult;
+  const allPass = d.cases.total > 0 && d.cases.passed === d.cases.total;
+  return (
+    <section className="my-1 rounded-md border border-input bg-card text-sm">
+      <header className="border-b px-3 py-2">
+        <h3 className="font-semibold leading-snug">
+          Drafted {d.name}{' '}
+          <span className="font-normal text-muted-foreground text-xs">version {d.version}</span>
+        </h3>
+      </header>
+      <div className="space-y-1.5 px-3 py-2">
+        <p className="text-[13px] leading-snug">{d.explanation}</p>
+        <ul className="text-muted-foreground text-xs">
+          {d.nodes.map((n) => (
+            <li key={n.type}>
+              {n.label} <code>{n.type}</code>
+            </li>
+          ))}
+        </ul>
+        <p className={cn('text-xs tabular', allPass ? 'text-muted-foreground' : 'text-wait')}>
+          {draftStatus(d)}
+        </p>
+      </div>
+      <footer className="flex items-center gap-2 border-t bg-muted/40 px-3 py-2">
+        <p className="min-w-0 flex-1 text-muted-foreground text-xs">
+          Nothing runs until an admin approves it.
+        </p>
+        <Button size="sm" onClick={() => navigate(d.href)}>
+          Review
+        </Button>
+      </footer>
+    </section>
   );
 }
 

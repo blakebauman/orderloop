@@ -471,6 +471,63 @@ Other isolates may still run it for their cache's 15 seconds. A rollback runs th
 against the storage as the newer version's migrations left it (migrations only go forward). Every action, and every refusal, is in the audit
 log (`plugin.*`).
 
+## Assistant-drafted plugins
+
+With `pluginInstalls.assistant: true` in the registry (the engine's `ASSISTANT_PLUGINS=on`), an
+admin can ask the assistant for a business rule ("hold orders over $5,000 shipping outside the
+US") and it drafts a plugin of rule steps (`draft_plugin`, `apps/engine/src/assistant/plugin-draft.ts`).
+Nothing it writes runs until an admin approves it on the Plugins page, with a step-up, like any
+upload.
+
+**What the model writes.** Only JSON (`runJson` with `ASSISTANT_MODEL`, prompt `plugin_draft@1`):
+a name, steps (snake_case name, label, outputs, and number, string or boolean settings with
+defaults), the rule code, and test cases. The code defines `const rules = { <step>: ({ order,
+config, vars }) => ({ branch, summary?, vars? }) }` over a `RedactedOrder`. In mock mode only,
+`heuristicDraft` writes one threshold rule from "over <amount>"; a failed model call is refused, never
+replaced by a stock rule. A new request gets an id of its own (`ai-<slug>`, then `-2`, `-3`); only
+`pluginId` revises.
+
+**What the engine writes**, so the guardrails don't depend on review:
+- the manifest (`draftManifest`): id `ai-<slug>`, version one more than the id's rows, steps
+  `ai-<slug>.<name>` in category `commerce` with no rollback or retries, `personalData: 'redact'`,
+  and no `egress`, `secrets`, `events`, `nav`, `publicPaths` or `provides`; limits 50 ms of CPU and
+  no subrequests. Whatever else the model returns is ignored.
+- the module (`hostModule`): a fixed host around the rule code, which runs inside a function scope.
+  `manifest()` answers from a string constant, `execute` runs the step's rule and turns a throw into
+  a failed step, `compensate` has nothing to undo, and `fetch`, `deliver` and `provide` refuse, as
+  the host's own methods, so nothing a rule adds to a prototype answers in their place. A rule that
+  rewrites the globals the host uses only changes what `manifest()` answers, which the pinned
+  manifest overrides. The engine serves pages only for a plugin whose pinned manifest has `nav` or
+  `publicPaths` (`pluginFetch`). No SDK and no
+  imports: the bundle is a few KB. The bundle keeps the rule code as `rules`, for the review.
+- refusals (`draftProblem`): no steps or more than 10, a bad step, output or setting name, repeated
+  outputs, code over 16 KiB, code without `const rules =`, an escape (`\u`, `\x`) outside a string,
+  and code naming what a rule never needs (`import`, `export`, `require`, `eval`, `Function`,
+  `fetch`, `globalThis`, `WebAssembly`, `caches`, `XMLHttpRequest`, `WebSocket`, the host's names,
+  `__proto__`, `constructor`, `prototype`, `defineProperty`, `setPrototypeOf`, `Reflect`, `Proxy`,
+  `process`), read with comments and string text removed (`codeOnly`). That list is a heuristic:
+  the sandbox is the boundary, with no network (`globalOutbound: null`), no storage, no secrets and
+  a CPU cap. A refused draft is audited `plugin.draft_refused`, with its reason and request.
+
+**Cases** (`apps/engine/src/plugin-cases.ts`): each names a step, an order (any field left out comes
+from `sampleRedactedOrder`, a one-line US order of 100 USD, with a fresh id, title and date each run
+so a rule can't tell a case from an order by them), settings (defaults filled) and the branch (and
+variables, compared whatever their key order) it must give. `runCases` runs each in a bare sandbox
+as the engine would run the step, with the draft's own CPU limit, through `checkExecResult`. The results are kept on the row (`installed_plugins.cases`);
+the admin edits and re-runs them on the Plugins page (`runPluginCases`, only while the draft is
+pending; a write guards on the cases it read, so a concurrent edit isn't lost). Approving re-runs
+them on the stored bundle and is refused unless every step has a case and all pass. Cases show
+behaviour, not safety: the review says to read the code. Local workerd doesn't enforce the CPU cap, so a rule that loops is only stopped deployed.
+
+**Trust.** A draft is staged by `stageBundle`, the second half of an upload, under the publisher
+`assistant`, which no registry key may use (`fleet.ts` refuses it, and an uploaded file claiming it
+is refused). It is trusted only while `ASSISTANT_PLUGINS` is on: turning it off stops every drafted
+plugin running (`activeInstalls` drops them) and refuses approving, rolling back to or turning on
+any. A version names one bundle ever (`installed_plugins_version`), so two drafts at once can't both
+be version 3. Over MCP, `draft_plugin` is not read-only (it saves a draft). A draft revises only an
+`ai-*` plugin the assistant drafted (`pluginId`), as its next version. Each draft is audited
+`plugin.drafted`, and each run of its cases `plugin.cases_run`.
+
 ## The Plugins page
 
 `apps/web/app/routes/plugins.tsx` is an admin-only page. For each installed plugin

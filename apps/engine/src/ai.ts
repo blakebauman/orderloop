@@ -70,7 +70,10 @@ export async function runJson<T>(
   messages: Msg[],
   schema: Record<string, unknown>,
   fallback: () => T,
+  /** Another model than `AI_MODEL` (the assistant's, to write code) and a larger answer. */
+  opts: { model?: string; maxTokens?: number } = {},
 ): Promise<{ value: T } & AiProvenance> {
+  const model = opts.model ?? String(env.AI_MODEL);
   const id = promptId(prompt);
   const started = Date.now();
   const heuristic = (reason: string) => {
@@ -82,11 +85,11 @@ export async function runJson<T>(
   try {
     const res = (await withTimeout(
       env.AI.run(
-        env.AI_MODEL as keyof AiModels,
+        model as keyof AiModels,
         {
           messages,
           response_format: { type: 'json_schema', json_schema: schema },
-          max_tokens: 2048,
+          max_tokens: opts.maxTokens ?? 2048,
           temperature: 0.2,
         } as never,
         env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined,
@@ -98,7 +101,7 @@ export async function runJson<T>(
     if (value === undefined || value === null) throw new Error('empty response');
     // A malformed answer would fail the step and call the model again on every retry.
     if (!conforms(value, schema)) throw new Error('response does not match the schema');
-    const p: AiProvenance = { source: 'model', model: String(env.AI_MODEL), prompt: id };
+    const p: AiProvenance = { source: 'model', model, prompt: id };
     logAiCall(p, Date.now() - started);
     return { value, ...p };
   } catch (err) {

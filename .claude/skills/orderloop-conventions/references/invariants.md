@@ -205,6 +205,12 @@ details only if that admin granted them. Admin-entered secrets are sealed in `pl
 never returned to the web app. Every install call and refusal is audited (`plugin.*`). Test:
 `pnpm --filter @orderloop/engine exec vitest run --project installs`.
 
+A plugin the assistant drafts (`apps/engine/src/assistant/plugin-draft.ts`) is logic only: the
+engine writes its manifest (`draftManifest`: no egress, secrets, buyer details, pages or events)
+and its module (`hostModule`); the model writes only the rule bodies and test cases. Never let a
+model's answer reach the manifest or add imports. A draft is approved only while `ASSISTANT_PLUGINS`
+is on and with every case passing on the stored bundle.
+
 The core never imports plugin code and keeps working with no plugin bound; the engine's default
 test project runs without one. `plugins/example` is a test fixture no deployment may install
 (check `deployments/*.jsonc`).

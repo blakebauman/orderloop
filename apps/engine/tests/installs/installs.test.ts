@@ -154,6 +154,10 @@ describe('installing a plugin at runtime', () => {
       'Runtime installs are off for this deployment',
     );
     expect(await refused('not json')).toMatch(/not a plugin bundle/);
+    // Only the assistant's own drafts are "assistant": a file can't claim it.
+    expect(await refused(await olplugin(v1, { publisher: 'assistant' }))).toMatch(
+      /Only the assistant drafts plugins/,
+    );
     expect(await refused(await olplugin(v1), { ...env, PLUGIN_TEST_FIXTURES: '' } as Env)).toMatch(
       /test fixture/,
     );

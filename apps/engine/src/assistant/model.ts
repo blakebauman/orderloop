@@ -194,6 +194,8 @@ export function heuristicStep(text: string, context: AssistantContext, tools: Se
     return pick('run_stock_review', {});
   if (flowId && /\b(add|insert|remove|delete|replace|change|move|rename|connect)\b/.test(t))
     return pick('propose_flow_change', { flowId, instruction: text });
+  if (/\b(draft|write|make|build|create)\b.*\b(plugin|rule)\b/.test(t))
+    return pick('draft_plugin', { instruction: text });
   if (/\b(needs? me|attention|waiting on|triage|stuck|overdue|what.*(should|do i|to do))\b/.test(t))
     return pick('needs_attention', {});
   if (/\b(stock|inventory|sku|reorder|low on)\b/.test(t)) {
@@ -322,6 +324,12 @@ export function describeResult(tool: string, output: unknown): string {
       return `[${o.name}](${o.href}) has ${list(o.steps).length} steps${o.publishedVersion ? `; v${o.publishedVersion} is live` : ''}.${list(o.errors).length ? ` ${list(o.errors).length} problem(s) to fix.` : ''}`;
     case 'propose_flow_change':
       return `${o.explanation} Review it in the editor before applying.`;
+    case 'draft_plugin': {
+      const cases = (o.cases ?? {}) as { total?: number; passed?: number };
+      // The model's words, kept out of the link's markup.
+      const plain = (v: unknown) => String(v ?? '').replace(/[[\]()<>]/g, '');
+      return `Drafted [${plain(o.name)} version ${plain(o.version)}](${o.href}): ${plain(o.explanation)} ${cases.passed ?? 0} of ${cases.total ?? 0} test cases pass. Nothing runs until an admin reviews and approves it on the Plugins page.`;
+    }
     default:
       return o.done ? `${o.done}.` : 'Done.';
   }
