@@ -138,6 +138,10 @@ describe('the plugin host API', () => {
     expect(await refused({ returnUrl: 'https://catalog.app.orderloop.test/x' })).toMatch(
       /buyer’s system/,
     );
+    expect(await refused({ returnUrl: 'https://app.orderloop.test./x' })).toMatch(/buyer’s system/);
+    expect(await refused({ returnUrl: 'https://eu.app.orderloop.test/x' })).toMatch(
+      /buyer’s system/,
+    );
     expect(await refused({ sessionRef: ['x'] as unknown as string })).toMatch(/sessionRef/);
     expect(
       await refused({ buyer: { id: 1, name: 'A' } as unknown as { id: string; name: string } }),

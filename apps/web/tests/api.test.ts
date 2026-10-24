@@ -124,7 +124,13 @@ const post = (path: string, body: unknown, as = operator) =>
 
 describe('starting orders over REST', () => {
   it('refuses an Idempotency-Key in a namespace the core starts orders under', async () => {
-    for (const key of ['cart:cart_1', 'ucp:chk_1', 'plugin:punchout:po-1']) {
+    for (const key of [
+      'cart:cart_1',
+      'ucp:chk_1',
+      'plugin:punchout:po-1',
+      'email:<m@x>',
+      'a2a:1',
+    ]) {
       const res = await handleApi(
         new Request('https://app.test/api/v1/orders', {
           method: 'POST',
@@ -134,9 +140,9 @@ describe('starting orders over REST', () => {
         operator,
       );
       expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({
-        error: 'Idempotency-Key may not start with cart:, ucp: or plugin:',
-      });
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /^Idempotency-Key may not start with cart:, ucp:/,
+      );
     }
   });
 });

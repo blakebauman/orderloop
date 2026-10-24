@@ -284,6 +284,8 @@ export class CartAgent extends Agent<Env, CartState> {
     actor: CartActor,
     op: CartOp,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
+    // While an order starts or a return renders, the cart is held as it was checked.
+    if (this.submitting) return { ok: false, error: 'The cart is being sent.' };
     const r = applyCartOp(this.cart(), op, actor, Date.now());
     if (!r.ok) return r;
     await this.save(r.cart);

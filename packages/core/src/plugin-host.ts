@@ -98,7 +98,8 @@ export function externalCartProblem(
     return 'buyer needs an id and a name of at most 120 characters';
   const back = typeof input.returnUrl === 'string' ? httpsUrl(input.returnUrl) : null;
   if (!back) return 'returnUrl must be an https URL without credentials';
-  if (ownHosts.includes(back.hostname)) return 'returnUrl must be the buyer’s system, not this one';
+  if (isOwnHost(back.hostname, ownHosts))
+    return 'returnUrl must be the buyer’s system, not this one';
   const origins = input.frameOrigins ?? [];
   if (!Array.isArray(origins) || origins.length > MAX_FRAME_ORIGINS)
     return `At most ${MAX_FRAME_ORIGINS} frameOrigins`;
@@ -138,6 +139,32 @@ export function checkCartReturn(
   }
   if (bytes > MAX_RETURN_BYTES) return { ok: false, error: 'The return is over 1 MiB' };
   return { ok: true, fields: Object.fromEntries(entries) };
+}
+
+/**
+ * Idempotency-key namespaces the core starts orders under itself (carts, UCP, plugins, channels,
+ * email, A2A, the stock review). A REST caller's key may not start with one.
+ */
+export const RESERVED_ORDER_KEY_PREFIXES = [
+  'cart:',
+  'ucp:',
+  'plugin:',
+  'order:',
+  'email:',
+  'a2a:',
+  'replenish:',
+] as const;
+
+export const reservedOrderKey = (key: string) =>
+  RESERVED_ORDER_KEY_PREFIXES.some((p) => key.startsWith(p));
+
+/** Whether `host` is one of `own`, or under one of them (a trailing dot ignored). */
+export function isOwnHost(host: string, own: readonly string[]): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  return own.some((o) => {
+    const x = o.toLowerCase().replace(/\.$/, '');
+    return !!x && (h === x || h.endsWith(`.${x}`));
+  });
 }
 
 /** The idempotency key a plugin's order starts under: its own namespace, never another's. */

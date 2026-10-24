@@ -476,6 +476,9 @@ test('capabilities are granted by the registry, and bind the host API as the plu
       props: { id: 'punchout' },
     },
   ]);
+  const vars = renderEngine(base('engine'), d).vars;
+  assert.equal(vars.APP_ORIGIN, 'https://acme.orderloop.app');
+  assert.equal(vars.OWN_HOSTS, 'acme.orderloop.app,catalog.acme.orderloop.app');
   // No capability, no host binding.
   assert.equal(renderPlugin(pluginBase, d, 'qbd').services, undefined);
   assert.throws(
