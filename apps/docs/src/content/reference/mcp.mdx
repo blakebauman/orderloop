@@ -66,6 +66,12 @@ A client that runs OAuth itself finds the authorization server from
 `/oauth/register` or with a Client ID Metadata Document (an `https` `client_id`), sends the person
 to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.
 
+A client or directory that discovers servers before connecting can read the
+[Server Card](https://modelcontextprotocol.io/seps/2127-mcp-server-cards) at
+`https://orderloop.app/mcp/server-card`, listed in `/.well-known/ai-catalog.json`. It names the
+server, the endpoint and the protocol revisions it speaks. It lists no tools: those depend on who
+connects, so a client learns them once connected.
+
 A token carries the role it was created with and its expiry. `/mcp` accepts the same bearer
 credentials as the [REST API](/reference/rest-api/): `ol_live_` tokens. These work on `/a2a` too. A bearer that isn't a valid token is `401`, and an expired token is
 refused (`401` with the reason), as there.

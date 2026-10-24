@@ -42,6 +42,7 @@ vi.mock('~/lib/auth.server', () => ({
 }));
 
 const { isOAuthPath, oauthApi, oauthFetch } = await import('~/lib/oauth.server');
+const { mcpDiscovery } = await import('~/lib/mcp-discovery');
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as never;
 const post = (path: string, headers: Record<string, string> = {}) =>
@@ -243,5 +244,62 @@ describe('MCP and A2A on the web Worker', () => {
     expect((await post('/a2a', { authorization: `Bearer ${a2aToken}` })).status).toBe(200);
     expect((await post('/mcp', { authorization: `Bearer ${a2aToken}` })).status).toBe(401);
     expect(apiPrincipal).not.toHaveBeenCalled();
+  });
+});
+
+describe('MCP discovery', () => {
+  const get = (path: string, init: RequestInit = {}) =>
+    mcpDiscovery(new Request(`https://orderloop.app${path}`, init));
+
+  it('publishes a Server Card for this origin, with no capabilities or tools', async () => {
+    const res = (await get('/mcp/server-card'))!;
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/mcp-server-card+json');
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
+    const card = (await res.json()) as { name: string; description: string };
+    expect(card).toMatchObject({
+      $schema: 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json',
+      name: 'app.orderloop/mcp',
+      version: expect.any(String),
+      remotes: [
+        {
+          type: 'streamable-http',
+          url: 'https://orderloop.app/mcp',
+          supportedProtocolVersions: expect.arrayContaining(['2026-07-28', '2025-06-18']),
+        },
+      ],
+    });
+    expect(card.name).toMatch(/^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/);
+    expect(card.description.length).toBeLessThanOrEqual(100);
+    expect(card).not.toHaveProperty('capabilities');
+    expect(card).not.toHaveProperty('tools');
+  });
+
+  it('lists the card in the AI Catalog', async () => {
+    const res = (await get('/.well-known/ai-catalog.json'))!;
+    expect(res.headers.get('content-type')).toBe('application/ai-catalog+json');
+    expect(await res.json()).toEqual({
+      specVersion: '1.0',
+      entries: [
+        {
+          identifier: 'urn:air:orderloop.app:mcp:orderloop',
+          type: 'application/mcp-server-card+json',
+          url: 'https://orderloop.app/mcp/server-card',
+        },
+      ],
+    });
+  });
+
+  it('revalidates by ETag, answers preflight and only reads', async () => {
+    const etag = (await get('/mcp/server-card'))!.headers.get('etag')!;
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    expect((await get('/mcp/server-card', { headers: { 'if-none-match': etag } }))!.status).toBe(
+      304,
+    );
+    expect((await get('/mcp/server-card', { method: 'OPTIONS' }))!.status).toBe(204);
+    expect((await get('/mcp/server-card', { method: 'POST' }))!.status).toBe(405);
+    expect(await get('/mcp')).toBeNull();
+    expect(isOAuthPath('/mcp/server-card')).toBe(false);
   });
 });
