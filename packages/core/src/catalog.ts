@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { assessConfigErrors, assessOutputs, assessQuestionsSchema } from './assess';
 import { policyRulesSchema } from './policy';
-import { SHIPPING_SELECTIONS, shippingConfigSchema } from './shipping';
+import { SHIPPING_SELECTIONS, shippingConfigSchema, taxRegionsSchema } from './shipping';
 
 export type NodeCategory = 'trigger' | 'commerce' | 'control' | 'ai';
 
@@ -190,6 +190,25 @@ export const NODE_SPECS = [
     outputs: OUT,
   }),
   node({
+    type: 'commerce.discount',
+    category: 'commerce',
+    label: 'Apply promotions',
+    description:
+      'Applies the promotion codes the order carries (from a cart, say): lowers the covered lines’ prices, or makes shipping free, and records each redemption against its limits.',
+    icon: 'TicketPercent',
+    fields: [
+      {
+        key: 'stack',
+        label: 'Stack codes',
+        kind: 'boolean',
+        default: false,
+        hint: 'Off applies only the code worth the most. Place after Price lines (and after Shipping rate for free shipping), before Calculate tax',
+      },
+    ],
+    outputs: OUT,
+    rollback: true,
+  }),
+  node({
     type: 'commerce.shipping_rate',
     category: 'commerce',
     label: 'Shipping rate',
@@ -251,6 +270,14 @@ export const NODE_SPECS = [
     icon: 'Percent',
     fields: [
       { key: 'rate', label: 'Rate', kind: 'number', default: 0.08 },
+      {
+        key: 'regions',
+        label: 'Rates by region',
+        kind: 'json',
+        schema: taxRegionsSchema,
+        default: [],
+        hint: 'Rates for ship-to countries or regions ([{ "country": "US", "region": "CA", "rate": 0.0725 }]), the most specific match first; Rate applies elsewhere',
+      },
       {
         key: 'includeShipping',
         label: 'Tax shipping',
