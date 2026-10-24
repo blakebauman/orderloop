@@ -146,9 +146,13 @@ export class CartAgent extends Agent<Env, CartState> {
       customerId: c.customerId,
       orderId: c.orderId,
       updatedAt: c.updatedAt,
-      // Who an external cart is for, so a data subject request finds it; null once erased.
-      buyerId:
-        c.external && c.external.buyer.id !== ERASED ? c.external.buyer.id.toLowerCase() : null,
+      // Who an external cart is for, so a data subject request finds it: '' once erased (indexed,
+      // no buyer), null only on a staff cart or an external one not indexed since 0050.
+      buyerId: c.external
+        ? c.external.buyer.id === ERASED
+          ? ''
+          : c.external.buyer.id.toLowerCase()
+        : null,
     };
     await this.db()
       .insert(carts)
@@ -256,6 +260,13 @@ export class CartAgent extends Agent<Env, CartState> {
   }
 
   /** What the buyer of this external cart put on it, for a data subject export. */
+  /** Writes this cart's index row again (the buyer a row from before migration 0050 lacks). */
+  async reindex(): Promise<boolean> {
+    if (!this.state.cart) return false;
+    await this.index(this.state.cart);
+    return true;
+  }
+
   async subjectExport() {
     const c = this.state.cart;
     if (!c?.external) return null;
