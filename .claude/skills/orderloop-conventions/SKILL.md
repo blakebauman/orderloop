@@ -9,7 +9,7 @@ metadata:
 
 # Order Loop conventions
 
-CLAUDE.md states the rules in one line each. This skill is the working version: what each rule
+AGENTS.md (imported by CLAUDE.md) states the rules in one line each. This skill is the working version: what each rule
 protects, where it lives in the code, and how to tell whether a change keeps it. The full list is
 in [references/invariants.md](references/invariants.md); read the sections your change touches.
 

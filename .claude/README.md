@@ -1,7 +1,7 @@
 # Order Loop Claude Code toolkit
 
 Project-scoped agents, skills and hooks for this repo, version-controlled and reviewed like source.
-CLAUDE.md states the rules. This toolkit splits how they're kept:
+AGENTS.md states the rules (CLAUDE.md imports it). This toolkit splits how they're kept:
 
 - **Hooks** enforce what a machine can check: they deny, ask or remind, every time.
 - **Skills** carry the procedures and the reasons behind the rules.

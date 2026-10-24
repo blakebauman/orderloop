@@ -178,7 +178,8 @@ Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wran
 ## Contributing
 
 Start with [docs/local-development.md](docs/local-development.md) (requirements, install, checks) and
-[CLAUDE.md](CLAUDE.md), the rules every change keeps (`AGENTS.md` is the same file). A few things the
+[AGENTS.md](AGENTS.md), the rules every change keeps, for people and every coding agent
+(`CLAUDE.md` imports it for Claude Code). A few things the
 code doesn't tell you:
 
 - **Branch in a worktree.** Several sessions, human and Claude, can share one checkout, so don't switch
