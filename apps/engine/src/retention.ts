@@ -10,11 +10,13 @@
 
 import {
   auditRetentionDays,
+  FINAL_CART_STATUSES,
   personalDataRetentionDays,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import {
   auditEvents,
+  carts,
   checkoutSessions,
   createDb,
   inboundEmails,
@@ -29,6 +31,7 @@ import {
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import { pruneConfirmations } from './confirmations';
 import { resealSecrets } from './data-key';
+import { cartAgent } from './namespaces';
 import { eraseOrders } from './subjects';
 import { pruneUsage } from './usage';
 
@@ -53,6 +56,11 @@ export const RETENTION = {
    * its order's record (its line ids and ship-to are what the platform's order events show).
    */
   abandonedCheckoutsMs: 30 * DAY,
+  /**
+   * Chat, files, return forms and buyers of carts that ended (submitted, returned or canceled)
+   * this long ago (`CartAgent.purge`). The cart's lines, quote and order stay.
+   */
+  endedCartsMs: 90 * DAY,
 } as const;
 
 /** Deletes everything past its retention, in one batch. Returns rows deleted per table. */
@@ -102,6 +110,7 @@ export async function sweep(env: Env, now = Date.now()) {
     ]);
   return {
     auditArchived: await archiveAudit(env, now),
+    cartsPurged: await purgeEndedCarts(env, now),
     personalDataErased: await expirePersonalData(env, now),
     confirmations: await pruneConfirmations(env, now),
     aiUsageDays: await pruneUsage(env, now),
@@ -115,6 +124,32 @@ export async function sweep(env: Env, now = Date.now()) {
     ucpIdempotency: replays.length,
     abandonedCheckouts: checkouts.length,
   };
+}
+
+/** Ended carts one sweep clears; the rest wait for the next day's. */
+const PURGE_MAX = 200;
+
+/** Clears the chat, files and buyer of carts that ended past their retention. Returns how many. */
+export async function purgeEndedCarts(env: Env, now = Date.now()) {
+  const db = createDb(env.DB);
+  const due = await db
+    .select({ id: carts.id })
+    .from(carts)
+    .where(
+      and(
+        isNull(carts.purgedAt),
+        inArray(carts.status, [...FINAL_CART_STATUSES]),
+        lt(carts.updatedAt, now - RETENTION.endedCartsMs),
+      ),
+    )
+    .orderBy(asc(carts.updatedAt))
+    .limit(PURGE_MAX);
+  let purged = 0;
+  for (const c of due) {
+    const r = await cartAgent(env, c.id).purge();
+    if (r.purged) purged++;
+  }
+  return purged;
 }
 
 /** Audit events per archive object, and the most one sweep moves. */

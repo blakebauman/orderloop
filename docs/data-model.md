@@ -67,6 +67,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0047_plugin_installs.sql` | `installed_plugins` (and its index `installed_plugins_status (status)`) and `plugin_secrets`, for plugins an admin installs at runtime |
 | `0048_carts_promotions.sql` | `carts` (the Carts index; unique `carts_session (plugin_id, session_ref)` where `plugin_id` is set), `promotions` (unique `promotions_code`) and `promotion_redemptions` |
 | `0049_plugin_drafts.sql` | `installed_plugins.request` and `cases`, for plugins the assistant drafts, and the unique index `installed_plugins_version (id, version)` |
+| `0050_cart_retention.sql` | `carts.buyer_id` (index `carts_buyer` where set) and `purged_at` (index `carts_purge` with `updated_at`), for data subject requests and the retention sweep |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -199,7 +200,7 @@ checking a code needs it. See [Team and roles](https://docs.orderloop.app/guides
 | `ucp_platforms` | The AI shopping platforms an admin let in (`apps/web/app/lib/ucp.server.ts`), id `ucp_…`: `name`, `profile_url` (https; must equal the profile in `UCP-Agent`), `key_prefix` (`ol_ucp_` and 4 characters, for lists), `key_hash` (SHA-256 of the key, unique; the key is returned once), `profile` and `profile_fetched_at` (the platform's profile as the engine fetched it, reused for an hour), `created_at`, `created_by`, `last_used_at` (written at most every 5 minutes) and `revoked_at`. A revoked row stays: checkouts and orders name it |
 | `checkout_sessions` | Checkouts (`apps/engine/src/ucp/checkout.ts`), id `chk_…`: `owner_id` (the platform), `status`, `data` (the whole `CheckoutSession` as JSON), `order_id` (set on completion; unique where not null), `version` (compared on every write so an update can't interleave with a completion), `created_at`, `updated_at` and `expires_at`. Indexed by `(owner_id, created_at)` and `expires_at`. Sessions that never placed an order are deleted 30 days after they expire by the [retention sweep](#retention); one that did is kept, since its line ids and ship-to are what the platform's order events show |
 | `ucp_idempotency` | `Idempotency-Key` replays for the UCP endpoints, primary key `(owner_id, key)`: `request_hash` (SHA-256 of the scope and the raw body), `status` and `response` (null while the first request runs) and `created_at`. A key is reusable after 24 hours; the [retention sweep](#retention) deletes rows older than 48 hours |
-| `carts` | The Carts page's index (`packages/core/src/cart.ts`), id `cart_…`: `title`, `status` (`open`, `locked`, `submitted`, `returned`, `canceled`), `customer_id`, `flow_id` (the flow that prices it and that submitting starts), `order_id` (set on submit), `created_by` (a principal id, or `plugin:<id>`), `created_at`, `updated_at`, and for an external cart `plugin_id`, `session_ref` (the plugin's session id; unique with `plugin_id`) and `expires_at`. The lines, quote and chat live in the cart's CartAgent, which writes this row when the title or status changes. Chat (author id and name, free text) is in the agent's own SQLite: neither the retention sweep nor data-subject export and erasure reach it yet, so a cart's chat is kept until the cart's retention is added. Indexed by `updated_at` and `(status, updated_at)` |
+| `carts` | The Carts page's index (`packages/core/src/cart.ts`), id `cart_…`: `title`, `status` (`open`, `locked`, `submitted`, `returned`, `canceled`), `customer_id`, `flow_id` (the flow that prices it and that submitting starts), `order_id` (set on submit), `created_by` (a principal id, or `plugin:<id>`), `created_at`, `updated_at`, and for an external cart `plugin_id`, `session_ref` (the plugin's session id; unique with `plugin_id`) and `expires_at`. The lines, quote and chat live in the cart's CartAgent, which writes this row when the title or status changes. Chat (author id and name, free text) is in the agent's own SQLite. `buyer_id` (an external cart's buyer as the plugin named them, lower-cased, so their email for a punchout buyer whose system sends one; null on a staff cart and once erased or purged) is how a [data subject request](#export-and-erasure) finds their carts, indexed where set; `purged_at` is when the [retention sweep](#retention) cleared the ended cart (indexed with `updated_at`) Indexed by `updated_at` and `(status, updated_at)` |
 | `promotions` | Promotion codes for the `commerce.discount` node, id `promo_…`: `code` (upper case, unique), `name`, `kind` (`pct`, `amount` or `free_shipping`), `value` (a percentage, or an amount in `currency`), `min_subtotal`, `skus` (a JSON array the discount is limited to, or null for every line), `customer_id` (limited to one customer), `valid_from` and `valid_to` (ms, either null for open-ended), `max_redemptions`, `per_customer_limit`, `status` (`active` or `paused`), `created_by`, `created_at`, `updated_at` |
 | `promotion_redemptions` | One per promotion per order, primary key `(promotion_id, order_id)`: `customer_id`, `amount` (what the discount took off), `step_key` (the discount node's step) and `created_at`. Written inside the node's step (`redeemPromotion`, one `INSERT … SELECT` that counts the other orders' redemptions, so two orders can't both take the last one), so a retried step redeems once; never by a quote (`dryRun`); deleted when the order rolls back (`ROLLBACKS['commerce.discount']`). Counted against `max_redemptions` and, by `(promotion_id, customer_id)`, `per_customer_limit` |
 
@@ -226,6 +227,13 @@ See [Email intake](https://docs.orderloop.app/guides/email-intake/#the-intake-lo
 | `po` | `<nodeId>-<run>.html` | `commerce.generate_po` |
 
 The web app serves them at `/docs/<key>` to signed-in users only.
+
+Cart files are at `carts/<cartId>/<attachmentId>` (`cartAttachmentKey`; `cartAttachmentPrefix` lists
+a cart's), written by the web app (`apps/web/app/lib/cart-attachments.server.ts`) with the file's
+type and, as custom metadata, the cart id and name. They're listed in the cart's agent
+(`CartState.attachments`), not in `documents`, and served at `/carts/<cartId>/attachments/<id>` to
+staff and to that cart's buyer. Removing one deletes it. A cart that ended 90 days ago loses its
+files with its chat ([retention](#retention)), and a buyer's data subject request removes theirs.
 
 ## Product catalog
 
@@ -349,7 +357,8 @@ subject is:
 
 - the `customers` with that email;
 - the `orders` with that `contact_email`, or whose `customer_id` is one of those customers;
-- the orders an `inbound_emails` row from that `sender` started (`order_id`).
+- the orders an `inbound_emails` row from that `sender` started (`order_id`);
+- the external carts (punchout sessions) whose `buyer_id` is the address.
 
 Orders with `erased_at` set are no longer part of it. A `users` row with the address is only reported
 (`teamMember`); it is never changed.
@@ -357,7 +366,9 @@ Orders with `erased_at` set are no longer part of it. A `users` row with the add
 **Export** returns a JSON attachment: `customers` (without `stripe_payment_method_id`), up to 500 orders
 (`truncated` when there were more) with `contact`, `lines` and `meta` read from each agent's state,
 `messages` (to those orders or to the address), `inbound_emails` rows (without `r2_key`) and the
-`documents` list (`key`, `kind`, `contentType`, `createdAt`).
+`documents` list (`key`, `kind`, `contentType`, `createdAt`), and `carts`: each of their external carts
+(`CartAgent.subjectExport`) with its id, title, status, buyer, lines, order, and the messages and file
+names, types and sizes they added.
 
 **Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
 has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
@@ -376,6 +387,12 @@ the rest of the batch is fully erased (agent state, R2, and the D1 rows below), 
 | `inbound_emails` | For rows with this `order_id`: `sender` set to `[erased]`, `subject` to `''`, `r2_key` to null |
 | `orders` | `contact_email` null, `title` erased (an order no agent holds is erased in D1 with the terms), `erased_at` set |
 
+Each call first erases the subject's external carts (`carts`, counted in `carts`) through
+`CartAgent.eraseSubject`: an open cart is canceled, their messages and files are deleted, the terms
+(with the buyer's id and name) are erased from everyone else's messages and the title, the return
+form and start links are dropped, their sockets are closed, and the buyer becomes `[erased]`, which
+clears `buyer_id`. The cart's lines, quote and order stay.
+
 When no order is left (the last call, `done: true`): `inbound_emails` from that sender that never
 started an order are erased the same way and their R2 `.eml` deleted, `messages` to the address are
 erased, and each `customers` row becomes `name` `Erased customer`, `email`
@@ -387,7 +404,8 @@ erased, and each `customers` row becomes `name` `Erased customer`, `email`
 target `subject:` and the first 16 hex characters of the SHA-256 of the normalised email
 (`fingerprintOf`), so the log does not hold the address.
 
-Not reached: the Workflow instance's params and step outputs, which Cloudflare Workflows retains; the
+Not reached: messages on staff carts or other buyers' carts that name the subject (until those carts'
+retention clears them), and external carts opened before `buyer_id` was recorded (migration `0050`); the Workflow instance's params and step outputs, which Cloudflare Workflows retains; the
 Stripe customer at Stripe (only the ids here are cleared); AI Gateway and Workers logs, which follow
 their own retention; the R2 audit archives (`audit/…`, which expire only after the deployment's `auditArchiveDays`, if set); `sellers`; and `orders.external_id` and
 `customer_id`, which stay on an erased order.
@@ -455,6 +473,7 @@ A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `s
 | `ai_usage` | `day` older than 90 days (`pruneUsage`; reported as `aiUsageDays`) |
 | `ucp_idempotency` | `created_at` older than 48 hours (reported as `ucpIdempotency`) |
 | `checkout_sessions` | no `order_id` and `expires_at` older than 30 days (reported as `abandonedCheckouts`) |
+| Cart chat, files and buyers | A cart that ended (`submitted`, `returned` or `canceled`) over 90 days ago and not yet purged, up to 200 a run (`purgeEndedCarts`, `CartAgent.purge`; reported as `cartsPurged`): its chat, return form and start links deleted, its files under `carts/<id>/` deleted, its buyer `[erased]`, and `purged_at` set. Its lines, quote and order, and the `carts` row, are kept |
 
 The sweep also reseals stored secrets (`resealSecrets`, `apps/engine/src/data-key.ts`; reported as `secrets: { resealed, unreadable }`): values stored in plaintext before encryption are encrypted, and values under `DATA_KEY_PREVIOUS` move onto `DATA_KEY`, each written conditionally on the value read so a concurrent rotation isn't undone. A value no key opens is logged and counted in `unreadable`. See [Rotating the data key](operations.md#rotating-the-data-key).
 

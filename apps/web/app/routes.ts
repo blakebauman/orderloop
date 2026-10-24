@@ -16,6 +16,9 @@ export default [
   // outside the app shell and its sign-in (lib/cart-guest.server.ts).
   route('cart/start/:cartId/:token', 'routes/cart-start.tsx'),
   route('cart/:cartId', 'routes/cart-buy.tsx'),
+  // A cart's files, for staff or the cart's buyer (lib/cart-attachments.server.ts).
+  route('carts/:cartId/attachments', 'routes/cart-attachments.ts'),
+  route('carts/:cartId/attachments/:attachmentId', 'routes/cart-attachment.ts'),
   layout('routes/shell.tsx', [
     // An error boundary inside the shell, so a refused or missing page keeps the app around it.
     layout('routes/in-app.tsx', [

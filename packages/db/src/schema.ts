@@ -947,9 +947,15 @@ export const carts = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     expiresAt: integer('expires_at'),
+    /** An external cart's buyer as the plugin named them, lower-cased (their email, for erasure). */
+    buyerId: text('buyer_id'),
+    /** When the retention sweep cleared the ended cart's chat, files and buyer. */
+    purgedAt: integer('purged_at'),
   },
   (t) => [
     index('carts_updated').on(t.updatedAt),
+    index('carts_buyer').on(t.buyerId).where(sql`${t.buyerId} IS NOT NULL`),
+    index('carts_purge').on(t.purgedAt, t.updatedAt),
     index('carts_status').on(t.status, t.updatedAt),
     uniqueIndex('carts_session').on(t.pluginId, t.sessionRef).where(sql`${t.pluginId} IS NOT NULL`),
   ],

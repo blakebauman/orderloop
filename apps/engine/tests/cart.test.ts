@@ -14,6 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
+import { purgeEndedCarts, RETENTION } from '../src/retention';
 import { signed } from './principal';
 
 const db = () => createDb(env.DB);
@@ -324,6 +325,59 @@ describe('the cart socket', () => {
   });
 });
 
+describe('cart files', () => {
+  const file = (id: string, cartId: string) => ({
+    id,
+    name: 'spec.pdf',
+    type: 'application/pdf',
+    size: 4,
+    key: `carts/${cartId}/${id}`,
+  });
+
+  it('lists a file the web app stored, for whoever may change the cart', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    const vee = staff(await who('viewer', 'vee'));
+    expect(await api().attachToCart(id, file('att_1', id), vee)).toEqual({
+      ok: false,
+      error: "You can't change this cart.",
+    });
+    expect(
+      await api().attachToCart(id, { ...file('att_2', id), key: 'carts/cart_x/att_2' }, ada),
+    ).toEqual({
+      ok: false,
+      error: 'That file isn’t this cart’s.',
+    });
+    expect(
+      await api().attachToCart(id, { ...file('att_3', id), type: 'text/html' }, ada),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(await api().attachToCart(id, file('att_1', id), ada)).toEqual({ ok: true });
+    expect((await state(id)).attachments).toEqual([
+      expect.objectContaining({ id: 'att_1', by: { id: ada.id, name: 'ada' } }),
+    ]);
+    expect(await api().attachToCart('cart_nope', file('att_1', 'cart_nope'), ada)).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('removes a file for who added it or an operator, and deletes it', async () => {
+    const id = await open();
+    const ann = await who('operator', 'ann2');
+    await env.DOCS.put(`carts/${id}/att_9`, '%PDF');
+    expect(await api().attachToCart(id, file('att_9', id), staff(ann))).toEqual({ ok: true });
+    const viewer = await socket(id, await who('viewer', 'vic'));
+    expect((await viewer.call('detach', ['att_9'])).result).toMatchObject({ ok: false });
+    const owner = await socket(id, ann);
+    expect((await owner.call('detach', ['att_9'])).result).toEqual({ ok: true });
+    expect((await state(id)).attachments).toEqual([]);
+    expect(await env.DOCS.get(`carts/${id}/att_9`)).toBeNull();
+    viewer.close();
+    owner.close();
+  });
+});
+
 describe('submitting a cart', () => {
   it('starts one order of the cart’s flow from the quote, and ends the cart', async () => {
     introspector = await introspectWorkflow(env.ORDER_LOOP);
@@ -368,5 +422,40 @@ describe('submitting a cart', () => {
     expect(await cart(id).cancelAs(staff(await who('viewer', 'vee')))).toMatchObject({ ok: false });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: true });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: false, error: 'The cart is canceled.' });
+  });
+});
+
+describe('cart retention', () => {
+  it('clears an ended cart’s chat and files after the retention, once, and keeps its lines', async () => {
+    const id = await open();
+    const ada = await who('operator', 'ada');
+    const ws = await socket(id, ada);
+    await cart(id).applyAs(staff(ada), { op: 'add', sku: 'WID-100', qty: 1 });
+    await ws.call('say', ['Ann at ann@northwind.example wants these Friday']);
+    await env.DOCS.put(`carts/${id}/att_r1`, '%PDF');
+    await api().attachToCart(
+      id,
+      { id: 'att_r1', name: 'po.pdf', type: 'application/pdf', size: 4, key: `carts/${id}/att_r1` },
+      staff(ada),
+    );
+    ws.close();
+    await cart(id).cancelAs(staff(ada));
+    // Not yet past the retention: kept.
+    expect(await purgeEndedCarts(env)).toBe(0);
+    const later = Date.now() + RETENTION.endedCartsMs + 1;
+    expect(await purgeEndedCarts(env, later)).toBeGreaterThanOrEqual(1);
+    const s = await state(id);
+    expect(s.chat).toEqual([]);
+    expect(s.attachments).toEqual([]);
+    expect(s.cart!.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 1 })]);
+    expect(await env.DOCS.get(`carts/${id}/att_r1`)).toBeNull();
+    const row = await db().select().from(carts).where(eq(carts.id, id)).get();
+    expect(row?.purgedAt).toEqual(expect.any(Number));
+    // Done once: the same cart isn't swept again.
+    const again = await purgeEndedCarts(env, later);
+    expect((await db().select().from(carts).where(eq(carts.id, id)).get())?.purgedAt).toBe(
+      row?.purgedAt,
+    );
+    expect(again).toBeGreaterThanOrEqual(0);
   });
 });

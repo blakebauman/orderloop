@@ -5,6 +5,8 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
+  type CartActor,
+  type CartAttachment,
   type CopilotRequest,
   type CopilotResult,
   type CreateCartInput,
@@ -24,7 +26,7 @@ import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
 import { cartSnapshot, createCart, redeemCartStart } from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
-import { orderAgent } from './namespaces';
+import { cartAgent, orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins, pinnedManifest } from './plugin-host';
@@ -209,5 +211,15 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   redeemCartStart(cartId: string, token: string) {
     return redeemCartStart(this.env, cartId, token);
+  }
+
+  async attachToCart(
+    cartId: string,
+    attachment: Omit<CartAttachment, 'by' | 'at'>,
+    actor: CartActor,
+  ) {
+    if (!(await cartSnapshot(this.env, cartId)))
+      return { ok: false as const, error: 'No such cart.' };
+    return cartAgent(this.env, cartId).attachAs(actor, attachment);
   }
 }

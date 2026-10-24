@@ -128,6 +128,8 @@ export type ErasureResult =
       documents: number;
       messages: number;
       inboundEmails: number;
+      /** External carts they were the buyer of: their messages and files removed, the cart kept. */
+      carts: number;
       /** The address is also a team member's; remove them on the team page. */
       teamMember: boolean;
     }
@@ -144,6 +146,8 @@ export type SubjectExport = {
   documents: { key: string; kind: string; contentType: string; createdAt: number }[];
   /** Agentic checkout sessions they were the buyer of. */
   checkouts: Record<string, unknown>[];
+  /** External carts (a punchout session, say) they were the buyer of, with their messages and files. */
+  carts: Record<string, unknown>[];
   /** True when there were more orders than one export holds. */
   truncated: boolean;
   teamMember: boolean;

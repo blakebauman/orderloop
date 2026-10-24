@@ -14,11 +14,14 @@
 import {
   applyCartOp,
   atLeast,
+  attachmentName,
+  attachmentProblem,
   BASE_CURRENCY,
   CART_CHAT_BROADCAST,
   CART_START_TTL_MS,
   type Cart,
   type CartActor,
+  type CartAttachment,
   type CartChatMessage,
   type CartGuest,
   type CartMember,
@@ -26,11 +29,18 @@ import {
   type CartState,
   type CheckoutSession,
   canChangeMessage,
+  canEditCart,
   canReadCart,
+  canRemoveAttachment,
+  cartAttachmentKey,
+  cartAttachmentPrefix,
   cartReadyProblem,
   chatBody,
   checkCartReturn,
   EMPTY_CART_STATE,
+  ERASED,
+  eraseText,
+  erasureTerms,
   finishCart,
   isCartExpired,
   isFinalCart,
@@ -41,6 +51,7 @@ import {
 } from '@orderloop/core';
 import { carts, createDb } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
+import { eq } from 'drizzle-orm';
 import { loadFlowVersion } from '../flows';
 import { startOrderOnce } from '../orders';
 import { pluginStub } from '../plugin-host';
@@ -135,6 +146,9 @@ export class CartAgent extends Agent<Env, CartState> {
       customerId: c.customerId,
       orderId: c.orderId,
       updatedAt: c.updatedAt,
+      // Who an external cart is for, so a data subject request finds it; null once erased.
+      buyerId:
+        c.external && c.external.buyer.id !== ERASED ? c.external.buyer.id.toLowerCase() : null,
     };
     await this.db()
       .insert(carts)
@@ -149,6 +163,119 @@ export class CartAgent extends Agent<Env, CartState> {
         ...row,
       })
       .onConflictDoUpdate({ target: carts.id, set: row });
+  }
+
+  /** Deletes every file stored for this cart (its `cartAttachmentPrefix`). Returns how many. */
+  private async deleteFiles(): Promise<number> {
+    const c = this.state.cart;
+    if (!c) return 0;
+    let deleted = 0;
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.DOCS.list({ prefix: cartAttachmentPrefix(c.id), cursor });
+      const keys = page.objects.map((o) => o.key);
+      if (keys.length) await this.env.DOCS.delete(keys);
+      deleted += keys.length;
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return deleted;
+  }
+
+  /**
+   * Retention: an ended cart keeps its lines, quote and order, and loses what people said and
+   * sent on it: its chat, files, return form, start links and who its buyer was. Safe to repeat.
+   */
+  async purge(): Promise<{ purged: boolean; messages: number; files: number }> {
+    const c = this.state.cart;
+    if (!c || !isFinalCart(c)) return { purged: false, messages: 0, files: 0 };
+    this.tables();
+    const messages = this.sql<{ n: number }>`SELECT count(*) AS n FROM cart_chat`[0]?.n ?? 0;
+    this.sql`DELETE FROM cart_chat`;
+    this.sql`DELETE FROM cart_return`;
+    this.sql`DELETE FROM cart_starts`;
+    const files = await this.deleteFiles();
+    this.setState({
+      ...this.state,
+      cart: c.external
+        ? { ...c, external: { ...c.external, buyer: { id: ERASED, name: ERASED } } }
+        : c,
+      chat: [],
+      attachments: [],
+    });
+    await this.index(this.cart());
+    await this.db().update(carts).set({ purgedAt: Date.now() }).where(eq(carts.id, c.id));
+    return { purged: true, messages, files };
+  }
+
+  /**
+   * A data subject request for the buyer an external cart was opened for: an open cart is
+   * canceled; their messages and files are removed; `terms` (their email and names) are erased
+   * from everyone else's messages and the title; and the cart no longer names them.
+   */
+  async eraseSubject(terms: string[]): Promise<{ messages: number; files: number }> {
+    const c = this.state.cart;
+    if (!c?.external) return { messages: 0, files: 0 };
+    if (!isFinalCart(c)) await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    const guestId = `guest:${c.external.buyer.id}`;
+    const all = erasureTerms([...terms, c.external.buyer.id, c.external.buyer.name]);
+    this.tables();
+    const theirs =
+      this.sql<{ n: number }>`SELECT count(*) AS n FROM cart_chat WHERE author_id = ${guestId}`[0]
+        ?.n ?? 0;
+    this.sql`DELETE FROM cart_chat WHERE author_id = ${guestId}`;
+    for (const r of this.sql<{
+      id: string;
+      body: string;
+      author_name: string;
+    }>`SELECT id, body, author_name FROM cart_chat`) {
+      const body = eraseText(r.body, all);
+      if (body !== r.body) this.sql`UPDATE cart_chat SET body = ${body} WHERE id = ${r.id}`;
+    }
+    this.sql`DELETE FROM cart_return`;
+    this.sql`DELETE FROM cart_starts`;
+    const files = (this.state.attachments ?? []).filter((a) => a.by.id === guestId);
+    for (const a of files) await this.env.DOCS.delete(a.key);
+    const tail = this
+      .sql<ChatRow>`SELECT * FROM cart_chat ORDER BY seq DESC LIMIT ${CART_CHAT_BROADCAST}`;
+    const now = this.cart();
+    this.setState({
+      ...this.state,
+      cart: {
+        ...now,
+        title: eraseText(now.title, all),
+        external: { ...now.external!, buyer: { id: ERASED, name: ERASED } },
+      },
+      chat: tail.map(fromRow).reverse(),
+      attachments: (this.state.attachments ?? []).filter((a) => a.by.id !== guestId),
+      members: this.state.members.filter((m) => m.id !== guestId),
+    });
+    for (const conn of this.getConnections<ConnectionState>())
+      if (conn.state?.guest) conn.close(4410, 'Cart closed');
+    await this.index(this.cart());
+    return { messages: theirs, files: files.length };
+  }
+
+  /** What the buyer of this external cart put on it, for a data subject export. */
+  async subjectExport() {
+    const c = this.state.cart;
+    if (!c?.external) return null;
+    const guestId = `guest:${c.external.buyer.id}`;
+    this.tables();
+    return {
+      id: c.id,
+      title: c.title,
+      status: c.status,
+      buyer: c.external.buyer,
+      lines: c.lines.map(({ sku, qty, title }) => ({ sku, qty, title })),
+      orderId: c.orderId,
+      createdAt: c.createdAt,
+      messages: this.sql<ChatRow>`SELECT * FROM cart_chat WHERE author_id = ${guestId} ORDER BY seq`
+        .map(fromRow)
+        .map(({ body, at }) => ({ body, at })),
+      files: (this.state.attachments ?? [])
+        .filter((a) => a.by.id === guestId)
+        .map(({ name, type, size, at }) => ({ name, type, size, at })),
+    };
   }
 
   /** Set while `submitAs` starts the order, so nothing else ends the cart meanwhile. */
@@ -348,6 +475,48 @@ export class CartAgent extends Agent<Env, CartState> {
     } finally {
       this.submitting = false;
     }
+  }
+
+  /** Adds a file the web app stored for this cart, as `actor`. */
+  async attachAs(
+    actor: CartActor,
+    a: Omit<CartAttachment, 'by' | 'at'>,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const c = this.cart();
+    if (!canEditCart(c, actor)) return { ok: false, error: "You can't change this cart." };
+    if (isFinalCart(c) || this.submitting) return { ok: false, error: `The cart is ${c.status}.` };
+    if (a.key !== cartAttachmentKey(c.id, a.id))
+      return { ok: false, error: 'That file isn’t this cart’s.' };
+    const files = this.state.attachments ?? [];
+    const problem = attachmentProblem(a, files.length);
+    if (problem) return { ok: false, error: problem };
+    const added: CartAttachment = {
+      id: a.id,
+      name: attachmentName(a.name),
+      type: a.type,
+      size: a.size,
+      key: a.key,
+      by: { id: actor.id, name: actor.name },
+      at: Date.now(),
+    };
+    this.setState({ ...this.state, attachments: [...files, added] });
+    return { ok: true };
+  }
+
+  /** Removes a file and deletes it, for whoever added it or staff who may change the cart. */
+  @callable()
+  async detach(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const actor = await this.caller();
+    const c = this.cart();
+    const files = this.state.attachments ?? [];
+    const a = files.find((f) => f.id === id);
+    if (!a) return { ok: false, error: 'That file is gone.' };
+    if (isFinalCart(c)) return { ok: false, error: `The cart is ${c.status}.` };
+    if (!canRemoveAttachment(a, actor))
+      return { ok: false, error: 'Only who added it can remove it.' };
+    this.setState({ ...this.state, attachments: files.filter((f) => f.id !== id) });
+    await this.env.DOCS.delete(a.key);
+    return { ok: true };
   }
 
   async cancelAs(actor: CartActor): Promise<{ ok: true } | { ok: false; error: string }> {

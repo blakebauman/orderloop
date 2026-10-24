@@ -17,6 +17,7 @@ import {
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import {
+  carts,
   createDb,
   customers,
   documents,
@@ -37,7 +38,7 @@ import {
   type SQLWrapper,
   sql,
 } from 'drizzle-orm';
-import { orderAgent } from './namespaces';
+import { cartAgent, orderAgent } from './namespaces';
 import { checkoutsOf, deleteCheckoutsOf, scrubCheckouts } from './ucp/subjects';
 
 /** Orders erased per call; the caller repeats until `done`. */
@@ -143,9 +144,27 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
         createdAt,
       }),
     ),
+    carts: (
+      await Promise.all(
+        (await cartsOf(env, s.email)).map((id) => cartAgent(env, id).subjectExport()),
+      )
+    )
+      .filter((c) => c !== null)
+      // Plain data, not the RPC result it came in.
+      .map((c) => JSON.parse(JSON.stringify(c)) as Record<string, unknown>),
     truncated: rows.length > EXPORT_MAX,
     teamMember: s.teamMember,
   };
+}
+
+/** External carts whose buyer is the subject (`carts.buyer_id`, written lower-cased). */
+async function cartsOf(env: Env, email: string) {
+  const rows = await createDb(env.DB)
+    .select({ id: carts.id })
+    .from(carts)
+    .where(eq(carts.buyerId, email))
+    .limit(EXPORT_MAX);
+  return rows.map((r) => r.id);
 }
 
 export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureResult> {
@@ -171,8 +190,15 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     documents: 0,
     messages: 0,
     inboundEmails: 0,
+    carts: 0,
     teamMember: s.teamMember,
   };
+
+  // Their external carts: each loses their messages and files, and stops naming them.
+  for (const id of await cartsOf(env, s.email)) {
+    await cartAgent(env, id).eraseSubject(s.terms);
+    result.carts++;
+  }
 
   const erased = await eraseOrders(env, list, s.terms);
   if (erased.refused.length) return { ok: false, reason: 'active_orders', orders: erased.refused };
