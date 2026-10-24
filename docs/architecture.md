@@ -180,6 +180,14 @@ the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 the call, as with REST); A2A chat has its own `{ confirm }`. See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
+Skills: `createServer` attaches the role's `SkillCatalog`
+(`@modelcontextprotocol/server/ext/skills`, built once per isolate per role from
+`mcpSkillFiles(role)`, `MCP_SKILLS` in `packages/core/src/mcp-skills.ts`), which declares
+`resources` and `io.modelcontextprotocol/skills` and serves `skills/list`, `skills/get` and
+`resources/read` on `skill://<name>/SKILL.md` with SHA-256 digests, a private five-minute cache hint
+and no `directoryRead`. A skill is offered to roles at or above its `role`;
+`tests/mcp-skills.test.ts` in core checks every tool it names exists and is within that role.
+
 ## A2A
 
 The Agent Card at `/.well-known/agent-card.json` is built from the request's origin by `agentCard`

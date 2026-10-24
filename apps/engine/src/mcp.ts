@@ -18,13 +18,16 @@ import {
   inputRequired,
   McpServer,
 } from '@modelcontextprotocol/server';
+import { memorySkillFiles, SkillCatalog } from '@modelcontextprotocol/server/ext/skills';
 import {
   type ActionPreview,
   ASSISTANT_TOOLS,
   type AssistantTool,
   atLeast,
   boundText,
+  mcpSkillFiles,
   type Principal,
+  type Role,
 } from '@orderloop/core';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
@@ -96,7 +99,28 @@ function confirmMessage(name: AssistantTool, preview: ActionPreview) {
 
 const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
-function createServer(p: Principal) {
+/**
+ * The skills a role can follow (MCP_SKILLS in @orderloop/core), served with the Skills extension:
+ * `skills/list`, `skills/get` and `resources/read` on `skill://<name>/SKILL.md`, with the
+ * digests and sizes the SDK computes. One catalog per role, built once per isolate.
+ */
+const catalogs = new Map<Role, Promise<SkillCatalog>>();
+function catalogFor(role: Role) {
+  let c = catalogs.get(role);
+  if (!c) {
+    c = SkillCatalog.load(memorySkillFiles(mcpSkillFiles(role)), {
+      strict: true,
+      // Per role, so per client; the skills change only with a deploy.
+      cacheHint: { ttlMs: 300_000, cacheScope: 'private' },
+    });
+    // A failed build is retried on the next request rather than cached.
+    c.catch(() => catalogs.delete(role));
+    catalogs.set(role, c);
+  }
+  return c;
+}
+
+async function createServer(p: Principal) {
   const server = new McpServer(
     { name: 'orderloop', title: 'OrderLoop', version: '1.0.0' },
     {
@@ -225,6 +249,8 @@ function createServer(p: Principal) {
       },
     );
   }
+  // @experimental in the SDK: how an extension attaches may change in a minor release.
+  (await catalogFor(p.role)).attach(server);
   return server;
 }
 

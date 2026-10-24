@@ -85,7 +85,9 @@ async function rpc(
   if (revision === '2026-07-28') {
     // Each request names itself in headers and carries the client in `_meta`.
     headers.set('mcp-method', method);
-    if (typeof params.name === 'string') headers.set('mcp-name', params.name);
+    // Mcp-Name is the tool or prompt name, or the resource's uri.
+    const named = params.name ?? params.uri;
+    if (typeof named === 'string') headers.set('mcp-name', named);
     body = {
       ...params,
       _meta: {
@@ -438,5 +440,62 @@ describe('MCP', () => {
     expect(first.structuredContent).toMatchObject({
       confirmation: expect.stringMatching(/^cfm_/),
     });
+  });
+
+  it('serves the skills a role can follow, with the Skills extension', async () => {
+    const viewer = person('viewer', 'vic@example.com');
+    const operator = person('operator', 'ops@example.com');
+    const modern = async (p: Principal, method: string, params: Record<string, unknown> = {}) =>
+      (await rpc(p, method, params, '2026-07-28')).body as {
+        result?: Record<string, unknown>;
+        error?: { code: number };
+      };
+
+    expect((await modern(viewer, 'server/discover')).result).toMatchObject({
+      capabilities: {
+        resources: {},
+        extensions: { 'io.modelcontextprotocol/skills': {} },
+      },
+    });
+
+    type Entry = {
+      uri: string;
+      frontmatter: { name: string };
+      resources: { uri: string; digest: string; size: number }[];
+    };
+    const names = async (p: Principal) =>
+      ((await modern(p, 'skills/list')).result!.skills as Entry[]).map((e) => e.frontmatter.name);
+    expect(await names(viewer)).toEqual(['triage-attention']);
+    expect((await names(operator)).sort()).toEqual([
+      'change-a-flow',
+      'review-approval',
+      'stock-review',
+      'triage-attention',
+    ]);
+
+    const listed = await modern(viewer, 'skills/list');
+    expect(listed.result).toMatchObject({ ttlMs: 300_000, cacheScope: 'private' });
+    const [entry] = listed.result!.skills as Entry[];
+    expect(entry).toMatchObject({ uri: 'skill://triage-attention/SKILL.md' });
+    const [file] = entry!.resources;
+
+    // The bytes served are the ones the manifest's digest and size describe.
+    const read = await modern(viewer, 'resources/read', { uri: file!.uri });
+    const text = (read.result!.contents as { text: string }[])[0]!.text;
+    const bytes = new TextEncoder().encode(text);
+    const hex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join('');
+    expect(file!.digest).toBe(`sha256:${hex}`);
+    expect(file!.size).toBe(bytes.length);
+    expect(text).toContain('needs_attention');
+
+    // A viewer is not served an operator's skill, listed or not.
+    const unknown = { uri: 'skill://stock-review/SKILL.md' };
+    expect((await modern(viewer, 'skills/get', unknown)).error).toMatchObject({ code: -32602 });
+    expect((await modern(operator, 'skills/get', unknown)).result).toMatchObject({
+      skill: { frontmatter: { name: 'stock-review' } },
+    });
+    expect((await modern(viewer, 'resources/read', unknown)).error).toBeDefined();
   });
 });
