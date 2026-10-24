@@ -5,7 +5,7 @@ import {
   pluginKey,
   verifyPrincipal,
 } from '@orderloop/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** Headers a hostile or buggy plugin might send, none of which may reach the browser. */
 const HOSTILE = {
@@ -83,6 +83,7 @@ vi.mock('~/lib/rate-limit', () => ({ overBudget }));
 const {
   pluginFetch: forward,
   pluginPathId,
+  unalias,
   MAX_PLUGIN_BODY,
 } = await import('~/lib/plugins.server');
 
@@ -231,5 +232,38 @@ describe('plugin pages on the web Worker', () => {
     expect(pluginPathId('/plugins/example/x')).toBe('example');
     expect((await call('/plugins/ledger/')).status).toBe(404);
     expect(pluginFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('plugin aliases', () => {
+  beforeEach(() => {
+    pluginFetch.mockClear();
+    caller = null;
+  });
+  afterEach(() => {
+    delete env.PLUGIN_ALIASES;
+  });
+
+  it('maps an alias onto the plugin’s own paths, and nothing else', () => {
+    env.PLUGIN_ALIASES = JSON.stringify({ '/ex/': 'example', bad: 'example', '/x/': 7 });
+    expect(unalias('/ex/public/ping')).toBe('/plugins/example/public/ping');
+    expect(unalias('/ex/')).toBe('/plugins/example/');
+    expect(unalias('/ex')).toBeNull();
+    expect(unalias('/exam/')).toBeNull();
+    expect(unalias('/x/')).toBeNull();
+    env.PLUGIN_ALIASES = 'not json';
+    expect(unalias('/ex/')).toBeNull();
+    delete env.PLUGIN_ALIASES;
+    expect(unalias('/ex/')).toBeNull();
+  });
+
+  it('answers an aliased path under every rule its own path has, and tells the plugin its alias', async () => {
+    env.PLUGIN_ALIASES = JSON.stringify({ '/ex/': 'example' });
+    // A page that needs a sign-in still does.
+    expect((await call(unalias('/ex/')!)).status).toBe(401);
+    // A public path goes through, and the plugin learns where else it answers.
+    expect((await call(unalias('/ex/public/ping')!)).status).toBe(200);
+    expect(new URL(sent().url).pathname).toBe('/plugins/example/public/ping');
+    expect(sent().headers.get('x-orderloop-alias')).toBe('/ex/');
   });
 });

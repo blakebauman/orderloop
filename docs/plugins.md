@@ -363,6 +363,23 @@ holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (
 string fields only, at most 2,000 and 1 MiB) and keeps it, marks the cart `returned`, and posts the
 fields to the cart's `returnUrl`. The plugin never chooses where they go.
 
+## Aliases
+
+A deployment can give a plugin a second address, so its public URLs read better than
+`/plugins/<id>/`: `"plugins": { "punchout": { "alias": "/punchout/" } }` answers
+`/punchout/cxml/setup` as `/plugins/punchout/cxml/setup`. The registry chooses it, never the plugin
+(a manifest's paths stay under `/plugins/<id>/`), and fleet refuses one that isn't a single
+lowercase segment, is one of the app's own top-level paths (`RESERVED_PATH_SEGMENTS`), or is
+another plugin's. `renderWeb` writes the map into the web Worker's `PLUGIN_ALIASES` (always, empty
+when there are none).
+
+The web Worker checks aliases last, after every path it serves itself (`unalias` in
+`apps/web/app/lib/plugins.server.ts`), rewrites the path to the plugin's own and forwards it through
+`pluginFetch` like any plugin request: the same sign-in, page role, public paths, rate limits,
+allowed headers, CSP and redirect rules, and the principal is signed for the `/plugins/<id>/` path.
+The plugin is told its alias in the `x-orderloop-alias` header (set by the web Worker only), so a
+page can show the shorter address; its own paths keep working.
+
 ## Runtimes
 
 A deployment runs each plugin one of two ways, set by `plugins.<id>.runtime` in its registry:

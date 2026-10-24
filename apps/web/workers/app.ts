@@ -31,7 +31,7 @@ import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
-import { pluginFetch, pluginPathId } from '../app/lib/plugins.server';
+import { pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
 import { setGuestHeader, setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
@@ -225,6 +225,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   // Installed plugins' pages, on their own Workers (app/lib/plugins.server.ts).
   if (pluginPathId(url.pathname)) return pluginFetch(request);
+  // A plugin's alias (`/punchout/…`), answered exactly as its `/plugins/<id>/…` path is. It is
+  // checked last, so no path the app serves itself can be one.
+  const aliased = unalias(url.pathname);
+  if (aliased) {
+    const to = new URL(request.url);
+    to.pathname = aliased;
+    return pluginFetch(new Request(to, request));
+  }
 
   // Order documents (invoices, POs, inbound POs) from R2.
   if (url.pathname.startsWith('/docs/orders/')) {
