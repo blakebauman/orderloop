@@ -19,7 +19,7 @@ optional:
   checks), picked per node in its Provider field ([Providers](#providers)).
 - **Event subscriptions** to outbound events, delivered over the binding instead of HTTP.
 - **Pages** under `/plugins/<id>/`, served by the plugin and linked from the nav.
-- **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person.
+- **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person. They skip the web app's cross-site check too (`isPluginPublicPath`): nothing ambient (cookie, sign-in) reaches the plugin on them, so a partner's site may post to them.
 - **Host calls**: with capabilities the deployment grants, it opens external carts for buyers it
   has authenticated and starts orders, through its `ORDERLOOP` binding ([The host API](#the-host-api)).
 
@@ -351,6 +351,7 @@ takes effect at once and a runtime install of the same id never inherits it.
 |---|---|---|
 | `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
+| `cancelOrder({ key, reason })` | `orders:start` | Cancels an order this plugin started, found by the key it started it under (`plugin:<id>:<key>`; another plugin's never matches): `cancelled` (also when it already was) or `finished` when it ended some other way, audited as `order.cancelled` by `plugin:<id>` |
 | `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys in any namespace the core starts orders under (`RESERVED_ORDER_KEY_PREFIXES`: `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:`, `replenish:`). A replay answers the same order with `replayed: true`; the same key with a different request is refused |
 
 `plugins/punchout` is the plugin that uses it: cXML and OCI punchout, installed with

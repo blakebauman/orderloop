@@ -41,9 +41,19 @@ function fakeHost() {
     async getCart() {
       return null;
     },
+    cancelled: [] as string[],
+    finished: new Set<string>(),
     async startOrder(req: PluginStartOrder) {
       started.push(req);
-      return { ok: true as const, orderId: 'ord_1', replayed: false };
+      return { ok: true as const, orderId: `ord_${started.length}`, replayed: false };
+    },
+    async cancelOrder(req: { key: string; reason: string }) {
+      const i = started.findIndex((s) => s.key === req.key);
+      if (i < 0) return { ok: false as const, error: 'No order was started under that key.' };
+      if (this.finished.has(req.key))
+        return { ok: true as const, orderId: `ord_${i + 1}`, outcome: 'finished' as const };
+      this.cancelled.push(req.key);
+      return { ok: true as const, orderId: `ord_${i + 1}`, outcome: 'cancelled' as const };
     },
   };
 }
@@ -55,6 +65,7 @@ beforeEach(async () => {
   plugin = new PunchoutPlugin(ctx, { ...env, ORDERLOOP: host } as never);
   await env.DB.prepare('DELETE FROM partners').run();
   await env.DB.prepare('DELETE FROM sessions').run();
+  await env.DB.prepare('DELETE FROM purchase_orders').run();
 });
 
 /** An admin's request to the plugin's page, signed as the web app signs it. */
@@ -226,6 +237,71 @@ describe('cXML punchout', () => {
   });
 });
 
+describe('changing and cancelling a purchase order', () => {
+  const po = (secret: string, type: string, payload: string, qty = 5) =>
+    orderXml
+      .replace('SECRET', secret)
+      .replace('type="new"', `type="${type}"`)
+      .replace('payloadID="1729770000.9876@buyer.example"', `payloadID="${payload}"`)
+      .replace('quantity="5"', `quantity="${qty}"`);
+  const statusText = async (res: Response) => {
+    const s = at(parseXml(await res.text()), 'Response/Status');
+    return { code: s?.attrs.code, body: s?.text };
+  };
+
+  it('replaces the order on an update, cancels it on a delete, and ignores a resend', async () => {
+    const secret = await partner();
+    expect(
+      await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'new', 'p1@b'))),
+    ).toEqual({ code: '200', body: 'ord_1' });
+    // Sent again with the same payloadID, or as a new PO with the same orderID: the same order.
+    expect(
+      (await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'new', 'p1@b'))))
+        .body,
+    ).toBe('ord_1');
+    expect(
+      (await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'new', 'p1b@b'))))
+        .body,
+    ).toBe('ord_1');
+    expect(host.started).toHaveLength(1);
+
+    const updated = await statusText(
+      await post('/plugins/punchout/cxml/order', po(secret, 'update', 'p2@b', 7)),
+    );
+    expect(updated).toEqual({ code: '200', body: 'ord_2' });
+    expect(host.cancelled).toEqual([host.started[0]!.key]);
+    expect(host.started[1]!.input.lines).toEqual([expect.objectContaining({ qty: 7 })]);
+    expect(host.started[1]!.input.meta).toMatchObject({ punchout: { replaces: 'ord_1' } });
+    // Resending the update doesn't cancel the order it started.
+    await post('/plugins/punchout/cxml/order', po(secret, 'update', 'p2@b', 7));
+    expect(host.cancelled).toHaveLength(1);
+
+    expect(
+      await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'delete', 'p3@b'))),
+    ).toEqual({ code: '200', body: 'ord_2' });
+    expect(host.cancelled).toEqual([host.started[0]!.key, host.started[1]!.key]);
+  });
+
+  it('refuses to change an order that has already ended, or one it never started', async () => {
+    const secret = await partner();
+    expect(
+      (await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'delete', 'x1@b'))))
+        .code,
+    ).toBe('404');
+    await post('/plugins/punchout/cxml/order', po(secret, 'new', 'n1@b'));
+    host.finished.add(host.started[0]!.key);
+    const late = await statusText(
+      await post('/plugins/punchout/cxml/order', po(secret, 'update', 'u1@b')),
+    );
+    expect(late.code).toBe('409');
+    expect(host.started).toHaveLength(1);
+    expect(
+      (await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'clone', 'c1@b'))))
+        .code,
+    ).toBe('406');
+  });
+});
+
 describe('OCI punchout', () => {
   it('opens a cart from the setup GET and returns OCI fields', async () => {
     const secret = await partner({
@@ -242,6 +318,11 @@ describe('OCI punchout', () => {
     const res = await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`));
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/cart/start/cart_1/tok');
+    // A form POST works the same.
+    const posted = await plugin.fetch(
+      new Request('https://plugin/plugins/punchout/oci/setup', { method: 'POST', body: q }),
+    );
+    expect(posted.status).toBe(302);
     q.set('PASSWORD', 'wrong');
     expect(
       (await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`))).status,

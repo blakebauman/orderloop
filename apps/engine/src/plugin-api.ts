@@ -16,10 +16,11 @@ import {
   pluginOrderKey,
   startOrderSchema,
 } from '@orderloop/core';
-import { createDb, fxRates } from '@orderloop/db';
+import { createDb, fxRates, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { recordAudit } from './audit';
 import { openExternalCart, pluginCart } from './cart/carts';
+import { orderAgent } from './namespaces';
 import { startOrderOnce } from './orders';
 import { mayUse } from './plugins';
 
@@ -39,6 +40,35 @@ export class PluginHost extends WorkerEntrypoint<Env, { id: string }> implements
   async getCart(cartId: string): Promise<PluginCart | null> {
     const id = await this.#allowed('carts:external');
     return id && typeof cartId === 'string' ? pluginCart(this.env, id, cartId) : null;
+  }
+
+  async cancelOrder(req: { key: string; reason: string }) {
+    const id = await this.#allowed('orders:start');
+    if (!id) return { ok: false as const, error: 'This plugin may not cancel orders here.' };
+    if (typeof req?.key !== 'string' || !req.key || req.key.length > 200)
+      return { ok: false as const, error: 'key is 1 to 200 characters' };
+    const reason = String(req.reason ?? '').slice(0, 500) || `Cancelled by ${id}`;
+    // Only an order it started: its key is in this plugin's own namespace.
+    const row = await createDb(this.env.DB)
+      .select({ id: orders.id, status: orders.status })
+      .from(orders)
+      .where(eq(orders.idempotencyKey, pluginOrderKey(id, req.key)))
+      .get();
+    if (!row) return { ok: false as const, error: 'No order was started under that key.' };
+    if (row.status === 'cancelled')
+      return { ok: true as const, orderId: row.id, outcome: 'cancelled' as const };
+    const r = (await orderAgent(this.env, row.id).cancel(reason)) as { ok: boolean };
+    if (r.ok)
+      await recordAudit(this.env, 'order.cancelled', {
+        actor: { kind: 'plugin', id: `plugin:${id}`, name: id },
+        target: row.id,
+        detail: { reason, via: 'plugin' },
+      });
+    return {
+      ok: true as const,
+      orderId: row.id,
+      outcome: r.ok ? ('cancelled' as const) : ('finished' as const),
+    };
   }
 
   async startOrder(req: PluginStartOrder) {

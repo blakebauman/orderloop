@@ -15,7 +15,7 @@
  */
 
 import type { PluginCart } from '@orderloop/core';
-import { definePlugin, host } from '@orderloop/plugin-sdk';
+import { definePlugin, host, pluginDb } from '@orderloop/plugin-sdk';
 import {
   CxmlError,
   orderMessage,
@@ -131,8 +131,56 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
   const partner = await findPartner(env, 'cxml', po.from);
   if (!partner || !(await secretMatches(partner, po.sharedSecret)))
     return refuse(401, 'Unknown buyer or wrong shared secret');
-  if (po.type !== 'new') return refuse(406, `Order type “${po.type}” is not supported`);
+  if (!['new', 'update', 'delete'].includes(po.type))
+    return refuse(406, `Order type “${po.type}” is not supported`);
   if (!po.payloadId) return refuse(400, 'The order has no payloadID');
+  const key = `cxml:${partner.id}:${po.payloadId}`.slice(0, 200);
+  const db = pluginDb(env);
+  // A document sent again: answer as the first time, change nothing.
+  const seen = await db
+    .prepare('SELECT order_id FROM purchase_orders WHERE key = ?')
+    .bind(key)
+    .first<{ order_id: string | null }>();
+  if (seen) return xml(statusResponse(HOST, 200, 'OK', seen.order_id ?? ''));
+  // The version before this one (an update or delete names the same orderID).
+  const before = await db
+    .prepare(
+      'SELECT key, order_id FROM purchase_orders WHERE partner_id = ? AND order_ref = ? ORDER BY created_at DESC LIMIT 1',
+    )
+    .bind(partner.id, po.orderId)
+    .first<{ key: string; order_id: string | null }>();
+  const record = (orderId: string | null) =>
+    db
+      .prepare(
+        'INSERT INTO purchase_orders (key, partner_id, order_ref, type, order_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+      )
+      .bind(key, partner.id, po.orderId, po.type, orderId, Date.now())
+      .run();
+
+  // A `new` for an order already started (sent again under a new payloadID): that order.
+  if (po.type === 'new' && before?.order_id)
+    return xml(statusResponse(HOST, 200, 'OK', before.order_id));
+  if (po.type !== 'new') {
+    if (!before?.order_id)
+      return po.type === 'delete'
+        ? refuse(404, `No order ${po.orderId} to cancel`)
+        : refuse(404, `No order ${po.orderId} to update`);
+    const cancelled = await host(env).cancelOrder({
+      key: before.key,
+      reason: `Purchase order ${po.orderId} ${po.type === 'delete' ? 'cancelled' : 'changed'} by the buyer`,
+    });
+    if (!cancelled.ok) return refuse(500, cancelled.error);
+    if (cancelled.outcome === 'finished')
+      return refuse(
+        409,
+        `Order ${po.orderId} can't be ${po.type === 'delete' ? 'cancelled' : 'changed'}: it has already ended`,
+      );
+    if (po.type === 'delete') {
+      await record(cancelled.orderId);
+      return xml(statusResponse(HOST, 200, 'OK', cancelled.orderId));
+    }
+  }
+
   // Which carts the PO came from, by the SupplierPartAuxiliaryID each returned line carried.
   const carts = [
     ...new Set(po.items.map((i) => i.aux?.split(':')[0]).filter((c) => c?.startsWith('cart_'))),
@@ -146,7 +194,7 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
         }
       : undefined;
   const started = await host(env).startOrder({
-    key: `cxml:${partner.id}:${po.payloadId}`.slice(0, 200),
+    key,
     flowId: partner.flowId,
     input: {
       model: partner.model as 'b2b',
@@ -163,17 +211,27 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
       ...(contact ? { contact } : {}),
       meta: {
         ...(po.shipTo ? { shipTo: po.shipTo } : {}),
-        punchout: { partnerId: partner.id, orderId: po.orderId, carts },
+        punchout: {
+          partnerId: partner.id,
+          orderId: po.orderId,
+          carts,
+          ...(po.type === 'update' && before?.order_id ? { replaces: before.order_id } : {}),
+        },
       },
     },
   });
   if (!started.ok) return refuse(400, started.error);
+  await record(started.orderId);
   return xml(statusResponse(HOST, 200, 'OK', started.orderId));
 }
 
 async function ociSetup(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const setup = parseOciSetup(url.searchParams);
+  // SAP opens the catalog with GET or a form POST; either way the same fields.
+  const params = new URLSearchParams(url.searchParams);
+  if (request.method === 'POST')
+    for (const [k, v] of await request.formData()) if (typeof v === 'string') params.set(k, v);
+  const setup = parseOciSetup(params);
   const page = (status: number, body: string, head = '') =>
     new Response(
       `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">${head}<title>Punchout</title></head><body>${body}</body></html>`,
@@ -269,7 +327,10 @@ export default definePlugin<Env>({
       return cxmlSetup(request, env);
     if (path === '/plugins/punchout/cxml/order' && request.method === 'POST')
       return cxmlOrder(request, env);
-    if (path === '/plugins/punchout/oci/setup' && request.method === 'GET')
+    if (
+      path === '/plugins/punchout/oci/setup' &&
+      (request.method === 'GET' || request.method === 'POST')
+    )
       return ociSetup(request, env);
     if (!principal) return new Response('Not found', { status: 404 });
     return adminPages(request, env);

@@ -16,7 +16,7 @@ the navigation.
 | Protocol | Session starts with | The cart goes back as | The order arrives as |
 |---|---|---|---|
 | **cXML 1.2** (Ariba, Coupa, Jaggaer and most others) | A `PunchOutSetupRequest` posted to the setup URL | A `PunchOutOrderMessage`, posted to the buyer's `BrowserFormPost` URL | A cXML `OrderRequest` posted to the order URL |
-| **OCI 4.0** (SAP SRM and S/4HANA) | The catalog URL opened with `USERNAME`, `PASSWORD` and `HOOK_URL` | OCI `NEW_ITEM-…` fields posted to `HOOK_URL` | Your SAP integration's usual channel (EDI or email) |
+| **OCI 4.0** (SAP SRM and S/4HANA) | The catalog URL opened (GET or POST) with `USERNAME`, `PASSWORD` and `HOOK_URL` | OCI `NEW_ITEM-…` fields posted to `HOOK_URL` | Your SAP integration's usual channel (EDI or email) |
 
 ## Adding a partner
 
@@ -46,8 +46,8 @@ Your workspace may give punchout a shorter address, such as `/punchout/` in plac
 - cXML setup URL: `https://<your OrderLoop address>/plugins/punchout/cxml/setup`
 - cXML order URL: `https://<your OrderLoop address>/plugins/punchout/cxml/order`
 - Your supplier credential (domain and identity) as entered on the partner, and their secret.
-- For OCI: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET` and the
-  parameters `USERNAME`, `PASSWORD` and `HOOK_URL`. OCI sends the secret in the URL, where browsers and proxies
+- For OCI: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET` or a
+  form `POST` and the parameters `USERNAME`, `PASSWORD` and `HOOK_URL`. OCI sends the secret in the URL, where browsers and proxies
   may keep it, so rotate an OCI partner's secret regularly.
 
 ## What happens in a session
@@ -63,6 +63,10 @@ Your workspace may give punchout a shorter address, such as `/punchout/` in plac
 4. When their PO arrives (cXML `OrderRequest`, type `new`), the order starts on the partner's flow
    for the partner's customer, with the PO number as its external id and the channel **EDI**. A PO
    sent again starts nothing new: the same order is answered.
+5. If they change the PO (type `update`), the order the earlier version started is cancelled and a
+   new one starts with the changed lines; if they cancel it (type `delete`), its order is
+   cancelled. An order that has already ended (shipped and paid, say) can't be changed or
+   cancelled this way: their system gets cXML status `409`.
 
 A cXML setup or order request with an unknown identity or wrong secret is answered with cXML
 status `401`, and a return URL on a host not listed with `403`, each over HTTP 200 as cXML
