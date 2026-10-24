@@ -279,7 +279,7 @@ export async function pluginStub(
         STORAGE: caps.PluginDb!({ props: { id, sha } }),
         // What it may ask of the core (plugin-api.ts), as itself: the props are the loader's.
         // Bound only with a granted capability, as a Worker plugin's binding is.
-        ...(registryGrants(env)[id]?.capabilities?.length
+        ...(registryOwns(env, id) && registryGrants(env)[id]?.capabilities?.length
           ? { ORDERLOOP: caps.PluginHost!({ props: { id } }) }
           : {}),
       },

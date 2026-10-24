@@ -122,6 +122,25 @@ const post = (path: string, body: unknown, as = operator) =>
     as,
   );
 
+describe('starting orders over REST', () => {
+  it('refuses an Idempotency-Key in a namespace the core starts orders under', async () => {
+    for (const key of ['cart:cart_1', 'ucp:chk_1', 'plugin:punchout:po-1']) {
+      const res = await handleApi(
+        new Request('https://app.test/api/v1/orders', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': key },
+          body: JSON.stringify({ flowId: 'tpl-b2b-order', input: { model: 'b2b' } }),
+        }),
+        operator,
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Idempotency-Key may not start with cart:, ucp: or plugin:',
+      });
+    }
+  });
+});
+
 describe('order actions over REST', () => {
   beforeEach(() => {
     for (const fn of Object.values(engine)) fn.mockReset();

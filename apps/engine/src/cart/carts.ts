@@ -92,7 +92,11 @@ export async function openExternalCart(
   input: ExternalCartInput,
 ): Promise<{ ok: true; cart: ExternalCartOpened } | { ok: false; error: string }> {
   const now = Date.now();
-  const problem = externalCartProblem(input, now);
+  const own = String(env.OWN_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  const problem = externalCartProblem(input, now, own);
   if (problem) return { ok: false, error: problem };
   const title = String(input.title ?? '').trim();
   if (!title || title.length > MAX_CART_TITLE)
@@ -136,7 +140,15 @@ export async function openExternalCart(
     return { ok: false, error: `That session’s cart is ${found.status}.` };
   const token = await cartAgent(env, found.id).issueStart();
   if (!token) return { ok: false, error: 'That session’s cart has closed.' };
-  return { ok: true, cart: { cartId: found.id, startPath: `/cart/start/${found.id}/${token}` } };
+  const startPath = `/cart/start/${found.id}/${token}`;
+  return {
+    ok: true,
+    cart: {
+      cartId: found.id,
+      startPath,
+      startUrl: env.APP_ORIGIN ? `${env.APP_ORIGIN}${startPath}` : null,
+    },
+  };
 }
 
 /** A cart as the plugin that opened it sees it, or null for anyone else's. */

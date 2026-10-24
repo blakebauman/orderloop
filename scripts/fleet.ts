@@ -633,6 +633,13 @@ export function renderEngine(base: Config, d: Deployment): Config {
   if (store.length)
     config.secrets_store_secrets = [...(config.secrets_store_secrets ?? []), ...store];
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
+  // The app's own origin (for links the engine hands out, an external cart's start link) and the
+  // hosts it serves, which an external cart must never post back to.
+  config.vars = {
+    ...config.vars,
+    APP_ORIGIN: `https://${d.domain}`,
+    OWN_HOSTS: [d.domain, d.catalogDomain].join(','),
+  };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
   config.vars = { ...config.vars, AI_PERSONAL_DATA: d.aiPersonalData };

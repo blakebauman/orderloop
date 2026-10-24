@@ -96,6 +96,9 @@ export default defineConfig(async () => {
             SIMULATE_FAILURES: 'true',
             // Signs the principal header the tests send as the web Worker would (tests/principal.ts).
             PRINCIPAL_KEY: 'test-principal-key',
+            // The app's origin and own hosts, for external carts' start links and returns.
+            APP_ORIGIN: 'https://app.orderloop.test',
+            OWN_HOSTS: 'app.orderloop.test,catalog.app.orderloop.test',
             // Encrypts secrets at rest (tests/secrets.test.ts rotates it).
             DATA_KEY: 'test-data-key',
             // Signs UCP order webhooks in tests (a throwaway key, never a deployment's).

@@ -32,6 +32,7 @@ import {
   checkCartReturn,
   EMPTY_CART_STATE,
   finishCart,
+  isCartExpired,
   isFinalCart,
   newId,
   type PluginCart,
@@ -64,6 +65,9 @@ const sha256 = async (s: string) =>
 /** Messages a person may send in a burst, and how long the burst lasts. */
 const CHAT_BURST = 10;
 const CHAT_WINDOW_MS = 10_000;
+/** Changes a guest may make in a burst. */
+const EDIT_BURST = 20;
+const EDIT_WINDOW_MS = 10_000;
 
 type ChatRow = {
   id: string;
@@ -165,7 +169,12 @@ export class CartAgent extends Agent<Env, CartState> {
   /** An external cart that hasn't gone back by its time is canceled. */
   async expire() {
     const c = this.state.cart;
-    if (!c || isFinalCart(c) || !c.external || this.submitting) return;
+    if (!c || isFinalCart(c) || !c.external) return;
+    // Mid-return: look again shortly, so a failed return can't outlive the cart's time.
+    if (this.submitting) {
+      await this.schedule(10, 'expire');
+      return;
+    }
     await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
     for (const conn of this.getConnections()) conn.close(4410, 'Cart expired');
   }
@@ -173,7 +182,7 @@ export class CartAgent extends Agent<Env, CartState> {
   /** A start link for an open external cart's buyer (else null): works once, within `CART_START_TTL_MS`. */
   async issueStart(): Promise<string | null> {
     const c = this.state.cart;
-    if (!c?.external || isFinalCart(c)) return null;
+    if (!c?.external || isFinalCart(c) || isCartExpired(c, Date.now())) return null;
     this.tables();
     const bytes = crypto.getRandomValues(new Uint8Array(24));
     const token = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -187,7 +196,13 @@ export class CartAgent extends Agent<Env, CartState> {
   /** The buyer a start link admits, or null for one that is unknown, used, expired or too late. */
   async redeemStart(token: string): Promise<CartGuest | null> {
     const c = this.state.cart;
-    if (!c?.external || isFinalCart(c) || typeof token !== 'string' || token.length > 100)
+    if (
+      !c?.external ||
+      isFinalCart(c) ||
+      isCartExpired(c, Date.now()) ||
+      typeof token !== 'string' ||
+      token.length > 100
+    )
       return null;
     this.tables();
     const hash = await sha256(token);
@@ -211,8 +226,10 @@ export class CartAgent extends Agent<Env, CartState> {
   > {
     const c = this.cart();
     if (!c.external) return { ok: false, error: 'Only an external cart goes back to a buyer.' };
-    if (actor.kind === 'staff' && !atLeast(actor.role, 'operator'))
-      return { ok: false, error: 'This needs the Operator role.' };
+    // Only from the buyer's own page: its fields are posted from the browser that asked, and a
+    // staff browser posting them would carry a staff session.
+    if (actor.kind !== 'guest') return { ok: false, error: 'Only the buyer sends the cart back.' };
+    if (isCartExpired(c, Date.now())) return { ok: false, error: 'The cart has closed.' };
     if (this.submitting) return { ok: false, error: 'The cart is being sent.' };
     const problem = cartReadyProblem(c);
     if (problem) return { ok: false, error: problem };
@@ -425,9 +442,17 @@ export class CartAgent extends Agent<Env, CartState> {
   async recheckConnections() {
     let open = 0;
     for (const c of this.getConnections<ConnectionState>()) {
-      // A guest stays while the cart is theirs to see; it ends with the cart (`expire`).
+      // A guest stays while their cart is open (or returned, to post it again) and the plugin
+      // that opened it may still.
       if (c.state?.guest) {
-        open++;
+        const cart = this.state.cart;
+        const keep =
+          !!cart?.external &&
+          (cart.status === 'returned' ||
+            (!isFinalCart(cart) && !isCartExpired(cart, Date.now()))) &&
+          (await mayUse(this.env, cart.external.pluginId, 'carts:external'));
+        if (keep) open++;
+        else c.close(4410, 'Cart closed');
         continue;
       }
       const stored = c.state?.principal ?? null;
@@ -466,6 +491,8 @@ export class CartAgent extends Agent<Env, CartState> {
     if (guest) {
       const c = this.cart();
       if (guest.cartId !== c.id || !c.external) throw new Error('This isn’t your cart.');
+      if (c.status === 'canceled' || isCartExpired(c, Date.now()))
+        throw new Error('This cart has closed.');
       return { kind: 'guest', id: guest.id, name: guest.name };
     }
     const stored = state?.principal ?? null;
@@ -485,9 +512,19 @@ export class CartAgent extends Agent<Env, CartState> {
     return { id: a.id, name: a.name, kind: a.kind, role: a.kind === 'staff' ? a.role : null };
   }
 
+  /** Changes per guest in a burst: each one prices the cart again. */
+  private edits = new Map<string, number[]>();
+
   @callable()
   async apply(op: CartOp) {
-    return this.applyAs(await this.caller(), op);
+    const actor = await this.caller();
+    if (actor.kind === 'guest') {
+      const now = Date.now();
+      const recent = (this.edits.get(actor.id) ?? []).filter((t) => now - t < EDIT_WINDOW_MS);
+      if (recent.length >= EDIT_BURST) return { ok: false as const, error: 'Slow down a moment.' };
+      this.edits.set(actor.id, [...recent, now]);
+    }
+    return this.applyAs(actor, op);
   }
 
   @callable()

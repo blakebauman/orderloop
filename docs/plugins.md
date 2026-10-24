@@ -343,16 +343,17 @@ A plugin asks the core for anything only through `ORDERLOOP`, typed `PluginHostR
 binding's own `props.id`, never an argument: fleet rendering gives a Worker plugin a service binding
 to `PluginHost` with `props: { id }` (only when its registry entry grants a capability), and the
 sandbox loader gives a sandboxed one `ctx.exports.PluginHost({ props: { id } })` on the same
-condition. Every call checks, at that moment, that the manifest declares the capability and the
-registry grants it (`mayUse`), so withdrawing a grant takes effect at once.
+condition. Every call checks, at that moment, that the registry installs the plugin (`registryOwns`),
+its manifest declares the capability and the registry grants it (`mayUse`), so withdrawing a grant
+takes effect at once and a runtime install of the same id never inherits it.
 
 | Method | Needs | Does |
 |---|---|---|
-| `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id and a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes); a session whose cart has ended is refused |
+| `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
-| `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host; the input is checked by `startOrderSchema`. A replay answers the same order with `replayed: true`; the same key with a different request is refused |
+| `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys starting `cart:`, `ucp:` or `plugin:`. A replay answers the same order with `replayed: true`; the same key with a different request is refused |
 
-When an external cart's buyer (or an operator) sends it back (`CartAgent.transferAs`), the core
+When an external cart's buyer sends it back (`CartAgent.transferAs`; only the buyer, since the fields are posted from the browser that asked), the core
 holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (`checkCartReturn`:
 string fields only, at most 2,000 and 1 MiB) and keeps it, marks the cart `returned`, and posts the
 fields to the cart's `returnUrl`. The plugin never chooses where they go.

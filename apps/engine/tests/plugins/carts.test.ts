@@ -8,7 +8,7 @@ import {
   PRINCIPAL_HEADER,
   signCartGuest,
 } from '@orderloop/core';
-import { carts, createDb, orders } from '@orderloop/db';
+import { auditEvents, carts, createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../../src/api';
@@ -110,6 +110,7 @@ describe('the plugin host API', () => {
     const a = await open({ sessionRef, lines: [{ sku: 'WID-100', qty: 4 }] });
     const b = await open({ sessionRef });
     expect(b.cartId).toBe(a.cartId);
+    expect(b.startUrl).toBe(`https://app.orderloop.test${b.startPath}`);
     expect(b.token).not.toBe(a.token);
     const row = await db().select().from(carts).where(eq(carts.id, a.cartId)).get();
     expect(row).toMatchObject({ pluginId: 'example', sessionRef, createdBy: 'plugin:example' });
@@ -130,6 +131,17 @@ describe('the plugin host API', () => {
     expect(await refused({ flowId: 'flow_nope' })).toMatch(/no published version/);
     expect(await refused({ customerId: 'cus_nope' })).toMatch(/No such customer/);
     expect(await refused({ lines: [{ sku: 'X', qty: 0 }] })).toMatch(/whole quantity/);
+    // Never back to the deployment itself, where a post would carry someone's session.
+    expect(await refused({ returnUrl: 'https://app.orderloop.test/api/v1/orders' })).toMatch(
+      /buyer’s system/,
+    );
+    expect(await refused({ returnUrl: 'https://catalog.app.orderloop.test/x' })).toMatch(
+      /buyer’s system/,
+    );
+    expect(await refused({ sessionRef: ['x'] as unknown as string })).toMatch(/sessionRef/);
+    expect(
+      await refused({ buyer: { id: 1, name: 'A' } as unknown as { id: string; name: string } }),
+    ).toMatch(/buyer/);
   });
 
   it('shows a plugin only the carts it opened', async () => {
@@ -171,10 +183,53 @@ describe('the plugin host API', () => {
     ).toEqual({ ok: false, error: 'That key already started a different order.' });
     const order = await db().select().from(orders).where(eq(orders.id, first.orderId)).get();
     expect(order).toMatchObject({ startedBy: 'plugin:example', externalId: 'PO-1001' });
+    const audited = await db()
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.target, first.orderId))
+      .all();
+    expect(audited.map((a) => [a.action, a.actorId])).toEqual([
+      ['order.started', 'plugin:example'],
+    ]);
     expect(order!.idempotencyKey).toBe(`plugin:example:${req.key}`);
     expect(
       (await hostFor('example').startOrder({ ...req, key: '' })) as { ok: boolean },
     ).toMatchObject({ ok: false });
+  });
+
+  it('keeps the core’s meta keys to the core, and refuses a currency with no rate', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const r = await hostFor('example').startOrder({
+      key: `po-${crypto.randomUUID()}`,
+      flowId: 'tpl-b2b-order',
+      input: {
+        model: 'b2b',
+        customerId: 'cus_northwind',
+        lines: [{ sku: 'WID-100', qty: 1 }],
+        meta: {
+          ucp: { platformId: 'ucp_x', checkoutId: 'chk_x', origin: 'https://x.test' },
+          cart: { id: 'cart_x' },
+          plugin: { id: 'fixture-carrier' },
+          po: 'PO-7',
+        },
+      },
+    });
+    if (!r.ok) throw new Error(r.error);
+    const snap = await api().snapshot(r.orderId);
+    expect(snap?.order?.meta).toMatchObject({ po: 'PO-7', plugin: { id: 'example' } });
+    expect(snap?.order?.meta).not.toHaveProperty('ucp');
+    expect(snap?.order?.meta).not.toHaveProperty('cart');
+    expect(
+      await hostFor('example').startOrder({
+        key: `po-${crypto.randomUUID()}`,
+        flowId: 'tpl-b2b-order',
+        input: { model: 'b2b', currency: 'XAU', lines: [{ sku: 'WID-100', qty: 1 }] },
+      }),
+    ).toEqual({ ok: false, error: 'Unsupported currency XAU; there is no exchange rate for it' });
   });
 });
 
@@ -241,6 +296,42 @@ describe('an external cart’s buyer', () => {
         input({ sessionRef: (await hostFor('example').getCart(c.cartId))!.sessionRef }),
       ),
     ).toEqual({ ok: false, error: 'That session’s cart is returned.' });
+  });
+
+  it('is the only one who sends it back, and is slowed down when editing in a burst', async () => {
+    const c = await open({ lines: [{ sku: 'WID-100', qty: 1 }] });
+    const ada = { kind: 'staff' as const, id: 'usr_ada', name: 'Ada', role: 'admin' as const };
+    expect(await cartAgent(c.cartId).transferAs(ada)).toEqual({
+      ok: false,
+      error: 'Only the buyer sends the cart back.',
+    });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error('socket refused');
+    const results = [];
+    for (let i = 0; i < 21; i++)
+      results.push((await ws.call('apply', [{ op: 'add', sku: 'WID-100', qty: 1 }])).result);
+    expect(results.slice(0, 20).every((r) => (r as { ok: boolean }).ok)).toBe(true);
+    expect(results[20]).toEqual({ ok: false, error: 'Slow down a moment.' });
+  });
+
+  it('is never admitted to a staff cart', async () => {
+    const staff = await api().createCart({
+      title: 'Staff cart',
+      flowId: 'tpl-b2b-order',
+      createdBy: 'usr_1',
+    });
+    if (!staff.ok) throw new Error(staff.error);
+    const forged = { cartId: staff.id, id: 'guest:x', name: 'X' };
+    expect((await guestSocket(staff.id, forged)).status).toBe(403);
+    expect(await cartAgent(staff.id).redeemStart('anything')).toBeNull();
+  });
+
+  it('can’t use a start link once the cart’s time has passed', async () => {
+    const c = await open({ expiresAt: Date.now() + 150 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await cartAgent(c.cartId).redeemStart(c.token)).toBeNull();
+    expect(await cartAgent(c.cartId).issueStart()).toBeNull();
   });
 
   it('loses the cart when it expires', async () => {

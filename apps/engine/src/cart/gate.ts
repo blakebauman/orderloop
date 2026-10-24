@@ -27,12 +27,17 @@ export async function cartGate(
     if (!guest || guest.cartId !== name)
       return new Response('Sign in to open this cart.', { status: 401 });
     const row = await createDb(env.DB)
-      .select({ pluginId: carts.pluginId, status: carts.status })
+      .select({ pluginId: carts.pluginId, status: carts.status, expiresAt: carts.expiresAt })
       .from(carts)
       .where(eq(carts.id, name))
       .get();
     if (!row?.pluginId) return new Response('Forbidden', { status: 403 });
-    if (row.status === 'canceled') return new Response('This cart has closed.', { status: 410 });
+    if (
+      row.status === 'canceled' ||
+      row.status === 'submitted' ||
+      (row.status !== 'returned' && (row.expiresAt ?? 0) <= Date.now())
+    )
+      return new Response('This cart has closed.', { status: 410 });
     return undefined;
   }
   const row = await createDb(env.DB)

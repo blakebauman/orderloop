@@ -42,6 +42,8 @@ export type ExternalCartOpened = {
   cartId: string;
   /** The path (on the app's origin) that admits the buyer, once, within `CART_START_TTL_MS`. */
   startPath: string;
+  /** The same on the app's origin, where the deployment knows it (`APP_ORIGIN`). */
+  startUrl: string | null;
 };
 
 /** What a plugin sees of a cart it opened. */
@@ -82,24 +84,39 @@ const httpsUrl = (raw: string): URL | null => {
 };
 
 /** Why `input` can't open a cart, or null. The engine checks the flow and customer itself. */
-export function externalCartProblem(input: ExternalCartInput, now: number): string | null {
-  if (!input.sessionRef || input.sessionRef.length > 200)
-    return 'sessionRef is 1 to 200 characters';
-  if (!input.buyer?.id || !input.buyer.name || input.buyer.name.length > 120)
+export function externalCartProblem(
+  input: ExternalCartInput,
+  now: number,
+  /** Hosts the deployment serves (its app, catalog): a cart never posts back to them. */
+  ownHosts: readonly string[] = [],
+): string | null {
+  const str = (v: unknown, max: number) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  if (!str(input?.sessionRef, 200)) return 'sessionRef is 1 to 200 characters';
+  if (!str(input.title, 200) || !str(input.flowId, 100)) return 'title and flowId are strings';
+  if (input.customerId != null && !str(input.customerId, 100)) return 'customerId is a string';
+  if (!str(input.buyer?.id, 200) || !str(input.buyer?.name, 120))
     return 'buyer needs an id and a name of at most 120 characters';
-  if (!httpsUrl(input.returnUrl)) return 'returnUrl must be an https URL without credentials';
+  const back = typeof input.returnUrl === 'string' ? httpsUrl(input.returnUrl) : null;
+  if (!back) return 'returnUrl must be an https URL without credentials';
+  if (ownHosts.includes(back.hostname)) return 'returnUrl must be the buyer’s system, not this one';
   const origins = input.frameOrigins ?? [];
-  if (origins.length > MAX_FRAME_ORIGINS) return `At most ${MAX_FRAME_ORIGINS} frameOrigins`;
+  if (!Array.isArray(origins) || origins.length > MAX_FRAME_ORIGINS)
+    return `At most ${MAX_FRAME_ORIGINS} frameOrigins`;
   for (const o of origins) {
-    const u = httpsUrl(o);
-    if (!u || u.origin !== o) return `frameOrigins must be https origins, not “${o}”`;
+    const u = typeof o === 'string' ? httpsUrl(o) : null;
+    if (!u || u.origin !== o) return `frameOrigins must be https origins, not “${String(o)}”`;
   }
-  if (!(input.expiresAt > now) || input.expiresAt - now > MAX_EXTERNAL_CART_MS)
+  if (
+    typeof input.expiresAt !== 'number' ||
+    !(input.expiresAt > now) ||
+    input.expiresAt - now > MAX_EXTERNAL_CART_MS
+  )
     return 'expiresAt must be in the next 24 hours';
   const lines = input.lines ?? [];
-  if (lines.length > MAX_CHECKOUT_LINES) return `At most ${MAX_CHECKOUT_LINES} lines`;
+  if (!Array.isArray(lines) || lines.length > MAX_CHECKOUT_LINES)
+    return `At most ${MAX_CHECKOUT_LINES} lines`;
   for (const l of lines)
-    if (!l.sku || !Number.isInteger(l.qty) || l.qty < 1 || l.qty > MAX_LINE_QUANTITY)
+    if (!str(l?.sku, 120) || !Number.isInteger(l.qty) || l.qty < 1 || l.qty > MAX_LINE_QUANTITY)
       return 'Each line is a SKU and a whole quantity from 1';
   return null;
 }

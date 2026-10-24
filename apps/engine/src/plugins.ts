@@ -91,6 +91,8 @@ function ungrantedCapabilities(env: Env, m: PluginManifest): PluginCapability[] 
  * deployment grants it. Withdrawing the grant takes effect at once.
  */
 export async function mayUse(env: Env, id: string, capability: PluginCapability): Promise<boolean> {
+  // A grant is the registry's plugin's: never one a runtime install of the same id would get.
+  if (!registryOwns(env, id)) return false;
   if (!(registryGrants(env)[id]?.capabilities ?? []).includes(capability)) return false;
   const status = (await pluginStatuses(env)).find((p) => p.id === id);
   return !!status?.manifest?.capabilities.includes(capability);

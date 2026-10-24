@@ -301,6 +301,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;
         if (idempotencyKey && idempotencyKey.length > 255)
           return json({ error: 'Idempotency-Key must be at most 255 characters' }, 400);
+        // Keys the core starts orders under itself (carts, UCP, plugins) aren't a caller's to take.
+        if (idempotencyKey && /^(cart|ucp|plugin):/.test(idempotencyKey))
+          return json({ error: 'Idempotency-Key may not start with cart:, ucp: or plugin:' }, 400);
         if (!(await currencies()).some((c) => c.currency === parsed.data.input.currency))
           return json(
             {
