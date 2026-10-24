@@ -6,7 +6,10 @@
  */
 
 import {
+  ATTACHMENT_TYPES,
+  attachmentProblem,
   CART_CHAT_BROADCAST,
+  type CartAttachment,
   type CartChatMessage,
   type CartOp,
   type CartState,
@@ -289,6 +292,13 @@ export function CartView({
         </div>
 
         <div className="grid min-w-0 content-start gap-4">
+          <Attachments
+            cartId={cart.id}
+            files={state.attachments ?? []}
+            canAdd={(guest || canOperate) && !final}
+            canRemove={(a) => !final && (a.by.id === meId || canOperate)}
+            onRemove={(id) => call<Result>('detach', [id])}
+          />
           <Section title="Here now">
             {state.members.length ? (
               <ul className="flex flex-wrap gap-1.5 text-sm">
@@ -625,6 +635,111 @@ function Promos({
         </form>
       ) : null}
     </div>
+  );
+}
+
+const size = (n: number) =>
+  n < 1024 * 1024
+    ? `${Math.max(1, Math.round(n / 1024))} KB`
+    : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+/** The cart's files: anyone on it can download them; adding one uploads it through the web app. */
+function Attachments({
+  cartId,
+  files,
+  canAdd,
+  canRemove,
+  onRemove,
+}: {
+  cartId: string;
+  files: CartAttachment[];
+  canAdd: boolean;
+  canRemove: (a: CartAttachment) => boolean;
+  onRemove: (id: string) => Promise<Result | null>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  if (!files.length && !canAdd) return null;
+  async function upload(file: File) {
+    setError(null);
+    const problem = attachmentProblem(file, files.length);
+    if (problem) return setError(problem);
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.set('file', file);
+      const res = await fetch(`/carts/${cartId}/attachments`, { method: 'POST', body });
+      if (!res.ok)
+        setError(
+          ((await res.json().catch(() => null)) as { error?: string } | null)?.error ??
+            'The file didn’t upload.',
+        );
+    } finally {
+      setUploading(false);
+      if (input.current) input.current.value = '';
+    }
+  }
+  return (
+    <Section title="Files" flush>
+      {files.length ? (
+        <ul className="divide-y text-sm">
+          {files.map((a) => (
+            <li key={a.id} className="flex items-start justify-between gap-2 px-4 py-2">
+              <div className="min-w-0">
+                <a
+                  href={`/carts/${cartId}/attachments/${a.id}`}
+                  className="block truncate text-link hover:underline"
+                  download={a.name}
+                >
+                  {a.name}
+                </a>
+                <div className="text-muted-foreground text-xs">
+                  {ATTACHMENT_TYPES[a.type] ?? a.type} · {size(a.size)} · {a.by.name} ·{' '}
+                  <Ago ms={a.at} />
+                </div>
+              </div>
+              {canRemove(a) ? (
+                <button
+                  type="button"
+                  className="text-muted-foreground text-xs hover:underline"
+                  onClick={() => void onRemove(a.id)}
+                >
+                  Remove
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-3 text-muted-foreground text-sm">No files yet.</p>
+      )}
+      {canAdd ? (
+        <div className="grid gap-1 border-t p-3">
+          <label htmlFor={`attach-${cartId}`} className="caption">
+            Add a file (PDF, image, CSV, text, Excel or Word; up to 10 MB)
+          </label>
+          <input
+            ref={input}
+            id={`attach-${cartId}`}
+            type="file"
+            accept={Object.keys(ATTACHMENT_TYPES).join(',')}
+            disabled={uploading}
+            onChange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) void upload(f);
+            }}
+            className="text-sm"
+          />
+          {uploading ? <p className="text-muted-foreground text-xs">Uploading…</p> : null}
+          {error ? (
+            <p role="alert" className="text-bad text-xs">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </Section>
   );
 }
 

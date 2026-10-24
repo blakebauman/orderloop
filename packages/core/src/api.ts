@@ -4,7 +4,7 @@
  * `EngineRpc` rather than importing engine source.
  */
 
-import type { CartState, CreateCartInput } from './cart';
+import type { CartActor, CartAttachment, CartState, CreateCartInput } from './cart';
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
@@ -318,6 +318,15 @@ export interface EngineRpc {
     cartId: string,
     token: string,
   ): Promise<{ guest: CartGuest; expiresAt: number } | null>;
+  /**
+   * Adds a file the web app has stored (at `cartAttachmentKey`) to a cart, as `actor`; refused
+   * for anyone who may not change the cart, a cart that has ended, or one that is full.
+   */
+  attachToCart(
+    cartId: string,
+    attachment: Omit<CartAttachment, 'by' | 'at'>,
+    actor: CartActor,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /** What an engine call returns when it may be refused: its value, or why not (to show as it is). */

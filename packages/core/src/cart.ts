@@ -270,9 +270,67 @@ export type CartState = {
   members: CartMember[];
   /** The newest `CART_CHAT_BROADCAST` messages, oldest first. */
   chat: CartChatMessage[];
+  /** Files on the cart, oldest first (absent on a cart from before attachments). */
+  attachments?: CartAttachment[];
 };
 
-export const EMPTY_CART_STATE: CartState = { cart: null, members: [], chat: [] };
+export const EMPTY_CART_STATE: CartState = { cart: null, members: [], chat: [], attachments: [] };
+
+/** Files a cart holds, and how big each may be. */
+export const MAX_CART_ATTACHMENTS = 20;
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/** The file types a cart takes, by media type. Nothing that a browser would run. */
+export const ATTACHMENT_TYPES: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'image/png': 'PNG image',
+  'image/jpeg': 'JPEG image',
+  'image/webp': 'WebP image',
+  'text/csv': 'CSV',
+  'text/plain': 'Text',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel workbook',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word document',
+};
+
+/** A file someone added to a cart: a spec sheet, a quote request, a photo. */
+export type CartAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  /** Where it is in the documents bucket: `carts/<cartId>/<id>` (`cartAttachmentKey`). */
+  key: string;
+  by: { id: string; name: string };
+  at: number;
+};
+
+/** Where a cart's file lives in the documents bucket, beside the bucket's `orders/` and `audit/`. */
+export const cartAttachmentKey = (cartId: string, id: string) => `carts/${cartId}/${id}`;
+
+/** Every file a cart holds, as a bucket prefix. */
+export const cartAttachmentPrefix = (cartId: string) => `carts/${cartId}/`;
+
+/** A file name as stored and shown: no path, no control characters, at most 120 characters. */
+export function attachmentName(raw: string): string {
+  const base = raw.split(/[\\/]/).pop() ?? '';
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+  const clean = base.replace(/[\u0000-\u001f\u007f"]/g, '').trim();
+  return (clean || 'file').slice(-120);
+}
+
+/** Why a file can't go on a cart, or null. */
+export function attachmentProblem(f: { type: string; size: number }, count: number): string | null {
+  if (!(f.type in ATTACHMENT_TYPES))
+    return 'Attach a PDF, an image (PNG, JPEG, WebP), a CSV or text file, or an Excel or Word file.';
+  if (f.size <= 0) return 'The file is empty.';
+  if (f.size > MAX_ATTACHMENT_BYTES) return 'A file is at most 10 MB.';
+  if (count >= MAX_CART_ATTACHMENTS) return `A cart holds at most ${MAX_CART_ATTACHMENTS} files.`;
+  return null;
+}
+
+/** Who may remove a file: whoever added it, or staff who may change the cart. */
+export const canRemoveAttachment = (a: Pick<CartAttachment, 'by'>, actor: CartActor) =>
+  a.by.id === actor.id || (actor.kind === 'staff' && atLeast(actor.role, 'operator'));
 
 /** What a staff cart starts with; the engine checks the flow and the customer. */
 export type CreateCartInput = {

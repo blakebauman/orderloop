@@ -227,6 +227,13 @@ See [Email intake](https://docs.orderloop.app/guides/email-intake/#the-intake-lo
 
 The web app serves them at `/docs/<key>` to signed-in users only.
 
+Cart files are at `carts/<cartId>/<attachmentId>` (`cartAttachmentKey`; `cartAttachmentPrefix` lists
+a cart's), written by the web app (`apps/web/app/lib/cart-attachments.server.ts`) with the file's
+type and, as custom metadata, the cart id and name. They're listed in the cart's agent
+(`CartState.attachments`), not in `documents`, and served at `/carts/<cartId>/attachments/<id>` to
+staff and to that cart's buyer. Removing one deletes it. A cart that ends keeps its files: like its
+chat, they're not swept or erased yet.
+
 ## Product catalog
 
 The catalog Worker ([Architecture](architecture.md#product-catalog)) owns no tables in D1. Its one

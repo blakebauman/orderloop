@@ -324,6 +324,59 @@ describe('the cart socket', () => {
   });
 });
 
+describe('cart files', () => {
+  const file = (id: string, cartId: string) => ({
+    id,
+    name: 'spec.pdf',
+    type: 'application/pdf',
+    size: 4,
+    key: `carts/${cartId}/${id}`,
+  });
+
+  it('lists a file the web app stored, for whoever may change the cart', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    const vee = staff(await who('viewer', 'vee'));
+    expect(await api().attachToCart(id, file('att_1', id), vee)).toEqual({
+      ok: false,
+      error: "You can't change this cart.",
+    });
+    expect(
+      await api().attachToCart(id, { ...file('att_2', id), key: 'carts/cart_x/att_2' }, ada),
+    ).toEqual({
+      ok: false,
+      error: 'That file isn’t this cart’s.',
+    });
+    expect(
+      await api().attachToCart(id, { ...file('att_3', id), type: 'text/html' }, ada),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(await api().attachToCart(id, file('att_1', id), ada)).toEqual({ ok: true });
+    expect((await state(id)).attachments).toEqual([
+      expect.objectContaining({ id: 'att_1', by: { id: ada.id, name: 'ada' } }),
+    ]);
+    expect(await api().attachToCart('cart_nope', file('att_1', 'cart_nope'), ada)).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('removes a file for who added it or an operator, and deletes it', async () => {
+    const id = await open();
+    const ann = await who('operator', 'ann2');
+    await env.DOCS.put(`carts/${id}/att_9`, '%PDF');
+    expect(await api().attachToCart(id, file('att_9', id), staff(ann))).toEqual({ ok: true });
+    const viewer = await socket(id, await who('viewer', 'vic'));
+    expect((await viewer.call('detach', ['att_9'])).result).toMatchObject({ ok: false });
+    const owner = await socket(id, ann);
+    expect((await owner.call('detach', ['att_9'])).result).toEqual({ ok: true });
+    expect((await state(id)).attachments).toEqual([]);
+    expect(await env.DOCS.get(`carts/${id}/att_9`)).toBeNull();
+    viewer.close();
+    owner.close();
+  });
+});
+
 describe('submitting a cart', () => {
   it('starts one order of the cart’s flow from the quote, and ends the cart', async () => {
     introspector = await introspectWorkflow(env.ORDER_LOOP);

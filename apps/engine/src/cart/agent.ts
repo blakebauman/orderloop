@@ -14,11 +14,14 @@
 import {
   applyCartOp,
   atLeast,
+  attachmentName,
+  attachmentProblem,
   BASE_CURRENCY,
   CART_CHAT_BROADCAST,
   CART_START_TTL_MS,
   type Cart,
   type CartActor,
+  type CartAttachment,
   type CartChatMessage,
   type CartGuest,
   type CartMember,
@@ -26,7 +29,10 @@ import {
   type CartState,
   type CheckoutSession,
   canChangeMessage,
+  canEditCart,
   canReadCart,
+  canRemoveAttachment,
+  cartAttachmentKey,
   cartReadyProblem,
   chatBody,
   checkCartReturn,
@@ -348,6 +354,48 @@ export class CartAgent extends Agent<Env, CartState> {
     } finally {
       this.submitting = false;
     }
+  }
+
+  /** Adds a file the web app stored for this cart, as `actor`. */
+  async attachAs(
+    actor: CartActor,
+    a: Omit<CartAttachment, 'by' | 'at'>,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const c = this.cart();
+    if (!canEditCart(c, actor)) return { ok: false, error: "You can't change this cart." };
+    if (isFinalCart(c) || this.submitting) return { ok: false, error: `The cart is ${c.status}.` };
+    if (a.key !== cartAttachmentKey(c.id, a.id))
+      return { ok: false, error: 'That file isn’t this cart’s.' };
+    const files = this.state.attachments ?? [];
+    const problem = attachmentProblem(a, files.length);
+    if (problem) return { ok: false, error: problem };
+    const added: CartAttachment = {
+      id: a.id,
+      name: attachmentName(a.name),
+      type: a.type,
+      size: a.size,
+      key: a.key,
+      by: { id: actor.id, name: actor.name },
+      at: Date.now(),
+    };
+    this.setState({ ...this.state, attachments: [...files, added] });
+    return { ok: true };
+  }
+
+  /** Removes a file and deletes it, for whoever added it or staff who may change the cart. */
+  @callable()
+  async detach(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const actor = await this.caller();
+    const c = this.cart();
+    const files = this.state.attachments ?? [];
+    const a = files.find((f) => f.id === id);
+    if (!a) return { ok: false, error: 'That file is gone.' };
+    if (isFinalCart(c)) return { ok: false, error: `The cart is ${c.status}.` };
+    if (!canRemoveAttachment(a, actor))
+      return { ok: false, error: 'Only who added it can remove it.' };
+    this.setState({ ...this.state, attachments: files.filter((f) => f.id !== id) });
+    await this.env.DOCS.delete(a.key);
+    return { ok: true };
   }
 
   async cancelAs(actor: CartActor): Promise<{ ok: true } | { ok: false; error: string }> {

@@ -948,6 +948,12 @@ the rest is in its SQL, paged by `history`).
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
   cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no
   such step; warnings never block submitting.
+- **Files.** The web app stores an upload (at most 10 MB, `ATTACHMENT_TYPES` only, 20 a cart) at
+  `carts/<cartId>/<id>` in `DOCS` and hands it to `EngineRpc.attachToCart`, which the agent
+  (`attachAs`) refuses for anyone who may not change the cart, a cart that has ended or a key not
+  under the cart; a refused file is deleted. `detach` (whoever added it, or an operator) removes and
+  deletes it. Downloads (`/carts/<cartId>/attachments/<id>`) go to staff and to the cart's own buyer
+  (`cartActor`), as attachments under a sandboxing CSP.
 - **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
   (0 removes), remove, clear, promo codes, and, for staff, lock, unlock and rename. Staff need
   `viewer` to read and `operator` to edit.

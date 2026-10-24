@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyCartOp,
+  attachmentName,
+  attachmentProblem,
   type Cart,
   type CartActor,
   type CartOp,
   canChangeMessage,
   canEditCart,
   canReadCart,
+  canRemoveAttachment,
+  cartAttachmentKey,
   cartReadyProblem,
   chatBody,
   finishCart,
   isCartExpired,
   isQuoteCurrent,
+  MAX_CART_ATTACHMENTS,
   MAX_CHAT_BODY,
   MAX_CHECKOUT_LINES,
   MAX_LINE_QUANTITY,
@@ -271,5 +276,40 @@ describe('cart chat', () => {
   it('lets only the author change a message', () => {
     expect(canChangeMessage({ authorId: 'usr_1' }, operator)).toBe(true);
     expect(canChangeMessage({ authorId: 'usr_1' }, viewer)).toBe(false);
+  });
+});
+
+describe('cart files', () => {
+  it('keeps a file name to its base name, without control characters or quotes', () => {
+    expect(attachmentName('C:\\specs\\widget "a".pdf')).toBe('widget a.pdf');
+    expect(attachmentName('../../etc/passwd')).toBe('passwd');
+    expect(attachmentName('bad\nname.txt')).toBe('badname.txt');
+    expect(attachmentName('')).toBe('file');
+    expect(attachmentName(`${'x'.repeat(200)}.pdf`)).toHaveLength(120);
+  });
+
+  it('takes documents and images up to 10 MB, and a cart holds 20', () => {
+    expect(attachmentProblem({ type: 'application/pdf', size: 1 }, 0)).toBeNull();
+    expect(attachmentProblem({ type: 'text/html', size: 1 }, 0)).toMatch(/Attach a PDF/);
+    expect(attachmentProblem({ type: 'image/svg+xml', size: 1 }, 0)).toMatch(/Attach a PDF/);
+    expect(attachmentProblem({ type: 'application/pdf', size: 0 }, 0)).toMatch(/empty/);
+    expect(attachmentProblem({ type: 'application/pdf', size: 10 * 1024 * 1024 + 1 }, 0)).toMatch(
+      /10 MB/,
+    );
+    expect(attachmentProblem({ type: 'application/pdf', size: 1 }, MAX_CART_ATTACHMENTS)).toMatch(
+      /at most 20/,
+    );
+  });
+
+  it('lets whoever added a file, or an operator, remove it', () => {
+    const a = { by: { id: 'guest:b1', name: 'Pat' } };
+    expect(canRemoveAttachment(a, guest)).toBe(false);
+    expect(canRemoveAttachment(a, { kind: 'guest', id: 'guest:b1', name: 'Pat' })).toBe(true);
+    expect(canRemoveAttachment(a, operator)).toBe(true);
+    expect(canRemoveAttachment(a, viewer)).toBe(false);
+  });
+
+  it('files a cart’s files under the cart', () => {
+    expect(cartAttachmentKey('cart_1', 'att_1')).toBe('carts/cart_1/att_1');
   });
 });
