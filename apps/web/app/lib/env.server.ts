@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { env, waitUntil } from 'cloudflare:workers';
 import type { EngineRpc } from '@orderloop/core';
 import type { ProductCatalogRpc } from '@orderloop/core/product';
 import { createDb } from '@orderloop/db';
@@ -19,4 +19,12 @@ export function db() {
 
 export function docs() {
   return env.DOCS;
+}
+
+/**
+ * Runs bookkeeping (a session's or a key's last use) after the response instead of before it.
+ * The write still happens: the Worker stays alive until it settles. A failure is logged.
+ */
+export function afterResponse(work: PromiseLike<unknown>) {
+  waitUntil(Promise.resolve(work).catch((err) => console.error('background write failed', err)));
 }

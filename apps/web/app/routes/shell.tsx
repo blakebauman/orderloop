@@ -1,4 +1,5 @@
-import { atLeast, type Principal, ROLE_LABELS } from '@orderloop/core';
+// The roles subpath alone: the core barrel would bring zod into every page.
+import { atLeast, type Principal, ROLE_LABELS } from '@orderloop/core/roles';
 import { approvals, users } from '@orderloop/db';
 import {
   DropdownMenu,
@@ -35,29 +36,26 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Until their two-factor sign-in is set up, a person sees only their Account page.
   if (me.twoFactorDue || me.passwordChangeDue)
     return { pending: 0, auth: true, me, nav: false, plugins: [] };
-  const pending = await db()
-    .select({ n: sql<number>`count(*)` })
-    .from(approvals)
-    .where(eq(approvals.status, 'pending'))
-    .get();
-  // Who to ask when a page needs a higher role: up to three active admins.
-  const admins = atLeast(me.role, 'admin')
-    ? []
-    : await db()
-        .select({ name: users.name, email: users.email })
-        .from(users)
-        .where(and(eq(users.role, 'admin'), isNull(users.disabledAt)))
-        .orderBy(users.name)
-        .limit(3);
-  return {
-    pending: pending?.n ?? 0,
-    auth: await authEnabled(),
-    me,
-    nav: true,
-    admins,
+  const [pending, admins, auth, plugins] = await Promise.all([
+    db()
+      .select({ n: sql<number>`count(*)` })
+      .from(approvals)
+      .where(eq(approvals.status, 'pending'))
+      .get(),
+    // Who to ask when a page needs a higher role: up to three active admins.
+    atLeast(me.role, 'admin')
+      ? []
+      : db()
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(and(eq(users.role, 'admin'), isNull(users.disabledAt)))
+          .orderBy(users.name)
+          .limit(3),
+    authEnabled(),
     // Installed plugins: their nodes in the editor, their pages in the nav.
-    plugins: await pluginManifests(),
-  };
+    pluginManifests(),
+  ]);
+  return { pending: pending?.n ?? 0, auth, me, nav: true, admins, plugins };
 }
 
 /**

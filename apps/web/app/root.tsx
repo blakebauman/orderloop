@@ -16,10 +16,18 @@ import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
+import plexSans400 from '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2?url';
+import plexSans600 from '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2?url';
 import './app.css';
 import { NonceContext } from './lib/csp';
 
+/** Running text and titles: fetched with the page rather than once the stylesheet is parsed. */
+const fontPreload = (href: string) =>
+  ({ rel: 'preload', href, as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' }) as const;
+
 export const links: Route.LinksFunction = () => [
+  fontPreload(plexSans400),
+  fontPreload(plexSans600),
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
 ];
 

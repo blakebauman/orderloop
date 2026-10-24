@@ -152,7 +152,7 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 `fx_rate`. The page shows counts instead of a completion rate below five ended orders per model,
 and a step's 95th percentile only from 20 runs (`apps/web/app/components/performance.tsx`).
 
-The overview's **Needs attention** (`attentionSummary` in `apps/web/app/lib/orders.server.ts`) reads
+The overview's **Needs attention** (`overview` in `apps/web/app/lib/orders.server.ts`, one D1 batch with the overview's other counts) reads
 the orders index: the newest failed and rolled-back orders with `stopped_at` and `reason`, and the
 open waits grouped in SQL by `waiting_at`, `waiting_on` and `waiting_for` with the oldest
 `waiting_since`; `lanes` in `apps/web/app/lib/attention.ts` groups them by who they wait on.

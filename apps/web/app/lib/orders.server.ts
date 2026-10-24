@@ -4,6 +4,7 @@ import {
   contains,
   contractPrices,
   customers,
+  type Db,
   documents,
   flows,
   fxRates,
@@ -48,6 +49,11 @@ export type OrderFilters = {
 };
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
+  return ordersQuery(db(), f, limit);
+}
+
+/** The orders a filter picks, as a query to run alone or in a batch. */
+function ordersQuery(d: Db, f: OrderFilters, limit: number) {
   // "#idz7qp" is how the app writes an order's reference (`orderRef`); search its id without the #.
   const q = f.q?.trim().replace(/^#/, '');
   const where = and(
@@ -99,7 +105,7 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
           : f.sort === 'waiting'
             ? [sql`${orders.waitingSince} is null`, asc(orders.waitingSince), desc(orders.id)]
             : [desc(orders.createdAt), desc(orders.id)];
-  return db()
+  return d
     .select(getTableColumns(orders))
     .from(orders)
     .leftJoin(customers, eq(customers.id, orders.customerId))
@@ -108,32 +114,83 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
     .limit(limit);
 }
 
-export async function dashboardStats() {
-  const [byStatus, byModel, pending] = await Promise.all([
-    db()
-      .select({
-        status: orders.status,
-        n: sql<number>`count(*)`,
-        // In the base currency, at each order's rate.
-        total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
-      })
-      .from(orders)
-      .groupBy(orders.status),
-    db()
-      .select({ model: orders.model, n: sql<number>`count(*)` })
-      .from(orders)
-      .groupBy(orders.model),
-    db()
-      .select({ n: sql<number>`count(*)` })
-      .from(approvals)
-      .where(eq(approvals.status, 'pending'))
-      .get(),
-  ]);
-  return { byStatus, byModel, pendingApprovals: pending?.n ?? 0 };
+/**
+ * Everything the overview reads from D1, in one round trip (a D1 batch): counts by status and
+ * model, the most recently updated orders, pending approvals, what needs a person (see below) and
+ * how many orders were declined by policy.
+ */
+export async function overview() {
+  const d = db();
+  const stopped = inArray(orders.status, ['failed', 'rolled_back']);
+  const [byStatus, byModel, pending, recent, approvalRows, failed, failedTotal, waits, declined] =
+    await d.batch([
+      d
+        .select({
+          status: orders.status,
+          n: sql<number>`count(*)`,
+          // In the base currency, at each order's rate.
+          total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
+        })
+        .from(orders)
+        .groupBy(orders.status),
+      d
+        .select({ model: orders.model, n: sql<number>`count(*)` })
+        .from(orders)
+        .groupBy(orders.model),
+      d.select({ n: sql<number>`count(*)` }).from(approvals).where(eq(approvals.status, 'pending')),
+      ordersQuery(d, { sort: 'updated' }, 8),
+      approvalsQuery(d, 'pending'),
+      // What needs a person: orders that failed or rolled back, newest first, with where and why
+      // they stopped; and every open wait counted by step and by what it waits on (the index's
+      // `waiting_for`), with the oldest. Counted in SQL, so it holds at any volume.
+      d
+        .select({
+          id: orders.id,
+          title: orders.title,
+          model: orders.model,
+          status: orders.status,
+          stoppedAt: orders.stoppedAt,
+          reason: orders.reason,
+          updatedAt: orders.updatedAt,
+        })
+        .from(orders)
+        .where(stopped)
+        .orderBy(desc(orders.updatedAt))
+        .limit(5),
+      d.select({ n: sql<number>`count(*)` }).from(orders).where(stopped),
+      d
+        .select({
+          at: orders.waitingAt,
+          on: orders.waitingOn,
+          for: orders.waitingFor,
+          n: sql<number>`count(*)`,
+          oldest: sql<number | null>`min(${orders.waitingSince})`,
+        })
+        .from(orders)
+        .where(eq(orders.status, 'waiting'))
+        .groupBy(orders.waitingAt, orders.waitingOn, orders.waitingFor),
+      // How many cancelled orders were declined by policy.
+      d
+        .select({ n: sql<number>`count(distinct ${approvals.orderId})` })
+        .from(approvals)
+        .innerJoin(orders, eq(orders.id, approvals.orderId))
+        .where(declinedWhere),
+    ]);
+  return {
+    stats: { byStatus, byModel, pendingApprovals: pending[0]?.n ?? 0 },
+    recent,
+    approvals: approvalRows,
+    attention: { failed, failedTotal: failedTotal[0]?.n ?? 0, waits },
+    declinedTotal: declined[0]?.n ?? 0,
+  };
 }
 
 export async function listApprovals(status = 'pending') {
-  return db()
+  return approvalsQuery(db(), status);
+}
+
+function approvalsQuery(d: Db, status: string) {
+  return d
     .select({
       id: approvals.id,
       orderId: approvals.orderId,
@@ -162,29 +219,31 @@ export async function listApprovals(status = 'pending') {
     .limit(200);
 }
 
+/** An order's D1 records, in one round trip (a D1 batch). */
 export async function orderRecords(orderId: string) {
-  const [docs, msgs, pays, ships, parts, outs, bills] = await Promise.all([
-    db()
+  const d = db();
+  const [docs, msgs, pays, ships, parts, outs, bills] = await d.batch([
+    d
       .select()
       .from(documents)
       .where(eq(documents.orderId, orderId))
       .orderBy(desc(documents.createdAt)),
-    db()
+    d
       .select()
       .from(messages)
       .where(eq(messages.orderId, orderId))
       .orderBy(desc(messages.createdAt)),
-    db()
+    d
       .select()
       .from(payments)
       .where(eq(payments.orderId, orderId))
       .orderBy(desc(payments.createdAt)),
-    db()
+    d
       .select()
       .from(shipments)
       .where(eq(shipments.orderId, orderId))
       .orderBy(desc(shipments.createdAt)),
-    db()
+    d
       .select({
         sellerId: sellerOrders.sellerId,
         name: sellers.name,
@@ -196,7 +255,7 @@ export async function orderRecords(orderId: string) {
       .leftJoin(sellers, eq(sellers.id, sellerOrders.sellerId))
       .where(eq(sellerOrders.orderId, orderId))
       .orderBy(sellerOrders.sellerId),
-    db()
+    d
       .select({
         sellerId: payouts.sellerId,
         name: sellers.name,
@@ -208,7 +267,7 @@ export async function orderRecords(orderId: string) {
       .leftJoin(sellers, eq(sellers.id, payouts.sellerId))
       .where(eq(payouts.orderId, orderId))
       .orderBy(payouts.sellerId),
-    db()
+    d
       .select({
         id: invoices.id,
         status: invoices.status,
@@ -285,47 +344,6 @@ export async function publishedFlows() {
     .orderBy(flows.name);
 }
 
-/**
- * What needs a person, for the overview: orders that failed or rolled back, newest first, with where
- * and why they stopped; and every open wait counted by step and by what it waits on (the index's
- * `waiting_for`), with the oldest. Counted in SQL, so it holds at any volume.
- */
-export async function attentionSummary() {
-  const [failed, failedTotal, waits] = await Promise.all([
-    db()
-      .select({
-        id: orders.id,
-        title: orders.title,
-        model: orders.model,
-        status: orders.status,
-        stoppedAt: orders.stoppedAt,
-        reason: orders.reason,
-        updatedAt: orders.updatedAt,
-      })
-      .from(orders)
-      .where(inArray(orders.status, ['failed', 'rolled_back']))
-      .orderBy(desc(orders.updatedAt))
-      .limit(5),
-    db()
-      .select({ n: sql<number>`count(*)` })
-      .from(orders)
-      .where(inArray(orders.status, ['failed', 'rolled_back']))
-      .get(),
-    db()
-      .select({
-        at: orders.waitingAt,
-        on: orders.waitingOn,
-        for: orders.waitingFor,
-        n: sql<number>`count(*)`,
-        oldest: sql<number | null>`min(${orders.waitingSince})`,
-      })
-      .from(orders)
-      .where(eq(orders.status, 'waiting'))
-      .groupBy(orders.waitingAt, orders.waitingOn, orders.waitingFor),
-  ]);
-  return { failed, failedTotal: failedTotal?.n ?? 0, waits };
-}
-
 /** Orders still running (queued, running or waiting) per flow and version, for the flows list. */
 export async function runningByFlow(): Promise<Record<string, Record<number, number>>> {
   const rows = await db()
@@ -378,17 +396,6 @@ export async function declinedOrderIds(ids: string[]): Promise<Set<string>> {
     .innerJoin(orders, eq(orders.id, approvals.orderId))
     .where(and(declinedWhere, inArray(approvals.orderId, ids)));
   return new Set(rows.map((r) => r.id));
-}
-
-/** How many cancelled orders were declined by policy, for the overview's counts. */
-export async function declinedCount(): Promise<number> {
-  const row = await db()
-    .select({ n: sql<number>`count(distinct ${approvals.orderId})` })
-    .from(approvals)
-    .innerJoin(orders, eq(orders.id, approvals.orderId))
-    .where(declinedWhere)
-    .get();
-  return row?.n ?? 0;
 }
 
 const declinedWhere = and(

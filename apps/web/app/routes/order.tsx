@@ -29,7 +29,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { data, Link, useFetcher, useLoaderData, useNavigate, useRevalidator } from 'react-router';
+import {
+  data,
+  Link,
+  type ShouldRevalidateFunctionArgs,
+  useFetcher,
+  useLoaderData,
+  useNavigate,
+} from 'react-router';
 import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
@@ -72,8 +79,27 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 }
 
+/**
+ * The socket keeps the live state current, and the records fetcher (below) the D1 records, so the
+ * loader (an engine snapshot and D1 reads) runs again only for another order or a navigation, not
+ * after an action on this page.
+ */
+export function shouldRevalidate({
+  currentParams,
+  nextParams,
+  formMethod,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  if (currentParams.orderId !== nextParams.orderId) return true;
+  if (formMethod && formMethod !== 'GET') return false;
+  return defaultShouldRevalidate;
+}
+
 type Tab = 'actions' | 'activity' | 'details' | 'node';
 type Records = Awaited<ReturnType<typeof orderRecords>>;
+
+/** How often, at most, the order page fetches its D1 records again while the run moves. */
+const RECORDS_REFRESH_MS = 1500;
 
 /** Engine reasons arrive without a full stop; banners read as sentences. */
 const sentence = (s?: string) => (!s ? '' : /[.!?]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
@@ -109,7 +135,12 @@ const rolledBack = (s: OrderState) =>
 
 export default function OrderPage() {
   const canOperate = useCan('operator');
-  const { snapshot, records, customerName, actor: by } = useLoaderData<typeof loader>();
+  const {
+    snapshot,
+    records: loadedRecords,
+    customerName,
+    actor: by,
+  } = useLoaderData<typeof loader>();
   const [state, setState] = useState<OrderState>(snapshot);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(
@@ -118,7 +149,6 @@ export default function OrderPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const { revalidate } = useRevalidator();
   const orderId = snapshot.orderId!;
   const tabsId = useId();
 
@@ -128,14 +158,25 @@ export default function OrderPage() {
     onStateUpdate: (s) => setState(s),
   });
 
-  // Payments, shipments and documents live in D1; refresh them as the run moves (throttled).
-  const lastRefresh = useRef(0);
+  // Payments, shipments and documents live in D1; fetch them again as the run moves, at most every
+  // RECORDS_REFRESH_MS and once more after the last change. One fetcher per order, so another
+  // order's records never show here.
+  const recordsFetcher = useFetcher<Records>({ key: `order-records:${orderId}` });
+  const records = recordsFetcher.data ?? loadedRecords;
+  const loadRecords = useRef(recordsFetcher.load);
+  loadRecords.current = recordsFetcher.load;
+  const lastRefresh = useRef(Date.now());
+  const seenUpdate = useRef(snapshot.updatedAt);
   useEffect(() => {
-    const now = Date.now();
-    if (now - lastRefresh.current < 1500) return;
-    lastRefresh.current = now;
-    revalidate();
-  }, [state.updatedAt, revalidate]);
+    if (state.updatedAt === seenUpdate.current) return;
+    const wait = Math.max(0, lastRefresh.current + RECORDS_REFRESH_MS - Date.now());
+    const t = window.setTimeout(() => {
+      seenUpdate.current = state.updatedAt;
+      lastRefresh.current = Date.now();
+      void loadRecords.current(`/orders/${orderId}/records`);
+    }, wait);
+    return () => window.clearTimeout(t);
+  }, [state.updatedAt, orderId]);
 
   // Land on what needs attention: a new wait, or a rollback, brings the Actions tab forward.
   const waitKey = state.waits.map((w) => w.eventType).join('|');

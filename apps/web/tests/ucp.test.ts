@@ -32,10 +32,11 @@ vi.mock('cloudflare:workers', () => ({ env }));
 vi.mock('~/lib/env.server', () => ({
   db: () => fakeDb,
   engine: () => ({ fetch: engineFetch, ucpProfile }),
+  afterResponse: (work: PromiseLike<unknown>) => void Promise.resolve(work),
 }));
 vi.mock('~/lib/rate-limit', () => ({ overBudget: async () => null }));
 
-const { ucpDiscovery, ucpFetch } = await import('~/lib/ucp.server');
+const { forgetUcpSettings, ucpDiscovery, ucpFetch } = await import('~/lib/ucp.server');
 const { sha256Hex } = await import('~/lib/credentials');
 
 const PROFILE = 'https://agent.example/profile';
@@ -52,6 +53,7 @@ const asPlatform = { 'x-api-key': KEY, 'ucp-agent': `profile="${PROFILE}"` };
 describe('UCP on the web Worker', () => {
   beforeEach(async () => {
     engineFetch.mockClear();
+    forgetUcpSettings();
     platformRow = {
       id: 'ucp_1',
       name: 'Agent',

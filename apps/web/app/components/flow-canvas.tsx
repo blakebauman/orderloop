@@ -31,6 +31,8 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react';
+// Only the pages with a canvas load React Flow's stylesheet; app.css restyles it for Ledger.
+import '@xyflow/react/dist/style.css';
 import { Crosshair, LayoutGrid, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { statusColor } from '~/lib/format';
