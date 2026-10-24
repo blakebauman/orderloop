@@ -45,6 +45,10 @@ function scope<T extends Rpc.DurableObjectBranded | undefined>(
   return ns.jurisdiction(j as (typeof JURISDICTIONS)[number]);
 }
 
+// Every object goes through here: one reached without the jurisdiction is a different, empty one.
 export const meta = (env: Env) => scope(env, env.META).getByName('meta');
 export const shard = (env: Env, n: number) => scope(env, env.SHARD).getByName(`shard-${n}`);
+export const feeds = (env: Env) => scope(env, env.FEEDS).getByName('feeds');
+export const indexer = (env: Env, channel: string, category: string) =>
+  scope(env, env.LISTINGS).getByName(`${channel}:${category}`);
 export const shardFor = (env: Env, key: string) => shard(env, productShard(key));

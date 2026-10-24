@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildListingIndex, ListingIndex, type ListingQuery } from '../src/product/listing-index';
+import { listingSpec } from '../src/product/listing-spec';
 import type { IndexEntry } from '../src/product/render';
 
 const spec = { terms: ['brand', 'color'], numbers: ['price'], sorts: ['price'] };
@@ -164,5 +165,34 @@ describe('listing index', () => {
     const empty = buildListingIndex([], spec);
     const r = new ListingIndex(empty.buffer as ArrayBuffer).query({ limit: 10 });
     expect(r).toEqual({ total: 0, uids: [], next: undefined, terms: {}, ranges: {} });
+  });
+});
+
+describe('listing spec', () => {
+  it('indexes filterable terms and numbers, sorts, buckets and labels from the types', async () => {
+    const { apparel, web } = await import('./fixtures/product');
+    const spec = listingSpec([apparel], web);
+    expect(spec.terms).toEqual(['brand', 'material', 'tags', 'size', 'color']);
+    expect(spec.numbers).toEqual(['price', 'weight']);
+    expect(spec.sorts).toEqual(['price', 'weight']);
+    expect(spec.buckets).toEqual({ weight: [200, 500] });
+    expect(spec.labels?.fr?.values.material).toEqual({ cotton: 'Coton' });
+    expect(spec.labels?.en?.values.color).toEqual({ red: 'Red' });
+  });
+
+  it('keeps buckets and labels in the blob and counts the stored buckets by default', () => {
+    const entries = catalog(200);
+    const bytes = buildListingIndex(entries, {
+      ...spec,
+      buckets: { price: [5_000] },
+      labels: { en: { attributes: { brand: 'Brand' }, values: { color: { red: 'Red' } } } },
+    });
+    const index = new ListingIndex(bytes.buffer as ArrayBuffer);
+    expect(index.labels.en?.values.color).toEqual({ red: 'Red' });
+    const r = index.query({ limit: 0 });
+    expect(r.ranges.price?.buckets?.map((b) => [b.lo, b.hi])).toEqual([
+      [null, 5_000],
+      [5_000, null],
+    ]);
   });
 });

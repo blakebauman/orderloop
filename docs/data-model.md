@@ -246,12 +246,13 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/<locale>/p/<key>.json` | The product document for that channel and locale; custom metadata `version` |
 | R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
+| R2 | `idx/f1/<channel>/<category>.bin` | The category's listing index (binary, all locales' labels inside); custom metadata `members` and `builtAt` |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
 | KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes; `catalog-edge` turns a batch's keys into card keys with it |
 
 `catalog-edge` ([Architecture](architecture.md#catalog-edge)) reads these objects and writes none.
 It has no storage of its own besides Workers Caching, whose entries are tagged `p:<key>`,
-`ch:<channel>` and `cats`. The cache tags of urgent changes wait on a queue, `orderloop-catalog-purge`
+`ch:<channel>` and `cats`, and `cat:<code>` on listing pages. The cache tags of urgent changes wait on a queue, `orderloop-catalog-purge`
 (`{ tags }` messages, drained by `catalog-edge`; failed messages go to `orderloop-catalog-purge-dlq`).
 
 Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and expire:
@@ -263,7 +264,15 @@ Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and e
 
 `scripts/provision.sh` adds an R2 lifecycle rule named `feeds` on that prefix that expires objects after 30 days, so a feed is retained only for as long as an import can need it (see [Operations](operations.md#adding-a-customer)).
 
-Listing indexes (`idx/f1/<channel>/<category>.bin`) are defined in core but not written yet.
+A listing index is rebuilt from `ListingIndexer`, the Durable Object for one channel and category
+(`<channel>:<category>`), which holds the listing's members in SQLite: `members` (`key` primary key,
+`uid`, `at`, `created_at`, `live`), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
+(`channel`, `category`, `dirty`, `built`). A member holds the latest change by `at`; a removed
+one stays as a tombstone (`live` 0) for 24 hours. A product is a member of its categories and
+all their ancestors. See [Architecture](architecture.md#listing-indexes).
+
+The shard's `published` row's JSON (`aliases` column) now also keeps the product's `categories` as
+published, which become `left` in the next `ListingChange`.
 
 ## Personal data
 
@@ -290,7 +299,7 @@ names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
 
 ### Data residency
 
-A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to `CatalogShard` and `CatalogMeta` (`apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
+A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to all its objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds` and `ListingIndexer`, all reached through `apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
 
 Each is fixed when the resource is created. Set the jurisdiction before the deployment's first order: with a different value the Durable Objects get different ids, and existing orders' live state is stranded (D1 and R2 can't move either). Local dev and tests leave it empty; workerd doesn't implement jurisdictions.
 

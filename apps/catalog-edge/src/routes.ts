@@ -9,6 +9,9 @@
  *   GET /v1/<channel>/<locale>/skus/<sku>          the product holding a SKU
  *   GET /v1/<channel>/<locale>/slugs/<slug>        the product with a slug in that locale
  *   GET /v1/<channel>/<locale>/categories          the category tree
+ *   GET /v1/<channel>/<locale>/categories/<code>/products?f.<attr>=a,b&r.<attr>=lo..hi
+ *       &sort=<newest|attr_asc|attr_desc>&cursor=<n>&limit=<1-100>
+ *                                                  a filtered, faceted, sorted category page
  */
 // The zod-free part of core only: this Worker's bundle stays small.
 import { BATCH_MAX, CODE, LOCALE, SLUG } from '@orderloop/core/product/paths';
@@ -18,7 +21,72 @@ export type Route =
   | { kind: 'batch'; channel: string; locale: string; keys: string[] }
   | { kind: 'sku'; channel: string; locale: string; sku: string }
   | { kind: 'slug'; channel: string; locale: string; slug: string }
-  | { kind: 'categories'; channel: string; locale: string };
+  | { kind: 'categories'; channel: string; locale: string }
+  | {
+      kind: 'listing';
+      channel: string;
+      locale: string;
+      category: string;
+      terms: Record<string, string[]>;
+      ranges: Record<string, [number | null, number | null]>;
+      sort: string;
+      cursor: number;
+      limit: number;
+    };
+
+/** Products a listing page holds by default, and at most. */
+export const PAGE = { default: 24, max: 100 } as const;
+const MAX_FILTERS = 20;
+const MAX_VALUES = 50;
+const SORT = /^(newest|[A-Za-z0-9][A-Za-z0-9._-]{0,127}_(asc|desc))$/;
+const NUMBER = /^-?\d+(\.\d+)?$/;
+
+type Bad = { ok: false; status: 400; error: string };
+const bad = (error: string): Bad => ({ ok: false, status: 400, error });
+
+function listingQuery(
+  url: URL,
+):
+  | Bad
+  | Pick<Extract<Route, { kind: 'listing' }>, 'terms' | 'ranges' | 'sort' | 'cursor' | 'limit'> {
+  const terms: Record<string, string[]> = {};
+  const ranges: Record<string, [number | null, number | null]> = {};
+  let filters = 0;
+  for (const [name, raw] of url.searchParams) {
+    if (name.startsWith('f.')) {
+      const attr = name.slice(2);
+      if (!CODE.test(attr)) return bad(`bad filter ${name}`);
+      const values = raw
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (values.length > MAX_VALUES) return bad(`at most ${MAX_VALUES} values in ${name}`);
+      terms[attr] = [...new Set([...(terms[attr] ?? []), ...values])].sort();
+      filters++;
+    } else if (name.startsWith('r.')) {
+      const attr = name.slice(2);
+      const [lo = '', hi = '', extra] = raw.split('..');
+      if (
+        !CODE.test(attr) ||
+        extra !== undefined ||
+        (lo && !NUMBER.test(lo)) ||
+        (hi && !NUMBER.test(hi))
+      )
+        return bad(`bad range ${name} (lo..hi)`);
+      ranges[attr] = [lo ? Number(lo) : null, hi ? Number(hi) : null];
+      filters++;
+    }
+  }
+  if (filters > MAX_FILTERS) return bad(`at most ${MAX_FILTERS} filters`);
+  const sort = url.searchParams.get('sort') ?? 'newest';
+  if (!SORT.test(sort)) return bad('bad sort');
+  const cursor = Number(url.searchParams.get('cursor') ?? 0);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) return bad('bad cursor');
+  const limit = Number(url.searchParams.get('limit') ?? PAGE.default);
+  if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max)
+    return bad(`limit is 1 to ${PAGE.max}`);
+  return { terms, ranges, sort, cursor, limit };
+}
 
 export type Parsed = { ok: true; route: Route } | { ok: false; status: 400 | 404; error: string };
 
@@ -67,9 +135,16 @@ export function parse(url: URL): Parsed {
       if (one === null || one.length > 200 || !SLUG.test(one))
         return { ok: false, status: 400, error: 'bad slug' };
       return { ok: true, route: { kind: 'slug', channel, locale, slug: one } };
-    case 'categories':
-      if (rest.length) return { ok: false, status: 404, error: 'not found' };
-      return { ok: true, route: { kind: 'categories', channel, locale } };
+    case 'categories': {
+      if (!rest.length) return { ok: true, route: { kind: 'categories', channel, locale } };
+      const category = segment(rest[0] as string);
+      if (rest.length !== 2 || rest[1] !== 'products')
+        return { ok: false, status: 404, error: 'not found' };
+      if (category === null || !CODE.test(category)) return bad('bad category');
+      const q = listingQuery(url);
+      if ('ok' in q) return q;
+      return { ok: true, route: { kind: 'listing', channel, locale, category, ...q } };
+    }
     default:
       return { ok: false, status: 404, error: 'not found' };
   }
@@ -89,5 +164,20 @@ export function canonical(route: Route): string {
       return `${base}/slugs/${encodeURIComponent(route.slug)}`;
     case 'categories':
       return `${base}/categories`;
+    case 'listing': {
+      // Filters in name order, values sorted: every equivalent page shares one cache entry.
+      const q = new URLSearchParams();
+      for (const attr of Object.keys(route.terms).sort())
+        q.set(`f.${attr}`, (route.terms[attr] as string[]).join(','));
+      for (const attr of Object.keys(route.ranges).sort()) {
+        const [lo, hi] = route.ranges[attr] as [number | null, number | null];
+        q.set(`r.${attr}`, `${lo ?? ''}..${hi ?? ''}`);
+      }
+      if (route.sort !== 'newest') q.set('sort', route.sort);
+      if (route.cursor) q.set('cursor', String(route.cursor));
+      if (route.limit !== PAGE.default) q.set('limit', String(route.limit));
+      const query = q.toString();
+      return `${base}/categories/${route.category}/products${query ? `?${query}` : ''}`;
+    }
   }
 }

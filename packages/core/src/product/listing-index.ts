@@ -22,6 +22,15 @@ export type ListingSpec = {
   numbers: string[];
   /** Numeric attributes offered as sorts (a subset of `numbers`). */
   sorts: string[];
+  /** Range bucket edges per numeric attribute, counted when a query doesn't name its own. */
+  buckets?: Record<string, number[]>;
+  /** Display labels per locale: attribute names (`attributes`) and term values (`values`). */
+  labels?: Record<string, Labels>;
+};
+
+export type Labels = {
+  attributes: Record<string, string>;
+  values: Record<string, Record<string, string>>;
 };
 
 type Section = [offset: number, length: number];
@@ -29,6 +38,8 @@ type Section = [offset: number, length: number];
 type Meta = {
   n: number;
   builtAt: number;
+  buckets?: Record<string, number[]>;
+  labels?: Record<string, Labels>;
   ids: Section;
   terms: { code: string; values: { v: string; count: number; bits: boolean; at: Section }[] }[];
   numbers: {
@@ -44,80 +55,89 @@ type Meta = {
 
 const align8 = (n: number) => (n + 7) & ~7;
 
-/** Builds the blob from the index entries of one channel's category. */
-export function buildListingIndex(
-  entries: IndexEntry[],
-  spec: ListingSpec,
-  builtAt = Date.now(),
-): Uint8Array {
-  const members = [...entries].sort((a, b) => b.createdAt - a.createdAt || a.uid - b.uid);
-  const n = members.length;
-  const chunks: { bytes: Uint8Array; set: (s: Section) => void }[] = [];
-  const add = (view: ArrayBufferView, set: (s: Section) => void) =>
-    chunks.push({ bytes: new Uint8Array(view.buffer, view.byteOffset, view.byteLength), set });
+/**
+ * Builds a listing index a piece at a time, so a caller can stream a million members out of
+ * storage without holding them as objects: give it the member ids in order, then each term value's
+ * members and each numeric column, then `finish`. Memory is the output plus the arrays handed in.
+ */
+export class ListingIndexBuilder {
+  private n = 0;
+  private readonly chunks: { bytes: Uint8Array; set: (s: Section) => void }[] = [];
+  private readonly meta: Meta;
+  private readonly facets = new Map<string, Meta['terms'][number]>();
 
-  const encoder = new TextEncoder();
-  const meta: Meta = { n, builtAt, ids: [0, 0], terms: [], numbers: [] };
-  add(
-    Uint32Array.from(members, (m) => m.uid),
-    (s) => {
-      meta.ids = s;
-    },
-  );
-
-  for (const code of spec.terms) {
-    const postings = new Map<string, number[]>();
-    members.forEach((m, i) => {
-      for (const v of m.terms[code] ?? []) {
-        let list = postings.get(v);
-        if (!list) {
-          list = [];
-          postings.set(v, list);
-        }
-        list.push(i);
-      }
-    });
-    if (!postings.size) continue;
-    const facet: Meta['terms'][number] = { code, values: [] };
-    const sorted = [...postings].sort(
-      (a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1),
-    );
-    for (const [v, list] of sorted) {
-      const bits = list.length * 32 > n;
-      const value = { v, count: list.length, bits, at: [0, 0] as Section };
-      facet.values.push(value);
-      if (bits) {
-        const words = new Uint32Array((n + 31) >>> 5);
-        for (const i of list) words[i >>> 5] = (words[i >>> 5] as number) | (1 << (i & 31));
-        add(words, (s) => {
-          value.at = s;
-        });
-      } else
-        add(Uint32Array.from(list), (s) => {
-          value.at = s;
-        });
-    }
-    meta.terms.push(facet);
+  constructor(
+    private readonly spec: ListingSpec,
+    builtAt = Date.now(),
+  ) {
+    this.meta = {
+      n: 0,
+      builtAt,
+      buckets: spec.buckets,
+      labels: spec.labels,
+      ids: [0, 0],
+      terms: [],
+      numbers: [],
+    };
   }
 
-  for (const code of spec.numbers) {
-    const offsets = new Uint32Array(n + 1);
-    const flat: number[] = [];
-    members.forEach((m, i) => {
-      for (const v of m.numbers[code] ?? []) flat.push(v);
-      offsets[i + 1] = flat.length;
+  private add(view: ArrayBufferView, set: (s: Section) => void) {
+    this.chunks.push({ bytes: new Uint8Array(view.buffer, view.byteOffset, view.byteLength), set });
+  }
+
+  /** The members' uids, in listing order (newest first): member `i` is `uids[i]`. Call first. */
+  ids(uids: Uint32Array) {
+    this.n = uids.length;
+    this.meta.n = uids.length;
+    this.add(uids, (s) => {
+      this.meta.ids = s;
     });
-    if (!flat.length) continue;
-    const int = flat.every((v) => Number.isInteger(v) && v >= -0x8000_0000 && v <= 0x7fff_ffff);
+  }
+
+  /** The members holding term `value` of `code`, as ascending member numbers. */
+  term(code: string, value: string, members: Uint32Array) {
+    if (!members.length) return;
+    let facet = this.facets.get(code);
+    if (!facet) {
+      facet = { code, values: [] };
+      this.facets.set(code, facet);
+    }
+    const bits = members.length * 32 > this.n;
+    const entry = { v: value, count: members.length, bits, at: [0, 0] as Section };
+    facet.values.push(entry);
+    const set = (s: Section) => {
+      entry.at = s;
+    };
+    if (!bits) return this.add(members, set);
+    const words = new Uint32Array((this.n + 31) >>> 5);
+    for (const i of members) words[i >>> 5] = (words[i >>> 5] as number) | (1 << (i & 31));
+    this.add(words, set);
+  }
+
+  /**
+   * A numeric column in CSR form: member `i`'s values are `values[offsets[i]..offsets[i + 1]]`.
+   * Sorts are derived here when `spec.sorts` names the column.
+   */
+  numbers(code: string, offsets: Uint32Array, flat: ArrayLike<number>) {
+    const n = this.n;
+    if (!flat.length) return;
+    let int = true;
+    for (let i = 0; i < flat.length; i++) {
+      const v = flat[i] as number;
+      if (!Number.isInteger(v) || v < -0x8000_0000 || v > 0x7fff_ffff) {
+        int = false;
+        break;
+      }
+    }
     const values = int ? Int32Array.from(flat) : Float64Array.from(flat);
     const col: Meta['numbers'][number] = { code, offsets: [0, 0], values: [0, 0], int };
-    add(offsets, (s) => {
+    this.add(offsets, (s) => {
       col.offsets = s;
     });
-    add(values, (s) => {
+    this.add(values, (s) => {
       col.values = s;
     });
-    if (spec.sorts.includes(code)) {
+    if (this.spec.sorts.includes(code)) {
       const lo = new Float64Array(n);
       const hi = new Float64Array(n);
       for (let i = 0; i < n; i++) {
@@ -132,54 +152,97 @@ export function buildListingIndex(
         hi[i] = max;
       }
       // Members without a value sort last both ways; ties keep newest first.
-      const ids = Array.from({ length: n }, (_, i) => i);
-      const asc = Uint32Array.from(
-        [...ids].sort((a, b) => (lo[a] as number) - (lo[b] as number) || a - b),
-      );
-      const desc = Uint32Array.from(
-        [...ids].sort((a, b) => {
-          const x = hi[a] as number;
-          const y = hi[b] as number;
-          if (x === y) return a - b;
-          if (x === Number.NEGATIVE_INFINITY) return 1;
-          if (y === Number.NEGATIVE_INFINITY) return -1;
-          return y - x;
-        }),
-      );
-      add(asc, (s) => {
+      const asc = new Uint32Array(n);
+      const desc = new Uint32Array(n);
+      for (let i = 0; i < n; i++) {
+        asc[i] = i;
+        desc[i] = i;
+      }
+      asc.sort((a, b) => (lo[a] as number) - (lo[b] as number) || a - b);
+      desc.sort((a, b) => {
+        const x = hi[a] as number;
+        const y = hi[b] as number;
+        if (x === y) return a - b;
+        if (x === Number.NEGATIVE_INFINITY) return 1;
+        if (y === Number.NEGATIVE_INFINITY) return -1;
+        return y - x;
+      });
+      this.add(asc, (s) => {
         col.asc = s;
       });
-      add(desc, (s) => {
+      this.add(desc, (s) => {
         col.desc = s;
       });
     }
-    meta.numbers.push(col);
+    this.meta.numbers.push(col);
   }
 
-  // Lay out: header (16 bytes), meta JSON, then 8-byte-aligned sections in order.
-  let offset = 0;
-  const placed = chunks.map((c) => {
-    const at = offset;
-    offset = align8(offset + c.bytes.byteLength);
-    return at;
-  });
-  // Sections are [byte offset from the data start, byte length].
-  chunks.forEach((c, i) => {
-    c.set([placed[i] as number, c.bytes.byteLength]);
-  });
-  const metaBytes = encoder.encode(JSON.stringify(meta));
-  const dataStart = align8(16 + metaBytes.byteLength);
-  const out = new Uint8Array(dataStart + offset);
-  const header = new DataView(out.buffer);
-  header.setUint32(0, MAGIC, true);
-  header.setUint32(4, FORMAT, true);
-  header.setUint32(8, metaBytes.byteLength, true);
-  header.setUint32(12, dataStart, true);
-  out.set(metaBytes, 16);
-  chunks.forEach((c, i) => {
-    out.set(c.bytes, dataStart + (placed[i] as number));
-  });
-  return out;
+  finish(): Uint8Array {
+    // Facets in the spec's order, values by count (then name), so the meta reads stably.
+    for (const code of this.spec.terms) {
+      const facet = this.facets.get(code);
+      if (!facet) continue;
+      facet.values.sort((a, b) => b.count - a.count || (a.v < b.v ? -1 : 1));
+      this.meta.terms.push(facet);
+    }
+    // Lay out: header (16 bytes), meta JSON, then 8-byte-aligned sections in order.
+    let offset = 0;
+    const placed = this.chunks.map((c) => {
+      const at = offset;
+      offset = align8(offset + c.bytes.byteLength);
+      return at;
+    });
+    // Sections are [byte offset from the data start, byte length].
+    this.chunks.forEach((c, i) => {
+      c.set([placed[i] as number, c.bytes.byteLength]);
+    });
+    const metaBytes = new TextEncoder().encode(JSON.stringify(this.meta));
+    const dataStart = align8(16 + metaBytes.byteLength);
+    const out = new Uint8Array(dataStart + offset);
+    const header = new DataView(out.buffer);
+    header.setUint32(0, MAGIC, true);
+    header.setUint32(4, FORMAT, true);
+    header.setUint32(8, metaBytes.byteLength, true);
+    header.setUint32(12, dataStart, true);
+    out.set(metaBytes, 16);
+    this.chunks.forEach((c, i) => {
+      out.set(c.bytes, dataStart + (placed[i] as number));
+    });
+    return out;
+  }
+}
+
+/** Builds the blob from the index entries of one channel's category, all in memory. */
+export function buildListingIndex(
+  entries: IndexEntry[],
+  spec: ListingSpec,
+  builtAt = Date.now(),
+): Uint8Array {
+  const members = [...entries].sort((a, b) => b.createdAt - a.createdAt || a.uid - b.uid);
+  const n = members.length;
+  const b = new ListingIndexBuilder(spec, builtAt);
+  b.ids(Uint32Array.from(members, (m) => m.uid));
+  for (const code of spec.terms) {
+    const postings = new Map<string, number[]>();
+    members.forEach((m, i) => {
+      for (const v of m.terms[code] ?? []) {
+        const list = postings.get(v) ?? [];
+        list.push(i);
+        postings.set(v, list);
+      }
+    });
+    for (const [v, list] of postings) b.term(code, v, Uint32Array.from(list));
+  }
+  for (const code of spec.numbers) {
+    const offsets = new Uint32Array(n + 1);
+    const flat: number[] = [];
+    members.forEach((m, i) => {
+      for (const v of m.numbers[code] ?? []) flat.push(v);
+      offsets[i + 1] = flat.length;
+    });
+    b.numbers(code, offsets, flat);
+  }
+  return b.finish();
 }
 
 export type ListingQuery = {
@@ -192,7 +255,7 @@ export type ListingQuery = {
   /** Position to continue from (the previous page's `next`). */
   cursor?: number;
   limit: number;
-  /** Bucket edges per numeric facet to count, ascending. */
+  /** Bucket edges per numeric facet to count, ascending (default: the ones the index was built with). */
   buckets?: Record<string, number[]>;
 };
 
@@ -218,6 +281,9 @@ function popcount(x: number): number {
 export class ListingIndex {
   readonly n: number;
   readonly builtAt: number;
+  /** Labels for a locale, when the index was built with them. */
+  readonly labels: Record<string, Labels>;
+  private readonly buckets: Record<string, number[]>;
   private readonly words: number;
   private readonly ids: Uint32Array;
   private readonly termCols = new Map<
@@ -246,6 +312,8 @@ export class ListingIndex {
     const i32 = (s: Section) => new Int32Array(buffer, dataStart + s[0], s[1] / 4);
     this.n = meta.n;
     this.builtAt = meta.builtAt;
+    this.labels = meta.labels ?? {};
+    this.buckets = meta.buckets ?? {};
     this.words = (meta.n + 31) >>> 5;
     this.ids = u32(meta.ids);
     for (const t of meta.terms)
@@ -367,7 +435,7 @@ export class ListingIndex {
     const ranges: ListingResult['ranges'] = {};
     for (const [code, col] of this.numCols) {
       const base = without(code);
-      const edges = q.buckets?.[code];
+      const edges = q.buckets?.[code] ?? this.buckets[code];
       const bucketCounts = edges ? new Array<number>(edges.length + 1).fill(0) : undefined;
       let min = Number.POSITIVE_INFINITY;
       let max = Number.NEGATIVE_INFINITY;

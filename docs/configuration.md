@@ -107,8 +107,10 @@ created through the API and stored in D1; they are not configuration.
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite-backed, migration `v1`), one, named `meta` |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite-backed, migration `v2`), one, named `feeds` |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
+| `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite-backed, migration `v3`), one per channel and category, named `<channel>:<category>` |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
-| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
+| `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, and the catalog Worker consumes them (`max_batch_size` 100, `max_batch_timeout` 2 seconds, `max_retries` 10, dead-letter queue `orderloop-catalog-changes-dlq`) |
+| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`) and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
 | `PURGE` | catalog | Queue producer for `orderloop-catalog-purge`: the alarm sends the cache tags (`PurgeMessage`) of urgent products after publishing them |
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
 | `PUBLISHED` | catalog-edge | The same R2 bucket, `orderloop-catalog`, read |

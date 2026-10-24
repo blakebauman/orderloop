@@ -1,12 +1,15 @@
 /**
  * The product catalog Worker. No public routes: the web app and catalog-edge reach it through the
- * CatalogApi entrypoint over service bindings. Its queue consumer applies feed parts.
+ * CatalogApi entrypoint over service bindings. Its queue consumer applies feed parts and routes
+ * listing changes to their indexers.
  */
 import { applyPart, type FeedPart, failPart } from './feed-import';
+import { applyChanges, type ListingChange } from './listings';
 
 export { CatalogApi } from './api';
 export { FeedImport } from './feed-import';
 export { CatalogFeeds } from './feeds';
+export { ListingIndexer } from './listings';
 export { CatalogMeta } from './meta';
 export { CatalogShard } from './shard';
 
@@ -20,6 +23,17 @@ export default {
   },
 
   async queue(batch, env) {
+    // Queue names carry the deployment's suffix: dispatch on the base name.
+    if (batch.queue.startsWith('orderloop-catalog-changes')) {
+      // One call per listing for the whole batch; a failure retries the batch (changes are
+      // idempotent by `at`).
+      await applyChanges(
+        env,
+        batch.messages.map((m) => m.body as ListingChange),
+      );
+      batch.ackAll();
+      return;
+    }
     await Promise.all(
       batch.messages.map(async (msg) => {
         const part = msg.body as FeedPart;

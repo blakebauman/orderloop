@@ -6,7 +6,7 @@ OrderLoop deploys as four Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
-| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, a queue for feed parts (`orderloop-catalog-feed-parts`, with a dead-letter queue), an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
+| `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, `ListingIndexer` Durable Objects, queues for feed parts (`orderloop-catalog-feed-parts`) and listing changes (`orderloop-catalog-changes`), each with a dead-letter queue, an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
 | `orderloop-catalog-edge` | `apps/catalog-edge/wrangler.jsonc` | The public, read-only catalog API at `catalog.orderloop.app` (custom domain): reads the catalog's R2 bucket and KV namespace behind Workers Caching, consumes the purge queue (`orderloop-catalog-purge`, with a dead-letter queue) and writes request data points to an Analytics Engine dataset (`orderloop_catalog_edge`). No secrets |
 | `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
 | `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
@@ -18,7 +18,7 @@ catalog and catalog-edge bind neither. They share the catalog's R2 bucket, KV na
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts and purge queues and their dead-letter queues, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts, purge and changes queues and their dead-letter queues, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm run deploy                                # catalog, then catalog-edge, then engine (web binds to it), then web
 ```
@@ -46,9 +46,9 @@ something else entirely.
    engine to exist. The catalog has no callers yet; it goes first so that the Workers that come to
    bind to it always find the version they expect. Catalog-edge goes next because its queue
    consumer needs the purge queue (which `provision.sh` creates) and it reads what the catalog
-   publishes; the catalog's `PURGE` producer needs the same queue.
+   publishes; the catalog's `PURGE` producer needs the same queue, and its `CHANGES` producer and consumer need the changes queue.
 
-Workflow names (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`) and queue names must be unique in the account. The catalog's and catalog-edge's queue consumers need their queues to exist, so run `provision.sh` before the first deploy that carries the feed code or the purge queue; an existing deployment re-runs it (see [Operations](operations.md#adding-a-customer)).
+Workflow names (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`) and queue names must be unique in the account. The catalog's and catalog-edge's queue consumers need their queues to exist, so run `provision.sh` before the first deploy that carries the feed code, the purge queue or the changes queue; an existing deployment re-runs it (see [Operations](operations.md#adding-a-customer)).
 
 ## Email intake
 

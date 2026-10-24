@@ -17,12 +17,15 @@
       // One object: product types, channels and categories.
       { "name": "META", "class_name": "CatalogMeta" },
       // One object: every feed's progress.
-      { "name": "FEEDS", "class_name": "CatalogFeeds" }
+      { "name": "FEEDS", "class_name": "CatalogFeeds" },
+      // One per channel and category: who is listed there, and its listing index.
+      { "name": "LISTINGS", "class_name": "ListingIndexer" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["CatalogShard", "CatalogMeta"] },
-    { "tag": "v2", "new_sqlite_classes": ["CatalogFeeds"] }
+    { "tag": "v2", "new_sqlite_classes": ["CatalogFeeds"] },
+    { "tag": "v3", "new_sqlite_classes": ["ListingIndexer"] }
   ],
   "workflows": [
     {
@@ -37,7 +40,9 @@
     "producers": [
       { "binding": "FEED_PARTS", "queue": "orderloop-catalog-feed-parts" },
       // Cache tags of urgent changes, for catalog-edge to purge.
-      { "binding": "PURGE", "queue": "orderloop-catalog-purge" }
+      { "binding": "PURGE", "queue": "orderloop-catalog-purge" },
+      // What each publish changes in the listings, for the indexers.
+      { "binding": "CHANGES", "queue": "orderloop-catalog-changes" }
     ],
     "consumers": [
       {
@@ -47,6 +52,14 @@
         "max_batch_timeout": 1,
         "max_retries": 4,
         "dead_letter_queue": "orderloop-catalog-feed-parts-dlq"
+      },
+      {
+        // Listing changes, a batch routed to its indexers at once.
+        "queue": "orderloop-catalog-changes",
+        "max_batch_size": 100,
+        "max_batch_timeout": 2,
+        "max_retries": 10,
+        "dead_letter_queue": "orderloop-catalog-changes-dlq"
       }
     ]
   },

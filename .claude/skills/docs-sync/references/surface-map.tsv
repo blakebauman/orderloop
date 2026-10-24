@@ -99,3 +99,4 @@
 ^apps/catalog-edge/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/operations.md	prose
 ^packages/core/src/product/	docs/architecture.md docs/data-model.md docs/testing.md	prose
 ^deployments/	docs/operations.md	prose
+^packages/core/package\.json$	docs/architecture.md	prose
