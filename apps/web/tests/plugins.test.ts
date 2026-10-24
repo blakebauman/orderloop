@@ -174,10 +174,19 @@ describe('plugin pages on the web Worker', () => {
       '/account',
       '//evil.example/x',
       '/plugins/other/',
+      '/cart/start/cart_1/abc?x=1',
+      '/cart/start/../account',
+      'https://evil.example/cart/start/cart_1/abc',
     ]) {
       reply = () => new Response(null, { status: 302, headers: { location: away } });
       expect((await call('/plugins/example/form')).status, away).toBe(502);
     }
+    // An external cart's start link is the one place off its pages a plugin may send someone.
+    reply = () =>
+      new Response(null, { status: 302, headers: { location: '/cart/start/cart_1/0a9f' } });
+    const start = await call('/plugins/example/form');
+    expect(start.status).toBe(302);
+    expect(start.headers.get('location')).toBe('/cart/start/cart_1/0a9f');
     reply = () => Response.json({ ok: true });
   });
 

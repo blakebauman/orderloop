@@ -23,7 +23,10 @@ function fakeHost() {
   return {
     opened,
     started,
+    ended: new Set<string>(),
     async openExternalCart(input: ExternalCartInput) {
+      if (this.ended.has(input.sessionRef))
+        return { ok: false as const, error: 'That session’s cart is returned.' };
       opened.push(input);
       const cartId = `cart_${opened.length}`;
       return {
@@ -118,21 +121,37 @@ describe('cXML punchout', () => {
   it('refuses a wrong secret, an unknown buyer and a return to a host not theirs', async () => {
     const secret = await partner();
     const wrong = await post('/plugins/punchout/cxml/setup', setupXml.replace('SECRET', 'nope'));
-    expect(wrong.status).toBe(401);
+    // cXML says what went wrong in its Status, over HTTP 200.
+    expect(wrong.status).toBe(200);
     expect(await status(wrong)).toBe('401');
     const stranger = await post(
       '/plugins/punchout/cxml/setup',
       setupXml.replace('SECRET', secret).replaceAll('AN01000000001', 'AN09999999999'),
     );
-    expect(stranger.status).toBe(401);
+    expect(await status(stranger)).toBe('401');
     const elsewhere = await post(
       '/plugins/punchout/cxml/setup',
       setupXml.replace('SECRET', secret).replace('https://buyer.example/', 'https://evil.example/'),
     );
-    expect(elsewhere.status).toBe(403);
+    expect(await status(elsewhere)).toBe('403');
     const bad = await post('/plugins/punchout/cxml/setup', '<!DOCTYPE a [<!ENTITY x "y">]><a/>');
-    expect(bad.status).toBe(400);
+    expect(await status(bad)).toBe('400');
     expect(host.opened).toEqual([]);
+  });
+
+  it('opens a new cart when a returned session’s cookie is used again', async () => {
+    const secret = await partner();
+    const xml = setupXml
+      .replace('SECRET', secret)
+      .replace('operation="create"', 'operation="edit"');
+    await post('/plugins/punchout/cxml/setup', xml);
+    host.ended.add(host.opened[0]!.sessionRef);
+    const again = await post('/plugins/punchout/cxml/setup', xml);
+    expect(await status(again)).toBe('200');
+    expect(host.opened).toHaveLength(2);
+    expect(host.opened[1]!.sessionRef).toBe(
+      `${host.opened[0]!.sessionRef}:1729760000.4321@buyer.example`,
+    );
   });
 
   it('returns the cart as a PunchOutOrderMessage for its session', async () => {
@@ -203,7 +222,7 @@ describe('cXML punchout', () => {
       },
     });
     expect(host.started[0]!.key).toMatch(/^cxml:ptn_[a-z0-9]+:1729770000\.9876@buyer\.example$/);
-    expect((await post('/plugins/punchout/cxml/order', orderXml)).status).toBe(401);
+    expect(await status(await post('/plugins/punchout/cxml/order', orderXml))).toBe('401');
   });
 });
 
@@ -221,10 +240,8 @@ describe('OCI punchout', () => {
       HOOK_URL: 'https://sap.example/sap/bc/hook',
     });
     const res = await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`));
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain(
-      'content="0;url=https://app.orderloop.test/cart/start/cart_1/tok"',
-    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/cart/start/cart_1/tok');
     q.set('PASSWORD', 'wrong');
     expect(
       (await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`))).status,
@@ -275,7 +292,7 @@ describe('the admin page', () => {
     expect(rotated).not.toContain(first);
     // The old secret no longer opens a session.
     const res = await post('/plugins/punchout/cxml/setup', setupXml.replace('SECRET', first));
-    expect(res.status).toBe(401);
+    expect(await status(res)).toBe('401');
   });
 
   it('refuses a partner without return hosts', async () => {
