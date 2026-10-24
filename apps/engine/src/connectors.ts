@@ -8,10 +8,12 @@
  * "payment_decline", "charge_fail", "out_of_stock", "three_way_mismatch".
  */
 
+import { NonRetryableError } from 'cloudflare:workflows';
 import {
   allocateLines,
   BASE_CURRENCY,
   checkAddress,
+  type LabelPackage,
   money,
   newId,
   type Order,
@@ -56,6 +58,7 @@ import type { BatchItem } from 'drizzle-orm/batch';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { reverseBalanceEntry, voidInvoices } from './billing';
 import { voidAuthorizations } from './payments';
+import { provide } from './providers';
 
 const db = (env: Env) => createDb(env.DB);
 const simulate = (order: Order) => String(order.meta?.simulate ?? '');
@@ -990,14 +993,28 @@ async function liveQuote(
 }
 
 /**
- * The shipping options for a request, cheapest first: the live carriers' quotes when any answered,
- * else the static services (a carrier adapter replaces the mock here).
+ * The shipping options for a request, cheapest first: the provider's quote when the node names one
+ * and it answers with options, else the live carriers' quotes when any answered, else the static
+ * services. A provider's options are checked as a live carrier's are, and its ids carry its id.
  */
 export async function quoteShipping(
   env: Env,
   config: ShippingConfig,
   req: RateRequest,
-): Promise<{ options: ShippingOption[]; source: 'live' | 'static' }> {
+  provider?: { id: string; quote: () => Promise<{ options: unknown[] }> },
+): Promise<{ options: ShippingOption[]; source: 'provider' | 'live' | 'static' }> {
+  if (provider) {
+    try {
+      const quoted = parseCarrierQuote(
+        { id: provider.id, carrier: provider.id, url: '' },
+        await provider.quote(),
+      );
+      if (quoted.length) return { options: rateOptions(config, req, quoted), source: 'provider' };
+    } catch (err) {
+      // As with a live carrier: rates fall back rather than fail the order.
+      console.warn(`shipping rates from ${provider.id}`, err);
+    }
+  }
   const auth = config.liveCarriers.length ? carrierAuth(env) : {};
   const live = (
     await Promise.all(config.liveCarriers.map((c) => liveQuote(c, req, auth[c.id])))
@@ -1005,59 +1022,250 @@ export async function quoteShipping(
   return { options: rateOptions(config, req, live), source: live.length ? 'live' : 'static' };
 }
 
+/** A node's Provider, when it names a plugin: who labels the shipment, and the node asking. */
+export type LabelProvider = { id: string; nodeId: string; config: Record<string, unknown> };
+
+type Label = { ref: string; id: string; tracking: string; carrier?: string; labelUrl?: string };
+
+/**
+ * Asks the provider for a label per package. One it doesn't return fails the node for good, after
+ * voiding the ones it did return, so nothing is left labelled that no shipment row records.
+ */
+async function providerLabels(
+  env: Env,
+  by: LabelProvider,
+  order: Order,
+  stepKey: string,
+  kind: 'shipment' | 'return',
+  carrier: string,
+  packages: LabelPackage[],
+): Promise<Map<string, Label>> {
+  const r = await provide(env, by.id, {
+    surface: 'shipping.labels',
+    op: 'create',
+    nodeId: by.nodeId,
+    stepKey,
+    orderId: order.id,
+    config: by.config,
+    order,
+    input: { kind, carrier, packages },
+  });
+  const byRef = new Map(r.labels.map((l) => [l.ref, l]));
+  const missing = packages.filter((p) => !byRef.has(p.ref)).map((p) => p.ref);
+  if (missing.length) {
+    await voidLabels(env, by.id, order.id, stepKey, r.labels).catch((err) =>
+      console.error(`voiding ${by.id} labels after an incomplete answer`, err),
+    );
+    throw new NonRetryableError(
+      `Shipping labels provider “${by.id}” returned no label for ${missing.join(', ')}`,
+    );
+  }
+  return byRef;
+}
+
+async function voidLabels(
+  env: Env,
+  providerId: string,
+  orderId: string,
+  stepKey: string,
+  labels: { ref: string; id: string }[],
+) {
+  if (!labels.length) return;
+  await provide(env, providerId, {
+    surface: 'shipping.labels',
+    op: 'void',
+    nodeId: stepKey.split('#')[0] ?? stepKey,
+    stepKey,
+    orderId,
+    config: {},
+    input: { labels: labels.map(({ ref, id }) => ({ ref, id })) },
+  });
+}
+
 /**
  * Books one shipment per location the physical lines ship from (one, unless routing split the
  * order), then consumes the held stock. The first shipment keeps the step's id, so a single-source
  * order books exactly what it always did; the groups come from the order, so a retry books the same.
+ * With a provider, each package's label (tracking, carrier) is the provider's, and the row records
+ * which provider made it and its id for the label, to void it on a rollback or a cancel.
  */
-export async function createShipment(env: Env, order: Order, stepKey: string, carrier: string) {
+export async function createShipment(
+  env: Env,
+  order: Order,
+  stepKey: string,
+  carrier: string,
+  by?: LabelProvider,
+) {
   const base = `shp_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
   const { lines } = await stockedLines(env, order);
-  const from = [
-    ...new Set(lines.map(([, l]) => l.locationId ?? order.fulfillment?.locationId ?? null)),
-  ].sort((a, b) => (a ?? '').localeCompare(b ?? ''));
+  const locationOf = (l: OrderLine) => l.locationId ?? order.fulfillment?.locationId ?? null;
+  const from = [...new Set(lines.map(([, l]) => locationOf(l)))].sort((a, b) =>
+    (a ?? '').localeCompare(b ?? ''),
+  );
+  const packages: LabelPackage[] = (from.length ? from : [null]).map((locationId, n) => ({
+    ref: n === 0 ? base : `${base}_${n + 1}`,
+    locationId,
+    lines: lines
+      .filter(([, l]) => locationOf(l) === locationId)
+      .map(([, l]) => ({ sku: l.sku, qty: l.qty })),
+  }));
+  const labels = by
+    ? await providerLabels(env, by, order, stepKey, 'shipment', carrier, packages)
+    : null;
   const out = [];
-  for (const [n, locationId] of (from.length ? from : [null]).entries()) {
-    const id = n === 0 ? base : `${base}_${n + 1}`;
-    const tracking = `${carrier.toUpperCase()}${Math.abs(hash(id)).toString().padStart(10, '0').slice(0, 10)}`;
+  for (const p of packages) {
+    const label = labels?.get(p.ref);
+    const tracking =
+      label?.tracking ??
+      `${carrier.toUpperCase()}${Math.abs(hash(p.ref)).toString().padStart(10, '0').slice(0, 10)}`;
     await db(env)
       .insert(shipments)
       .values({
-        id,
+        id: p.ref,
         orderId: order.id,
-        carrier,
+        carrier: label?.carrier ?? carrier,
         tracking,
         status: 'label_created',
         createdAt: Date.now(),
+        provider: by?.id ?? null,
+        externalId: label?.id ?? null,
       })
       .onConflictDoNothing();
-    out.push({ shipmentId: id, tracking, locationId });
+    out.push({
+      shipmentId: p.ref,
+      tracking,
+      locationId: p.locationId,
+      ...(label?.labelUrl ? { labelUrl: label.labelUrl } : {}),
+    });
   }
   await consumeInventory(env, order.id);
   return {
     shipmentId: out[0]!.shipmentId,
-    carrier,
+    carrier: labels?.get(base)?.carrier ?? carrier,
     tracking: out[0]!.tracking,
     shipments: out,
+    ...(by ? { provider: by.id } : {}),
   };
 }
 
 /** A prepaid return label. Stock comes back with `restock` once the goods arrive. */
-export async function createReturnLabel(env: Env, order: Order, stepKey: string, carrier: string) {
+export async function createReturnLabel(
+  env: Env,
+  order: Order,
+  stepKey: string,
+  carrier: string,
+  by?: LabelProvider,
+) {
   const id = `rma_${order.id}_${stepKey}`.replace(/[^\w-]/g, '_');
-  const tracking = `${carrier.toUpperCase()}R${Math.abs(hash(id)).toString().padStart(9, '0').slice(0, 9)}`;
+  let label: Label | undefined;
+  if (by) {
+    const { lines } = await stockedLines(env, order);
+    const pkg = {
+      ref: id,
+      locationId: null,
+      lines: lines.map(([, l]) => ({ sku: l.sku, qty: l.qty })),
+    };
+    label = (await providerLabels(env, by, order, stepKey, 'return', carrier, [pkg])).get(id);
+  }
+  const tracking =
+    label?.tracking ??
+    `${carrier.toUpperCase()}R${Math.abs(hash(id)).toString().padStart(9, '0').slice(0, 9)}`;
   await db(env)
     .insert(shipments)
     .values({
       id,
       orderId: order.id,
-      carrier,
+      carrier: label?.carrier ?? carrier,
       tracking,
       status: 'return_label',
       createdAt: Date.now(),
+      provider: by?.id ?? null,
+      externalId: label?.id ?? null,
     })
     .onConflictDoNothing();
-  return { rmaId: id, carrier, tracking };
+  return {
+    rmaId: id,
+    carrier: label?.carrier ?? carrier,
+    tracking,
+    ...(label?.labelUrl ? { labelUrl: label.labelUrl } : {}),
+    ...(by ? { provider: by.id } : {}),
+  };
+}
+
+/**
+ * Voids the provider labels among these shipments (rollback: throws, so the rollback is retried
+ * and reported if a provider can't be reached), grouped by provider.
+ */
+export async function voidShipmentLabels(
+  env: Env,
+  orderId: string,
+  stepKey: string,
+  ids: string[],
+) {
+  if (!ids.length) return 0;
+  const rows = await db(env)
+    .select()
+    .from(shipments)
+    .where(and(inArray(shipments.id, ids), sql`${shipments.provider} IS NOT NULL`));
+  const live = rows.filter((r) => r.status !== 'cancelled' && r.provider && r.externalId);
+  for (const [provider, group] of groupBy(live, (r) => r.provider!))
+    await voidLabels(
+      env,
+      provider,
+      orderId,
+      stepKey,
+      group.map((r) => ({ ref: r.id, id: r.externalId! })),
+    );
+  return live.length;
+}
+
+/**
+ * On a cancel: voids the order's open provider labels before they are cancelled here. One a
+ * provider can't void is marked `void_failed` (not cancelled, so it is never taken for undone) and
+ * counted, and the cancel goes on.
+ */
+async function voidOpenLabels(env: Env, orderId: string) {
+  const rows = await db(env)
+    .select()
+    .from(shipments)
+    .where(
+      and(
+        eq(shipments.orderId, orderId),
+        inArray(shipments.status, ['label_created', 'ready_for_pickup']),
+        sql`${shipments.provider} IS NOT NULL`,
+      ),
+    );
+  let failed = 0;
+  for (const [provider, group] of groupBy(rows, (r) => r.provider!)) {
+    try {
+      await voidLabels(
+        env,
+        provider,
+        orderId,
+        'cancel',
+        group.flatMap((r) => (r.externalId ? [{ ref: r.id, id: r.externalId }] : [])),
+      );
+    } catch (err) {
+      console.error(`voiding ${provider} labels for ${orderId}`, err);
+      failed += group.length;
+      await db(env)
+        .update(shipments)
+        .set({ status: 'void_failed' })
+        .where(
+          inArray(
+            shipments.id,
+            group.map((r) => r.id),
+          ),
+        );
+    }
+  }
+  return failed;
+}
+
+function groupBy<T>(xs: T[], key: (x: T) => string) {
+  const m = new Map<string, T[]>();
+  for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+  return m;
 }
 
 /** Compensation: cancel a shipment that was booked by this step. */
@@ -1135,6 +1343,8 @@ export function renderDocument(title: string, order: Order, extra: Record<string
 
 /** Undo everything compensable for an order (cancel path; Workflow rollback covers failures). */
 export async function compensateOrder(env: Env, orderId: string) {
+  // First, so a label a provider made is voided there before its shipment reads as cancelled.
+  const labelsNotVoided = await voidOpenLabels(env, orderId);
   const [released, voided, cancelled, sellerOrdersCancelled, payoutsReversed, revoked, invoices] =
     await Promise.all([
       releaseInventory(env, orderId),
@@ -1160,6 +1370,7 @@ export async function compensateOrder(env: Env, orderId: string) {
     unbilled,
     invoicesVoided: invoices.voided,
     invoicesPaid: invoices.paid,
+    labelsNotVoided,
   };
 }
 

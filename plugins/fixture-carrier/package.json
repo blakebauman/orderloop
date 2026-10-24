@@ -1,0 +1,25 @@
+{
+  "name": "@orderloop/plugin-fixture-carrier",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A test-only carrier built with @orderloop/plugin-sdk that provides every provider surface (shipping rates and labels, tax, address checks) behind the built-in nodes. Its own tests run the contract suite; the engine's tests bind it. Never deployed.",
+  "scripts": {
+    "types": "wrangler types",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@orderloop/core": "workspace:*",
+    "@orderloop/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

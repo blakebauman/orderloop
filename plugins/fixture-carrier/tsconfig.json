@@ -1,0 +1,7 @@
+{
+  "extends": "@orderloop/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["src", "tests", "worker-configuration.d.ts", "vitest.config.ts"]
+}

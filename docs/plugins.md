@@ -11,10 +11,12 @@ deployment from the registry and removable without touching the core. The contra
 A plugin is a Worker in `plugins/<id>/` that a deployment lists under `plugins` in its registry file.
 Fleet tooling binds it to the engine and the web Worker as a service binding named `PLUGIN_<ID>`
 (`pluginBinding`: upper case, dashes to underscores, so `qbd-sync` is `PLUGIN_QBD_SYNC`), gives it a
-D1 database of its own, and deploys it before the engine. It contributes up to four things, all
+D1 database of its own, and deploys it before the engine. It contributes up to five things, all
 optional:
 
 - **Nodes**, namespaced `<id>.<name>`, which the editor offers and the Workflow runs.
+- **Providers**: the work behind a built-in node (shipping rates, shipping labels, tax, address
+  checks), picked per node in its Provider field ([Providers](#providers)).
 - **Event subscriptions** to outbound events, delivered over the binding instead of HTTP.
 - **Pages** under `/plugins/<id>/`, served by the plugin and linked from the nav.
 - **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person.
@@ -68,6 +70,7 @@ The manifest (`pluginManifestSchema`) has:
 | `requires` | Ids of plugins that must also be installed |
 | `pageRole` | The least role that may open the plugin's pages and see its nav entries; default `operator` |
 | `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
+| `provides` | Surfaces from `PROVIDER_SURFACES` (`shipping.rates`, `shipping.labels`, `tax`, `address`) the plugin can do behind built-in nodes. All but `shipping.rates` need `personalData: 'send'` (`SURFACE_NEEDS_BUYER`) ([Providers](#providers)) |
 | `secrets` | Up to 20 `{ name, description?, optional? }`: env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
 
 A manifest over `PLUGIN_MANIFEST_MAX_BYTES` (64 KiB) serialized is refused.
@@ -197,11 +200,54 @@ both:
 
 If the plugin calls an external system, pass that system the same key.
 
+## Providers
+
+A provider is a plugin doing a built-in node's work: the node keeps its contract (its fields,
+outputs, events and what it writes), and asks the plugin for the part a real service does. A node
+with a Provider field (kind `provider`, `providerField` in `packages/core/src/catalog.ts`) offers
+`builtin` and each installed plugin whose manifest `provides` its surface (`NodeRegistry.providers`).
+The choice is part of the published flow version, so a replay calls the same provider.
+
+| Surface | Nodes | Ops (`ProvideRequest`) | The plugin returns (`PROVIDE_RESULT_SCHEMAS`) | The engine still |
+|---|---|---|---|---|
+| `shipping.rates` | `commerce.shipping_rate` | `quote` `{ itemCount, country?, subtotal, currency }` (base currency) | `{ options: [{ id, amount, title?, carrier?, minDays?, maxDays? }] }` (at most 50), in the base currency | Checks each option as a live carrier's (`parseCarrierQuote`, ids prefixed with the plugin id), applies the free threshold, converts, picks and totals. A provider that fails or offers nothing falls back to the live carriers, then the static services (`source` `provider`, `live` or `static`) |
+| `shipping.labels` | `commerce.ship`, `commerce.return_label` | `create` `{ kind: 'shipment' \| 'return', carrier, packages: [{ ref, locationId, lines }] }`; `void` `{ labels: [{ ref, id }] }` | `create`: `{ labels: [{ ref, id, tracking, carrier?, labelUrl? }] }`, one per package (`labelUrl` https only); `void`: `{ summary? }` | Writes the shipment rows (with `provider` and `external_id`, migration `0045`), consumes stock, sets `vars.tracking`, emits `order.shipped`. A package with no label fails the node for good, after voiding what came back |
+| `tax` | `commerce.tax` | `calculate` `{ subtotal, shipping, includeShipping, currency }` (the order's currency) | `{ amount }` | Stores the rate the amount works out to (`amount ÷ taxable`), so nodes that total the order again keep the same tax |
+| `address` | `commerce.address_validate` | `validate` `{ address }` (`meta.shipTo`) | `{ status: 'valid' \| 'corrected' \| 'invalid', address, issues }` | Takes the branch and sets `vars.suggestedAddress` when corrected |
+
+- `provide` (`apps/engine/src/providers.ts`) calls `PluginRpc.provide` inside the node's step, with
+  the node's step key, the order as `personalData` allows (`pluginOrder`; `void` carries no order),
+  held to `PLUGIN_CALL_MS`, and checks the result with `checkProvideResult`. A provider that isn't
+  bound, doesn't provide the surface or returns a result the contract doesn't allow fails the node
+  with a `NonRetryableError`; one that is bound but not answering, or returns `fail` with `retry`,
+  throws an ordinary error, so the step retries.
+- Rates and tax also run while pricing a UCP checkout (`ucp/quote.ts` calls the same executors with
+  step key `quote#<nodeId>`), so `quote`, `calculate` and `validate` must write nothing; the contract
+  suite checks it.
+- Labels are undone where they were made. The `commerce.ship` rollback (`ROLLBACKS`, which now get
+  the step key) calls `void` for its shipments that have a `provider` before cancelling them
+  (`voidShipmentLabels`; it throws, so the rollback is retried and reported, when the provider
+  can't). Cancelling an order (`compensateOrder`) voids its open provider labels first
+  (`voidOpenLabels`, step key `cancel`); one a provider can't void is marked `void_failed`, never
+  `cancelled`, and the cancel's timeline entry says how many. `void` is keyed by the label ids it is
+  sent: it may run again.
+- A flow that names a provider depends on that plugin: `nodePlugins`/`flowPlugins` count it, so the
+  run gets a `load-plugins` step, `pluginUsage` (and `plugin:check`) report the flow, and
+  `validateGraph` refuses it (`Provider: plugin “<id>” is not installed` or `doesn't provide …`)
+  once the plugin is gone or no longer provides the surface.
+- With the SDK, `definePlugin({ providers: { 'shipping.labels': { create, void }, … } })`: every op of
+  every surface in `provides` needs a handler, and none for a surface it doesn't list. Each gets
+  `req`, `env`, `key` (`<orderId>:<stepKey>`) and `fail`. `plugins/fixture-carrier` is the template
+  (and a test fixture no deployment may install).
+
+Payments and inventory have no provider surface: payments are bound to Stripe holds, UCP adoption,
+refunds across payments and webhooks, and stock is the core's. A plugin adds those as its own nodes.
+
 ## Installing
 
 1. Add the plugin to the deployment's registry file, `deployments/<id>.jsonc`:
    `"plugins": { "qbd-sync": {} }`. `loadDeployments` refuses an id that isn't a plugin id, one that is a
-   fixture (`example`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id` and
+   fixture (`example`, `fixture-carrier`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id` and
    `personalData`, and no other key.
    **Granting buyer details**: a plugin whose manifest says `personalData: 'send'` is refused (its
    status is `healthy: false` with `error` `It asks for buyer details…`) unless its entry says
@@ -341,6 +387,8 @@ throws when the plugin is gone, since there is nothing to undo it with.
     flow uses is bound but has no manifest (not answering, or refused), because recording it as
     absent would fail the order for good and run its nodes without their rollbacks. A plugin that
     isn't bound is left out.
+- **Providers**: an executor whose node names a provider calls `provide` instead of its built-in
+  connector ([Providers](#providers)).
 - **Events**: `emit` in `apps/engine/src/outbox.ts` adds a delivery for each installed plugin whose
   `events` match, with subscription id `plugin:<id>`, in `webhook_deliveries` (no schema change; see
   [Data model](data-model.md)). `deliverToPlugin` calls `deliver` over the binding with `data`

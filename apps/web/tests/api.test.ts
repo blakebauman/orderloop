@@ -428,6 +428,7 @@ describe('plugins over REST', () => {
           version: '1',
           nodes: ['example.stamp'],
           events: ['order.completed'],
+          provides: [],
           healthy: true,
         },
         {
@@ -437,6 +438,7 @@ describe('plugins over REST', () => {
           version: null,
           nodes: [],
           events: [],
+          provides: [],
           healthy: false,
           error: 'apiVersion must be 1',
         },

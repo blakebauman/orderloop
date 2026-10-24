@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkExecResult,
+  checkProvideResult,
   type FlowGraph,
+  flowPlugins,
   type Order,
   PLUGIN_RESULT_MAX_BYTES,
   parseManifest,
@@ -74,6 +76,7 @@ describe('plugin manifests', () => {
       pageRole: 'operator',
       personalData: 'redact',
       secrets: [],
+      provides: [],
     });
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
   });
@@ -266,5 +269,80 @@ describe('plugin keys', () => {
     expect(
       await verifyPrincipal([await pluginKey('k', 'example')], forPlugin, '/plugins/example/'),
     ).toMatchObject({ id: 'usr_1' });
+  });
+});
+
+describe('providers', () => {
+  const carrier = (over: Record<string, unknown> = {}) =>
+    parseManifest(
+      manifest({
+        id: 'carrier',
+        nodes: [],
+        nav: [],
+        publicPaths: [],
+        personalData: 'send',
+        provides: ['shipping.labels', 'shipping.rates'],
+        ...over,
+      }),
+    );
+
+  it('needs buyer details for surfaces that use the address, not for rates', () => {
+    expect(() => carrier({ personalData: 'redact' })).toThrow(/needs the buyer's address/);
+    expect(carrier({ personalData: 'redact', provides: ['shipping.rates'] }).provides).toEqual([
+      'shipping.rates',
+    ]);
+    expect(() => carrier({ provides: ['tax', 'tax'] })).toThrow(/Duplicate surface/);
+  });
+
+  it('checks a node’s provider is installed and provides that surface', () => {
+    const reg = withPlugins([carrier()]);
+    expect(reg.providers('shipping.labels')).toEqual([{ id: 'carrier', name: 'Example' }]);
+    expect(reg.providers('tax')).toEqual([]);
+    expect(reg.validate('commerce.ship', { provider: 'carrier' })).toEqual([]);
+    expect(reg.validate('commerce.ship', {})).toEqual([]);
+    expect(reg.validate('commerce.tax', { provider: 'carrier' })).toEqual([
+      "Provider: plugin “carrier” doesn't provide tax",
+    ]);
+    expect(staticRegistry.validate('commerce.ship', { provider: 'carrier' })).toEqual([
+      'Provider: plugin “carrier” is not installed',
+    ]);
+  });
+
+  it('counts a provider among the plugins a flow depends on', () => {
+    expect([
+      ...flowPlugins({
+        nodes: [
+          { type: 'commerce.ship', config: { provider: 'carrier' } },
+          { type: 'commerce.tax', config: { provider: 'builtin' } },
+          { type: 'example.stamp', config: {} },
+        ],
+      }),
+    ]).toEqual(['carrier', 'example']);
+  });
+
+  it('checks provider results per surface and op', () => {
+    const ok = checkProvideResult('carrier', 'shipping.labels', 'create', {
+      labels: [{ ref: 'p1', id: 'L1', tracking: '1Z' }],
+    });
+    expect(ok).toEqual({
+      kind: 'done',
+      value: { labels: [{ ref: 'p1', id: 'L1', tracking: '1Z' }] },
+    });
+    expect(
+      checkProvideResult('carrier', 'tax', 'calculate', { fail: { message: 'down', retry: true } }),
+    ).toEqual({ kind: 'fail', message: 'down', retry: true });
+    expect(() => checkProvideResult('carrier', 'tax', 'calculate', { amount: -1 })).toThrow(
+      /carrier \(tax calculate\) returned an invalid result: amount/,
+    );
+    expect(() =>
+      checkProvideResult('carrier', 'shipping.labels', 'create', {
+        labels: [{ ref: 'p1', id: 'L1', tracking: '1Z', labelUrl: 'http://x.test/l.pdf' }],
+      }),
+    ).toThrow(/labelUrl/);
+    expect(() =>
+      checkProvideResult('carrier', 'shipping.rates', 'quote', {
+        options: ['x'.repeat(PLUGIN_RESULT_MAX_BYTES)],
+      }),
+    ).toThrow(/limit/);
   });
 });

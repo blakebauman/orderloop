@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // A fixture for providers (docs/plugins.md, "Providers"). scripts/fleet.ts refuses to install
+  // it, so it is never deployed; the engine's tests bind it.
+  "name": "orderloop-plugin-fixture-carrier",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orderloop-plugin-fixture-carrier",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

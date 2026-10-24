@@ -7,16 +7,20 @@
  * It checks what the engine relies on and can't check at run time: the manifest parses for this
  * contract version; running a node twice for the same order and step key gives the same result and
  * no second effect; undoing it twice is harmless and leaves what was there before; delivering the
- * same event twice records it once; and a page refuses a request without a signed-in person, or
- * from one below the manifest's `pageRole`.
+ * same event twice records it once; a provider's results have its surface's shape, rates, tax
+ * and address checks write nothing (they also run while pricing a checkout), and a label created
+ * twice for one key is created once and voided twice harmlessly; and a page refuses a request
+ * without a signed-in person, or from one below the manifest's `pageRole`.
  */
 
 import {
+  checkProvideResult,
   type Order,
   type OutboundPayload,
   type PluginManifest,
   type PluginRpc,
   PRINCIPAL_HEADER,
+  type ProvideRequest,
   parseManifest,
   ROLES,
   signPrincipal,
@@ -61,6 +65,16 @@ const BASE_ORDER: Order = {
   tax: 0,
   total: 10,
 } as Order;
+
+/** A ship-to for providers granted buyer details. */
+const SHIP_TO = {
+  name: 'Contract Buyer',
+  line1: '1 Main St',
+  city: 'Springfield',
+  region: 'IL',
+  postalCode: '62701',
+  country: 'US',
+};
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -135,6 +149,86 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
       }
     } catch (err) {
       problems.push(`${n.type}: ${message(err)}`);
+    }
+  }
+
+  for (const surface of manifest.provides) {
+    const orderId = `ord_contract_${surface.replace(/\W/g, '_')}`;
+    const order = {
+      ...(cases.order ?? BASE_ORDER),
+      id: orderId,
+      ...(manifest.personalData === 'send'
+        ? { meta: { ...(cases.order ?? BASE_ORDER).meta, shipTo: SHIP_TO } }
+        : {}),
+    };
+    const base = { nodeId: 'contract', stepKey: 'contract#1', orderId, config: {}, order };
+    const call = async (req: ProvideRequest) => {
+      const out = checkProvideResult(manifest.id, req.surface, req.op, await stub.provide(req));
+      if (out.kind === 'fail') throw new Error(`${req.op} failed (${out.message})`);
+      return out.value;
+    };
+    try {
+      const before = await cases.effects(orderId);
+      if (surface === 'shipping.labels') {
+        const create: ProvideRequest = {
+          ...base,
+          surface,
+          op: 'create',
+          input: {
+            kind: 'shipment',
+            carrier: 'ups',
+            packages: [{ ref: 'p1', locationId: null, lines: [{ sku: 'SKU-1', qty: 1 }] }],
+          },
+        };
+        type Labels = { labels: { ref: string; id: string }[] };
+        const first = (await call(create)) as Labels;
+        const afterFirst = await cases.effects(orderId);
+        if (afterFirst <= before)
+          problems.push(`${surface}: create wrote nothing the effects() probe sees`);
+        if (!first.labels.some((l) => l.ref === 'p1'))
+          problems.push(`${surface}: create returned no label for package p1`);
+        const second = await call(create);
+        if (!same(first, second))
+          problems.push(
+            `${surface}: create gave a different result when run again for the same step`,
+          );
+        if ((await cases.effects(orderId)) !== afterFirst)
+          problems.push(`${surface}: create wrote again for the same order and step key`);
+        const labels = first.labels.map(({ ref, id }) => ({ ref, id }));
+        const { order: _order, ...noOrder } = base;
+        const undo: ProvideRequest = { ...noOrder, surface, op: 'void', input: { labels } };
+        await call(undo);
+        await call(undo);
+        const afterVoid = await cases.effects(orderId);
+        if (afterVoid !== before)
+          problems.push(
+            `${surface}: voiding twice left ${afterVoid} effects; there were ${before} before create`,
+          );
+      } else {
+        const req: ProvideRequest =
+          surface === 'shipping.rates'
+            ? ({
+                ...base,
+                surface,
+                op: 'quote',
+                input: { itemCount: 1, country: 'US', subtotal: 10, currency: 'USD' },
+              } as const)
+            : surface === 'tax'
+              ? ({
+                  ...base,
+                  surface,
+                  op: 'calculate',
+                  input: { subtotal: 10, shipping: 5, includeShipping: true, currency: 'USD' },
+                } as const)
+              : ({ ...base, surface, op: 'validate', input: { address: SHIP_TO } } as const);
+        await call(req);
+        if ((await cases.effects(orderId)) !== before)
+          problems.push(
+            `${surface}: ${req.op} wrote something; it also runs while pricing checkouts, so it must not`,
+          );
+      }
+    } catch (err) {
+      problems.push(`${surface}: ${message(err)}`);
     }
   }
 

@@ -47,6 +47,7 @@ import * as ai from './ai';
 import * as billing from './billing';
 import * as clef from './clef';
 import * as cx from './connectors';
+import { provide } from './providers';
 
 export type NodeResult = {
   branches?: string[];
@@ -79,6 +80,12 @@ const cash = (n: number, ctx: RunContext) =>
     currency: ctx.order.currency || 'USD',
   }).format(n);
 const lineCount = (n: number) => `${n} ${n === 1 ? 'line' : 'lines'}`;
+
+/** The plugin a node's Provider field names, or null for the built-in connector. */
+const providerOf = (config: Record<string, unknown>) =>
+  typeof config.provider === 'string' && config.provider && config.provider !== 'builtin'
+    ? config.provider
+    : null;
 
 const passthrough: Exec = async () => ({ summary: 'Started' });
 
@@ -191,7 +198,7 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.shipping_rate': async ({ env, ctx, config }) => {
+  'commerce.shipping_rate': async ({ env, ctx, config, node, stepKey }) => {
     const rates = shippingConfigSchema.safeParse(config.rates);
     if (!rates.success)
       throw new NonRetryableError(`Invalid shipping rates: ${rates.error.issues[0]?.message}`);
@@ -211,11 +218,29 @@ export const EXECUTORS: Record<string, Exec> = {
     }
     const fx = ctx.order.fxRate;
     const country = shipToCountry(ctx.order);
-    const { options, source } = await cx.quoteShipping(env, rates.data, {
-      itemCount: units,
-      country,
-      subtotal: toBase(ctx.order.subtotal, fx),
-    });
+    const req = { itemCount: units, country, subtotal: toBase(ctx.order.subtotal, fx) };
+    const by = providerOf(config);
+    const { options, source } = await cx.quoteShipping(
+      env,
+      rates.data,
+      req,
+      by
+        ? {
+            id: by,
+            quote: () =>
+              provide(env, by, {
+                surface: 'shipping.rates',
+                op: 'quote',
+                nodeId: node.id,
+                stepKey,
+                orderId: ctx.order.id,
+                config,
+                order: ctx.order,
+                input: { ...req, currency: BASE_CURRENCY },
+              }),
+          }
+        : undefined,
+    );
     // Rates are in the base currency; the order pays in its own.
     const offered = options.map((o) => ({ ...o, amount: fromBase(o.amount, fx) }));
     const select = (SHIPPING_SELECTIONS as readonly string[]).includes(str(config.select))
@@ -245,14 +270,38 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.tax': async ({ ctx, config }) => {
-    const rate = num(config.rate, 0.08);
+  'commerce.tax': async ({ env, ctx, config, node, stepKey }) => {
     const taxShipping = config.includeShipping !== false;
+    const by = providerOf(config);
+    let rate = num(config.rate, 0.08);
+    if (by) {
+      const shipping = ctx.order.shipping ?? 0;
+      const { amount } = await provide(env, by, {
+        surface: 'tax',
+        op: 'calculate',
+        nodeId: node.id,
+        stepKey,
+        orderId: ctx.order.id,
+        config,
+        order: ctx.order,
+        input: {
+          subtotal: ctx.order.subtotal,
+          shipping,
+          includeShipping: taxShipping,
+          currency: ctx.order.currency,
+        },
+      });
+      // Kept as the rate it works out to, so later nodes that recompute totals keep the same tax.
+      const taxable = ctx.order.subtotal + (taxShipping ? shipping : 0);
+      if (amount > 0 && taxable <= 0)
+        throw new NonRetryableError(`Tax provider “${by}” charged tax on nothing taxable`);
+      rate = taxable > 0 ? amount / taxable : 0;
+    }
     const t = computeTotals({ ...ctx.order, taxRate: rate, taxShipping });
     return {
       order: { ...t, taxRate: rate, taxShipping },
-      output: { rate, taxShipping, ...t },
-      summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}`,
+      output: { rate, taxShipping, ...t, ...(by ? { provider: by } : {}) },
+      summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}${by ? ` (${by})` : ''}`,
     };
   },
 
@@ -436,12 +485,19 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.ship': async ({ env, ctx, config, stepKey }) => {
+  'commerce.ship': async ({ env, ctx, config, node, stepKey }) => {
     // from_order books the carrier of the option a shipping-rate node charged, else UPS.
     const chosen = str(config.carrier, 'ups');
     const carrier =
       chosen === 'from_order' ? str(ctx.vars.shippingCarrier, 'ups').toLowerCase() : chosen;
-    const r = await cx.createShipment(env, ctx.order, stepKey, carrier);
+    const by = providerOf(config);
+    const r = await cx.createShipment(
+      env,
+      ctx.order,
+      stepKey,
+      carrier,
+      by ? { id: by, nodeId: node.id, config } : undefined,
+    );
     const tracking = r.shipments.map((s) => s.tracking).join(', ');
     return {
       output: r,
@@ -453,8 +509,15 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.return_label': async ({ env, ctx, config, stepKey }) => {
-    const r = await cx.createReturnLabel(env, ctx.order, stepKey, str(config.carrier, 'ups'));
+  'commerce.return_label': async ({ env, ctx, config, node, stepKey }) => {
+    const by = providerOf(config);
+    const r = await cx.createReturnLabel(
+      env,
+      ctx.order,
+      stepKey,
+      str(config.carrier, 'ups'),
+      by ? { id: by, nodeId: node.id, config } : undefined,
+    );
     return {
       output: r,
       vars: { returnTracking: r.tracking },
@@ -484,8 +547,20 @@ export const EXECUTORS: Record<string, Exec> = {
     return { output: r, summary: `Scheduled ${cash(r.amount, ctx)}` };
   },
 
-  'commerce.address_validate': async ({ env, ctx }) => {
-    const r = await cx.validateAddress(env, ctx.order.meta?.shipTo);
+  'commerce.address_validate': async ({ env, ctx, config, node, stepKey }) => {
+    const by = providerOf(config);
+    const r = by
+      ? await provide(env, by, {
+          surface: 'address',
+          op: 'validate',
+          nodeId: node.id,
+          stepKey,
+          orderId: ctx.order.id,
+          config,
+          order: ctx.order,
+          input: { address: ctx.order.meta?.shipTo ?? null },
+        })
+      : await cx.validateAddress(env, ctx.order.meta?.shipTo);
     return {
       branches: [r.status],
       output: r,
@@ -495,7 +570,7 @@ export const EXECUTORS: Record<string, Exec> = {
           ? 'Address OK'
           : r.status === 'corrected'
             ? 'Suggested a corrected address'
-            : r.issues.join('; '),
+            : r.issues.join('; ') || 'Address not usable',
     };
   },
 
@@ -875,7 +950,7 @@ function imageRefs(v: unknown, ctx: RunContext): string[] {
 /** Saga compensations, registered on the step when the node type declares `rollback`. */
 export const ROLLBACKS: Record<
   string,
-  (env: Env, orderId: string, output: unknown) => Promise<string>
+  (env: Env, orderId: string, output: unknown, stepKey: string) => Promise<string>
 > = {
   'commerce.reserve_inventory': async (env, orderId) =>
     `Released ${await cx.releaseInventory(env, orderId)} reservations`,
@@ -892,13 +967,15 @@ export const ROLLBACKS: Record<
     `Cancelled ${await cx.cancelSellerOrders(env, orderId)} seller orders`,
   'commerce.payout': async (env, orderId) =>
     `Reversed ${await cx.reversePayouts(env, orderId)} payouts`,
-  'commerce.ship': async (env, orderId, output) => {
+  'commerce.ship': async (env, orderId, output, stepKey) => {
     const o = output as { shipmentId?: string; shipments?: { shipmentId: string }[] } | undefined;
     const ids = o?.shipments?.map((s) => s.shipmentId) ?? (o?.shipmentId ? [o.shipmentId] : []);
+    // A provider's labels are voided there first; this throws (and is retried) if it can't be.
+    const voided = await cx.voidShipmentLabels(env, orderId, stepKey, ids);
     for (const id of ids) await cx.cancelShipment(env, id);
     if (!ids.length) return 'No shipment to cancel';
     const restored = await cx.restoreShippedStock(env, orderId);
-    return `Cancelled ${ids.join(', ')}${restored ? `, restocked ${restored} lines` : ''}`;
+    return `Cancelled ${ids.join(', ')}${voided ? `, voided ${voided} labels` : ''}${restored ? `, restocked ${restored} lines` : ''}`;
   },
   'commerce.invoice': async (env, orderId) => {
     // Void first: an invoice Stripe reports paid keeps its account charge, which the payment settles.

@@ -1,0 +1,97 @@
+/**
+ * A fixture carrier: every provider surface, built with definePlugin, for the engine's tests and as
+ * the template for a real provider (docs/plugins.md, "Providers").
+ *
+ * - Rates: "ground" (3 + 1 per unit) and "air" (15), in the base currency. An order whose
+ *   `meta.simulate` is "provider_down" makes it throw, so the node falls back to its static rates.
+ * - Labels: one row per order, step key and package, so a retried step labels once; void marks
+ *   them voided. `effects` in its tests count the order's labels not voided.
+ * - Tax: 10% of what is taxable, for a US ship-to; none elsewhere.
+ * - Address: upper-cases the city ("corrected" when that changed it); no postcode is "invalid".
+ *
+ * Labels, tax and the address need the buyer's address, so it asks for buyer details.
+ */
+
+import { definePlugin } from '@orderloop/plugin-sdk';
+
+type ShipTo = { city?: string; postalCode?: string; country?: string; [k: string]: unknown };
+
+const shipTo = (order: { meta?: Record<string, unknown> }) => (order.meta?.shipTo ?? {}) as ShipTo;
+
+const labelId = (key: string, ref: string) => `fx_${key}_${ref}`.replace(/[^\w-]/g, '_');
+
+export default definePlugin<Env>({
+  manifest: {
+    apiVersion: 1,
+    id: 'fixture-carrier',
+    name: 'Fixture carrier',
+    version: '1',
+    personalData: 'send',
+    provides: ['shipping.rates', 'shipping.labels', 'tax', 'address'],
+  },
+
+  providers: {
+    'shipping.rates': {
+      quote({ req }) {
+        if (req.order.meta?.simulate === 'provider_down') throw new Error('carrier unreachable');
+        return {
+          options: [
+            {
+              id: 'ground',
+              title: 'Ground',
+              amount: 3 + req.input.itemCount,
+              minDays: 2,
+              maxDays: 4,
+            },
+            { id: 'air', title: 'Air', amount: 15, minDays: 1, maxDays: 1 },
+          ],
+        };
+      },
+    },
+
+    'shipping.labels': {
+      async create({ req, env, key }) {
+        const labels = [];
+        for (const p of req.input.packages) {
+          const id = labelId(key, p.ref);
+          const tracking = `FX${id.length.toString().padStart(4, '0')}${p.ref.slice(-6)}`;
+          await env.DB.prepare(
+            'INSERT OR IGNORE INTO labels (id, order_id, step_key, ref, kind, tracking, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          )
+            .bind(id, req.orderId, req.stepKey, p.ref, req.input.kind, tracking, Date.now())
+            .run();
+          labels.push({ ref: p.ref, id, tracking, carrier: 'fixture' });
+        }
+        return { labels };
+      },
+      async void({ req, env }) {
+        for (const l of req.input.labels)
+          await env.DB.prepare('UPDATE labels SET voided = 1 WHERE id = ?').bind(l.id).run();
+        return { summary: `Voided ${req.input.labels.length}` };
+      },
+    },
+
+    tax: {
+      calculate({ req }) {
+        if (shipTo(req.order).country !== 'US') return { amount: 0 };
+        const { subtotal, shipping, includeShipping } = req.input;
+        const taxable = subtotal + (includeShipping ? shipping : 0);
+        return { amount: Math.round(taxable * 10) / 100 };
+      },
+    },
+
+    address: {
+      validate({ req }) {
+        const a = (req.input.address ?? {}) as ShipTo;
+        if (!a.postalCode) return { status: 'invalid', address: null, issues: ['No postcode'] };
+        const city = String(a.city ?? '').toUpperCase();
+        const address = Object.fromEntries(
+          Object.entries({ ...a, city }).filter(
+            (e): e is [string, string] => typeof e[1] === 'string',
+          ),
+        );
+        return { status: city === a.city ? 'valid' : 'corrected', address, issues: [] };
+      },
+    },
+  },
+});

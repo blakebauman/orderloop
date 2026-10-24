@@ -172,6 +172,44 @@ export function Inspector({
   );
 }
 
+/** Built in, or an installed plugin providing the field's surface; a missing one stays listed. */
+function ProviderSelect({
+  field: f,
+  value,
+  readOnly,
+  onChange,
+}: {
+  field: ConfigField;
+  value: unknown;
+  readOnly: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const nodes = useNodes();
+  const current = String(value ?? 'builtin') || 'builtin';
+  const providers = f.surface ? nodes.providers(f.surface) : [];
+  const listed = current === 'builtin' || providers.some((p) => p.id === current);
+  return (
+    <Field label={f.label} hint={f.hint}>
+      <NativeSelect
+        disabled={readOnly}
+        value={current}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-full"
+      >
+        <NativeSelectOption value="builtin">Built in</NativeSelectOption>
+        {providers.map((p) => (
+          <NativeSelectOption key={p.id} value={p.id}>
+            {p.name}
+          </NativeSelectOption>
+        ))}
+        {listed ? null : (
+          <NativeSelectOption value={current}>{current} (not installed)</NativeSelectOption>
+        )}
+      </NativeSelect>
+    </Field>
+  );
+}
+
 function ConfigInput({
   field: f,
   value,
@@ -184,6 +222,8 @@ function ConfigInput({
   onChange: (v: unknown) => void;
 }) {
   switch (f.kind) {
+    case 'provider':
+      return <ProviderSelect field={f} value={value} readOnly={readOnly} onChange={onChange} />;
     case 'boolean':
       return (
         <div className="flex items-start justify-between gap-3">

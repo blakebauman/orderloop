@@ -54,11 +54,19 @@ export default defineConfig(async () => {
             MIGRATION_DB: 'migration-test',
             DEMO_DB: 'demo-test',
             AUDIT_DB: 'audit-test',
-            // The example plugin's own database, so its tests can read what it wrote.
-            ...(plugins.length ? { EXAMPLE_DB: 'plugin-example' } : {}),
+            // The plugins' own databases, so their tests can read what they wrote.
+            ...(plugins.length
+              ? { EXAMPLE_DB: 'plugin-example', CARRIER_DB: 'plugin-fixture-carrier' }
+              : {}),
           },
           ...(plugins.length
-            ? { workers: plugins, serviceBindings: { PLUGIN_EXAMPLE: 'orderloop-plugin-example' } }
+            ? {
+                workers: plugins,
+                serviceBindings: {
+                  PLUGIN_EXAMPLE: 'orderloop-plugin-example',
+                  PLUGIN_FIXTURE_CARRIER: 'orderloop-plugin-fixture-carrier',
+                },
+              }
             : {}),
         },
       }),
@@ -77,16 +85,28 @@ export default defineConfig(async () => {
         // Payments in the default mock mode: `meta.simulate` drives declines. No plugins are
         // installed, as in a deployment that never added one or has removed one.
         project('engine', ['tests/*.test.ts']),
-        // With the example plugin installed (tests/plugins/).
+        // With the example plugin and the fixture carrier (a provider, granted buyer details)
+        // installed (tests/plugins/).
         project(
           'plugins',
           ['tests/plugins/**/*.test.ts'],
-          { TEST_EXAMPLE_MIGRATIONS: await readD1Migrations('../../plugins/example/migrations') },
+          {
+            TEST_EXAMPLE_MIGRATIONS: await readD1Migrations('../../plugins/example/migrations'),
+            TEST_CARRIER_MIGRATIONS: await readD1Migrations(
+              '../../plugins/fixture-carrier/migrations',
+            ),
+            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+          },
           [
             await bundlePlugin('../../plugins/example/src/index.ts', {
               name: 'orderloop-plugin-example',
               d1: { DB: 'plugin-example' },
               bindings: { PLUGIN_KEY: 'test-plugin-key' },
+            }),
+            await bundlePlugin('../../plugins/fixture-carrier/src/index.ts', {
+              name: 'orderloop-plugin-fixture-carrier',
+              d1: { DB: 'plugin-fixture-carrier' },
+              bindings: { PLUGIN_KEY: 'test-carrier-key' },
             }),
           ],
         ),

@@ -1,4 +1,9 @@
-import { CATEGORY_LABELS, pluginSecretVar, ROLE_LABELS } from '@orderloop/core';
+import {
+  CATEGORY_LABELS,
+  PROVIDER_SURFACE_LABELS,
+  pluginSecretVar,
+  ROLE_LABELS,
+} from '@orderloop/core';
 import { Link, useLoaderData } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
@@ -111,6 +116,12 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
             </dd>
             <dt className="text-muted-foreground">Events</dt>
             <dd>{m.events.length ? m.events.join(', ') : 'None'}</dd>
+            {m.provides.length ? (
+              <>
+                <dt className="text-muted-foreground">Provides</dt>
+                <dd>{m.provides.map((x) => PROVIDER_SURFACE_LABELS[x]).join(', ')}</dd>
+              </>
+            ) : null}
             {m.secrets.length ? (
               <>
                 <dt className="text-muted-foreground">Secrets</dt>

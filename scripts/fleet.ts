@@ -156,7 +156,7 @@ export type Deployment = {
 };
 
 /** Test fixtures in plugins/ that no deployment may install. */
-const FIXTURE_PLUGINS = new Set(['example']);
+const FIXTURE_PLUGINS = new Set(['example', 'fixture-carrier']);
 
 /** A plugin's binding name, as `pluginBinding` in @orderloop/core makes it: "qbd-sync" → "PLUGIN_QBD_SYNC". */
 export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replaceAll('-', '_')}`;

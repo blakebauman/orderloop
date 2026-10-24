@@ -13,6 +13,7 @@ import { NonRetryableError } from 'cloudflare:workflows';
 import {
   checkExecResult,
   type FlowGraph,
+  flowPlugins,
   missing,
   type NodeRegistry,
   type OutboundPayload,
@@ -173,7 +174,7 @@ export async function registry(env: Env): Promise<NodeRegistry> {
  */
 export async function flowManifests(env: Env, flow: Pick<FlowGraph, 'nodes'>) {
   const statuses = await pluginStatuses(env);
-  const used = new Set(flow.nodes.flatMap((n) => pluginOf(n.type) ?? []));
+  const used = flowPlugins(flow);
   for (const id of used) {
     const s = statuses.find((x) => x.binding === pluginBinding(id));
     if (s && !s.manifest) throw new Error(`Plugin “${id}” is not answering: ${s.error}`);
@@ -181,9 +182,11 @@ export async function flowManifests(env: Env, flow: Pick<FlowGraph, 'nodes'>) {
   return statuses.flatMap((s) => (s.manifest ? [s.manifest] : []));
 }
 
-/** True when a graph uses any plugin's nodes (only then does a run need the manifests). */
-export const usesPlugins = (graph: Pick<FlowGraph, 'nodes'>) =>
-  graph.nodes.some((n) => pluginOf(n.type) !== null);
+/**
+ * True when a graph uses any plugin, for its nodes or as a provider (only then does a run need
+ * the manifests).
+ */
+export const usesPlugins = (graph: Pick<FlowGraph, 'nodes'>) => flowPlugins(graph).size > 0;
 
 /**
  * Runs a plugin node, inside the node's step. Its branch is checked against the node as the run
@@ -275,11 +278,13 @@ export async function deliverToPlugin(env: Env, id: string, payload: OutboundPay
 
 const ENDED = TERMINAL_ORDER_STATUSES.filter((s) => s !== 'failed');
 
-/** What still depends on a plugin, so it isn't removed from under a flow or a running order. */
+/**
+ * What still depends on a plugin (its nodes, or a node naming it as Provider), so it isn't removed
+ * from under a flow or a running order.
+ */
 export async function pluginUsage(env: Env, id: string): Promise<PluginUsage> {
   const d = createDb(env.DB);
-  const usesIt = (json: string) =>
-    (JSON.parse(json) as FlowGraph).nodes.some((n) => pluginOf(n.type) === id);
+  const usesIt = (json: string) => flowPlugins(JSON.parse(json) as FlowGraph).has(id);
   const published = await d
     .select({ id: flows.id, version: flowVersions.version, json: flowVersions.flowJson })
     .from(flows)
