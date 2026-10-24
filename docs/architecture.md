@@ -85,7 +85,7 @@ engine source.
 | `POST /api/v1/channels/shopify/orders` | `handleShopifyOrder`, before authentication: `verifyShopifyHmac` against `SHOPIFY_WEBHOOK_SECRET` (`503` unset, `401` bad), other `X-Shopify-Topic` values answered `{ ignored: true }`, then `shopifyToInbound` with `customerIdByEmail` and the shared `startInbound` (currency, routing, publish check, `startOrderOnce`). See [Channel adapters](https://docs.orderloop.app/guides/channel-adapters/) |
 | `GET /api/v1/openapi.json` | The OpenAPI document, public, `cache-control: public, max-age=300` |
 | `/api/v1/*` | `apiPrincipal` (an `ol_live_` token or the session cookie; `401` for none, a bearer that isn't an `ol_live_` token, or an expired token, `403` while the person's two-factor setup is due), then `handleApi(request, caller)`, which checks each route's role. `POST /api/v1/channels/edi/850` is one of its routes (`operator`): `parseX12`, the sender looked up in `EDI_PARTNERS`, then `x12850ToInbound` and `startInbound` for each transaction |
-| `/agents/order-agent/*`, `/agents/cart-agent/*`, `/agents/assistant-agent/*` | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
+| `/agents/order-agent/*`, `/agents/cart-agent/*`, `/agents/assistant-agent/*` (a cart's socket with no staff sign-in takes its buyer's cookie instead and is signed as a `CartGuest`; see [External carts](#external-carts)) | `principal`, then proxied to the engine's `fetch` (`routeAgentRequest`) with the caller signed into `x-orderloop-principal` (replacing any the browser sent) and `cookie` and `authorization` deleted, carrying the Agents SDK WebSocket. For the assistant the instance name is replaced with the caller's id, so everyone reaches only their own |
 | `GET /.well-known/agent-card.json` | `agentCard(origin)` from core, public, `cache-control: public, max-age=300` |
 | `GET /.well-known/ucp`, `/ucp`, `/ucp/*` | `ucpDiscovery` and `ucpFetch` (`apps/web/app/lib/ucp.server.ts`), before the OAuth paths. See [UCP](#ucp-agentic-checkout) |
 | `/mcp`, `/a2a`, `/.well-known/oauth-*`, `/oauth/*` | `oauthFetch` (`apps/web/app/lib/oauth.server.ts`), before everything else. `/oauth/authorize` is excluded: it is the consent page, a React Router route |
@@ -952,6 +952,17 @@ every 30 seconds too, and closed once the cart is canceled, submitted or past it
 plugin loses its grant. A cart past `expiresAt` takes no start link and admits no guest even before
 its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
 `renderReturn`, keeps the fields (`returnForm` returns them again) and marks the cart `returned`.
+
+In the web app the start path is the route `/cart/start/:cartId/:token`: it redeems the link
+(`EngineRpc.redeemCartStart`) and sets a cookie for that cart alone (`ol_<cartId>`, the `gs1`
+envelope `signCartGuestSession`, `HttpOnly; Secure; SameSite=None; Partitioned`, until the cart
+expires), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
+`apps/web/app/components/cart-view.tsx`, shared with the staff page). That page's CSP lets the
+cart's `frameOrigins` frame it and its form post to the cart's `returnUrl` (`EMBED_HEADER`, folded
+in by `entry.server.tsx`; `withSecurityHeaders` then leaves out `X-Frame-Options`). Its socket is
+proxied with the cookie's guest signed for the path (`setGuestHeader`). Sending the cart back
+posts the fields from the page itself, in the same window, with a button if the post doesn't
+start.
 
 ## The assistant
 

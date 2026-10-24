@@ -12,6 +12,10 @@ export default [
   route('setup', 'routes/setup.tsx'),
   // The consent page MCP clients send people to (lib/oauth.server.ts).
   route('oauth/authorize', 'routes/oauth-authorize.tsx'),
+  // An external cart's buyer (a punchout session): a one-time start link, then the cart itself,
+  // outside the app shell and its sign-in (lib/cart-guest.server.ts).
+  route('cart/start/:cartId/:token', 'routes/cart-start.ts'),
+  route('cart/:cartId', 'routes/cart-buy.tsx'),
   layout('routes/shell.tsx', [
     // An error boundary inside the shell, so a refused or missing page keeps the app around it.
     layout('routes/in-app.tsx', [
