@@ -1,0 +1,30 @@
+/**
+ * What may reach a cart's agent from outside. Unlike an order's socket, a cart's sends the whole
+ * cart the moment it opens, so the principal is checked before the request reaches the object:
+ * a signature for this cart's path (`forwardedPrincipal`), a live sign-in with at least the
+ * viewer role, and a cart that exists (a socket can't create one).
+ */
+
+import { atLeast } from '@orderloop/core';
+import { carts, createDb } from '@orderloop/db';
+import { eq } from 'drizzle-orm';
+import { forwardedPrincipal, livePrincipal } from '../principal';
+
+export const CART_AGENT_PATH = '/agents/cart-agent/';
+
+export async function cartGate(env: Env, request: Request): Promise<Response | undefined> {
+  const id = decodeURIComponent(
+    new URL(request.url).pathname.slice(CART_AGENT_PATH.length).split('/')[0] ?? '',
+  );
+  const signed = await forwardedPrincipal(env, request);
+  const p = signed ? await livePrincipal(env, signed) : null;
+  if (!p) return new Response('Sign in to open this cart.', { status: 401 });
+  if (!atLeast(p.role, 'viewer')) return new Response('Forbidden', { status: 403 });
+  const row = await createDb(env.DB)
+    .select({ id: carts.id })
+    .from(carts)
+    .where(eq(carts.id, id))
+    .get();
+  if (!row) return new Response('Not found', { status: 404 });
+  return undefined;
+}

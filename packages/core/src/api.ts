@@ -4,6 +4,7 @@
  * `EngineRpc` rather than importing engine source.
  */
 
+import type { CartState, CreateCartInput } from './cart';
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
@@ -286,6 +287,12 @@ export interface EngineRpc {
   setPluginEnabled(id: string, enabled: boolean): Promise<Refusable<{ id: string }>>;
   rollbackPlugin(id: string, sha: string): Promise<Refusable<{ id: string; version: string }>>;
   uninstallPlugin(id: string): Promise<Refusable<{ id: string }>>;
+  /** Opens a staff cart, or says why it can't: the flow must price orders, the customer exist. */
+  createCart(
+    input: CreateCartInput,
+  ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  /** A cart as its agent holds it, or null for an id no cart has. */
+  cartSnapshot(id: string): Promise<CartState | null>;
 }
 
 /** What an engine call returns when it may be refused: its value, or why not (to show as it is). */

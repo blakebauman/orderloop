@@ -7,6 +7,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
   type CopilotRequest,
   type CopilotResult,
+  type CreateCartInput,
   type EngineRpc,
   type OrderState,
   type PaymentEvent,
@@ -17,11 +18,12 @@ import {
   type StartOrderOnceInput,
   UCP_PATH,
 } from '@orderloop/core';
-import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
+import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
+import { cartSnapshot, createCart } from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
-import { orderAgent, scopedEnv } from './namespaces';
+import { orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins } from './plugin-host';
@@ -44,10 +46,7 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     if (url.pathname === A2A_PATH) return handleA2A(request, this.env);
     if (url.pathname === UCP_PATH || url.pathname.startsWith(`${UCP_PATH}/`))
       return handleUcp(request, this.env);
-    return (
-      (await routeAgentRequest(request, scopedEnv(this.env))) ??
-      new Response('Not found', { status: 404 })
-    );
+    return routeAgents(request, this.env);
   }
 
   private agent(orderId: string) {
@@ -188,5 +187,13 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     const stub = await plugin(this.env, id, 'serve');
     if (!stub) return new Response('Not found', { status: 404 });
     return stub.fetch(request);
+  }
+
+  createCart(input: CreateCartInput) {
+    return createCart(this.env, input);
+  }
+
+  cartSnapshot(id: string) {
+    return cartSnapshot(this.env, id);
   }
 }

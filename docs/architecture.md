@@ -16,6 +16,7 @@ browser ──► orderloop-web (apps/web, React Router on Workers)
               │                                     ├─ EngineApi      WorkerEntrypoint (RPC)
               ├── /agents/order-agent/:id ─fetch─►  ├─ OrderAgent     Durable Object, one per order
               ├── /agents/assistant-agent/* ─────►  ├─ AssistantAgent Durable Object, one per person
+              ├── /agents/cart-agent/:id ────────►  ├─ CartAgent      Durable Object, one per cart
               └── /a2a (fetch, via OAuth) ───────►  ├─ A2AAgent       Durable Object, one per caller
                                                     ├─ OrderLoop      Workflow, one instance per generation
                                                     ├─ Replenish      Workflow, daily cron
@@ -32,7 +33,7 @@ inbound mail ── Email Routing ──email()───────────
 | `packages/plugin-sdk` (`@orderloop/plugin-sdk`) | What plugins are built with: `definePlugin` (the `PluginRpc` entrypoint), the `pluginContract` suite and `bundlePlugin` for tests; see [Plugins](plugins.md) |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
-| `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
+| `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `CartAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
 | `apps/catalog` (`@orderloop/catalog`) | The product catalog Worker: `CatalogShard`, `CatalogMeta` and `CatalogPublisher` Durable Objects, the publisher, `CatalogApi` |
 | `apps/catalog-edge` (`@orderloop/catalog-edge`) | The public, read-only catalog API: the gateway, the cached `Delivery` entrypoint and the purge queue consumer |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, Commerce page, `/api/v1` |
@@ -721,6 +722,7 @@ Bundle: about 10 KiB gzipped (segmented listings added about 1 KiB to the 9.4 it
 | `ORDER_AGENT` | engine | Durable Object class `OrderAgent` (SQLite, migration tag `v1`) |
 | `ASSISTANT_AGENT` | engine | Durable Object class `AssistantAgent` (SQLite, migration tag `v2`) |
 | `A2A_AGENT` | engine | Durable Object class `A2AAgent` (SQLite, migration tag `v3`) |
+| `CART_AGENT` | engine | Durable Object class `CartAgent` (SQLite, migration tag `v5`) |
 | `ORDER_LOOP` | engine | Workflow `orderloop-order`, class `OrderLoop`, `limits.steps: 10000` |
 | `REPLENISH` | engine | Workflow `orderloop-replenish`, class `Replenish`, schedule `0 6 * * *` |
 | `DB` | both | D1 `orderloop`, migrations in `packages/db/migrations` |
@@ -868,12 +870,13 @@ the `documents` table (see [Data model](data-model.md#r2-documents)).
 
 ## Where state lives
 
-Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `orderAgent` and `a2aAgent` for stubs, and `scopedEnv` for `routeAgentRequest`, which looks namespaces up on the `env` it is given. They put each namespace in the deployment's jurisdiction (`DATA_JURISDICTION`); an object reached without it is a different, empty one. Never call `env.ORDER_AGENT.getByName` and the like directly: `tests/namespaces.test.ts` fails if engine source does. See [Data residency](data-model.md#data-residency).
+Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `orderAgent`, `a2aAgent` and `cartAgent` for stubs, and `scopedEnv` for `routeAgentRequest`, which looks namespaces up on the `env` it is given. They put each namespace in the deployment's jurisdiction (`DATA_JURISDICTION`); an object reached without it is a different, empty one. Never call `env.ORDER_AGENT.getByName` and the like directly: `tests/namespaces.test.ts` fails if engine source does. See [Data residency](data-model.md#data-residency).
 
 | State | Owner |
 |---|---|
 | Live run state of one order (nodes, edges, waits, vars, timeline) | Its `OrderAgent` |
 | A person's assistant conversation | Their `AssistantAgent` |
+| A cart's lines, quote, who has it open and its chat | Its `CartAgent`; the Carts list reads the `carts` row it writes |
 | Durable progress (memoized step results, sleeps, waits) | Its `OrderLoop` instance |
 | Order index for lists and filters (`orders` row) | D1, written by the agent's `syncIndex` |
 | Flows, versions, approvals, back office, webhook outbox, email intake log | D1 |
@@ -884,6 +887,34 @@ Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `order
 | Published listing cards and key to uid entries | KV (`CARDS`) |
 | Who is listed in each category (members, terms, numbers) | `ListingIndexer`, one per channel, category and listing segment |
 | Cache tags awaiting a purge; listing changes awaiting an indexer | The `orderloop-catalog-purge` and `orderloop-catalog-changes` queues |
+
+## Carts
+
+A cart (`packages/core/src/cart.ts`) is lines several people build together before they become an
+order. Each lives in a `CartAgent` (`apps/engine/src/cart/agent.ts`), opened by
+`EngineRpc.createCart` (`apps/engine/src/cart/carts.ts`) for a flow that prices orders (one with a
+`commerce.price` step) and an optional customer. The agent syncs `CartState`: the cart, who has it
+open (`members`, from the live connections) and the newest 50 chat messages (`CART_CHAT_BROADCAST`;
+the rest is in its SQL, paged by `history`).
+
+- **Pricing.** Nobody sets a price. After each op that changes lines or promo codes the agent
+  prices the cart with the flow's pricing nodes through `quoteCheckout`, exactly as a UCP checkout
+  is priced, for the cart's customer (`DraftExtra` in `apps/engine/src/ucp/quote.ts`) with its codes in
+  `meta.promoCodes`. A quote that finishes after the cart changed again is dropped, and a cart is
+  ready only when its quote is for its current `version` and found no errors (`cartReadyProblem`).
+- **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
+  (0 removes), remove, clear, promo codes, and, for staff, lock, unlock and rename. Staff need
+  `viewer` to read and `operator` to edit.
+- **Submitting** (`submitAs`, operator) holds the cart locked, without bumping its version, while
+  `startOrderOnce` starts an order of the cart's flow keyed `cart:<id>` (channel `manual`,
+  `externalId` the cart id, lines from the quote, `meta.cart` and `meta.promoCodes`), then marks it
+  `submitted` with the order id. Approvals happen in that order's flow.
+- **The socket.** A cart's socket sends the whole cart as it opens, so `cartGate`
+  (`apps/engine/src/cart/gate.ts`), run by `routeAgents` (`apps/engine/src/agent-routes.ts`)
+  before the request reaches the object, refuses one without a signed principal for that cart's
+  path and a live sign-in (`401`), below viewer (`403`), or for a cart the `carts` table doesn't
+  have (`404`). Each call re-reads the person with `livePrincipal`. Chat messages are posted as
+  the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
 
 ## The assistant
 

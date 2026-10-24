@@ -202,9 +202,10 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
 export function cartReadyProblem(cart: Cart): string | null {
   if (isFinalCart(cart)) return `The cart is ${cart.status}.`;
   if (!cart.lines.length) return 'Add at least one line.';
-  if (!isQuoteCurrent(cart)) return 'The cart is being priced.';
+  if (cart.quotedVersion !== cart.version) return 'The cart is being priced.';
   const error = cart.issues.find((i) => i.kind === 'error');
-  return error ? error.content : null;
+  if (error) return error.content;
+  return cart.quote ? null : 'The cart could not be priced.';
 }
 
 /** Ends the cart: `submitted` (staff, into an order) or `returned` (external, to the buyer's system). */
@@ -240,3 +241,28 @@ export function chatBody(raw: string): string | null {
 /** Only a message's author changes or deletes it. */
 export const canChangeMessage = (m: Pick<CartChatMessage, 'authorId'>, actor: CartActor) =>
   m.authorId === actor.id;
+
+/** Someone with the cart open now. */
+export type CartMember = { id: string; name: string; kind: CartActor['kind'] };
+
+/** Chat messages the synced state carries; older ones are read a page at a time. */
+export const CART_CHAT_BROADCAST = 50;
+
+/** What a cart's agent syncs to everyone who has it open. */
+export type CartState = {
+  cart: Cart | null;
+  members: CartMember[];
+  /** The newest `CART_CHAT_BROADCAST` messages, oldest first. */
+  chat: CartChatMessage[];
+};
+
+export const EMPTY_CART_STATE: CartState = { cart: null, members: [], chat: [] };
+
+/** What a staff cart starts with; the engine checks the flow and the customer. */
+export type CreateCartInput = {
+  title: string;
+  flowId: string;
+  customerId?: string | null;
+  /** The principal id creating it, set by the caller's server. */
+  createdBy: string;
+};

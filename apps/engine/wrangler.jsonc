@@ -32,6 +32,8 @@
       { "name": "ASSISTANT_AGENT", "class_name": "AssistantAgent" },
       // A2A tasks: one per caller (an API token, or a person through an OAuth grant).
       { "name": "A2A_AGENT", "class_name": "A2AAgent" },
+      // A cart several people build together: lines, quote, presence and chat (src/cart/agent.ts).
+      { "name": "CART_AGENT", "class_name": "CartAgent" },
       // A sandboxed plugin's own SQLite database, one per plugin id (src/plugin-host.ts).
       { "name": "PLUGIN_STORAGE", "class_name": "PluginStorage" }
     ]
@@ -40,7 +42,8 @@
     { "tag": "v1", "new_sqlite_classes": ["OrderAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] },
     { "tag": "v3", "new_sqlite_classes": ["A2AAgent"] },
-    { "tag": "v4", "new_sqlite_classes": ["PluginStorage"] }
+    { "tag": "v4", "new_sqlite_classes": ["PluginStorage"] },
+    { "tag": "v5", "new_sqlite_classes": ["CartAgent"] }
   ],
   // Loads sandboxed plugins as Dynamic Workers (Worker Loader, open beta; Workers Paid). Unused
   // until a deployment installs a plugin with runtime "sandboxed".

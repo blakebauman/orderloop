@@ -195,7 +195,8 @@ describe('normalizePromoCode', () => {
 describe('cart readiness', () => {
   it('needs lines and a quote for this version without errors', () => {
     expect(cartReadyProblem(cart({ lines: [] }))).toMatch(/line/);
-    expect(cartReadyProblem(cart())).toMatch(/priced/);
+    expect(cartReadyProblem(cart())).toBe('The cart is being priced.');
+    expect(cartReadyProblem(cart({ quotedVersion: 1 }))).toBe('The cart could not be priced.');
     const priced = cart({ quote, quotedVersion: 1 });
     expect(isQuoteCurrent(priced)).toBe(true);
     expect(cartReadyProblem(priced)).toBeNull();
