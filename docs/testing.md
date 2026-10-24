@@ -183,10 +183,11 @@ sandboxed plugins** step does) and publishes the flows the tests run. The tests:
 | `limitsFor` | The per-call caps by kind (200 ms and 20 subrequests for a call, 1,000 ms for a page), with a manifest's `limits` lowering but never raising them |
 | `egressRefusal` | Loopback, link-local, CGNAT, unique-local, IPv4-mapped IPv6 (both spellings), the metadata hostname, wildcard-DNS names and URLs with credentials are refused even when `egress` would allow them |
 
-Local workerd does not enforce Worker Loader's `limits` and does not deliver a Dynamic Worker's tail
-events to its `tails` handler, so neither is exercised through the loader: `limitsFor` is tested as a
-function, and the scrubbing test calls the `PluginTail` entrypoint's `tail()` with hand-made trace
-items, as the runtime would. Egress is tested through the loader, because `globalOutbound` is
+Local workerd does not enforce Worker Loader's `limits`, so `limitsFor` is tested as a function. Not
+every local workerd delivers a Dynamic Worker's tail events to its `tails` handler (CI's does, so a
+thrown attempt's exception lands in `plugin_errors` there), so the scrubbing test also calls the
+`PluginTail` entrypoint's `tail()` with hand-made trace items, as the runtime would, and asserts
+every row is scrubbed. Egress is tested through the loader, because `globalOutbound` is
 enforced locally.
 
 ## Catalog: shards and publishing in workerd
