@@ -65,7 +65,7 @@ describes them.
 9. **Repo-level docs.** `README.md`, `CLAUDE.md` and `ROADMAP.md` describe the same system; if the
    change falsifies them, fix them too (a shipped roadmap item moves out of the roadmap).
 10. **Build:** `pnpm docs:build`. It fails on bad frontmatter, an unknown sidebar slug, an MDX
-   syntax error, a broken import from `@orderloop/core`, and (via `scripts/check-links.mjs`) any
+   syntax error, a broken import from `@orderloop/core`, and (via `apps/docs/scripts/check-links.mjs`) any
    internal link or `#anchor` that doesn't resolve. It does not catch a wrong claim.
 
 ## Things that bite

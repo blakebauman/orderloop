@@ -109,5 +109,11 @@ git -C "$repo" worktree add -q "$TMPDIR/wt" -b feat/y
 check "a worktree on a branch says so" "worktree: yes" "$(echo '{}' | CLAUDE_PROJECT_DIR=$TMPDIR/wt "$hooks/session-context.sh")"
 check "and doesn't warn" "" "$(echo '{}' | CLAUDE_PROJECT_DIR=$TMPDIR/wt "$hooks/session-context.sh" | grep -o 'git worktree add')"
 
+# A PATH with every system tool but jq.
+mkdir -p "$TMPDIR/nojq"
+for f in /bin/* /usr/bin/*; do [ "${f##*/}" = jq ] || ln -sf "$f" "$TMPDIR/nojq/${f##*/}"; done
+check "without jq the session start says the hooks are off" "jq is not installed" "$(echo '{}' | PATH="$TMPDIR/nojq" /bin/bash "$hooks/session-context.sh")"
+check "and the guards stay silent rather than erroring" "" "$(echo '{"tool_input":{"command":"pnpm deploy"}}' | PATH="$TMPDIR/nojq" /bin/bash "$hooks/guard-bash.sh" 2>&1)"
+
 rm -rf "$TMPDIR"
 exit $fail

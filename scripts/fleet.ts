@@ -712,7 +712,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1 (see the header)',
+        'usage: fleet.ts render|matrix|secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

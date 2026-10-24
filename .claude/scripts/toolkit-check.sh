@@ -8,6 +8,7 @@
 #   - settings.json: every hook command is an executable script that parses (bash -n)
 #   - the rules and surface maps: two columns where expected, and every regex compiles
 set -u
+command -v jq >/dev/null 2>&1 || { echo "FAIL jq is not installed: the hooks need it (and do nothing without it). Install it (brew install jq) and re-run."; exit 1; }
 root=$(cd "$(dirname "$0")/../.." && pwd)
 kit="$root/.claude"
 fail=0
