@@ -65,19 +65,41 @@ const person = (role: Principal['role'], email: string): Principal => ({
 });
 
 let n = 0;
-/** One JSON-RPC call to /mcp as the web Worker forwards it (2025-06-18 stateless lane). */
-async function rpc(p: Principal | null, method: string, params: Record<string, unknown> = {}) {
+/** The revisions served: 2026-07-28 (envelope, no handshake) and the 2025 ones, statelessly. */
+type Revision = '2026-07-28' | '2025-11-25' | '2025-06-18';
+
+/** One JSON-RPC call to /mcp as the web Worker forwards it. */
+async function rpc(
+  p: Principal | null,
+  method: string,
+  params: Record<string, unknown> = {},
+  revision: Revision = '2025-06-18',
+) {
   const headers = new Headers({
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
-    'mcp-protocol-version': '2025-06-18',
+    'mcp-protocol-version': revision,
   });
+  let body = params;
+  if (revision === '2026-07-28') {
+    // Each request names itself in headers and carries the client in `_meta`.
+    headers.set('mcp-method', method);
+    if (typeof params.name === 'string') headers.set('mcp-name', params.name);
+    body = {
+      ...params,
+      _meta: {
+        'io.modelcontextprotocol/protocolVersion': revision,
+        'io.modelcontextprotocol/clientCapabilities': {},
+        'io.modelcontextprotocol/clientInfo': { name: 'test', version: '0' },
+      },
+    };
+  }
   if (p) headers.set(PRINCIPAL_HEADER, await signed(p, '/mcp'));
   const res = await worker.fetch(
     new Request('https://engine/mcp', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method, params }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method, params: body }),
     }),
     env,
   );
@@ -95,8 +117,13 @@ async function rpc(p: Principal | null, method: string, params: Record<string, u
   return { status: 200, body: json as { result?: Record<string, unknown>; error?: unknown } };
 }
 
-const call = async (p: Principal, name: string, args: Record<string, unknown>) => {
-  const r = await rpc(p, 'tools/call', { name, arguments: args });
+const call = async (
+  p: Principal,
+  name: string,
+  args: Record<string, unknown>,
+  revision?: Revision,
+) => {
+  const r = await rpc(p, 'tools/call', { name, arguments: args }, revision);
   return (r.body as { result: Record<string, unknown> }).result as {
     content: { text: string }[];
     structuredContent?: Record<string, unknown>;
@@ -107,6 +134,33 @@ const call = async (p: Principal, name: string, args: Record<string, unknown>) =
 describe('MCP', () => {
   it('refuses a request the web Worker did not forward', async () => {
     expect((await rpc(null, 'tools/list')).status).toBe(401);
+  });
+
+  it('serves 2026-07-28 without a handshake, and the 2025 revisions statelessly', async () => {
+    const viewer = person('viewer', 'vic@example.com');
+    const discovered = await rpc(viewer, 'server/discover', {}, '2026-07-28');
+    expect(discovered.status).toBe(200);
+    expect(discovered.body).toMatchObject({
+      result: {
+        resultType: 'complete',
+        capabilities: { tools: {} },
+      },
+    });
+    for (const revision of ['2026-07-28', '2025-11-25', '2025-06-18'] as const) {
+      const listed = await rpc(viewer, 'tools/list', {}, revision);
+      expect(listed.status, revision).toBe(200);
+      expect((listed.body as { result: { tools: unknown[] } }).result.tools, revision).toHaveLength(
+        7,
+      );
+    }
+    const res = await worker.fetch(
+      new Request('https://engine/mcp', {
+        headers: { [PRINCIPAL_HEADER]: await signed(viewer, '/mcp') },
+      }),
+      env,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
   });
 
   it('lists only the tools the role can use, with hints', async () => {
@@ -142,6 +196,8 @@ describe('MCP', () => {
     const found = await call(viewer, 'get_order', { orderId });
     expect(found.isError).toBeFalsy();
     expect(found.structuredContent).toMatchObject({ id: orderId });
+    const modern = await call(viewer, 'get_order', { orderId }, '2026-07-28');
+    expect(modern).toMatchObject({ resultType: 'complete', structuredContent: { id: orderId } });
 
     const assessed = await call(viewer, 'assess_order', {
       orderId,

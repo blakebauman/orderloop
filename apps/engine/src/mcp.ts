@@ -11,9 +11,8 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { McpServer } from '@modelcontextprotocol/server';
+import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
-import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
 import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from './assistant/tools';
@@ -113,11 +112,10 @@ function createServer(p: Principal) {
 const handler = createMcpHandler(
   (ctx) => createServer(ctx.authInfo?.extra?.principal as Principal),
   {
-    route: MCP_PATH,
-    // Reached only through the service binding (the engine has no public route), so Host means
-    // nothing here; the web Worker validates Origin before forwarding.
-    allowedOriginHostnames: '*',
-    corsOptions: false,
+    // 2025-era requests (no envelope) get a fresh server each, as 2026-07-28 ones do. The engine
+    // is reached only through the service binding, and the web Worker checks Origin first.
+    legacy: 'stateless',
+    onerror: (err) => console.error('mcp', err),
   },
 );
 
