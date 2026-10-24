@@ -20,6 +20,10 @@
   // A runaway invocation stops at 10 s of CPU (the default is 30 s). Workflow steps, agents and
   // the assistant peak around 100 ms; model calls wait on I/O, which doesn't count.
   "limits": { "cpu_ms": 10000 },
+  // Runs near D1 rather than near the web app that calls it: a Workflow step, a connector or a
+  // request to an agent makes several D1 round trips. Keep it only if D1 latency in
+  // Observability drops; the service binding hop is the cost.
+  "placement": { "mode": "smart" },
   "upload_source_maps": true,
   "durable_objects": {
     "bindings": [
