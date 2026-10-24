@@ -69,10 +69,13 @@ async function open(customerId: string | null = 'cus_northwind') {
 }
 
 /** The response to opening the cart's socket the way the web proxy does, as `principal`. */
-async function upgrade(cartId: string, principal: ProxiedPrincipal | null) {
-  const path = `/agents/cart-agent/${cartId}`;
+async function upgrade(
+  cartId: string,
+  principal: ProxiedPrincipal | null,
+  { signFor, path = `/agents/cart-agent/${cartId}` }: { signFor?: string; path?: string } = {},
+) {
   const headers = new Headers({ Upgrade: 'websocket' });
-  if (principal) headers.set(PRINCIPAL_HEADER, await signed(principal, path));
+  if (principal) headers.set(PRINCIPAL_HEADER, await signed(principal, signFor ?? path));
   return worker.fetch(new Request(`http://engine${path}`, { headers }), env);
 }
 
@@ -87,10 +90,16 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
     (m: { success: boolean; result?: unknown; error?: string }) => void
   >();
   let last: CartState | null = null;
+  let closedWith: number | null = null;
+  ws.addEventListener('close', (e) => {
+    closedWith = e.code;
+  });
+  const errors: string[] = [];
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(String(e.data));
     if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
     if (m.type === 'cf_agent_state') last = m.state as CartState;
+    if (m.type === 'cf_agent_state_error' || m.error) errors.push(String(m.error ?? m.type));
   });
   let n = 0;
   return {
@@ -101,6 +110,9 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
         ws.send(JSON.stringify({ type: 'rpc', id, method, args }));
       }),
     seen: () => last,
+    closed: () => closedWith,
+    errors: () => errors,
+    send: (m: unknown) => ws.send(JSON.stringify(m)),
     close: () => ws.close(),
   };
 }
@@ -162,6 +174,32 @@ describe('the cart socket', () => {
     const signedOut = { ...(await who('operator', 'gone')), session: 'sess_forged' };
     expect((await upgrade(id, signedOut)).status).toBe(401);
     expect((await upgrade('cart_nope', await who('operator', 'ada'))).status).toBe(404);
+    // A principal signed for another path, and a path the SDK still routes to a cart.
+    const ada = await who('operator', 'ada');
+    expect((await upgrade(id, ada, { signFor: '/agents/order-agent/x' })).status).toBe(401);
+    expect((await upgrade(id, null, { path: `//agents/cart-agent/${id}` })).status).toBe(401);
+    expect((await upgrade(id, null, { path: `/agents//cart-agent/${id}` })).status).toBe(401);
+  });
+
+  it('refuses a viewer’s submit and a page writing state, and closes a socket whose sign-in ends', async () => {
+    const id = await open();
+    const vee = await who('viewer', 'vee2');
+    const viewer = await socket(id, vee);
+    expect((await viewer.call('submit')).result).toEqual({
+      ok: false,
+      error: 'This needs the Operator role.',
+    });
+    expect((await viewer.call('cancel')).result).toMatchObject({ ok: false });
+    viewer.send({ type: 'cf_agent_state', state: { cart: null, members: [], chat: [] } });
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await state(id)).cart?.id).toBe(id);
+
+    // Signed out while the page listens without calling anything: the next check closes it.
+    await db().delete(sessions).where(eq(sessions.tokenHash, vee.session!));
+    await cart(id).recheckConnections();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(viewer.closed()).toBe(4401);
+    expect((await state(id)).members.map((m) => m.name)).not.toContain('vee2');
   });
 
   it('lets a viewer read but not edit, and shows everyone who has it open', async () => {

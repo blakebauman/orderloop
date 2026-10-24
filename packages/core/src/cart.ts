@@ -124,9 +124,17 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
   const fail = (error: string): CartOpResult => ({ ok: false, error });
   if (isFinalCart(cart)) return fail(`The cart is ${cart.status}.`);
   if (!canEditCart(cart, actor)) return fail("You can't change this cart.");
+  // A change that doesn't touch lines or codes keeps a current quote current.
   const done = (patch: Partial<Cart>, reprice: boolean): CartOpResult => ({
     ok: true,
-    cart: { ...cart, ...patch, updatedAt: now, version: cart.version + 1 },
+    cart: {
+      ...cart,
+      ...patch,
+      updatedAt: now,
+      version: cart.version + 1,
+      quotedVersion:
+        !reprice && cart.quotedVersion === cart.version ? cart.version + 1 : cart.quotedVersion,
+    },
     reprice,
   });
 

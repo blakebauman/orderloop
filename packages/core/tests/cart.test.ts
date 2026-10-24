@@ -156,6 +156,19 @@ describe('applyCartOp', () => {
     expect(apply(c, { op: 'add', sku: 'X', qty: 1 }, guest).cart.lines).toHaveLength(2);
   });
 
+  it('keeps a current quote current across lock, unlock and rename', () => {
+    const priced = cart({ quote, quotedVersion: 1 });
+    const locked = apply(priced, { op: 'lock' }).cart;
+    expect(isQuoteCurrent(locked)).toBe(true);
+    expect(cartReadyProblem(locked)).toBeNull();
+    expect(isQuoteCurrent(apply(locked, { op: 'unlock' }).cart)).toBe(true);
+    expect(isQuoteCurrent(apply(priced, { op: 'rename', title: 'New' }).cart)).toBe(true);
+    // A stale quote stays stale.
+    expect(isQuoteCurrent(apply(cart({ quote, quotedVersion: 0 }), { op: 'lock' }).cart)).toBe(
+      false,
+    );
+  });
+
   it('renames without repricing', () => {
     const r = apply(cart(), { op: 'rename', title: '  Office chairs ' });
     expect(r.cart.title).toBe('Office chairs');

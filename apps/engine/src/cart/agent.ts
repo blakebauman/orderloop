@@ -168,13 +168,14 @@ export class CartAgent extends Agent<Env, CartState> {
     if (c.external) return { ok: false, error: 'An external cart goes back to its buyer.' };
     const problem = cartReadyProblem(c);
     if (problem) return { ok: false, error: problem };
-    const flow = await loadFlowVersion(this.env, c.flowId);
-    if (!flow) return { ok: false, error: 'The cart’s flow is gone.' };
     const q = c.quote!;
     const held = c;
+    // Held before the first await, so no op or cancel lands between the check and the start.
     this.submitting = true;
     this.setState({ ...this.state, cart: { ...c, status: 'locked' } });
     try {
+      const flow = await loadFlowVersion(this.env, c.flowId);
+      if (!flow) throw new Error('The cart’s flow is gone.');
       const started = await startOrderOnce(this.env, {
         flowId: flow.id,
         idempotencyKey: `cart:${c.id}`,
@@ -281,10 +282,36 @@ export class CartAgent extends Agent<Env, CartState> {
       : null;
     connection.setState({ principal, member });
     this.syncMembers();
+    await this.keepChecking();
   }
 
   override async onClose(connection: Connection) {
     this.syncMembers(connection.id);
+  }
+
+  /** How often open sockets are checked against live sign-ins. */
+  private static RECHECK_S = 30;
+
+  /**
+   * Closes every socket whose person can no longer read the cart (signed out, disabled, a revoked
+   * token, a role below viewer): broadcasts reach a socket without it calling anything, so a call's
+   * own check isn't enough. Runs on a schedule while anyone has the cart open.
+   */
+  async recheckConnections() {
+    let open = 0;
+    for (const c of this.getConnections<ConnectionState>()) {
+      const stored = c.state?.principal ?? null;
+      const p = stored ? await livePrincipal(this.env, stored) : null;
+      if (!p || !atLeast(p.role, 'viewer')) c.close(4401, 'Session ended');
+      else open++;
+    }
+    this.syncMembers();
+    if (open) await this.schedule(CartAgent.RECHECK_S, 'recheckConnections');
+  }
+
+  private async keepChecking() {
+    if (!this.getSchedules().some((s) => s.callback === 'recheckConnections'))
+      await this.schedule(CartAgent.RECHECK_S, 'recheckConnections');
   }
 
   /** Everyone with the cart open, once each, from the live connections. */

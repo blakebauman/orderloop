@@ -905,7 +905,9 @@ the rest is in its SQL, paged by `history`).
 - **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
   (0 removes), remove, clear, promo codes, and, for staff, lock, unlock and rename. Staff need
   `viewer` to read and `operator` to edit.
-- **Submitting** (`submitAs`, operator) holds the cart locked, without bumping its version, while
+- **Lock, unlock and rename** keep a current quote current (they bump the version and the quoted
+  version together), so a locked cart can be submitted.
+- **Submitting** (`submitAs`, operator) holds the cart locked before its first await, without bumping its version, while
   `startOrderOnce` starts an order of the cart's flow keyed `cart:<id>` (channel `manual`,
   `externalId` the cart id, lines from the quote, `meta.cart` and `meta.promoCodes`), then marks it
   `submitted` with the order id. Approvals happen in that order's flow.
@@ -913,7 +915,11 @@ the rest is in its SQL, paged by `history`).
   (`apps/engine/src/cart/gate.ts`), run by `routeAgents` (`apps/engine/src/agent-routes.ts`)
   before the request reaches the object, refuses one without a signed principal for that cart's
   path and a live sign-in (`401`), below viewer (`403`), or for a cart the `carts` table doesn't
-  have (`404`). Each call re-reads the person with `livePrincipal`. Chat messages are posted as
+  have (`404`). The gate keys on the route the SDK matched (`CART_AGENT` and its name), not the path's
+  spelling, so `//agents/cart-agent/…` is checked too. Each call re-reads the person with
+  `livePrincipal`, and since broadcasts reach a socket that never calls, `recheckConnections` runs
+  every 30 seconds while anyone has the cart open and closes (`4401`) each socket whose person can
+  no longer read it. Chat messages are posted as
   the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
 
 ## The assistant
