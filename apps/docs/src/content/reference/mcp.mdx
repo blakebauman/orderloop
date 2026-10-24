@@ -12,8 +12,8 @@ read orders, and, with the right role, decide approvals or cancel orders. Each p
 what their role allows.
 
 The server is stateless: every request is answered by a fresh server that lists only the tools
-the caller's role can use. It speaks streamable HTTP, the draft 2026-07-28 revision of the
-protocol and the 2025 stateless lane. Another agent that speaks Agent2Agent rather than MCP
+the caller's role can use. It speaks streamable HTTP: the 2026-07-28 revision of the protocol,
+and the 2025 revisions (2025-11-25 and earlier) served the same stateless way. Another agent that speaks Agent2Agent rather than MCP
 connects at `/a2a`; see [A2A endpoint](/reference/a2a/). AI shopping platforms that buy from you use a separate endpoint and credential; see [Agentic checkout (UCP)](/reference/ucp/).
 
 ## Connecting
