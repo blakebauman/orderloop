@@ -66,3 +66,8 @@ they can help in the chat. When the buyer is done, **Return cart to your system*
 priced lines back to their purchasing system, which raises the purchase order from them, and
 the cart reads **Returned to the buyer**. A cart the buyer never sends back closes on its own
 when the session expires.
+
+Inside the purchasing system's frame, the cart keeps its buyer signed in with a cookie kept for
+that system's site alone (a partitioned third-party cookie). A browser that blocks third-party
+cookies outright, as Safari does by default, doesn't keep it, so there the buyer can't use the
+cart in a frame; the purchasing system has to open it in its own window or tab.

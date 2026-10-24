@@ -7,7 +7,9 @@
 
 import { env } from 'cloudflare:workers';
 import { type CartGuest, signCartGuestSession, verifyCartGuestSession } from '@orderloop/core';
+import { data } from 'react-router';
 import { cookie } from './auth.server';
+import { ANY_HTTPS_FRAMER, EMBED_HEADER } from './csp';
 import { principalKey } from './principal.server';
 
 const COOKIE_RE = /^cart_[a-z0-9]+$/;
@@ -34,4 +36,19 @@ export function cartGuest(request: Request, cartId: string): Promise<CartGuest |
     cookie(request, cookieName(cartId)),
     cartId,
   );
+}
+
+/**
+ * Why a buyer can't have a cart page, thrown from its loader and shown by `CartRefusal`. The
+ * buyer's system usually frames these pages, so the refusal may be framed by any https page (it
+ * holds nothing but the message); otherwise they'd see a blocked frame instead of the reason.
+ */
+export function cartRefusal(message: string, status: number) {
+  return data(message, {
+    status,
+    headers: {
+      'cache-control': 'no-store',
+      [EMBED_HEADER]: JSON.stringify({ frameAncestors: [ANY_HTTPS_FRAMER] }),
+    },
+  });
 }

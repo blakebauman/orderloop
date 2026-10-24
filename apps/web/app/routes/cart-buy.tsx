@@ -6,10 +6,12 @@
  * to the cart's return URL (`EMBED_HEADER`, folded into the CSP by entry.server.tsx).
  */
 
+import { isCartExpired, isFinalCart } from '@orderloop/core';
 import { products } from '@orderloop/db';
 import { data, type ShouldRevalidateFunctionArgs, useLoaderData } from 'react-router';
+import { CartRefusal } from '~/components/cart-refusal';
 import { CartView } from '~/components/cart-view';
-import { cartGuest } from '~/lib/cart-guest.server';
+import { cartGuest, cartRefusal } from '~/lib/cart-guest.server';
 import { EMBED_HEADER } from '~/lib/csp';
 import { db, engine } from '~/lib/env.server';
 import { customerNames } from '~/lib/orders.server';
@@ -21,23 +23,27 @@ export const meta = ({ loaderData: d }: Route.MetaArgs) => [
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const guest = await cartGuest(request, params.cartId);
-  if (!guest)
-    throw data('Open this cart from your purchasing system.', {
-      status: 401,
-      headers: { 'cache-control': 'no-store' },
-    });
+  if (!guest) throw cartRefusal('Open this cart from your purchasing system.', 401);
   const snapshot = await engine().cartSnapshot(params.cartId);
-  const external = snapshot?.cart?.external;
-  if (!snapshot?.cart || !external) throw data('Cart not found', { status: 404 });
+  const cart = snapshot?.cart;
+  const external = cart?.external;
+  if (!snapshot || !cart || !external) throw cartRefusal('This cart doesn’t exist.', 404);
+  // The cart's socket refuses the buyer once it closes (the engine's cartGate); say so here
+  // rather than render a cart that can't connect. A returned cart stays, to post it again.
+  if (cart.status !== 'returned' && (isFinalCart(cart) || isCartExpired(cart, Date.now())))
+    throw cartRefusal(
+      'This cart has closed. Go back to your purchasing system and open the catalog again.',
+      410,
+    );
   const [names, catalog] = await Promise.all([
-    customerNames([snapshot.cart.customerId]),
+    customerNames([cart.customerId]),
     db().select({ sku: products.sku, name: products.name }).from(products).orderBy(products.sku),
   ]);
   return data(
     {
       snapshot,
       guest,
-      customerName: snapshot.cart.customerId ? (names[snapshot.cart.customerId] ?? null) : null,
+      customerName: cart.customerId ? (names[cart.customerId] ?? null) : null,
       products: catalog,
     },
     {
@@ -52,9 +58,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   );
 }
 
-export function headers({ loaderHeaders }: Route.HeadersArgs) {
-  return loaderHeaders;
+export function headers({ errorHeaders, loaderHeaders }: Route.HeadersArgs) {
+  return errorHeaders ?? loaderHeaders;
 }
+
+export const ErrorBoundary = CartRefusal;
 
 export function shouldRevalidate({ currentParams, nextParams }: ShouldRevalidateFunctionArgs) {
   return currentParams.cartId !== nextParams.cartId;

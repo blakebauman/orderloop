@@ -179,8 +179,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const caller = await principal(request);
     // An external cart's buyer, on their own cart's socket only, with no staff sign-in.
     if (!caller && cart) {
-      const cartId = decodeURIComponent(url.pathname.split('/')[3] ?? '');
-      const guest = await cartGuest(request, cartId);
+      // The raw segment: a cart id has nothing to decode, and cartGuest refuses anything else
+      // (decoding a malformed escape would throw before the refusal).
+      const guest = await cartGuest(request, url.pathname.split('/')[3] ?? '');
       if (!guest) return new Response('Unauthorized', { status: 401 });
       const headers = new Headers(request.headers);
       headers.delete('cookie');

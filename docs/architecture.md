@@ -964,6 +964,17 @@ proxied with the cookie's guest signed for the path (`setGuestHeader`). Sending 
 posts the fields from the page itself, in the same window, with a button if the post doesn't
 start.
 
+The return URL goes into `form-action` as its origin and path (`parseEmbed` in
+`apps/web/app/lib/csp.ts`; CSP ignores the query), with `;` `,` and `'` in the path
+percent-encoded, which CSP decodes before matching, so a URL like `/punchout;jsessionid=…` still
+admits the post. Both routes' refusals (`cartRefusal` in `apps/web/app/lib/cart-guest.server.ts`:
+a used or expired start link `410`, no cookie `401`, a cart that has closed `410`, which the page
+checks as `cartGate` does) are shown by their own `CartRefusal` boundary and may be framed by any
+https page (`frame-ancestors https:`): they carry only the message, and the buyer would otherwise
+see a blocked frame. Framed, the cookie is a partitioned third-party cookie (CHIPS), so a browser
+that blocks third-party cookies outright (Safari's default) can't keep the buyer on a framed cart;
+the buyer's system has to open it top-level there.
+
 ## The assistant
 
 `AssistantAgent` (`apps/engine/src/assistant/agent.ts`) is an `AIChatAgent` from

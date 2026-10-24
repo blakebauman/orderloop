@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { contentSecurityPolicy, parseEmbed, withSecurityHeaders } from '../app/lib/csp';
+import {
+  ANY_HTTPS_FRAMER,
+  contentSecurityPolicy,
+  parseEmbed,
+  withSecurityHeaders,
+} from '../app/lib/csp';
 
 const directive = (csp: string, name: string) =>
   csp.split('; ').find((d) => d.startsWith(`${name} `));
@@ -29,11 +34,50 @@ describe('page CSP', () => {
     const embed = parseEmbed(
       JSON.stringify({
         frameAncestors: ['http://buyer.example', "https://x.example; script-src 'unsafe-inline'"],
-        formAction: ['javascript:alert(1)', 'https://ok.example/a b'],
+        formAction: [
+          'javascript:alert(1)',
+          "https://x.example; script-src 'unsafe-inline'",
+          'https://user:pw@buyer.example/return',
+          // The URL parser lets these into a host; a source can't carry them.
+          'https://a;b.example/return',
+          'https://a,b.example/return',
+          "https://a'b.example/return",
+        ],
       }),
     );
     expect(embed).toEqual({ frameAncestors: [], formAction: [] });
     expect(parseEmbed('not json')).toBeNull();
+  });
+
+  it('keeps a return URL whose path or query holds the policy’s separators', () => {
+    const embed = parseEmbed(
+      JSON.stringify({
+        frameAncestors: [],
+        formAction: [
+          'https://buyer.example/punchout;jsessionid=ABC',
+          'https://buyer.example/ret?ids=1,2;x=3',
+          "https://buyer.example/a,b/it's here",
+        ],
+      }),
+    );
+    // CSP decodes a path before matching and ignores the query, so these still admit the post.
+    expect(embed?.formAction).toEqual([
+      'https://buyer.example/punchout%3Bjsessionid=ABC',
+      'https://buyer.example/ret',
+      'https://buyer.example/a%2Cb/it%27s%20here',
+    ]);
+    const csp = contentSecurityPolicy('n', embed);
+    expect(csp.split('; ')).toHaveLength(10);
+    expect(directive(csp, 'form-action')?.split(' ')).toHaveLength(5);
+  });
+
+  it('lets any https page frame a refusal, and nothing else', () => {
+    const embed = parseEmbed(JSON.stringify({ frameAncestors: [ANY_HTTPS_FRAMER] }));
+    expect(embed).toEqual({ frameAncestors: ['https:'], formAction: [] });
+    expect(directive(contentSecurityPolicy('n', embed), 'frame-ancestors')).toBe(
+      'frame-ancestors https:',
+    );
+    expect(parseEmbed(JSON.stringify({ frameAncestors: 'https:' }))?.frameAncestors).toEqual([]);
   });
 
   it('sends X-Frame-Options only when the page can’t be framed', () => {
