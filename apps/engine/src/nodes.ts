@@ -29,6 +29,7 @@ import {
   ORDER_CHANNEL_LABELS,
   type Order,
   type OrderLine,
+  PROVIDER_MAX_TAX_RATE,
   type PricedBy,
   pickOption,
   policyRulesSchema,
@@ -220,7 +221,7 @@ export const EXECUTORS: Record<string, Exec> = {
     const country = shipToCountry(ctx.order);
     const req = { itemCount: units, country, subtotal: toBase(ctx.order.subtotal, fx) };
     const by = providerOf(config);
-    const { options, source } = await cx.quoteShipping(
+    const { options, source, providerError } = await cx.quoteShipping(
       env,
       rates.data,
       req,
@@ -248,6 +249,9 @@ export const EXECUTORS: Record<string, Exec> = {
       : 'from_order';
     const wanted = ctx.order.shippingOption;
     const chosen = pickOption(offered, select, wanted);
+    // A provider that failed is named in the output and summary, not only in the logs.
+    const fellBack = by && providerError ? { providerError: `${by}: ${providerError}` } : {};
+    const note = by && providerError ? ` (${by} unavailable)` : '';
     if (!chosen)
       return {
         branches: ['unavailable'],
@@ -257,16 +261,24 @@ export const EXECUTORS: Record<string, Exec> = {
           source,
           options: offered,
           wanted: wanted ?? null,
+          ...fellBack,
         },
-        summary: wanted && offered.length ? `“${wanted}” is not offered` : 'No shipping options',
+        summary: `${wanted && offered.length ? `“${wanted}” is not offered` : 'No shipping options'}${note}`,
       };
     const t = computeTotals({ ...ctx.order, shipping: chosen.amount });
     return {
       branches: ['ok'],
       order: { ...t, shippingOption: chosen.id },
-      output: { country: country ?? null, units, source, option: chosen, options: offered },
+      output: {
+        country: country ?? null,
+        units,
+        source,
+        option: chosen,
+        options: offered,
+        ...fellBack,
+      },
       vars: { shippingCarrier: chosen.carrier },
-      summary: `${chosen.title} (${chosen.carrier.toUpperCase()}) · ${chosen.free ? 'free' : cash(chosen.amount, ctx)}`,
+      summary: `${chosen.title} (${chosen.carrier.toUpperCase()}) · ${chosen.free ? 'free' : cash(chosen.amount, ctx)}${note}`,
     };
   },
 
@@ -275,7 +287,8 @@ export const EXECUTORS: Record<string, Exec> = {
     const by = providerOf(config);
     let rate = num(config.rate, 0.08);
     if (by) {
-      const shipping = ctx.order.shipping ?? 0;
+      // What computeTotals will tax: the lines' subtotal and rounded shipping, not stored totals.
+      const { subtotal, shipping } = computeTotals({ ...ctx.order, taxRate: 0 });
       const { amount } = await provide(env, by, {
         surface: 'tax',
         op: 'calculate',
@@ -284,17 +297,16 @@ export const EXECUTORS: Record<string, Exec> = {
         orderId: ctx.order.id,
         config,
         order: ctx.order,
-        input: {
-          subtotal: ctx.order.subtotal,
-          shipping,
-          includeShipping: taxShipping,
-          currency: ctx.order.currency,
-        },
+        input: { subtotal, shipping, includeShipping: taxShipping, currency: ctx.order.currency },
       });
       // Kept as the rate it works out to, so later nodes that recompute totals keep the same tax.
-      const taxable = ctx.order.subtotal + (taxShipping ? shipping : 0);
+      const taxable = subtotal + (taxShipping ? shipping : 0);
       if (amount > 0 && taxable <= 0)
         throw new NonRetryableError(`Tax provider “${by}” charged tax on nothing taxable`);
+      if (amount > taxable * PROVIDER_MAX_TAX_RATE)
+        throw new NonRetryableError(
+          `Tax provider “${by}” charged ${cash(amount, ctx)}, over ${PROVIDER_MAX_TAX_RATE * 100}% of ${cash(taxable, ctx)} taxable`,
+        );
       rate = taxable > 0 ? amount / taxable : 0;
     }
     const t = computeTotals({ ...ctx.order, taxRate: rate, taxShipping });
@@ -570,7 +582,7 @@ export const EXECUTORS: Record<string, Exec> = {
           ? 'Address OK'
           : r.status === 'corrected'
             ? 'Suggested a corrected address'
-            : r.issues.join('; ') || 'Address not usable',
+            : r.issues.join('; ').slice(0, 300) || 'Address not usable',
     };
   },
 
@@ -970,12 +982,13 @@ export const ROLLBACKS: Record<
   'commerce.ship': async (env, orderId, output, stepKey) => {
     const o = output as { shipmentId?: string; shipments?: { shipmentId: string }[] } | undefined;
     const ids = o?.shipments?.map((s) => s.shipmentId) ?? (o?.shipmentId ? [o.shipmentId] : []);
-    // A provider's labels are voided there first; this throws (and is retried) if it can't be.
-    const voided = await cx.voidShipmentLabels(env, orderId, stepKey, ids);
-    for (const id of ids) await cx.cancelShipment(env, id);
+    // A provider's labels are voided there first. One it can't void stays `void_failed` (retried
+    // daily) rather than failing the rollback, so the saga's earlier compensations still run.
+    const { voided, failed, kept } = await cx.voidShipmentLabels(env, orderId, stepKey, ids);
+    for (const id of ids) if (!kept.has(id)) await cx.cancelShipment(env, id);
     if (!ids.length) return 'No shipment to cancel';
     const restored = await cx.restoreShippedStock(env, orderId);
-    return `Cancelled ${ids.join(', ')}${voided ? `, voided ${voided} labels` : ''}${restored ? `, restocked ${restored} lines` : ''}`;
+    return `Cancelled ${ids.join(', ')}${voided ? `, voided ${voided} labels` : ''}${failed ? `; ${failed} labels could not be voided with their provider (retried daily)` : ''}${restored ? `, restocked ${restored} lines` : ''}`;
   },
   'commerce.invoice': async (env, orderId) => {
     // Void first: an invoice Stripe reports paid keeps its account charge, which the payment settles.

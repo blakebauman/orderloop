@@ -32,6 +32,20 @@ type Value<R extends Ask> = Extract<
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** How long a provider may take while pricing a checkout (an agent is waiting), not in a step. */
+const QUOTE_CALL_MS = 10_000;
+
+/** Marks an error as a provider's, so checkout pricing can answer without passing its text on. */
+function fromProvider<E extends Error>(err: E, id: string): E {
+  return Object.assign(err, { provider: id });
+}
+
+/** The provider whose call failed, for an error `provide` threw; null for any other error. */
+export const providerOfError = (err: unknown): string | null =>
+  (err as { provider?: unknown } | null)?.provider === undefined
+    ? null
+    : String((err as { provider: unknown }).provider);
+
 /**
  * Asks plugin `id` to do `req`. A provider that isn't installed, doesn't provide the surface or
  * returns something the contract doesn't allow fails for good; one that is bound but not answering,
@@ -44,26 +58,36 @@ export async function provide<R extends Ask>(
 ): Promise<Value<R>> {
   const what = `${PROVIDER_SURFACE_LABELS[req.surface]} provider “${id}”`;
   const stub = plugin(env, id);
-  if (!stub) throw new NonRetryableError(`${what} is not installed`);
+  if (typeof stub?.provide !== 'function')
+    throw fromProvider(new NonRetryableError(`${what} is not installed`), id);
   const manifest = (await manifests(env)).find((m) => m.id === id);
-  if (!manifest) throw new Error(`${what} is not answering`);
+  if (!manifest) throw fromProvider(new Error(`${what} is not answering`), id);
   if (!manifest.provides.includes(req.surface))
-    throw new NonRetryableError(`${what} doesn't provide ${req.surface}`);
+    throw fromProvider(new NonRetryableError(`${what} doesn't provide ${req.surface}`), id);
   const sent = (
     'order' in req ? { ...req, order: pluginOrder(manifest, req.order as Order) } : req
   ) as ProvideRequest;
-  const result = await withTimeout(stub.provide(sent), `${id} (${req.surface} ${req.op})`);
+  const quoting = req.stepKey.startsWith('quote#');
+  let result: unknown;
+  try {
+    result = await withTimeout(
+      stub.provide(sent),
+      `${id} (${req.surface} ${req.op})`,
+      quoting ? QUOTE_CALL_MS : undefined,
+    );
+  } catch (err) {
+    throw fromProvider(err instanceof Error ? err : new Error(message(err)), id);
+  }
   let outcome: ProvideOutcome<Value<R>>;
   try {
     outcome = checkProvideResult(id, req.surface, req.op, result) as ProvideOutcome<Value<R>>;
   } catch (err) {
     // The same plugin code would return the same thing again: no retry.
-    throw new NonRetryableError(message(err));
+    throw fromProvider(new NonRetryableError(message(err)), id);
   }
   if (outcome.kind === 'fail') {
     const failed = `${what}: ${outcome.message}`;
-    if (outcome.retry) throw new Error(failed);
-    throw new NonRetryableError(failed);
+    throw fromProvider(outcome.retry ? new Error(failed) : new NonRetryableError(failed), id);
   }
   return outcome.value;
 }

@@ -220,9 +220,9 @@ The node keeps its fields, outputs and events; the plugin supplies the part a re
 
 | Node | The provider |
 |---|---|
-| `commerce.shipping_rate` | Quotes shipping options. If it fails or offers nothing, the node falls back to the live carriers, then the configured services |
-| `commerce.ship`, `commerce.return_label` | Creates a label and tracking number per package, and voids it on rollback or cancel |
-| `commerce.tax` | Returns the tax amount |
+| `commerce.shipping_rate` | Quotes shipping options. If it fails or offers nothing, the node falls back to the live carriers, then the configured services, and its summary says the provider was unavailable |
+| `commerce.ship`, `commerce.return_label` | Creates a label and tracking number per package, and voids it on rollback or cancel (a label it can't void is kept and tried again daily) |
+| `commerce.tax` | Returns the tax amount; more than half of what is taxable fails the node |
 | `commerce.address_validate` | Reports `valid`, `corrected` or `invalid` |
 
 OrderLoop still checks what comes back, applies free thresholds and currency conversion, computes

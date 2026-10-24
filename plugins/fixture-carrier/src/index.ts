@@ -5,7 +5,9 @@
  * - Rates: "ground" (3 + 1 per unit) and "air" (15), in the base currency. An order whose
  *   `meta.simulate` is "provider_down" makes it throw, so the node falls back to its static rates.
  * - Labels: one row per order, step key and package, so a retried step labels once; void marks
- *   them voided. `effects` in its tests count the order's labels not voided.
+ *   them voided. `effects` in its tests count the order's labels not voided. For tests, an order
+ *   whose `meta.simulate` is "void_fails" gets labels it can't void (until `fail_void` is
+ *   cleared), and "label_wrong_ref" gets labels for packages it wasn't asked about.
  * - Tax: 10% of what is taxable, for a US ship-to; none elsewhere.
  * - Address: upper-cases the city ("corrected" when that changed it); no postcode is "invalid".
  *
@@ -51,20 +53,38 @@ export default definePlugin<Env>({
 
     'shipping.labels': {
       async create({ req, env, key }) {
+        const simulate = req.order.meta?.simulate;
         const labels = [];
         for (const p of req.input.packages) {
-          const id = labelId(key, p.ref);
-          const tracking = `FX${id.length.toString().padStart(4, '0')}${p.ref.slice(-6)}`;
+          // "label_wrong_ref": answers for a package it wasn't asked about.
+          const ref = simulate === 'label_wrong_ref' ? `${p.ref}_other` : p.ref;
+          const id = labelId(key, ref);
+          const tracking = `FX${id.length.toString().padStart(4, '0')}${ref.slice(-6)}`;
           await env.DB.prepare(
-            'INSERT OR IGNORE INTO labels (id, order_id, step_key, ref, kind, tracking, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT OR IGNORE INTO labels (id, order_id, step_key, ref, kind, tracking, fail_void, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           )
-            .bind(id, req.orderId, req.stepKey, p.ref, req.input.kind, tracking, Date.now())
+            .bind(
+              id,
+              req.orderId,
+              req.stepKey,
+              ref,
+              req.input.kind,
+              tracking,
+              simulate === 'void_fails' ? 1 : 0,
+              Date.now(),
+            )
             .run();
-          labels.push({ ref: p.ref, id, tracking, carrier: 'fixture' });
+          labels.push({ ref, id, tracking, carrier: 'fixture' });
         }
         return { labels };
       },
-      async void({ req, env }) {
+      async void({ req, env, fail }) {
+        for (const l of req.input.labels) {
+          const row = await env.DB.prepare('SELECT fail_void FROM labels WHERE id = ?')
+            .bind(l.id)
+            .first<{ fail_void: number }>();
+          if (row?.fail_void) return fail('the carrier refused the void', { retry: true });
+        }
         for (const l of req.input.labels)
           await env.DB.prepare('UPDATE labels SET voided = 1 WHERE id = ?').bind(l.id).run();
         return { summary: `Voided ${req.input.labels.length}` };

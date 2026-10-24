@@ -210,10 +210,10 @@ The choice is part of the published flow version, so a replay calls the same pro
 
 | Surface | Nodes | Ops (`ProvideRequest`) | The plugin returns (`PROVIDE_RESULT_SCHEMAS`) | The engine still |
 |---|---|---|---|---|
-| `shipping.rates` | `commerce.shipping_rate` | `quote` `{ itemCount, country?, subtotal, currency }` (base currency) | `{ options: [{ id, amount, title?, carrier?, minDays?, maxDays? }] }` (at most 50), in the base currency | Checks each option as a live carrier's (`parseCarrierQuote`, ids prefixed with the plugin id), applies the free threshold, converts, picks and totals. A provider that fails or offers nothing falls back to the live carriers, then the static services (`source` `provider`, `live` or `static`) |
-| `shipping.labels` | `commerce.ship`, `commerce.return_label` | `create` `{ kind: 'shipment' \| 'return', carrier, packages: [{ ref, locationId, lines }] }`; `void` `{ labels: [{ ref, id }] }` | `create`: `{ labels: [{ ref, id, tracking, carrier?, labelUrl? }] }`, one per package (`labelUrl` https only); `void`: `{ summary? }` | Writes the shipment rows (with `provider` and `external_id`, migration `0045`), consumes stock, sets `vars.tracking`, emits `order.shipped`. A package with no label fails the node for good, after voiding what came back |
-| `tax` | `commerce.tax` | `calculate` `{ subtotal, shipping, includeShipping, currency }` (the order's currency) | `{ amount }` | Stores the rate the amount works out to (`amount ÷ taxable`), so nodes that total the order again keep the same tax |
-| `address` | `commerce.address_validate` | `validate` `{ address }` (`meta.shipTo`) | `{ status: 'valid' \| 'corrected' \| 'invalid', address, issues }` | Takes the branch and sets `vars.suggestedAddress` when corrected |
+| `shipping.rates` | `commerce.shipping_rate` | `quote` `{ itemCount, country?, subtotal, currency }` (base currency) | `{ options: [{ id, amount, title?, carrier?, minDays?, maxDays? }] }` (at most 50), in the base currency | Checks each option as a live carrier's (`parseCarrierQuote`, ids prefixed with the plugin id), drops any over `PROVIDER_MAX_RATE`, applies the free threshold, converts, picks and totals. A provider that fails or offers nothing falls back to the live carriers, then the static services (`source` `provider`, `live` or `static`), with `providerError` in the output and "(<id> unavailable)" in the summary |
+| `shipping.labels` | `commerce.ship`, `commerce.return_label` | `create` `{ kind: 'shipment' \| 'return', carrier, packages: [{ ref, locationId, lines }] }` (only packages with goods; none, no call); `void` `{ labels: [{ ref, id }] }` | `create`: `{ labels: [{ ref, id, tracking, carrier? }] }`, one per package; `id`, `tracking` and `carrier` are plain text (letters, digits, spaces, `. _ : # + -`). No label link: one anyone can fetch would carry the buyer's address to every plugin and webhook that sees the node's output. `void`: `{ summary? }` | Writes the shipment rows (with `provider` and `external_id`, migration `0045`), consumes stock, sets `vars.tracking`, emits `order.shipped`. A label for a package it wasn't asked about is voided at once; a package with no label fails the node for good, after voiding what came back |
+| `tax` | `commerce.tax` | `calculate` `{ subtotal, shipping, includeShipping, currency }` (the order's currency, as `computeTotals` works them out from the lines) | `{ amount }` | Fails the node for good over `PROVIDER_MAX_TAX_RATE` (50%) of what is taxable, or for tax on nothing taxable; otherwise stores the rate the amount works out to (`amount ÷ taxable`), so nodes that total the order again keep the same tax |
+| `address` | `commerce.address_validate` | `validate` `{ address }` (`meta.shipTo`) | `{ status: 'valid' \| 'corrected' \| 'invalid', address, issues }`; `address` has `ShipAddress`'s keys only (so redaction, which goes by key, knows each field), and is required when `corrected`; at most 5 issues | Takes the branch and sets `vars.suggestedAddress` when corrected |
 
 - `provide` (`apps/engine/src/providers.ts`) calls `PluginRpc.provide` inside the node's step, with
   the node's step key, the order as `personalData` allows (`pluginOrder`; `void` carries no order),
@@ -222,15 +222,22 @@ The choice is part of the published flow version, so a replay calls the same pro
   with a `NonRetryableError`; one that is bound but not answering, or returns `fail` with `retry`,
   throws an ordinary error, so the step retries.
 - Rates and tax also run while pricing a UCP checkout (`ucp/quote.ts` calls the same executors with
-  step key `quote#<nodeId>`), so `quote`, `calculate` and `validate` must write nothing; the contract
-  suite checks it.
+  step key `quote#<nodeId>`, each provider call held to 10 seconds), so `quote`, `calculate` and
+  `validate` must write nothing; the contract suite checks it. A provider's failure there (errors
+  `provide` throws are tagged, `providerOfError`) becomes the issue "Shipping or tax could not be
+  calculated right now.": its own text never reaches the buyer's agent.
 - Labels are undone where they were made. The `commerce.ship` rollback (`ROLLBACKS`, which now get
-  the step key) calls `void` for its shipments that have a `provider` before cancelling them
-  (`voidShipmentLabels`; it throws, so the rollback is retried and reported, when the provider
-  can't). Cancelling an order (`compensateOrder`) voids its open provider labels first
-  (`voidOpenLabels`, step key `cancel`); one a provider can't void is marked `void_failed`, never
-  `cancelled`, and the cancel's timeline entry says how many. `void` is keyed by the label ids it is
-  sent: it may run again.
+  the step key) calls `void` for its shipments that have a `provider` before cancelling the rest
+  (`voidShipmentLabels`). Cancelling an order (`compensateOrder`) voids its open provider labels
+  first, return labels included (`voidOpenLabels`, step key `cancel`). Either way a label the
+  provider can't void is kept as a `void_failed` shipment, never `cancelled`, and counted in the
+  timeline; the rollback doesn't fail for it, so the saga's earlier compensations (the payment
+  void, the stock release) still run. The engine's daily cron tries those again
+  (`retryLabelVoids`, step key `retry`), and `pluginUsage` lists them under `labels`, so the
+  plugin can't be removed while it holds one. `void` is keyed by the label ids it is sent: it may
+  run again.
+- A Worker rollback to a version from before providers ignores a node's Provider (built-in tax and
+  mock labels) and cancels provider shipments without voiding them; roll forward instead.
 - A flow that names a provider depends on that plugin: `nodePlugins`/`flowPlugins` count it, so the
   run gets a `load-plugins` step, `pluginUsage` (and `plugin:check`) report the flow, and
   `validateGraph` refuses it (`Provider: plugin “<id>” is not installed` or `doesn't provide …`)
@@ -322,7 +329,8 @@ A published flow or a running order that uses a removed plugin's nodes fails, so
    with an admin's API token. It calls `GET /api/v1/plugins/<plugin>/usage` on the deployment and
    prints each published flow (`pluginUsage`: the published version, not archived) and each order not
    yet ended whose flow version uses the plugin's nodes (a `failed` order counts until it is rolled
-   back, since its compensations still call the plugin), and exits `1` if there are any.
+   back, since its compensations still call the plugin) and each label it made but couldn't void
+   yet (`void_failed`, retried daily), and exits `1` if there are any.
    Republish those flows without the nodes, and let the orders finish or cancel them.
 2. Remove the plugin from `plugins` in the registry file and merge. CI stops deploying it, and the
    engine and web Worker lose the binding.

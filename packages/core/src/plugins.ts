@@ -487,6 +487,22 @@ export type ProvideOp = ProvideRequest['op'];
 
 const shortText = (max: number) => z.string().min(1).max(max);
 
+/**
+ * Text a provider returns that the engine stores and shows (tracking, carrier, label ids):
+ * printable, with no control or bidi characters, since it reaches the timeline, webhooks and UCP
+ * events.
+ */
+const plainText = (max: number) =>
+  shortText(max).regex(/^[A-Za-z0-9 ._:#+-]+$/, 'Use letters, digits, spaces and . _ : # + -');
+
+/** The most tax a provider may charge, as a share of what is taxable; more fails the node. */
+export const PROVIDER_MAX_TAX_RATE = 0.5;
+
+/** The highest shipping rate a provider may quote, in the base currency; a higher one is dropped. */
+export const PROVIDER_MAX_RATE = 100_000;
+
+const addressText = z.string().max(200);
+
 /** What each surface's ops return, before the engine applies it. */
 export const PROVIDE_RESULT_SCHEMAS = {
   'shipping.rates': {
@@ -494,19 +510,17 @@ export const PROVIDE_RESULT_SCHEMAS = {
     quote: z.object({ options: z.array(z.unknown()).max(50) }),
   },
   'shipping.labels': {
+    // No label link: a URL anyone can fetch would carry the buyer's address to every plugin and
+    // webhook that sees the node's output.
     create: z.object({
       labels: z
         .array(
           z.object({
             ref: shortText(120),
             /** The provider's own id for the label, sent back to `void`. */
-            id: shortText(120),
-            tracking: shortText(80),
-            carrier: shortText(40).optional(),
-            labelUrl: z
-              .url({ protocol: /^https$/ })
-              .max(2048)
-              .optional(),
+            id: plainText(120),
+            tracking: plainText(80),
+            carrier: plainText(40).optional(),
           }),
         )
         .min(1)
@@ -518,11 +532,27 @@ export const PROVIDE_RESULT_SCHEMAS = {
     calculate: z.object({ amount: z.number().nonnegative().finite() }),
   },
   address: {
-    validate: z.object({
-      status: z.enum(['valid', 'corrected', 'invalid']),
-      address: z.record(z.string(), z.string()).nullable(),
-      issues: z.array(z.string().transform(clip)).max(10),
-    }),
+    // `ShipAddress`'s keys only, so redaction (which goes by key) knows every field.
+    validate: z
+      .object({
+        status: z.enum(['valid', 'corrected', 'invalid']),
+        address: z
+          .strictObject({
+            name: addressText.optional(),
+            line1: addressText.optional(),
+            line2: addressText.optional(),
+            city: addressText.optional(),
+            region: addressText.optional(),
+            postalCode: addressText.optional(),
+            country: addressText.optional(),
+          })
+          .nullable(),
+        issues: z.array(z.string().max(PLUGIN_SUMMARY_MAX)).max(5),
+      })
+      .refine((r) => r.status !== 'corrected' || r.address !== null, {
+        message: 'A corrected address needs the address',
+        path: ['address'],
+      }),
   },
 } as const;
 
@@ -617,12 +647,14 @@ export type PluginStatus = {
   error?: string;
 };
 
-/** What still uses a plugin's nodes; it can be removed only once both lists are empty. */
+/** What still uses a plugin; it can be removed only once every list is empty. */
 export type PluginUsage = {
-  /** Flows whose published version uses the plugin's nodes. */
+  /** Flows whose published version uses the plugin's nodes, or names it as a Provider. */
   flows: { id: string; version: number }[];
   /** Orders still running on a flow version that does. */
   orders: { id: string; flowId: string; version: number }[];
+  /** Labels it made that it couldn't void yet (`void_failed`), retried daily. */
+  labels: { id: string; orderId: string }[];
 };
 
 // ── Node registry ────────────────────────────────────────────────────────────

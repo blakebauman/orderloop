@@ -32,7 +32,7 @@ import {
   TERMINAL_ORDER_STATUSES,
   withPlugins,
 } from '@orderloop/core';
-import { createDb, flows, flowVersions, orders } from '@orderloop/db';
+import { createDb, flows, flowVersions, orders, shipments } from '@orderloop/db';
 import { and, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import type { ExecInput, NodeResult } from './nodes';
 
@@ -307,7 +307,12 @@ export async function pluginUsage(env: Env, id: string): Promise<PluginUsage> {
     )
     // A failed order may still be compensating its nodes: it counts until it is rolled back.
     .where(notInArray(orders.status, ENDED));
+  const labels = await d
+    .select({ id: shipments.id, orderId: shipments.orderId })
+    .from(shipments)
+    .where(and(eq(shipments.provider, id), eq(shipments.status, 'void_failed')));
   return {
+    labels,
     flows: published.filter((f) => usesIt(f.json)).map(({ id, version }) => ({ id, version })),
     orders: running
       .filter((o) => usesIt(o.json))

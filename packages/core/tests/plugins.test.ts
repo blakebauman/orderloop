@@ -336,9 +336,23 @@ describe('providers', () => {
     );
     expect(() =>
       checkProvideResult('carrier', 'shipping.labels', 'create', {
-        labels: [{ ref: 'p1', id: 'L1', tracking: '1Z', labelUrl: 'http://x.test/l.pdf' }],
+        labels: [{ ref: 'p1', id: 'L1', tracking: '1Z\u202eevil' }],
       }),
-    ).toThrow(/labelUrl/);
+    ).toThrow(/tracking/);
+    expect(() =>
+      checkProvideResult('carrier', 'address', 'validate', {
+        status: 'corrected',
+        address: null,
+        issues: [],
+      }),
+    ).toThrow(/A corrected address needs the address/);
+    expect(() =>
+      checkProvideResult('carrier', 'address', 'validate', {
+        status: 'valid',
+        address: { street1: '1 Main' },
+        issues: [],
+      }),
+    ).toThrow(/address/);
     expect(() =>
       checkProvideResult('carrier', 'shipping.rates', 'quote', {
         options: ['x'.repeat(PLUGIN_RESULT_MAX_BYTES)],

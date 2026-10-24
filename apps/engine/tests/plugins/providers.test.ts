@@ -1,13 +1,19 @@
 import { applyD1Migrations, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import type { D1Migration } from '@cloudflare/vitest-plugin';
-import { type OrderInput, staticRegistry, validateGraph } from '@orderloop/core';
-import { createDb, publishFlow, shipments } from '@orderloop/db';
+import {
+  type CheckoutSession,
+  type OrderInput,
+  staticRegistry,
+  validateGraph,
+} from '@orderloop/core';
+import { createDb, publishFlow, reservations, shipments } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { compensateOrder } from '../../src/connectors';
+import { compensateOrder, retryLabelVoids } from '../../src/connectors';
 import { startOrder } from '../../src/orders';
 import { pluginUsage, registry } from '../../src/plugins';
+import { quoteCheckout } from '../../src/ucp/quote';
 import { edge, node, settled } from '../plugin-helpers';
 
 const testEnv = env as Env & { CARRIER_DB: D1Database; TEST_CARRIER_MIGRATIONS: D1Migration[] };
@@ -124,13 +130,54 @@ describe('a plugin as provider', () => {
     expect((await labels(orderId)).map((l) => l.voided)).toEqual([1]);
   });
 
+  it('keeps a label it can’t void on rollback, rolls the rest back, and voids it later', async () => {
+    const { orderId, done } = await run('test-providers-fail', {
+      meta: { shipTo, simulate: 'void_fails' },
+    });
+    expect(done.status).toBe('rolled_back');
+    expect(done.nodes.ship!.summary).toMatch(/1 labels could not be voided with their provider/);
+    // The saga went on: the stock it held is released.
+    const held = await db().select().from(reservations).where(eq(reservations.orderId, orderId));
+    expect(held.map((r) => r.status)).not.toContain('held');
+    const rows = () => db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect((await rows()).map((r) => r.status)).toEqual(['void_failed']);
+    expect((await pluginUsage(env, CARRIER)).labels).toEqual([
+      { id: (await rows())[0]!.id, orderId },
+    ]);
+
+    // The carrier accepts the void again: the daily retry voids it.
+    await testEnv.CARRIER_DB.prepare('UPDATE labels SET fail_void = 0 WHERE order_id = ?')
+      .bind(orderId)
+      .run();
+    expect(await retryLabelVoids(env)).toMatchObject({ voided: 1 });
+    expect((await rows()).map((r) => r.status)).toEqual(['cancelled']);
+    expect((await labels(orderId)).map((l) => l.voided)).toEqual([1]);
+    expect((await pluginUsage(env, CARRIER)).labels).toEqual([]);
+  });
+
+  it('cancels an order whose label can’t be voided, and says so', async () => {
+    const { orderId } = await run('test-providers', { meta: { shipTo, simulate: 'void_fails' } });
+    expect(await compensateOrder(env, orderId)).toMatchObject({ labelsNotVoided: 1 });
+    const rows = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
+    expect(rows.map((r) => r.status)).toEqual(['void_failed']);
+  });
+
+  it('voids labels for packages it wasn’t asked about and fails the node', async () => {
+    const { orderId, done } = await run('test-providers', {
+      meta: { shipTo, simulate: 'label_wrong_ref' },
+    });
+    expect(done.status).toBe('rolled_back');
+    expect(done.nodes.ship!.error).toMatch(/returned no label for shp_/);
+    expect((await labels(orderId)).map((l) => l.voided)).toEqual([1]);
+  });
+
   it('falls back to the static rates when the provider is down', async () => {
     const { done } = await run('test-providers', {
       meta: { shipTo, simulate: 'provider_down' },
     });
     expect(done.status).toBe('completed');
     expect(done.order!.shippingOption).toBe('standard');
-    expect((done.nodes.rates as { output?: { source?: string } }).output?.source).toBe('static');
+    expect(done.nodes.rates!.summary).toMatch(/\(fixture-carrier unavailable\)$/);
   });
 
   it('is checked when the flow is validated, and counted as using the plugin', async () => {
@@ -146,6 +193,42 @@ describe('a plugin as provider', () => {
     const usage = await pluginUsage(env, CARRIER);
     expect(usage.flows.map((f) => f.id)).toEqual(
       expect.arrayContaining(['test-providers', 'test-providers-fail']),
+    );
+  });
+
+  it('prices a checkout with the same providers, and keeps their errors from the agent', async () => {
+    const session = (id: string): CheckoutSession => ({
+      id,
+      ownerId: 'platform',
+      status: 'incomplete',
+      currency: 'USD',
+      lines: [{ id: 'li_1', sku: 'WID-100', qty: 2 }],
+      buyer: { email: 'buyer@example.com' },
+      fulfillment: 'ship',
+      shipTo,
+      shippingOption: null,
+      quote: null,
+      issues: [],
+      orderId: null,
+      createdAt: 0,
+      updatedAt: 0,
+      expiresAt: 0,
+      version: 1,
+    });
+    const flow = (provider: string) => ({
+      ...providerFlow('quote', 'completed', provider),
+      version: 1,
+      publishedAt: 0,
+    });
+    const { quote } = await quoteCheckout(env, flow(CARRIER) as never, session('chk_1'));
+    expect(quote).toMatchObject({ shipping: 5 });
+    expect(quote!.tax).toBe(Math.round((quote!.subtotal + 5) * 10) / 100);
+
+    // "example" provides nothing: the agent hears a fixed message, not the provider's error.
+    const failed = await quoteCheckout(env, flow('example') as never, session('chk_2'));
+    expect(failed.quote).toBeNull();
+    expect(failed.issues.map((i) => i.content)).toContainEqual(
+      expect.stringMatching(/^Shipping or tax could not be calculated right now\.$/),
     );
   });
 });

@@ -13,6 +13,7 @@ import { loadDeployments } from './fleet.ts';
 type Usage = {
   flows: { id: string; version: number }[];
   orders: { id: string; flowId: string; version: number }[];
+  labels: { id: string; orderId: string }[];
 };
 
 const [id, plugin] = process.argv.slice(2);
@@ -32,9 +33,10 @@ try {
   for (const f of usage.flows) console.log(`flow   ${f.id} (published v${f.version})`);
   for (const o of usage.orders)
     console.log(`order  ${o.id} (running on ${o.flowId} v${o.version})`);
-  if (usage.flows.length || usage.orders.length) {
+  for (const l of usage.labels) console.log(`label  ${l.id} (order ${l.orderId}, not voided yet)`);
+  if (usage.flows.length || usage.orders.length || usage.labels.length) {
     console.error(
-      `${plugin} is still used on ${d.id}: republish those flows without its nodes and let the orders finish (or cancel them) first`,
+      `${plugin} is still used on ${d.id}: republish those flows without its nodes and let the orders finish (or cancel them) first; labels it couldn't void are retried daily`,
     );
     process.exit(1);
   }

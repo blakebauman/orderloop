@@ -21,7 +21,7 @@ const engine = {
     },
     { binding: 'PLUGIN_BROKEN', healthy: false, manifest: null, error: 'apiVersion must be 1' },
   ]),
-  pluginUsage: vi.fn(async () => ({ flows: [{ id: 'f1', version: 2 }], orders: [] })),
+  pluginUsage: vi.fn(async () => ({ flows: [{ id: 'f1', version: 2 }], orders: [], labels: [] })),
 };
 
 const receipts = new Set<string>();
@@ -447,6 +447,7 @@ describe('plugins over REST', () => {
     expect(await (await get('plugins/example/usage')).json()).toEqual({
       flows: [{ id: 'f1', version: 2 }],
       orders: [],
+      labels: [],
     });
     expect(engine.pluginUsage).toHaveBeenCalledWith('example');
     expect((await get('plugins/Not_An_Id/usage')).status).toBe(404);

@@ -177,7 +177,7 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
   return (
     <div className="mt-4 border-t pt-3 text-sm">
       <h3 className="caption mb-1.5">In use</h3>
-      {usage.flows.length || usage.orders.length ? (
+      {usage.flows.length || usage.orders.length || usage.labels.length ? (
         <p>
           {usage.flows.map((f, i) => (
             <span key={f.id}>
@@ -191,6 +191,12 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
           {usage.orders.length ? (
             <span className="block text-muted-foreground">
               {usage.orders.length} running {usage.orders.length === 1 ? 'order' : 'orders'}
+            </span>
+          ) : null}
+          {usage.labels.length ? (
+            <span className="block text-muted-foreground">
+              {usage.labels.length} {usage.labels.length === 1 ? 'label' : 'labels'} it couldn’t
+              void yet (retried daily)
             </span>
           ) : null}
         </p>

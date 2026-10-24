@@ -7,6 +7,8 @@ CREATE TABLE labels (
   kind TEXT NOT NULL,
   tracking TEXT NOT NULL,
   voided INTEGER NOT NULL DEFAULT 0,
+  -- Set for an order whose meta.simulate is "void_fails": voiding it fails until a test clears it.
+  fail_void INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX labels_order ON labels(order_id);

@@ -8,6 +8,7 @@
 import { UCP_PATH } from '@orderloop/core';
 import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
+import { retryLabelVoids } from './connectors';
 import { receiveEmail } from './email';
 import { handleMcp, MCP_PATH } from './mcp';
 import { scopedEnv } from './namespaces';
@@ -35,9 +36,11 @@ export default {
     );
   },
 
-  // The daily retention sweep (`triggers.crons` in wrangler.jsonc).
+  // The daily retention sweep (`triggers.crons` in wrangler.jsonc), and another try at labels a
+  // provider couldn't void.
   async scheduled(_controller, env) {
     console.log('retention sweep', JSON.stringify(await sweep(env)));
+    console.log('label voids', JSON.stringify(await retryLabelVoids(env)));
   },
 
   async email(message, env) {

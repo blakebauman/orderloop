@@ -640,11 +640,11 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/plugins/{id}/usage': {
         get: {
-          summary: "What uses a plugin's nodes: check this is empty before removing it (admin)",
+          summary: 'What uses a plugin: check this is empty before removing it (admin)',
           parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
           responses: {
             '200': ok(
-              '{ flows: [{ id, version }], orders: [{ id, flowId, version }] }: published flows and running orders',
+              "{ flows: [{ id, version }], orders: [{ id, flowId, version }], labels: [{ id, orderId }] }: published flows that use its nodes or name it as a provider, running orders on them, and shipping labels it couldn't void yet (retried daily)",
             ),
             ...errors,
           },
