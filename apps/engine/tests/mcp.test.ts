@@ -161,6 +161,50 @@ describe('MCP', () => {
     );
     expect(res.status).toBe(405);
     expect(res.headers.get('allow')).toBe('POST');
+
+    // The SDK answers the transport errors itself.
+    const headers = {
+      [PRINCIPAL_HEADER]: await signed(viewer, '/mcp'),
+      accept: 'application/json, text/event-stream',
+    };
+    const plain = await worker.fetch(
+      new Request('https://engine/mcp', {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'text/plain' },
+        body: '{}',
+      }),
+      env,
+    );
+    expect(plain.status).toBe(415);
+    const mismatch = await worker.fetch(
+      new Request('https://engine/mcp', {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': 'tools/call',
+          'mcp-name': 'find_orders',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: ++n,
+          method: 'tools/call',
+          params: {
+            name: 'get_order',
+            arguments: { orderId: 'ord_x' },
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+              'io.modelcontextprotocol/clientInfo': { name: 'test', version: '0' },
+            },
+          },
+        }),
+      }),
+      env,
+    );
+    expect(mismatch.status).toBe(400);
+    expect(await mismatch.json()).toMatchObject({ error: { code: -32020 } });
   });
 
   it('lists only the tools the role can use, with hints', async () => {
