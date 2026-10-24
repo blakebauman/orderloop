@@ -202,9 +202,10 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
 export function cartReadyProblem(cart: Cart): string | null {
   if (isFinalCart(cart)) return `The cart is ${cart.status}.`;
   if (!cart.lines.length) return 'Add at least one line.';
-  if (!isQuoteCurrent(cart)) return 'The cart is being priced.';
+  if (cart.quotedVersion !== cart.version) return 'The cart is being priced.';
   const error = cart.issues.find((i) => i.kind === 'error');
-  return error ? error.content : null;
+  if (error) return error.content;
+  return cart.quote ? null : 'The cart could not be priced.';
 }
 
 /** Ends the cart: `submitted` (staff, into an order) or `returned` (external, to the buyer's system). */
