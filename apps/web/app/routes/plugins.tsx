@@ -17,10 +17,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const statuses = await engine().pluginCatalog();
   const plugins = await Promise.all(
     statuses.map(async (s) => {
-      const id = s.manifest?.id;
-      const [usage, deliveries] = id
-        ? await Promise.all([engine().pluginUsage(id), listDeliveries(`plugin:${id}`, RECENT)])
-        : [null, []];
+      // A refused plugin has no manifest, but its id follows from its binding: that is when its
+      // flows and running orders matter most.
+      const id =
+        s.manifest?.id ?? s.binding.slice('PLUGIN_'.length).toLowerCase().replaceAll('_', '-');
+      const [usage, deliveries] = await Promise.all([
+        engine().pluginUsage(id),
+        listDeliveries(`plugin:${id}`, RECENT),
+      ]);
       return {
         ...s,
         usage,
@@ -135,7 +139,7 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
         </div>
       ) : null}
       {p.usage ? <Usage usage={p.usage} /> : null}
-      {m?.events.length ? <Deliveries deliveries={p.deliveries} /> : null}
+      {m?.events.length || p.deliveries.length ? <Deliveries deliveries={p.deliveries} /> : null}
     </Section>
   );
 }

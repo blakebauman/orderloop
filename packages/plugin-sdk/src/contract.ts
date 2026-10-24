@@ -20,6 +20,7 @@ import {
   parseManifest,
   ROLES,
   signPrincipal,
+  withPlugins,
 } from '@orderloop/core';
 
 export type ContractStub = PluginRpc & { fetch(request: Request): Promise<Response> };
@@ -30,13 +31,18 @@ export type ContractCases = {
    * count around repeated calls, so it must see every write a node or compensation makes.
    */
   effects(orderId: string): Promise<number>;
-  /** Config to run each node with, by node type; defaults to `{}`. */
+  /** Config to run each node with, by node type; its fields' defaults are filled in, as the engine does. */
   configs?: Record<string, Record<string, unknown>>;
+  /**
+   * Node types that write nothing (they only compute or call out). Every other node must write at
+   * least one effect for its config, so the suite knows its idempotency checks saw a real write.
+   */
+  noEffects?: string[];
   /** The order nodes are run for; a small B2B order by default. Its id is replaced per node. */
   order?: Order;
   /** Counts what the plugin recorded for a delivery id; needed when the manifest has events. */
   deliveries?(payloadId: string): Promise<number>;
-  /** The key the plugin verifies page requests with; needed when the manifest has pages. */
+  /** The key the plugin verifies page requests with (its `PLUGIN_KEY`); needed when it has pages. */
   principalKey?: string;
   /** A signed-in page to probe; defaults to the first nav path. */
   pagePath?: string;
@@ -68,14 +74,16 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
     return [`manifest: ${message(err)}`];
   }
 
+  const registry = withPlugins([manifest]);
   for (const n of manifest.nodes) {
     const orderId = `ord_contract_${n.type.replace(/\W/g, '_')}`;
+    const writes = !cases.noEffects?.includes(n.type);
     const req = {
       type: n.type,
       nodeId: 'contract',
       stepKey: 'contract#1',
       orderId,
-      config: cases.configs?.[n.type] ?? {},
+      config: registry.withDefaults(n.type, cases.configs?.[n.type] ?? {}),
       order: { ...(cases.order ?? BASE_ORDER), id: orderId },
       vars: {},
       nodes: {},
@@ -83,7 +91,17 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
     try {
       const before = await cases.effects(orderId);
       const first = await stub.execute(req);
+      if ('fail' in first) {
+        problems.push(
+          `${n.type}: execute failed (${first.fail.message}); give it a config that succeeds in configs`,
+        );
+        continue;
+      }
       const afterFirst = await cases.effects(orderId);
+      if (writes && afterFirst <= before)
+        problems.push(
+          `${n.type}: execute wrote nothing the effects() probe sees; list it in noEffects if it writes nothing`,
+        );
       const second = await stub.execute(req);
       const afterSecond = await cases.effects(orderId);
       if (!same(first, second))
@@ -94,8 +112,18 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
         problems.push(
           `${n.type}: execute wrote again for the same order and step key (${afterFirst} → ${afterSecond} effects)`,
         );
+      // Another run of the node (a loop's next iteration, the next generation) must write again.
+      if (writes && afterFirst > before) {
+        await stub.execute({ ...req, stepKey: 'contract#2' });
+        const afterOther = await cases.effects(orderId);
+        if (afterOther <= afterSecond)
+          problems.push(
+            `${n.type}: a run with another step key wrote nothing; key writes by order id and step key, not the order alone`,
+          );
+        await stub.compensate({ ...req, stepKey: 'contract#2', output: undefined });
+      }
       if (n.rollback) {
-        const output = 'fail' in first ? undefined : first.output;
+        const output = first.output;
         const undo = { type: n.type, nodeId: 'contract', stepKey: 'contract#1', orderId, output };
         await stub.compensate(undo);
         await stub.compensate(undo);

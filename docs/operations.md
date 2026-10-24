@@ -38,7 +38,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `assistantDailyTokens` | `1000000` | Whole number of model tokens each person's assistant conversations may use per UTC day; `0` is no limit (negative or fractional is refused). Rendered into the engine's `ASSISTANT_DAILY_TOKENS` |
 | `aiGatewayLogs` | `true` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs, which hold the prompts and responses. `provision.sh` sets it when it creates the gateway |
 | `sso` | none | `{ "issuer": "https://…", "clientId": "…" }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). Rendered into the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
-| `plugins` | none | `{ "<plugin id>": { "d1Id": "…" } }`: the plugins (`plugins/<id>/`) this deployment installs. Each is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`. `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy; ids that aren't plugin ids, the `example` fixture, and ids without `plugins/<id>/wrangler.jsonc` are refused. See [Plugins](plugins.md) |
+| `plugins` | none | `{ "<plugin id>": { "d1Id": "…", "personalData": "send" } }`: the plugins (`plugins/<id>/`) this deployment installs. Each is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`. `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. `personalData` is optional and can only be `"send"` (anything else, and any other key, is refused): it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. A plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. Ids that aren't plugin ids, the `example` fixture, and ids without `plugins/<id>/wrangler.jsonc` are refused. See [Plugins](plugins.md) |
 | `hold` | `false` | CI skips it: it stays on the version it runs now |
 | `docs` | `false` | Deploy the docs site after it. Only `orderloop` sets it |
 
@@ -115,7 +115,7 @@ Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's
 
 1. Render its configs and collect its secrets from the environment.
 2. Record a D1 Time Travel bookmark (in the run summary) and apply migrations to its D1.
-3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with `--secrets-file`; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
+3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with its own `--secrets-file`, `PLUGIN_KEY` derived from `PRINCIPAL_KEY` for that plugin alone; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
    each with `--secrets-file` (the catalog and catalog-edge have no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`, then `https://<catalogDomain>/health`.
@@ -134,6 +134,15 @@ plugin's D1 database), and merge. To remove one from a deployment: run
 while a published flow or a running order uses the plugin's nodes; take it out of `plugins` and merge
 so CI deploys without it; then delete its Worker `orderloop-plugin-<plugin><suffix>` and its D1
 database. Delete `plugins/<plugin>/` once no deployment lists it.
+
+A plugin whose manifest asks for `personalData: "send"` is refused until its registry entry says
+`"personalData": "send"`; merge that to grant it, and remove it to withdraw it (the plugin is refused
+at once on the next deploy, even from its last good manifest). A plugin's keys are derived from
+`PRINCIPAL_KEY` (`PLUGIN_KEY`) and `PRINCIPAL_KEY_PREVIOUS` (`PLUGIN_KEY_PREVIOUS`), so rotating the
+principal key rotates them too, and each plugin's secrets are written per plugin
+(`fleet.ts secrets plugin <out> <plugin>`). The old `PLUGIN_KEY_PREVIOUS` is not removed from the
+plugin's Worker when it stops being written: run `wrangler secret delete PLUGIN_KEY_PREVIOUS`
+against `orderloop-plugin-<plugin><suffix>` after the rotation.
 
 ## Holding and checking deployments
 
@@ -216,7 +225,7 @@ lasts 60 seconds, so a rotation needs no downtime when it runs in two deploys:
 Removing a secret from the environment does not remove it from the Worker: `fleet.ts secrets` writes
 only the ones set and `--secrets-file` never deletes, so also run
 `wrangler secret delete PRINCIPAL_KEY_PREVIOUS` against the deployment's engine Worker
-(`orderloop-engine-<id>`), or the old key stays accepted.
+(`orderloop-engine-<id>`), or the old key stays accepted. Each installed plugin's `PLUGIN_KEY` is derived from it, so the same two deploys rotate those ([Plugins](#plugins)).
 
 ## Rotating the data key
 

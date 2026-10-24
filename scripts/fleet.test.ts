@@ -7,6 +7,7 @@ import {
   loadDeployments,
   matrix,
   pluginBinding,
+  pluginKey,
   renderCatalog,
   renderCatalogEdge,
   renderEngine,
@@ -362,4 +363,67 @@ test('plugins are checked: ids, fixtures and provisioning', () => {
     /not provisioned/,
   );
   assert.equal(pluginBinding('qbd-sync'), 'PLUGIN_QBD_SYNC');
+});
+
+test('a plugin may declare only its database and vars, and gets one D1 binding', () => {
+  const base = { name: 'orderloop-plugin-ledger', main: 'src/index.ts', vars: { A: '1' } };
+  for (const key of [
+    'services',
+    'durable_objects',
+    'r2_buckets',
+    'kv_namespaces',
+    'queues',
+    'routes',
+  ])
+    assert.throws(
+      () => renderPlugin({ ...base, [key]: [] }, withLedger, 'ledger'),
+      new RegExp(`may not declare ${key}`),
+    );
+  assert.throws(
+    () =>
+      renderPlugin(
+        { ...base, d1_databases: [{ binding: 'DB' }, { binding: 'OTHER' }] },
+        withLedger,
+        'ledger',
+      ),
+    /one D1 binding, named DB/,
+  );
+  assert.throws(
+    () => renderPlugin({ ...base, d1_databases: [{ binding: 'CORE' }] }, withLedger, 'ledger'),
+    /named DB/,
+  );
+  assert.deepEqual(renderPlugin(base, withLedger, 'ledger').vars, { A: '1' });
+});
+
+test("a plugin's key is derived from the principal key, as core derives it", () => {
+  // The same vector as packages/core/tests/plugins.test.ts.
+  assert.equal(
+    pluginKey('test-principal-key', 'example'),
+    '3b9f2f08046e6b872940790364b2e8be0fb31ec677270a2464f10a29e9fcae13',
+  );
+  assert.notEqual(
+    pluginKey('test-principal-key', 'ledger'),
+    pluginKey('test-principal-key', 'example'),
+  );
+});
+
+test('buyer details are granted to a plugin only by its registry entry', () => {
+  const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+  const granted = toDeployment({
+    ...raw,
+    plugins: { ledger: { d1Id: 'x', personalData: 'send' }, qbd: { d1Id: 'y' } },
+  });
+  assert.equal(
+    renderEngine(base('engine'), granted).vars.PLUGIN_GRANTS,
+    '{"ledger":{"personalData":"send"}}',
+  );
+  assert.equal(renderEngine(base('engine'), withLedger).vars.PLUGIN_GRANTS, undefined);
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { ledger: { personalData: 'yes' } } }),
+    /can only be "send"/,
+  );
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { ledger: { events: ['*'] } } }),
+    /unknown keys: events/,
+  );
 });

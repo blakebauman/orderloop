@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -58,7 +59,14 @@ export default defineConfig({
         },
         ...devPlugins.map((p) => ({
           configPath: `../../plugins/${p}/wrangler.jsonc`,
-          config: { vars: { PRINCIPAL_KEY: DEV_PRINCIPAL_KEY } },
+          // Its own key, as scripts/fleet.ts derives it: never the principal key.
+          config: {
+            vars: {
+              PLUGIN_KEY: createHmac('sha256', DEV_PRINCIPAL_KEY)
+                .update(`orderloop-plugin:${p}`)
+                .digest('hex'),
+            },
+          },
           devOnly: true,
         })),
       ],

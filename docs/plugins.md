@@ -41,16 +41,18 @@ Every plugin's default entrypoint is a `WorkerEntrypoint` implementing `PluginRp
 
 A call that outlasts its limit fails with `<what> took longer than <n>s`.
 
+A plugin node's `execute` is retried while the plugin is bound but not answering (see [How the parts connect](#how-the-parts-connect)); `compensate` throws for a node type the plugin no longer has, so an order never reads as rolled back while that node's effect stays.
+
 `checkExecResult` holds an `execute` result to the contract. A result that breaks it fails the node
 without a retry, since the same code would answer the same again:
 
 | Result | Rule |
 |---|---|
 | `branch` | One of the node's `outputs`; default the first. Otherwise `<type> chose “<branch>”, which isn't one of its outputs` |
-| `summary` | At most `PLUGIN_SUMMARY_MAX` (300) characters |
+| `summary` | Cut to `PLUGIN_SUMMARY_MAX` (300) characters, ending in `…`; not refused |
 | `output`, `vars` | Each at most `PLUGIN_RESULT_MAX_BYTES` (128 KiB) serialized as JSON |
-| `vars` | Merged into the order's variables under the plugin's id, as `vars.<id>`, so a plugin can't overwrite the flow's variables or another plugin's |
-| `{ fail: { message, retry? } }` | Fails the node with `message` (1 to 300 characters). `retry: true` throws an ordinary error, so the step retries as when `execute` throws; otherwise it is a `NonRetryableError` and the order rolls back |
+| `vars` | Merged, as a delta over what the plugin set before, into the order's variables at `vars.plugins.<id>`, so a plugin can't overwrite the flow's variables or another plugin's |
+| `{ fail: { message, retry? } }` | Fails the node with `message` (at least 1 character, cut to 300 like a summary). `retry: true` throws an ordinary error, so the step retries as when `execute` throws; otherwise it is a `NonRetryableError` and the order rolls back |
 
 The manifest (`pluginManifestSchema`) has:
 
@@ -59,19 +61,21 @@ The manifest (`pluginManifestSchema`) has:
 | `apiVersion` | Must be `PLUGIN_API_VERSION` (`1`); a manifest for any other version is refused |
 | `id` | `PLUGIN_ID_RE` (2 to 31 lowercase letters, digits and dashes, starting with a letter); not `trigger`, `commerce`, `control`, `ai`, `core` or `orderloop`; must match the binding it is reached by |
 | `name`, `version` | Non-empty. Change `version` whenever the manifest changes |
-| `nodes` | `PluginNodeSpec`s: `type` is `<id>.<name>` (name lowercase, digits, underscores); `category` is `commerce`, `control` or `ai`; `label`, `description`, `icon` (a lucide-react name); `fields` (the catalog's field kinds, with `jsonSchema` in place of a zod schema); `outputs` (at least one, fixed); optional `rollback` and `retries` (0 to 10, default 3). A type the built-in catalog has is refused |
+| `nodes` | At most 50 `PluginNodeSpec`s: `type` is `<id>.<name>` (name lowercase, digits, underscores); `category` is `commerce`, `control` or `ai`; `label`, `description`, `icon` (a lucide-react name); `fields` (at most 50; the catalog's field kinds, with `jsonSchema` in place of a zod schema); `outputs` (at least one, fixed); optional `rollback` and `retries` (0 to 10, default 3). A type the built-in catalog has is refused |
 | `events` | Outbound event names, or `"*"` for all |
-| `nav` | `{ label, path, icon }`; each `path` starts with `/plugins/<id>/` |
-| `publicPaths` | Exact paths under `/plugins/<id>/` forwarded with no signed-in person |
+| `nav` | `{ label, path, icon }`; each `path` is a plain path under `/plugins/<id>/` (`PLUGIN_PAGE_PATH_RE`: letters, digits and `- _ . ~ /`, no `.` or `..` segment, no query or fragment) |
+| `publicPaths` | Exact plain paths (same rule) under `/plugins/<id>/` forwarded with no signed-in person |
 | `requires` | Ids of plugins that must also be installed |
 | `pageRole` | The least role that may open the plugin's pages and see its nav entries; default `operator` |
-| `personalData` | `redact` (default) or `send`: whether `execute` is sent who the buyer is |
+| `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
+
+A manifest over `PLUGIN_MANIFEST_MAX_BYTES` (64 KiB) serialized is refused.
 
 `pluginStatuses` (engine) reports a `PluginStatus` per `PLUGIN_*` binding: `binding`, `manifest`,
 `healthy` and `error`. When a manifest doesn't parse or its `id` doesn't match its binding (for
 example mid-deploy, or a blip), the plugin is `healthy: false` and the engine keeps running the last
 good manifest it saw from that binding, so its nodes don't read as missing and fail running orders;
-with none, `manifest` is `null`. When a required plugin is absent the manifest is `null` too and the
+with none, `manifest` is `null`. A manifest with `personalData: 'send'` is also refused (`It asks for buyer details…`) unless the deployment grants it; the last good manifest stands in only if it needs no grant or the grant is still there, so withdrawing a grant takes effect at once. When a required plugin is absent the manifest is `null` too and the
 `error` is `Needs <ids> installed`. Both are logged (`plugin manifest refused`, `plugin missing
 requirements`). A plugin with no manifest reads as `Plugin “<id>” is not installed` on its nodes,
 and every other flow keeps running.
@@ -80,10 +84,14 @@ and every other flow keeps running.
 with defaults filled in (expressions not yet evaluated), the `order`, `vars` and earlier nodes'
 outputs (`nodes`). `compensate` receives the same ids and the `output` that `execute` returned.
 
-With `personalData: 'redact'` the `order` (`pluginOrder`), `vars` and `nodes` (`pluginView`) are sent
-as AI nodes get them: contact, names and addresses are removed and emails and phone numbers in free
-text are masked. Line items keep their product names. Set `send` only when the plugin needs to know
-who the buyer is.
+With `personalData: 'redact'` the `order` is a `RedactedOrder` that `pluginOrder` builds from an
+allowlist, as AI nodes get it (`modelOrder`): lines (with product names), amounts, currency, channel,
+fulfilment method and ship-to country, plus `externalId`, `createdAt` and the title with emails and
+phone numbers masked. It has no contact, addresses, `meta`, inbound document text or key, or payment
+ids. `vars` and `nodes` (`pluginView`) are scrubbed the same way as AI nodes' (contact, names and
+addresses removed, emails and phone numbers in free text masked), and so is the `data` of every event
+delivered to the plugin. Set `send` only when the plugin needs to know who the buyer is, and the
+deployment must grant it ([Installing](#installing)): a manifest can't grant itself buyer details.
 
 ## Writing a plugin
 
@@ -92,7 +100,11 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
 
 - `wrangler.jsonc`: the Worker, `workers_dev` and `preview_urls` off, and a `DB` D1 binding with a
   `migrations_dir`. The fleet renders the name (`orderloop-plugin-<id><suffix>`) and the database
-  id, so what the file holds are the base names only.
+  id, so what the file holds are the base names only. `renderPlugin` accepts only the keys in
+  `PLUGIN_CONFIG_KEYS` (`$schema`, `name`, `main`, `compatibility_date`, `compatibility_flags`,
+  `workers_dev`, `preview_urls`, `observability`, `upload_source_maps`, `vars`, `d1_databases`) and
+  at most one D1 binding, named `DB`. Service bindings, Durable Objects, buckets, queues, routes and
+  the rest are refused, since they could reach the engine or another deployment's resources.
 - `src/index.ts`: `export default definePlugin<Env>({ manifest, nodes, events, pages })`.
   `definePlugin` returns the `PluginRpc` entrypoint class and checks the definition when the Worker
   loads, so a mistake fails the deploy rather than an order: the manifest must parse
@@ -102,11 +114,14 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
   - A node handler's `execute({ req, env, key, fail })` gets `key`, `<orderId>:<stepKey>`, the one
     key to write by, and `fail(message, { retry? })` to build the failing result. `compensate`
     gets the same `key` and returns a one-line description.
-  - An `events` handler is called by event name; an event without one is ignored.
+  - An `events` handler is called by event name, and every event the manifest subscribes to (other than `"*"`) needs one: `definePlugin` refuses a subscription without a handler.
   - `pages(request, { env, principal })` is called after the SDK verified the principal header
-    (keys `PRINCIPAL_KEY` and `PRINCIPAL_KEY_PREVIOUS`, header `PRINCIPAL_HEADER`, bound to the
-    request path) and checked `pageRole`: `401` without a valid principal, `403` below the role.
-    On a `publicPaths` entry it runs with `principal: null`, so authenticate the caller yourself.
+    (keys `PLUGIN_KEY` and `PLUGIN_KEY_PREVIOUS`, the `PluginEnv` secrets; header `PRINCIPAL_HEADER`,
+    bound to the request path) and checked `pageRole`: `401` without a valid principal, `403` below
+    the role. The principal has `kind`, `id`, `name`, `role` and `email` but no session id. On a
+    `publicPaths` entry it runs with `principal: null`, so authenticate the caller yourself.
+    The page runs no script (see [Limits and hardening](#limits-and-hardening)); render HTML whose links and
+    forms come back to `/plugins/<id>/`.
 - `migrations/`: the plugin's own D1 migrations. As with the core's, they must work with the code
   already deployed: add first, drop or rename later.
 - `package.json` named `@orderloop/plugin-<id>`, depending on `@orderloop/core` and
@@ -132,15 +147,20 @@ none):
 expect(await pluginContract(plugin, { effects, deliveries, principalKey })).toEqual([]);
 ```
 
-It checks that the manifest parses for this contract version; that running each node twice for the
-same order and step key gives the same result and no second effect; that, for a `rollback` node,
+It checks that the manifest parses for this contract version; that each node, run with its config's
+field defaults filled in (as the engine does), succeeds and writes at least one effect the
+`effects()` probe sees (a `fail` result, or no write, is a problem unless the type is listed in
+`noEffects`); that running it twice for the same order and step key gives the same result and no
+second effect; that a run with another step key (`contract#2`) writes again, so writes are keyed by
+order and step key, not the order alone; that, for a `rollback` node,
 compensating twice leaves the effect count it had before `execute`; that delivering the same event
 twice records it once; and that the first nav page answers `401` without a signed-in person, `403`
 to the role below `pageRole`, and neither to `pageRole` itself. `cases` supplies `effects(orderId)`
 (count the plugin's rows for an order), and, as the manifest needs them, `deliveries(payloadId)`,
-`principalKey`, plus optional `configs` per node type, an `order` and a `pagePath`. Run it from the
+`principalKey` (the plugin's `PLUGIN_KEY`), plus optional `configs` per node type, `noEffects`
+(node types that write nothing, such as `example.probe`), an `order` and a `pagePath`. Run it from the
 plugin's own tests in workerd: `plugins/example/vitest.config.ts` is a `cloudflareTest` project with
-the plugin's migrations applied in `tests/setup.ts` and a `PRINCIPAL_KEY`. Every plugin ships one.
+the plugin's migrations applied in `tests/setup.ts` and a `PLUGIN_KEY`. Every plugin ships one.
 
 `bundlePlugin(entry, { name, d1, bindings })` (`@orderloop/plugin-sdk/testing`, Node only) bundles a
 plugin with esbuild into a Miniflare auxiliary Worker for another package's vitest config; the
@@ -148,7 +168,9 @@ engine's `plugins` project binds the example this way.
 
 To try a plugin in the app locally, apply its migrations to the dev session's state and name it in
 `ORDERLOOP_DEV_PLUGINS` (comma-separated). `apps/web/vite.config.ts` then runs it as one more
-auxiliary Worker, bound to the web app and the engine as `PLUGIN_<ID>`:
+auxiliary Worker, bound to the web app and the engine as `PLUGIN_<ID>`, with a `PLUGIN_KEY` derived
+from `DEV_PRINCIPAL_KEY` as the fleet derives it (never the principal key itself). Dev grants no
+`personalData: 'send'`, so a plugin that asks for it shows as refused:
 
 ```bash
 pnpm --filter @orderloop/plugin-example exec wrangler d1 migrations apply DB --local \
@@ -172,15 +194,32 @@ If the plugin calls an external system, pass that system the same key.
 
 1. Add the plugin to the deployment's registry file, `deployments/<id>.jsonc`:
    `"plugins": { "qbd-sync": {} }`. `loadDeployments` refuses an id that isn't a plugin id, one that is a
-   fixture (`example`), and one without `plugins/<id>/wrangler.jsonc`.
+   fixture (`example`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id` and
+   `personalData`, and no other key.
+   **Granting buyer details**: a plugin whose manifest says `personalData: 'send'` is refused (its
+   status is `healthy: false` with `error` `It asks for buyer details…`) unless its entry says
+   `"personalData": "send"`: `"plugins": { "qbd-sync": { "personalData": "send" } }`. Only that value
+   is accepted. `renderEngine` writes the grants into the engine's `PLUGIN_GRANTS` variable
+   (`{"qbd-sync":{"personalData":"send"}}`), which the engine reads on every status check. Removing
+   the grant refuses the plugin on the next deploy, even if its last good manifest asked for `send`.
+   Grant it only after reviewing what the plugin does with buyer details.
 2. Run `./scripts/provision.sh <deployment>`. For each plugin it creates the D1 database
    `orderloop-plugin-<id><suffix>` and records its id with `fleet.ts set-plugin-d1`, as `plugins.<id>.d1Id`.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
 3. Merge. CI's deploy job (`.github/workflows/deploy.yml`) renders `plugins/<id>/wrangler.<deployment>.json`,
-   writes the plugin secrets (`fleet.ts secrets plugin`: `PRINCIPAL_KEY` and, during a rotation,
-   `PRINCIPAL_KEY_PREVIOUS`), then in the **Deploy plugins** step applies each plugin's D1
-   migrations and deploys its Worker, all before the engine, because the engine and web Worker bind
+   writes one secrets file per plugin (`fleet.ts secrets plugin <out> <plugin>`), holding that
+   plugin's own `PLUGIN_KEY` and, during a rotation, `PLUGIN_KEY_PREVIOUS`; then in the **Deploy
+   plugins** step applies each plugin's D1 migrations and deploys its Worker with its file, all
+   before the engine, because the engine and web Worker bind
    to it. The engine's and web Worker's configs gain a service binding per plugin.
+
+A plugin never holds `PRINCIPAL_KEY`. `pluginKey(principalKey, id)` (`packages/core/src/plugins.ts`,
+mirrored by `scripts/fleet.ts`; `scripts/fleet.test.ts` holds both to the same vector) is the
+hex HMAC-SHA256 of the principal key over `orderloop-plugin:<id>`. The web Worker signs a plugin's
+page requests with it, so the engine and every other plugin, which hold other keys, refuse a
+principal signed for this one, and a plugin can't sign requests to them. Rotating `PRINCIPAL_KEY`
+([Operations](operations.md#rotating-the-principal-key)) rotates every plugin's key too, with
+`PLUGIN_KEY_PREVIOUS` covering the gap.
 
 A plugin's first deploy has no earlier version to roll back to; a failed deploy rolls back the plugins
 that did deploy, with the rest.
@@ -196,9 +235,10 @@ the shell (for people at or above its `pageRole`). Admins see what is installed 
 while running its last manifest, with the `error`; its contract version, whether buyer details are
 redacted or sent, who may open its pages and its public paths, its events, what it `requires`, and
 its nodes with their category, outputs and whether they roll back. For a plugin with a manifest it
-adds what uses it (`pluginUsage`: published flows and the number of running orders) and, for one
-with events, its ten most recent deliveries (subscription `plugin:<id>`) with status, attempts and
-last error. It is read-only: installing and removing a plugin is a change to the deployment.
+adds what uses it (`pluginUsage`: published flows and the number of orders not yet ended) and, for one
+with events or earlier deliveries, its ten most recent deliveries (subscription `plugin:<id>`) with
+status, attempts and last error. A refused plugin has no manifest, so its id comes from its binding
+and the page shows the same usage and deliveries, when its flows and orders matter most. It is read-only: installing and removing a plugin is a change to the deployment.
 
 ## Removing
 
@@ -207,7 +247,8 @@ A published flow or a running order that uses a removed plugin's nodes fails, so
 1. Run `ORDERLOOP_API_TOKEN=ol_… pnpm plugin:check <deployment> <plugin>` (`scripts/plugin-check.ts`),
    with an admin's API token. It calls `GET /api/v1/plugins/<plugin>/usage` on the deployment and
    prints each published flow (`pluginUsage`: the published version, not archived) and each order not
-   in a terminal status whose flow version uses the plugin's nodes, and exits `1` if there are any.
+   yet ended whose flow version uses the plugin's nodes (a `failed` order counts until it is rolled
+   back, since its compensations still call the plugin), and exits `1` if there are any.
    Republish those flows without the nodes, and let the orders finish or cancel them.
 2. Remove the plugin from `plugins` in the registry file and merge. CI stops deploying it, and the
    engine and web Worker lose the binding.
@@ -220,20 +261,34 @@ installed` on its nodes (it can't be published), an order reaching a node fails 
 (`NonRetryableError`), and the rollback of earlier steps runs. A compensation for a plugin node
 throws when the plugin is gone, since there is nothing to undo it with.
 
-## Limits
+## Limits and hardening
 
 - No trigger, waiting or looping nodes: `category` is `commerce`, `control` or `ai`, and a plugin
   node runs in one step and picks a branch from fixed `outputs`.
 - A node's `icon` outside the app's set (`apps/web/app/components/node-icon.tsx`) shows as a puzzle piece.
 - A call into a plugin is bounded (`PLUGIN_CALL_MS`, 60 seconds for `execute` and `compensate`; 30
   for `deliver`; 10 for `manifest`), and a result is bounded (see the contract). The engine hands a
-  plugin buyer details only with `personalData: 'send'`.
-- Manifests are cached about 60 seconds per isolate, in the engine (`MANIFEST_TTL_MS`) and in the web
-  app, so a redeployed plugin's nodes and pages show up after that. A flow with plugin nodes reads
-  the manifests once in a durable `load-plugins` step so a replay sees the same specs; flows
-  without them add no step.
+  plugin buyer details only with `personalData: 'send'` and the deployment's grant.
+- A manifest is at most `PLUGIN_MANIFEST_MAX_BYTES` (64 KiB), with at most 50 nodes and 50 fields a
+  node; nav and public paths are plain paths.
+- Manifests are cached about 60 seconds per isolate, in the engine (`MANIFEST_TTL_MS`, one cache
+  per `env`) and in the web app, so a redeployed plugin's nodes and pages show up after that. A
+  status with any plugin unhealthy is cached only 5 seconds (`UNHEALTHY_TTL_MS`), so one that
+  didn't answer is asked again soon. Deep health reads fresh, but at most every 10 seconds
+  (`FRESH_MIN_MS`), since `/health/deep` is a public route. A flow with plugin nodes reads the
+  manifests once in a durable `load-plugins` step so a replay sees the same specs; flows without
+  them add no step.
 - A plugin's pages load as whole documents (`reloadDocument`), not as app routes, and it can't
   import app code.
+- What a plugin can reach is bounded on each side. Its Worker holds `PLUGIN_KEY` and its own D1
+  database only (`PLUGIN_CONFIG_KEYS`, above); the key opens only requests signed for that plugin.
+  Its pages run no script: the web app's CSP for them is `default-src 'none'`, `script-src 'none'`,
+  `connect-src 'none'`, `worker-src 'none'`, styles and images from the app's origin, no framing and
+  forms posting back to it, since a script would run with the viewer's session on the app's origin.
+  Only the headers in `RESPONSE_ALLOWED` pass from the plugin's response, so none that acts on the
+  whole origin (`set-cookie`, HSTS, service-worker scope, reporting, site-data clearing,
+  permissions); a redirect must lead to `/plugins/<id>/…` on the app's origin or the response is
+  `502`.
 - An outbound event reaches a plugin only while it is installed and subscribed when the event is
   emitted; there is no replay for a plugin installed later.
 
@@ -245,12 +300,26 @@ throws when the plugin is gone, since there is nothing to undo it with.
   as the manifest's `personalData` allows (`pluginOrder`, `pluginView`), holds the call to
   `PLUGIN_CALL_MS`, checks the result with `checkExecResult` (a bad result, or a `fail` without
   `retry`, is a `NonRetryableError`; `fail` with `retry` throws an ordinary error) and returns it as
-  any executor's, with `vars` under `vars.<id>`. With `rollback: true` it registers `pluginRollback`
-  in place of an entry in `ROLLBACKS`. Retries default to the spec's or 3.
+  any executor's, with `vars` as `pluginVars`, which `applyResult` merges into `vars.plugins.<id>`
+  as a delta. With `rollback: true` it registers `pluginRollback` in place of an entry in
+  `ROLLBACKS`. Retries default to the spec's or 3.
+  - A plugin that isn't bound at all fails its node with a `NonRetryableError` (`Plugin “<id>” is not
+    installed`); one that is bound but isn't answering throws an ordinary error, so the step
+    retries.
+  - The node's branch and spec are checked against the registry the run was planned with (the
+    `load-plugins` snapshot, passed to the executor as `registry`), not the current manifest, so a
+    plugin redeployed mid-order can't steer the order down an edge its flow doesn't have.
+  - `flowManifests` builds that snapshot: it throws, so `load-plugins` retries, while a plugin the
+    flow uses is bound but has no manifest (not answering, or refused), because recording it as
+    absent would fail the order for good and run its nodes without their rollbacks. A plugin that
+    isn't bound is left out.
 - **Events**: `emit` in `apps/engine/src/outbox.ts` adds a delivery for each installed plugin whose
   `events` match, with subscription id `plugin:<id>`, in `webhook_deliveries` (no schema change; see
-  [Data model](data-model.md)). `deliverToPlugin` calls `deliver` over the binding and never throws;
-  the ids (`whd_<orderId>_<stepKey>_plugin:<id>` with unsafe characters as `_`), retries and the step's `pending` failure
+  [Data model](data-model.md)). `deliverToPlugin` calls `deliver` over the binding with `data`
+  passed through `pluginView` (so redacted unless the plugin is granted buyer details) and never
+  throws (a plugin with no manifest is an error to retry); an earlier plugin delivery recorded for
+  the same step stays pending and is retried even when the plugin has dropped out of the targets
+  (it didn't answer this time); the ids (`whd_<orderId>_<stepKey>_plugin:<id>` with unsafe characters as `_`), retries and the step's `pending` failure
   are the outbox's.
 - **Pages**: the web Worker routes `/plugins/*` to `pluginFetch`, which forwards only
   `/plugins/<id>/…` (`pluginPathId`; `/plugins` itself is the admin page) and answers `404` for an
@@ -259,16 +328,20 @@ throws when the plugin is gone, since there is nothing to undo it with.
     `user-agent`, never the cookie, authorization or proxy headers. A declared body over
     `MAX_PLUGIN_BODY` (10 MiB) is `413`, and a streamed one errors once it passes the cap.
   - A page needs a signed-in caller (`401`, or `403` while setup is due) whose role is at least the
-    manifest's `pageRole` (`403`), and the principal header is signed for that path; the plugin
-    trusts nothing else.
+    manifest's `pageRole` (`403`), within the `API_LIMIT` budget per person and plugin (keyed
+    `plugin:<id>:<principal id>`, `429` over it). The principal header is signed for that path with
+    the plugin's own key (`setPluginPrincipalHeader`, `pluginKey`) and carries `kind`, `id`, `name`,
+    `role` and `email`, never a session id; the plugin trusts nothing else.
   - Paths in `publicPaths` skip all of that, for callers that authenticate to the plugin
     themselves, but are rate-limited per plugin and caller address with `WEBHOOK_LIMIT`
     (`429` over it) and get the same body cap.
-  - Out: the response loses `set-cookie` and the hop-by-hop headers, and gets the app's own
-    `content-security-policy` (scripts from the app's origin only, no framing, forms post back to
-    it), `x-frame-options: DENY`, `x-content-type-options`, `referrer-policy` and
-    `cross-origin-opener-policy`, whatever the plugin set. A plugin's page therefore can't use
-    inline script.
+  - Out: only `cache-control`, `content-disposition`, `content-language`, `content-length`,
+    `content-type`, `etag`, `expires`, `last-modified` and `vary` pass (`RESPONSE_ALLOWED`). A
+    `location` is kept only if it resolves to `/plugins/<id>/…` on the app's origin, rewritten to a
+    path; any other redirect is a `502`. The response gets the app's own `content-security-policy`
+    (no script at all, see Limits and hardening), `x-frame-options: DENY`, `x-content-type-options`,
+    `referrer-policy`, `cross-origin-opener-policy` and `cross-origin-resource-policy:
+    same-origin`, whatever the plugin set. A plugin's page therefore can't run script.
 - **Editor and validation**: the shell loads the manifests (`pluginManifests`, from
   `EngineRpc.pluginCatalog`) into `PluginsProvider` (`apps/web/app/lib/plugins.tsx`); components
   read node specs with `useNodes()` (`lib/nodes.tsx`) rather than `nodeSpec`, which builds the
@@ -276,8 +349,8 @@ throws when the plugin is gone, since there is nothing to undo it with.
   shell leaves out nav entries whose `pageRole` the person is below. Server-side flow validation
   uses `nodeRegistry()`.
 - **Health and usage**: `EngineRpc.health` adds a check per binding, named like it in lower case
-  (`plugin_example`), that re-reads the manifest without the cache and fails with the status's
-  `error` unless the plugin answered with a manifest the engine accepts. `EngineRpc.pluginUsage(id)` backs the admin
+  (`plugin_example`), that re-reads the manifest (bypassing the cache, but at most every 10 seconds) and fails with the status's
+  `error` unless the plugin answered with a manifest the engine accepts. `EngineRpc.pluginUsage(id)` (a `failed` order counts until rolled back) backs the admin
   endpoint `GET /api/v1/plugins/:id/usage`. `EngineRpc.pluginCatalog` returns a `PluginStatus` per
   binding; `GET /api/v1/plugins` lists each as `{ binding, id, name, version, nodes, events,
   healthy, error? }`, with `id`, `name` and `version` null for a refused plugin.

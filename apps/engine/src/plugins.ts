@@ -42,7 +42,29 @@ const MANIFEST_TTL_MS = 60_000;
 /** How long one call into a plugin may take, well inside its node's step timeout. */
 export const PLUGIN_CALL_MS = 60_000;
 
-let cached: { at: number; key: string; statuses: PluginStatus[] } | null = null;
+/** How soon a plugin that didn't answer is asked again. */
+const UNHEALTHY_TTL_MS = 5_000;
+/** The least time between uncached reads (deep health). */
+const FRESH_MIN_MS = 10_000;
+
+type Cached = { at: number; key: string; ttl: number; statuses: PluginStatus[] };
+/** Per environment (one per isolate in production), so a different `env` never reads another's. */
+const caches = new WeakMap<object, Cached>();
+
+/**
+ * What the deployment grants each plugin beyond the defaults, from its registry entry
+ * (`PLUGIN_GRANTS`, rendered by scripts/fleet.ts): `{ "<id>": { "personalData": "send" } }`. A
+ * manifest can't grant itself buyer details.
+ */
+function grants(env: Env): Record<string, { personalData?: 'send' }> {
+  const raw = (env as unknown as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
+  try {
+    return raw ? (JSON.parse(raw) as Record<string, { personalData?: 'send' }>) : {};
+  } catch {
+    console.error('PLUGIN_GRANTS is not JSON; granting nothing');
+    return {};
+  }
+}
 /**
  * The last manifest each binding answered with, kept while it can't answer (mid-deploy, a blip), so
  * its nodes don't read as not installed and fail running orders.
@@ -85,8 +107,10 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
   const bound = pluginBindings(env);
   if (!bound.length) return [];
   const key = bound.map(([k]) => k).join(',');
-  if (!fresh && cached && cached.key === key && Date.now() - cached.at < MANIFEST_TTL_MS)
-    return cached.statuses;
+  // Deep health asks for fresh statuses, but at most every few seconds: it is a public route.
+  const cached = caches.get(env);
+  const age = cached && cached.key === key ? Date.now() - cached.at : Number.POSITIVE_INFINITY;
+  if (cached && age < (fresh ? FRESH_MIN_MS : cached.ttl)) return cached.statuses;
   const got = await Promise.all(
     bound.map(async ([binding, stub]): Promise<PluginStatus> => {
       try {
@@ -95,13 +119,22 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
         );
         if (pluginBinding(m.id) !== binding)
           throw new Error(`id “${m.id}” is not bound as ${binding}`);
+        if (m.personalData === 'send' && grants(env)[m.id]?.personalData !== 'send')
+          throw new Error(
+            'It asks for buyer details (personalData: "send"), which this deployment does not grant',
+          );
         lastGood.set(binding, m);
         return { binding, manifest: m, healthy: true };
       } catch (err) {
         console.error('plugin manifest refused', binding, err);
+        // The last good manifest stands in, but never past a grant the deployment has withdrawn.
+        const fallback = lastGood.get(binding);
+        const allowed =
+          fallback &&
+          (fallback.personalData !== 'send' || grants(env)[fallback.id]?.personalData === 'send');
         return {
           binding,
-          manifest: lastGood.get(binding) ?? null,
+          manifest: allowed ? fallback : null,
           healthy: false,
           error: message(err),
         };
@@ -115,7 +148,9 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
     console.error('plugin missing requirements', s.binding, absent);
     return { ...s, manifest: null, healthy: false, error: `Needs ${absent.join(', ')} installed` };
   });
-  cached = { at: Date.now(), key, statuses };
+  // A plugin that didn't answer is asked again soon, not after the full minute.
+  const ttl = statuses.every((s) => s.healthy) ? MANIFEST_TTL_MS : UNHEALTHY_TTL_MS;
+  caches.set(env, { at: Date.now(), key, ttl, statuses });
   return statuses;
 }
 
@@ -130,24 +165,48 @@ export async function registry(env: Env): Promise<NodeRegistry> {
   return ms.length ? withPlugins(ms) : staticRegistry;
 }
 
+/**
+ * The manifests a run of `flow` is planned with (its `load-plugins` step). Throws, so the step is
+ * retried, while a plugin the flow uses is bound but hasn't answered: recording it as not installed
+ * would fail the order for good and run its nodes without their rollbacks. A plugin that isn't
+ * bound at all is left out; its nodes then fail as not installed.
+ */
+export async function flowManifests(env: Env, flow: Pick<FlowGraph, 'nodes'>) {
+  const statuses = await pluginStatuses(env);
+  const used = new Set(flow.nodes.flatMap((n) => pluginOf(n.type) ?? []));
+  for (const id of used) {
+    const s = statuses.find((x) => x.binding === pluginBinding(id));
+    if (s && !s.manifest) throw new Error(`Plugin “${id}” is not answering: ${s.error}`);
+  }
+  return statuses.flatMap((s) => (s.manifest ? [s.manifest] : []));
+}
+
 /** True when a graph uses any plugin's nodes (only then does a run need the manifests). */
 export const usesPlugins = (graph: Pick<FlowGraph, 'nodes'>) =>
   graph.nodes.some((n) => pluginOf(n.type) !== null);
 
-/** Runs a plugin node. Called inside the node's step; a missing plugin fails it without retries. */
+/**
+ * Runs a plugin node, inside the node's step. Its branch is checked against the node as the run
+ * was planned (`registry`, the `load-plugins` snapshot), so a plugin redeployed mid-order can't
+ * steer the order down an edge its flow doesn't have. A plugin that isn't bound fails the node for
+ * good; one that is bound but not answering fails this attempt, to be retried.
+ */
 export async function execPluginNode({
   env,
   node,
   config,
   ctx,
   stepKey,
+  registry: planned,
 }: ExecInput): Promise<NodeResult> {
   const id = pluginOf(node.type);
   const stub = id ? plugin(env, id) : null;
+  if (!id || !stub) throw new NonRetryableError(missing(node.type));
   const installed = await manifests(env);
   const manifest = installed.find((m) => m.id === id);
-  const spec = withPlugins(installed).spec(node.type);
-  if (!id || !stub || !manifest || !spec) throw new NonRetryableError(missing(node.type));
+  if (!manifest) throw new Error(`Plugin “${id}” is not answering`);
+  const spec = (planned ?? withPlugins(installed)).spec(node.type);
+  if (!spec) throw new NonRetryableError(missing(node.type));
   const result = await withTimeout(
     stub.execute({
       type: node.type,
@@ -172,13 +231,13 @@ export async function execPluginNode({
     if (outcome.retry) throw new Error(outcome.message);
     throw new NonRetryableError(outcome.message);
   }
-  // A plugin's variables live under its id, so it can't overwrite the flow's or another plugin's.
-  const own = (ctx.vars[id] ?? {}) as Record<string, unknown>;
+  // A plugin's variables go to `vars.plugins.<id>`, merged there when the result is applied, so
+  // it can't overwrite the flow's own variables or another plugin's.
   return {
     branches: [outcome.branch],
     output: outcome.output,
     summary: outcome.summary,
-    ...(outcome.vars ? { vars: { [id]: { ...own, ...outcome.vars } } } : {}),
+    ...(outcome.vars ? { pluginVars: { id, vars: outcome.vars } } : {}),
   };
 }
 
@@ -196,17 +255,25 @@ export function pluginRollback(type: string, nodeId: string, stepKey: string) {
   };
 }
 
-/** Delivers an outbound event over a plugin's binding. Never throws; the outbox retries. */
+/**
+ * Delivers an outbound event over a plugin's binding, its data redacted unless the plugin is
+ * granted buyer details. Never throws; the outbox retries.
+ */
 export async function deliverToPlugin(env: Env, id: string, payload: OutboundPayload) {
   const stub = plugin(env, id);
   if (!stub) return { ok: false, status: null, error: missing(`${id}.*`) };
+  const manifest = (await manifests(env)).find((m) => m.id === id);
+  if (!manifest) return { ok: false, status: null, error: `Plugin “${id}” is not answering` };
   try {
-    await withTimeout(stub.deliver(payload), `${id}.deliver()`, 30_000);
+    const data = pluginView(manifest, payload.data);
+    await withTimeout(stub.deliver({ ...payload, data }), `${id}.deliver()`, 30_000);
     return { ok: true, status: 200, error: null };
   } catch (err) {
     return { ok: false, status: null, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+const ENDED = TERMINAL_ORDER_STATUSES.filter((s) => s !== 'failed');
 
 /** What still depends on a plugin, so it isn't removed from under a flow or a running order. */
 export async function pluginUsage(env: Env, id: string): Promise<PluginUsage> {
@@ -233,7 +300,8 @@ export async function pluginUsage(env: Env, id: string): Promise<PluginUsage> {
       flowVersions,
       and(eq(flowVersions.flowId, orders.flowId), eq(flowVersions.version, orders.flowVersion)),
     )
-    .where(notInArray(orders.status, TERMINAL_ORDER_STATUSES));
+    // A failed order may still be compensating its nodes: it counts until it is rolled back.
+    .where(notInArray(orders.status, ENDED));
   return {
     flows: published.filter((f) => usesIt(f.json)).map(({ id, version }) => ({ id, version })),
     orders: running

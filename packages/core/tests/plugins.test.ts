@@ -6,12 +6,15 @@ import {
   PLUGIN_RESULT_MAX_BYTES,
   parseManifest,
   pluginBinding,
+  pluginKey,
   pluginOf,
   pluginOrder,
   pluginView,
+  signPrincipal,
   staticRegistry,
   TEMPLATES,
   validateGraph,
+  verifyPrincipal,
   withPlugins,
 } from '../src';
 
@@ -175,7 +178,16 @@ describe('plugin results', () => {
     expect(() => checkExecResult('x.y', { branch: 'nope' }, outs)).toThrow(
       /isn't one of its outputs/,
     );
-    expect(() => checkExecResult('x.y', { summary: 's'.repeat(301) }, outs)).toThrow(/summary/);
+    // Long text is cut, not refused: refusing would turn a retryable failure into a final one.
+    const long = checkExecResult('x.y', { summary: 's'.repeat(301) }, outs);
+    expect(long.kind === 'done' && long.summary).toBe(`${'s'.repeat(299)}…`);
+    expect(
+      checkExecResult('x.y', { fail: { message: 'e'.repeat(5000), retry: true } }, outs),
+    ).toMatchObject({
+      kind: 'fail',
+      retry: true,
+      message: `${'e'.repeat(299)}…`,
+    });
     const big = 'x'.repeat(PLUGIN_RESULT_MAX_BYTES);
     expect(() => checkExecResult('x.y', { output: big }, outs)).toThrow(/output is \d+ bytes/);
     expect(() => checkExecResult('x.y', { vars: { big } }, outs)).toThrow(/vars is \d+ bytes/);
@@ -200,14 +212,41 @@ describe('what a plugin sees', () => {
   } as unknown as Order;
 
   it('gets no buyer details unless its manifest asks for them', () => {
-    const seen = pluginOrder({ personalData: 'redact' }, order);
-    expect(seen).not.toHaveProperty('contact');
-    expect(seen.meta).not.toHaveProperty('shipTo');
-    expect(JSON.stringify(seen)).not.toMatch(/ada|555 123/i);
+    const seen = pluginOrder({ personalData: 'redact' }, {
+      ...order,
+      title: 'PO from ada@example.com',
+      documentText: 'Ship to Ada Lovelace, 1 Main St, Springfield',
+      documentKey: 'intake/abc.eml',
+      payment: { provider: 'stripe', intentId: 'pi_123', paymentMethodId: 'pm_456' },
+      meta: { buyerName: 'Ada Lovelace', note: 'call 555 123 4567' },
+    } as Order);
+    for (const k of ['contact', 'meta', 'documentText', 'documentKey', 'payment'])
+      expect(seen).not.toHaveProperty(k);
+    expect(seen.title).toBe('PO from [email]');
+    expect(JSON.stringify(seen)).not.toMatch(/ada|lovelace|main st|555 123|pi_123|pm_456/i);
     expect(seen.lines[0]).toMatchObject({ sku: 'WID-100', name: 'Widget' });
     expect(pluginOrder({ personalData: 'send' }, order)).toBe(order);
     expect(pluginView({ personalData: 'redact' }, { buyer: { email: 'a@b.co' }, n: 1 })).toEqual({
       n: 1,
     });
+  });
+});
+
+describe('plugin keys', () => {
+  it("derive a plugin's own key that the principal key's holder can't be confused with", async () => {
+    // The same vector as scripts/fleet.test.ts.
+    expect(await pluginKey('test-principal-key', 'example')).toBe(
+      '3b9f2f08046e6b872940790364b2e8be0fb31ec677270a2464f10a29e9fcae13',
+    );
+    const p = { kind: 'user' as const, id: 'usr_1', name: 'Ada', role: 'admin' as const };
+    const forPlugin = await signPrincipal(await pluginKey('k', 'example'), p, '/plugins/example/');
+    // The engine checks with the principal key; another plugin with its own key.
+    expect(await verifyPrincipal(['k'], forPlugin, '/plugins/example/')).toBeNull();
+    expect(
+      await verifyPrincipal([await pluginKey('k', 'other')], forPlugin, '/plugins/example/'),
+    ).toBeNull();
+    expect(
+      await verifyPrincipal([await pluginKey('k', 'example')], forPlugin, '/plugins/example/'),
+    ).toMatchObject({ id: 'usr_1' });
   });
 });

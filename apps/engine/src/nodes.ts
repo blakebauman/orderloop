@@ -25,6 +25,7 @@ import {
   interpolate,
   isBuySide,
   money,
+  type NodeRegistry,
   ORDER_CHANNEL_LABELS,
   type Order,
   type OrderLine,
@@ -53,6 +54,8 @@ export type NodeResult = {
   summary?: string;
   order?: Partial<Order>;
   vars?: Record<string, unknown>;
+  /** A plugin node's variables, merged into `vars.plugins[id]` (never over the flow's own). */
+  pluginVars?: { id: string; vars: Record<string, unknown> };
 };
 
 export type ExecInput = {
@@ -61,6 +64,8 @@ export type ExecInput = {
   config: Record<string, unknown>;
   ctx: RunContext;
   stepKey: string;
+  /** The node types this run was planned with (its `load-plugins` snapshot, for plugin nodes). */
+  registry?: NodeRegistry;
 };
 
 type Exec = (i: ExecInput) => Promise<NodeResult>;

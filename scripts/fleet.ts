@@ -4,7 +4,8 @@
  *   node scripts/fleet.ts render <id>             write apps/{catalog,catalog-edge,engine,web}/wrangler.<id>.json
  *                                                 and plugins/<plugin>/wrangler.<id>.json for each plugin
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
- *   node scripts/fleet.ts secrets <engine|web|plugin> <out>  write this app's secrets from the environment
+ *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
+ *   node scripts/fleet.ts secrets plugin <out> <plugin>  write a plugin's own keys, derived
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
@@ -16,6 +17,7 @@
  * in, written next to it so its relative paths still resolve. See docs/operations.md.
  */
 
+import { createHmac } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,8 +76,6 @@ const SECRETS = {
     'STRIPE_SECRET_KEY',
     'UCP_SIGNING_KEY',
   ],
-  // A plugin verifies the principal the web Worker signs onto its pages (docs/plugins.md).
-  plugin: ['PRINCIPAL_KEY', 'PRINCIPAL_KEY_PREVIOUS'],
 } as const;
 
 /**
@@ -151,7 +151,7 @@ export type Deployment = {
    * engine and the web Worker as PLUGIN_<ID>. `d1Id` is set by scripts/provision.sh. Removing an
    * entry uninstalls the plugin on the next deploy; see docs/plugins.md.
    */
-  plugins: Record<string, { d1Id?: string }>;
+  plugins: Record<string, { d1Id?: string; personalData?: 'send' }>;
 };
 
 /** Test fixtures in plugins/ that no deployment may install. */
@@ -267,12 +267,22 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       );
     if (FIXTURE_PLUGINS.has(p)) throw new Error(`${file}: plugins.${p} is a test fixture`);
     const d1 = (v as { d1Id?: unknown } | null)?.d1Id;
+    const pd = (v as { personalData?: unknown } | null)?.personalData;
+    if (pd !== undefined && pd !== 'send')
+      throw new Error(
+        `${file}: plugins.${p}.personalData can only be "send" (to grant buyer details)`,
+      );
+    const extra = Object.keys((v as object) ?? {}).filter(
+      (k) => k !== 'd1Id' && k !== 'personalData',
+    );
+    if (extra.length)
+      throw new Error(`${file}: plugins.${p} has unknown keys: ${extra.join(', ')}`);
     if (
       typeof v !== 'object' ||
       v === null ||
       (d1 !== undefined && (typeof d1 !== 'string' || !d1))
     )
-      throw new Error(`${file}: plugins.${p} must be { "d1Id"? }`);
+      throw new Error(`${file}: plugins.${p} must be { "d1Id"?, "personalData"? }`);
   }
   return {
     id,
@@ -360,19 +370,64 @@ function pluginServices(d: Deployment) {
     .map((p) => ({ binding: pluginBinding(p), service: names(d).plugin(p) }));
 }
 
+/**
+ * What a plugin's wrangler.jsonc may hold. Anything else (service bindings, Durable Objects,
+ * buckets, queues, routes…) could reach the engine or another deployment's resources, so a plugin
+ * that asks for it is refused rather than deployed.
+ */
+const PLUGIN_CONFIG_KEYS = new Set([
+  '$schema',
+  'name',
+  'main',
+  'compatibility_date',
+  'compatibility_flags',
+  'workers_dev',
+  'preview_urls',
+  'observability',
+  'upload_source_maps',
+  'vars',
+  'd1_databases',
+]);
+
 export function renderPlugin(base: Config, d: Deployment, p: string): Config {
   const d1Id = d.plugins[p]?.d1Id;
   if (!d1Id) throw new Error(`${d.id}: plugin ${p} has no d1Id: run scripts/provision.sh ${d.id}`);
+  const extra = Object.keys(base).filter((k) => !PLUGIN_CONFIG_KEYS.has(k));
+  if (extra.length)
+    throw new Error(
+      `plugins/${p}/wrangler.jsonc: a plugin may not declare ${extra.join(', ')}; it gets one D1 database and vars`,
+    );
+  const dbs = (base.d1_databases ?? []) as Config[];
+  if (dbs.length > 1 || (dbs[0] && dbs[0].binding !== 'DB'))
+    throw new Error(`plugins/${p}/wrangler.jsonc: a plugin has one D1 binding, named DB`);
   const config = structuredClone(base);
   config.name = names(d).plugin(p);
   config.workers_dev = false;
   config.preview_urls = false;
-  config.d1_databases = (config.d1_databases ?? []).map((db: Config) => ({
+  config.d1_databases = dbs.map((db) => ({
     ...db,
     database_name: names(d).plugin(p),
     database_id: d1Id,
   }));
   return config;
+}
+
+/**
+ * A plugin's own page-signing key: the HMAC of the deployment's principal key with its id, as
+ * `pluginKey` in @orderloop/core computes it (fleet.test.ts holds the two to the same vector). The
+ * plugin never gets the principal key itself.
+ */
+export const pluginKey = (principalKey: string, id: string) =>
+  createHmac('sha256', principalKey).update(`orderloop-plugin:${id}`).digest('hex');
+
+/** What the engine grants plugins beyond the defaults, from the registry: buyer details. */
+function pluginGrants(d: Deployment) {
+  const grants = Object.fromEntries(
+    Object.entries(d.plugins).flatMap(([p, v]) =>
+      v.personalData === 'send' ? [[p, { personalData: 'send' }]] : [],
+    ),
+  );
+  return Object.keys(grants).length ? JSON.stringify(grants) : '';
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: a wrangler config is JSON read as is
@@ -401,6 +456,8 @@ export function renderEngine(base: Config, d: Deployment): Config {
   storage(config, d);
   const plugins = pluginServices(d);
   if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
+  const grants = pluginGrants(d);
+  if (grants) config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
   config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
   if (d.auditRetentionDays)
     config.vars = { ...config.vars, AUDIT_RETENTION_DAYS: String(d.auditRetentionDays) };
@@ -599,8 +656,9 @@ export function secretsProblem(d: Deployment, env: Record<string, string | undef
 
 function secrets(app: string | undefined, out: string | undefined, id?: string) {
   if (app !== 'web' && app !== 'engine' && app !== 'plugin')
-    throw new Error('secrets <engine|web|plugin> <out> [id]');
-  if (!out) throw new Error('secrets <engine|web|plugin> <out> [id]');
+    throw new Error('secrets <engine|web|plugin> <out> [id | plugin id]');
+  if (!out) throw new Error('secrets <engine|web|plugin> <out> [id | plugin id]');
+  if (app === 'plugin') return pluginSecrets(out, id);
   const missing = REQUIRED_SECRETS.filter((k) => !process.env[k]);
   if (missing.length)
     throw new Error(
@@ -614,6 +672,21 @@ function secrets(app: string | undefined, out: string | undefined, id?: string) 
   );
   writeFileSync(out, JSON.stringify(values), { mode: 0o600 });
   console.log(`${app}: ${Object.keys(values).join(', ') || 'no secrets set'}`);
+}
+
+/** A plugin's secrets: its own keys derived from PRINCIPAL_KEY (and the one before a rotation). */
+function pluginSecrets(out: string, plugin: string | undefined) {
+  if (!plugin || !/^[a-z][a-z0-9-]{1,30}$/.test(plugin))
+    throw new Error('secrets plugin <out> <plugin id>');
+  const current = process.env.PRINCIPAL_KEY;
+  if (!current) throw new Error("PRINCIPAL_KEY not set: a plugin's key is derived from it");
+  const previous = process.env.PRINCIPAL_KEY_PREVIOUS;
+  const values = {
+    PLUGIN_KEY: pluginKey(current, plugin),
+    ...(previous ? { PLUGIN_KEY_PREVIOUS: pluginKey(previous, plugin) } : {}),
+  };
+  writeFileSync(out, JSON.stringify(values), { mode: 0o600 });
+  console.log(`plugin ${plugin}: ${Object.keys(values).join(', ')}`);
 }
 
 function shellNames(id: string | undefined) {

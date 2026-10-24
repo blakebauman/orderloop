@@ -86,7 +86,7 @@ export default defineConfig(async () => {
             await bundlePlugin('../../plugins/example/src/index.ts', {
               name: 'orderloop-plugin-example',
               d1: { DB: 'plugin-example' },
-              bindings: { PRINCIPAL_KEY: 'test-principal-key' },
+              bindings: { PLUGIN_KEY: 'test-plugin-key' },
             }),
           ],
         ),

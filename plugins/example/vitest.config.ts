@@ -11,7 +11,7 @@ export default defineConfig(async () => ({
       miniflare: {
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations('./migrations'),
-          PRINCIPAL_KEY: 'example-test-key',
+          PLUGIN_KEY: 'example-test-key',
         },
       },
     }),

@@ -32,8 +32,12 @@ import {
 } from '@orderloop/core';
 import type { z } from 'zod';
 
-/** What every plugin's environment carries: the keys the web app signs page requests with. */
-export type PluginEnv = { PRINCIPAL_KEY?: string; PRINCIPAL_KEY_PREVIOUS?: string };
+/**
+ * What every plugin's environment carries: its own key the web app signs page requests with
+ * (`pluginKey` in @orderloop/core, derived for this plugin alone), and the one before a rotation.
+ * A plugin never holds the deployment's principal key.
+ */
+export type PluginEnv = { PLUGIN_KEY?: string; PLUGIN_KEY_PREVIOUS?: string };
 
 /** A manifest as written: defaults may be left out. */
 export type ManifestInput = z.input<typeof pluginManifestSchema>;
@@ -94,9 +98,13 @@ export function checkDefinition<E>(def: PluginDefinition<E>): PluginManifest {
     if (!manifest.nodes.some((n) => n.type === `${manifest.id}.${name}`))
       problems.push(`nodes.${name} is not a node in the manifest`);
   const subscribed = new Set<string>(manifest.events);
-  for (const event of Object.keys(def.events ?? {}))
+  const handled = Object.keys(def.events ?? {});
+  for (const event of handled)
     if (!subscribed.has('*') && !subscribed.has(event))
       problems.push(`events.${event} is not in the manifest's events`);
+  for (const event of subscribed)
+    if (event !== '*' && !handled.includes(event))
+      problems.push(`the manifest subscribes to ${event} but events has no handler for it`);
   if ((manifest.nav.length || manifest.publicPaths.length) && !def.pages)
     problems.push('the manifest has pages (nav or publicPaths) but there is no pages handler');
   if (problems.length) throw new Error(`Plugin ${manifest.id}: ${problems.join('; ')}`);
@@ -128,7 +136,10 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
 
     async compensate(req: PluginCompensateRequest) {
       const h = handler(req.type);
-      const said = await h?.compensate?.({
+      // A node this version no longer handles can't be undone here; saying so keeps the order
+      // from reading as rolled back while its effect stays.
+      if (!h) throw new Error(`${req.type} is not a node of ${manifest.id}, so it can't be undone`);
+      const said = await h.compensate?.({
         req,
         env: this.env,
         key: runKey(req.orderId, req.stepKey),
@@ -146,7 +157,7 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
       if (manifest.publicPaths.includes(path))
         return def.pages(request, { env: this.env, principal: null });
       const principal = await verifyPrincipal(
-        [this.env.PRINCIPAL_KEY, this.env.PRINCIPAL_KEY_PREVIOUS],
+        [this.env.PLUGIN_KEY, this.env.PLUGIN_KEY_PREVIOUS],
         request.headers.get(PRINCIPAL_HEADER),
         path,
       );

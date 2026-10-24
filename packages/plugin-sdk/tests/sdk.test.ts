@@ -17,7 +17,7 @@ const { pluginContract } = await import('../src/contract');
 
 const KEY = 'sdk-test-key';
 
-type Env = { PRINCIPAL_KEY: string; rows: Map<string, string>; seen: Set<string> };
+type Env = { PLUGIN_KEY: string; rows: Map<string, string>; seen: Set<string> };
 
 const manifest = {
   apiVersion: 1 as const,
@@ -64,7 +64,7 @@ const good = () =>
   });
 
 const instance = (Plugin: ReturnType<typeof good>) => {
-  const env: Env = { PRINCIPAL_KEY: KEY, rows: new Map(), seen: new Set() };
+  const env: Env = { PLUGIN_KEY: KEY, rows: new Map(), seen: new Set() };
   return { plugin: new Plugin({} as never, env), env };
 };
 
@@ -110,7 +110,9 @@ describe('definePlugin', () => {
         },
         events: { 'order.shipped': () => {} },
       }),
-    ).toThrow(/nodes.other is not a node.*events.order.shipped is not in/);
+    ).toThrow(
+      /nodes.other is not a node.*events.order.shipped is not in.*subscribes to order.completed but events has no handler/,
+    );
     expect(() =>
       checkDefinition({
         manifest,
@@ -134,6 +136,10 @@ describe('definePlugin', () => {
     });
     expect(await plugin.compensate({ ...req(), output: null })).toBe('Removed');
     expect(await plugin.compensate({ ...req(), output: null })).toBe('Nothing to remove');
+    // A node it no longer has can't be undone: it says so rather than reporting success.
+    await expect(
+      plugin.compensate({ ...req({ type: 'demo.gone' }), output: null }),
+    ).rejects.toThrow(/can't be undone/);
   });
 
   it('dispatches events by name and ignores the rest', async () => {
@@ -183,9 +189,43 @@ describe('pluginContract', () => {
         },
       },
     });
-    const env: Env = { PRINCIPAL_KEY: KEY, rows: new Map(), seen: new Set() };
+    const env: Env = { PLUGIN_KEY: KEY, rows: new Map(), seen: new Set() };
     const problems = await pluginContract(new Plugin({} as never, env), cases(env));
     expect(problems.join('\n')).toMatch(/execute wrote again.*\n.*compensating twice left/);
+  });
+
+  it('catches a node keyed by the order alone, and one that writes nothing', async () => {
+    const byOrder = definePlugin<Env>({
+      manifest: { ...manifest, nav: [], publicPaths: [], events: [] },
+      nodes: {
+        stamp: {
+          execute: ({ env, req }) => {
+            env.rows.set(req.orderId, req.orderId);
+            return {};
+          },
+          compensate: ({ env, req }) => (env.rows.delete(req.orderId) ? 'Removed' : 'None'),
+        },
+      },
+    });
+    const env: Env = { PLUGIN_KEY: KEY, rows: new Map(), seen: new Set() };
+    expect(await pluginContract(new byOrder({} as never, env), cases(env))).toEqual([
+      'demo.stamp: a run with another step key wrote nothing; key writes by order id and step key, not the order alone',
+    ]);
+
+    const idle = definePlugin<Env>({
+      manifest: { ...manifest, nav: [], publicPaths: [], events: [] },
+      nodes: { stamp: { execute: () => ({}), compensate: () => 'None' } },
+    });
+    const env2: Env = { PLUGIN_KEY: KEY, rows: new Map(), seen: new Set() };
+    expect(await pluginContract(new idle({} as never, env2), cases(env2))).toEqual([
+      'demo.stamp: execute wrote nothing the effects() probe sees; list it in noEffects if it writes nothing',
+    ]);
+    expect(
+      await pluginContract(new idle({} as never, env2), {
+        ...cases(env2),
+        noEffects: ['demo.stamp'],
+      }),
+    ).toEqual([]);
   });
 
   it('catches a page that lets anyone in and a delivery recorded twice', async () => {

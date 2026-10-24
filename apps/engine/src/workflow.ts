@@ -47,7 +47,7 @@ import { orderAgent } from './namespaces';
 import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
 import { instanceExists } from './orders';
 import { emit, orderSummary } from './outbox';
-import { execPluginNode, manifests, pluginRollback, usesPlugins } from './plugins';
+import { execPluginNode, flowManifests, pluginRollback, usesPlugins } from './plugins';
 
 export type OrderLoopParams = {
   orderId: string;
@@ -91,7 +91,9 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     const registry: NodeRegistry = usesPlugins(flow)
       ? withPlugins(
           JSON.parse(
-            await step.do('load-plugins', async () => JSON.stringify(await manifests(this.env))),
+            await step.do('load-plugins', async () =>
+              JSON.stringify(await flowManifests(this.env, flow)),
+            ),
           ) as PluginManifest[],
         )
       : staticRegistry;
@@ -385,7 +387,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
             },
             true,
           );
-          const r = await exec({ env, node, config, ctx, stepKey: fx });
+          const r = await exec({ env, node, config, ctx, stepKey: fx, registry });
           await report(
             {
               node: {
@@ -510,6 +512,11 @@ function applyResult(ctx: RunContext, nodeId: string, r: NodeResult) {
   ctx.nodes[nodeId] = r.output ?? null;
   if (r.order) ctx.order = { ...ctx.order, ...r.order };
   if (r.vars) ctx.vars = { ...ctx.vars, ...r.vars };
+  if (r.pluginVars) {
+    const plugins = (ctx.vars.plugins ?? {}) as Record<string, Record<string, unknown>>;
+    const { id, vars } = r.pluginVars;
+    ctx.vars = { ...ctx.vars, plugins: { ...plugins, [id]: { ...plugins[id], ...vars } } };
+  }
 }
 
 function clonePlan(plan: PlanState): PlanState {

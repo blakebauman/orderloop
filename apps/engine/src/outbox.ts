@@ -19,9 +19,9 @@ import {
   subscribedTo,
 } from '@orderloop/core';
 import { createDb, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { openSecret } from './data-key';
-import { deliverToPlugin, manifests } from './plugins';
+import { deliverToPlugin, manifests, pluginBindings } from './plugins';
 
 const TIMEOUT_MS = 10_000;
 /** The subscription id of a plugin's deliveries: `plugin:<id>`. */
@@ -42,12 +42,12 @@ export async function emit(
     .filter((m) => subscribedTo(m.events, event))
     .map((m) => ({ id: `${PLUGIN_SUBSCRIPTION}${m.id}` }));
   const targets = [...subs, ...plugins];
-  if (!targets.length) return { delivered: 0, pending: 0 };
+  if (!targets.length && !pluginBindings(env).length) return { delivered: 0, pending: 0 };
 
   const secrets = new Map(subs.map((s) => [s.id, s]));
   const ids = targets.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
   const now = Date.now();
-  const [first, ...rest] = targets.map((s, i) => {
+  const inserts = targets.map((s, i) => {
     const payload: OutboundPayload = { id: ids[i]!, event, occurredAt: now, orderId, data };
     return d
       .insert(webhookDeliveries)
@@ -61,12 +61,28 @@ export async function emit(
       })
       .onConflictDoNothing();
   });
-  await d.batch([first!, ...rest]);
+  const [first, ...rest] = inserts;
+  if (first) await d.batch([first, ...rest]);
 
+  // Also any plugin delivery recorded for this step by an earlier attempt, though the plugin isn't
+  // among the targets now (it didn't answer this time): it stays pending until it's delivered.
+  const earlier = `${`whd_${orderId}_${stepKey}_`.replace(/[^\w-]/g, '_').replace(/[\\%_]/g, '\\$&')}%`;
   const open = await d
     .select()
     .from(webhookDeliveries)
-    .where(and(inArray(webhookDeliveries.id, ids), ne(webhookDeliveries.status, 'delivered')));
+    .where(
+      and(
+        ne(webhookDeliveries.status, 'delivered'),
+        or(
+          inArray(webhookDeliveries.id, ids),
+          and(
+            eq(webhookDeliveries.orderId, orderId),
+            sql`${webhookDeliveries.id} LIKE ${earlier} ESCAPE '\\'`,
+            sql`${webhookDeliveries.subscriptionId} LIKE 'plugin:%'`,
+          ),
+        ),
+      ),
+    );
   // Every subscriber at once: one slow receiver must not use up the step's time for the rest.
   const sent = await Promise.all(
     open.map(async (row) => {
