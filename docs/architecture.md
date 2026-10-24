@@ -944,6 +944,10 @@ the rest is in its SQL, paged by `history`).
   is priced, for the cart's customer (`DraftExtra` in `apps/engine/src/ucp/quote.ts`) with its codes in
   `meta.promoCodes`. A quote that finishes after the cart changed again is dropped, and a cart is
   ready only when its quote is for its current `version` and found no errors (`cartReadyProblem`).
+- **Promotion codes.** A cart's codes ride in `meta.promoCodes` on its quote and its order. A
+  code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
+  cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no
+  such step; warnings never block submitting.
 - **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
   (0 removes), remove, clear, promo codes, and, for staff, lock, unlock and rename. Staff need
   `viewer` to read and `operator` to edit.

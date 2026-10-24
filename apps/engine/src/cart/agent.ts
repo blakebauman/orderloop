@@ -37,6 +37,7 @@ import {
   newId,
   type PluginCart,
   type ProxiedPrincipal,
+  quoteNodes,
 } from '@orderloop/core';
 import { carts, createDb } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
@@ -393,13 +394,23 @@ export class CartAgent extends Agent<Env, CartState> {
       expiresAt: c.external?.expiresAt ?? Number.MAX_SAFE_INTEGER,
       version: c.version,
     };
-    const { quote, issues } = c.lines.length
+    const { quote, issues: found } = c.lines.length
       ? await quoteCheckout(this.env, flow, session, {
           channel: 'manual',
           ...(c.customerId ? { customerId: c.customerId } : {}),
           meta: c.promoCodes.length ? { promoCodes: c.promoCodes } : {},
         })
       : { quote: null, issues: [] };
+    const issues = [...found];
+    // Codes on a cart whose flow never applies them would otherwise just sit there.
+    if (c.promoCodes.length && !quoteNodes(flow).some((n) => n.type === 'commerce.discount'))
+      issues.push({
+        kind: 'warning',
+        code: 'promotion',
+        content:
+          'This cart’s flow has no Apply promotions step, so its codes don’t change the price.',
+        path: '$.promoCodes',
+      });
     const now = this.state.cart;
     if (!now || now.version !== c.version) return;
     const lines = quote
