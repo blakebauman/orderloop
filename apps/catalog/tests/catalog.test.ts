@@ -152,6 +152,54 @@ describe('aliases', () => {
   });
 });
 
+describe('publishing passes', () => {
+  /** `n` products that all live on shard `target`. */
+  function onShard(target: number, n: number) {
+    const out: ReturnType<typeof product>[] = [];
+    while (out.length < n) {
+      const p = product();
+      if (productShard(p.key) === target) out.push(p);
+    }
+    return out;
+  }
+
+  it('publishes a backlog of several passes, each product at its latest version', async () => {
+    // 450 products on one shard: five passes of 100, more than an alarm keeps in flight at once,
+    // and half of them rewritten while the first passes may be running.
+    const target = 7;
+    const products = onShard(target, 450);
+    await api.putProducts(products, { by });
+    const changed = products
+      .slice(0, 225)
+      .map((p) => ({ ...p, title: { en: `${p.title?.en} v2` } }));
+    await api.putProducts(changed, { by });
+    await settle();
+    expect(await env.SHARD.getByName(`shard-${target}`).pending()).toBe(0);
+    for (const p of [products[0], products[224], products[225], products[449]]) {
+      const published = await doc(p?.key ?? '');
+      const latest = changed.find((c) => c.key === p?.key) ?? p;
+      expect(published).toMatchObject({ key: p?.key, title: latest?.title?.en });
+    }
+  });
+
+  it('starts no pass on a product whose pass is still in flight', async () => {
+    const target = 11;
+    const [a, b] = onShard(target, 2);
+    if (!a || !b) throw new Error('no products');
+    await api.putProducts([a, b], { by });
+    await runInDurableObject(env.SHARD.getByName(`shard-${target}`), (o) => {
+      const next = (o as unknown as { nextPass(s: Set<string>): { key: string }[] }).nextPass;
+      const keys = (inFlight: string[]) => [
+        ...new Set(next.call(o, new Set(inFlight)).map((r) => r.key)),
+      ];
+      expect(keys([]).sort()).toEqual([a.key, b.key].sort());
+      expect(keys([a.key])).toEqual([b.key]);
+      expect(keys([a.key, b.key])).toEqual([]);
+    });
+    await settle();
+  });
+});
+
 describe('shard batches', () => {
   it('applies a batch id once', async () => {
     const p = product();

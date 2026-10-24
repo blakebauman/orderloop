@@ -345,8 +345,13 @@ SKU, GTIN or slug is unique without a global object) and the `outbox`.
   what it read: a product changed by another write meanwhile is rejected with `send it again`, and
   what it claimed is given back. Aliases a product dropped are released after the commit, best effort.
 - Each change writes an `outbox` row in the same transaction. The shard's alarm publishes from it
-  (`publish.ts`), up to 100 products a pass, and sets itself again while rows remain, so a crash
-  between storing and publishing only delays publishing.
+  (`publish.ts`), up to 100 products a pass (`PUBLISH_BATCH`) and up to four passes in flight at
+  once (`PUBLISH_PASSES`), each on different products: a new pass starts as soon as one finishes,
+  rather than after the slowest write of the last. A product whose pass is in flight is left for a
+  later pass (`nextPass` skips it), so its writes never overlap. An alarm keeps starting passes for
+  a minute (`ALARM_WINDOW_MS`), then sets itself again while rows remain, so a crash between storing
+  and publishing only delays publishing. A failed pass fails the alarm, which is retried, once the
+  passes still in flight are done.
 
 **Publishing** renders each product once per channel and locale (`renderForChannel`) and writes:
 a product document and alias pointers to R2 (`PUBLISHED`, under `docs/f1/<channel>/…`, `f1` being
@@ -381,8 +386,8 @@ jurisdiction like the other objects), whose `write(ops)` starts them all at once
 queues those past six and starts each as a slot frees, so none waits for a slower one).
 `publishKeys` awaits every publisher and only then records `published` and returns the changes. With
 a fanout of 1 it runs the ops itself and makes no hop. One product's writes always go to the same
-publisher and the shard waits for every publisher before its next pass, so a product's writes are
-never reordered. The publishers hold no state.
+publisher and the product is in no other pass until every publisher of its pass is done, so a
+product's writes are never reordered. The publishers hold no state.
 
 Measured on production in October 2026 (a pass is 100 products, about 500 writes):
 
@@ -393,6 +398,9 @@ Measured on production in October 2026 (a pass is 100 products, about 500 writes
   took about a second from the publisher, while R2 and KV accepted about 1,200 writes a second with
   no errors. The listing changes queue kept up throughout (backlog under 250 messages, 2 to 8
   consumers).
+- With 32 publishers starting every write at once, republishing 1,000,000 products peaked near
+  1,000 a second (R2 about 3,200 puts a second) and averaged about 400. A pass waited for the
+  slowest of its 32 publishers (shard pass p50 8 to 14 s), which is why passes now overlap.
 
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel, and again when the key's uid changed (a key deleted and
