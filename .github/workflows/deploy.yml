@@ -35,6 +35,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ID: ${{ fromJSON(inputs.deployment).id }}
       DOMAIN: ${{ fromJSON(inputs.deployment).domain }}
+      CATALOG_DOMAIN: ${{ fromJSON(inputs.deployment).catalogDomain }}
       # Rendered next to each app's wrangler.jsonc by the Render step.
       CONFIG: wrangler.${{ fromJSON(inputs.deployment).id }}.json
     # The Cloudflare API sometimes fails a request outright (codes 7403, 10013) and succeeds on
@@ -116,6 +117,11 @@ jobs:
       - name: Deploy catalog
         id: catalog
         run: retry pnpm --filter @orderloop/catalog exec wrangler deploy --config "$CONFIG"
+      # The public catalog API, reading what the catalog publishes; it consumes the purge queue the
+      # catalog sends to.
+      - name: Deploy catalog-edge
+        id: catalog_edge
+        run: retry pnpm --filter @orderloop/catalog-edge exec wrangler deploy --config "$CONFIG"
       # The web Worker binds to the engine, so the engine goes first.
       - name: Deploy engine
         id: engine
@@ -143,6 +149,8 @@ jobs:
           # The app itself, not just the health route: the sign-in page renders.
           # (On a workspace with no people yet it redirects to the setup page, which must render too.)
           curl -fsSL --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
+          # The public catalog API answers on its own host.
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$CATALOG_DOMAIN/health"
       # Any failure once the catalog has shipped puts each Worker that deployed back on its
       # previous version, so the deployment never runs a new engine behind an old web app (or the
       # reverse). D1 migrations are not rolled back, which is why they must be additive.
@@ -156,7 +164,11 @@ jobs:
           if [ "${{ steps.engine.outcome }}" = "success" ]; then
             retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg" --config "$CONFIG"
           fi
-          # A deployment's first catalog has no earlier version to go back to.
+          # A deployment's first catalog or catalog-edge has no earlier version to go back to.
+          if [ "${{ steps.catalog_edge.outcome }}" = "success" ]; then
+            retry pnpm --filter @orderloop/catalog-edge exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
+              || echo "No earlier catalog-edge version to roll back to"
+          fi
           retry pnpm --filter @orderloop/catalog exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
             || echo "No earlier catalog version to roll back to"
       # Static docs Worker; independent of the app, so it goes last and can't block a deploy above

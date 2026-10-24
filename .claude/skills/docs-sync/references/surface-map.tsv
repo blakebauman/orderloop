@@ -95,5 +95,7 @@
 ^scripts/(fleet\.ts|provision\.sh)$	docs/deploy.md docs/operations.md docs/configuration.md	prose
 ^apps/catalog/src/	docs/architecture.md docs/data-model.md docs/configuration.md	prose
 ^apps/catalog/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/data-model.md	prose
+^apps/catalog-edge/src/	docs/architecture.md docs/data-model.md docs/testing.md	prose
+^apps/catalog-edge/wrangler\.jsonc$	docs/configuration.md docs/deploy.md docs/architecture.md docs/operations.md	prose
 ^packages/core/src/product/	docs/architecture.md docs/data-model.md docs/testing.md	prose
 ^deployments/	docs/operations.md	prose

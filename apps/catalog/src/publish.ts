@@ -40,6 +40,9 @@ export async function publishKeys(shard: CatalogShard, keys: string[], config: C
   for (const key of keys) {
     const current = shard.publishable(key);
     const before = new Map(shard.publishedState(key).map((s) => [s.channel, s]));
+    // A product's uid never changes: write the key → uid entry the first time it publishes.
+    if (current && before.size === 0)
+      tasks.push(() => env.CARDS.put(paths.uid(DOC_FORMAT, key), String(current.uid)));
     for (const channel of config.channels) {
       const prev = before.get(channel.code);
       const type = current && resolve(current.product.type, current.product.typeVersion);

@@ -19,9 +19,11 @@ import {
   type Issue,
   type Product,
   type ProductData,
+  type PurgeMessage,
   productAliases,
   productShard,
   productUid,
+  tags,
   type WriteResult,
 } from '@orderloop/core/product';
 import { type CatalogConfig, meta, shard } from './config';
@@ -401,6 +403,18 @@ export class CatalogShard extends DurableObject<Env> {
     const included = new Set(keys);
     const upTo = rows.filter((r) => included.has(r.key)).at(-1)?.seq ?? 0;
     await publishKeys(this, keys, config);
+    // Urgent changes don't wait out the edge cache's minute: their tags go to catalog-edge's purge
+    // queue, which it drains at the rate Cloudflare allows. Sent after publishing, so a purge never
+    // refills from the old document.
+    const urgent = [
+      ...new Set(rows.filter((r) => r.urgent && included.has(r.key)).map((r) => r.key)),
+    ];
+    for (let i = 0; i < urgent.length; i += 100)
+      await this.env.PURGE.sendBatch(
+        urgent
+          .slice(i, i + 100)
+          .map((key) => ({ body: { tags: [tags.product(key)] } satisfies PurgeMessage })),
+      );
     // Every outbox row up to the last one published is covered: later rows for the same key
     // republish the same (latest) state.
     this.sql.exec(

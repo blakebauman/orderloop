@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orderloop-catalog-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // The public catalog API. A deployment's host is catalog.<its domain> (the registry renders it).
+  "routes": [{ "pattern": "catalog.orderloop.app", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  // Workers Caching: tiered, collapses concurrent misses, revalidates in the background. Kept across
+  // deploys (paths carry the document format), so a deploy doesn't start from a cold cache.
+  "cache": { "enabled": true, "cross_version_cache": true },
+  "exports": {
+    // The gateway normalizes every request; caching in front of it would skip that.
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    // What the gateway forwards to: cached by URL.
+    "Delivery": { "type": "worker", "cache": { "enabled": true } }
+  },
+  // What the catalog Worker publishes: documents, alias pointers and category trees.
+  "r2_buckets": [{ "binding": "PUBLISHED", "bucket_name": "orderloop-catalog" }],
+  // Listing cards and key → uid entries.
+  "kv_namespaces": [{ "binding": "CARDS", "id": "7f9656f155a848b690457d2360700e0d" }],
+  "queues": {
+    "consumers": [
+      {
+        // Cache tags of urgent changes. One batch at a time, at most one every 12 seconds: purges
+        // are rationed (5 a minute, 100 tags each).
+        "queue": "orderloop-catalog-purge",
+        "max_batch_size": 100,
+        "max_batch_timeout": 12,
+        "max_concurrency": 1,
+        "max_retries": 10,
+        "dead_letter_queue": "orderloop-catalog-purge-dlq"
+      }
+    ]
+  },
+  // Requests by route, channel, status and cache result, with latency.
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "orderloop_catalog_edge" }]
+}

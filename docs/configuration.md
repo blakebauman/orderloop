@@ -1,9 +1,9 @@
 # Configuration
 
-Variables, secrets and bindings for the engine, web and catalog Workers, and the local dev files.
+Variables, secrets and bindings for the engine, web, catalog and catalog-edge Workers, and the local dev files.
 
 Each Worker is configured in its `wrangler.jsonc`. After changing one, regenerate its binding
-types: `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types` or `pnpm --filter @orderloop/catalog types`.
+types: `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types` `pnpm --filter @orderloop/catalog types` or `pnpm --filter @orderloop/catalog-edge types`.
 
 ## Engine variables
 
@@ -31,7 +31,7 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 
 ## Catalog variables
 
-The catalog Worker has two variables and no secrets (`apps/catalog/wrangler.jsonc`):
+The catalog Worker has two variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -109,7 +109,13 @@ created through the API and stored in D1; they are not configuration.
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
 | `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
-| `CARDS` | catalog | KV namespace of listing cards. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
+| `PURGE` | catalog | Queue producer for `orderloop-catalog-purge`: the alarm sends the cache tags (`PurgeMessage`) of urgent products after publishing them |
+| `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
+| `PUBLISHED` | catalog-edge | The same R2 bucket, `orderloop-catalog`, read |
+| `CARDS` | catalog-edge | The same KV namespace, read |
+| `ANALYTICS` | catalog-edge | Analytics Engine dataset `orderloop_catalog_edge` (a customer's is `orderloop_catalog_edge_<id>`) |
+| Queue consumer | catalog-edge | `orderloop-catalog-purge` (`max_batch_size` 100, `max_batch_timeout` 12 seconds, `max_concurrency` 1, `max_retries` 10, dead-letter queue `orderloop-catalog-purge-dlq`) |
+| Workers Caching | catalog-edge | `cache: { enabled: true, cross_version_cache: true }`, and `exports`: the default (gateway) entrypoint has the cache off, `Delivery` has it on |
 | `ENGINE` | web | Service binding to `orderloop-engine`, entrypoint `EngineApi` |
 | `OAUTH_REGISTER_LIMIT`, `OAUTH_TOKEN_LIMIT` | web | Workers rate-limit bindings (`ratelimits` in `wrangler.jsonc`): 10 requests a minute to `/oauth/register` and 60 to `/oauth/token`, per address; over the limit answers `429 slow_down` |
 | `API_LIMIT`, `AGENT_LIMIT`, `WEBHOOK_LIMIT` | web | Per-caller budgets (`app/lib/rate-limit.ts`): 600 requests a minute per principal on `/api/v1` (after authentication), 300 per principal on each of `/mcp` and `/a2a` (keyed `<path>:<principal id>`) and 300 per registered UCP platform on `/ucp` (`/ucp:<platform id>`, `AGENT_LIMIT`), and 1,200 per integration on the signed webhooks (after the signature verifies, so a forged request can't spend a sender's budget) or per shop on Shopify's. Over the limit answers `429` with `Retry-After: 60`. A deployment's `limits` in the registry replace these numbers ([Operations](operations.md#the-registry)). Counted per Cloudflare location, so they stop a runaway client rather than meter it exactly. Without the binding (unit tests) nothing is limited |
@@ -129,6 +135,12 @@ serves `docs.orderloop.app`, and likewise sets `workers_dev` and `preview_urls` 
 
 The catalog Worker has no routes, no `workers_dev` URL and no preview URLs, and nothing binds to it
 yet; it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
+
+The catalog-edge Worker serves `catalog.orderloop.app` as a custom domain (a customer's is the
+registry's `catalogDomain`, default `catalog.<domain>`, rendered at deploy), with `workers_dev` and
+`preview_urls` off. It answers `GET /health` with `{ ok: true }`, and CI smoke-tests it. Its
+compatibility flags are `nodejs_compat` and `global_fetch_strictly_public`; `observability` is on and
+source maps are uploaded.
 
 Both app Workers answer `GET /health` with `{ ok: true, service }`. The web app's
 `GET /health/deep` also checks D1, R2 and the engine (see

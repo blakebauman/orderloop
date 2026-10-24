@@ -13,6 +13,7 @@ import {
   parseTypeRef,
   productInputSchema,
 } from './model';
+import { SLUG } from './paths';
 
 export type Issue = { path: string; message: string };
 export type Validated = { ok: true; data: ProductData } | { ok: false; issues: Issue[] };
@@ -31,7 +32,6 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 const REF = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const SLUG = /^[\p{Ll}\p{Lo}\p{N}]+(-[\p{Ll}\p{Lo}\p{N}]+)*$/u;
 
 function checker(def: AttributeDef): Check {
   switch (def.kind) {

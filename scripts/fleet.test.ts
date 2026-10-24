@@ -7,6 +7,7 @@ import {
   loadDeployments,
   matrix,
   renderCatalog,
+  renderCatalogEdge,
   renderEngine,
   renderWeb,
   secretsProblem,
@@ -69,6 +70,35 @@ test('the catalog config has its own name, bucket, card namespace and jurisdicti
   assert.equal(c.workers_dev, false);
 });
 
+test("catalog-edge serves catalog.<domain> from the deployment's bucket, cards and purge queue", () => {
+  const c = renderCatalogEdge(base('catalog-edge'), acme);
+  assert.equal(acme.catalogDomain, 'catalog.acme.orderloop.app');
+  assert.equal(c.name, 'orderloop-catalog-edge-acme');
+  assert.deepEqual(c.routes, [{ pattern: 'catalog.acme.orderloop.app', custom_domain: true }]);
+  assert.deepEqual(c.r2_buckets[0], {
+    binding: 'PUBLISHED',
+    bucket_name: 'orderloop-catalog-acme',
+    jurisdiction: 'eu',
+  });
+  assert.deepEqual(c.kv_namespaces[0], { binding: 'CARDS', id: 'a'.repeat(32) });
+  assert.equal(c.queues.consumers[0].queue, 'orderloop-catalog-purge-acme');
+  assert.equal(c.queues.consumers[0].dead_letter_queue, 'orderloop-catalog-purge-dlq-acme');
+  assert.equal(c.queues.consumers[0].max_concurrency, 1);
+  assert.equal(c.analytics_engine_datasets[0].dataset, 'orderloop_catalog_edge_acme');
+  // The catalog sends to the same purge queue.
+  const producers = renderCatalog(base('catalog'), acme).queues.producers;
+  assert.ok(producers.some((p: { queue: string }) => p.queue === 'orderloop-catalog-purge-acme'));
+  assert.equal(
+    toDeployment({ id: 'beta', ring: 'canary', slot: 5, catalogDomain: 'products.b.example' })
+      .catalogDomain,
+    'products.b.example',
+  );
+  assert.throws(
+    () => toDeployment({ id: 'beta', ring: 'canary', slot: 5, catalogDomain: 'x' }),
+    /catalogDomain/,
+  );
+});
+
 test('the web config binds its own engine, domain and rate-limit namespaces', () => {
   const c = renderWeb(base('web'), acme);
   assert.equal(c.name, 'orderloop-web-acme');
@@ -96,6 +126,7 @@ test("a customer's limits replace the base budgets they name", () => {
 test("orderloop.app's own deployment renders the base configs unchanged", () => {
   const d = loadDeployments().find((x) => x.id === 'orderloop')!;
   assert.deepEqual(renderCatalog(base('catalog'), d), base('catalog'));
+  assert.deepEqual(renderCatalogEdge(base('catalog-edge'), d), base('catalog-edge'));
   assert.deepEqual(renderEngine(base('engine'), d), base('engine'));
   assert.deepEqual(renderWeb(base('web'), d), base('web'));
 });

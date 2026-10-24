@@ -2,24 +2,25 @@
 
 Provision D1, R2 and KV, apply migrations, set secrets and deploy the catalog, engine and web Workers, plus the docs site.
 
-OrderLoop deploys as three Workers in one Cloudflare account:
+OrderLoop deploys as four Workers in one Cloudflare account:
 
 | Worker | Config | Role |
 |---|---|---|
 | `orderloop-catalog` | `apps/catalog/wrangler.jsonc` | The product catalog: `CatalogShard`, `CatalogMeta` and `CatalogFeeds` Durable Objects, the `orderloop-catalog-feed` Workflow, a queue for feed parts (`orderloop-catalog-feed-parts`, with a dead-letter queue), an R2 bucket (`orderloop-catalog`) and a KV namespace for what it publishes. No public URL and no secrets; nothing binds to it yet |
+| `orderloop-catalog-edge` | `apps/catalog-edge/wrangler.jsonc` | The public, read-only catalog API at `catalog.orderloop.app` (custom domain): reads the catalog's R2 bucket and KV namespace behind Workers Caching, consumes the purge queue (`orderloop-catalog-purge`, with a dead-letter queue) and writes request data points to an Analytics Engine dataset (`orderloop_catalog_edge`). No secrets |
 | `orderloop-engine` | `apps/engine/wrangler.jsonc` | OrderAgent and AssistantAgent Durable Objects, `orderloop-order` and `orderloop-replenish` Workflows, Workers AI. No public URL (`workers_dev` and preview URLs are off); reached only through the web app's service binding |
 | `orderloop-web` | `apps/web/wrangler.jsonc` | Dashboard, editor, REST API. Binds the engine as `ENGINE` (entrypoint `EngineApi`) |
 
 The engine and web bind the same D1 database (`orderloop`) and R2 bucket (`orderloop-docs`); the
-catalog binds neither.
+catalog and catalog-edge bind neither. They share the catalog's R2 bucket, KV namespace and purge queue.
 
 ## First deploy
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts queue and its dead-letter queue, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts and purge queues and their dead-letter queues, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
-pnpm run deploy                                # catalog, then engine (web binds to it), then web
+pnpm run deploy                                # catalog, then catalog-edge, then engine (web binds to it), then web
 ```
 
 Production has no demo data (migration `0027` removed it and `packages/db/seed` is never applied remotely), so the
@@ -41,11 +42,13 @@ something else entirely.
    table or column. Until the new Workers are live, the old code runs against the new schema, so a
    migration only adds (expand); dropping or renaming waits for a later change once nothing
    deployed uses it (contract).
-2. **Catalog, then engine, then web.** The web Worker's service binding needs the engine to exist.
-   The catalog has no callers yet; it goes first so that the Workers that come to bind to it always
-   find the version they expect.
+2. **Catalog, then catalog-edge, then engine, then web.** The web Worker's service binding needs the
+   engine to exist. The catalog has no callers yet; it goes first so that the Workers that come to
+   bind to it always find the version they expect. Catalog-edge goes next because its queue
+   consumer needs the purge queue (which `provision.sh` creates) and it reads what the catalog
+   publishes; the catalog's `PURGE` producer needs the same queue.
 
-Workflow names (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`) and queue names must be unique in the account. The catalog's queue consumer needs its queue to exist, so run `provision.sh` before the first deploy that carries the feed code; an existing deployment re-runs it (see [Operations](operations.md#adding-a-customer)).
+Workflow names (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`) and queue names must be unique in the account. The catalog's and catalog-edge's queue consumers need their queues to exist, so run `provision.sh` before the first deploy that carries the feed code or the purge queue; an existing deployment re-runs it (see [Operations](operations.md#adding-a-customer)).
 
 ## Email intake
 
@@ -176,11 +179,11 @@ type-check, build, tests, the fleet tests (`pnpm test:fleet`) and
 `pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
-D1, deploys its catalog, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login`
+D1, deploys its catalog, deploys its catalog-edge, deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's
 and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
 deployment before its migration. If anything fails once the catalog has deployed (the engine deploy,
 the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed;
-the catalog goes last, and a catalog with no earlier version (a deployment's first) is left as it is. D1 is not rolled
+catalog-edge and then the catalog go last, and one with no earlier version (a deployment's first) is left as it is. D1 is not rolled
 back, which is why migrations only add; see [Restoring D1](#restoring-d1). The docs then get their
 own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with its canonical URL, a
 reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.

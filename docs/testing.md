@@ -13,6 +13,7 @@ CI runs it after lint, type-check and build, then audits production dependencies
 | `packages/design` | Node | `packages/design/vitest.config.ts` |
 | `apps/engine` | workerd, through `@cloudflare/vitest-plugin`; two projects, `engine` and `stripe` | `apps/engine/vitest.config.ts` |
 | `apps/catalog` | workerd, through `@cloudflare/vitest-plugin` | `apps/catalog/vitest.config.ts` |
+| `apps/catalog-edge` | workerd, through `@cloudflare/vitest-plugin` | `apps/catalog-edge/vitest.config.ts` |
 | `apps/web` | Node | `apps/web/vitest.config.ts` |
 
 :::caution
@@ -154,6 +155,10 @@ rendering and routing are covered in core (`product-*.test.ts`), not repeated he
 | unpublishing | A draft's documents, cards and alias pointers are deleted while it still owns its SKUs, and come back when it is active again; a dropped variant's pointer goes; deleting a product removes its documents and claims, and an unknown key is `unchanged` |
 | types, channels and categories | Types add versions only (a removed attribute is refused with a reason, a new type must start at 1) and an unversioned product pins to the latest; categories with an unknown parent or a cycle are refused and the published tree has localized names; a channel whose default locale isn't published is refused |
 
+The writing-products group also checks the `u:f1:<key>` uid entry in KV, and its second write is
+urgent (`putProducts(…, { urgent: true })`) so the alarm's purge send runs; no test reads the purge
+queue.
+
 ### Feeds
 
 `apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
@@ -214,7 +219,29 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 
 `scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
 
+`scripts/fleet.test.ts` also covers catalog-edge: `renderCatalogEdge` gives the Worker its own name (`orderloop-catalog-edge-<id>`), a custom-domain route for `catalogDomain` (default `catalog.<domain>`), the deployment's bucket (with its jurisdiction), `CARDS` namespace id, purge queue and dead-letter queue consumer (`max_concurrency` 1) and Analytics Engine dataset (`orderloop_catalog_edge_<id>`); the catalog's `PURGE` producer names the same queue; a `catalogDomain` that isn't a host name is refused; `orderloop` renders the committed `apps/catalog-edge/wrangler.jsonc` unchanged.
+
 `scripts/fleet.test.ts` also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
+
+## Catalog edge: delivery in workerd
+
+`apps/catalog-edge/tests/edge.test.ts` runs the gateway and `Delivery` against local R2 and KV,
+from the Worker's own `wrangler.jsonc` with `remoteBindings: false`. `beforeAll` writes what the
+publisher would (two products, one in two locales, SKU and slug alias pointers, a category tree, uid
+entries and cards) with `paths` from `@orderloop/core/product/paths`, and requests go to the default
+entrypoint through `exports`.
+
+| Group | Covers |
+|---|---|
+| documents | A product document with its content type, `Cache-Control` (`FRESH`), a quoted `etag` and CORS; a `304` with no body when `If-None-Match` matches; SKU and slug lookups (a slug in its own locale); a missing product or SKU is `404` with `MISSING`; the category tree; `HEAD` has no body |
+| batches | Cards in the order asked, `null` for unknown keys, a repeated key once; no `keys`, 101 keys or a malformed key is `400` (`at most 100 keys`) |
+| the gateway | `POST` is `405`; `OPTIONS` is `204` allowing `if-none-match`; a wrong version prefix or unknown kind is `404`; a bad channel, locale or slug is `400`; `/health` is `{ ok: true }` |
+| purging | A queue batch with a repeated tag is acknowledged (`ackAll`, no retry) |
+
+Workers Caching isn't emulated locally, so these tests check what reaches the cache (canonical URLs,
+headers, `304`s) and not hits, misses, stale serving or tag purges: `Delivery.purge` is a no-op
+without it, so the test only checks the acknowledgement. Nothing in the repository tests those; the
+deploy's smoke test requests only `/health`, which the gateway answers without the cache.
 
 ## What isn't covered
 

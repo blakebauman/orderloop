@@ -6,7 +6,8 @@
   "description": "Order Loop logic with no bindings: flow schema, node catalog, the DAG planner the Workflow interpreter drives, expressions, templates and the engine RPC contract.",
   "exports": {
     ".": "./src/index.ts",
-    "./product": "./src/product/index.ts"
+    "./product": "./src/product/index.ts",
+    "./product/paths": "./src/product/paths.ts"
   },
   "scripts": {
     "test": "vitest run",
