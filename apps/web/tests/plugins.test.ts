@@ -1,12 +1,30 @@
-import { type PluginManifest, PRINCIPAL_HEADER, verifyPrincipal } from '@orderloop/core';
+import {
+  type PluginManifest,
+  type PluginStatus,
+  PRINCIPAL_HEADER,
+  verifyPrincipal,
+} from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const pluginFetch = vi.fn(async (_r: Request) => Response.json({ ok: true }));
+const pluginFetch = vi.fn(async (_r: Request) =>
+  Response.json(
+    { ok: true },
+    {
+      headers: {
+        'set-cookie': 'session=stolen; Path=/',
+        'x-frame-options': 'ALLOWALL',
+        'content-security-policy': "script-src 'unsafe-inline' https://evil.example",
+        connection: 'keep-alive',
+      },
+    },
+  ),
+);
 const env: Record<string, unknown> = {
   PRINCIPAL_KEY: 'web-test-key',
   PLUGIN_EXAMPLE: { fetch: pluginFetch },
 };
 const manifest: PluginManifest = {
+  apiVersion: 1,
   id: 'example',
   name: 'Example',
   version: '1',
@@ -15,9 +33,14 @@ const manifest: PluginManifest = {
   nav: [],
   publicPaths: ['/plugins/example/public/ping'],
   requires: [],
+  pageRole: 'operator',
+  personalData: 'redact',
 };
-const pluginCatalog = vi.fn(async () => [manifest]);
+const pluginCatalog = vi.fn(
+  async (): Promise<PluginStatus[]> => [{ binding: 'PLUGIN_EXAMPLE', manifest, healthy: true }],
+);
 let caller: Record<string, unknown> | null;
+let limited = false;
 
 vi.mock('cloudflare:workers', () => ({ env }));
 vi.mock('~/lib/env.server', () => ({ engine: () => ({ pluginCatalog }) }));
@@ -26,26 +49,44 @@ vi.mock('~/lib/auth.server', () => ({
   sessionId: async () => 'sess-hash',
   setupDue: () => null,
 }));
+vi.mock('~/lib/audit.server', () => ({ clientIp: () => '203.0.113.7' }));
+const overBudget = vi.fn(async (_budget: string, _key: string) =>
+  limited ? new Response('Too many requests', { status: 429 }) : null,
+);
+vi.mock('~/lib/rate-limit', () => ({ overBudget }));
 
-const { pluginFetch: forward } = await import('~/lib/plugins.server');
+const {
+  pluginFetch: forward,
+  pluginPathId,
+  MAX_PLUGIN_BODY,
+} = await import('~/lib/plugins.server');
 
-const call = (path: string, headers: Record<string, string> = {}) =>
-  forward(new Request(`https://shop.example${path}`, { headers }));
+const call = (path: string, init: RequestInit = {}) =>
+  forward(new Request(`https://shop.example${path}`, init));
 const sent = () => pluginFetch.mock.calls.at(-1)![0];
 
 describe('plugin pages on the web Worker', () => {
   beforeEach(() => {
     pluginFetch.mockClear();
+    overBudget.mockClear();
+    limited = false;
     caller = { kind: 'user', id: 'usr_1', name: 'Ada', role: 'admin' };
   });
 
-  it('forwards a signed-in person with a signed principal and no credentials', async () => {
-    const res = await call('/plugins/example/', { cookie: 'session=abc', authorization: 'x' });
+  it('forwards a signed-in person with a signed principal and only the allowed headers', async () => {
+    const res = await call('/plugins/example/', {
+      headers: {
+        cookie: 'session=abc',
+        authorization: 'Bearer x',
+        'x-forwarded-for': '10.0.0.1',
+        'cf-connecting-ip': '203.0.113.7',
+        accept: 'text/html',
+      },
+    });
     expect(res.status).toBe(200);
     const req = sent();
     expect(new URL(req.url).pathname).toBe('/plugins/example/');
-    expect(req.headers.get('cookie')).toBeNull();
-    expect(req.headers.get('authorization')).toBeNull();
+    expect([...req.headers.keys()].sort()).toEqual(['accept', PRINCIPAL_HEADER]);
     const p = await verifyPrincipal(
       ['web-test-key'],
       req.headers.get(PRINCIPAL_HEADER),
@@ -54,19 +95,56 @@ describe('plugin pages on the web Worker', () => {
     expect(p).toMatchObject({ id: 'usr_1', role: 'admin', session: 'sess-hash' });
   });
 
-  it('refuses a page to someone not signed in', async () => {
+  it("puts this app's rules on the plugin's response", async () => {
+    const res = await call('/plugins/example/');
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(res.headers.get('connection')).toBeNull();
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    const csp = res.headers.get('content-security-policy')!;
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain('evil.example');
+  });
+
+  it('refuses a page to someone not signed in, or below its page role', async () => {
     caller = null;
     expect((await call('/plugins/example/')).status).toBe(401);
+    caller = { kind: 'user', id: 'usr_2', name: 'Vi', role: 'viewer' };
+    expect((await call('/plugins/example/')).status).toBe(403);
     expect(pluginFetch).not.toHaveBeenCalled();
   });
 
-  it('forwards a public path without a principal', async () => {
+  it('forwards a public path without a principal, within its rate limit', async () => {
     caller = null;
     expect((await call('/plugins/example/public/ping')).status).toBe(200);
     expect(sent().headers.get(PRINCIPAL_HEADER)).toBeNull();
+    expect(overBudget).toHaveBeenCalledWith('WEBHOOK_LIMIT', 'plugin:example:203.0.113.7');
+    limited = true;
+    expect((await call('/plugins/example/public/ping')).status).toBe(429);
   });
 
-  it('answers 404 for a plugin that is not installed', async () => {
+  it('refuses a body over the limit, declared or streamed', async () => {
+    const declared = await call('/plugins/example/public/ping', {
+      method: 'POST',
+      headers: { 'content-length': String(MAX_PLUGIN_BODY + 1) },
+      body: 'x',
+    });
+    expect(declared.status).toBe(413);
+    expect(pluginFetch).not.toHaveBeenCalled();
+
+    await call('/plugins/example/public/ping', {
+      method: 'POST',
+      body: new Blob([new Uint8Array(MAX_PLUGIN_BODY + 1)]).stream(),
+      duplex: 'half',
+    } as RequestInit);
+    await expect(sent().arrayBuffer()).rejects.toThrow(/too large/);
+  });
+
+  it('forwards only /plugins/<id>/ paths, and answers 404 for a plugin not installed', async () => {
+    expect(pluginPathId('/plugins')).toBeNull();
+    expect(pluginPathId('/plugins/')).toBeNull();
+    expect(pluginPathId('/plugins/Bad_Id/x')).toBeNull();
+    expect(pluginPathId('/plugins/example/x')).toBe('example');
     expect((await call('/plugins/ledger/')).status).toBe(404);
     expect(pluginFetch).not.toHaveBeenCalled();
   });

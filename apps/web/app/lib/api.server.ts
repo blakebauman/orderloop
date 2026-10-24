@@ -114,7 +114,7 @@ import {
   touchIntegration,
 } from './integrations.server';
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
-import { pluginManifests } from './plugins.server';
+import { pluginStatuses } from './plugins.server';
 import { overBudget } from './rate-limit';
 import {
   addPlatform,
@@ -225,12 +225,15 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       if (denied) return denied;
       if (parts.length === 1)
         return json({
-          plugins: (await pluginManifests()).map((m) => ({
-            id: m.id,
-            name: m.name,
-            version: m.version,
-            nodes: m.nodes.map((n) => n.type),
-            events: m.events,
+          plugins: (await pluginStatuses()).map(({ binding, manifest: m, healthy, error }) => ({
+            binding,
+            id: m?.id ?? null,
+            name: m?.name ?? null,
+            version: m?.version ?? null,
+            nodes: m?.nodes.map((n) => n.type) ?? [],
+            events: m?.events ?? [],
+            healthy,
+            ...(error ? { error } : {}),
           })),
         });
       if (parts.length === 3 && parts[2] === 'usage' && PLUGIN_ID_RE.test(parts[1]!))

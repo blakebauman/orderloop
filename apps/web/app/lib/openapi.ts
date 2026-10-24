@@ -629,9 +629,11 @@ export function openApiDocument(serverUrl: string) {
       '/api/v1/plugins': {
         get: {
           summary:
-            'The installed plugins, with their node types and the events they receive (admin)',
+            'The installed plugins, with their node types, the events they receive and whether they answer (admin)',
           responses: {
-            '200': ok('{ plugins: [{ id, name, version, nodes, events }] }'),
+            '200': ok(
+              '{ plugins: [{ binding, id, name, version, nodes, events, healthy, error? }] }: id and name are null for a plugin whose manifest was refused',
+            ),
             ...errors,
           },
         },

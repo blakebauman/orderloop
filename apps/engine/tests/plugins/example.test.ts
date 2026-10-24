@@ -1,15 +1,15 @@
 import { applyD1Migrations, introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import type { D1Migration } from '@cloudflare/vitest-plugin';
-import { validateGraph } from '@orderloop/core';
+import { type OrderInput, type OrderState, validateGraph } from '@orderloop/core';
 import { createDb, publishFlow, reservations, webhookDeliveries } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import { execPluginNode, registry } from '../../src/plugins';
-import { node, settled, stampFlow, stampInput } from '../plugin-helpers';
+import { execPluginNode, pluginStatuses, registry } from '../../src/plugins';
+import { node, probeFlow, settled, stampFlow, stampInput } from '../plugin-helpers';
 
 const testEnv = env as Env & {
   EXAMPLE_DB: D1Database;
@@ -39,7 +39,20 @@ beforeAll(async () => {
   await publishFlow(db(), stampFlow('test-stamp', 'completed'));
   await publishFlow(db(), stampFlow('test-stamp-fails', 'failed'));
   await publishFlow(db(), stampFlow('test-stamp-skips', 'completed', true));
+  for (const behave of ['echo', 'fail', 'fail_retry', 'big', 'bad_branch', 'vars'])
+    await publishFlow(db(), probeFlow(`test-probe-${behave}`, behave));
 });
+
+const probe = async (behave: string, input: Partial<OrderInput> = {}) => {
+  await introspector?.dispose();
+  await introspect();
+  const { orderId } = await startOrder(env, {
+    flowId: `test-probe-${behave}`,
+    input: { ...stampInput(), lines: [], ...input },
+  });
+  return settled(orderId, 45_000, { rollback: false });
+};
+const attempts = (s: OrderState) => s.timeline.filter((t) => /attempt \d/.test(t.message)).length;
 
 afterEach(async () => {
   await introspector?.dispose();
@@ -48,9 +61,10 @@ afterEach(async () => {
 
 describe('an installed plugin', () => {
   it('lists its manifest and passes the deep health check', async () => {
-    const [m] = await api().pluginCatalog();
-    expect(m).toMatchObject({ id: 'example', events: ['order.completed'] });
-    expect(m!.nodes.map((n) => n.type)).toEqual(['example.stamp']);
+    const [s] = await api().pluginCatalog();
+    expect(s).toMatchObject({ binding: 'PLUGIN_EXAMPLE', healthy: true });
+    expect(s!.manifest).toMatchObject({ id: 'example', apiVersion: 1, personalData: 'redact' });
+    expect(s!.manifest!.nodes.map((n) => n.type)).toEqual(['example.stamp', 'example.probe']);
     expect((await api().health()).checks).toMatchObject({ plugin_example: 'ok' });
   });
 
@@ -128,16 +142,67 @@ describe('an installed plugin', () => {
 
   it('reports what uses it', async () => {
     const usage = await api().pluginUsage('example');
-    expect(usage.flows.map((f) => f.id).sort()).toEqual([
-      'test-stamp',
-      'test-stamp-fails',
-      'test-stamp-skips',
-    ]);
+    expect(usage.flows.map((f) => f.id)).toEqual(
+      expect.arrayContaining([
+        'test-stamp',
+        'test-stamp-fails',
+        'test-stamp-skips',
+        'test-probe-echo',
+      ]),
+    );
     expect(await api().pluginUsage('other')).toEqual({ flows: [], orders: [] });
   });
 
   it('leaves the stock it reserved for the order that completed', async () => {
     const held = await db().select().from(reservations);
     expect(held.length).toBeGreaterThan(0);
+  });
+});
+
+describe('what the engine accepts from a plugin', () => {
+  it('sends it the order without the buyer details its manifest did not ask for', async () => {
+    const done = await probe('echo', {
+      contact: { name: 'Ada Lovelace', email: 'ada@example.com' },
+      meta: { shipTo: { line1: '1 Main St', city: 'Springfield' } },
+    });
+    expect(done.status).toBe('completed');
+    const sent = done.nodes.probe!.output as { order: Record<string, unknown> };
+    expect(sent.order).not.toHaveProperty('contact');
+    expect(JSON.stringify(sent)).not.toMatch(/ada|main st/i);
+  });
+
+  it('keeps its variables under its own name', async () => {
+    const done = await probe('vars');
+    expect(done.vars).toMatchObject({ example: { probed: true } });
+    expect(done.vars).not.toHaveProperty('probed');
+  });
+
+  it('fails the node without retrying for fail, an oversized result or a branch it lacks', async () => {
+    for (const [behave, reason] of [
+      ['fail', 'Probe declined'],
+      ['big', 'output is'],
+      ['bad_branch', 'chose “elsewhere”'],
+    ] as const) {
+      const done = await probe(behave);
+      expect(done.status, behave).toBe('failed');
+      expect(done.reason, behave).toContain(reason);
+      expect(attempts(done), behave).toBe(0);
+    }
+  });
+
+  it('retries the node when the plugin asks to', async () => {
+    const done = await probe('fail_retry');
+    expect(done.status).toBe('failed');
+    expect(done.reason).toContain('Probe busy');
+    expect(attempts(done)).toBeGreaterThan(0);
+  });
+
+  it('keeps the last good manifest while a plugin cannot answer, and reports it unhealthy', async () => {
+    const good = (await pluginStatuses(env, true))[0]!.manifest;
+    const manifest = vi.fn().mockRejectedValue(new Error('connection reset'));
+    const flaky = { PLUGIN_EXAMPLE: { fetch() {}, manifest } } as unknown as Env;
+    const [s] = await pluginStatuses(flaky, true);
+    expect(s).toMatchObject({ healthy: false, error: 'connection reset' });
+    expect(s!.manifest).toEqual(good);
   });
 });

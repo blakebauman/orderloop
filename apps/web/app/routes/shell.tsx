@@ -188,9 +188,9 @@ function ShellFrame() {
   const nav: NavItem[] = showNav
     ? [
         ...NAV,
-        ...plugins.flatMap((p) =>
-          p.nav.map((n) => ({ to: n.path, label: n.label, document: true })),
-        ),
+        ...plugins
+          .filter((p) => atLeast(me.role, p.pageRole))
+          .flatMap((p) => p.nav.map((n) => ({ to: n.path, label: n.label, document: true }))),
       ]
     : [];
   const theme = useTheme();
@@ -372,6 +372,9 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link to="/audit">Audit log</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to="/plugins">Plugins</Link>
           </DropdownMenuItem>
         </>
       ) : null}

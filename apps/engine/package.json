@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
-    "@orderloop/plugin-example": "workspace:*",
+    "@orderloop/plugin-sdk": "workspace:*",
     "@orderloop/typescript-config": "workspace:*",
     "typescript": "catalog:",
     "vitest": "catalog:",

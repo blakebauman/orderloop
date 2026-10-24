@@ -1,0 +1,29 @@
+{
+  "name": "@orderloop/plugin-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "What a plugin is built with: definePlugin (the PluginRpc entrypoint with principal, role and manifest checks), the contract suite every plugin's tests run, and a bundler that runs a plugin as a test Worker. See docs/plugins.md.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orderloop/core": "workspace:*",
+    "esbuild": "0.28.2",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
