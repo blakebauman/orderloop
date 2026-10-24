@@ -185,7 +185,7 @@ queue.
 
 `apps/catalog/tests/orders.test.ts` covers Order Loop's `products` rows: publishing a product writes each variant's SKU with its name (`Field jacket (S)`) and price (a variant's own price over the product's), and leaves an existing row's `stock` alone; and `applyOrders` never lets an older change overwrite a newer one (`catalog_at`), across batches and within one.
 
-`apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
+`apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps. It also binds `LISTING_DELAY_MS` to an hour: listing indexes build only when a test runs the indexer's alarm, because one firing on its own as a file ends is cut off mid-RPC and vitest fails the run on the unhandled error.
 
 | Test | Covers |
 |---|---|

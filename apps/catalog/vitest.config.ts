@@ -11,7 +11,11 @@ export default defineConfig(async () => {
         wrangler: { configPath: './wrangler.jsonc' },
         remoteBindings: false,
         // Small feed chunks, so a test feed spans several Workflow steps.
-        miniflare: { bindings: { FEED_CHUNK: '300', TEST_MIGRATIONS: migrations } },
+        // Listing indexes build only when a test runs the indexer's alarm: one firing on its own
+        // as a test file ends is cut off mid-RPC, which vitest reports as an unhandled error.
+        miniflare: {
+          bindings: { FEED_CHUNK: '300', LISTING_DELAY_MS: '3600000', TEST_MIGRATIONS: migrations },
+        },
       }),
     ],
     test: {

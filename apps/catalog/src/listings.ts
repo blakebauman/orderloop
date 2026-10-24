@@ -171,7 +171,9 @@ export class ListingIndexer extends DurableObject<Env> {
     });
     if (changed && (await this.ctx.storage.getAlarm()) === null) {
       const last = Number(this.setting('built') ?? 0);
-      await this.ctx.storage.setAlarm(Math.max(Date.now(), last + DEBOUNCE_MS));
+      // LISTING_DELAY_MS holds every build back (0 in production; tests run builds themselves).
+      const delay = Number(this.env.LISTING_DELAY_MS) || 0;
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + delay, last + DEBOUNCE_MS));
     }
   }
 
