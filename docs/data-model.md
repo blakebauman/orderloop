@@ -271,6 +271,17 @@ A listing index is rebuilt from `ListingIndexer`, the Durable Object for one cha
 one stays as a tombstone (`live` 0) for 24 hours. A product is a member of its categories and
 all their ancestors. See [Architecture](architecture.md#listing-indexes).
 
+`SearchShard` (16, `search-<n>`, `n` from `searchShard(key)`): one FTS5 virtual table per channel and
+locale, `fts_<channel>__<locale>` (non-alphanumerics in either become `_`), created on first use, with
+columns `title`, `brand`, `skus`, `body` (indexed; `body` is at most `SEARCH_BODY_MAX`, 4,000
+characters) and `uid` (`UNINDEXED`), tokenized `unicode61 remove_diacritics 2` with `prefix = '2 3'`.
+`seen` (`key`, `channel`, `at`) holds the latest change by `at`, and a removal stays as a tombstone
+that the next `apply` prunes after 24 hours when the product owns no rows; `rows` (`key`, `channel`,
+`tbl`, `rid`) records which FTS rows each product owns, so a change deletes them and inserts the new
+ones. A product has one row per locale it lists in. Search keeps no R2 or KV objects. It fills from
+`ListingChange`s only, so products published before search existed enter on `reindex`. See
+[Architecture](architecture.md#keyword-search).
+
 The shard's `published` row's JSON (`aliases` column) now also keeps the product's `categories` as
 published, which become `left` in the next `ListingChange`.
 
@@ -299,7 +310,7 @@ names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
 
 ### Data residency
 
-A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to all its objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds` and `ListingIndexer`, all reached through `apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
+A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to all its objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer` and `SearchShard`, all reached through `apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
 
 Each is fixed when the resource is created. Set the jurisdiction before the deployment's first order: with a different value the Durable Objects get different ids, and existing orders' live state is stranded (D1 and R2 can't move either). Local dev and tests leave it empty; workerd doesn't implement jurisdictions.
 

@@ -21,6 +21,8 @@
   },
   // What the catalog Worker publishes: documents, alias pointers and category trees.
   "r2_buckets": [{ "binding": "PUBLISHED", "bucket_name": "orderloop-catalog" }],
+  // Keyword search runs on the catalog's search shards.
+  "services": [{ "binding": "CATALOG", "service": "orderloop-catalog", "entrypoint": "SearchApi" }],
   // Listing cards and key → uid entries.
   "kv_namespaces": [{ "binding": "CARDS", "id": "7f9656f155a848b690457d2360700e0d" }],
   "queues": {

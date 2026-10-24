@@ -123,6 +123,7 @@ export async function publishKeys(
           at,
           entry: pub.index,
           left: prev?.categories ?? [],
+          search: pub.rendered?.map((r) => ({ ...r.search, locale: r.locale })) ?? null,
         });
     }
   }

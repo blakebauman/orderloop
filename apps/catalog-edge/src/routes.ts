@@ -12,9 +12,12 @@
  *   GET /v1/<channel>/<locale>/categories/<code>/products?f.<attr>=a,b&r.<attr>=lo..hi
  *       &sort=<newest|attr_asc|attr_desc>&cursor=<n>&limit=<1-100>
  *                                                  a filtered, faceted, sorted category page
+ *   GET /v1/<channel>/<locale>/search?q=<words>&cursor=<n>&limit=<1-100>
+ *                                                  keyword search, best match first
  */
 // The zod-free part of core only: this Worker's bundle stays small.
 import { BATCH_MAX, CODE, LOCALE, SLUG } from '@orderloop/core/product/paths';
+import { normalizeQuery, queryTerms, SEARCH_DEPTH } from '@orderloop/core/product/search';
 
 export type Route =
   | { kind: 'product'; channel: string; locale: string; key: string }
@@ -22,6 +25,7 @@ export type Route =
   | { kind: 'sku'; channel: string; locale: string; sku: string }
   | { kind: 'slug'; channel: string; locale: string; slug: string }
   | { kind: 'categories'; channel: string; locale: string }
+  | { kind: 'search'; channel: string; locale: string; q: string; cursor: number; limit: number }
   | {
       kind: 'listing';
       channel: string;
@@ -135,6 +139,18 @@ export function parse(url: URL): Parsed {
       if (one === null || one.length > 200 || !SLUG.test(one))
         return { ok: false, status: 400, error: 'bad slug' };
       return { ok: true, route: { kind: 'slug', channel, locale, slug: one } };
+    case 'search': {
+      if (rest.length) return { ok: false, status: 404, error: 'not found' };
+      const q = normalizeQuery(url.searchParams.get('q') ?? '');
+      if (!queryTerms(q).length) return bad('q needs a word');
+      const cursor = Number(url.searchParams.get('cursor') ?? 0);
+      if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor >= SEARCH_DEPTH)
+        return bad(`cursor is 0 to ${SEARCH_DEPTH - 1}`);
+      const limit = Number(url.searchParams.get('limit') ?? PAGE.default);
+      if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max)
+        return bad(`limit is 1 to ${PAGE.max}`);
+      return { ok: true, route: { kind: 'search', channel, locale, q, cursor, limit } };
+    }
     case 'categories': {
       if (!rest.length) return { ok: true, route: { kind: 'categories', channel, locale } };
       const category = segment(rest[0] as string);
@@ -164,6 +180,12 @@ export function canonical(route: Route): string {
       return `${base}/slugs/${encodeURIComponent(route.slug)}`;
     case 'categories':
       return `${base}/categories`;
+    case 'search': {
+      const q = new URLSearchParams({ q: route.q });
+      if (route.cursor) q.set('cursor', String(route.cursor));
+      if (route.limit !== PAGE.default) q.set('limit', String(route.limit));
+      return `${base}/search?${q}`;
+    }
     case 'listing': {
       // Filters in name order, values sorted: every equivalent page shares one cache entry.
       const q = new URLSearchParams();

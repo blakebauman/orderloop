@@ -11,4 +11,5 @@ export * from './model';
 export * from './paths';
 export * from './render';
 export * from './routing';
+export * from './search';
 export * from './validate';

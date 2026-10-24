@@ -55,6 +55,7 @@ breaks `@cloudflare/vitest-plugin`. Don't bump it without running the engine and
 | `product-routing.test.ts` | The catalog's frozen layout: FNV-1a 64 against the published vectors and a BigInt reference for UTF-8; golden shard, alias-shard and search-shard numbers for fixed keys (never update them: a change strands stored products); 64 and 16 shards; even spread; `productUid` packing into 32 bits and refusing to overflow; `canonicalJson` and `contentHash` ignoring key order and seeing any change |
 | `product-model.test.ts` | Product types refused when they can't be indexed or told apart (enum without values, localized non-text, sorting non-numbers, duplicate codes, json filters, bad variant axes); `typeChangeIssues` allowing only additions; `validateProduct` pinning the type version, defaulting the primary category and naming each bad attribute, duplicate SKU, repeated or missing variant options, bad slug and unknown type; `productAliases`; `renderForChannel` resolving locales with fallback, enum labels, channel and variant prices, cards, search text and the index entry, and publishing nothing for drafts or unlisted products (fixture: `tests/fixtures/product.ts`) |
 | `product-listing.test.ts` | The binary listing index against a brute-force oracle on 3,000 pseudo-random products: dense (bitset) and sparse (list) term filters, ranges, both price sorts, disjunctive facet counts; cursor paging to the last page; range buckets with min and max; an unknown sort and foreign bytes refused; an empty category; `listingSpec` (terms, numbers, sorts, buckets and per-locale labels from the types) and a built index keeping `buckets` and `labels` and counting the stored buckets by default |
+| `product-search.test.ts` | `normalizeQuery` folding case, width (NFKC) and spacing and capping at `QUERY_MAX`; `ftsQuery` quoting every term and prefix-matching only the last; FTS5 syntax (operators, column filters, quotes) coming out as plain quoted terms |
 | `product-feed.test.ts` | Streaming CSV records (quotes, `""`, newlines inside fields, CRLF, BOM, UTF-8 split across chunks, an unterminated quote, bytes that aren't UTF-8 failing) and NDJSON lines (bad lines reported by number); each record's `end` offset as a cursor: a ranged read from the `end` of any record yields exactly the records after it, at the same offsets, for CSV and NDJSON; CSV rows grouped into products with cells read by attribute kind and channel prices in minor units; a bad row reported against its product while later rows still parse; resuming mid-file from a product boundary with the saved header gives the rest of the products; `key` and `sku` columns required |
 
 ### Adding a planner test
@@ -170,6 +171,16 @@ queue.
 | ordering | The latest change by `at` wins when changes arrive out of order |
 | `withAncestors` | Every ancestor once; a cycle stops |
 
+### Keyword search
+
+`apps/catalog/tests/search.test.ts` calls the catalog's real `SearchApi` through `exports` after `putProducts` and the publish and `CHANGES` queue have run, polling `until` the expected `total` arrives (the queue is asynchronous).
+
+| Test | Covers |
+|---|---|
+| finding | Title words, a prefix on the last term, SKU parts and brand; the title outranks the brand; every term is required; each locale has its own index |
+| removal | A product leaves search when it is unpublished or deleted |
+| paging | Pages across the 16 shards come out in score order with the same `total`; syntax characters in a query are text |
+
 ### Feeds
 
 `apps/catalog/tests/feeds.test.ts` runs the real `FeedImport` Workflow, the `FEED_PARTS` queue consumer and `CatalogFeeds` in workerd, polling `feedStatus` until a feed is `done` or `failed`. `vitest.config.ts` binds `FEED_CHUNK` to `300`, so a 1,000-product feed spans several `split` steps.
@@ -230,7 +241,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 
 `scripts/fleet.test.ts` (run by `pnpm test:fleet`) also covers the catalog's rendering: `renderCatalog` gives the Worker its own name, R2 bucket and `CARDS` namespace id from `catalogKvId`, suffixes its Workflow name and its feed-parts queue, consumer and dead-letter queue names, renders the changes queue as a producer and a second consumer (`orderloop-catalog-changes-<id>`), sets `DATA_JURISDICTION` and the bucket's jurisdiction from the registry, and refuses a deployment without `catalogKvId`; `orderloop` renders the committed `apps/catalog/wrangler.jsonc` unchanged; a `catalogKvId` that isn't 32 hex characters is refused; `matrix` refuses a deployment without `d1Id` or `catalogKvId`.
 
-`scripts/fleet.test.ts` also covers catalog-edge: `renderCatalogEdge` gives the Worker its own name (`orderloop-catalog-edge-<id>`), a custom-domain route for `catalogDomain` (default `catalog.<domain>`), the deployment's bucket (with its jurisdiction), `CARDS` namespace id, purge queue and dead-letter queue consumer (`max_concurrency` 1) and Analytics Engine dataset (`orderloop_catalog_edge_<id>`); the catalog's `PURGE` producer names the same queue; a `catalogDomain` that isn't a host name is refused; `orderloop` renders the committed `apps/catalog-edge/wrangler.jsonc` unchanged.
+`scripts/fleet.test.ts` also covers catalog-edge: `renderCatalogEdge` gives the Worker its own name (`orderloop-catalog-edge-<id>`), points its `CATALOG` service binding at the deployment's catalog (`orderloop-catalog-<id>`, entrypoint `SearchApi`), a custom-domain route for `catalogDomain` (default `catalog.<domain>`), the deployment's bucket (with its jurisdiction), `CARDS` namespace id, purge queue and dead-letter queue consumer (`max_concurrency` 1) and Analytics Engine dataset (`orderloop_catalog_edge_<id>`); the catalog's `PURGE` producer names the same queue; a `catalogDomain` that isn't a host name is refused; `orderloop` renders the committed `apps/catalog-edge/wrangler.jsonc` unchanged.
 
 `scripts/fleet.test.ts` also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
 
@@ -258,6 +269,15 @@ entrypoint through `exports`.
 | refusals | A sort the index lacks, bad filters, ranges, cursors and limits (`400`) and an unknown category (`404`) |
 | the internal path | `/_idx/…` is not reachable through the gateway |
 | cache keys | Equivalent pages (filter order, value order, default `sort`, `cursor` and `limit` spelled out) have one canonical URL |
+
+`apps/catalog-edge/tests/search.test.ts` requests `search` through the gateway. The catalog is a stub Worker named `orderloop-catalog`, defined in `vitest.config.ts` (miniflare `workers`) and answering only `tee` (uids 7, 70 and 71), so the service binding resolves without Durable Objects:
+
+| Group | Covers |
+|---|---|
+| matching | Cards in match order, with `total` and `next` paging |
+| exact SKU | A one-word query that is a product's SKU puts that product first |
+| refusals | A query without a word and a `cursor` at or past `SEARCH_DEPTH` are `400` |
+| cache keys | Equivalent queries (case, spacing, default `cursor` and `limit` spelled out) have one canonical URL |
 
 Workers Caching isn't emulated locally, so these tests check what reaches the cache (canonical URLs,
 headers, `304`s) and not hits, misses, stale serving or tag purges: `Delivery.purge` is a no-op

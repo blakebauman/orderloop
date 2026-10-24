@@ -20,6 +20,7 @@ import {
   ListingIndexBuilder,
   listingSpec,
   paths,
+  type SearchEntry,
 } from '@orderloop/core/product';
 import { indexer, meta } from './config';
 
@@ -33,6 +34,8 @@ export type ListingChange = {
   entry: IndexEntry | null;
   /** The categories it was listed in before this change. */
   left: string[];
+  /** What search indexes, per locale; null when it no longer lists in the channel. */
+  search: (SearchEntry & { locale: string })[] | null;
 };
 
 type Item = { key: string; at: number; entry: IndexEntry | null };

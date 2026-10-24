@@ -5,12 +5,14 @@
  */
 import { applyPart, type FeedPart, failPart } from './feed-import';
 import { applyChanges, type ListingChange } from './listings';
+import { applySearch } from './search';
 
 export { CatalogApi } from './api';
 export { FeedImport } from './feed-import';
 export { CatalogFeeds } from './feeds';
 export { ListingIndexer } from './listings';
 export { CatalogMeta } from './meta';
+export { SearchApi, SearchShard } from './search';
 export { CatalogShard } from './shard';
 
 /** Deliveries of a part before its rows count as rejected (the consumer's max_retries + 1). */
@@ -27,10 +29,8 @@ export default {
     if (batch.queue.startsWith('orderloop-catalog-changes')) {
       // One call per listing for the whole batch; a failure retries the batch (changes are
       // idempotent by `at`).
-      await applyChanges(
-        env,
-        batch.messages.map((m) => m.body as ListingChange),
-      );
+      const changes = batch.messages.map((m) => m.body as ListingChange);
+      await Promise.all([applyChanges(env, changes), applySearch(env, changes)]);
       batch.ackAll();
       return;
     }
