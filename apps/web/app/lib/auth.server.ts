@@ -47,7 +47,7 @@ import {
 } from './credentials';
 import { openSecret } from './data-key.server';
 import { DEMO_USER, isDemo } from './demo.server';
-import { db } from './env.server';
+import { afterResponse, db } from './env.server';
 import { isLocalHost } from './origin';
 import { ssoOnlyInEffect, twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
@@ -122,8 +122,26 @@ async function passwordInUse(passwordHash: string | null) {
   return passwordHash !== null && !(await ssoOnlyInEffect());
 }
 
-/** The signed-in person for a browser request, or null. */
-export async function principal(request: Request): Promise<Caller | null> {
+const callers = new WeakMap<Request, Promise<Caller | null>>();
+
+/**
+ * The signed-in person for a browser request, or null. It is looked up once per Request: the
+ * shell's loader and the page's run against the same one and share the answer. A client
+ * navigation's `.data` fetch is a Request of its own, and so is the one React Router hands the
+ * loaders after an action (a sign-in, a sign-out), so neither sees an earlier answer.
+ */
+export function principal(request: Request): Promise<Caller | null> {
+  let found = callers.get(request);
+  if (!found) {
+    found = lookUpPrincipal(request);
+    callers.set(request, found);
+    // A failed lookup isn't kept, so asking again with the same Request tries again.
+    found.catch(() => callers.delete(request));
+  }
+  return found;
+}
+
+async function lookUpPrincipal(request: Request): Promise<Caller | null> {
   if (!(await authEnabled())) return OPEN;
   const token = cookie(request, SESSION);
   if (token) {
@@ -155,10 +173,12 @@ export async function principal(request: Request): Promise<Caller | null> {
     if (row) {
       const { seen, totpEnabledAt, passwordChangeDue, passwordHash, ...person } = row;
       if (now - seen > SESSION_TOUCH_MS)
-        await db()
-          .update(sessions)
-          .set({ lastSeenAt: now, ip: clientIp(request) })
-          .where(eq(sessions.tokenHash, hash));
+        afterResponse(
+          db()
+            .update(sessions)
+            .set({ lastSeenAt: now, ip: clientIp(request) })
+            .where(eq(sessions.tokenHash, hash)),
+        );
       const role = person.role as Role;
       // The shared demo visitor can't set up two-factor sign-in (its Account page is read-only).
       const due =
@@ -258,7 +278,7 @@ export async function apiPrincipal(request: Request): Promise<Caller | null> {
     throw new TokenExpired(row.expiresAt);
   }
   if (!row.lastUsedAt || now - row.lastUsedAt > TOKEN_TOUCH_MS)
-    await db().update(apiTokens).set({ lastUsedAt: now }).where(eq(apiTokens.id, row.id));
+    afterResponse(db().update(apiTokens).set({ lastUsedAt: now }).where(eq(apiTokens.id, row.id)));
   return { kind: 'token', id: row.id, name: `token:${row.name}`, role: row.role as Role };
 }
 

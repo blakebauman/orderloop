@@ -227,7 +227,8 @@ state (live order state, assistant conversations) is not part of D1 and isn't re
 ## The docs site
 
 The public docs, docs.orderloop.app, are `apps/docs` (`@orderloop/docs`), a static Starlight site served by a static-assets
-Worker, `orderloop-docs`, with no runtime code.
+Worker, `orderloop-docs`, with no runtime code. `apps/docs/public/_headers` caches the fingerprinted
+`/_astro/*` files for a year (`immutable`).
 
 ```bash
 pnpm docs:dev       # local preview

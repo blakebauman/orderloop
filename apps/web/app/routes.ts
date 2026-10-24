@@ -33,5 +33,6 @@ export default [
   // Resource routes the editor and order page post to.
   route('flows/:flowId/action', 'routes/flow-action.ts'),
   route('orders/:orderId/action', 'routes/order-action.ts'),
+  route('orders/:orderId/records', 'routes/order-records.ts'),
   route('account/passkeys', 'routes/account-passkeys.ts'),
 ] satisfies RouteConfig;

@@ -31,7 +31,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { platformInput } from './api-schemas';
 import { randomToken, sha256Hex } from './credentials';
-import { db, engine } from './env.server';
+import { afterResponse, db, engine } from './env.server';
 import { overBudget } from './rate-limit';
 
 type Row = typeof ucpPlatforms.$inferSelect;
@@ -85,15 +85,28 @@ export async function revokePlatform(id: string) {
   return res[0] ? view(res[0]) : null;
 }
 
-/** Agentic checkout's settings; off (no checkout flow) until an admin sets them. */
+const SETTINGS_CACHE_MS = 30_000;
+let cachedSettings: { value: UcpSettings; at: number } | null = null;
+
+/**
+ * Agentic checkout's settings; off (no checkout flow) until an admin sets them. Every `/ucp`
+ * call checks them and they change rarely, so each isolate keeps what it read for 30 seconds.
+ */
 export async function ucpSettings(): Promise<UcpSettings> {
+  if (cachedSettings && Date.now() - cachedSettings.at < SETTINGS_CACHE_MS)
+    return cachedSettings.value;
   const row = await db()
     .select({ value: workspaceSettings.value })
     .from(workspaceSettings)
     .where(eq(workspaceSettings.key, UCP_SETTINGS_KEY))
     .get();
-  return readUcpSettings(row?.value);
+  const value = readUcpSettings(row?.value);
+  cachedSettings = { value, at: Date.now() };
+  return value;
 }
+export const forgetUcpSettings = () => {
+  cachedSettings = null;
+};
 
 /** Why `flowId` can't take checkouts (unknown, unpublished, or never holds a card), or null. */
 export async function checkoutFlowRefusal(flowId: string): Promise<string | null> {
@@ -112,6 +125,7 @@ export async function setUcpSettings(next: UcpSettings, by: string) {
       target: workspaceSettings.key,
       set: { value, updatedAt: now, updatedBy: by },
     });
+  cachedSettings = { value: next, at: now };
 }
 
 /** How often a platform's last use is written back. */
@@ -132,7 +146,9 @@ async function platformFor(request: Request): Promise<Row | null> {
   if (!row) return null;
   const now = Date.now();
   if (!row.lastUsedAt || now - row.lastUsedAt > TOUCH_MS)
-    await db().update(ucpPlatforms).set({ lastUsedAt: now }).where(eq(ucpPlatforms.id, row.id));
+    afterResponse(
+      db().update(ucpPlatforms).set({ lastUsedAt: now }).where(eq(ucpPlatforms.id, row.id)),
+    );
   return row;
 }
 

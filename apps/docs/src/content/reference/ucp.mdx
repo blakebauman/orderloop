@@ -50,7 +50,7 @@ Settings, set with `POST /api/v1/ucp/settings` (admin; see [REST API](/reference
 
 | Field | Meaning |
 |---|---|
-| `checkoutFlowId` | The flow described above, or `null` to turn agentic checkout off |
+| `checkoutFlowId` | The flow described above, or `null` to turn agentic checkout off (a change takes effect within 30 seconds) |
 | `links` | Up to 10 legal links every checkout shows the buyer: `{ type, url, title? }`, such as a privacy policy, terms of service or refund policy |
 | `orderUrl` | Where a buyer sees their order, a URL containing `{id}` such as `https://shop.example/orders/{id}`. Without it the link is the order's page in the workspace |
 

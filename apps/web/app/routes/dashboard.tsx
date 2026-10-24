@@ -20,16 +20,7 @@ import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { duration, humanize, money, orderRef, orderStatus, STATUS_COLOR } from '~/lib/format';
 import { performance } from '~/lib/metrics.server';
-import {
-  attentionSummary,
-  customerNames,
-  dashboardStats,
-  declinedCount,
-  declinedOrderIds,
-  demoAvailable,
-  listApprovals,
-  listOrders,
-} from '~/lib/orders.server';
+import { customerNames, declinedOrderIds, demoAvailable, overview } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import { startScenario } from '~/lib/scenarios.server';
 import { useDateTime } from '~/lib/use-date-time';
@@ -40,30 +31,28 @@ import type { Route } from './+types/dashboard';
 export const meta = () => [{ title: 'Overview · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
-  await ensureSeeded();
-  const [stats, recent, approvals, attention, declinedTotal, perf, demo] = await Promise.all([
-    dashboardStats(),
-    listOrders({ sort: 'updated' }, 8),
-    listApprovals('pending'),
-    attentionSummary(),
-    declinedCount(),
-    performance(),
-    demoAvailable(),
-  ]);
-  const [names, declinedSet] = await Promise.all([
+  // The reads start alongside the sign-in check; nothing is returned unless it passes.
+  const [, , { stats, recent, approvals, attention, declinedTotal }, perf, demo] =
+    await Promise.all([
+      requireUser(request),
+      ensureSeeded(),
+      overview(),
+      performance(),
+      demoAvailable(),
+    ]);
+  const top = approvals.slice(0, 5);
+  const [names, declinedSet, states] = await Promise.all([
     customerNames(recent.map((o) => o.customerId)),
     declinedOrderIds(recent.map((o) => o.id)),
+    Promise.all(
+      top.map((a) =>
+        engine()
+          .snapshot(a.orderId)
+          .catch(() => null),
+      ),
+    ),
   ]);
   const declined = [...declinedSet];
-  const top = approvals.slice(0, 5);
-  const states = await Promise.all(
-    top.map((a) =>
-      engine()
-        .snapshot(a.orderId)
-        .catch(() => null),
-    ),
-  );
   const decisions = top.map((a, i) => ({
     ...a,
     ctx: states[i]

@@ -25,19 +25,22 @@ import { db } from './env.server';
 import { summarizeFlow } from './new-order';
 import { nodeRegistry } from './plugins.server';
 
-let seeded = false;
+let seededAt: number | null = null;
+
+/** How long a demo trusts its last check: its nightly reset removes the templates. */
+const DEMO_RESEED_MS = 60_000;
 
 /**
- * Publishes the built-in templates on first use (cheap no-op afterwards). A demo checks every
- * time, since its nightly reset removes them while isolates stay warm.
+ * Publishes the built-in templates on first use (cheap no-op afterwards). A demo checks again
+ * after a minute, since its nightly reset removes them while isolates stay warm.
  */
 export async function ensureSeeded() {
-  if (seeded && !isDemo()) return;
+  if (seededAt !== null && (!isDemo() || Date.now() - seededAt < DEMO_RESEED_MS)) return;
   await seedFlows(
     db(),
     Object.values(TEMPLATES).map((t) => t()),
   );
-  seeded = true;
+  seededAt = Date.now();
 }
 
 /**

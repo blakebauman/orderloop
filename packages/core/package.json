@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Order Loop logic with no bindings: flow schema, node catalog, the DAG planner the Workflow interpreter drives, expressions, templates and the engine RPC contract.",
+  "sideEffects": [
+    "./src/logic.ts"
+  ],
   "exports": {
     ".": "./src/index.ts",
+    "./roles": "./src/roles.ts",
     "./product": "./src/product/index.ts",
     "./product/paths": "./src/product/paths.ts",
     "./product/listing": "./src/product/listing-index.ts",

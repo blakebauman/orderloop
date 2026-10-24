@@ -207,15 +207,27 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (!caller) return new Response('Unauthorized', { status: 401 });
     const due = setupDue(caller);
     if (due) return new Response(due, { status: 403 });
-    const obj = await docs().get(decodeURIComponent(url.pathname.slice('/docs/'.length)));
+    // A browser that has the document asks with its ETag; R2 then skips the body.
+    const ifNoneMatch = request.headers.get('if-none-match');
+    const obj = await docs().get(
+      decodeURIComponent(url.pathname.slice('/docs/'.length)),
+      ifNoneMatch ? { onlyIf: new Headers({ 'if-none-match': ifNoneMatch }) } : undefined,
+    );
     if (!obj) return new Response('Not found', { status: 404 });
-    return new Response(obj.body, {
-      headers: {
-        'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream',
-        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
-      },
-    });
+    const headers = {
+      'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      etag: obj.httpEtag,
+      // Only this browser may keep it (it took a sign-in), and only briefly without asking.
+      'cache-control': 'private, max-age=300',
+    };
+    if (!('body' in obj)) return new Response(null, { status: 304, headers });
+    return new Response(obj.body, { headers });
   }
 
-  return requestHandler(request);
+  const res = await requestHandler(request);
+  // Pages are per person and change as orders move: a browser may keep one, but asks first.
+  if (res.headers.get('content-type')?.startsWith('text/html') && !res.headers.has('cache-control'))
+    res.headers.set('cache-control', 'private, no-cache');
+  return res;
 }

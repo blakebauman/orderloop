@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@xyflow/react/dist/style.css";
+/* React Flow's own stylesheet comes with the flow canvas (components/flow-canvas.tsx), on the
+   pages that draw one; the rules below that restyle it outrank it whichever loads last. */
 
 /* `@orderloop/ui` is consumed as raw source from outside this app's root, so Tailwind's
    automatic content detection never sees it. */
@@ -244,7 +245,7 @@
   border: 1px solid var(--rule);
   border-radius: var(--radius);
 }
-.react-flow__edge-text {
+.react-flow .react-flow__edge-text {
   font-size: 11px;
   font-family: var(--font-mono);
 }

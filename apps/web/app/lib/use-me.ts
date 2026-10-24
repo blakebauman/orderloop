@@ -1,4 +1,5 @@
-import { atLeast, type Principal, type Role } from '@orderloop/core';
+// The roles subpath alone: the core barrel would bring zod into every page.
+import { atLeast, type Principal, type Role } from '@orderloop/core/roles';
 import { useRouteLoaderData } from 'react-router';
 
 /** The signed-in principal, from the app shell's loader. */
