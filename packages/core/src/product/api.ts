@@ -38,6 +38,9 @@ export type FeedFormat = (typeof FEED_FORMATS)[number];
 export const FEED_STATES = ['queued', 'splitting', 'applying', 'done', 'failed'] as const;
 export type FeedState = (typeof FEED_STATES)[number];
 
+/** One message on the purge queue: cache tags catalog-edge purges (rationed, ~5 calls a minute). */
+export type PurgeMessage = { tags: string[] };
+
 /** Products a feed step reads before handing off to the next step. */
 export const FEED_CHUNK = 25_000;
 /** Rejected rows a feed keeps the reasons of. */

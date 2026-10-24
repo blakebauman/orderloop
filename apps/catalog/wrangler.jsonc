@@ -34,7 +34,11 @@
     }
   ],
   "queues": {
-    "producers": [{ "binding": "FEED_PARTS", "queue": "orderloop-catalog-feed-parts" }],
+    "producers": [
+      { "binding": "FEED_PARTS", "queue": "orderloop-catalog-feed-parts" },
+      // Cache tags of urgent changes, for catalog-edge to purge.
+      { "binding": "PURGE", "queue": "orderloop-catalog-purge" }
+    ],
     "consumers": [
       {
         // Each message is one feed part for one shard.

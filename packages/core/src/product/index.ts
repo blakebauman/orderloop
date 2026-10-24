@@ -7,6 +7,7 @@ export * from './api';
 export * from './feed';
 export * from './listing-index';
 export * from './model';
+export * from './paths';
 export * from './render';
 export * from './routing';
 export * from './validate';

@@ -85,18 +85,24 @@ Then read its live state with `GET /api/v1/orders/:id`.
 ## Checks
 
 ```bash
-pnpm test            # core planner tests (node), engine Workflow e2e and catalog (workerd), web tests
+pnpm test            # core planner tests (node), engine Workflow e2e and catalog and catalog-edge (workerd), web tests
 pnpm lint            # Biome
 pnpm check-types     # tsc --noEmit (web runs react-router typegen first)
 ```
 
 After changing a `wrangler.jsonc`, regenerate that app's binding types with
-`pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types` or
-`pnpm --filter @orderloop/catalog types`.
+`pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types`,
+`pnpm --filter @orderloop/catalog types` or `pnpm --filter @orderloop/catalog-edge types`.
 
 `pnpm web:dev` doesn't start the catalog Worker, since nothing calls it yet. Run it on its own with
 `pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
 Durable Objects.
+
+`pnpm web:dev` doesn't start catalog-edge either. Run it with `pnpm --filter @orderloop/catalog-edge dev`
+(port 8790). It reads R2 and KV through `wrangler dev`'s local storage, which the catalog Worker
+(port 8789) doesn't share by default, so a local catalog-edge serves what its own storage holds
+(tests write it directly). There is no Workers Caching locally: every request runs `Delivery`, and
+`purge` does nothing. Its tests run in `pnpm test`.
 
 ## Next
 

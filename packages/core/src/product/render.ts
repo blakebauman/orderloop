@@ -348,25 +348,3 @@ export function renderForChannel(
 }
 
 type CompiledDefs = Map<string, { def: AttributeDef }>;
-
-/** Published object paths. Every path carries the doc format, so a format change is a new tree. */
-export const paths = {
-  doc: (fmt: string, channel: string, locale: string, key: string) =>
-    `docs/${fmt}/${channel}/${locale}/p/${key}.json`,
-  alias: (fmt: string, channel: string, alias: string) =>
-    `docs/${fmt}/${channel}/a/${encodeURIComponent(alias)}`,
-  categories: (fmt: string, channel: string, locale: string) =>
-    `docs/${fmt}/${channel}/${locale}/categories.json`,
-  listing: (fmt: string, channel: string, category: string) =>
-    `idx/${fmt}/${channel}/${category}.bin`,
-  card: (fmt: string, channel: string, locale: string, uid: number) =>
-    `c:${fmt}:${channel}:${locale}:${uid.toString(36)}`,
-} as const;
-
-/** Cache tags. Printable ASCII only: keys and codes already are. */
-export const tags = {
-  product: (key: string) => `p:${key}`,
-  channel: (channel: string) => `ch:${channel}`,
-  category: (code: string) => `cat:${code}`,
-  categories: 'cats',
-} as const;

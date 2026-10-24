@@ -37,9 +37,9 @@ echo "Recorded catalogKvId $kv in deployments/$id.jsonc"
 # audit rule above.
 wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name feeds ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
 wrangler r2 bucket lifecycle add "$CATALOG_R2" feeds feeds/ --expire-days 30 --force ${j[@]+"${j[@]}"}
-# The queue feed parts go through, and the one parts that keep failing land in. A deploy fails if
+# The queues feed parts and urgent purges go through, and their dead-letter queues. A deploy fails if
 # the consumer's queue is missing, so a queue that can't be created or found stops provisioning.
-for q in "$CATALOG_FEED_PARTS" "$CATALOG_FEED_PARTS_DLQ"; do
+for q in "$CATALOG_FEED_PARTS" "$CATALOG_FEED_PARTS_DLQ" "$CATALOG_PURGE" "$CATALOG_PURGE_DLQ"; do
   if wrangler queues info "$q" >/dev/null 2>&1; then echo "Queue $q already exists"
   else wrangler queues create "$q"; fi
 done

@@ -1,0 +1,25 @@
+{
+  "name": "@orderloop/catalog-edge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Catalog delivery Worker: serves published product documents, SKU and slug lookups, batch cards and category trees from R2 and KV behind Workers Caching, and drains the purge queue. Read-only.",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orderloop/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@orderloop/typescript-config": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

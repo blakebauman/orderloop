@@ -5,8 +5,9 @@
  */
 import { z } from 'zod';
 
-/** Bumped when a published document's shape changes; published paths carry it (`f1`). */
-export const DOC_FORMAT = 'f1';
+import { CODE, LOCALE } from './paths';
+
+export { DOC_FORMAT } from './paths';
 
 export const PRODUCT_STATUSES = ['draft', 'active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
@@ -30,11 +31,8 @@ export const TERM_KINDS: readonly AttributeKind[] = ['enum', 'multi_enum', 'bool
 /** Kinds a listing can filter by range and sort. */
 export const NUMERIC_KINDS: readonly AttributeKind[] = ['number', 'money', 'measure', 'date'];
 
-/** Keys, codes and SKUs: printable ASCII without separators, so they are safe in paths and tags. */
-const CODE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const codeSchema = z.string().regex(CODE, 'letters, digits, ".", "_" or "-" (max 128)');
-/** BCP 47-ish locale tag: en, en-US, zh-Hant-TW. */
-export const localeSchema = z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/);
+export const localeSchema = z.string().regex(LOCALE);
 export const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 
 /** An amount in integer minor units (cents; whole units for zero-decimal currencies). */

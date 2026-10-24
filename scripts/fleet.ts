@@ -1,7 +1,7 @@
 /**
  * The fleet: one OrderLoop deployment per customer, each listed in deployments/<id>.jsonc.
  *
- *   node scripts/fleet.ts render <id>             write apps/{catalog,engine,web}/wrangler.<id>.json
+ *   node scripts/fleet.ts render <id>             write apps/{catalog,catalog-edge,engine,web}/wrangler.<id>.json
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
  *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
  *   node scripts/fleet.ts status                  deep health of every deployment
@@ -89,6 +89,8 @@ export type Deployment = {
   slot: number;
   /** Defaults to `<id>.orderloop.app`. */
   domain: string;
+  /** The public catalog API's host. Defaults to `catalog.<domain>`. */
+  catalogDomain: string;
   /** Appended to every resource name. Defaults to `-<id>`; orderloop.app's own is `""`. */
   suffix: string;
   /** The GitHub environment holding this deployment's secrets. Defaults to `deploy-<id>`. */
@@ -170,6 +172,11 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   if (raw.d1Id !== undefined && (typeof raw.d1Id !== 'string' || !raw.d1Id))
     throw new Error(`${file}: d1Id must be the D1 database's id`);
   if (
+    raw.catalogDomain !== undefined &&
+    (typeof raw.catalogDomain !== 'string' || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(raw.catalogDomain))
+  )
+    throw new Error(`${file}: catalogDomain must be a host name`);
+  if (
     raw.catalogKvId !== undefined &&
     (typeof raw.catalogKvId !== 'string' || !/^[0-9a-f]{32}$/.test(raw.catalogKvId))
   )
@@ -239,6 +246,10 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ring,
     slot: raw.slot as number,
     domain: typeof raw.domain === 'string' ? raw.domain : `${id}.orderloop.app`,
+    catalogDomain:
+      typeof raw.catalogDomain === 'string'
+        ? raw.catalogDomain
+        : `catalog.${typeof raw.domain === 'string' ? raw.domain : `${id}.orderloop.app`}`,
     suffix: typeof raw.suffix === 'string' ? raw.suffix : `-${id}`,
     environment: typeof raw.environment === 'string' ? raw.environment : `deploy-${id}`,
     ...(raw.d1Id ? { d1Id: raw.d1Id as string } : {}),
@@ -293,6 +304,11 @@ export const names = (d: Deployment) => ({
   catalogKv: `orderloop-catalog-cards${d.suffix}`,
   catalogFeedParts: `orderloop-catalog-feed-parts${d.suffix}`,
   catalogFeedPartsDlq: `orderloop-catalog-feed-parts-dlq${d.suffix}`,
+  catalogEdge: `orderloop-catalog-edge${d.suffix}`,
+  catalogPurge: `orderloop-catalog-purge${d.suffix}`,
+  catalogPurgeDlq: `orderloop-catalog-purge-dlq${d.suffix}`,
+  // Analytics Engine dataset names allow letters, digits and underscores.
+  catalogEdgeDataset: `orderloop_catalog_edge${d.suffix.replaceAll('-', '_')}`,
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: a wrangler config is JSON read as is
@@ -380,6 +396,35 @@ export function renderCatalog(base: Config, d: Deployment): Config {
   return config;
 }
 
+export function renderCatalogEdge(base: Config, d: Deployment): Config {
+  if (!d.catalogKvId)
+    throw new Error(`${d.id} has no catalogKvId: run scripts/provision.sh ${d.id}`);
+  const config = structuredClone(base);
+  const n = names(d);
+  config.name = n.catalogEdge;
+  config.routes = [{ pattern: d.catalogDomain, custom_domain: true }];
+  config.r2_buckets = config.r2_buckets.map((b: Config) => ({
+    ...b,
+    bucket_name: n.catalogR2,
+    ...(d.jurisdiction ? { jurisdiction: d.jurisdiction } : {}),
+  }));
+  config.kv_namespaces = config.kv_namespaces.map((k: Config) =>
+    k.binding === 'CARDS' ? { ...k, id: d.catalogKvId } : k,
+  );
+  config.queues = {
+    consumers: config.queues.consumers.map((c: Config) => ({
+      ...c,
+      queue: `${c.queue}${d.suffix}`,
+      ...(c.dead_letter_queue ? { dead_letter_queue: `${c.dead_letter_queue}${d.suffix}` } : {}),
+    })),
+  };
+  config.analytics_engine_datasets = config.analytics_engine_datasets.map((a: Config) => ({
+    ...a,
+    dataset: n.catalogEdgeDataset,
+  }));
+  return config;
+}
+
 export function renderWeb(base: Config, d: Deployment): Config {
   const config = structuredClone(base);
   const n = names(d);
@@ -418,6 +463,7 @@ function render(id: string | undefined) {
   const d = byId(id);
   for (const [app, fn] of [
     ['catalog', renderCatalog],
+    ['catalog-edge', renderCatalogEdge],
     ['engine', renderEngine],
     ['web', renderWeb],
   ] as const) {
@@ -487,6 +533,9 @@ function shellNames(id: string | undefined) {
     CATALOG_KV: n.catalogKv,
     CATALOG_FEED_PARTS: n.catalogFeedParts,
     CATALOG_FEED_PARTS_DLQ: n.catalogFeedPartsDlq,
+    CATALOG_PURGE: n.catalogPurge,
+    CATALOG_PURGE_DLQ: n.catalogPurgeDlq,
+    CATALOG_DOMAIN: d.catalogDomain,
     DOMAIN: d.domain,
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',

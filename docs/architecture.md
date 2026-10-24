@@ -2,7 +2,7 @@
 
 The Workers, the service binding between web and engine, the packages, the bindings and the connectors.
 
-OrderLoop is two Workers in one pnpm monorepo, plus the product catalog's Worker (see
+OrderLoop is two Workers in one pnpm monorepo, plus the product catalog's two Workers (see
 [Product catalog](#product-catalog)). `orderloop-web` serves the dashboard, the flow
 editor and the REST API; `orderloop-engine` runs orders. The web app reaches the engine only
 through a service binding, and the engine has no public URL.
@@ -26,11 +26,12 @@ inbound mail ── Email Routing ──email()───────────
 
 | Path | Role |
 |---|---|
-| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index, feed parsing and the `ProductCatalogRpc` contract. No bindings and no Cloudflare imports |
+| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index, feed parsing and the `ProductCatalogRpc` contract. Where published objects live and their cache tags are the zod-free `@orderloop/core/product/paths` (`DOC_FORMAT`, the `CODE`, `LOCALE` and `SLUG` patterns, `BATCH_MAX`, `paths`, `tags`), which `catalog-edge` imports alone. No bindings and no Cloudflare imports |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
 | `apps/catalog` (`@orderloop/catalog`) | The product catalog Worker: `CatalogShard` and `CatalogMeta` Durable Objects, the publisher, `CatalogApi` |
+| `apps/catalog-edge` (`@orderloop/catalog-edge`) | The public, read-only catalog API: the gateway, the cached `Delivery` entrypoint and the purge queue consumer |
 | `apps/web` (`@orderloop/web`) | Dashboard, editor, live order view, approvals inbox, Commerce page, `/api/v1` |
 | `apps/docs` (`@orderloop/docs`) | This site |
 
@@ -288,11 +289,13 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 
 ## Product catalog
 
-`orderloop-catalog` (`apps/catalog`) is the write side of a product catalog. The pure model lives
-in `@orderloop/core/product`; the Worker adds storage and publishing. It has no routes, no
-`workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers (the
-web app, and a read-side `catalog-edge` Worker) are meant to reach it through service bindings.
-Nothing binds to it yet and the read side is not built, so no published page or API exposes it.
+`orderloop-catalog` (`apps/catalog`) is the write side of a product catalog, and
+`orderloop-catalog-edge` (`apps/catalog-edge`) the read side. The pure model lives in
+`@orderloop/core/product`; the catalog Worker adds storage and publishing. It has no routes, no
+`workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers
+(the web app, later) are meant to reach it through a service binding. Nothing binds to it yet, so
+no published page or API writes to it. `catalog-edge` shares only its R2 bucket, KV namespace and
+purge queue with it (see [Catalog edge](#catalog-edge)), so the read path never touches a Durable Object.
 
 `CatalogApi` (`apps/catalog/src/api.ts`) is a `WorkerEntrypoint` implementing `ProductCatalogRpc`
 (`packages/core/src/product/api.ts`). It never touches storage itself:
@@ -343,6 +346,12 @@ aliases are published per product and channel is kept in the shard's `published`
 recorded only after every write succeeded, so a failed pass republishes in full. Publishing the
 same product twice writes the same bytes. Listing indexes (`idx/…`) are not produced yet.
 
+Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
+the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards
+by key. After the alarm has published a pass, it sends the cache tag `p:<key>` of every product whose
+outbox rows were `urgent` to the `PURGE` queue (`PurgeMessage`: `{ tags }`), 100 messages a
+`sendBatch`. It sends after publishing so a purge never refills the cache from the old document.
+
 **`CatalogMeta`** is one Durable Object (`meta`) holding product types (every version), channels
 and categories, with a `rev` counter that moves on every type or channel change. A type's version
 may only add (`typeChangeIssues`), and a new type starts at version 1. A channel's `defaultLocale`
@@ -388,6 +397,58 @@ Both Durable Object namespaces are reached only through `apps/catalog/src/config
 `shard`, `shardFor`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
 any other value throws). See [Data residency](data-model.md#data-residency).
 
+## Catalog edge
+
+`orderloop-catalog-edge` (`apps/catalog-edge`) is the public, read-only catalog API. It is a
+Worker on the custom domain `catalog.<domain>` (`catalog.orderloop.app` for the `orderloop`
+deployment), with no `workers_dev` or preview URLs. It reads what the catalog published (R2
+`PUBLISHED`, KV `CARDS`) and holds no state of its own. It has two entrypoints, and Workers Caching
+(`cache.enabled`, with `cross_version_cache`, so a deploy doesn't empty the cache: paths carry
+`DOC_FORMAT`) sits between them:
+
+- **The gateway** (default export, `src/index.ts`; its `exports` entry turns the cache off, since
+  caching in front of it would skip normalizing). It answers `GET /health` with `{ ok: true }` and
+  `OPTIONS` with `204` (`access-control-allow-methods: GET, HEAD`, allowed header `if-none-match`,
+  max-age 86400), refuses anything but `GET` and `HEAD` with `405` (`{ "error": "read only" }`,
+  `allow: GET, HEAD, OPTIONS`), then parses the route (`routes.ts`; `404` for an unknown path,
+  `400` for a bad channel, locale, key, SKU, slug, or `keys`). It forwards only the route's
+  canonical URL (`https://catalog.internal/v1/<channel>/<locale>/…`, unused query parameters
+  dropped, keys deduplicated) and the request's `If-None-Match` to `ctx.exports.Delivery.fetch`, so
+  every way of asking for the same thing is one cache entry and no cookie or other client header
+  reaches it. It adds `access-control-allow-origin: *`, exposes `etag` and `cf-cache-status`, and
+  writes one Analytics Engine data point per routed request without waiting on it (blobs: route kind,
+  channel, status, `cf-cache-status` or `NONE`; double: latency in ms; index: channel).
+- **`Delivery`** (`src/delivery.ts`, a `WorkerEntrypoint` with the cache enabled). A hit never runs
+  it; concurrent misses for a URL run it once; a stale entry is served while one background request
+  revalidates it. It reads and streams stored bytes and never parses a document.
+
+| Route (`GET`, under `/v1/<channel>/<locale>/`) | Answers |
+|---|---|
+| `products/<key>` | The product document, `docs/f1/<channel>/<locale>/p/<key>.json` from R2 |
+| `skus/<sku>`, `slugs/<slug>` | The same document, found through the R2 alias pointer (`sku:<sku>`, `slug:<locale>:<slug>`) |
+| `products?keys=a,b` | `{ "products": [card or null, …] }`, in the order asked, for at most `BATCH_MAX` (100) distinct keys. Key to uid through KV `u:f1:<key>` (one bulk `get`), then cards `c:f1:<channel>:<locale>:<uid>` (a second) |
+| `categories` | The channel's category tree for that locale |
+
+R2 is asked with `onlyIf` set to the request headers, so a revalidation whose `If-None-Match` still
+matches is a `304` with no body read. Responses carry the object's `etag` and `last-modified`
+and, for documents and category trees, `Cache-Control: public, max-age=60, stale-while-revalidate=86400,
+stale-if-error=604800` (a minute fresh, a day stale while revalidating, a week if R2 fails). A
+missing product, SKU, slug or category tree is `404` with `{ "error": … }` and `public, max-age=30`.
+Batches carry the same fresh `Cache-Control`. Cache tags: `p:<key>` and `ch:<channel>` on a
+document (a SKU or slug miss only `ch:<channel>`), `cats` and `ch:<channel>` on a category tree,
+`ch:<channel>` and one `p:<key>` per key on a batch.
+
+The Worker is also the consumer of the purge queue (`orderloop-catalog-purge`) the catalog's
+`PURGE` binding feeds. A batch's tags are deduplicated and purged at most 100 a call through
+`Delivery.purge`, since Workers Caching scopes a purge to the entrypoint that calls it. Purges are
+rationed (the Free-plan limits: about 5 calls a minute), so the consumer runs one batch at a time and
+when a call is refused it calls `retryAll` with a 30 second delay; after `max_retries` the
+messages go to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (local
+development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent
+writes queue a purge.
+
+Bundle: about 10 KiB, because it imports only `@orderloop/core/product/paths`, never zod or the model.
+
 ## Bindings
 
 | Binding | Worker | Resource |
@@ -408,7 +469,12 @@ any other value throws). See [Data residency](data-model.md#data-residency).
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees |
-| `CARDS` | catalog | KV namespace of listing cards; created by `provision.sh` |
+| `PURGE` | catalog | Queue producer for `orderloop-catalog-purge` (`{ tags }` messages) |
+| `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries; created by `provision.sh` |
+| `PUBLISHED` | catalog-edge | R2 `orderloop-catalog`, read |
+| `CARDS` | catalog-edge | The same KV namespace, read |
+| `ANALYTICS` | catalog-edge | Analytics Engine dataset `orderloop_catalog_edge` |
+| (queue consumer) | catalog-edge | `orderloop-catalog-purge`, dead-letter queue `orderloop-catalog-purge-dlq` |
 
 Variables and secrets are listed in [Configuration](configuration.md).
 
@@ -502,7 +568,8 @@ Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `order
 | Products, alias claims and the publishing outbox | `CatalogShard`, one of 64 |
 | Product types, channels, categories | `CatalogMeta` |
 | Published product documents and category trees | R2 (`orderloop-catalog`) |
-| Published listing cards | KV (`CARDS`) |
+| Published listing cards and key to uid entries | KV (`CARDS`) |
+| Cache tags awaiting a purge | The `orderloop-catalog-purge` queue |
 
 ## The assistant
 

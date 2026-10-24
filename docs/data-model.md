@@ -239,7 +239,7 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 channel change).
 
 Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a new tree (`paths` in
-`packages/core/src/product/render.ts`):
+`packages/core/src/product/paths.ts`):
 
 | Where | Key | Holds |
 |---|---|---|
@@ -247,6 +247,12 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
+| KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes; `catalog-edge` turns a batch's keys into card keys with it |
+
+`catalog-edge` ([Architecture](architecture.md#catalog-edge)) reads these objects and writes none.
+It has no storage of its own besides Workers Caching, whose entries are tagged `p:<key>`,
+`ch:<channel>` and `cats`. The cache tags of urgent changes wait on a queue, `orderloop-catalog-purge`
+(`{ tags }` messages, drained by `catalog-edge`; failed messages go to `orderloop-catalog-purge-dlq`).
 
 Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and expire:
 
@@ -384,7 +390,7 @@ Not covered by the redaction:
 - **AI Gateway** records every model call. With request logs on (the registry's `aiGatewayLogs`,
   default `true`) it keeps the prompts and responses, up to 100,000 entries. Turning logs off is
   set at creation by `provision.sh`; for an existing gateway it is changed in the dashboard.
-- **Workers logs** are on for the engine, web and catalog Workers (`observability` in `wrangler.jsonc`, invocation logs
+- **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines
   outlive the D1 retention and are subject to Cloudflare's log retention instead.
