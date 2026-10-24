@@ -217,6 +217,7 @@ export function openStatus(issues: CheckoutIssue[]): CheckoutStatus {
 export const QUOTE_NODE_TYPES = [
   'commerce.validate',
   'commerce.price',
+  'commerce.discount',
   'commerce.shipping_rate',
   'commerce.tax',
   'commerce.policy',

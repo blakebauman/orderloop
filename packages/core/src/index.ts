@@ -25,6 +25,7 @@ export * from './payments';
 export * from './plugins';
 export * from './policy';
 export * from './pricing';
+export * from './promotions';
 export * from './provenance';
 export * from './redact';
 export * from './roles';
