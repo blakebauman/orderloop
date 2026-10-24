@@ -66,7 +66,9 @@ jobs:
         run: pnpm audit --prod --audit-level high
 
   # The fleet: every deployment in deployments/, grouped by ring. Each ring waits for the one
-  # before it to finish cleanly; an empty ring is skipped. See docs/operations.md.
+  # before it to finish cleanly; an empty ring is skipped. See docs/operations.md. A ring after
+  # staging runs past a skipped one (`!failure()`), so it also needs plan to have run: on a pull
+  # request plan is skipped, its outputs are empty, and the ring's matrix couldn't be built.
   plan:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -111,7 +113,7 @@ jobs:
 
   internal:
     needs: [plan, staging]
-    if: ${{ !failure() && !cancelled() && needs.plan.outputs.internal != '[]' }}
+    if: ${{ !failure() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.internal != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,7 +126,7 @@ jobs:
 
   canary:
     needs: [plan, internal]
-    if: ${{ !failure() && !cancelled() && needs.plan.outputs.canary != '[]' }}
+    if: ${{ !failure() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.canary != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -137,7 +139,7 @@ jobs:
 
   general:
     needs: [plan, canary]
-    if: ${{ !failure() && !cancelled() && needs.plan.outputs.general != '[]' }}
+    if: ${{ !failure() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.general != '[]' }}
     strategy:
       fail-fast: false
       # Customers in the general ring deploy a few at a time.
