@@ -38,7 +38,7 @@ import {
   TOOL_OUTPUTS,
   type ToolInput,
 } from './assistant/tools';
-import { issueConfirmation, useConfirmation } from './confirmations';
+import { issueConfirmation, redeemConfirmation, useConfirmation } from './confirmations';
 import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
@@ -216,19 +216,22 @@ async function createServer(p: Principal) {
                 await useConfirmation(env, p, name, asked, code);
                 return refusal('The person did not confirm. Nothing happened.');
               }
-              if (!(await useConfirmation(env, p, name, asked, code)))
+              const used = await redeemConfirmation(env, p, name, asked, code);
+              if (!used)
                 return refusal(
                   'That confirmation expired or was already used, or the input changed. Call again for a new preview.',
                 );
               return result(
                 (await runTool(env, p, name, input as ToolInput<typeof name>, {
                   via: 'MCP',
+                  confirmed: used,
                 })) as Record<string, unknown>,
               );
             }
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
-            const issued = await issueConfirmation(env, p, name, asked);
+            // Held to what the person is shown (a cart's version), kept here, not in the request.
+            const issued = await issueConfirmation(env, p, name, asked, undefined, preview.bound);
             return inputRequired({
               inputRequests: {
                 confirm: inputRequired.elicit({
@@ -244,21 +247,31 @@ async function createServer(p: Principal) {
           if (!confirmation) {
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
-            const { code, expiresAt } = await issueConfirmation(env, p, name, input);
+            const { bound, ...shown } = preview;
+            const { code, expiresAt } = await issueConfirmation(
+              env,
+              p,
+              name,
+              input,
+              undefined,
+              bound,
+            );
             return result({
-              preview,
+              preview: shown,
               confirmation: code,
               expiresAt,
               next: 'Nothing has happened yet. Show the person this preview; if they agree, call again with the same input and this confirmation.',
             });
           }
-          if (!(await useConfirmation(env, p, name, input, confirmation)))
+          const used = await redeemConfirmation(env, p, name, input, confirmation);
+          if (!used)
             return refusal(
               'That confirmation is not valid: it expired, was already used, or was for a different action or input. Call without it for a new preview.',
             );
           return result(
             (await runTool(env, p, name, input as ToolInput<typeof name>, {
               via: 'MCP',
+              confirmed: used,
             })) as Record<string, unknown>,
           );
         } catch (err) {

@@ -418,6 +418,69 @@ describe('MCP', () => {
       (await call(op, 'change_cart', { cartId, ops: [{ op: 'unlock' }] })).isError,
     ).toBeFalsy();
 
+    // A code is held to the cart the person was shown: a change after the preview voids it.
+    const stale = await call(op, 'submit_cart', { cartId });
+    expect(stale.structuredContent!.preview).not.toHaveProperty('bound');
+    await call(op, 'change_cart', { cartId, ops: [{ op: 'add', sku: 'WID-200', qty: 1 }] });
+    const refusedStale = await call(op, 'submit_cart', {
+      cartId,
+      confirmation: stale.structuredContent!.confirmation,
+    });
+    expect(refusedStale.isError).toBe(true);
+    expect(refusedStale.content[0]!.text).toBe(
+      'The cart changed since you confirmed; preview it again.',
+    );
+    // So does one asked through a client that elicits.
+    const elicits = { elicitation: { form: {} } };
+    const asked = (
+      (
+        await rpc(
+          op,
+          'tools/call',
+          { name: 'submit_cart', arguments: { cartId } },
+          '2026-07-28',
+          elicits,
+        )
+      ).body as { result: Record<string, unknown> }
+    ).result;
+    expect(asked.resultType).toBe('input_required');
+    // Even a rename: the version moved on.
+    await call(op, 'change_cart', { cartId, ops: [{ op: 'rename', title: 'Restock, renamed' }] });
+    const elicitedStale = (
+      (
+        await rpc(
+          op,
+          'tools/call',
+          {
+            name: 'submit_cart',
+            arguments: { cartId },
+            requestState: asked.requestState,
+            inputResponses: { confirm: { action: 'accept', content: { confirm: true } } },
+          },
+          '2026-07-28',
+          elicits,
+        )
+      ).body as { result: { isError?: boolean; content: { text: string }[] } }
+    ).result;
+    expect(elicitedStale.isError).toBe(true);
+    expect(elicitedStale.content[0]!.text).toMatch(/changed since you confirmed/);
+    const open = await call(viewer, 'get_cart', { cartId });
+    expect(open.structuredContent).toMatchObject({ status: 'open', orderId: null });
+    // Back to the lines this test submits.
+    await call(op, 'change_cart', {
+      cartId,
+      ops: [
+        {
+          op: 'remove',
+          lineIds: [
+            (open.structuredContent!.lines as { lineId: string; sku: string }[]).find(
+              (l) => l.sku === 'WID-200',
+            )!.lineId,
+          ],
+        },
+      ],
+    });
+
     // Submitting: the first call previews and changes nothing.
     const first = await call(op, 'submit_cart', { cartId });
     expect(first.structuredContent).toMatchObject({

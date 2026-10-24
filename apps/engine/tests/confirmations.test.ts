@@ -5,6 +5,7 @@ import {
   CONFIRMATION_TTL_MS,
   issueConfirmation,
   pruneConfirmations,
+  redeemConfirmation,
   useConfirmation,
 } from '../src/confirmations';
 
@@ -35,5 +36,24 @@ describe('action confirmations', () => {
     expect(
       await pruneConfirmations(env, now + CONFIRMATION_TTL_MS + 86_400_001),
     ).toBeGreaterThanOrEqual(2);
+  });
+
+  it('hand back what the server held them to, once, and never from the request', async () => {
+    const cart = { cartId: 'cart_1' };
+    const held = await issueConfirmation(env, p, 'submit_cart', cart, Date.now(), {
+      cartVersion: 4,
+    });
+    // The bound isn't part of the input: a caller sending it doesn't change what comes back.
+    expect(
+      await redeemConfirmation(env, p, 'submit_cart', { ...cart, cartVersion: 9 }, held.code),
+    ).toBeNull();
+    expect(await redeemConfirmation(env, p, 'submit_cart', cart, held.code)).toEqual({
+      bound: { cartVersion: 4 },
+    });
+    expect(await redeemConfirmation(env, p, 'submit_cart', cart, held.code)).toBeNull();
+    const plain = await issueConfirmation(env, p, 'cancel_order', input);
+    expect(await redeemConfirmation(env, p, 'cancel_order', input, plain.code)).toEqual({
+      bound: null,
+    });
   });
 });

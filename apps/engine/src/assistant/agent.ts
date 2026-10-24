@@ -16,6 +16,7 @@ import {
   type AssistantContext,
   type AssistantTool,
   atLeast,
+  fingerprintOf,
   flowGraphSchema,
   type Principal,
   type ProxiedPrincipal,
@@ -33,7 +34,14 @@ import {
 import type { z } from 'zod';
 import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
 import { assistantBudgetSpent, finishTurn } from '../usage';
-import { type ActionInput, type ActionTool, attention, previewAction, Refused } from './data';
+import {
+  type ActionInput,
+  type ActionTool,
+  attention,
+  type Confirmed,
+  previewAction,
+  Refused,
+} from './data';
 import { assistantModel, type ModelSource } from './model';
 import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
 
@@ -65,12 +73,34 @@ export class AssistantAgent extends AIChatAgent<Env> {
     return attention(this.env);
   }
 
-  /** An action resolved against live data, for its confirm card. */
+  /**
+   * An action resolved against live data, for its confirm card. What the card shows that can
+   * change before the person confirms (`bound`: a cart's version) is kept here, per tool and
+   * input, and the confirmed action is held to it; the panel never sends it back.
+   */
   @callable()
   async preview(name: string, input: unknown) {
     const p = await this.caller();
     if (!ACTION_TOOLS.includes(name as ActionTool)) throw new Error(`Not an action: ${name}`);
-    return previewAction(this.env, p, name as ActionTool, input as ActionInput[ActionTool]);
+    const preview = await previewAction(
+      this.env,
+      p,
+      name as ActionTool,
+      input as ActionInput[ActionTool],
+    );
+    const key = await shownKey(name, input);
+    if (preview.bound) await this.ctx.storage.put(key, preview.bound);
+    else await this.ctx.storage.delete(key);
+    const { bound: _bound, ...shown } = preview;
+    return shown;
+  }
+
+  /** What the card for this action showed, once: a confirm uses it up. */
+  private async shown(name: string, input: unknown): Promise<Confirmed> {
+    const key = await shownKey(name, input);
+    const bound = (await this.ctx.storage.get<Record<string, unknown>>(key)) ?? null;
+    await this.ctx.storage.delete(key);
+    return { bound };
   }
 
   override async onChatMessage(
@@ -131,13 +161,21 @@ export class AssistantAgent extends AIChatAgent<Env> {
             inputSchema: TOOL_INPUTS[name] as z.ZodObject,
             ...(confirm ? { needsApproval: true } : {}),
             execute: async (input: ToolInput<typeof name>) =>
-              runTool(this.env, await this.caller(), name, input, { via: 'assistant', context }),
+              runTool(this.env, await this.caller(), name, input, {
+                via: 'assistant',
+                context,
+                ...(confirm ? { confirmed: await this.shown(name, input) } : {}),
+              }),
           }),
         ];
       }),
     );
   }
 }
+
+/** Where a confirm card's `bound` is kept: per tool and input, whatever the key order. */
+const shownKey = async (name: string, input: unknown) =>
+  `shown:${await fingerprintOf({ name, input: input ?? {} })}`;
 
 /** The page the person is on, as the panel sent it; anything malformed counts as the workspace. */
 export function readContext(raw: unknown): AssistantContext {

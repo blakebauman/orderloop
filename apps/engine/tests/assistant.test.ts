@@ -268,9 +268,46 @@ describe('assistant actions', () => {
     const preview = await previewAction(env, op, 'submit_cart', { cartId: cart.id });
     expect(preview.blocked).toBeUndefined();
     expect(preview.consequences[0]).toMatch(/^1 line · \$/);
-    const done = (await runAction(env, op, 'submit_cart', { cartId: cart.id })) as {
-      orderId: string;
-    };
+    expect(preview.bound).toEqual({ cartVersion: expect.any(Number) });
+
+    // Changed after the person saw it: their confirm doesn't submit what they never saw.
+    await runTool(
+      env,
+      op,
+      'change_cart',
+      { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty: 40 }] },
+      { via: 'MCP' },
+    );
+    await expect(
+      runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', {
+        bound: preview.bound!,
+      }),
+    ).rejects.toThrow('The cart changed since you confirmed; preview it again.');
+    // Nor does a confirm held to nothing.
+    await expect(
+      runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', { bound: null }),
+    ).rejects.toBeInstanceOf(Refused);
+    const still = (await runTool(
+      env,
+      op,
+      'get_cart',
+      { cartId: cart.id },
+      { via: 'assistant' },
+    )) as { status: string; orderId: string | null };
+    expect(still).toMatchObject({ status: 'open', orderId: null });
+    const changes = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'cart.changed'), eq(auditEvents.target, cart.id)));
+    expect(changes.map((e) => JSON.parse(e.detail!))).toEqual([
+      { op: 'add', via: 'assistant', tool: 'change_cart' },
+      { op: 'add', via: 'mcp', tool: 'change_cart' },
+    ]);
+
+    const seen = await previewAction(env, op, 'submit_cart', { cartId: cart.id });
+    const done = (await runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', {
+      bound: seen.bound!,
+    })) as { orderId: string };
     const logged = await db()
       .select()
       .from(auditEvents)

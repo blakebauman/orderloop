@@ -129,6 +129,9 @@ export type CartOpResult =
   | { ok: true; cart: Cart; reprice: boolean }
   | { ok: false; error: string };
 
+/** What submitting refuses when the cart changed after the person saw what they confirmed. */
+export const CART_CHANGED_SINCE_CONFIRM = 'The cart changed since you confirmed; preview it again.';
+
 export const isFinalCart = (c: Pick<Cart, 'status'>) => FINAL_CART_STATUSES.includes(c.status);
 
 export const isExternalCart = (c: Pick<Cart, 'external'>) => c.external !== null;

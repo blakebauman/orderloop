@@ -26,6 +26,7 @@ import {
   assessOrder,
   attention,
   type Channel,
+  type Confirmed,
   findOrders,
   findProducts,
   getFlow,
@@ -259,17 +260,18 @@ export const isActionTool = (name: AssistantTool): name is ActionTool =>
 
 /**
  * Runs a tool as `p`. `via` names the channel in the order's audit trail ("… via MCP");
- * `context` is the assistant panel's page, which only the flow draft uses.
+ * `context` is the assistant panel's page, which only the flow draft uses; `confirmed` is what
+ * an action's confirm was held to (`runAction`).
  */
 export async function runTool<T extends AssistantTool>(
   env: Env,
   p: Principal,
   name: T,
   input: ToolInput<T>,
-  opts: { via: Channel; context?: AssistantContext },
+  opts: { via: Channel; context?: AssistantContext; confirmed?: Confirmed },
 ): Promise<unknown> {
   if (isActionTool(name))
-    return runAction(env, p, name, input as ActionInput[typeof name], opts.via);
+    return runAction(env, p, name, input as ActionInput[typeof name], opts.via, opts.confirmed);
   requireRole(p, name);
   switch (name) {
     case 'needs_attention':
@@ -294,7 +296,7 @@ export async function runTool<T extends AssistantTool>(
       return openCart(env, p, input as ToolInput<'create_cart'>, opts.via);
     case 'change_cart': {
       const i = input as ToolInput<'change_cart'>;
-      return changeCart(env, p, i.cartId, i.ops);
+      return changeCart(env, p, i.cartId, i.ops, opts.via);
     }
     case 'list_flows':
       return listFlows(env);

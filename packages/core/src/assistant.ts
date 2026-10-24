@@ -238,6 +238,12 @@ export type ActionPreview = {
   blocked?: string;
   /** Where to look, e.g. `/orders/ord_…`. */
   href?: string;
+  /**
+   * What confirming this preview is held to besides the input: what the person saw that can
+   * change before they confirm (a cart's `cartVersion`). The server that showed the preview keeps
+   * its own copy and hands it to the action, which refuses when it no longer holds.
+   */
+  bound?: Record<string, unknown>;
 };
 
 /** What `draft_plugin` returns: a pending draft to review on the Plugins page, never running. */

@@ -334,12 +334,20 @@ describe('carts over REST', () => {
       { op: 'add', sku: 'WID-100', qty: 3 },
       { kind: 'staff', id: 'tok_1', name: 'ci', role: 'operator' },
     );
+    expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.changed', {
+      actor: operator,
+      target: 'cart_1',
+      detail: { op: 'add', via: 'api' },
+    });
+    audit.mockClear();
     engine.changeCart.mockResolvedValueOnce({ ok: false, error: 'The cart is locked.' });
     const locked = await post('carts/cart_1/ops', { op: 'clear' });
     expect(locked.status).toBe(409);
     expect(await locked.json()).toEqual({ error: 'The cart is locked.' });
     engine.changeCart.mockResolvedValueOnce({ ok: false, error: 'No such cart.', notFound: true });
     expect((await post('carts/cart_x/ops', { op: 'clear' })).status).toBe(404);
+    // Only a change that went in is recorded.
+    expect(audit).not.toHaveBeenCalled();
   });
 
   it('submits once, recording the order it started, and cancels', async () => {

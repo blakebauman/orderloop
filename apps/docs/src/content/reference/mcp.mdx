@@ -141,7 +141,10 @@ The action runs when the same person calls again with the same input plus `confi
 5 minutes. A code works once. A code used by someone else, for another tool or with a different
 input (key order doesn't matter), or one that expired or was used, is refused with a tool error;
 call without it for a new preview. The role and the order's state are checked again when the
-action runs.
+action runs. A `submit_cart` code is also held to the cart as the preview showed it: if anything
+changed the cart in between (a `change_cart`, someone on the cart's page), the confirmed call is
+refused with "The cart changed since you confirmed; preview it again" and nothing is submitted.
+The same holds when the person confirms through an eliciting client.
 
 Reads, `propose_flow_change`, `draft_plugin`, `create_cart` and `change_cart` do not take a code:
 a cart is only a draft of an order until `submit_cart`. Over [A2A](/reference/a2a/), typed skills

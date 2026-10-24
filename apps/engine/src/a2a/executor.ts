@@ -41,6 +41,7 @@ import { generateText, type ModelMessage, stepCountIs, type ToolSet, tool } from
 import type { z } from 'zod';
 import {
   type ActionInput,
+  type Confirmed,
   previewAction,
   Refused,
   resolveOrderId,
@@ -144,7 +145,8 @@ export class OrderLoopExecutor implements AgentExecutor {
       if (!atLeast(p.role, min)) throw new Refused(`This needs the ${ROLE_LABELS[min]} role.`);
       const input = (data.input ?? {}) as Record<string, unknown>;
       if (skill === 'place_order') return this.placeOrder(p, ids, message, input, bus);
-      return this.runSkill(p, ids, skill, input, bus);
+      // The caller composed this call itself: there is no preview to hold it to.
+      return this.runSkill(p, ids, skill, input, bus, 'direct');
     }
     return this.chatTurn(p, ids, text, bus);
   }
@@ -189,6 +191,7 @@ export class OrderLoopExecutor implements AgentExecutor {
     name: AssistantTool,
     raw: Record<string, unknown>,
     bus: ExecutionEventBus,
+    confirmed: Confirmed,
   ): Promise<string | null> {
     const parsed = (TOOL_INPUTS[name] as z.ZodObject).safeParse(raw);
     if (!parsed.success) throw new Refused(`The input is not valid: ${issues(parsed.error)}`);
@@ -200,7 +203,7 @@ export class OrderLoopExecutor implements AgentExecutor {
       const s = await snapshot(this.env, target);
       if (s) this.before.set(ids.taskId, key(orderTaskState(s)));
     }
-    const result = await runTool(this.env, p, name, input, { via: 'A2A' });
+    const result = await runTool(this.env, p, name, input, { via: 'A2A', confirmed });
     bus.publish(dataArtifact(ids, name, result));
     if (target) {
       await this.store.follow(ids.taskId, target);
@@ -235,15 +238,18 @@ export class OrderLoopExecutor implements AgentExecutor {
         bus.publish(statusEvent(ids, 'TASK_STATE_CANCELED', 'Left as it was. Nothing was sent.'));
         return null;
       }
-      return this.runSkill(p, ids, pending.tool as AssistantTool, pending.input, bus);
+      // Held to what the proposal showed (a cart's version), kept with the task.
+      return this.runSkill(p, ids, pending.tool as AssistantTool, pending.input, bus, {
+        bound: pending.bound ?? null,
+      });
     }
     const orderId = this.store.orderOf(ids.taskId);
     if (!orderId) throw new Refused('This task isn’t waiting for anything. Start a new task.');
     if (typeof data?.decision === 'string') {
       const input = { orderId, decision: data.decision, nodeId: data.nodeId, note: data.note };
-      await this.runSkill(p, ids, 'decide_approval', input, bus);
+      await this.runSkill(p, ids, 'decide_approval', input, bus, 'direct');
     } else if (typeof data?.event === 'string') {
-      await this.runSkill(p, ids, 'deliver_event', { orderId, event: data.event }, bus);
+      await this.runSkill(p, ids, 'deliver_event', { orderId, event: data.event }, bus, 'direct');
     } else {
       throw new Refused(
         'Reply { "decision": "approved" | "rejected", "nodeId"? } for an approval, or { "event": "…" } for an event.',
@@ -291,8 +297,11 @@ export class OrderLoopExecutor implements AgentExecutor {
       bus.publish(statusEvent(ids, 'TASK_STATE_COMPLETED', preview.blocked));
       return;
     }
-    this.store.setPending(ids.taskId, action);
-    bus.publish(dataArtifact(ids, 'proposal', { tool: action.tool, input: action.input, preview }));
+    const { bound, ...shown } = preview;
+    this.store.setPending(ids.taskId, { ...action, ...(bound ? { bound } : {}) });
+    bus.publish(
+      dataArtifact(ids, 'proposal', { tool: action.tool, input: action.input, preview: shown }),
+    );
     bus.publish(
       statusEvent(
         ids,

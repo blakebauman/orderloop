@@ -14,6 +14,7 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'order.event_delivered': 'Delivered an event',
   'approval.decided': 'Decided an approval',
   'cart.created': 'Opened a cart',
+  'cart.changed': 'Changed a cart',
   'cart.canceled': 'Canceled a cart',
   'flow.saved': 'Saved a flow draft',
   'flow.published': 'Published a flow',

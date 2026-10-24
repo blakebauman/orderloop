@@ -72,7 +72,8 @@ the card says why and offers no confirm.
 
 Confirming runs the action as you, after the engine re-checks your role and the order or flow
 again. The state can have changed since the card appeared, in which case the action is refused with
-the reason. An approval decided here has no 5-second undo window, because the confirm is the
+the reason. A cart is held to the card exactly: if it changed at all after the card appeared, the
+submit is refused and nothing is ordered; ask again for a new card. An approval decided here has no 5-second undo window, because the confirm is the
 check. The audit trail names the actor as `<email> via assistant`: that string is the approval's
 `by`, or ends the cancel reason. A confirmed action is also an [audit log](/guides/team-and-roles/#audit-log) event (`via` the assistant, with the `tool`); read-only tools are not logged.
 

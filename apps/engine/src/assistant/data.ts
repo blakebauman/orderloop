@@ -61,6 +61,13 @@ export function requireRole(p: Principal, tool: AssistantTool) {
 /** Where a tool call came from: the workspace assistant, an MCP client or an A2A agent. */
 export type Channel = 'assistant' | 'MCP' | 'A2A';
 
+/**
+ * How a confirmed action reached `runAction`: with what the person's confirm was held to (the
+ * preview's `bound`, kept server-side by the channel that showed it), or `direct` for a call the
+ * caller composed without a preview (a typed A2A skill).
+ */
+export type Confirmed = { bound: Record<string, unknown> | null } | 'direct';
+
 /** How the audit trail names an act taken for someone through a channel. */
 export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
 
@@ -621,6 +628,7 @@ export async function runAction<T extends ActionTool>(
   tool: T,
   input: ActionInput[T],
   channel: Channel = 'assistant',
+  confirmed?: Confirmed,
 ) {
   requireRole(p, tool);
   const preview = await previewAction(env, p, tool, input);
@@ -669,7 +677,7 @@ export async function runAction<T extends ActionTool>(
       return { done: preview.title, href: preview.href };
     }
     case 'submit_cart':
-      return runSubmit(env, p, (input as ActionInput['submit_cart']).cartId, channel);
+      return runSubmit(env, p, (input as ActionInput['submit_cart']).cartId, channel, confirmed);
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);

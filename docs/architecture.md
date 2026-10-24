@@ -180,7 +180,17 @@ card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmati
 the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 `CONFIRMATION_TTL_MS` (5 minutes). Anything else is a tool error. The sweep calls
 `pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
-the call, as with REST); A2A chat has its own `{ confirm }`. See
+the call, as with REST, `confirmed: 'direct'`); A2A chat has its own `{ confirm }`.
+
+A preview can also carry `bound`: what the person is shown that can change before they confirm
+(for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that
+showed the preview keeps it and strips it from what it sends: MCP in the code's `bound` column
+(`issueConfirmation`, handed back by `redeemConfirmation`), the assistant panel in the
+`AssistantAgent`'s storage per tool and input (`preview()` writes it, the confirmed `execute` uses
+it up), A2A chat with the task's pending action. `runAction` passes it on as `confirmed`, and
+`runSubmit` hands `cartVersion` to `CartAgent.submitAs`, which refuses a cart whose version moved
+on (`CART_CHANGED_SINCE_CONFIRM`); a submit with no bound, other than a typed A2A skill, is refused
+too. See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
 Skills: `createServer` attaches the role's `SkillCatalog`

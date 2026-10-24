@@ -117,14 +117,16 @@ export async function changeCart(
   return { ok: true, cart: cartView((await staffCart(env, id))!) };
 }
 
+/** `confirmedVersion`: the version a confirmed preview showed; a cart changed since is refused. */
 export async function submitCart(
   env: Env,
   id: string,
   actor: StaffCartActor,
+  confirmedVersion?: number,
 ): Promise<CartAnswer<{ orderId: string }>> {
   if (actor?.kind !== 'staff') return NOT_STAFF;
   if (!(await staffCart(env, id))) return NO_CART;
-  return cartAgent(env, id).submitAs(actor);
+  return cartAgent(env, id).submitAs(actor, confirmedVersion);
 }
 
 export async function cancelCart(

@@ -505,7 +505,13 @@ async function handleCarts(
     const op = cartOpSchema.safeParse(await body());
     if (!op.success) return json({ error: 'Invalid cart op', issues: op.error.issues }, 400);
     const r = await engine().changeCart(id, op.data, actor);
-    return r.ok ? json({ cart: r.cart }) : refused(r);
+    if (!r.ok) return refused(r);
+    await audit(request, 'cart.changed', {
+      actor: caller,
+      target: id,
+      detail: { op: op.data.op, via: 'api' },
+    });
+    return json({ cart: r.cart });
   }
   if (verb === 'submit') {
     const r = await engine().submitCart(id, actor);
