@@ -113,9 +113,10 @@ credit check"), not open questions.
 ## Over MCP
 
 The same tools are served to MCP clients such as Claude, Claude Code and Cursor at `/mcp`, with the
-same roles. There is no confirm card: an action's first call returns a preview and a one-time
-confirmation code and changes nothing, and it runs only when the client calls again with the code
-after you agree (see [Actions take two calls](/reference/mcp/#actions-take-two-calls)). The
+same roles. There is no confirm card: an action's first call changes nothing. A client that can
+ask you shows the preview and acts only once you agree; any other client gets a preview and a
+one-time code, and the action runs only when it calls again with the code (see
+[Actions wait for the person](/reference/mcp/#actions-wait-for-the-person)). The
 engine still re-checks the role and the state before it acts. Writes are recorded as
 `<email> via MCP`. See [MCP server](/reference/mcp/). Other agents reach the same tools over the
 Agent2Agent protocol at `/a2a`, as skills; see [A2A endpoint](/reference/a2a/).
