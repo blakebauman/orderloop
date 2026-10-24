@@ -367,15 +367,24 @@ Object alarm included, can have only six storage calls waiting for response head
 and Queues calls all count, and a write's headers arrive when it is stored), so one shard's alarm
 alone published only a few products a second. `publishKeys` builds each write as a `WriteOp`
 (`publisher.ts`: an R2 or KV put, or an R2 or KV delete, as plain data that crosses RPC) and groups
-them by `publisherOf(key, PUBLISH_FANOUT)`, the FNV hash of `w:<key>` modulo the fanout (default 8).
+them by `publisherOf(key, PUBLISH_FANOUT)`, the FNV hash of `w:<key>` modulo the fanout (default 32).
 Each group goes to `CatalogPublisher` `pub-<shard>-<n>` (`publisher()` in `config.ts`, scoped to the
-jurisdiction like the other objects), whose `write(ops)` runs them through `runOps`, 16 in flight.
+jurisdiction like the other objects), whose `write(ops)` starts them all at once through `runOps` (the runtime
+queues those past six and starts each as a slot frees, so none waits for a slower one).
 `publishKeys` awaits every publisher and only then records `published` and returns the changes. With
 a fanout of 1 it runs the ops itself and makes no hop. One product's writes always go to the same
 publisher and the shard waits for every publisher before its next pass, so a product's writes are
-never reordered. Measured on production in October 2026: about 330 products a second across the 64
-shards for a 250,000-product feed (an alarm pass's p99 about 18 seconds, CPU about 1%). The
-publishers hold no state.
+never reordered. The publishers hold no state.
+
+Measured on production in October 2026 (a pass is 100 products, about 500 writes):
+
+- With no publishers, a 250,000-product feed published at about 200 products a second across the 64
+  shards (an alarm pass's p99 about 18 seconds, CPU about 1%).
+- With 8 publishers each running 16 writes in lockstep, a 750,000-product feed still published at
+  about 240 a second. A publisher's call (about 62 writes) took 10 seconds at the median, so a write
+  took about a second from the publisher, while R2 and KV accepted about 1,200 writes a second with
+  no errors. The listing changes queue kept up throughout (backlog under 250 messages, 2 to 8
+  consumers).
 
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards

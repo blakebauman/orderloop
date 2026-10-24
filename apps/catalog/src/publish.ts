@@ -20,7 +20,7 @@ import type { CatalogShard } from './shard';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 /** Publishers per shard when PUBLISH_FANOUT isn't set (publisher.ts). */
-const FANOUT = 8;
+const FANOUT = 32;
 
 /** Aliases published per channel: slugs only in the locales the channel publishes. */
 function channelAliases(all: string[], channel: Channel): string[] {
