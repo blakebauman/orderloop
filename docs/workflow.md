@@ -15,8 +15,9 @@ interprets every flow. One instance runs one order generation; its params are `O
    clock, so it replays identically.
 3. Reports a `running` snapshot to the agent.
 4. Loops: `readyNodes` → `beginNode` for each ready node (waiting node types are marked `waiting`)
-   → snapshot → run the whole batch concurrently with `Promise.all` → apply the outcomes **in graph
-   order** → snapshot. It stops when nothing is ready or an End node ran.
+   → snapshot, sent alongside the batch (awaited in the same `Promise.all`, not before it) → run
+   the whole batch concurrently with `Promise.all` → apply the outcomes **in graph order** →
+   snapshot. It stops when nothing is ready or an End node ran.
 5. Reports the final status. For `failed` it throws `NonRetryableError(reason)`, which fails the
    instance and makes Workflows run the registered rollbacks. Otherwise it returns
    `{ outcome, total }`.

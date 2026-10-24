@@ -129,13 +129,16 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
       for (const n of nodes)
         if (registry.spec(n.type)?.waits || n.type === 'control.wait')
           plan.nodes[n.id]!.status = 'waiting';
-      await snapshot(
+      // The batch's snapshot goes out alongside its nodes rather than before them: it is
+      // sequenced, so the agent drops it if a newer one lands first, and it never throws.
+      const batchSnapshot = snapshot(
         nodes.some((n) => plan.nodes[n.id]!.status === 'waiting') ? 'waiting' : 'running',
       );
 
-      const outcomes = await Promise.all(
-        nodes.map((n, i) => this.runNode(step, plan, ctx, n, keys[i]!, p, report, registry)),
-      );
+      const [, ...outcomes] = await Promise.all([
+        batchSnapshot,
+        ...nodes.map((n, i) => this.runNode(step, plan, ctx, n, keys[i]!, p, report, registry)),
+      ]);
 
       // Apply in graph order so the plan is identical on replay.
       let continueKey: string | null = null;
@@ -185,7 +188,10 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
     await step.do(key, async () => {
       const generation = p.generation + 1;
       const id = `${p.orderId}-g${generation}`;
-      const params: OrderLoopParams = { ...p, generation, order: ctx.order, vars: ctx.vars };
+      // An order started before documents moved to R2 may still carry the text; drop it once stored.
+      const { documentText: _text, ...stored } = ctx.order;
+      const order = stored.documentKey ? stored : ctx.order;
+      const params: OrderLoopParams = { ...p, generation, order, vars: ctx.vars };
       try {
         await env.ORDER_LOOP.create({ id, params });
       } catch (err) {

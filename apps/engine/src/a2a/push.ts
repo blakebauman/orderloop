@@ -40,6 +40,8 @@ const MAX_CONFIGS = 5;
 /** Matches outbound webhooks: the first try plus 5 retries, 10s apart and doubling. */
 const RETRIES = 5;
 const TIMEOUT_MS = 5_000;
+/** Push URLs delivered to at once in a pass. */
+const PARALLEL_URLS = 6;
 /** Failed deliveries are kept this long for inspection. */
 const KEEP_FAILED_MS = 7 * 86_400_000;
 
@@ -306,7 +308,7 @@ export class PushSender implements PushNotificationSender {
     return false;
   }
 
-  /** Tries every due notification once; one pass at a time, in queue order. */
+  /** Tries every due notification once; one pass at a time, each URL's in queue order. */
   deliver(): Promise<void> {
     if (this.running) {
       this.again = true;
@@ -323,6 +325,40 @@ export class PushSender implements PushNotificationSender {
     return this.running;
   }
 
+  /** One delivery attempt: removes the row once delivered, else schedules its retry. */
+  private async attempt(row: OutboxRow) {
+    let error: string | null = null;
+    try {
+      const headers = await openSecret(this.env, row.headers, outboxContext(row.id));
+      const res = await fetch(row.url, {
+        method: 'POST',
+        headers: JSON.parse(headers) as Record<string, string>,
+        body: row.body,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      await res.body?.cancel();
+      if (!res.ok) error = `HTTP ${res.status}`;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    if (!error) {
+      this.storage.sql.exec('DELETE FROM push_outbox WHERE id = ?', row.id);
+      return;
+    }
+    const attempts = row.attempts + 1;
+    const failed = attempts > RETRIES;
+    this.storage.sql.exec(
+      `UPDATE push_outbox SET attempts = ?, status = ?, next_at = ?, last_error = ?,
+         updated_at = ? WHERE id = ?`,
+      attempts,
+      failed ? 'failed' : 'pending',
+      Date.now() + 10_000 * 2 ** (attempts - 1),
+      error,
+      Date.now(),
+      row.id,
+    );
+  }
+
   private async pass() {
     const now = Date.now();
     const due = this.storage.sql
@@ -332,38 +368,21 @@ export class PushSender implements PushNotificationSender {
         now,
       )
       .toArray();
+    // A URL's notifications go one after another, in queue order; different URLs go together,
+    // a few at a time.
+    const byUrl = new Map<string, OutboxRow[]>();
     for (const row of due) {
-      let error: string | null = null;
-      try {
-        const headers = await openSecret(this.env, row.headers, outboxContext(row.id));
-        const res = await fetch(row.url, {
-          method: 'POST',
-          headers: JSON.parse(headers) as Record<string, string>,
-          body: row.body,
-          signal: AbortSignal.timeout(TIMEOUT_MS),
-        });
-        await res.body?.cancel();
-        if (!res.ok) error = `HTTP ${res.status}`;
-      } catch (err) {
-        error = err instanceof Error ? err.message : String(err);
-      }
-      if (!error) {
-        this.storage.sql.exec('DELETE FROM push_outbox WHERE id = ?', row.id);
-        continue;
-      }
-      const attempts = row.attempts + 1;
-      const failed = attempts > RETRIES;
-      this.storage.sql.exec(
-        `UPDATE push_outbox SET attempts = ?, status = ?, next_at = ?, last_error = ?,
-           updated_at = ? WHERE id = ?`,
-        attempts,
-        failed ? 'failed' : 'pending',
-        Date.now() + 10_000 * 2 ** (attempts - 1),
-        error,
-        Date.now(),
-        row.id,
-      );
+      const q = byUrl.get(row.url);
+      if (q) q.push(row);
+      else byUrl.set(row.url, [row]);
     }
+    const queues = [...byUrl.values()];
+    for (let i = 0; i < queues.length; i += PARALLEL_URLS)
+      await Promise.all(
+        queues.slice(i, i + PARALLEL_URLS).map(async (q) => {
+          for (const row of q) await this.attempt(row);
+        }),
+      );
     this.storage.sql.exec(
       "DELETE FROM push_outbox WHERE status = 'failed' AND updated_at < ?",
       Date.now() - KEEP_FAILED_MS,

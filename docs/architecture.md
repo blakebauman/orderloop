@@ -673,8 +673,9 @@ and R2. Each function is the seam where a real adapter (a WMS, a carrier API, an
 replaces the mock. Payments already have one: `apps/engine/src/payments.ts` (re-exported from
 `connectors.ts`) records each payment in D1 and, with `PAYMENTS_MODE=stripe`, calls Stripe through
 the fetch client in `apps/engine/src/stripe.ts` (form encoding, pinned `Stripe-Version`,
-`StripeError`, no SDK and no retries of its own). Card errors take the node's declined or failed
-branch; Stripe 5xx, 429, 409 and network errors throw so the step retries; any other refusal is a
+`StripeError`, a 15-second timeout per request, no SDK and no retries of its own). Card errors take
+the node's declined or failed branch; Stripe 5xx, 429, 409, network errors and timeouts throw so
+the step retries (every write carries an `Idempotency-Key`); any other refusal is a
 `NonRetryableError`. `paymentSource` in `packages/core/src/payments.ts` picks external, offline,
 adopt, confirm, off-session or none from `order.payment`, the node's method and the customer's
 saved card, and `toMinor`/`fromMinor` (`packages/core/src/money.ts`) convert amounts, with

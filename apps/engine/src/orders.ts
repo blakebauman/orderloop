@@ -149,6 +149,9 @@ async function launch(
       'text/plain; charset=utf-8',
     );
   }
+  // Once the document is in R2, the agent's state and the Workflow's params carry only its key
+  // (`ai.extract` reads it back from there).
+  if (order.documentKey) delete order.documentText;
   await orderAgent(env, orderId).init(order, flow, instanceId);
   const params: OrderLoopParams = {
     orderId,

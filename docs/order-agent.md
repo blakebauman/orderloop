@@ -15,17 +15,24 @@ and acts on the order through this agent.
 
 ## State
 
-The synced state is `OrderState` from `packages/core/src/api.ts`, plus a private `seq`:
+The state is `OrderState` from `packages/core/src/api.ts`, plus a private `seq`. What the agent
+syncs to browsers is kept small: `flow` is always `null` in it, and `timeline` holds only the newest
+50 entries (`TIMELINE_BROADCAST`). The pinned flow and the whole timeline live in the object's own
+SQL (`order_flow` and `order_timeline`); `snapshot()` returns the state with both filled in, which is
+what `EngineApi.snapshot` and the REST API serve. The order page takes the flow from its loader's
+snapshot and folds each broadcast's timeline into the one it holds (`mergeTimeline` in core);
+`getFlow()` serves the flow to any other socket client. An agent whose state still holds the flow
+(an order begun before this split) moves it and its timeline into SQL the first time it runs.
 
 | Field | Meaning |
 |---|---|
-| `orderId`, `order`, `flow` | The order and the pinned `FlowVersion` |
+| `orderId`, `order`, `flow` | The order and the pinned `FlowVersion` (`null` in the synced state). Once the inbound document is stored in R2, `order` carries only its `documentKey`, not `documentText` |
 | `status` | One of `ORDER_STATUSES` (`packages/core/src/types.ts`) |
 | `nodes` | `NodeRun` per node: status, runs, summary, output, error, branches, `startedAt`, `endedAt` |
 | `edges` | `EdgeState` per edge, from the latest plan |
 | `waits` | Open `PendingWait`s: node, event type, kind, title, event, amount, assignee, deadline |
 | `vars` | Run variables |
-| `timeline` | `TimelineEntry`s, capped at the last 400 (`TIMELINE_CAP`) |
+| `timeline` | `TimelineEntry`s, capped at the last 400 (`TIMELINE_CAP`); the newest 50 in the synced state |
 | `instanceId`, `generation` | The Workflow instance driving the order and its generation |
 | `rollback` | `{ outcome: 'complete' \| 'failed', error }` once a failed run has settled |
 | `reason` | Why it was cancelled, declined or failed |
@@ -48,7 +55,10 @@ state and call methods, never write state.
 - A `status` applies only if the order is not already terminal
   (`TERMINAL_ORDER_STATUSES` in `packages/core/src/types.ts`), so a late report cannot reopen a finished order. A
   status change adds a timeline entry keyed `status:${generation}:${status}`.
-- Timeline entries with a `key` replace the entry with the same key rather than appending.
+- Timeline entries with a `key` replace the entry with the same key rather than appending (the
+  replacement moves to the end).
+- Building the next state touches only the broadcast tail: `log()` writes the entry to SQL and
+  returns the newest 50, never copying the whole timeline.
 
 After a status change or an order patch the agent writes the index row (`syncIndex`). When the
 status becomes `failed` it schedules `checkInstance` to run 5 seconds later.
@@ -63,7 +73,8 @@ generation. A replayed report reaches a node that has already ended, or a later 
 never adds a row. Nodes without a start (an End node, a `control.wait` sleep) are not timed.
 
 These rules are what make replays and retries safe: `apps/engine/tests/agent.test.ts` covers
-replayed snapshots, deduped keys, new generations and sticky terminal statuses.
+replayed snapshots, deduped keys, new generations and sticky terminal statuses, and the small
+synced state against the full snapshot.
 
 ## The orders index
 
@@ -98,7 +109,8 @@ the same methods over RPC.
 | `decide(nodeId, decision, by = 'operator', note?, deciderId?)` | First checks separation of duties: `separationRefusal` (`apps/engine/src/separation.ts`) reads `approval_separation` and `orders.started_by` and throws `OWN_ORDER_REFUSAL` when `ownOrderRefusal` (core) says the decider started the order. `deciderId` comes from RPC callers (the REST route, the order action, the assistant); on a socket it is the signed-in caller's id. Without one (no principal), nothing is checked. Then finds the approval wait for `nodeId` (throws if none) and sends its event type to the instance with `{ decision, by, note }` |
 | `deliver(event, payload = {})` | Finds the event wait for `event`. If none is open, returns `{ delivered: false }`; otherwise sends `{ ...payload, event, at }` and returns `{ delivered: true, nodeId }` |
 | `cancel(reason = 'Cancelled by operator')` | See below. Returns `{ ok: false }` for an order that has already ended |
-| `erasePersonalData(terms)` | Not `@callable()`; RPC only, from `eraseDataSubject`. Returns `null` while the order has not ended (a status outside `TERMINAL_ORDER_STATUSES`), `{ held: false, title: '' }` for an agent that never held an order, otherwise replaces the state with `eraseOrderState(state, terms)` (core), runs `syncIndex` and returns `{ held: true, title }` |
+| `erasePersonalData(terms)` | Not `@callable()`; RPC only, from `eraseDataSubject`. Returns `null` while the order has not ended (a status outside `TERMINAL_ORDER_STATUSES`), `{ held: false, title: '' }` for an agent that never held an order, otherwise replaces the state, with its whole timeline, with `eraseOrderState(state, terms)` (core), runs `syncIndex` and returns `{ held: true, title }` |
+| `getFlow()` | The pinned `FlowVersion`, which the synced state leaves out. Needs `viewer` on a socket |
 | `whoami()` | The caller as the agent sees them now, `{ name, role }`; fails once their sign-in has ended |
 
 ### Roles on the socket

@@ -26,6 +26,8 @@ import {
   ROLE_LABELS,
   type Role,
   TERMINAL_ORDER_STATUSES,
+  TIMELINE_BROADCAST,
+  TIMELINE_CAP,
   type TimelineEntry,
 } from '@orderloop/core';
 import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
@@ -53,11 +55,15 @@ export type Report = {
   log?: TimelineEntry;
 };
 
+/**
+ * The synced state: `flow` is always null and `timeline` holds the newest `TIMELINE_BROADCAST`
+ * entries, so every broadcast stays small. The pinned flow and the whole timeline (up to
+ * `TIMELINE_CAP`) live in this object's SQL; `snapshot()` and `getFlow()` read them.
+ */
 type State = OrderState & { seq: number };
 /** Per-connection state: who opened the order page's socket. */
 type ConnectionState = { principal: ProxiedPrincipal | null };
 
-const TIMELINE_CAP = 400;
 // Matches the Workflow's emit step: 5 retries with exponential backoff from 10 seconds.
 const WEBHOOK_RETRIES = 5;
 /** Statuses an order ends in without having been fulfilled. */
@@ -78,10 +84,67 @@ export class OrderAgent extends Agent<Env, State> {
     this.setState({ ...this.state, ...p, updatedAt: Date.now() });
   }
 
+  /** Set once this instance has created its tables. */
+  private tablesReady = false;
+
+  /** Creates this object's SQL tables, once per instance. */
+  private tables() {
+    if (this.tablesReady) return;
+    this.sql`CREATE TABLE IF NOT EXISTS order_flow (id INTEGER PRIMARY KEY, flow TEXT NOT NULL)`;
+    this
+      .sql`CREATE TABLE IF NOT EXISTS order_timeline (seq INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, entry TEXT NOT NULL)`;
+    this.sql`CREATE TABLE IF NOT EXISTS a2a_watchers (name TEXT PRIMARY KEY)`;
+    this.sql`CREATE TABLE IF NOT EXISTS a2a_watch_state (id INTEGER PRIMARY KEY, key TEXT)`;
+    this
+      .sql`CREATE TABLE IF NOT EXISTS ucp_sync (id INTEGER PRIMARY KEY, digest TEXT, pending INTEGER NOT NULL DEFAULT 0, released INTEGER NOT NULL DEFAULT 0)`;
+    this.tablesReady = true;
+    // An order begun while the flow and the whole timeline were kept in state: move them out.
+    const s = this.state;
+    if (s.flow) {
+      this.sql`INSERT OR IGNORE INTO order_flow (id, flow) VALUES (1, ${JSON.stringify(s.flow)})`;
+      if (!this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM order_timeline`[0]?.n)
+        for (const e of s.timeline) this.appendTimeline(e);
+      this.setState({ ...s, flow: null, timeline: s.timeline.slice(-TIMELINE_BROADCAST) });
+    }
+  }
+
+  private appendTimeline(e: TimelineEntry) {
+    // A keyed entry replaces its earlier row and moves to the end, as the broadcast tail does.
+    this
+      .sql`INSERT OR REPLACE INTO order_timeline (key, entry) VALUES (${e.key ?? null}, ${JSON.stringify(e)})`;
+  }
+
+  /** The order's whole timeline, oldest first. */
+  private fullTimeline(): TimelineEntry[] {
+    this.tables();
+    return this.sql<{ entry: string }>`SELECT entry FROM order_timeline ORDER BY seq`.map(
+      (r) => JSON.parse(r.entry) as TimelineEntry,
+    );
+  }
+
+  private flowCache: FlowVersion | null | undefined;
+
+  /** The flow version this order runs on (it never changes once pinned). */
+  private pinnedFlow(): FlowVersion | null {
+    if (this.flowCache !== undefined) return this.flowCache;
+    this.tables();
+    const row = this.sql<{ flow: string }>`SELECT flow FROM order_flow WHERE id = 1`[0];
+    this.flowCache = row ? (JSON.parse(row.flow) as FlowVersion) : null;
+    return this.flowCache;
+  }
+
+  /**
+   * Records a timeline entry (a keyed one replaces its earlier copy) and returns the broadcast
+   * tail with it: `base` is the tail it builds on, never the whole timeline.
+   */
   private log(entry: Omit<TimelineEntry, 'at'> & { at?: number }, base = this.state.timeline) {
     const e: TimelineEntry = { at: Date.now(), ...entry };
-    const timeline = e.key ? [...base.filter((t) => t.key !== e.key), e] : [...base, e];
-    return timeline.slice(-TIMELINE_CAP);
+    this.tables();
+    this.appendTimeline(e);
+    this
+      .sql`DELETE FROM order_timeline WHERE seq <= (SELECT seq FROM order_timeline ORDER BY seq DESC LIMIT 1 OFFSET ${TIMELINE_CAP})`;
+    const kept = e.key ? base.filter((t) => t.key !== e.key) : base;
+    return [...kept.slice(-(TIMELINE_BROADCAST - 1)), e];
   }
 
   private db() {
@@ -94,7 +157,8 @@ export class OrderAgent extends Agent<Env, State> {
   private async syncIndex() {
     const s = this.state;
     if (!s.orderId || !s.order) return;
-    const label = (nodeId: string) => s.flow?.nodes.find((n) => n.id === nodeId)?.label ?? nodeId;
+    const flow = this.pinnedFlow();
+    const label = (nodeId: string) => flow?.nodes.find((n) => n.id === nodeId)?.label ?? nodeId;
     // A timer (control.wait) holds the order without a PendingWait; its node is marked waiting.
     const timers = s.waits.length
       ? []
@@ -105,7 +169,7 @@ export class OrderAgent extends Agent<Env, State> {
     const failedSteps = Object.entries(s.nodes).filter(([, r]) => r.status === 'failed' || r.error);
     const endsReached = Object.entries(s.nodes).filter(
       ([id, r]) =>
-        r.status === 'succeeded' && s.flow?.nodes.find((n) => n.id === id)?.type === 'control.end',
+        r.status === 'succeeded' && flow?.nodes.find((n) => n.id === id)?.type === 'control.end',
     );
     const failed = (failedSteps.length ? failedSteps : endsReached).map(([id]) => label(id));
     const row = {
@@ -146,8 +210,14 @@ export class OrderAgent extends Agent<Env, State> {
 
   // ── Called by EngineApi and the Workflow ───────────────────────────────────
 
+  /** The whole state: the synced state with the pinned flow and the full timeline. */
   async snapshot(): Promise<OrderState> {
-    return this.state;
+    return this.fullState();
+  }
+
+  private fullState(): State {
+    const flow = this.pinnedFlow();
+    return { ...this.state, flow, timeline: this.fullTimeline() };
   }
 
   /**
@@ -158,7 +228,15 @@ export class OrderAgent extends Agent<Env, State> {
   async erasePersonalData(terms: string[]): Promise<{ held: boolean; title: string } | null> {
     if (!this.state.orderId) return { held: false, title: '' };
     if (!TERMINAL_ORDER_STATUSES.includes(this.state.status)) return null;
-    this.setState({ ...eraseOrderState(this.state, terms), updatedAt: Date.now() });
+    const erased = eraseOrderState(this.fullState(), terms);
+    this.sql`DELETE FROM order_timeline`;
+    for (const e of erased.timeline) this.appendTimeline(e);
+    this.setState({
+      ...erased,
+      flow: null,
+      timeline: erased.timeline.slice(-TIMELINE_BROADCAST),
+      updatedAt: Date.now(),
+    });
     await this.syncIndex();
     return { held: true, title: this.state.order?.title ?? '' };
   }
@@ -166,29 +244,32 @@ export class OrderAgent extends Agent<Env, State> {
   async init(order: Order, flow: FlowVersion, instanceId: string) {
     // A replayed start may call this again; never reset a run that has begun.
     if (this.state.instanceId === instanceId) return;
+    this.tables();
+    this.sql`INSERT OR REPLACE INTO order_flow (id, flow) VALUES (1, ${JSON.stringify(flow)})`;
+    this.flowCache = flow;
+    this.sql`DELETE FROM order_timeline`;
+    const timeline = this.log(
+      { kind: 'order', message: `Order created on ${flow.name} v${flow.version}` },
+      [],
+    );
     this.setState({
       ...EMPTY_ORDER_STATE,
       seq: 0,
       orderId: order.id,
       order,
-      flow,
+      flow: null,
       instanceId,
       generation: 1,
       status: 'queued',
       nodes: Object.fromEntries(flow.nodes.map((n) => [n.id, { status: 'pending', runs: 0 }])),
       edges: Object.fromEntries(flow.edges.map((e) => [e.id, 'pending'])),
-      timeline: [
-        {
-          at: Date.now(),
-          kind: 'order',
-          message: `Order created on ${flow.name} v${flow.version}`,
-        },
-      ],
+      timeline,
       updatedAt: Date.now(),
     });
   }
 
   async report(r: Report) {
+    this.tables();
     const s = this.state;
     let next: State = { ...s };
     const gen = r.generation ?? s.generation;
@@ -262,7 +343,7 @@ export class OrderAgent extends Agent<Env, State> {
   /** Writes one finished node run for the dashboard's timing; a repeat is a no-op. */
   private async recordRun(nodeId: string, run: NodeRun) {
     const s = this.state;
-    const type = s.flow?.nodes.find((n) => n.id === nodeId)?.type;
+    const type = this.pinnedFlow()?.nodes.find((n) => n.id === nodeId)?.type;
     if (!s.orderId || !s.order || !type || run.startedAt === undefined || run.endedAt === undefined)
       return;
     await this.db()
@@ -434,6 +515,13 @@ export class OrderAgent extends Agent<Env, State> {
     return p;
   }
 
+  /** The flow version the order runs on; the synced state leaves it out, since it never changes. */
+  @callable()
+  async getFlow() {
+    await this.authorize('viewer');
+    return this.pinnedFlow();
+  }
+
   /** The caller as this agent sees them now: their current role, or a refusal if signed out. */
   @callable()
   async whoami() {
@@ -571,7 +659,7 @@ export class OrderAgent extends Agent<Env, State> {
   // after the request that started it has ended.
 
   private watchers(): string[] {
-    this.sql`CREATE TABLE IF NOT EXISTS a2a_watchers (name TEXT PRIMARY KEY)`;
+    this.tables();
     return this.sql<{ name: string }>`SELECT name FROM a2a_watchers`.map((r) => r.name);
   }
 
@@ -585,7 +673,6 @@ export class OrderAgent extends Agent<Env, State> {
     if (!state?.orderId) return;
     if (ucpMetaOf(state.order?.meta)) this.queueUcpSync();
     if (!this.watchers().length) return;
-    this.sql`CREATE TABLE IF NOT EXISTS a2a_watch_state (id INTEGER PRIMARY KEY, key TEXT)`;
     const key = watchKey(state);
     const last = this.sql<{ key: string }>`SELECT key FROM a2a_watch_state WHERE id = 1`[0]?.key;
     if (key === last) return;
@@ -623,8 +710,7 @@ export class OrderAgent extends Agent<Env, State> {
   // the state settles sends the whole order entity, unless it is the same as the last one sent.
 
   private ucpSyncRow() {
-    this
-      .sql`CREATE TABLE IF NOT EXISTS ucp_sync (id INTEGER PRIMARY KEY, digest TEXT, pending INTEGER NOT NULL DEFAULT 0, released INTEGER NOT NULL DEFAULT 0)`;
+    this.tables();
     return this.sql<{
       digest: string | null;
       pending: number;

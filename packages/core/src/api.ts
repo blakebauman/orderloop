@@ -32,11 +32,17 @@ export type NodeRun = {
   endedAt?: number;
 };
 
-/** The OrderAgent's synced state: everything the order page renders. */
+/**
+ * An order's state. `snapshot()` returns all of it. The OrderAgent's synced (broadcast) state is
+ * the same shape with `flow` null and only the newest `TIMELINE_BROADCAST` timeline entries: the
+ * pinned flow never changes, so a page reads it once (the agent's `getFlow()` or a snapshot), and
+ * folds each broadcast's timeline into what it holds with `mergeTimeline`.
+ */
 export type OrderState = {
   orderId: string | null;
   status: OrderStatus;
   order: Order | null;
+  /** Null in the agent's broadcast state. */
   flow: FlowVersion | null;
   nodes: Record<string, NodeRun>;
   edges: Record<string, EdgeState>;
@@ -68,6 +74,27 @@ export const EMPTY_ORDER_STATE: OrderState = {
   rollback: null,
   updatedAt: 0,
 };
+
+/** The most timeline entries an order keeps. */
+export const TIMELINE_CAP = 400;
+/** The newest timeline entries the OrderAgent broadcasts with its state. */
+export const TIMELINE_BROADCAST = 50;
+
+const entryId = (t: TimelineEntry) => t.key ?? `${t.at}|${t.kind}|${t.nodeId ?? ''}|${t.message}`;
+
+/**
+ * The timeline a page shows after a broadcast: the broadcast's entries (the newest, and
+ * authoritative), after the older ones the page already held. A broadcast shorter than
+ * `TIMELINE_BROADCAST` is the whole timeline.
+ */
+export function mergeTimeline(held: TimelineEntry[], tail: TimelineEntry[]): TimelineEntry[] {
+  if (tail.length < TIMELINE_BROADCAST) return tail;
+  const ids = new Set(tail.map(entryId));
+  const first = entryId(tail[0]!);
+  const start = held.findIndex((t) => entryId(t) === first);
+  const older = (start < 0 ? held : held.slice(0, start)).filter((t) => !ids.has(entryId(t)));
+  return [...older, ...tail].slice(-TIMELINE_CAP);
+}
 
 /** The largest event payload (JSON) an order accepts; it lands in the order's variables. */
 export const MAX_EVENT_PAYLOAD_BYTES = 32 * 1024;
