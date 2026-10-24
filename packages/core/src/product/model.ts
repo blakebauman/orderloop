@@ -171,13 +171,33 @@ export type Json = z.infer<typeof jsonSchema>;
 /** Attribute values as written. Their shape is checked against the product type. */
 export const attributeValuesSchema = z.record(codeSchema, jsonSchema);
 
+/**
+ * Whether `digits` is a GTIN-8, -12 (UPC), -13 (EAN) or -14 with a correct GS1 check digit: from
+ * the right, the digits before the check digit weigh 3, 1, 3, 1…, and the check digit brings the
+ * sum to a multiple of 10.
+ */
+export function isGtin(digits: string): boolean {
+  if (!/^\d{8}$|^\d{12,14}$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = digits.length - 2, w = 3; i >= 0; i--, w = 4 - w) sum += Number(digits[i]) * w;
+  return (10 - (sum % 10)) % 10 === Number(digits[digits.length - 1]);
+}
+
+/**
+ * A GTIN as 14 digits (zero-padded on the left), so a UPC and the same item's EAN or GTIN-14 are
+ * one identifier; null when it isn't a valid GTIN.
+ */
+export function gtin14(digits: string): string | null {
+  return isGtin(digits) ? digits.padStart(14, '0') : null;
+}
+
 export const variantInputSchema = z.object({
   sku: codeSchema,
   status: z.enum(PRODUCT_STATUSES).default('active'),
-  gtin: z
-    .string()
-    .regex(/^\d{8}$|^\d{12,14}$/)
-    .optional(),
+  /** As written (8, 12, 13 or 14 digits); claimed and matched as its GTIN-14 (`gtin14`). */
+  gtin: z.string().refine(isGtin, 'a GTIN-8, -12, -13 or -14 with a valid check digit').optional(),
+  /** The manufacturer's part number: unique only within its brand, so searched but not claimed. */
+  mpn: z.string().trim().min(1).max(70).optional(),
   attributes: attributeValuesSchema.default({}),
   /** Overrides the product's price in a channel. */
   prices: z.record(codeSchema, moneySchema).optional(),

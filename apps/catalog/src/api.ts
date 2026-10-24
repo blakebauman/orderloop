@@ -15,6 +15,7 @@ import {
   type CategoryInput,
   type Channel,
   type ChannelResult,
+  claimedAlias,
   type DeleteCategoriesResult,
   type DeleteChannelResult,
   type DeleteTypeResult,
@@ -136,7 +137,9 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
   }
 
   async resolveAlias(alias: string): Promise<string | null> {
-    return shard(this.env, aliasShard(alias)).owner(alias);
+    // A GTIN in any length is claimed as its GTIN-14.
+    const claimed = claimedAlias(alias);
+    return claimed ? shard(this.env, aliasShard(claimed)).owner(claimed) : null;
   }
 
   async putType(type: ProductTypeInput, by: string): Promise<TypeResult> {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { productTypeSchema, typeChangeIssues } from '../src/product/model';
+import { gtin14, isGtin, productTypeSchema, typeChangeIssues } from '../src/product/model';
 import { renderForChannel } from '../src/product/render';
-import { productAliases, validateProduct } from '../src/product/validate';
+import { claimedAlias, productAliases, validateProduct } from '../src/product/validate';
 import { apparel, stored, tee, types, web } from './fixtures/product';
 
 describe('product types', () => {
@@ -119,14 +119,112 @@ describe('product validation', () => {
     expect(validateProduct({ key: 'has space', type: 'apparel' }, types).ok).toBe(false);
   });
 
-  it('lists the aliases a product claims', () => {
+  it('lists the aliases a product claims, GTINs as GTIN-14', () => {
     expect(
-      productAliases({ variants: [{ sku: 'A', gtin: '12345678' } as never], slug: { en: 'a' } }),
-    ).toEqual(['sku:A', 'gtin:12345678', 'slug:en:a']);
+      productAliases({
+        variants: [{ sku: 'A', gtin: '036000291452' }, { sku: 'B' }] as never,
+        slug: { en: 'a' },
+      }),
+    ).toEqual(['sku:A', 'gtin:00036000291452', 'sku:B', 'slug:en:a']);
+  });
+
+  it('checks GTIN check digits and reads every length as one GTIN-14', () => {
+    // GTIN-8, UPC (GTIN-12), the same UPC as EAN-13 and GTIN-14, and an EAN-13.
+    for (const g of [
+      '96385074',
+      '036000291452',
+      '0036000291452',
+      '00036000291452',
+      '4006381333931',
+    ])
+      expect(isGtin(g)).toBe(true);
+    for (const g of ['12345678', '036000291453', '3600029145', '0360002914520a', ''])
+      expect(isGtin(g)).toBe(false);
+    expect(gtin14('036000291452')).toBe('00036000291452');
+    expect(gtin14('0036000291452')).toBe('00036000291452');
+    expect(gtin14('96385074')).toBe('00000096385074');
+    expect(gtin14('036000291453')).toBeNull();
+    expect(claimedAlias('gtin:036000291452')).toBe('gtin:00036000291452');
+    expect(claimedAlias('gtin:036000291453')).toBeNull();
+    expect(claimedAlias('sku:036000291452')).toBe('sku:036000291452');
+  });
+
+  it('refuses a bad check digit and one GTIN on two variants', () => {
+    const v = validateProduct(
+      tee({
+        variants: [
+          { sku: 'A', gtin: '036000291453', attributes: { size: 'S', color: 'red' } },
+          { sku: 'B', gtin: '036000291452', attributes: { size: 'M', color: 'red' } },
+          { sku: 'C', gtin: '0036000291452', attributes: { size: 'L', color: 'red' } },
+        ],
+      }),
+      types,
+    );
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.issues).toEqual([
+      {
+        path: 'variants.0.gtin',
+        message: 'a GTIN-8, -12, -13 or -14 with a valid check digit',
+      },
+    ]);
+    const dup = validateProduct(
+      tee({
+        variants: [
+          { sku: 'B', gtin: '036000291452', attributes: { size: 'M', color: 'red' } },
+          { sku: 'C', gtin: '0036000291452', attributes: { size: 'L', color: 'red' } },
+        ],
+      }),
+      types,
+    );
+    expect(dup).toMatchObject({
+      ok: false,
+      issues: [{ path: 'variants.1.gtin', message: 'duplicate GTIN' }],
+    });
+  });
+
+  it('keeps an MPN as written, trimmed, and refuses an empty or long one', () => {
+    const ok = validateProduct(
+      tee({
+        variants: [{ sku: 'A', mpn: '  CT-100-S ', attributes: { size: 'S', color: 'red' } }],
+      }),
+      types,
+    );
+    expect(ok.ok && ok.data.variants[0]?.mpn).toBe('CT-100-S');
+    for (const mpn of ['  ', 'x'.repeat(71)])
+      expect(
+        validateProduct(
+          tee({ variants: [{ sku: 'A', mpn, attributes: { size: 'S', color: 'red' } }] }),
+          types,
+        ).ok,
+      ).toBe(false);
   });
 });
 
 describe('publishing', () => {
+  it('publishes each variant GTIN and MPN and makes both searchable', () => {
+    const product = tee({
+      variants: [
+        {
+          sku: 'TEE-S-RED',
+          gtin: '036000291452',
+          mpn: 'CT-100-S',
+          attributes: { size: 'S', color: 'red' },
+        },
+        { sku: 'TEE-M-RED', attributes: { size: 'M', color: 'red' } },
+      ],
+    });
+    const { rendered } = renderForChannel(stored(product), apparel, web, { uid: 7, createdAt: 1 });
+    const doc = JSON.parse(rendered?.[0]?.doc ?? '{}');
+    expect(doc.variants[0]).toMatchObject({
+      sku: 'TEE-S-RED',
+      gtin: '036000291452',
+      mpn: 'CT-100-S',
+    });
+    expect(doc.variants[1].mpn).toBeUndefined();
+    expect(rendered?.[0]?.search.skus).toBe('TEE-S-RED 036000291452 CT-100-S TEE-M-RED');
+  });
+
   it('renders a doc per locale with labels resolved and the channel price picked', () => {
     const { rendered, index } = renderForChannel(stored(tee()), apparel, web, {
       uid: 7,
@@ -157,7 +255,7 @@ describe('publishing', () => {
     expect(rendered?.[0]?.search).toMatchObject({
       title: 'Classic tee',
       brand: 'Acme',
-      skus: 'TEE-S-RED  TEE-M-RED ',
+      skus: 'TEE-S-RED TEE-M-RED',
     });
     expect(index).toEqual({
       key: 'tee-classic',
