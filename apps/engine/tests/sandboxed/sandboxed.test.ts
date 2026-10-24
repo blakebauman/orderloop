@@ -243,8 +243,8 @@ describe('a sandboxed plugin', () => {
     expect(thrown.done.status).toBe('failed');
     expect(thrown.done.nodes.probe!.error).toMatch(/Probe exploded holding \[redacted\]/);
 
-    // Its Tail Worker keeps its exceptions, scrubbed (local workerd doesn't send a Dynamic
-    // Worker's tail events, so the handler is driven here as the runtime would).
+    // Its Tail Worker keeps its exceptions, scrubbed (driven here as the runtime would, since not
+    // every local workerd sends a Dynamic Worker's tail events).
     const tail = (
       exports as unknown as Record<string, (o: unknown) => { tail(e: unknown[]): Promise<void> }>
     ).PluginTail!({ props: { id: 'example', sha: bundles.example!.sha } });
@@ -257,7 +257,11 @@ describe('a sandboxed plugin', () => {
       },
     ]);
     const rows = await db().select().from(pluginErrors).where(eq(pluginErrors.pluginId, 'example'));
-    expect(rows.map((r) => r.message)).toEqual(['Error: Probe exploded holding [redacted]']);
+    // Where the runtime delivers the sandbox's own tail events (CI's workerd does), the thrown
+    // attempts are recorded too: every row is scrubbed either way.
+    const messages = rows.map((r) => r.message);
+    expect(messages).toContain('Error: Probe exploded holding [redacted]');
+    expect(messages.join('\n')).not.toMatch(/ping-secret/);
   });
 
   it('keeps the credential an upstream echoes out of the order', async () => {
