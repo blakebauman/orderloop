@@ -49,6 +49,7 @@ import { assess, resolveImages } from '../clef';
 import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
+import { previewSubmit, runSubmit } from './carts';
 
 export class Refused extends Error {}
 
@@ -64,7 +65,11 @@ export type Channel = 'assistant' | 'MCP' | 'A2A';
 export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
 
 /** How the audit log names each channel. */
-const AUDIT_CHANNEL: Record<Channel, AuditVia> = { assistant: 'assistant', MCP: 'mcp', A2A: 'a2a' };
+export const AUDIT_CHANNEL: Record<Channel, AuditVia> = {
+  assistant: 'assistant',
+  MCP: 'mcp',
+  A2A: 'a2a',
+};
 
 export function money(n: number | null | undefined, currency = BASE_CURRENCY) {
   if (n === null || n === undefined) return '';
@@ -443,6 +448,7 @@ export type ActionInput = {
   };
   deliver_event: { orderId: string; event: string };
   cancel_order: { orderId: string; reason: string };
+  submit_cart: { cartId: string };
   publish_flow: { flowId: string };
   run_stock_review: Record<string, never>;
 };
@@ -550,6 +556,8 @@ export async function previewAction<T extends ActionTool>(
               : undefined),
         };
       }
+      case 'submit_cart':
+        return await previewSubmit(env, p, (input as ActionInput['submit_cart']).cartId);
       case 'publish_flow': {
         const i = input as ActionInput['publish_flow'];
         const { row, flow } = await loadFlow(env, i.flowId);
@@ -660,6 +668,8 @@ export async function runAction<T extends ActionTool>(
       });
       return { done: preview.title, href: preview.href };
     }
+    case 'submit_cart':
+      return runSubmit(env, p, (input as ActionInput['submit_cart']).cartId, channel);
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);

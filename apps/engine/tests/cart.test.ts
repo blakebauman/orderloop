@@ -12,6 +12,7 @@ import { carts, createDb, orders, promotions, publishFlow, sessions, users } fro
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
+import { createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { purgeEndedCarts, RETENTION } from '../src/retention';
@@ -402,6 +403,91 @@ describe('submitting a cart', () => {
     expect(await cart(id).cancelAs(staff(await who('viewer', 'vee')))).toMatchObject({ ok: false });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: true });
     expect(await cart(id).cancelAs(ada)).toEqual({ ok: false, error: 'The cart is canceled.' });
+  });
+});
+
+describe('staff carts over EngineApi (the REST API)', () => {
+  it('applies an op as the caller and answers with the cart priced again', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    const r = await api().changeCart(id, { op: 'add', sku: 'WID-100', qty: 2 }, ada);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.cart).toMatchObject({ id, quoteCurrent: true, notReady: null });
+    expect(r.cart.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 2 })]);
+    expect(r.cart.quote?.subtotal).toBe(43);
+    // The view leaves out what stays on the cart's page.
+    expect(r.cart).not.toHaveProperty('external');
+    expect(r.cart).not.toHaveProperty('chat');
+  });
+
+  it('refuses a viewer, a guest, a malformed op, an unknown cart and an external one', async () => {
+    const id = await open();
+    const viewer = staff(await who('viewer', 'vee'));
+    expect(await api().changeCart(id, { op: 'clear' }, viewer)).toEqual({
+      ok: false,
+      error: "You can't change this cart.",
+    });
+    expect(await api().submitCart(id, viewer)).toEqual({
+      ok: false,
+      error: 'This needs the Operator role.',
+    });
+    expect((await api().cancelCart(id, viewer)).ok).toBe(false);
+    // Typed as staff, but the binding carries whatever its caller sends.
+    const guest = { kind: 'guest', id: 'guest:x', name: 'X' } as never;
+    expect(await api().changeCart(id, { op: 'clear' }, guest)).toMatchObject({ ok: false });
+    expect(await api().submitCart(id, guest)).toMatchObject({ ok: false });
+    const ada = staff(await who('operator', 'ada'));
+    expect(await api().changeCart(id, { op: 'add', sku: 'WID-100' } as never, ada)).toEqual({
+      ok: false,
+      error: 'That is not a cart change.',
+    });
+    expect(await api().changeCart('cart_nope', { op: 'clear' }, ada)).toMatchObject({
+      ok: false,
+      notFound: true,
+    });
+    const ext = await createCart(
+      env,
+      { title: 'Punchout', flowId: 'tpl-b2b-order', createdBy: 'plugin:example' },
+      {
+        pluginId: 'example',
+        sessionRef: `s-${Date.now()}`,
+        expiresAt: Date.now() + 3_600_000,
+        returnUrl: 'https://buyer.example/return',
+        frameOrigins: [],
+        buyer: { id: 'buyer@example.com', name: 'Buyer' },
+      },
+    );
+    if (!ext.ok) throw new Error(ext.error);
+    for (const r of [
+      await api().changeCart(ext.id, { op: 'lock' }, ada),
+      await api().submitCart(ext.id, ada),
+      await api().cancelCart(ext.id, ada),
+    ])
+      expect(r).toMatchObject({ ok: false, notFound: true });
+    expect((await state(ext.id)).cart?.status).toBe('open');
+  });
+
+  it('submits as the caller once, and cancels only a cart that has not ended', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    expect(await api().submitCart(id, ada)).toEqual({ ok: false, error: 'Add at least one line.' });
+    await api().changeCart(id, { op: 'add', sku: 'WID-100', qty: 1 }, ada);
+    const done = await api().submitCart(id, ada);
+    if (!done.ok) throw new Error(done.error);
+    const order = await db().select().from(orders).where(eq(orders.id, done.orderId)).get();
+    expect(order).toMatchObject({ startedBy: ada.id, externalId: id });
+    // A replay starts nothing more.
+    expect(await api().submitCart(id, ada)).toEqual({ ok: false, error: 'The cart is submitted.' });
+    expect(await api().cancelCart(id, ada)).toEqual({ ok: false, error: 'The cart is submitted.' });
+
+    const other = await open(null);
+    const canceled = await api().cancelCart(other, ada);
+    expect(canceled).toMatchObject({ ok: true, cart: { status: 'canceled' } });
   });
 });
 

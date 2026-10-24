@@ -12,6 +12,13 @@
  *   POST /api/v1/orders/:id/approvals/:nodeId   { decision: "approved"|"rejected", by?, note? }  (409 not waiting)
  *   POST /api/v1/orders/:id/cancel              { reason? }  (409 already finished)
  *
+ *   GET  /api/v1/carts?status=&limit=           staff carts, most recently changed first
+ *   POST /api/v1/carts                          { title, flowId, customerId? }  (422 a flow that doesn't price)
+ *   GET  /api/v1/carts/:id                      lines, quote and problems (no chat or files)
+ *   POST /api/v1/carts/:id/ops                  one CartOp, applied as the caller  (409 refused)
+ *   POST /api/v1/carts/:id/submit               starts its order  (409 not ready or ended)
+ *   POST /api/v1/carts/:id/cancel               (409 ended)
+ *
  *   GET    /api/v1/audit-events                 ?type=…&before=<ms>&limit=  newest first; ?after=<seq> oldest first (admin)
  *   GET    /api/v1/audit-events/verify          ?after=<seq>  checks the hash chain (admin)
  *
@@ -60,6 +67,9 @@ import {
   allowsEvent,
   allowsOrder,
   atLeast,
+  type CartAnswer,
+  cartOpSchema,
+  cartView,
   flowForOrder,
   type InboundOrder,
   inboundFingerprint,
@@ -77,6 +87,7 @@ import {
   SIGNATURE_HEADER,
   shopifyToInbound,
   signatureKeyId,
+  staffCartActor,
   startOrderSchema,
   subjectTarget,
   toStartRequest,
@@ -91,6 +102,7 @@ import { eq, lt } from 'drizzle-orm';
 import type { z } from 'zod';
 import {
   cancelInput,
+  createCartInput,
   dataSubjectInput,
   decisionInput,
   eventSchema,
@@ -103,6 +115,7 @@ import { isAuditGroup } from './audit';
 import { audit, listAudit, verifyAudit } from './audit.server';
 import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
+import { isCartStatus, listCarts } from './carts.server';
 import { handleCatalog } from './catalog-api.server';
 import { decodeCursor, encodeCursor } from './cursor';
 import { db, engine } from './env.server';
@@ -269,6 +282,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         return json(await engine().pluginUsage(parts[1]!));
       return json({ error: 'Not found' }, 404);
     }
+    if (parts[0] === 'carts') return await handleCarts(request, caller, parts, body, need);
     if (parts[0] !== 'orders') return json({ error: 'Not found' }, 404);
 
     if (parts.length === 1) {
@@ -417,6 +431,99 @@ function failure(err: unknown): Response {
   if (err instanceof BodyTooLarge) return tooLarge(err);
   console.error('api error', err);
   return json({ error: 'Internal error' }, 500);
+}
+
+/** The most carts one GET /api/v1/carts returns. */
+const MAX_CARTS = 200;
+
+/**
+ * Staff carts, as the Carts page has them: viewers read, operators change. The engine applies
+ * every change as the caller (`staffCartActor`) through the cart's agent, so what the API may do
+ * is what that person could do on the page. External carts belong to their buyer's page and are
+ * not found here.
+ */
+async function handleCarts(
+  request: Request,
+  caller: Principal,
+  parts: string[],
+  body: () => Promise<unknown>,
+  need: (min: Role) => Response | null,
+): Promise<Response> {
+  const [, id, verb] = parts;
+  // An engine refusal: 404 for a cart it doesn't have, else 409 with its reason.
+  const refused = (r: Extract<CartAnswer<object>, { ok: false }>) =>
+    r.notFound ? json({ error: 'Not found' }, 404) : json({ error: r.error }, 409);
+
+  if (parts.length === 1 && request.method === 'GET') {
+    const q = new URL(request.url).searchParams;
+    const status = q.get('status');
+    if (status && !isCartStatus(status)) return json({ error: `Unknown status ${status}` }, 400);
+    const limit = Math.min(Math.max(Number(q.get('limit')) || 50, 1), MAX_CARTS);
+    const rows = await listCarts({ status: isCartStatus(status) ? status : undefined }, limit);
+    return json({
+      carts: rows.map((c) => ({
+        id: c.id,
+        title: c.title,
+        status: c.status,
+        flowId: c.flowId,
+        customerId: c.customerId,
+        orderId: c.orderId,
+        createdBy: c.createdBy,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      })),
+    });
+  }
+  if (parts.length === 1 && request.method === 'POST') {
+    const denied = need('operator');
+    if (denied) return denied;
+    const parsed = createCartInput.safeParse(await body());
+    if (!parsed.success) return json({ error: 'Invalid cart', issues: parsed.error.issues }, 400);
+    await ensureSeeded();
+    const made = await engine().createCart({ ...parsed.data, createdBy: caller.id });
+    if (!made.ok) return json({ error: made.error }, 422);
+    await audit(request, 'cart.created', {
+      actor: caller,
+      target: made.id,
+      detail: { flowId: parsed.data.flowId, via: 'api' },
+    });
+    const c = (await engine().cartSnapshot(made.id))?.cart;
+    return json({ cart: c ? cartView(c) : { id: made.id } }, 201);
+  }
+  if (!id) return json({ error: 'Not found' }, 404);
+
+  if (parts.length === 2 && request.method === 'GET') {
+    const c = (await engine().cartSnapshot(id))?.cart;
+    return c && !c.external ? json({ cart: cartView(c) }) : json({ error: 'Not found' }, 404);
+  }
+  if (parts.length !== 3 || request.method !== 'POST') return json({ error: 'Not found' }, 404);
+  const denied = need('operator');
+  if (denied) return denied;
+  const actor = staffCartActor(caller);
+
+  if (verb === 'ops') {
+    const op = cartOpSchema.safeParse(await body());
+    if (!op.success) return json({ error: 'Invalid cart op', issues: op.error.issues }, 400);
+    const r = await engine().changeCart(id, op.data, actor);
+    return r.ok ? json({ cart: r.cart }) : refused(r);
+  }
+  if (verb === 'submit') {
+    const r = await engine().submitCart(id, actor);
+    if (!r.ok) return refused(r);
+    await audit(request, 'order.started', {
+      actor: caller,
+      target: r.orderId,
+      detail: { cartId: id, via: 'api' },
+    });
+    return json({ orderId: r.orderId, cartId: id }, 201);
+  }
+  if (verb === 'cancel') {
+    const r = await engine().cancelCart(id, actor);
+    if (!r.ok) return refused(r);
+    await audit(request, 'cart.canceled', { actor: caller, target: id, detail: { via: 'api' } });
+    return json({ cart: r.cart });
+  }
+  return json({ error: 'Not found' }, 404);
 }
 
 async function handleSubscriptions(

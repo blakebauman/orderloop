@@ -2,6 +2,7 @@
 
 import {
   isWebhookUrl,
+  MAX_CART_TITLE,
   MAX_EVENT_PAYLOAD_BYTES,
   ORDER_CHANNELS,
   OUTBOUND_EVENTS,
@@ -35,6 +36,14 @@ export const decisionInput = z.object({
 });
 
 export const cancelInput = z.object({ reason: z.string().max(500).optional() });
+
+/** A staff cart: who opens it is the caller, never the body. */
+export const createCartInput = z.object({
+  title: z.string().trim().min(1).max(MAX_CART_TITLE),
+  /** A published flow with a Price lines step; it prices the cart and runs its order. */
+  flowId: z.string().min(1).max(100),
+  customerId: z.string().min(1).max(100).nullable().optional(),
+});
 
 export const subscriptionInput = z.object({
   url: z.string().url().refine(isWebhookUrl, WEBHOOK_URL_RULE),

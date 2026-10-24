@@ -14,6 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { readContext } from '../src/assistant/agent';
 import { previewAction, Refused, runAction } from '../src/assistant/data';
 import { describeResult, heuristicStep } from '../src/assistant/model';
+import { runTool } from '../src/assistant/tools';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
@@ -181,6 +182,35 @@ describe('assistant heuristics (no model)', () => {
     );
   });
 
+  it('reads carts, and keeps a cart’s own words out of links', () => {
+    const carts = new Set([...all, 'list_carts', 'get_cart', 'submit_cart']);
+    expect(heuristicStep('Which carts are open?', ws, carts)).toEqual({
+      tool: 'list_carts',
+      input: { status: 'open' },
+    });
+    expect(heuristicStep('Submit cart_k3x9q2', ws, carts)).toEqual({
+      tool: 'submit_cart',
+      input: { cartId: 'cart_k3x9q2' },
+    });
+    expect(heuristicStep('What is in cart_k3x9q2?', ws, carts)).toEqual({
+      tool: 'get_cart',
+      input: { cartId: 'cart_k3x9q2' },
+    });
+    const line = describeResult('get_cart', {
+      id: 'cart_k3x9q2',
+      href: '/carts/cart_k3x9q2',
+      title: 'Q4 [click](https://evil.example)',
+      status: 'open',
+      lines: [{ lineId: 'l1', sku: 'WID-100', qty: 2 }],
+      priced: true,
+      total: '$43.00',
+      notReady: null,
+    });
+    expect(line).toBe(
+      '[cart_k3x9q2](/carts/cart_k3x9q2) Q4 clickhttps://evil.example is **open**: 1 line, $43.00.',
+    );
+  });
+
   it('treats a malformed page context as the workspace', () => {
     expect(readContext({ kind: 'order' })).toEqual({ kind: 'workspace' });
     expect(readContext({ kind: 'flow', id: 'f1', label: 'F', graph: { nodes: 'x' } })).toEqual({
@@ -192,6 +222,69 @@ describe('assistant heuristics (no model)', () => {
 });
 
 describe('assistant actions', () => {
+  it('submits a cart only once it is ready, as the person, through the assistant', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = strip(await who('operator', 'ops@example.com'));
+    const viewer = strip(await who('viewer', 'vic@example.com'));
+    const cart = (await runTool(
+      env,
+      op,
+      'create_cart',
+      { title: 'Q4', flowId: 'tpl-b2b-order' },
+      {
+        via: 'assistant',
+      },
+    )) as { id: string };
+    expect((await previewAction(env, op, 'submit_cart', { cartId: cart.id })).blocked).toBe(
+      'Add at least one line.',
+    );
+    await runTool(
+      env,
+      op,
+      'change_cart',
+      { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty: 1 }] },
+      {
+        via: 'assistant',
+      },
+    );
+    expect((await previewAction(env, viewer, 'submit_cart', { cartId: cart.id })).blocked).toBe(
+      'This needs the Operator role.',
+    );
+    await expect(
+      runTool(
+        env,
+        viewer,
+        'change_cart',
+        { cartId: cart.id, ops: [{ op: 'clear' }] },
+        {
+          via: 'assistant',
+        },
+      ),
+    ).rejects.toBeInstanceOf(Refused);
+    const preview = await previewAction(env, op, 'submit_cart', { cartId: cart.id });
+    expect(preview.blocked).toBeUndefined();
+    expect(preview.consequences[0]).toMatch(/^1 line · \$/);
+    const done = (await runAction(env, op, 'submit_cart', { cartId: cart.id })) as {
+      orderId: string;
+    };
+    const logged = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'order.started'), eq(auditEvents.target, done.orderId)))
+      .get();
+    expect(JSON.parse(logged!.detail!)).toMatchObject({ cartId: cart.id, via: 'assistant' });
+    const created = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'cart.created'), eq(auditEvents.target, cart.id)))
+      .get();
+    expect(created).toMatchObject({ actor: 'ops@example.com' });
+  });
+
   it('previews a decision against live data and refuses roles that cannot make it', async () => {
     const orderId = await waitingOrder();
     const viewer = strip(await who('viewer', 'vic@example.com'));

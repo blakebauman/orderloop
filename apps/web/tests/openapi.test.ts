@@ -32,6 +32,22 @@ describe('OpenAPI document', () => {
     expect(order.properties.shippingOption.type).toBe('string');
   });
 
+  it('describes carts and generates a cart op body from the schema the route validates with', () => {
+    const json = JSON.parse(JSON.stringify(doc));
+    const op =
+      json.paths['/api/v1/carts/{id}/ops'].post.requestBody.content['application/json'].schema;
+    const kinds = (op.oneOf ?? op.anyOf).map(
+      (s: { properties: { op: { const: string } } }) => s.properties.op.const,
+    );
+    expect(kinds).toEqual(expect.arrayContaining(['add', 'set_qty', 'remove', 'lock', 'rename']));
+    const create = json.paths['/api/v1/carts'].post.requestBody.content['application/json'].schema;
+    expect(create.required).toEqual(expect.arrayContaining(['title', 'flowId']));
+    // Who opened it is the caller, never the body.
+    expect(create.properties).not.toHaveProperty('createdBy');
+    expect(json.components.schemas.Cart.properties).not.toHaveProperty('external');
+    expect(Object.keys(json.paths['/api/v1/carts/{id}/submit'].post.responses)).toContain('409');
+  });
+
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);

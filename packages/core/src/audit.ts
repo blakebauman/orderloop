@@ -1,7 +1,7 @@
 /**
- * The business half of the audit log: what was done to orders, approvals, flows and webhooks, and
- * by whom, through whichever way in (the app, the REST API, a signed webhook, the assistant, MCP
- * or A2A). The web app and the engine both write these, through `auditRow`, into the same
+ * The business half of the audit log: what was done to orders, approvals, carts, flows and
+ * webhooks, and by whom, through whichever way in (the app, the REST API, a signed webhook, the
+ * assistant, MCP or A2A). The web app and the engine both write these, through `auditRow`, into the same
  * `audit_events` table as the sign-in and team events.
  */
 
@@ -13,6 +13,8 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'order.cancelled': 'Cancelled an order',
   'order.event_delivered': 'Delivered an event',
   'approval.decided': 'Decided an approval',
+  'cart.created': 'Opened a cart',
+  'cart.canceled': 'Canceled a cart',
   'flow.saved': 'Saved a flow draft',
   'flow.published': 'Published a flow',
   'flow.archived': 'Archived a flow draft',

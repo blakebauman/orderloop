@@ -4,7 +4,15 @@
  * `EngineRpc` rather than importing engine source.
  */
 
-import type { CartActor, CartAttachment, CartState, CreateCartInput } from './cart';
+import type {
+  CartActor,
+  CartAttachment,
+  CartOp,
+  CartState,
+  CartView,
+  CreateCartInput,
+  StaffCartActor,
+} from './cart';
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
@@ -301,6 +309,19 @@ export interface EngineRpc {
   /** A cart as its agent holds it, or null for an id no cart has. */
   cartSnapshot(id: string): Promise<CartState | null>;
   /**
+   * Applies one op to a staff cart as `actor` (`CartAgent.applyAs`), and the cart as it is after
+   * it, priced again. An external cart is changed only on its buyer's page, so it is not found here.
+   */
+  changeCart(
+    cartId: string,
+    op: CartOp,
+    actor: StaffCartActor,
+  ): Promise<CartAnswer<{ cart: CartView }>>;
+  /** Submits a priced staff cart as an order of its flow, once (`CartAgent.submitAs`). */
+  submitCart(cartId: string, actor: StaffCartActor): Promise<CartAnswer<{ orderId: string }>>;
+  /** Cancels a staff cart that hasn't ended (`CartAgent.cancelAs`). */
+  cancelCart(cartId: string, actor: StaffCartActor): Promise<CartAnswer<{ cart: CartView }>>;
+  /**
    * Saves an assistant draft's test cases (as an admin edited them) and runs them on its bundle in
    * the sandbox. Approving it needs every case passing.
    */
@@ -328,6 +349,12 @@ export interface EngineRpc {
     actor: CartActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
+
+/**
+ * A change to a staff cart: done, refused (`error`, to show as it is), or `notFound` for an id no
+ * staff cart has.
+ */
+export type CartAnswer<T> = ({ ok: true } & T) | { ok: false; error: string; notFound?: true };
 
 /** What an engine call returns when it may be refused: its value, or why not (to show as it is). */
 export type Refusable<T> = { ok: true; value: T } | { ok: false; error: string };

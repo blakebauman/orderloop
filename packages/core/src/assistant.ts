@@ -50,13 +50,18 @@ export type AssistantTool =
   | 'get_order'
   | 'assess_order'
   | 'find_products'
+  | 'list_carts'
+  | 'get_cart'
   | 'list_flows'
   | 'get_flow'
   | 'propose_flow_change'
   | 'draft_plugin'
+  | 'create_cart'
+  | 'change_cart'
   | 'decide_approval'
   | 'deliver_event'
   | 'cancel_order'
+  | 'submit_cart'
   | 'publish_flow'
   | 'run_stock_review';
 
@@ -111,6 +116,22 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Find products',
     description: 'Products with stock, reserved and available quantities and reorder points.',
   },
+  list_carts: {
+    role: 'viewer',
+    confirm: false,
+    label: 'Listed carts',
+    title: 'List carts',
+    description:
+      'Carts people are building before they become orders, most recently changed first: title, status, customer and, once submitted, its order.',
+  },
+  get_cart: {
+    role: 'viewer',
+    confirm: false,
+    label: 'Read the cart',
+    title: 'Get a cart',
+    description:
+      'One cart: its lines (with each line’s id) at the prices its flow quoted, promo codes, problems the quote found, and why it can’t be submitted yet.',
+  },
   list_flows: {
     role: 'viewer',
     confirm: false,
@@ -141,6 +162,22 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Draft a plugin of business-rule flow steps from an instruction (e.g. “hold orders over $5,000 shipping outside the US”), with test cases. Nothing runs: an admin reviews it on the Plugins page, runs its cases and approves it there. Give pluginId to revise a drafted plugin.',
   },
+  create_cart: {
+    role: 'operator',
+    confirm: false,
+    label: 'Opened a cart',
+    title: 'Open a cart',
+    description:
+      'Open a cart priced by a published flow that prices orders, for a customer if given. Nothing is ordered until the cart is submitted.',
+  },
+  change_cart: {
+    role: 'operator',
+    confirm: false,
+    label: 'Changed the cart',
+    title: 'Change a cart',
+    description:
+      'Change an open cart, op by op in order: add a SKU, set a line’s quantity (0 removes it), remove lines, clear it, add or remove a promo code, lock, unlock or rename it. The cart’s flow prices it again; nothing is ordered.',
+  },
   decide_approval: {
     role: 'approver',
     confirm: true,
@@ -162,6 +199,14 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Cancel an order',
     description:
       'Cancel an order and undo what it did (release stock, void payment, cancel shipments).',
+  },
+  submit_cart: {
+    role: 'operator',
+    confirm: true,
+    label: 'Submit a cart',
+    title: 'Submit a cart',
+    description:
+      'Submit a priced cart as an order of its flow, at the prices it was quoted. The cart ends, and the order runs.',
   },
   publish_flow: {
     role: 'operator',

@@ -10,12 +10,16 @@ import {
   type AssistantContext,
   type AssistantTool,
   assessQuestionsSchema,
+  CART_STATUSES,
+  cartOpSchema,
+  MAX_CART_TITLE,
   ORDER_CHANNELS,
   ORDER_MODELS,
   ORDER_STATUSES,
   type Principal,
 } from '@orderloop/core';
 import { z } from 'zod';
+import { changeCart, getCart, listCarts, openCart } from './carts';
 import {
   type ActionInput,
   type ActionTool,
@@ -34,6 +38,7 @@ import {
 import { draftPlugin } from './plugin-draft';
 
 const orderId = z.string().describe('The order id (ord_…) or its #reference, e.g. #k3x9q2');
+const cartId = z.string().max(100).describe('The cart id (cart_…)');
 
 /** Each tool's input. Built once per isolate. */
 export const TOOL_INPUTS = {
@@ -66,6 +71,11 @@ export const TOOL_INPUTS = {
     q: z.string().optional().describe('SKU or name'),
     belowReorder: z.boolean().optional().describe('Only SKUs at or below their reorder point'),
   }),
+  list_carts: z.object({
+    status: z.enum(CART_STATUSES).optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  }),
+  get_cart: z.object({ cartId }),
   list_flows: z.object({}),
   get_flow: z.object({ flowId: z.string() }),
   propose_flow_change: z.object({ flowId: z.string(), instruction: z.string() }),
@@ -78,6 +88,19 @@ export const TOOL_INPUTS = {
       .optional()
       .describe('A plugin the assistant drafted (ai-…), to revise as its next version'),
   }),
+  create_cart: z.object({
+    title: z.string().min(1).max(MAX_CART_TITLE),
+    flowId: z.string().describe('A published flow with a Price lines step (list_flows)'),
+    customerId: z.string().optional().describe('The customer it is for (cus_…)'),
+  }),
+  change_cart: z.object({
+    cartId,
+    ops: z
+      .array(cartOpSchema)
+      .min(1)
+      .max(20)
+      .describe('Applied in order; line ids come from get_cart'),
+  }),
   decide_approval: z.object({
     orderId,
     nodeId: z
@@ -89,6 +112,7 @@ export const TOOL_INPUTS = {
   }),
   deliver_event: z.object({ orderId, event: z.string() }),
   cancel_order: z.object({ orderId, reason: z.string() }),
+  submit_cart: z.object({ cartId }),
   publish_flow: z.object({ flowId: z.string() }),
   run_stock_review: z.object({}),
 } satisfies Record<AssistantTool, z.ZodObject>;
@@ -107,6 +131,17 @@ const orderRow = row({
   status: z.string(),
   total: money,
   href,
+});
+
+const cartOutput = row({
+  id: z.string(),
+  href,
+  title: z.string(),
+  status: z.string(),
+  lines: z.array(row({ lineId: z.string(), sku: z.string(), qty: z.number() })),
+  priced: z.boolean().describe('Whether the total prices the cart as it is now'),
+  total: money.describe('Formatted in the quote’s currency; empty until priced'),
+  notReady: z.string().nullable().describe('Why it can’t be submitted yet; null when it can'),
 });
 
 /** An action's result: a preview and code on the first call, what was done on the second. */
@@ -161,6 +196,11 @@ export const TOOL_OUTPUTS = {
     ),
     href,
   }),
+  list_carts: row({
+    shown: z.number(),
+    carts: z.array(row({ id: z.string(), title: z.string(), status: z.string(), href })),
+  }),
+  get_cart: cartOutput,
   list_flows: row({
     flows: z.array(row({ id: z.string(), name: z.string(), href })),
   }),
@@ -195,9 +235,12 @@ export const TOOL_OUTPUTS = {
     cases: row({ total: z.number(), passed: z.number() }),
     href: href.describe('Where an admin reviews, tests and approves it'),
   }),
+  create_cart: cartOutput,
+  change_cart: cartOutput.extend({ applied: z.number().describe('Ops applied') }),
   decide_approval: actionOutput,
   deliver_event: actionOutput,
   cancel_order: actionOutput,
+  submit_cart: actionOutput,
   publish_flow: actionOutput,
   run_stock_review: actionOutput,
 } satisfies Record<AssistantTool, z.ZodObject>;
@@ -206,6 +249,7 @@ export const ACTION_TOOLS: ActionTool[] = [
   'decide_approval',
   'deliver_event',
   'cancel_order',
+  'submit_cart',
   'publish_flow',
   'run_stock_review',
 ];
@@ -241,6 +285,16 @@ export async function runTool<T extends AssistantTool>(
     case 'find_products': {
       const i = input as ToolInput<'find_products'>;
       return findProducts(env, i.q, i.belowReorder);
+    }
+    case 'list_carts':
+      return listCarts(env, input as ToolInput<'list_carts'>);
+    case 'get_cart':
+      return getCart(env, (input as ToolInput<'get_cart'>).cartId);
+    case 'create_cart':
+      return openCart(env, p, input as ToolInput<'create_cart'>, opts.via);
+    case 'change_cart': {
+      const i = input as ToolInput<'change_cart'>;
+      return changeCart(env, p, i.cartId, i.ops);
     }
     case 'list_flows':
       return listFlows(env);

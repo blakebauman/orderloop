@@ -41,7 +41,9 @@ after each reply, with links to each item:
 Every role can read. The tools are `needs_attention`, `find_orders` (by status, model, channel, customer,
 text, total, age), `get_order` (status, what it waits on, steps run, recent activity),
 `assess_order` (typed questions about one order, answered with a probability for every option; up to 4 images),
-`find_products` (stock, reserved, available, reorder points), `list_flows` and `get_flow` (a saved
+`find_products` (stock, reserved, available, reorder points), `list_carts` and `get_cart` (a
+[cart's](/guides/carts/) lines with their ids, its price, promotion codes, the problems its price
+found, and why it can't be submitted yet), `list_flows` and `get_flow` (a saved
 draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a row in the
 conversation.
 
@@ -55,15 +57,17 @@ sent until you press the confirm button, and declining leaves everything as it w
 | `decide_approval` | `approver` | Approves or rejects the approval an order waits on, with an optional note |
 | `deliver_event` | `operator` | Delivers a business event to the order waiting for it |
 | `cancel_order` | `operator` | Cancels the order and undoes what it did, as [Cancelling](/guides/approvals-and-events/#cancelling) |
+| `submit_cart` | `operator` | Submits a priced cart as an order of its flow, as [Submit as order](/guides/carts/#locking-submitting-and-cancelling) |
 | `publish_flow` | `operator` | Publishes the flow's saved draft as the next version |
 | `run_stock_review` | `operator` | Starts the stock review now |
 
 The card is not the model's summary. It is resolved against live data when it appears, and states
 the consequence: for a decision, the order, its total and which step it goes on to; for a cancel,
-the effects it will undo and the reason; for a publish, what changed since the live version and
+the effects it will undo and the reason; for a cart, its lines, total, flow and customer, and
+that the cart ends; for a publish, what changed since the live version and
 that unsaved editor changes are not included; for the stock review, which SKUs are at or below
 their reorder point. When the action can't go ahead (already decided, nothing waiting for that
-event, the order has finished, you started the order and the workspace separates approvals, the draft has errors, nothing to publish, or your role is too low)
+event, the order has finished, you started the order and the workspace separates approvals, the cart isn't priced or has a problem, the draft has errors, nothing to publish, or your role is too low)
 the card says why and offers no confirm.
 
 Confirming runs the action as you, after the engine re-checks your role and the order or flow
@@ -90,6 +94,18 @@ accepting it is one undoable edit that you can still save and publish. In the ed
 builds on the graph on screen. A request that changes nothing says so, with no card.
 
 Creating a flow from a description still happens on the Flows page.
+
+## Carts
+
+Operators can have the assistant build a [cart](/guides/carts/): `create_cart` opens one (a title,
+a published flow that prices orders, and optionally a customer) and `change_cart` adds SKUs, sets
+or removes lines, clears it, adds or removes promotion codes, locks, unlocks or renames it, a few
+changes at a time, in order. Neither asks first, because nothing is ordered until the cart is
+submitted, and each change is made as you, exactly as on the cart's page: a locked or ended cart
+refuses it, and the reply says how many changes went in before one was refused. The cart is
+priced again by its flow after each change. Submitting is `submit_cart`, behind a confirm card.
+The assistant reaches carts your team opens; a cart a customer opened from their own purchasing
+system stays on its own page. It never reads a cart's chat or files.
 
 ## Plugin drafts
 

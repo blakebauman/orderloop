@@ -6,7 +6,7 @@
  * an `ol_live_` API token), checks Origin, and forwards here over the service binding with the
  * principal header, as it does for the agent sockets. This layer trusts that header, like the rest
  * of EngineApi. Each request is answered by a fresh server listing only the tools the caller's
- * role can use. An action (decide, deliver, cancel, publish, stock review) runs only on a second
+ * role can use. An action (decide, deliver, cancel, submit a cart, publish, stock review) runs only on a second
  * call carrying the one-time code the first call returned with its preview (confirmations.ts).
  */
 
@@ -43,18 +43,36 @@ import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
 
-/** Tools that save something without a confirm (nothing they save runs until someone approves it). */
-const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>(['draft_plugin']);
+/**
+ * Tools that save something without a confirm: nothing they save runs until someone approves it
+ * (a plugin draft) or submits it (a cart).
+ */
+const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>([
+  'draft_plugin',
+  'create_cart',
+  'change_cart',
+]);
 
 /** Actions that can't be taken back by calling them again: a client should confirm them. */
-const DESTRUCTIVE = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'publish_flow']);
+const DESTRUCTIVE = new Set<AssistantTool>([
+  'decide_approval',
+  'cancel_order',
+  'submit_cart',
+  'publish_flow',
+]);
 /** Calling these twice with the same input does nothing more the second time. */
-const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order']);
+const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'submit_cart']);
 /**
  * These reach outside OrderLoop: cancelling voids payments and cancels shipments with the
- * carrier, the stock review places supplier reorders, and an assessment may fetch an https image.
+ * carrier, a submitted cart's order runs its flow (payments, shipping), the stock review places
+ * supplier reorders, and an assessment may fetch an https image.
  */
-const OPEN_WORLD = new Set<AssistantTool>(['cancel_order', 'run_stock_review', 'assess_order']);
+const OPEN_WORLD = new Set<AssistantTool>([
+  'cancel_order',
+  'submit_cart',
+  'run_stock_review',
+  'assess_order',
+]);
 
 /** Every tool returns an object (TOOL_OUTPUTS), sent as JSON text and as structured content. */
 const result = (value: Record<string, unknown>) => ({
@@ -131,7 +149,7 @@ async function createServer(p: Principal) {
       // narrows the list within a minute.
       cacheHints: { 'tools/list': { ttlMs: 60_000, cacheScope: 'private' } },
       instructions:
-        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Actions (deciding, delivering an event, cancelling, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
+        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Carts (cart_…) are built with create_cart and change_cart and become orders with submit_cart. Actions (deciding, delivering an event, cancelling, submitting a cart, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
     },
   );
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {

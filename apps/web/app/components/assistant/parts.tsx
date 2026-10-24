@@ -26,6 +26,7 @@ import {
   PenLine,
   Puzzle,
   Search,
+  ShoppingCart,
   Workflow,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -81,6 +82,10 @@ const ICONS: Record<string, LucideIcon> = {
   find_orders: Search,
   get_order: FileText,
   find_products: Boxes,
+  list_carts: ShoppingCart,
+  get_cart: ShoppingCart,
+  create_cart: ShoppingCart,
+  change_cart: ShoppingCart,
   list_flows: Workflow,
   get_flow: Workflow,
   propose_flow_change: PenLine,
@@ -92,6 +97,10 @@ const RUNNING: Record<string, string> = {
   find_orders: 'Searching orders',
   get_order: 'Reading the order',
   find_products: 'Looking up stock',
+  list_carts: 'Listing carts',
+  get_cart: 'Reading the cart',
+  create_cart: 'Opening a cart',
+  change_cart: 'Changing the cart',
   list_flows: 'Listing flows',
   get_flow: 'Reading the flow',
   propose_flow_change: 'Drafting a flow change',
@@ -117,6 +126,12 @@ function found(name: string, out: Record<string, unknown>): string | null {
       return `${out.ref} · ${String(out.status ?? '').replace('_', ' ')}`;
     case 'find_products':
       return `${n(out.products)} products`;
+    case 'list_carts':
+      return `${n(out.carts)} carts`;
+    case 'get_cart':
+    case 'create_cart':
+    case 'change_cart':
+      return `${n(out.lines)} lines${out.priced && out.total ? ` · ${out.total}` : ''}`;
     case 'list_flows':
       return `${n(out.flows)} flows`;
     case 'get_flow':
@@ -169,6 +184,7 @@ const VERB: Record<string, (input: Record<string, unknown>) => string> = {
   decide_approval: (i) => (i.decision === 'rejected' ? 'Reject' : 'Approve'),
   deliver_event: () => 'Deliver event',
   cancel_order: () => 'Cancel order',
+  submit_cart: () => 'Submit cart',
   publish_flow: () => 'Publish',
   run_stock_review: () => 'Run review',
 };

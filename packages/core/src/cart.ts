@@ -9,6 +9,7 @@
  * a quote is current only for the version it was worked out for.
  */
 
+import { z } from 'zod';
 import {
   applyLines,
   type CheckoutIssue,
@@ -17,7 +18,7 @@ import {
   MAX_CHECKOUT_LINES,
   MAX_LINE_QUANTITY,
 } from './checkout';
-import { atLeast, type Role } from './roles';
+import { atLeast, type Principal, type Role } from './roles';
 
 export const CART_STATUSES = ['open', 'locked', 'submitted', 'returned', 'canceled'] as const;
 export type CartStatus = (typeof CART_STATUSES)[number];
@@ -37,6 +38,17 @@ export const MAX_CHAT_BODY = 4_000;
 export type CartActor =
   | { kind: 'staff'; id: string; name: string; role: Role }
   | { kind: 'guest'; id: string; name: string };
+
+/** Staff acting on a cart: what the REST API, MCP and the assistant act as, never a guest. */
+export type StaffCartActor = Extract<CartActor, { kind: 'staff' }>;
+
+/** The principal as they act on a cart, built by the server that resolved them. */
+export const staffCartActor = (p: Pick<Principal, 'id' | 'name' | 'role'>): StaffCartActor => ({
+  kind: 'staff',
+  id: p.id,
+  name: p.name,
+  role: p.role,
+});
 
 /** Set when a plugin opened the cart for a buyer outside OrderLoop. */
 export type ExternalCart = {
@@ -85,6 +97,33 @@ export type CartOp =
   | { op: 'promo_add'; code: string }
   | { op: 'promo_remove'; code: string }
   | { op: 'rename'; title: string };
+
+/**
+ * A `CartOp` as a caller outside the cart's page sends it (the REST API, MCP, the assistant).
+ * Shapes and bounds only; `applyCartOp` decides whether the cart takes it.
+ */
+export const cartOpSchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('add'),
+    sku: z.string().trim().min(1).max(120),
+    qty: z.number().int().min(1).max(MAX_LINE_QUANTITY),
+  }),
+  z.object({
+    op: z.literal('set_qty'),
+    lineId: z.string().min(1).max(100),
+    qty: z.number().int().min(0).max(MAX_LINE_QUANTITY).describe('0 removes the line'),
+  }),
+  z.object({
+    op: z.literal('remove'),
+    lineIds: z.array(z.string().min(1).max(100)).min(1).max(MAX_CHECKOUT_LINES),
+  }),
+  z.object({ op: z.literal('clear') }),
+  z.object({ op: z.literal('lock') }),
+  z.object({ op: z.literal('unlock') }),
+  z.object({ op: z.literal('promo_add'), code: z.string().min(1).max(40) }),
+  z.object({ op: z.literal('promo_remove'), code: z.string().min(1).max(40) }),
+  z.object({ op: z.literal('rename'), title: z.string().min(1).max(MAX_CART_TITLE) }),
+]) satisfies z.ZodType<CartOp>;
 
 export type CartOpResult =
   | { ok: true; cart: Cart; reprice: boolean }
@@ -220,6 +259,22 @@ export function cartReadyProblem(cart: Cart): string | null {
   const error = cart.issues.find((i) => i.kind === 'error');
   if (error) return error.content;
   return cart.quote ? null : 'The cart could not be priced.';
+}
+
+/**
+ * A staff cart as the REST API and MCP show it: its lines, quote and problems, without its chat,
+ * files or the people who have it open, which stay on the cart's page.
+ */
+export type CartView = Omit<Cart, 'external' | 'quotedVersion'> & {
+  /** Whether `quote` prices the cart as it is now. */
+  quoteCurrent: boolean;
+  /** Why it can't be submitted yet (`cartReadyProblem`); null when it can. */
+  notReady: string | null;
+};
+
+export function cartView(cart: Cart): CartView {
+  const { external: _external, quotedVersion: _quoted, ...rest } = cart;
+  return { ...rest, quoteCurrent: isQuoteCurrent(cart), notReady: cartReadyProblem(cart) };
 }
 
 /** Ends the cart: `submitted` (staff, into an order) or `returned` (external, to the buyer's system). */
