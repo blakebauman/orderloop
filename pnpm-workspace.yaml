@@ -30,7 +30,7 @@ catalog:
   json-logic-js: ^2.0.5
 
   # Agents
-  agents: ^0.28.1
+  agents: ^0.30.1
   '@cloudflare/ai-chat': 0.12.1
   ai: 7.0.139
   '@ai-sdk/react': 4.0.142
@@ -60,3 +60,10 @@ overrides:
   # require the patched releases.
   '@ai-sdk/provider-utils>undici': ^7.30.1
   'unifont>undici': ^8.12.2
+
+peerDependencyRules:
+  allowedVersions:
+    # agents pins its MCP server peer to exactly 2.3.1, but the engine serves /mcp with the SDK's
+    # own createMcpHandler (apps/engine/src/mcp.ts) and never loads agents/mcp/server. agents'
+    # MCP client keeps its own @modelcontextprotocol/core 2.3.1. Drop once agents allows ^2.4.
+    'agents>@modelcontextprotocol/server': 2.4.0

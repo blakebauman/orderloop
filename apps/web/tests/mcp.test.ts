@@ -109,6 +109,20 @@ describe('MCP and A2A on the web Worker', () => {
     ).toMatchObject(token);
   });
 
+  it('passes the 2026-07-28 request headers on to the engine', async () => {
+    apiPrincipal.mockResolvedValueOnce(token);
+    await mcp({
+      authorization: 'Bearer ol_live_abc',
+      'mcp-protocol-version': '2026-07-28',
+      'mcp-method': 'tools/call',
+      'mcp-name': 'get_order',
+    });
+    const forwarded = engineFetch.mock.calls[0]![0];
+    expect(forwarded.headers.get('mcp-protocol-version')).toBe('2026-07-28');
+    expect(forwarded.headers.get('mcp-method')).toBe('tools/call');
+    expect(forwarded.headers.get('mcp-name')).toBe('get_order');
+  });
+
   it('refuses a caller who must choose their own password or set up two-factor first', async () => {
     apiPrincipal.mockResolvedValueOnce({ ...token, passwordChangeDue: true });
     const res = await mcp({ authorization: 'Bearer ol_live_abc' });
