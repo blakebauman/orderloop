@@ -23,7 +23,7 @@ import { handleMcp, MCP_PATH } from './mcp';
 import { orderAgent, scopedEnv } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
-import { manifests, pluginBindings, pluginUsage } from './plugins';
+import { pluginStatuses, pluginUsage } from './plugins';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
 import { ucpProfile } from './ucp/config';
@@ -120,9 +120,15 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   }
 
   async health() {
-    // Each installed plugin answers with its manifest.
+    // Each installed plugin answers, just now, with a manifest the engine accepts.
+    const statuses = await pluginStatuses(this.env, true);
     const plugins = Object.fromEntries(
-      pluginBindings(this.env).map(([name, stub]) => [name.toLowerCase(), () => stub.manifest()]),
+      statuses.map((p) => [
+        p.binding.toLowerCase(),
+        async () => {
+          if (!p.healthy) throw new Error(p.error);
+        },
+      ]),
     );
     return runHealthChecks('orderloop-engine', {
       db: () => this.env.DB.prepare('select 1').first(),
@@ -136,7 +142,7 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   }
 
   pluginCatalog() {
-    return manifests(this.env);
+    return pluginStatuses(this.env);
   }
 
   pluginUsage(id: string) {

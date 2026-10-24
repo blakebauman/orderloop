@@ -175,10 +175,20 @@ through `quoteNodes` is a finding. What UCP serves is tested against the vendore
 
 Plugins (`plugins/<id>/`, contract in `packages/core/src/plugins.ts`, see `docs/plugins.md`):
 
-- import only `@orderloop/core` and `@orderloop/design`;
+- import only `@orderloop/core`, `@orderloop/design` and `@orderloop/plugin-sdk`, and are built with
+  `definePlugin` (it checks the manifest against the handlers and the page principal and role);
+- declare `apiVersion` (`PLUGIN_API_VERSION`), and get buyer details only with
+  `personalData: 'send'`;
 - own their D1 database and migrations (the core schema never holds a plugin's tables);
 - namespace node types `<id>.<name>`;
-- key every write and compensation by order id + step key, every delivery by its payload id.
+- key every write and compensation by order id + step key (the SDK's `key`), every delivery by its
+  payload id;
+- pass `pluginContract` (`@orderloop/plugin-sdk/contract`) in their own tests.
+
+The engine checks what a plugin returns (`checkExecResult`), times its calls out, and puts its
+`vars` under `vars.<id>`. The web app forwards only `/plugins/<id>/…`, with allowlisted request
+headers, and strips cookies from and forces its CSP and framing headers onto every plugin
+response (`apps/web/app/lib/plugins.server.ts`).
 
 The core never imports plugin code and keeps working with no plugin bound; the engine's default
 test project runs without one. `plugins/example` is a test fixture no deployment may install

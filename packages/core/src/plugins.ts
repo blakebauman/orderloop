@@ -21,6 +21,8 @@ import {
   validateFields,
 } from './catalog';
 import { conforms } from './json-schema';
+import { PERSONAL_DATA_MODES, scrubPersonal } from './redact';
+import { ROLES } from './roles';
 import type { Order } from './types';
 import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
 
@@ -28,6 +30,18 @@ import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
 const RESERVED_IDS = new Set(['trigger', 'commerce', 'control', 'ai', 'core', 'orderloop']);
 
 export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{1,30}$/;
+
+/**
+ * The contract version this OrderLoop speaks. A manifest declares the one it was written for, and
+ * one for any other version is refused rather than half understood.
+ */
+export const PLUGIN_API_VERSION = 1;
+
+/** Longest summary a plugin node may report for the order's timeline. */
+export const PLUGIN_SUMMARY_MAX = 300;
+
+/** Largest `output` (and, separately, `vars`) a plugin node may return, serialized. */
+export const PLUGIN_RESULT_MAX_BYTES = 128 * 1024;
 
 /** The binding a plugin is reached by: "ledger" → "PLUGIN_LEDGER", "qbd-sync" → "PLUGIN_QBD_SYNC". */
 export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replace(/-/g, '_')}`;
@@ -88,6 +102,10 @@ export type PluginNodeSpec = z.infer<typeof nodeSchema>;
 
 export const pluginManifestSchema = z
   .object({
+    /** Must be `PLUGIN_API_VERSION`. */
+    apiVersion: z.literal(PLUGIN_API_VERSION, {
+      error: `apiVersion must be ${PLUGIN_API_VERSION}, the plugin contract this OrderLoop speaks`,
+    }),
     id: pluginId,
     name: z.string().min(1),
     /** Changes whenever the manifest does; the engine caches manifests by it. */
@@ -106,6 +124,13 @@ export const pluginManifestSchema = z
     publicPaths: z.array(z.string()).default([]),
     /** Plugins that must be installed alongside this one. */
     requires: z.array(pluginId).default([]),
+    /** The least role a person needs to open the plugin's pages (and see its nav entries). */
+    pageRole: z.enum(ROLES).default('operator'),
+    /**
+     * Whether `execute` sees who the buyer is. `redact` (the default) scrubs contact details, names
+     * and addresses from the order, variables and earlier outputs it is sent, as AI nodes get them.
+     */
+    personalData: z.enum(PERSONAL_DATA_MODES).default('redact'),
   })
   .superRefine((m, ctx) => {
     const prefix = `/plugins/${m.id}/`;
@@ -161,14 +186,113 @@ export type PluginExecRequest = {
   nodes: Record<string, unknown>;
 };
 
-/** The same shape a built-in executor returns. */
-export type PluginExecResult = {
-  /** One of the node's `outputs`; defaults to the first. */
-  branch?: string;
-  output?: unknown;
-  summary?: string;
-  vars?: Record<string, unknown>;
-};
+/**
+ * What `execute` returns: the branch it took, or `fail` to fail the node. `fail` with `retry: false`
+ * fails it for good (a declined request, bad config); with `retry: true` the step is tried again,
+ * as when `execute` throws.
+ */
+export type PluginExecResult =
+  | {
+      /** One of the node's `outputs`; defaults to the first. */
+      branch?: string;
+      output?: unknown;
+      /** One line for the order's timeline, at most `PLUGIN_SUMMARY_MAX` characters. */
+      summary?: string;
+      /** Merged into the order's variables under the plugin's id: `vars.<id>`. */
+      vars?: Record<string, unknown>;
+    }
+  | { fail: { message: string; retry?: boolean } };
+
+const jsonSized = (what: string) =>
+  z.unknown().superRefine((v, ctx) => {
+    let bytes: number;
+    try {
+      bytes = new TextEncoder().encode(JSON.stringify(v ?? null)).byteLength;
+    } catch {
+      ctx.addIssue({ code: 'custom', message: `${what} must be JSON` });
+      return;
+    }
+    if (bytes > PLUGIN_RESULT_MAX_BYTES)
+      ctx.addIssue({
+        code: 'custom',
+        message: `${what} is ${bytes} bytes; the limit is ${PLUGIN_RESULT_MAX_BYTES}`,
+      });
+  });
+
+const failSchema = z.object({
+  fail: z.object({
+    message: z.string().min(1).max(PLUGIN_SUMMARY_MAX),
+    retry: z.boolean().optional(),
+  }),
+});
+
+const doneSchema = z.object({
+  branch: z.string().optional(),
+  output: jsonSized('output').optional(),
+  summary: z.string().max(PLUGIN_SUMMARY_MAX).optional(),
+  vars: z.record(z.string(), z.unknown()).and(jsonSized('vars')).optional(),
+});
+
+/** A checked `execute` result: what the node did, or how it failed. */
+export type PluginOutcome =
+  | {
+      kind: 'done';
+      branch: string;
+      output?: unknown;
+      summary?: string;
+      vars?: Record<string, unknown>;
+    }
+  | { kind: 'fail'; message: string; retry: boolean };
+
+/**
+ * Checks what a plugin returned for a node with these `outputs`. Throws (with a message naming the
+ * problem) for a result the engine must not apply: not the contract's shape, too large, or a
+ * branch the node doesn't have.
+ */
+export function checkExecResult(type: string, value: unknown, outputs: string[]): PluginOutcome {
+  const raw = value ?? {};
+  const failing = !!raw && typeof raw === 'object' && 'fail' in raw;
+  const r = (failing ? failSchema : doneSchema).safeParse(raw);
+  if (!r.success) {
+    const issue = r.error.issues[0];
+    throw new Error(
+      `${type} returned an invalid result: ${issue?.path.join('.') || 'result'}: ${issue?.message}`,
+    );
+  }
+  if ('fail' in r.data)
+    return { kind: 'fail', message: r.data.fail.message, retry: r.data.fail.retry === true };
+  const branch = r.data.branch ?? outputs[0]!;
+  if (!outputs.includes(branch))
+    throw new Error(`${type} chose “${branch}”, which isn't one of its outputs`);
+  return {
+    kind: 'done',
+    branch,
+    output: r.data.output,
+    summary: r.data.summary,
+    vars: r.data.vars,
+  };
+}
+
+type Privacy = Pick<PluginManifest, 'personalData'>;
+
+/** Variables or earlier outputs as a plugin with this manifest is sent them. */
+export function pluginView<T>(manifest: Privacy, value: T): T {
+  return manifest.personalData === 'send' ? value : (scrubPersonal(value) as T);
+}
+
+/**
+ * The order as a plugin with this manifest is sent it. Redacted, it has no contact, names or
+ * addresses, and emails and phone numbers in free text are masked; its lines keep their product
+ * names, which identify goods, not people.
+ */
+export function pluginOrder(manifest: Privacy, order: Order): Order {
+  if (manifest.personalData === 'send') return order;
+  const { lines, ...rest } = order;
+  return {
+    ...(scrubPersonal(rest) as Omit<Order, 'lines'>),
+    lines: lines.map((l) => ({ ...(scrubPersonal(l) as typeof l), name: l.name })),
+  };
+}
 
 export type PluginCompensateRequest = {
   type: string;
@@ -192,6 +316,19 @@ export interface PluginRpc {
   /** An outbound event. Idempotent on `payload.id`, which is stable across redeliveries. */
   deliver(payload: OutboundPayload): Promise<void>;
 }
+
+/**
+ * One `PLUGIN_*` binding as the engine sees it. `manifest` is what the deployment runs: null when
+ * the plugin is refused (its manifest doesn't parse, its id doesn't match the binding, a plugin it
+ * requires is missing), and the last good one while the plugin is unreachable. `healthy` is whether
+ * the plugin answered with a usable manifest just now.
+ */
+export type PluginStatus = {
+  binding: string;
+  manifest: PluginManifest | null;
+  healthy: boolean;
+  error?: string;
+};
 
 /** What still uses a plugin's nodes; it can be removed only once both lists are empty. */
 export type PluginUsage = {

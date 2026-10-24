@@ -11,16 +11,22 @@
 
 import { NonRetryableError } from 'cloudflare:workflows';
 import {
+  checkExecResult,
   type FlowGraph,
   missing,
   type NodeRegistry,
   type OutboundPayload,
+  PLUGIN_SUMMARY_MAX,
   type PluginManifest,
+  type PluginOutcome,
   type PluginRpc,
+  type PluginStatus,
   type PluginUsage,
   parseManifest,
   pluginBinding,
   pluginOf,
+  pluginOrder,
+  pluginView,
   staticRegistry,
   TERMINAL_ORDER_STATUSES,
   withPlugins,
@@ -33,7 +39,15 @@ type PluginStub = Fetcher & { [K in keyof PluginRpc]: PluginRpc[K] };
 
 /** How long an isolate trusts the manifests it fetched; a redeployed plugin shows up after this. */
 const MANIFEST_TTL_MS = 60_000;
-let cached: { at: number; key: string; manifests: PluginManifest[] } | null = null;
+/** How long one call into a plugin may take, well inside its node's step timeout. */
+export const PLUGIN_CALL_MS = 60_000;
+
+let cached: { at: number; key: string; statuses: PluginStatus[] } | null = null;
+/**
+ * The last manifest each binding answered with, kept while it can't answer (mid-deploy, a blip), so
+ * its nodes don't read as not installed and fail running orders.
+ */
+const lastGood = new Map<string, PluginManifest>();
 
 /** Every `PLUGIN_*` service binding, by binding name. */
 export function pluginBindings(env: Env): [string, PluginStub][] {
@@ -47,38 +61,67 @@ export function plugin(env: Env, id: string): PluginStub | null {
   return ((env as unknown as Record<string, unknown>)[pluginBinding(id)] as PluginStub) ?? null;
 }
 
+/** Rejects once `ms` pass, so a hung plugin fails its call instead of the whole step. */
+export function withTimeout<T>(p: Promise<T>, what: string, ms = PLUGIN_CALL_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} took longer than ${ms / 1000}s`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 /**
- * The installed plugins' manifests. A plugin whose manifest doesn't parse, whose id doesn't match
- * its binding, or that misses a plugin it requires is left out (and logged): its nodes then read
- * as not installed, while every other flow keeps running.
+ * Every plugin binding and what the deployment runs of it (`PluginStatus`). A plugin whose
+ * manifest doesn't parse or whose id doesn't match its binding keeps its last good manifest, or is
+ * left out when it never had one; one missing a plugin it requires is left out. Either way it is
+ * logged and reported unhealthy, its nodes read as not installed, and every other flow keeps
+ * running. `fresh` skips the isolate's cache (deep health).
  */
-export async function manifests(env: Env): Promise<PluginManifest[]> {
+export async function pluginStatuses(env: Env, fresh = false): Promise<PluginStatus[]> {
   const bound = pluginBindings(env);
   if (!bound.length) return [];
   const key = bound.map(([k]) => k).join(',');
-  if (cached && cached.key === key && Date.now() - cached.at < MANIFEST_TTL_MS)
-    return cached.manifests;
+  if (!fresh && cached && cached.key === key && Date.now() - cached.at < MANIFEST_TTL_MS)
+    return cached.statuses;
   const got = await Promise.all(
-    bound.map(async ([name, stub]) => {
+    bound.map(async ([binding, stub]): Promise<PluginStatus> => {
       try {
-        const m = parseManifest(await stub.manifest());
-        if (pluginBinding(m.id) !== name) throw new Error(`id “${m.id}” is not bound as ${name}`);
-        return m;
+        const m = parseManifest(
+          await withTimeout(stub.manifest(), `${binding}.manifest()`, 10_000),
+        );
+        if (pluginBinding(m.id) !== binding)
+          throw new Error(`id “${m.id}” is not bound as ${binding}`);
+        lastGood.set(binding, m);
+        return { binding, manifest: m, healthy: true };
       } catch (err) {
-        console.error('plugin manifest refused', name, err);
-        return null;
+        console.error('plugin manifest refused', binding, err);
+        return {
+          binding,
+          manifest: lastGood.get(binding) ?? null,
+          healthy: false,
+          error: message(err),
+        };
       }
     }),
   );
-  const ok = got.filter((m) => m !== null);
-  const ids = new Set(ok.map((m) => m.id));
-  const usable = ok.filter((m) => {
-    const absent = m.requires.filter((r) => !ids.has(r));
-    if (absent.length) console.error('plugin missing requirements', m.id, absent);
-    return !absent.length;
+  const ids = new Set(got.flatMap((s) => (s.manifest ? [s.manifest.id] : [])));
+  const statuses = got.map((s): PluginStatus => {
+    const absent = s.manifest?.requires.filter((r) => !ids.has(r)) ?? [];
+    if (!absent.length) return s;
+    console.error('plugin missing requirements', s.binding, absent);
+    return { ...s, manifest: null, healthy: false, error: `Needs ${absent.join(', ')} installed` };
   });
-  cached = { at: Date.now(), key, manifests: usable };
-  return usable;
+  cached = { at: Date.now(), key, statuses };
+  return statuses;
+}
+
+/** The manifests of the plugins this deployment runs. */
+export async function manifests(env: Env): Promise<PluginManifest[]> {
+  return (await pluginStatuses(env)).flatMap((s) => (s.manifest ? [s.manifest] : []));
 }
 
 /** Node lookups for this deployment: the built-in catalog plus its plugins' nodes. */
@@ -101,23 +144,42 @@ export async function execPluginNode({
 }: ExecInput): Promise<NodeResult> {
   const id = pluginOf(node.type);
   const stub = id ? plugin(env, id) : null;
-  const spec = (await registry(env)).spec(node.type);
-  if (!stub || !spec) throw new NonRetryableError(missing(node.type));
-  const r = await stub.execute({
-    type: node.type,
-    nodeId: node.id,
-    stepKey,
-    orderId: ctx.order.id,
-    config,
-    order: ctx.order,
-    vars: ctx.vars,
-    nodes: ctx.nodes,
-  });
-  const outputs = spec.outputs as string[];
-  const branch = r.branch ?? outputs[0]!;
-  if (!outputs.includes(branch))
-    throw new NonRetryableError(`${node.type} chose “${branch}”, which isn't one of its outputs`);
-  return { branches: [branch], output: r.output, summary: r.summary, vars: r.vars };
+  const installed = await manifests(env);
+  const manifest = installed.find((m) => m.id === id);
+  const spec = withPlugins(installed).spec(node.type);
+  if (!id || !stub || !manifest || !spec) throw new NonRetryableError(missing(node.type));
+  const result = await withTimeout(
+    stub.execute({
+      type: node.type,
+      nodeId: node.id,
+      stepKey,
+      orderId: ctx.order.id,
+      config,
+      order: pluginOrder(manifest, ctx.order),
+      vars: pluginView(manifest, ctx.vars),
+      nodes: pluginView(manifest, ctx.nodes),
+    }),
+    `${node.type} (execute)`,
+  );
+  let outcome: PluginOutcome;
+  try {
+    outcome = checkExecResult(node.type, result, spec.outputs as string[]);
+  } catch (err) {
+    // The same plugin code would return the same thing again: no retry.
+    throw new NonRetryableError(message(err));
+  }
+  if (outcome.kind === 'fail') {
+    if (outcome.retry) throw new Error(outcome.message);
+    throw new NonRetryableError(outcome.message);
+  }
+  // A plugin's variables live under its id, so it can't overwrite the flow's or another plugin's.
+  const own = (ctx.vars[id] ?? {}) as Record<string, unknown>;
+  return {
+    branches: [outcome.branch],
+    output: outcome.output,
+    summary: outcome.summary,
+    ...(outcome.vars ? { vars: { [id]: { ...own, ...outcome.vars } } } : {}),
+  };
 }
 
 /** The compensation for a plugin node with `rollback`; it throws if the plugin is gone. */
@@ -126,7 +188,11 @@ export function pluginRollback(type: string, nodeId: string, stepKey: string) {
     const id = pluginOf(type);
     const stub = id ? plugin(env, id) : null;
     if (!stub) throw new Error(`${missing(type)}, so ${type} could not be undone`);
-    return stub.compensate({ type, nodeId, stepKey, orderId, output });
+    const said = await withTimeout(
+      stub.compensate({ type, nodeId, stepKey, orderId, output }),
+      `${type} (compensate)`,
+    );
+    return typeof said === 'string' ? said.slice(0, PLUGIN_SUMMARY_MAX) : 'Undone';
   };
 }
 
@@ -135,7 +201,7 @@ export async function deliverToPlugin(env: Env, id: string, payload: OutboundPay
   const stub = plugin(env, id);
   if (!stub) return { ok: false, status: null, error: missing(`${id}.*`) };
   try {
-    await stub.deliver(payload);
+    await withTimeout(stub.deliver(payload), `${id}.deliver()`, 30_000);
     return { ok: true, status: 200, error: null };
   } catch (err) {
     return { ok: false, status: null, error: err instanceof Error ? err.message : String(err) };

@@ -9,12 +9,17 @@ const engine = {
   eraseDataSubject: vi.fn(),
   pluginCatalog: vi.fn(async () => [
     {
-      id: 'example',
-      name: 'Example',
-      version: '1',
-      nodes: [{ type: 'example.stamp' }],
-      events: ['order.completed'],
+      binding: 'PLUGIN_EXAMPLE',
+      healthy: true,
+      manifest: {
+        id: 'example',
+        name: 'Example',
+        version: '1',
+        nodes: [{ type: 'example.stamp' }],
+        events: ['order.completed'],
+      },
     },
+    { binding: 'PLUGIN_BROKEN', healthy: false, manifest: null, error: 'apiVersion must be 1' },
   ]),
   pluginUsage: vi.fn(async () => ({ flows: [{ id: 'f1', version: 2 }], orders: [] })),
 };
@@ -417,11 +422,23 @@ describe('plugins over REST', () => {
     expect(await (await get('plugins')).json()).toEqual({
       plugins: [
         {
+          binding: 'PLUGIN_EXAMPLE',
           id: 'example',
           name: 'Example',
           version: '1',
           nodes: ['example.stamp'],
           events: ['order.completed'],
+          healthy: true,
+        },
+        {
+          binding: 'PLUGIN_BROKEN',
+          id: null,
+          name: null,
+          version: null,
+          nodes: [],
+          events: [],
+          healthy: false,
+          error: 'apiVersion must be 1',
         },
       ],
     });

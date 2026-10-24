@@ -44,6 +44,21 @@ export const stampFlow = (id: string, outcome: 'completed' | 'failed', skip = fa
   ],
 });
 
+/** start → probe (`behave`) → end: one call into the plugin, doing as told. */
+export const probeFlow = (id: string, behave: string) => ({
+  id,
+  name: 'Probe',
+  description: '',
+  model: 'b2b',
+  channels: [],
+  nodes: [
+    node('start', 'trigger.manual'),
+    node('probe', 'example.probe', { behave }),
+    node('done', 'control.end', { outcome: 'completed', reason: 'probed' }),
+  ],
+  edges: [edge('start', 'probe'), edge('probe', 'done')],
+});
+
 export const stampInput = (): OrderInput => ({
   model: 'b2b',
   channel: 'api',
@@ -55,14 +70,20 @@ export const stampInput = (): OrderInput => ({
 
 const state = async (id: string) => (await env.ORDER_AGENT.getByName(id).snapshot()) as OrderState;
 
-export async function settled(id: string, ms = 30_000): Promise<OrderState> {
+/**
+ * Waits for the order to end. A failed order is rolled back after it reports failed, so by default
+ * this also waits for that outcome; pass `rollback: false` for a flow with nothing to roll back.
+ */
+export async function settled(
+  id: string,
+  ms = 30_000,
+  { rollback = true } = {},
+): Promise<OrderState> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     const s = await state(id);
     if (['completed', 'declined', 'cancelled', 'failed', 'rolled_back'].includes(s.status))
-      if (s.status !== 'failed' || s.rollback)
-        // A failed order is rolled back after it reports failed: wait for the outcome too.
-        return s;
+      if (s.status !== 'failed' || s.rollback || !rollback) return s;
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`Timed out waiting for ${id} to settle`);

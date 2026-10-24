@@ -29,6 +29,7 @@ inbound mail ── Email Routing ──email()───────────
 |---|---|
 | `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index and `listingSpec`, feed parsing and the `ProductCatalogRpc` contract. Where published objects live and their cache tags are the zod-free `@orderloop/core/product/paths` (`DOC_FORMAT`, the `CODE`, `LOCALE` and `SLUG` patterns, `BATCH_MAX`, `paths`, `tags`), and the listing index's decoder is the zod-free `@orderloop/core/product/listing` (`ListingIndex`); `catalog-edge` imports only those two. No bindings and no Cloudflare imports |
 | `plugins/<id>` | Optional features, each its own Worker and D1 database, installed per deployment; see [Plugins](plugins.md). `plugins/example` is a test-only fixture |
+| `packages/plugin-sdk` (`@orderloop/plugin-sdk`) | What plugins are built with: `definePlugin` (the `PluginRpc` entrypoint), the `pluginContract` suite and `bundlePlugin` for tests; see [Plugins](plugins.md) |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
@@ -58,7 +59,7 @@ inbound mail ── Email Routing ──email()───────────
 | `exportDataSubject(email)` | Everything held about the person with that email (`subjects.ts`): customer accounts, up to 500 orders with their agent state, messages, intake log rows, documents; see [Personal data](data-model.md#personal-data) |
 | `eraseDataSubject(email)` | Erases that person (100 orders a call, `done` says whether to call again) or returns `{ ok: false, reason: 'active_orders', orders }`. Calls each order's `OrderAgent.erasePersonalData` |
 | `runReplenish()` | Creates a `Replenish` instance now |
-| `pluginCatalog()` | The installed [plugins](plugins.md)' validated manifests (cached about 60 seconds per isolate) |
+| `pluginCatalog()` | A `PluginStatus` per [plugin](plugins.md) binding: the manifest the deployment runs, `healthy` and `error` (cached about 60 seconds per isolate) |
 | `pluginUsage(id)` | The published flows and running orders that use a plugin's nodes (`GET /api/v1/plugins/:id/usage`) |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
@@ -708,10 +709,17 @@ types, receive outbound events and serve pages. The contract (`PluginManifest`, 
 `NodeRegistry`, `withPlugins`) is `packages/core/src/plugins.ts`; `validateGraph` takes a registry,
 so a plugin's `<id>.<name>` nodes validate only while it is installed, and the planner is untouched.
 The engine (`apps/engine/src/plugins.ts`) finds plugins by their `PLUGIN_*` service bindings, caches
-their manifests for about 60 seconds, runs a plugin node inside its own `step.do` and delivers events
-through the outbox. The web app forwards `/plugins/:id/*` with a signed principal
-(`apps/web/app/lib/plugins.server.ts`) and reads node specs through `useNodes()`. `EngineRpc` has
-`pluginCatalog` and `pluginUsage`, and deep health a `plugin_<id>` check each. See
+their statuses (`pluginStatuses`: manifest, `healthy`, `error`) for about 60 seconds and keeps a
+plugin's last good manifest while it can't answer. It runs a plugin node inside its own `step.do`
+under a timeout, with the order redacted unless the manifest sets `personalData: 'send'`, checks the
+result (`checkExecResult`) and puts its variables under `vars.<id>`; events go through the outbox.
+The web app forwards `/plugins/<id>/*` with a signed principal
+(`apps/web/app/lib/plugins.server.ts`), which filters request headers, applies the manifest's
+`pageRole`, rate-limits and size-caps public paths, and puts the app's own security headers on the
+response; it reads node specs through `useNodes()` and shows each plugin's status at `/plugins`
+(`apps/web/app/routes/plugins.tsx`, admin). `EngineRpc` has
+`pluginCatalog` and `pluginUsage`, and deep health a `plugin_<id>` check each. Plugins are written
+with `packages/plugin-sdk`. See
 [Plugins](plugins.md) for the contract, installing and removing.
 
 ## Connectors

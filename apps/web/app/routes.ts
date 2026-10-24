@@ -27,6 +27,8 @@ export default [
       route('commerce', 'routes/commerce.tsx'),
       route('team', 'routes/team.tsx'),
       route('audit', 'routes/audit.tsx'),
+      // Installed plugins (admin). Their own pages are under /plugins/<id>/, forwarded by workers/app.ts.
+      route('plugins', 'routes/plugins.tsx'),
       route('account', 'routes/account.tsx'),
     ]),
   ]),

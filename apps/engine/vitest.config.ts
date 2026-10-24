@@ -1,9 +1,5 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
-import {
-  EXAMPLE_DB_ID,
-  EXAMPLE_PLUGIN,
-  examplePluginWorker,
-} from '@orderloop/plugin-example/test-worker';
+import { bundlePlugin } from '@orderloop/plugin-sdk/testing';
 import agents from 'agents/vite';
 import { defineConfig } from 'vitest/config';
 
@@ -19,7 +15,7 @@ export default defineConfig(async () => {
     name: string,
     include: string[],
     bindings: Record<string, unknown> = {},
-    plugins: Awaited<ReturnType<typeof examplePluginWorker>>[] = [],
+    plugins: Awaited<ReturnType<typeof bundlePlugin>>[] = [],
   ) => ({
     plugins: [
       // TC39 decorators (`@callable()`): Oxc doesn't transform them yet.
@@ -59,10 +55,10 @@ export default defineConfig(async () => {
             DEMO_DB: 'demo-test',
             AUDIT_DB: 'audit-test',
             // The example plugin's own database, so its tests can read what it wrote.
-            ...(plugins.length ? { EXAMPLE_DB: EXAMPLE_DB_ID } : {}),
+            ...(plugins.length ? { EXAMPLE_DB: 'plugin-example' } : {}),
           },
           ...(plugins.length
-            ? { workers: plugins, serviceBindings: { PLUGIN_EXAMPLE: EXAMPLE_PLUGIN } }
+            ? { workers: plugins, serviceBindings: { PLUGIN_EXAMPLE: 'orderloop-plugin-example' } }
             : {}),
         },
       }),
@@ -86,7 +82,13 @@ export default defineConfig(async () => {
           'plugins',
           ['tests/plugins/**/*.test.ts'],
           { TEST_EXAMPLE_MIGRATIONS: await readD1Migrations('../../plugins/example/migrations') },
-          [await examplePluginWorker('test-principal-key')],
+          [
+            await bundlePlugin('../../plugins/example/src/index.ts', {
+              name: 'orderloop-plugin-example',
+              d1: { DB: 'plugin-example' },
+              bindings: { PRINCIPAL_KEY: 'test-principal-key' },
+            }),
+          ],
         ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
         project('stripe', ['tests/stripe/**/*.test.ts'], {

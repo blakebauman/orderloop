@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkExecResult,
   type FlowGraph,
+  type Order,
+  PLUGIN_RESULT_MAX_BYTES,
   parseManifest,
   pluginBinding,
   pluginOf,
+  pluginOrder,
+  pluginView,
   staticRegistry,
   TEMPLATES,
   validateGraph,
@@ -11,6 +16,7 @@ import {
 } from '../src';
 
 const manifest = (over: Record<string, unknown> = {}) => ({
+  apiVersion: 1,
   id: 'example',
   name: 'Example',
   version: '1',
@@ -54,9 +60,22 @@ const flow = (type: string, handle = 'ok'): FlowGraph => ({
 
 describe('plugin manifests', () => {
   it('parses a valid manifest and fills defaults', () => {
-    const m = parseManifest({ id: 'example', name: 'Example', version: '1' });
-    expect(m).toMatchObject({ nodes: [], events: [], nav: [], publicPaths: [], requires: [] });
+    const m = parseManifest({ apiVersion: 1, id: 'example', name: 'Example', version: '1' });
+    expect(m).toMatchObject({
+      nodes: [],
+      events: [],
+      nav: [],
+      publicPaths: [],
+      requires: [],
+      pageRole: 'operator',
+      personalData: 'redact',
+    });
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
+  });
+
+  it('refuses a manifest written for another contract version', () => {
+    expect(() => parseManifest(manifest({ apiVersion: 2 }))).toThrow(/apiVersion must be 1/);
+    expect(() => parseManifest({ ...manifest(), apiVersion: undefined })).toThrow(/apiVersion/);
   });
 
   it('rejects bad and reserved ids', () => {
@@ -124,5 +143,71 @@ describe('node registry', () => {
       const t = make();
       expect(validateGraph(t, registry)).toEqual(validateGraph(t, staticRegistry));
     }
+  });
+});
+
+describe('plugin results', () => {
+  const outs = ['ok', 'skipped'];
+
+  it('takes the first output by default and keeps what the node returned', () => {
+    expect(checkExecResult('example.stamp', { output: { a: 1 }, summary: 'Done' }, outs)).toEqual({
+      kind: 'done',
+      branch: 'ok',
+      output: { a: 1 },
+      summary: 'Done',
+      vars: undefined,
+    });
+    expect(checkExecResult('example.stamp', undefined, outs)).toMatchObject({ branch: 'ok' });
+  });
+
+  it('turns fail into a failure, retried only when the plugin says so', () => {
+    expect(checkExecResult('x.y', { fail: { message: 'Declined' } }, outs)).toEqual({
+      kind: 'fail',
+      message: 'Declined',
+      retry: false,
+    });
+    expect(checkExecResult('x.y', { fail: { message: 'Busy', retry: true } }, outs)).toMatchObject({
+      retry: true,
+    });
+  });
+
+  it('refuses a branch the node lacks, a long summary and an oversized output', () => {
+    expect(() => checkExecResult('x.y', { branch: 'nope' }, outs)).toThrow(
+      /isn't one of its outputs/,
+    );
+    expect(() => checkExecResult('x.y', { summary: 's'.repeat(301) }, outs)).toThrow(/summary/);
+    const big = 'x'.repeat(PLUGIN_RESULT_MAX_BYTES);
+    expect(() => checkExecResult('x.y', { output: big }, outs)).toThrow(/output is \d+ bytes/);
+    expect(() => checkExecResult('x.y', { vars: { big } }, outs)).toThrow(/vars is \d+ bytes/);
+    expect(() => checkExecResult('x.y', { vars: 'not an object' }, outs)).toThrow(/vars/);
+  });
+});
+
+describe('what a plugin sees', () => {
+  const order = {
+    id: 'ord_1',
+    model: 'b2c',
+    channel: 'web',
+    currency: 'USD',
+    lines: [{ sku: 'WID-100', name: 'Widget', qty: 1, unitPrice: 5 }],
+    contact: { name: 'Ada Lovelace', email: 'ada@example.com' },
+    meta: { shipTo: { line1: '1 Main St', city: 'Springfield' }, note: 'call 555 123 4567' },
+    createdAt: 0,
+    subtotal: 5,
+    shipping: 0,
+    tax: 0,
+    total: 5,
+  } as unknown as Order;
+
+  it('gets no buyer details unless its manifest asks for them', () => {
+    const seen = pluginOrder({ personalData: 'redact' }, order);
+    expect(seen).not.toHaveProperty('contact');
+    expect(seen.meta).not.toHaveProperty('shipTo');
+    expect(JSON.stringify(seen)).not.toMatch(/ada|555 123/i);
+    expect(seen.lines[0]).toMatchObject({ sku: 'WID-100', name: 'Widget' });
+    expect(pluginOrder({ personalData: 'send' }, order)).toBe(order);
+    expect(pluginView({ personalData: 'redact' }, { buyer: { email: 'a@b.co' }, n: 1 })).toEqual({
+      n: 1,
+    });
   });
 });
