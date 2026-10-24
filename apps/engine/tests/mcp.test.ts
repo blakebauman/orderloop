@@ -153,6 +153,10 @@ describe('MCP', () => {
         7,
       );
     }
+    // Per role, so per client: 2026-07-28 says how long a client may keep the list.
+    expect((await rpc(viewer, 'tools/list', {}, '2026-07-28')).body).toMatchObject({
+      result: { ttlMs: 60_000, cacheScope: 'private' },
+    });
     const res = await worker.fetch(
       new Request('https://engine/mcp', {
         headers: { [PRINCIPAL_HEADER]: await signed(viewer, '/mcp') },
@@ -179,14 +183,31 @@ describe('MCP', () => {
     ]);
     expect(viewer.find((t) => t.name === 'find_orders')).toMatchObject({
       title: 'Find orders',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: { type: 'object' },
+      outputSchema: { type: 'object', properties: { count: {}, orders: {} } },
     });
+    expect(viewer.every((t) => t.outputSchema)).toBe(true);
     const operator = await tools(person('operator', 'ops@example.com'));
     expect(operator).toHaveLength(13);
     expect(operator.find((t) => t.name === 'cancel_order')).toMatchObject({
-      annotations: { readOnlyHint: false, destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     });
+    expect(operator.find((t) => t.name === 'publish_flow')).toMatchObject({
+      annotations: { openWorldHint: false },
+    });
+  });
+
+  it('keeps an internal error to itself', async () => {
+    await env.DB.prepare(
+      "INSERT INTO flows (id, name, model, graph_json, created_at, updated_at) VALUES ('flw_broken', 'Broken', 'b2c', '{not json', 0, 0)",
+    ).run();
+    const broken = await call(person('viewer', 'vic@example.com'), 'get_flow', {
+      flowId: 'flw_broken',
+    });
+    expect(broken.isError).toBe(true);
+    expect(broken.content[0]!.text).toMatch(/went wrong on OrderLoop/);
+    expect(broken.content[0]!.text).not.toMatch(/JSON/);
   });
 
   it('reads with structured content, and acts as the person via MCP', async () => {
