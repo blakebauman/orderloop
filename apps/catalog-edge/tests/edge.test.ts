@@ -2,7 +2,7 @@ import { createExecutionContext, createMessageBatch, getQueueResult } from 'clou
 import { env, exports } from 'cloudflare:workers';
 import { DOC_FORMAT, paths } from '@orderloop/core/product/paths';
 import { beforeAll, describe, expect, it } from 'vitest';
-import worker, { drain, PURGE_PACE_MS } from '../src';
+import worker, { drain, PURGE_CALLS, PURGE_PACE_MS } from '../src';
 import { FRESH, MISSING } from '../src/delivery';
 
 const get = (path: string, init?: RequestInit) =>
@@ -205,7 +205,6 @@ describe('purging', () => {
         return { success: calls.length !== refuseCall };
       },
       t.wait,
-      t.now,
     );
     const ctx = createExecutionContext();
     return { calls, waits: t.c.waits, result: await getQueueResult(batch, ctx) };
@@ -225,20 +224,21 @@ describe('purging', () => {
     expect(result.retryMessages).toEqual([]);
   });
 
-  it('acknowledges messages over a minute old without purging, as the backlog ages', async () => {
+  it('purges an old message too, and hands back what is past the per-batch call cap', async () => {
     const { calls, result } = await run([
-      { id: 'old', age: 61_000, tags: ['p:old'] },
-      ...Array.from({ length: 10 }, (_, i) => ({
+      { id: 'old', age: 3_600_000, tags: ['p:old'] },
+      ...Array.from({ length: PURGE_CALLS + 5 }, (_, i) => ({
         id: `m${i}`,
         age: 0,
         tags: tagsFor(`m${i}-`, 100),
       })),
     ]);
-    // Five paced calls take the minute; by then the rest is fresh in the cache without them.
-    expect(calls).toHaveLength(5);
-    expect(calls.flat()).not.toContain('p:old');
-    expect(result.explicitAcks).toHaveLength(11);
-    expect(result.retryMessages).toEqual([]);
+    // Stale-while-revalidate keeps an old copy servable, so an hour-old purge still goes out.
+    expect(calls[0]).toContain('p:old');
+    expect(calls).toHaveLength(PURGE_CALLS);
+    expect(result.retryMessages).toHaveLength(6);
+    // The old message alone (it and a 100-tag one exceed a call), then 39 of the rest.
+    expect(result.explicitAcks).toHaveLength(PURGE_CALLS);
   });
 
   it('retries what a refused call left, keeping what was purged acknowledged', async () => {
