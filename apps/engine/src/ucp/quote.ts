@@ -153,6 +153,15 @@ export async function quoteCheckout(
       if (node.type === 'commerce.policy' && r.branches?.includes('fail'))
         for (const failure of (r.vars?.policyFailures as string[] | undefined) ?? [])
           issues.push(issue('policy', failure, '$'));
+      // A code the promotions step left out says why, without stopping the checkout.
+      if (node.type === 'commerce.discount')
+        for (const reason of (r.vars?.promotionsRefused as string[] | undefined) ?? [])
+          issues.push({
+            kind: 'warning',
+            code: 'promotion',
+            content: reason,
+            path: '$.promoCodes',
+          });
       if (node.type === 'commerce.shipping_rate') {
         const out = (r.output ?? {}) as {
           options?: ShippingOption[];
