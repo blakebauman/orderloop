@@ -27,6 +27,9 @@ way an order on that flow is priced. Until the new price is in, the cart shows *
 - Adding a SKU the cart already has adds to that line.
 - Setting a quantity to 0 removes the line.
 - A cart holds at most 100 lines, and a line at most 10,000 units.
+- **Promotion codes** go in the box under the price (up to five a cart). They change the price
+  only if the cart's flow has an Apply promotions step; a code that doesn't apply, or a flow
+  without that step, is shown under the price, and the cart can still be submitted.
 - A SKU the store doesn't sell, or a line that is short of stock, shows its problem under the line.
   A policy the cart breaks (an order minimum, say) shows under the price.
 

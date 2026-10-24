@@ -167,6 +167,26 @@ describe('pricing a cart', () => {
   });
 });
 
+describe('promotion codes on a cart', () => {
+  it('keeps the codes, and says so when the cart’s flow never applies them', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 1 });
+    expect(await cart(id).applyAs(ada, { op: 'promo_add', code: ' welcome15 ' })).toEqual({
+      ok: true,
+    });
+    const s = await state(id);
+    expect(s.cart!.promoCodes).toEqual(['WELCOME15']);
+    expect(s.cart!.issues).toContainEqual(
+      expect.objectContaining({ kind: 'warning', code: 'promotion', path: '$.promoCodes' }),
+    );
+    // A warning doesn't stop the cart from being submitted.
+    expect(isQuoteCurrent(s.cart!)).toBe(true);
+    await cart(id).applyAs(ada, { op: 'promo_remove', code: 'WELCOME15' });
+    expect((await state(id)).cart!.issues.filter((i) => i.code === 'promotion')).toEqual([]);
+  });
+});
+
 describe('the cart socket', () => {
   it('refuses a request without a live principal, and an unknown cart', async () => {
     const id = await open();

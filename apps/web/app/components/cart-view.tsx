@@ -279,6 +279,12 @@ export function CartView({
                   ))}
               </ul>
             ) : null}
+            <Promos
+              codes={cart.promoCodes}
+              editable={editable}
+              onAdd={(code) => apply({ op: 'promo_add', code })}
+              onRemove={(code) => apply({ op: 'promo_remove', code })}
+            />
           </Section>
         </div>
 
@@ -554,6 +560,71 @@ function Chat({
         </Button>
       </form>
     </Section>
+  );
+}
+
+/** The cart's promotion codes, and a box to add one while it is open. */
+function Promos({
+  codes,
+  editable,
+  onAdd,
+  onRemove,
+}: {
+  codes: string[];
+  editable: boolean;
+  onAdd: (code: string) => Promise<Result | null>;
+  onRemove: (code: string) => Promise<Result | null>;
+}) {
+  const [code, setCode] = useState('');
+  if (!codes.length && !editable) return null;
+  return (
+    <div className="mt-4 border-t pt-3">
+      <h3 className="caption mb-1.5">Promotion codes</h3>
+      {codes.length ? (
+        <ul className="mb-2 flex flex-wrap gap-1.5 text-sm">
+          {codes.map((c) => (
+            <li
+              key={c}
+              className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono"
+            >
+              {c}
+              {editable ? (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={`Remove ${c}`}
+                  onClick={() => void onRemove(c)}
+                >
+                  ×
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {editable ? (
+        <form
+          className="flex gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if ((await onAdd(code))?.ok) setCode('');
+          }}
+        >
+          <Input
+            aria-label="Promotion code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="WELCOME15"
+            maxLength={32}
+            autoCapitalize="characters"
+            className="h-8 w-44 font-mono uppercase"
+          />
+          <Button type="submit" size="sm" variant="outline" disabled={!code.trim()}>
+            Apply
+          </Button>
+        </form>
+      ) : null}
+    </div>
   );
 }
 
