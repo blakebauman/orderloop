@@ -1,6 +1,11 @@
 /**
- * Listing indexes: one ListingIndexer Durable Object per channel and category keeps who is listed
- * there, and rebuilds the category's binary index (core's listing index) into R2 for catalog-edge.
+ * Listing indexes: every channel's category listing is split by product key into LISTING_SEGMENTS
+ * segments (`listingSegment`), and one ListingIndexer Durable Object per channel, category and
+ * segment keeps who is listed in it and rebuilds that segment's binary index (core's listing
+ * index) into R2 for catalog-edge, which merges the segments per query. Splitting keeps every
+ * build a fraction of the category: one object holding a million-member root category spent 30 s
+ * and more per rebuild, queued the changes arriving meanwhile until they were refused, and near a
+ * million members was reset mid-build for overrunning storage.
  *
  * The shards' publisher sends a ListingChange per product and channel to the changes queue. The
  * consumer (`applyChanges`) expands categories to their ancestors (a product in Tees is listed in
@@ -11,7 +16,7 @@
  * Members are stored normalized (a row per member, per term value, per number), and a build streams
  * them column by column into ListingIndexBuilder, so a category of a million members builds without
  * ever holding a million objects. Builds wait at least `debounceMs(members)` after the last one
- * (15 s, longer for a large category, whose build costs more), so a feed touching a category ten
+ * (15 s, longer for a large segment, whose build costs more), so a feed touching a category ten
  * thousand times rebuilds it a handful of times. A change that leaves a member's entry as it was (a
  * new description, say: most changes reach the root categories this way) doesn't rebuild at all.
  */
@@ -20,6 +25,7 @@ import {
   DOC_FORMAT,
   type IndexEntry,
   ListingIndexBuilder,
+  listingSegment,
   listingSpec,
   paths,
   type SearchEntry,
@@ -162,20 +168,25 @@ export async function sendChanges(
 export const changesIn = (body: unknown): ListingChange[] =>
   Array.isArray(body) ? (body as ListingChange[]) : [body as ListingChange];
 
-/** Routes a batch of changes to the listings they touch, one call per listing. */
+/** Routes a batch of changes to the listing segments they touch, one call per segment. */
 export async function applyChanges(env: Env, changes: ListingChange[]): Promise<void> {
   const parents = await categoryParents(env);
-  const groups = new Map<string, { channel: string; category: string; items: Item[] }>();
-  const push = (channel: string, category: string, item: Item) => {
-    const id = `${channel}:${category}`;
-    const g = groups.get(id) ?? { channel, category, items: [] };
+  const groups = new Map<
+    string,
+    { channel: string; category: string; segment: number; items: Item[] }
+  >();
+  const push = (channel: string, category: string, segment: number, item: Item) => {
+    const id = `${channel}:${category}:${segment}`;
+    const g = groups.get(id) ?? { channel, category, segment, items: [] };
     g.items.push(item);
     groups.set(id, g);
   };
   for (const c of changes) {
+    // A product is in the same segment of every listing it enters or leaves.
+    const segment = listingSegment(c.key);
     const now = withAncestors(c.entry?.categories ?? [], parents);
     for (const category of now)
-      push(c.channel, category, {
+      push(c.channel, category, segment, {
         key: c.key,
         at: c.at,
         rev: c.rev,
@@ -184,11 +195,16 @@ export async function applyChanges(env: Env, changes: ListingChange[]): Promise<
       });
     for (const category of withAncestors(c.left, parents))
       if (!now.has(category))
-        push(c.channel, category, { key: c.key, at: c.at, rev: c.rev, entry: null });
+        push(c.channel, category, segment, { key: c.key, at: c.at, rev: c.rev, entry: null });
   }
   await Promise.all(
     [...groups.values()].map((g) =>
-      indexer(env, g.channel, g.category).apply(g.channel, g.category, g.items),
+      indexer(env, g.channel, g.category, g.segment).apply(
+        g.channel,
+        g.category,
+        g.segment,
+        g.items,
+      ),
     ),
   );
 }
@@ -233,12 +249,13 @@ export class ListingIndexer extends DurableObject<Env> {
     this.sql.exec('DELETE FROM nums WHERE uid = ?', uid);
   }
 
-  async apply(channel: string, category: string, items: Item[]): Promise<void> {
+  async apply(channel: string, category: string, segment: number, items: Item[]): Promise<void> {
     let changed = false;
     this.ctx.storage.transactionSync(() => {
       if (!this.setting('channel')) {
         this.set('channel', channel);
         this.set('category', category);
+        this.set('segment', segment);
       }
       let rev = Number(this.setting('rev') ?? 0);
       for (const item of items) {
@@ -300,7 +317,7 @@ export class ListingIndexer extends DurableObject<Env> {
     return debounceMs(Number(this.setting('members') ?? 0));
   }
 
-  /** Listed members (tests and status). */
+  /** Listed members in this segment (tests and status). */
   count(): number {
     return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM members WHERE live = 1').one().n;
   }
@@ -310,6 +327,10 @@ export class ListingIndexer extends DurableObject<Env> {
     if (this.setting('dirty') !== '1') return;
     const channelCode = this.setting('channel') ?? '';
     const category = this.setting('category') ?? '';
+    const segment = Number(this.setting('segment') ?? Number.NaN);
+    // An indexer named before listings were segmented holds a whole category: it is abandoned
+    // (a reindex fills the segments), so it publishes nothing.
+    if (!Number.isInteger(segment)) return;
     const config = await configAt(this.env, Number(this.setting('rev') ?? 0));
     const channel = config.channels.find((c) => c.code === channelCode);
     // A channel that no longer exists keeps its last index; nothing new to build for it.
@@ -319,7 +340,7 @@ export class ListingIndexer extends DurableObject<Env> {
     this.set('dirty', 0);
     const bytes = this.build(spec, builtAt);
     const members = this.count();
-    await this.env.PUBLISHED.put(paths.listing(DOC_FORMAT, channelCode, category), bytes, {
+    await this.env.PUBLISHED.put(paths.listing(DOC_FORMAT, channelCode, category, segment), bytes, {
       httpMetadata: { contentType: 'application/octet-stream' },
       customMetadata: { members: String(members), builtAt: String(builtAt) },
     });
@@ -334,12 +355,15 @@ export class ListingIndexer extends DurableObject<Env> {
     const b = new ListingIndexBuilder(spec, builtAt);
     const n = this.count();
     const ids = new Uint32Array(n);
+    const created = new Float64Array(n);
     let i = 0;
-    for (const r of this.sql.exec<{ uid: number }>(
-      'SELECT uid FROM members WHERE live = 1 ORDER BY created_at DESC, uid',
-    ))
+    for (const r of this.sql.exec<{ uid: number; created_at: number }>(
+      'SELECT uid, created_at FROM members WHERE live = 1 ORDER BY created_at DESC, uid',
+    )) {
+      created[i] = r.created_at;
       ids[i++] = r.uid;
-    b.ids(ids);
+    }
+    b.ids(ids, created);
     // uid → member number, by binary search over the uids in ascending order.
     const order = new Uint32Array(n);
     for (let j = 0; j < n; j++) order[j] = j;
@@ -393,7 +417,8 @@ export class ListingIndexer extends DurableObject<Env> {
         counts[m] = r.c;
         total += r.c;
       }
-      if (!total) continue;
+      // A sort's column is written even empty, so the segment offers the sort (see the builder).
+      if (!total && !spec.sorts.includes(attr)) continue;
       const offsets = new Uint32Array(n + 1);
       for (let j = 0; j < n; j++) offsets[j + 1] = (offsets[j] as number) + (counts[j] as number);
       const flat = new Float64Array(total);

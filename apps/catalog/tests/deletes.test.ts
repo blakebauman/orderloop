@@ -1,5 +1,5 @@
 import { env, exports } from 'cloudflare:workers';
-import { DOC_FORMAT, paths } from '@orderloop/core/product';
+import { DOC_FORMAT, LISTING_SEGMENTS, paths } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { SearchApi } from '../src/search';
 import { alias, api, by, doc, product, settle, setup } from './helpers';
@@ -61,7 +61,13 @@ describe('deleting categories', () => {
       ok: false,
       issues: ['del-busy: 1 products are filed in it'],
     });
+    // Leftover listing segments (from products since moved out) go with the category.
+    const leftover = [0, LISTING_SEGMENTS - 1].map((s) =>
+      paths.listing(DOC_FORMAT, 'web', 'del-leaf', s),
+    );
+    for (const k of leftover) await env.PUBLISHED.put(k, new Uint8Array(8));
     const gone = await api.deleteCategories(['del-leaf', 'del-root'], by);
+    for (const k of leftover) expect(await env.PUBLISHED.head(k)).toBeNull();
     expect(gone.ok && [...gone.deleted].sort()).toEqual(['del-leaf', 'del-root']);
     const tree = await env.PUBLISHED.get(paths.categories(DOC_FORMAT, 'web', 'en'));
     if (!tree) throw new Error('no category tree');

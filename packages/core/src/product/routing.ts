@@ -8,6 +8,12 @@
 export const PRODUCT_SHARDS = 64;
 /** Keyword search shards. Derived data: changing this needs a search rebuild, nothing more. */
 export const SEARCH_SHARDS = 16;
+/**
+ * Segments every category listing is split into, each built by its own indexer and published as
+ * its own blob. Derived data, but frozen with the shard counts: changing it (or `listingSegment`)
+ * strands every built segment, so it needs a full listing rebuild (a reindex).
+ */
+export const LISTING_SEGMENTS = 8;
 
 const encoder = new TextEncoder();
 let scratch = new Uint8Array(256);
@@ -68,6 +74,11 @@ export function productUid(shard: number, seq: number): number {
 /** The search shard indexing product `key`. */
 export function searchShard(key: string): number {
   return mod64(`s:${key}`, SEARCH_SHARDS);
+}
+
+/** The listing segment product `key` is indexed in, in every category it lists in. Frozen. */
+export function listingSegment(key: string): number {
+  return mod64(`l:${key}`, LISTING_SEGMENTS);
 }
 
 /**

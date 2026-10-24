@@ -1,6 +1,15 @@
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { DOC_FORMAT, ListingIndex, paths } from '@orderloop/core/product';
+import {
+  DOC_FORMAT,
+  LISTING_SEGMENTS,
+  ListingIndex,
+  type ListingQuery,
+  listingLabels,
+  listingSegment,
+  paths,
+  queryListing,
+} from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   applyChanges,
@@ -28,23 +37,52 @@ beforeAll(async () => {
   if (!r.ok) throw new Error(r.issues.join('; '));
 });
 
-const indexer = (category: string) => env.LISTINGS.getByName(`web:${category}`);
+const indexer = (category: string, segment: number) =>
+  env.LISTINGS.getByName(`web:${category}:${segment}`);
+const SEGMENTS = Array.from({ length: LISTING_SEGMENTS }, (_, s) => s);
+
+/** Members listed in `category`, over all its segments. */
+const members = async (category: string) =>
+  (await Promise.all(SEGMENTS.map((s) => indexer(category, s).count()))).reduce((a, b) => a + b);
+
+type Listing = {
+  n: number;
+  /** Each segment's index, null where none was built. */
+  segments: (ListingIndex | null)[];
+  query: (q: ListingQuery) => ReturnType<typeof queryListing>;
+};
 
 /**
- * Waits for the changes queue to bring `category` to `n` members, then for an index of those `n`.
- * The indexer's first alarm is due at once, so miniflare may already be running it: run it when
- * it's pending, and read the index only once its recorded member count is right.
+ * Waits for the changes queue to bring `category` to `n` members, then for every segment's index
+ * of its members. An indexer's first alarm is due at once, so miniflare may already be running
+ * it: run each when it's pending, and read a segment only once its recorded member count is right.
  */
-async function listing(category: string, n: number): Promise<ListingIndex> {
-  for (let i = 0; i < 200 && (await indexer(category).count()) !== n; i++)
+async function listing(category: string, n: number): Promise<Listing> {
+  for (let i = 0; i < 200 && (await members(category)) !== n; i++)
     await new Promise((r) => setTimeout(r, 50));
-  expect(await indexer(category).count()).toBe(n);
+  expect(await members(category)).toBe(n);
   for (let i = 0; i < 200; i++) {
-    await runDurableObjectAlarm(indexer(category));
-    const object = await env.PUBLISHED.get(paths.listing(DOC_FORMAT, 'web', category));
-    if (object?.customMetadata?.members === String(n))
-      return new ListingIndex(await object.arrayBuffer());
-    await object?.body.cancel();
+    const read = await Promise.all(
+      SEGMENTS.map(async (s) => {
+        const stub = indexer(category, s);
+        const count = await stub.count();
+        await runDurableObjectAlarm(stub);
+        const object = await env.PUBLISHED.get(paths.listing(DOC_FORMAT, 'web', category, s));
+        if (!object) return count === 0 ? { index: null } : null;
+        if (object.customMetadata?.members === String(count))
+          return { index: new ListingIndex(await object.arrayBuffer()) };
+        await object.body.cancel();
+        return null;
+      }),
+    );
+    if (read.every((r) => r !== null)) {
+      const segments = read.map((r) => r?.index ?? null);
+      return {
+        n: segments.reduce((a, x) => a + (x?.n ?? 0), 0),
+        segments,
+        query: (q) => queryListing(segments, q),
+      };
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error(`no index of ${n} for ${category}`);
@@ -75,13 +113,41 @@ describe('listing indexes', () => {
       await uidOf(wool.key),
     ]);
     // Labels come from the type, per locale.
-    expect(caps.labels.fr?.values.material).toEqual({ cotton: 'Coton' });
+    expect(listingLabels(caps.segments).fr?.values.material).toEqual({ cotton: 'Coton' });
+  });
+
+  it('splits a listing into segments by key, each published on its own, merged newest first', async () => {
+    const r = await api.putCategories([{ code: 'seg-test', name: { en: 'Segments' } }], by);
+    if (!r.ok) throw new Error(r.issues.join('; '));
+    const products = Array.from({ length: 24 }, () => product({ categories: ['seg-test'] }));
+    await api.putProducts(products, { by });
+    await settle();
+    const seg = await listing('seg-test', 24);
+    // Each product is in its key's segment, and only there.
+    for (const p of products) {
+      const uid = await uidOf(p.key);
+      for (const [s, index] of seg.segments.entries()) {
+        const held = index ? Array.from({ length: index.n }, (_, i) => index.uid(i)) : [];
+        expect(held.includes(uid)).toBe(s === listingSegment(p.key));
+      }
+    }
+    expect(seg.segments.filter((s) => s?.n).length).toBeGreaterThan(1);
+    // Pages of five over every segment hold every product once.
+    const seen: number[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = seg.query({ limit: 5, cursor });
+      seen.push(...page.uids);
+      cursor = page.next;
+    } while (cursor);
+    expect(new Set(seen).size).toBe(24);
+    expect(seen.sort()).toEqual((await Promise.all(products.map((p) => uidOf(p.key)))).sort());
   });
 
   it('moves a product between listings, and drops it when it stops being listed', async () => {
-    const caps = await indexer('caps').count();
-    const hats = await indexer('hats').count();
-    const shop = await indexer('shop').count();
+    const caps = await members('caps');
+    const hats = await members('hats');
+    const shop = await members('shop');
     const p = product({ categories: ['caps'] });
     await api.putProducts([p], { by });
     await settle();
@@ -103,7 +169,7 @@ describe('listing indexes', () => {
   });
 
   it('keeps the latest change when changes arrive out of order', async () => {
-    const stub = indexer('order-test');
+    const stub = indexer('order-test', 0);
     const entry = {
       key: 'x',
       uid: 9,
@@ -113,18 +179,20 @@ describe('listing indexes', () => {
       numbers: {},
       createdAt: 1,
     };
-    await stub.apply('web', 'order-test', [{ key: 'x', at: 200, entry }]);
+    await stub.apply('web', 'order-test', 0, [{ key: 'x', at: 200, entry }]);
     // An older removal, delivered late, changes nothing.
-    await stub.apply('web', 'order-test', [{ key: 'x', at: 100, entry: null }]);
+    await stub.apply('web', 'order-test', 0, [{ key: 'x', at: 100, entry: null }]);
     expect(await stub.count()).toBe(1);
     // A newer removal takes it out; an older listing delivered after it can't bring it back.
-    await stub.apply('web', 'order-test', [{ key: 'x', at: 300, entry: null }]);
-    await stub.apply('web', 'order-test', [{ key: 'x', at: 250, entry }]);
+    await stub.apply('web', 'order-test', 0, [{ key: 'x', at: 300, entry: null }]);
+    await stub.apply('web', 'order-test', 0, [{ key: 'x', at: 250, entry }]);
     expect(await stub.count()).toBe(0);
   });
 });
 
 describe('build pacing', () => {
+  // The segment applyChanges routes key `y` to.
+  const pace = () => indexer('pace-test', listingSegment('y'));
   const entry = (version: number, price: number) => ({
     key: 'y',
     uid: 11,
@@ -149,7 +217,7 @@ describe('build pacing', () => {
   });
 
   it('schedules the next build by the size of the last one', async () => {
-    await runInDurableObject(indexer('pace-test'), async (o) => {
+    await runInDurableObject(pace(), async (o) => {
       // No test delay here, so the debounce alone decides.
       const self = o as unknown as { env: Env };
       self.env = { ...self.env, LISTING_DELAY_MS: '0' } as Env;
@@ -157,28 +225,38 @@ describe('build pacing', () => {
       put(o, 'built', builtAt);
       put(o, 'members', 2_000_000);
       await storage(o).deleteAlarm();
-      await o.apply('web', 'pace-test', [{ key: 'y', at: 1, entry: entry(1, 100) }]);
+      await o.apply('web', 'pace-test', listingSegment('y'), [
+        { key: 'y', at: 1, entry: entry(1, 100) },
+      ]);
       expect(await storage(o).getAlarm()).toBe(builtAt + 100_000);
       put(o, 'members', 10);
       await storage(o).deleteAlarm();
-      await o.apply('web', 'pace-test', [{ key: 'y', at: 2, entry: entry(2, 200) }]);
+      await o.apply('web', 'pace-test', listingSegment('y'), [
+        { key: 'y', at: 2, entry: entry(2, 200) },
+      ]);
       expect(await storage(o).getAlarm()).toBe(builtAt + DEBOUNCE_MS);
       await storage(o).deleteAlarm();
     });
   });
 
   it('skips a rebuild for a change that leaves the entry as it was', async () => {
-    await runInDurableObject(indexer('pace-test'), async (o) => {
+    await runInDurableObject(pace(), async (o) => {
       put(o, 'dirty', 0);
       // A new version (a new description, say) listing as before: only `at` moves.
-      await o.apply('web', 'pace-test', [{ key: 'y', at: 3, entry: entry(3, 200) }]);
+      await o.apply('web', 'pace-test', listingSegment('y'), [
+        { key: 'y', at: 3, entry: entry(3, 200) },
+      ]);
       expect(dirty(o)).toBe('0');
       const at = storage(o).sql.exec<{ at: number }>('SELECT at FROM members WHERE key = ?', 'y');
       expect(at.one().at).toBe(3);
       // An older change can't undo it, and a new price rebuilds.
-      await o.apply('web', 'pace-test', [{ key: 'y', at: 2, entry: entry(2, 100) }]);
+      await o.apply('web', 'pace-test', listingSegment('y'), [
+        { key: 'y', at: 2, entry: entry(2, 100) },
+      ]);
       expect(dirty(o)).toBe('0');
-      await o.apply('web', 'pace-test', [{ key: 'y', at: 4, entry: entry(4, 300) }]);
+      await o.apply('web', 'pace-test', listingSegment('y'), [
+        { key: 'y', at: 4, entry: entry(4, 300) },
+      ]);
       expect(dirty(o)).toBe('1');
       await storage(o).deleteAlarm();
     });
@@ -187,7 +265,7 @@ describe('build pacing', () => {
   it('rebuilds for a reindex even when the entry is unchanged', async () => {
     // A reindex (a new document format, a new locale) changes what the index holds, not the
     // entries: its changes are forced, through applyChanges' grouping as well.
-    await runInDurableObject(indexer('pace-test'), async (o) => {
+    await runInDurableObject(pace(), async (o) => {
       put(o, 'dirty', 0);
     });
     await applyChanges(env, [
@@ -201,10 +279,28 @@ describe('build pacing', () => {
         search: null,
       },
     ]);
-    await runInDurableObject(indexer('pace-test'), async (o) => {
+    await runInDurableObject(pace(), async (o) => {
       expect(dirty(o)).toBe('1');
       await storage(o).deleteAlarm();
     });
+  });
+});
+
+describe('unsegmented indexers', () => {
+  it('publishes nothing from an indexer named before segments (no segment setting)', async () => {
+    const old = env.LISTINGS.getByName('web:legacy-test');
+    await runInDurableObject(old, async (o: ListingIndexer) => {
+      const sql = (o as unknown as { ctx: DurableObjectState }).ctx.storage.sql;
+      for (const [k, v] of [
+        ['channel', 'web'],
+        ['category', 'legacy-test'],
+        ['dirty', '1'],
+      ])
+        sql.exec('INSERT OR REPLACE INTO settings VALUES (?, ?)', k, v);
+      await o.alarm();
+    });
+    const listed = await env.PUBLISHED.list({ prefix: `idx/${DOC_FORMAT}/web/legacy-test` });
+    expect(listed.objects).toEqual([]);
   });
 });
 

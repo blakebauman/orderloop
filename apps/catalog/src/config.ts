@@ -49,8 +49,9 @@ function scope<T extends Rpc.DurableObjectBranded | undefined>(
 export const meta = (env: Env) => scope(env, env.META).getByName('meta');
 export const shard = (env: Env, n: number) => scope(env, env.SHARD).getByName(`shard-${n}`);
 export const feeds = (env: Env) => scope(env, env.FEEDS).getByName('feeds');
-export const indexer = (env: Env, channel: string, category: string) =>
-  scope(env, env.LISTINGS).getByName(`${channel}:${category}`);
+/** One segment of a channel's category listing (`listingSegment` picks a product's). */
+export const indexer = (env: Env, channel: string, category: string, segment: number) =>
+  scope(env, env.LISTINGS).getByName(`${channel}:${category}:${segment}`);
 export const searcher = (env: Env, n: number) => scope(env, env.SEARCH).getByName(`search-${n}`);
 export const publisher = (env: Env, shard: number, n: number) =>
   scope(env, env.PUBLISHERS).getByName(`pub-${shard}-${n}`);

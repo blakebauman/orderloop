@@ -24,8 +24,9 @@ export const paths = {
     `docs/${fmt}/${channel}/a/${encodeURIComponent(alias)}`,
   categories: (fmt: string, channel: string, locale: string) =>
     `docs/${fmt}/${channel}/${locale}/categories.json`,
-  listing: (fmt: string, channel: string, category: string) =>
-    `idx/${fmt}/${channel}/${category}.bin`,
+  /** One segment of a category's listing index (`listingSegment` picks a product's). */
+  listing: (fmt: string, channel: string, category: string, segment: number) =>
+    `idx/${fmt}/${channel}/${category}/${segment}.bin`,
   card: (fmt: string, channel: string, locale: string, uid: number) =>
     `c:${fmt}:${channel}:${locale}:${uid.toString(36)}`,
   /** KV: a product key's uid, so cards (keyed by uid) can be looked up by key. */

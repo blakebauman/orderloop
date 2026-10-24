@@ -27,7 +27,7 @@ inbound mail ── Email Routing ──email()───────────
 
 | Path | Role |
 |---|---|
-| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index and `listingSpec`, feed parsing and the `ProductCatalogRpc` contract. Where published objects live and their cache tags are the zod-free `@orderloop/core/product/paths` (`DOC_FORMAT`, the `CODE`, `LOCALE` and `SLUG` patterns, `BATCH_MAX`, `paths`, `tags`), and the listing index's decoder is the zod-free `@orderloop/core/product/listing` (`ListingIndex`); `catalog-edge` imports only those two. No bindings and no Cloudflare imports |
+| `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index and `listingSpec`, feed parsing and the `ProductCatalogRpc` contract. Where published objects live and their cache tags are the zod-free `@orderloop/core/product/paths` (`DOC_FORMAT`, the `CODE`, `LOCALE` and `SLUG` patterns, `BATCH_MAX`, `paths`, `tags`), and the listing index's decoder and merged query are the zod-free `@orderloop/core/product/listing` (`ListingIndex`, `queryListing`, the cursor functions and `LISTING_SEGMENTS`, re-exported from `routing.ts`, which imports nothing); `catalog-edge` imports only those two. No bindings and no Cloudflare imports |
 | `plugins/<id>` | Optional features, each its own Worker and D1 database, installed per deployment; see [Plugins](plugins.md). `plugins/example` is a test-only fixture |
 | `packages/plugin-sdk` (`@orderloop/plugin-sdk`) | What plugins are built with: `definePlugin` (the `PluginRpc` entrypoint), the `pluginContract` suite and `bundlePlugin` for tests; see [Plugins](plugins.md) |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
@@ -316,7 +316,7 @@ and purge queue with it and binds its `SearchApi` entrypoint for keyword search 
 | `putType`, `deleteType`, `listTypes` | Product types, through `CatalogMeta`. `deleteType` sums `CatalogShard.countUsing({ type })` over all 64 shards and refuses with `N products use <code>: delete or move them first`; else `CatalogMeta.deleteType` removes every version (`<code>: unknown type` when there were none) |
 | `putChannel`, `listChannels`, `putCategories`, `listCategories` | Channels and categories, through `CatalogMeta`. The writes answer with a `Result` (`{ ok: true, … }` or `{ ok: false, issues }`), as `putType` does |
 | `deleteChannel(code, by)` | `CatalogMeta.deleteChannel` first (the channel leaves the config, so no shard publishes to it again, and its category trees are deleted from R2; `<code>: unknown channel` when absent), then every shard runs `forgetChannel(code, 500)` until it answers 0: it deletes the channel's documents, alias pointers and `CARDS` entries for the `published` rows, sends `ListingChange`s with `entry: null`, `left` the categories and `search: null` (so the indexers and search shards drop them), and clears the rows. Last it sweeps the R2 prefixes `idx/f1/<code>/` and `docs/f1/<code>/`. Answers `{ ok, code, unpublished }`. Products keep their listing data, so re-adding the channel and a `reindex` republishes it |
-| `deleteCategories(codes, by)` | Refuses with `<code>: N products are filed in it` (counted over the shards by `countUsing({ category })`), or when `CatalogMeta.deleteCategories` does (`unknown category`; `<parent>: still the parent of <child>` for a child outside the set). Otherwise deletes them, republishes the tree in every channel and deletes their `idx/` listing in every channel. Answers `{ ok, deleted }` |
+| `deleteCategories(codes, by)` | Refuses with `<code>: N products are filed in it` (counted over the shards by `countUsing({ category })`), or when `CatalogMeta.deleteCategories` does (`unknown category`; `<parent>: still the parent of <child>` for a child outside the set). Otherwise deletes them, republishes the tree in every channel and deletes every segment of their `idx/` listing in every channel. Answers `{ ok, deleted }` |
 | `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part), records the feed in `CatalogFeeds` as `queued`, starts the `FeedImport` Workflow with the feed id as its instance id and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
 | `feedStatus(id)`, `listFeeds(limit)` | A feed's `FeedStatus` (`null` for an unknown id), or the most recent feeds first (20 by default, between 1 and 100) |
 | `reindex(by)` | Calls `republishAll` on all 64 shards, which queue every product not already waiting in their `outbox` for the publisher (so repeating it queues nothing twice), and answers `{ queued }`, the number of products on the shards. It waits for no publishing: each shard's alarm does that |
@@ -470,25 +470,39 @@ have a null `catalog_at`. See [Data model](data-model.md#product-catalog).
 
 ### Listing indexes
 
-A category page is answered from one binary blob per channel and category, built by the catalog and
-read by `catalog-edge` (format and builder in `packages/core/src/product/listing-index.ts`). Three
-parts:
+A category page is answered from `LISTING_SEGMENTS` (8) binary blobs per channel and category, built
+by the catalog and read by `catalog-edge` (format, builder and the merged query in
+`packages/core/src/product/listing-index.ts`). A product's key picks its segment
+(`listingSegment(key)`, FNV-1a of `l:<key>` mod 8, in `routing.ts`), the same in every category, and
+each segment has its own indexer and its own blob, so no single build or object grows with the whole
+category. The count and the hash are frozen by the golden tests in `product-routing.test.ts`:
+changing either strands every built segment and needs a full listing rebuild (a `reindex`).
+
+Why segments: on production's 1M-product scale test, one indexer holding the root category (all 1M
+members) took 30 to 36 seconds per rebuild (alarm p99). From about 600,000 members the change
+batches queued behind the rebuild until the object refused them (`Durable Object is overloaded`,
+292 errors), and at about 900,000, with changes still arriving, the rebuild overran storage and the
+object was reset, so the index stopped publishing until the feed ended. Leaf categories of up to
+250,000 were fine; the target is 10M products a category, which is 1.25M a segment.
+
+Four parts:
 
 - **What goes in.** `listingSpec(types, channel)` (`listing-spec.ts`) takes each type's latest
   version: term attributes are `brand` plus every filterable, non-localized attribute of kind `enum`,
   `multi_enum`, `bool`, `text` or `ref` (`TERM_KINDS`); numbers are `price` plus every filterable or sortable `number`, `money`, `measure` or `date` attribute;
   sorts are `price` plus the sortable ones among those; `buckets` are the edges an attribute declares; and
   `labels` hold attribute and value labels in each of the channel's locales. `ListingSpec.buckets`
-  and `labels` are stored in the blob (`ListingIndex.labels`), and a query that names no buckets counts
-  the stored ones.
+  and `labels` are stored in every segment's blob (`ListingIndex.labels`, `ListingIndex.buckets`);
+  a query that names no buckets counts the most recently built segment's, and its labels are the
+  listing's (`listingLabels`).
 - **Routing changes.** The catalog's queue consumer (`index.ts`) hands every batch of
   `orderloop-catalog-changes*` messages (the name carries a customer's suffix) to `applyChanges`
   (`listings.ts`), which expands each change's categories to their ancestors (`withAncestors`: a
   product in Tees is listed in Tops too) using the category tree from `CatalogMeta`, cached for 30
-  seconds in the isolate, and calls the `ListingIndexer` of each listing it enters or leaves once per
-  batch. A category that moved reaches its old listings only on a `reindex`. A failed batch retries
+  seconds in the isolate, and calls the `ListingIndexer` of each listing segment it enters or leaves
+  (the product key's segment, in each category) once per batch. A category that moved reaches its old listings only on a `reindex`. A failed batch retries
   whole; changes are idempotent.
-- **`ListingIndexer`** is a Durable Object per `<channel>:<category>` (`LISTINGS`, SQLite) with tables
+- **`ListingIndexer`** is a Durable Object per `<channel>:<category>:<segment>` (`LISTINGS`, SQLite) with tables
   `members` (key, uid, `at`, `created_at`, `live`, `sig`), `terms`, `nums` and `settings`. Changes arrive at
   least once and in any order, so a member keeps the change with the latest `at`; a removal is a
   tombstone (`live` 0) that stays 24 hours so a late older change can't bring the product back. A
@@ -496,18 +510,34 @@ parts:
   numbers, which is all the index uses) only moves `at`, unless the change is `forced` (a reindex,
 whose new document format, locale or labels change the index without changing the entry). A
   change that alters anything sets `dirty` and an alarm, at least `debounceMs(members)` after the
-  last build (a second per 20,000 members of the last build, at least `DEBOUNCE_MS`, 15 seconds, and
+  segment's last build (a second per 20,000 members of the last build, at least `DEBOUNCE_MS`, 15 seconds, and
   at most 5 minutes), so a feed that touches a category thousands of times rebuilds it a handful of times;
   changes during a build rebuild once more after the debounce. The build uses the config at the
   highest `rev` its changes carry (`ListingChange.rev`), from an isolate copy at most 2 seconds old.
   The alarm streams the members, ordered
-  newest first, into `ListingIndexBuilder` (ids, then each term value's members, then each numeric
-  column, counted per member with a `GROUP BY uid` and then filled in place, then `finish`) and puts `idx/f1/<channel>/<category>.bin` in `PUBLISHED` with custom
+  newest first (`created_at DESC, uid`), into `ListingIndexBuilder` (uids and their `createdAt`, then each term value's members, then each numeric
+  column, counted per member with a `GROUP BY uid` and then filled in place, then `finish`) and puts `idx/f1/<channel>/<category>/<segment>.bin` in `PUBLISHED` with custom
   metadata `members` and `builtAt`, and records `members` in `settings` for the next debounce. `buildListingIndex` is the same builder over an in-memory array
-  (tests). A channel that no longer exists keeps its last index.
+  (tests). A channel that no longer exists keeps its last index. The blob is format 2 (the header's
+  version; the decoder refuses any other): format 1 had no `createdAt` column, and its single-blob
+  objects and paths are simply abandoned, a `reindex` repopulating the segments.
+- **Querying.** `queryListing(segments, q)` runs the filters on every segment (`ListingIndex.scan`)
+  and adds up: `total` and each facet value's count are summed (then sorted by count, then value),
+  a range's `min` and `max` span the segments, and its buckets, counted with the same edges in each,
+  are summed. The page is a k-way merge of the segments' own orders by the sort key: `newest` is
+  `createdAt` descending, `<attr>_asc` a member's lowest value ascending and `<attr>_desc` its
+  highest descending (members without a value last either way, so a segment with no values for the
+  attribute is all last), each tie broken by `createdAt` descending and then uid, which is also the
+  order within a segment. The cursor is each segment's position in its order, in base 36 joined by `.`
+  (`0.0.0.0.0.0.0.0` is the first page; `encodeListingCursor`, `decodeListingCursor`), so a page
+  never skips or repeats a member. `next` is absent when no segment has another match. The sorts a
+  listing offers are those every present segment has (`listingSorts`): the builder writes a
+  sort's column even when a segment has no values for it, so a sort is missing only from a segment
+  not rebuilt since it was added.
 
 Measured in workerd (a measurement, not a guarantee): 50,000 members apply in about 0.8 seconds and
-build in about 0.11 seconds into a 1.2 MB index.
+build in about 0.11 seconds into a 1.2 MB index. That was one indexer per category; a segment
+builds an eighth of the category.
 
 ### Keyword search
 
@@ -621,7 +651,7 @@ deployment), with no `workers_dev` or preview URLs. It reads what the catalog pu
 | `skus/<sku>`, `slugs/<slug>` | The same document, found through the R2 alias pointer (`sku:<sku>`, `slug:<locale>:<slug>`) |
 | `products?keys=a,b` | `{ "products": [card or null, …] }`, in the order asked, for at most `BATCH_MAX` (100) distinct keys. Key to uid through KV `u:f1:<key>` (one bulk `get`), then cards `c:f1:<channel>:<locale>:<uid>` (a second) |
 | `categories` | The channel's category tree for that locale |
-| `categories/<code>/products` | One page of a category: `{ total, next, sorts, products, facets, ranges }`, filtered, sorted and faceted from the listing index, `products` being the cards in order. Query: `f.<attr>=a,b` (any of the values; attributes AND together), `r.<attr>=lo..hi` (either end may be empty), `sort` (`newest`, the default, or `<attr>_asc` / `<attr>_desc` for a sort the index has), `cursor` (`next` from the last page), `limit` (default 24, at most 100). At most 20 filters and 50 values a filter |
+| `categories/<code>/products` | One page of a category: `{ total, next, sorts, products, facets, ranges }`, filtered, sorted and faceted from the listing index, `products` being the cards in order. Query: `f.<attr>=a,b` (any of the values; attributes AND together), `r.<attr>=lo..hi` (either end may be empty), `sort` (`newest`, the default, or `<attr>_asc` / `<attr>_desc` for a sort the index has), `cursor` (`next` from the last page: an opaque string, exactly `LISTING_SEGMENTS` base-36 positions joined by `.`, no leading zeros; `next` is `null` on the last page), `limit` (default 24, at most 100). At most 20 filters and 50 values a filter |
 | `search?q=<words>` | One page of keyword search: `{ total, next, products }`, `products` being the cards in match order. Query: `q` (normalized by `normalizeQuery`; `400` without a word), `cursor` (an offset, `0` to `SEARCH_DEPTH - 1`, so `400` from 1,000; `next` is `null` once the last page or the depth is reached), `limit` (default 24, at most 100) |
 
 R2 is asked with `onlyIf` set to the request headers, so a revalidation whose `If-None-Match` still
@@ -642,16 +672,25 @@ document (a SKU or slug miss only `ch:<channel>`), `cats` and `ch:<channel>` on 
 **Search.** The gateway's canonical URL for `search` keeps the normalized `q` and drops `cursor=0` and the default `limit`. `Delivery.search` calls `env.CATALOG` (a service binding to the catalog's `SearchApi` entrypoint) for the page's uids, and in parallel, on the first page only, looks for an exact SKU: when the normalized query is one code-like word (`CODE`) it reads the SKU alias pointer in R2 for the query upper-cased and then as typed, and the uid in KV, and puts that product first (and removes it from its later place; `total` counts it once more when full-text search didn't match it). It then reads the cards in one bulk KV `get` (a missing card is skipped). The response carries the fresh `Cache-Control` and the tag `ch:<channel>`, so a channel's searches go in one purge. When a search shard fails, `SearchApi` leaves its matches out instead of failing the search (and logs the shard); the response then has `"partial": true` and is cached only 30 s, so the full answer replaces it soon. Search needs the catalog Worker to exist and be reachable; the other routes don't.
 
 **Listing pages.** The gateway's canonical URL for a listing sorts filters by attribute and values
-within each, joins them with `,`, and omits `sort=newest`, `cursor=0` and the default `limit`, so
-equivalent requests share one cache entry. `Delivery` loads the index through its own `/_idx/<channel>/<category>`
-path, called on itself so it goes through Workers Caching (`public, max-age=30, stale-while-revalidate=300`,
-tags `cat:<code>` and `ch:<channel>`); the gateway never routes `/_idx/`, so it is not public. Each
-isolate keeps decoded indexes (zero-copy views over the bytes) up to 32 MiB, least recently used out
-first; one is trusted for 30 seconds and then revalidated with its ETag, so an unchanged index is a
-`304` and nothing is downloaded or decoded again. Concurrent requests for one index share one load
-(a request waits on another's for at most 5 seconds, then loads it itself). An index whose
-`content-length` is over 64 MiB is never buffered: the page is `503` (`listing unavailable`,
-`MISSING`) and the size is logged. A page reads its cards from KV in one bulk `get` (a
+within each, joins them with `,`, and omits `sort=newest`, the first page's cursor
+(`0.0.0.0.0.0.0.0`) and the default `limit`, so equivalent requests share one cache entry; a cursor
+is accepted only in its one spelling. `Delivery` loads every segment of the listing in parallel, each through its own
+`/_idx/<channel>/<category>/<segment>` path, called on itself so it goes through Workers Caching
+(`public, max-age=30, stale-while-revalidate=300`, tags `cat:<code>` and `ch:<channel>`); the
+gateway never routes `/_idx/`, so it is not public. A segment that doesn't exist (a small category
+needn't have members in every one) counts as empty; a listing with no segment at all is unknown.
+Each isolate holds decoded listings (zero-copy views over the bytes) as a unit, every segment
+together, up to 32 MiB in all (`INDEX_LIMITS.budget`): other listings go out least recently used
+first, never a segment of the listing being kept, so a listing over the budget is held on its own
+rather than re-downloaded in part. A segment with no object is held too (an empty entry), so a small
+category doesn't ask for its empty segments on every request. A held segment is trusted for 30
+seconds and then revalidated with its ETag, so an unchanged segment is a `304` and nothing is
+downloaded or decoded again; an empty one is asked for again. Concurrent requests for one listing
+share one load (a request waits on another's for at most 5 seconds, then loads it itself). The
+internal path sends each segment's `content-length`, and a listing whose segments (held and
+fetched) add up to more than 64 MiB (`INDEX_LIMITS.max`) is never buffered: the page is `503`
+(`listing unavailable`, `MISSING`) and the size is logged. The bytes actually read are held to the
+same cap. A page reads its cards from KV in one bulk `get` (a
 card missing from KV is skipped) and returns facets (`{ attr: { label, values: [{ value, label, count }] } }`,
 the top 50 values by count, counted disjunctively over the whole result) and ranges
 (`{ attr: { label, min, max, buckets } }`), with labels in the request's locale (the code when none).
@@ -672,7 +711,7 @@ to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (
 development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent
 writes queue a purge.
 
-Bundle: about 32 KiB (9.4 KiB gzipped), because it imports only `@orderloop/core/product/paths`, `@orderloop/core/product/listing` (the zod-free index decoder) and `@orderloop/core/product/search` (the zod-free query helpers), never zod or the model.
+Bundle: about 10 KiB gzipped (segmented listings added about 1 KiB to the 9.4 it was), because it imports only `@orderloop/core/product/paths`, `@orderloop/core/product/listing` (the zod-free index decoder and merged query, with `LISTING_SEGMENTS`) and `@orderloop/core/product/search` (the zod-free query helpers), never zod or the model.
 
 ## Bindings
 
@@ -694,7 +733,7 @@ Bundle: about 32 KiB (9.4 KiB gzipped), because it imports only `@orderloop/core
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
-| `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite, migration tag `v3`), one per channel and category |
+| `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite, migration tag `v3`), one per channel, category and listing segment |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite, migration tag `v4`), 16 of them named `search-<n>` |
 | `PUBLISHERS` | catalog | Durable Object `CatalogPublisher` (SQLite, migration tag `v5`), `PUBLISH_FANOUT` per shard named `pub-<shard>-<n>`: the shards' storage writes |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
@@ -827,7 +866,7 @@ Durable Objects are reached only through `apps/engine/src/namespaces.ts`: `order
 | Product types, channels, categories | `CatalogMeta` |
 | Published product documents, category trees and listing indexes | R2 (`orderloop-catalog`) |
 | Published listing cards and key to uid entries | KV (`CARDS`) |
-| Who is listed in each category (members, terms, numbers) | `ListingIndexer`, one per channel and category |
+| Who is listed in each category (members, terms, numbers) | `ListingIndexer`, one per channel, category and listing segment |
 | Cache tags awaiting a purge; listing changes awaiting an indexer | The `orderloop-catalog-purge` and `orderloop-catalog-changes` queues |
 
 ## The assistant

@@ -9,7 +9,13 @@
  * through `purge`, called by the gateway's queue consumer.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { ListingIndex } from '@orderloop/core/product/listing';
+import {
+  LISTING_SEGMENTS,
+  ListingIndex,
+  listingLabels,
+  listingSorts,
+  queryListing,
+} from '@orderloop/core/product/listing';
 import { CODE, DOC_FORMAT, paths, tags } from '@orderloop/core/product/paths';
 import { SEARCH_DEPTH } from '@orderloop/core/product/search';
 import { parse, type Route } from './routes';
@@ -19,44 +25,86 @@ export const FRESH = 'public, max-age=60, stale-while-revalidate=86400, stale-if
 /** A miss is remembered briefly, so a product that appears is seen within half a minute. */
 export const MISSING = 'public, max-age=30';
 const JSON_TYPE = 'application/json; charset=utf-8';
-/** Listing indexes: rebuilt at most every 15 s (longer for large ones), so cached for 30. */
+/** Listing index segments: rebuilt at most every 15 s (longer for large ones), so cached for 30. */
 const INDEX_FRESH = 'public, max-age=30, stale-while-revalidate=300';
-/** Where Delivery fetches a listing index from itself, through the cache. Not a public route. */
+/**
+ * Where Delivery fetches a listing index segment from itself, through the cache
+ * (`/_idx/<channel>/<category>/<segment>`). Not a public route.
+ */
 const INDEX_PATH = '/_idx/';
-/** Decoded indexes an isolate keeps, by bytes (an isolate has 128 MB in all). */
-const INDEX_BUDGET = 32 * 1024 * 1024;
-/** The largest index an isolate will download and decode at all. */
-const INDEX_MAX = 64 * 1024 * 1024;
-/** How long an isolate trusts a decoded index before revalidating it. */
-const INDEX_TRUST_MS = 30_000;
-/** How long a request waits on another's load of the same index before loading it itself. */
+/**
+ * Listing index limits, mutable only so tests can shrink them. `budget`: decoded listings an
+ * isolate keeps, by bytes (an isolate has 128 MB in all). `max`: the most one listing's segments
+ * may add up to; a listing over it is never buffered. `trustMs`: how long a held segment is
+ * trusted before it is revalidated.
+ */
+export const INDEX_LIMITS = {
+  budget: 32 * 1024 * 1024,
+  max: 64 * 1024 * 1024,
+  trustMs: 30_000,
+};
+/** How long a request waits on another's load of the same listing before loading it itself. */
 const SHARED_LOAD_MS = 5_000;
 /** Facet values returned per attribute, most frequent first. */
 const FACET_VALUES = 50;
 /** Key → uid entries an isolate remembers (a uid never changes while its product exists). */
 const UID_ENTRIES = 50_000;
 
-type Held = { index: ListingIndex; etag: string; bytes: number; checked: number };
-const held = new Map<string, Held>();
+/** A held segment; `index` null for one with no object (an empty segment), held all the same. */
+type Held = { index: ListingIndex | null; etag: string; bytes: number; checked: number };
+/** A listing's held segments, and their bytes. Kept and evicted as a unit. */
+type HeldListing = { segments: Held[]; bytes: number };
+const held = new Map<string, HeldListing>();
 let heldBytes = 0;
-/** Index loads in flight, so concurrent requests for one category download it once. */
-const loading = new Map<string, Promise<ListingIndex | null>>();
+/** Listing loads in flight, so concurrent requests for one category download it once. */
+const loading = new Map<string, Promise<(ListingIndex | null)[] | null>>();
 const uidCache = new Map<string, number>();
 
 class IndexTooLarge extends Error {}
 
-function keep(id: string, h: Held) {
+/**
+ * Holds listing `id`, most recently used, and evicts other listings, least recently used first,
+ * until the budget fits. Never a segment of the listing being kept: one listing over the budget
+ * is held on its own rather than re-downloaded in part on every request.
+ */
+function keep(id: string, listing: HeldListing) {
   const old = held.get(id);
   if (old) heldBytes -= old.bytes;
   held.delete(id);
-  held.set(id, h);
-  heldBytes += h.bytes;
-  // Least recently used out first (a Map iterates in insertion order).
+  held.set(id, listing);
+  heldBytes += listing.bytes;
+  // A Map iterates in insertion order, so the least recently used come first.
   for (const [k, v] of held) {
-    if (heldBytes <= INDEX_BUDGET || k === id) break;
+    if (heldBytes <= INDEX_LIMITS.budget || k === id) break;
     held.delete(k);
     heldBytes -= v.bytes;
   }
+}
+
+function forget(id: string) {
+  const old = held.get(id);
+  if (!old) return;
+  held.delete(id);
+  heldBytes -= old.bytes;
+}
+
+/** What this isolate holds (tests): each listing's segments, and the bytes counted. */
+export function heldListings(): { bytes: number; listings: Map<string, Held[]> } {
+  return {
+    bytes: heldBytes,
+    listings: new Map([...held].map(([id, l]) => [id, l.segments.map((h) => ({ ...h }))])),
+  };
+}
+
+/** A listing's segments to query, or null when it has none at all. */
+function present(segments: Held[]): (ListingIndex | null)[] | null {
+  return segments.some((s) => s.index) ? segments.map((s) => s.index) : null;
+}
+
+/** Drops everything held (tests). */
+export function forgetListings() {
+  held.clear();
+  heldBytes = 0;
 }
 
 /** The catalog's SearchApi entrypoint, as this Worker calls it. */
@@ -232,13 +280,23 @@ export class Delivery extends WorkerEntrypoint<Env> {
     });
   }
 
-  /** A listing index's bytes from R2 (only ever asked for by `loadIndex`, through the cache). */
+  /** A listing index segment's bytes from R2 (only ever asked for by `fetchListing`, through the cache). */
   private async indexBlob(request: Request, url: URL): Promise<Response> {
-    const [channel = '', category = ''] = url.pathname.slice(INDEX_PATH.length).split('/');
-    if (!CODE.test(channel) || !CODE.test(category)) return new Response(null, { status: 404 });
-    const object = await this.env.PUBLISHED.get(paths.listing(DOC_FORMAT, channel, category), {
-      onlyIf: request.headers,
-    });
+    const parts = url.pathname.slice(INDEX_PATH.length).split('/');
+    const [channel = '', category = '', n = ''] = parts;
+    const segment = Number(n);
+    if (
+      parts.length !== 3 ||
+      !CODE.test(channel) ||
+      !CODE.test(category) ||
+      !/^(0|[1-9][0-9]*)$/.test(n) ||
+      segment >= LISTING_SEGMENTS
+    )
+      return new Response(null, { status: 404 });
+    const object = await this.env.PUBLISHED.get(
+      paths.listing(DOC_FORMAT, channel, category, segment),
+      { onlyIf: request.headers },
+    );
     const headers = {
       'cache-control': INDEX_FRESH,
       'cache-tag': [tags.category(category), tags.channel(channel)].join(','),
@@ -247,33 +305,48 @@ export class Delivery extends WorkerEntrypoint<Env> {
       return new Response(null, { status: 404, headers: { ...headers, 'cache-control': MISSING } });
     if (!('body' in object))
       return new Response(null, { status: 304, headers: { ...headers, etag: object.httpEtag } });
+    // The length up front, so `fetchListing` can refuse a listing over the cap before reading it.
     return new Response(object.body, {
-      headers: { ...headers, etag: object.httpEtag, 'content-type': 'application/octet-stream' },
+      headers: {
+        ...headers,
+        etag: object.httpEtag,
+        'content-type': 'application/octet-stream',
+        'content-length': String(object.size),
+      },
     });
   }
 
   /**
-   * A category's decoded index. Held per isolate, revalidated every 30 s through the cache with
-   * its ETag (an unchanged index is a 304: nothing is downloaded or decoded again).
+   * A category's decoded index segments, null where a segment has none (a small category needn't
+   * have members in every segment), or null when no segment exists at all. Held per isolate as a
+   * unit; a segment is revalidated through the cache with its ETag once it has been held 30 s (an
+   * unchanged one is a 304: nothing is downloaded or decoded again).
    */
-  private async loadIndex(channel: string, category: string): Promise<ListingIndex | null> {
+  private async loadListing(
+    channel: string,
+    category: string,
+  ): Promise<(ListingIndex | null)[] | null> {
     const id = `${channel}/${category}`;
     const h = held.get(id);
-    if (h && Date.now() - h.checked < INDEX_TRUST_MS) return h.index;
+    const now = Date.now();
+    if (h?.segments.every((s) => now - s.checked < INDEX_LIMITS.trustMs)) {
+      keep(id, h);
+      return present(h.segments);
+    }
     // Another request is loading it: wait for that (briefly; a load that fails or stalls, say
     // because its request was cancelled, is done again here).
     const inFlight = loading.get(id);
     if (inFlight) {
       const shared = await Promise.race([
         inFlight.then(
-          (index) => ({ index }),
+          (segments) => ({ segments }),
           () => null,
         ),
         scheduler.wait(SHARED_LOAD_MS).then(() => null),
       ]);
-      if (shared) return shared.index;
+      if (shared) return shared.segments;
     }
-    const load = this.fetchIndex(id, h);
+    const load = this.fetchListing(id, h);
     loading.set(id, load);
     try {
       return await load;
@@ -282,41 +355,73 @@ export class Delivery extends WorkerEntrypoint<Env> {
     }
   }
 
-  private async fetchIndex(id: string, h: Held | undefined): Promise<ListingIndex | null> {
+  /**
+   * Revalidates or downloads every segment not trusted any more, in parallel. The bodies are
+   * buffered only once the whole listing is known to fit `INDEX_LIMITS.max`, held segments
+   * included, so no listing ever takes the isolate's memory with it.
+   */
+  private async fetchListing(
+    id: string,
+    h: HeldListing | undefined,
+  ): Promise<(ListingIndex | null)[] | null> {
     const self = (this.ctx as unknown as { exports: { Delivery: Fetcher } }).exports.Delivery;
-    const r = await self.fetch(
-      new Request(`https://catalog.internal${INDEX_PATH}${id}`, {
-        headers: h ? { 'if-none-match': h.etag } : {},
+    const now = Date.now();
+    const answers = await Promise.all(
+      Array.from({ length: LISTING_SEGMENTS }, async (_, s) => {
+        const prior = h?.segments[s];
+        if (prior && now - prior.checked < INDEX_LIMITS.trustMs) return { prior, r: null };
+        const r = await self.fetch(
+          new Request(`https://catalog.internal${INDEX_PATH}${id}/${s}`, {
+            headers: prior?.etag ? { 'if-none-match': prior.etag } : {},
+          }),
+        );
+        return { prior, r };
       }),
     );
-    if (r.status === 304 && h) {
-      keep(id, { ...h, checked: Date.now() });
-      return h.index;
+    // A body already read or cancelled refuses to cancel again; that's fine.
+    const cancel = () =>
+      Promise.all(answers.map((a) => a.r?.body?.cancel().catch(() => undefined)));
+    let total = 0;
+    for (const { prior, r } of answers) {
+      if (!r || (r.status === 304 && prior)) total += prior?.bytes ?? 0;
+      else if (r.ok) total += Number(r.headers.get('content-length') ?? 0);
     }
-    if (!r.ok) {
-      // What is held now, not `h`: it may have been evicted (and its bytes counted off) meanwhile.
-      const cur = held.get(id);
-      if (cur) {
-        held.delete(id);
-        heldBytes -= cur.bytes;
-      }
-      return null;
+    if (total > INDEX_LIMITS.max) {
+      await cancel();
+      forget(id);
+      throw new IndexTooLarge(`listing index ${id} is ${total} bytes`);
     }
-    // Checked before buffering: an index this large would take the isolate's memory with it.
-    const length = Number(r.headers.get('content-length') ?? 0);
-    if (length > INDEX_MAX) {
-      await r.body?.cancel();
-      throw new IndexTooLarge(`listing index ${id} is ${length} bytes`);
-    }
-    const buffer = await r.arrayBuffer();
-    const index = new ListingIndex(buffer);
-    keep(id, {
-      index,
-      etag: r.headers.get('etag') ?? '',
-      bytes: buffer.byteLength,
-      checked: Date.now(),
+    const checked = Date.now();
+    let bytes = 0;
+    const segments = await Promise.all(
+      answers.map(async ({ prior, r }): Promise<Held> => {
+        if (!r) return prior as Held;
+        if (r.status === 304 && prior) return { ...prior, checked };
+        // No object: an empty segment, held so it isn't asked for again until revalidated.
+        // Anything else failed: empty this once, and asked for again next time.
+        if (!r.ok) {
+          await r.body?.cancel();
+          return { index: null, etag: '', bytes: 0, checked: r.status === 404 ? checked : 0 };
+        }
+        const buffer = await r.arrayBuffer();
+        // A body larger than its content-length said is still held to the cap.
+        bytes += buffer.byteLength;
+        if (bytes > INDEX_LIMITS.max)
+          throw new IndexTooLarge(`listing index ${id} is over the cap`);
+        return {
+          index: new ListingIndex(buffer),
+          etag: r.headers.get('etag') ?? '',
+          bytes: buffer.byteLength,
+          checked,
+        };
+      }),
+    ).catch(async (err) => {
+      await cancel();
+      forget(id);
+      throw err;
     });
-    return index;
+    keep(id, { segments, bytes: segments.reduce((n, s) => n + s.bytes, 0) });
+    return present(segments);
   }
 
   /** One page of a category: filtered, sorted, faceted over the whole result, cards in order. */
@@ -325,9 +430,9 @@ export class Delivery extends WorkerEntrypoint<Env> {
     route: Extract<Route, { kind: 'listing' }>,
   ): Promise<Response> {
     const cacheTags = [tags.category(route.category), tags.channel(route.channel)];
-    let index: ListingIndex | null;
+    let segments: (ListingIndex | null)[] | null;
     try {
-      index = await this.loadIndex(route.channel, route.category);
+      segments = await this.loadListing(route.channel, route.category);
     } catch (err) {
       if (!(err instanceof IndexTooLarge)) throw err;
       console.error(err.message);
@@ -335,25 +440,22 @@ export class Delivery extends WorkerEntrypoint<Env> {
         'cache-control': MISSING,
       });
     }
-    if (!index) return missing('no such category', cacheTags);
-    if (route.sort !== 'newest' && !index.sorts.includes(route.sort))
-      return json(
-        JSON.stringify({ error: 'unsupported sort', sorts: ['newest', ...index.sorts] }),
-        400,
-        {
-          'cache-control': MISSING,
-        },
-      );
-    const r = index.query({
+    if (!segments) return missing('no such category', cacheTags);
+    const sorts = listingSorts(segments);
+    if (route.sort !== 'newest' && !sorts.includes(route.sort))
+      return json(JSON.stringify({ error: 'unsupported sort', sorts: ['newest', ...sorts] }), 400, {
+        'cache-control': MISSING,
+      });
+    const r = queryListing(segments, {
       terms: route.terms,
       ranges: route.ranges,
       sort: route.sort,
-      cursor: route.cursor,
+      cursor: route.cursor ?? undefined,
       limit: route.limit,
     });
     const keys = r.uids.map((uid) => paths.card(DOC_FORMAT, route.channel, route.locale, uid));
     const cards = keys.length ? await this.env.CARDS.get(keys) : new Map<string, string | null>();
-    const labels = index.labels[route.locale];
+    const labels = listingLabels(segments)[route.locale];
     const facets = Object.fromEntries(
       Object.entries(r.terms).map(([attr, counts]) => [
         attr,
@@ -376,7 +478,7 @@ export class Delivery extends WorkerEntrypoint<Env> {
     // Cards are stored serialized: join them as they are (a card missing from KV is skipped).
     const products = keys.map((k) => cards.get(k)).filter((c): c is string => !!c);
     const body =
-      `{"total":${r.total},"next":${r.next ?? 'null'},"sorts":${JSON.stringify(['newest', ...index.sorts])},` +
+      `{"total":${r.total},"next":${r.next ? JSON.stringify(r.next) : 'null'},"sorts":${JSON.stringify(['newest', ...sorts])},` +
       `"products":[${products.join(',')}],"facets":${JSON.stringify(facets)},"ranges":${JSON.stringify(ranges)}}`;
     return assembled(request, body, { 'cache-control': FRESH, 'cache-tag': cacheTags.join(',') });
   }
