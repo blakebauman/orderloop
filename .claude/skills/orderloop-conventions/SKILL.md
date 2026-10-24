@@ -53,7 +53,7 @@ The ones that need judgement, in the order reviews most often find them broken:
 2. **Idempotency.** Connector writes keyed by step key; compensations idempotent; agent updates
    idempotent; plugin writes keyed by order id + step key.
 3. **Boundaries.** core has no `env`; web never imports engine source; catalog-edge imports core
-   only via `@orderloop/core/product/paths`; the core never imports plugin code.
+   only through zod-free subpaths (`product/paths`, `product/listing`, `product/search`); the core never imports plugin code.
 4. **Trust.** The engine trusts only a principal signed for that path and unexpired; UCP
    platforms act only on their own checkouts; `/mcp` and `/a2a` tokens are not interchangeable.
    See the `security-model` skill.
