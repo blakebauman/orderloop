@@ -194,6 +194,8 @@ ended, or one that is already being cancelled, does nothing. Otherwise OrderLoop
    shipments consumed once none is live, voids its unpaid Stripe invoices (a paid one is left
    alone and named in the timeline), reverses its on-account invoice charges, revokes its
    issued digital codes, cancels its seller orders and reverses its scheduled payouts;
+   If a shipping provider cannot void a label, the shipment is not marked cancelled and the
+   timeline says how many labels could not be voided with their provider;
 3. marks pending approvals `cancelled` and clears the order's waits;
 4. sets the status to `cancelled`, with the reason and the counts in the timeline;
 5. sends the `order.cancelled` [outbound webhook](/guides/outbound-webhooks/).
