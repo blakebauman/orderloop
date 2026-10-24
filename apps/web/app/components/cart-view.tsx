@@ -299,6 +299,13 @@ export function CartView({
             )}
           </Section>
           <Chat
+            title={
+              guest
+                ? 'Chat with your supplier'
+                : cart.external
+                  ? 'Chat · the buyer sees it'
+                  : 'Chat'
+            }
             messages={state.chat}
             myId={meId}
             onSay={(body) => call<{ ok: true; id: string }>('say', [body])}
@@ -419,6 +426,7 @@ function AddLine({
 }
 
 function Chat({
+  title,
   messages,
   myId,
   onSay,
@@ -426,6 +434,8 @@ function Chat({
   onDelete,
   onOlder,
 }: {
+  /** Says who reads it: an external cart's chat is shared with its buyer. */
+  title: string;
   messages: CartChatMessage[];
   myId: string | null;
   onSay: (body: string) => Promise<{ ok: true; id: string } | { ok: false; error: string } | null>;
@@ -445,7 +455,7 @@ function Chat({
   }, [last]);
 
   return (
-    <Section title="Chat" flush>
+    <Section title={title} flush>
       <ol className="grid max-h-[28rem] gap-3 overflow-y-auto p-4 text-sm" aria-live="polite">
         {shown.length >= CART_CHAT_BROADCAST && !noMore ? (
           <li>
