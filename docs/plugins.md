@@ -68,6 +68,7 @@ The manifest (`pluginManifestSchema`) has:
 | `requires` | Ids of plugins that must also be installed |
 | `pageRole` | The least role that may open the plugin's pages and see its nav entries; default `operator` |
 | `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
+| `secrets` | Up to 20 `{ name, description?, optional? }`: env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
 
 A manifest over `PLUGIN_MANIFEST_MAX_BYTES` (64 KiB) serialized is refused.
 
@@ -120,6 +121,9 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
     bound to the request path) and checked `pageRole`: `401` without a valid principal, `403` below
     the role. The principal has `kind`, `id`, `name`, `role` and `email` but no session id. On a
     `publicPaths` entry it runs with `principal: null`, so authenticate the caller yourself.
+  - `manifest()` throws while a declared secret not marked `optional` is missing or empty in env
+    (`missingSecrets`), naming the `PLUGIN_<ID>_<NAME>` to set, so the engine leaves the plugin out
+    and deep health fails until it is set.
     The page runs no script (see [Limits and hardening](#limits-and-hardening)); render HTML whose links and
     forms come back to `/plugins/<id>/`.
 - `migrations/`: the plugin's own D1 migrations. As with the core's, they must work with the code
@@ -178,6 +182,9 @@ pnpm --filter @orderloop/plugin-example exec wrangler d1 migrations apply DB --l
 ORDERLOOP_DEV_PLUGINS=example pnpm web:dev
 ```
 
+A plugin's secrets in dev go in `plugins/<id>/.dev.vars` (git-ignored), under their own names
+(`PING_TOKEN=…`), which the auxiliary Worker reads next to its `wrangler.jsonc`.
+
 ### Idempotency
 
 The engine retries steps and replays Workflows, and the outbox redelivers. A plugin must tolerate
@@ -208,7 +215,8 @@ If the plugin calls an external system, pass that system the same key.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
 3. Merge. CI's deploy job (`.github/workflows/deploy.yml`) renders `plugins/<id>/wrangler.<deployment>.json`,
    writes one secrets file per plugin (`fleet.ts secrets plugin <out> <plugin>`), holding that
-   plugin's own `PLUGIN_KEY` and, during a rotation, `PLUGIN_KEY_PREVIOUS`; then in the **Deploy
+   plugin's own `PLUGIN_KEY`, during a rotation `PLUGIN_KEY_PREVIOUS`, and its own secrets
+   ([Secrets](#secrets)); then in the **Deploy
    plugins** step applies each plugin's D1 migrations and deploys its Worker with its file, all
    before the engine, because the engine and web Worker bind
    to it. The engine's and web Worker's configs gain a service binding per plugin.
@@ -220,6 +228,26 @@ page requests with it, so the engine and every other plugin, which hold other ke
 principal signed for this one, and a plugin can't sign requests to them. Rotating `PRINCIPAL_KEY`
 ([Operations](operations.md#rotating-the-principal-key)) rotates every plugin's key too, with
 `PLUGIN_KEY_PREVIOUS` covering the gap.
+
+### Secrets
+
+A plugin that calls another service declares the secrets it reads in its manifest's `secrets`, and
+each deployment sets them in its GitHub environment (`deploy-<id>`) as `PLUGIN_<ID>_<NAME>`
+(`pluginSecretVar`): `API_KEY` of `shipstation` is `PLUGIN_SHIPSTATION_API_KEY`. The deploy's
+**Collect plugin secrets** step, which runs only when the deployment installs a plugin, reads the
+environment's secrets (`toJSON(secrets)`, as `ENV_SECRETS`), and `pluginOwnSecrets` hands each
+plugin those with its own prefix, under `<NAME>`: never another plugin's, nor the core's. A
+`PLUGIN_<ID>_` secret whose name isn't a secret name, or is reserved, fails the deploy.
+
+- Two installed plugins whose ids would share a prefix (`ship` and `ship-rates`:
+  `PLUGIN_SHIP_RATES_X` is both `ship`'s `RATES_X` and `ship-rates`'s `X`) are refused by
+  `loadDeployments`.
+- A required secret that is not set doesn't stop the deploy itself, but the plugin's `manifest()`
+  then fails, so `/health/deep` does and the smoke test rolls the deploy back, naming the secret.
+- `--secrets-file` adds and replaces, and never removes: deleting a secret from the environment
+  leaves its last value on the Worker. To revoke one, rotate it at the service that issued it.
+- Secret values never reach the engine or the web app. The Plugins page shows each declared
+  secret's environment name and description, not its value.
 
 A plugin's first deploy has no earlier version to roll back to; a failed deploy rolls back the plugins
 that did deploy, with the rest.
@@ -280,8 +308,8 @@ throws when the plugin is gone, since there is nothing to undo it with.
   them add no step.
 - A plugin's pages load as whole documents (`reloadDocument`), not as app routes, and it can't
   import app code.
-- What a plugin can reach is bounded on each side. Its Worker holds `PLUGIN_KEY` and its own D1
-  database only (`PLUGIN_CONFIG_KEYS`, above); the key opens only requests signed for that plugin.
+- What a plugin can reach is bounded on each side. Its Worker holds `PLUGIN_KEY`, the secrets
+  named for it ([Secrets](#secrets)) and its own D1 database only (`PLUGIN_CONFIG_KEYS`, above); the key opens only requests signed for that plugin.
   Its pages run no script: the web app's CSP for them is `default-src 'none'`, `script-src 'none'`,
   `connect-src 'none'`, `worker-src 'none'`, styles and images from the app's origin, no framing and
   forms posting back to it, since a script would run with the viewer's session on the app's origin.

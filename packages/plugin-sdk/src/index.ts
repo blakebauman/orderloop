@@ -10,6 +10,8 @@
  * - Events are dispatched by name; an event without a handler is ignored.
  * - Pages get the person the web app signed onto the request, verified against both principal keys
  *   and checked against the manifest's `pageRole`; `publicPaths` get `principal: null`.
+ * - The manifest call fails while a secret the manifest declares (and doesn't mark `optional`) is
+ *   missing from env, so the engine leaves the plugin out and deep health names the secret.
  *
  * The contract itself is `PluginRpc` in @orderloop/core; see docs/plugins.md.
  */
@@ -28,6 +30,7 @@ import {
   type ProxiedPrincipal,
   parseManifest,
   type pluginManifestSchema,
+  pluginSecretVar,
   verifyPrincipal,
 } from '@orderloop/core';
 import type { z } from 'zod';
@@ -81,6 +84,14 @@ export type PluginDefinition<E> = {
   pages?(request: Request, ctx: PageContext<E>): Response | Promise<Response>;
 };
 
+/** The declared secrets, not `optional`, that `env` lacks. */
+export function missingSecrets(manifest: PluginManifest, env: object): string[] {
+  const e = env as Record<string, unknown>;
+  return manifest.secrets
+    .filter((s) => !s.optional && (typeof e[s.name] !== 'string' || e[s.name] === ''))
+    .map((s) => s.name);
+}
+
 /** The writes key for one node run. */
 export const runKey = (orderId: string, stepKey: string) => `${orderId}:${stepKey}`;
 
@@ -120,6 +131,13 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
 
   return class Plugin extends WorkerEntrypoint<E> implements PluginRpc {
     async manifest() {
+      const missing = missingSecrets(manifest, this.env);
+      if (missing.length)
+        throw new Error(
+          `${manifest.id} is missing ${missing.length === 1 ? 'a secret' : 'secrets'}: set ${missing
+            .map((n) => pluginSecretVar(manifest.id, n))
+            .join(', ')} in the deployment's GitHub environment`,
+        );
       return manifest;
     }
 

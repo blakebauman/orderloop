@@ -20,7 +20,7 @@ export default definePlugin<Env>({
     apiVersion: 1,
     id: 'example',
     name: 'Example',
-    version: '2',
+    version: '3',
     nodes: [
       {
         type: 'example.stamp',
@@ -62,6 +62,13 @@ export default definePlugin<Env>({
     events: ['order.completed'],
     nav: [{ label: 'Example', path: '/plugins/example/', icon: 'Puzzle' }],
     publicPaths: ['/plugins/example/public/ping'],
+    secrets: [
+      {
+        name: 'PING_TOKEN',
+        description: 'When set, the public ping answers only a bearer of this token',
+        optional: true,
+      },
+    ],
   },
 
   nodes: {
@@ -113,9 +120,13 @@ export default definePlugin<Env>({
     },
   },
 
-  pages(request, { principal }) {
-    if (new URL(request.url).pathname === '/plugins/example/public/ping')
+  pages(request, { principal, env }) {
+    if (new URL(request.url).pathname === '/plugins/example/public/ping') {
+      // A public path authenticates its caller itself.
+      if (env.PING_TOKEN && request.headers.get('authorization') !== `Bearer ${env.PING_TOKEN}`)
+        return new Response('Unauthorized', { status: 401 });
       return Response.json({ ok: true });
+    }
     return Response.json(
       { plugin: 'example', principal: principal && { id: principal.id, role: principal.role } },
       // Things the web app must not let through to the browser as they are.

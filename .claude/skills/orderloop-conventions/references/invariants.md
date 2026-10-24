@@ -179,6 +179,8 @@ Plugins (`plugins/<id>/`, contract in `packages/core/src/plugins.ts`, see `docs/
   `definePlugin` (it checks the manifest against the handlers and the page principal and role);
 - declare `apiVersion` (`PLUGIN_API_VERSION`), and get buyer details only with
   `personalData: 'send'`;
+- read credentials only from the `secrets` their manifest declares, which each deployment sets as
+  `PLUGIN_<ID>_<NAME>` and the deploy hands to that plugin alone (`pluginOwnSecrets`);
 - own their D1 database and migrations (the core schema never holds a plugin's tables);
 - namespace node types `<id>.<name>`;
 - key every write and compensation by order id + step key (the SDK's `key`), every delivery by its

@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS, ROLE_LABELS } from '@orderloop/core';
+import { CATEGORY_LABELS, pluginSecretVar, ROLE_LABELS } from '@orderloop/core';
 import { Link, useLoaderData } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
@@ -111,6 +111,24 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
             </dd>
             <dt className="text-muted-foreground">Events</dt>
             <dd>{m.events.length ? m.events.join(', ') : 'None'}</dd>
+            {m.secrets.length ? (
+              <>
+                <dt className="text-muted-foreground">Secrets</dt>
+                <dd>
+                  {m.secrets.map((x) => (
+                    <span key={x.name} className="block">
+                      <code className="text-xs">{pluginSecretVar(m.id, x.name)}</code>
+                      {x.optional ? (
+                        <span className="text-muted-foreground"> (optional)</span>
+                      ) : null}
+                      {x.description ? (
+                        <span className="block text-muted-foreground text-xs">{x.description}</span>
+                      ) : null}
+                    </span>
+                  ))}
+                </dd>
+              </>
+            ) : null}
             {m.requires.length ? (
               <>
                 <dt className="text-muted-foreground">Needs</dt>

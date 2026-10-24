@@ -115,7 +115,7 @@ Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's
 
 1. Render its configs and collect its secrets from the environment.
 2. Record a D1 Time Travel bookmark (in the run summary) and apply migrations to its D1.
-3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with its own `--secrets-file`, `PLUGIN_KEY` derived from `PRINCIPAL_KEY` for that plugin alone; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
+3. Deploy its catalog, then its catalog-edge, then each installed plugin (its D1 migrations, then its Worker with its own `--secrets-file`: `PLUGIN_KEY` derived from `PRINCIPAL_KEY` for that plugin alone, and the environment's `PLUGIN_<ID>_*` secrets under their own names; the engine and web Worker bind to it), then its engine, then build and deploy its web app; the engine and web app
    each with `--secrets-file` (the catalog and catalog-edge have no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`, then `https://<catalogDomain>/health`.

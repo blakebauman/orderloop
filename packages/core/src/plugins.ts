@@ -71,6 +71,19 @@ export async function pluginKey(principalKey: string, id: string): Promise<strin
 /** The binding a plugin is reached by: "ledger" → "PLUGIN_LEDGER", "qbd-sync" → "PLUGIN_QBD_SYNC". */
 export const pluginBinding = (id: string) => `PLUGIN_${id.toUpperCase().replace(/-/g, '_')}`;
 
+/** A secret's name in the plugin's env: upper case, digits and underscores. */
+export const PLUGIN_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,62}$/;
+
+/** Names a plugin's env already has from the deployment, which no secret may take. */
+export const RESERVED_PLUGIN_ENV = new Set(['PLUGIN_KEY', 'PLUGIN_KEY_PREVIOUS', 'DB']);
+
+/**
+ * Where a deployment keeps one of a plugin's secrets: in its GitHub environment, named by the
+ * plugin's binding and the secret ("shipstation", "API_KEY" → "PLUGIN_SHIPSTATION_API_KEY"). The
+ * deploy hands the plugin's Worker only the ones with its prefix, under their own names.
+ */
+export const pluginSecretVar = (id: string, name: string) => `${pluginBinding(id)}_${name}`;
+
 /** The plugin a node type belongs to, or null for a built-in type. */
 export function pluginOf(type: string): string | null {
   const dot = type.indexOf('.');
@@ -156,6 +169,23 @@ export const pluginManifestSchema = z
      * and addresses from the order, variables and earlier outputs it is sent, as AI nodes get them.
      */
     personalData: z.enum(PERSONAL_DATA_MODES).default('redact'),
+    /**
+     * Secrets the plugin reads from its env (an outside service's API key, a webhook signing
+     * secret), set per deployment as `pluginSecretVar(id, name)`. Until each one not `optional` is
+     * set, the plugin's manifest call fails, so the plugin counts as not installed.
+     */
+    secrets: z
+      .array(
+        z.object({
+          name: z
+            .string()
+            .regex(PLUGIN_SECRET_NAME_RE, 'Use upper-case letters, digits and underscores'),
+          description: z.string().max(200).optional(),
+          optional: z.boolean().optional(),
+        }),
+      )
+      .max(20)
+      .default([]),
   })
   .superRefine((m, ctx) => {
     const prefix = `/plugins/${m.id}/`;
@@ -171,6 +201,16 @@ export const pluginManifestSchema = z
       if (seen.has(n.type))
         ctx.addIssue({ code: 'custom', path: ['nodes', i, 'type'], message: 'Duplicate type' });
       seen.add(n.type);
+    }
+    const names = new Set<string>();
+    for (const [i, { name }] of m.secrets.entries()) {
+      if (RESERVED_PLUGIN_ENV.has(name) || names.has(name))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['secrets', i, 'name'],
+          message: RESERVED_PLUGIN_ENV.has(name) ? 'That name is reserved' : 'Duplicate secret',
+        });
+      names.add(name);
     }
     for (const [key, paths] of [
       ['nav', m.nav.map((n) => n.path)],

@@ -5,7 +5,8 @@
  *                                                 and plugins/<plugin>/wrangler.<id>.json for each plugin
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
  *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
- *   node scripts/fleet.ts secrets plugin <out> <plugin>  write a plugin's own keys, derived
+ *   node scripts/fleet.ts secrets plugin <out> <plugin>  write a plugin's own keys, derived, and its
+ *                                                 PLUGIN_<ID>_* secrets from ENV_SECRETS
  *   node scripts/fleet.ts status                  deep health of every deployment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
@@ -284,6 +285,14 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     )
       throw new Error(`${file}: plugins.${p} must be { "d1Id"?, "personalData"? }`);
   }
+  // A plugin's secrets are PLUGIN_<ID>_<NAME>, so with ids "a" and "a-b" both installed,
+  // PLUGIN_A_B_X would be a's B_X and b's X at once.
+  for (const a of Object.keys(plugins))
+    for (const b of Object.keys(plugins))
+      if (a !== b && pluginBinding(b).startsWith(`${pluginBinding(a)}_`))
+        throw new Error(
+          `${file}: plugins ${a} and ${b} can't both be installed: ${pluginBinding(b)}_* secrets would also reach ${a}`,
+        );
   return {
     id,
     ring,
@@ -674,14 +683,39 @@ function secrets(app: string | undefined, out: string | undefined, id?: string) 
   console.log(`${app}: ${Object.keys(values).join(', ') || 'no secrets set'}`);
 }
 
-/** A plugin's secrets: its own keys derived from PRINCIPAL_KEY (and the one before a rotation). */
+/** Names a plugin's env already has from the deployment (`RESERVED_PLUGIN_ENV` in @orderloop/core). */
+const PLUGIN_RESERVED_ENV = new Set(['PLUGIN_KEY', 'PLUGIN_KEY_PREVIOUS', 'DB']);
+
+/**
+ * A plugin's own secrets among the deployment's: each `PLUGIN_<ID>_<NAME>` (`pluginSecretVar` in
+ * @orderloop/core), under `<NAME>`. Nothing without the plugin's prefix reaches it.
+ */
+export function pluginOwnSecrets(plugin: string, source: Record<string, unknown>) {
+  const prefix = `${pluginBinding(plugin)}_`;
+  const values: Record<string, string> = {};
+  for (const [k, v] of Object.entries(source)) {
+    if (!k.startsWith(prefix) || typeof v !== 'string' || !v) continue;
+    const name = k.slice(prefix.length);
+    if (!/^[A-Z][A-Z0-9_]{0,62}$/.test(name) || PLUGIN_RESERVED_ENV.has(name))
+      throw new Error(`${k}: ${name} can't be a secret name for plugin ${plugin}`);
+    values[name] = v;
+  }
+  return values;
+}
+
+/**
+ * A plugin's secrets: its own keys derived from PRINCIPAL_KEY (and the one before a rotation), and
+ * its PLUGIN_<ID>_* secrets from ENV_SECRETS (the job's `toJSON(secrets)`), else the environment.
+ */
 function pluginSecrets(out: string, plugin: string | undefined) {
   if (!plugin || !/^[a-z][a-z0-9-]{1,30}$/.test(plugin))
     throw new Error('secrets plugin <out> <plugin id>');
   const current = process.env.PRINCIPAL_KEY;
   if (!current) throw new Error("PRINCIPAL_KEY not set: a plugin's key is derived from it");
   const previous = process.env.PRINCIPAL_KEY_PREVIOUS;
+  const all = process.env.ENV_SECRETS ? JSON.parse(process.env.ENV_SECRETS) : process.env;
   const values = {
+    ...pluginOwnSecrets(plugin, all),
     PLUGIN_KEY: pluginKey(current, plugin),
     ...(previous ? { PLUGIN_KEY_PREVIOUS: pluginKey(previous, plugin) } : {}),
   };

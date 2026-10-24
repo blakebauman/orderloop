@@ -8,6 +8,7 @@ import {
   matrix,
   pluginBinding,
   pluginKey,
+  pluginOwnSecrets,
   renderCatalog,
   renderCatalogEdge,
   renderEngine,
@@ -393,6 +394,28 @@ test('a plugin may declare only its database and vars, and gets one D1 binding',
     /named DB/,
   );
   assert.deepEqual(renderPlugin(base, withLedger, 'ledger').vars, { A: '1' });
+});
+
+test('a plugin gets only its own PLUGIN_<ID>_* secrets, under their own names', () => {
+  const source = {
+    PRINCIPAL_KEY: 'p',
+    STRIPE_SECRET_KEY: 'sk',
+    PLUGIN_SHIPSTATION_API_KEY: 'k1',
+    PLUGIN_SHIPSTATION_API_SECRET: 's1',
+    PLUGIN_SHIPSTATION_UNSET: '',
+    PLUGIN_LEDGER_API_KEY: 'k2',
+  };
+  assert.deepEqual(pluginOwnSecrets('shipstation', source), { API_KEY: 'k1', API_SECRET: 's1' });
+  assert.deepEqual(pluginOwnSecrets('qbd-sync', { PLUGIN_QBD_SYNC_TOKEN: 't' }), { TOKEN: 't' });
+  assert.throws(
+    () => pluginOwnSecrets('ledger', { PLUGIN_LEDGER_PLUGIN_KEY: 'x' }),
+    /can't be a secret name/,
+  );
+  const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+  assert.throws(
+    () => toDeployment({ ...raw, plugins: { ship: {}, 'ship-rates': {} } }),
+    /can't both be installed/,
+  );
 });
 
 test("a plugin's key is derived from the principal key, as core derives it", () => {

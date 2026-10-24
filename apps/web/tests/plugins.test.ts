@@ -41,6 +41,7 @@ const manifest: PluginManifest = {
   requires: [],
   pageRole: 'operator',
   personalData: 'redact',
+  secrets: [],
 };
 const pluginCatalog = vi.fn(
   async (): Promise<PluginStatus[]> => [{ binding: 'PLUGIN_EXAMPLE', manifest, healthy: true }],
