@@ -348,7 +348,10 @@ export const balanceEntries = sqliteTable(
     applied: integer('applied', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull(),
   },
-  (t) => [index('balance_entries_customer').on(t.customerId, t.createdAt)],
+  (t) => [
+    index('balance_entries_customer').on(t.customerId, t.createdAt),
+    index('balance_entries_order').on(t.orderId),
+  ],
 );
 
 /** Inventory changes keyed by step and line; `applied` makes each one count exactly once. */

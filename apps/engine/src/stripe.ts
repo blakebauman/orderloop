@@ -163,7 +163,9 @@ export function stripeClient(secretKey: string) {
       body = params ? encodeForm(params) : '';
       if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     }
-    const res = await fetch(url, { method, headers, body });
+    // A hung connection fails the step's attempt instead of holding it until the step times out;
+    // the retry is safe, since every write carries an Idempotency-Key.
+    const res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(15_000) });
     const text = await res.text();
     let json: unknown;
     try {

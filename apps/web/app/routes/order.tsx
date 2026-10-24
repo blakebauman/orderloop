@@ -7,6 +7,7 @@
 
 import {
   FULFILLMENT_METHOD_LABELS,
+  mergeTimeline,
   ORDER_CHANNEL_LABELS,
   ORDER_MODEL_LABELS,
   type OrderModel,
@@ -125,7 +126,14 @@ export default function OrderPage() {
   const agent = useAgent<OrderState>({
     agent: 'order-agent',
     name: orderId,
-    onStateUpdate: (s) => setState(s),
+    // The broadcast leaves out the pinned flow (the loader's snapshot has it; the agent's
+    // `getFlow` serves it) and carries only the newest timeline entries.
+    onStateUpdate: (s) =>
+      setState((prev) => ({
+        ...s,
+        flow: s.flow ?? prev.flow,
+        timeline: mergeTimeline(prev.timeline, s.timeline),
+      })),
   });
 
   // Payments, shipments and documents live in D1; refresh them as the run moves (throttled).

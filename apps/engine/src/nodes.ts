@@ -104,11 +104,14 @@ export const EXECUTORS: Record<string, Exec> = {
 
   'commerce.validate': async ({ env, ctx }) => {
     const skus = ctx.order.lines.map((l) => l.sku);
-    const known = new Map((await cx.getProducts(env, skus)).map((p) => [p.sku, p]));
+    const [products, customer] = await Promise.all([
+      cx.getProducts(env, skus),
+      cx.getCustomer(env, ctx.order.customerId),
+    ]);
+    const known = new Map(products.map((p) => [p.sku, p]));
     const unknown = skus.filter((s) => !known.has(s));
     if (!ctx.order.lines.length) throw new NonRetryableError('Order has no lines');
     if (unknown.length) throw new NonRetryableError(`Unknown SKUs: ${unknown.join(', ')}`);
-    const customer = await cx.getCustomer(env, ctx.order.customerId);
     if (ctx.order.customerId && !customer)
       throw new NonRetryableError(`Unknown customer ${ctx.order.customerId}`);
     const lines: OrderLine[] = ctx.order.lines.map((l) => ({
@@ -124,21 +127,21 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   'commerce.price': async ({ env, ctx, config }) => {
-    const products = new Map(
-      (
-        await cx.getProducts(
-          env,
-          ctx.order.lines.map((l) => l.sku),
-        )
-      ).map((p) => [p.sku, p]),
-    );
     // Buy-side models price at cost and sell-side models run the pricing chain, unless the node says otherwise.
     const buying =
       config.basis === 'cost' || (config.basis === 'auto' && isBuySide(ctx.order.model));
-    // Base-currency prices convert at the order's rate, fixed here for the life of the order.
-    const fx = await cx.fxRate(env, ctx.order.currency);
+    // Independent reads, all at once.
+    const [rows, fx, chain] = await Promise.all([
+      cx.getProducts(
+        env,
+        ctx.order.lines.map((l) => l.sku),
+      ),
+      // Base-currency prices convert at the order's rate, fixed here for the life of the order.
+      cx.fxRate(env, ctx.order.currency),
+      buying ? null : cx.pricingFor(env, ctx.order.customerId),
+    ]);
+    const products = new Map(rows.map((p) => [p.sku, p]));
     if (fx === null) throw new NonRetryableError(`No exchange rate for ${ctx.order.currency}`);
-    const chain = buying ? null : await cx.pricingFor(env, ctx.order.customerId);
     const sources =
       chain?.sources.filter((s) =>
         s.id === 'contract' ? config.useContracts : config.usePriceRules,
@@ -675,11 +678,12 @@ export const EXECUTORS: Record<string, Exec> = {
     const body = interpolate(str(config.body), ctx) || subject;
     if (to === 'seller') {
       const sellers = await cx.sellerContacts(env, ctx.order.id);
-      const sent = [];
-      for (const s of sellers)
-        sent.push(
-          await cx.sendMessage(env, ctx.order.id, `${stepKey}:${s.id}`, s.email, subject, body),
-        );
+      // Each send is keyed by its seller, so they go out together.
+      const sent = await Promise.all(
+        sellers.map((s) =>
+          cx.sendMessage(env, ctx.order.id, `${stepKey}:${s.id}`, s.email, subject, body),
+        ),
+      );
       return {
         output: { messages: sent },
         summary: `→ ${sent.length} ${sent.length === 1 ? 'seller' : 'sellers'}: ${subject}`,

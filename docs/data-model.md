@@ -61,6 +61,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0041_order_index_where.sql` | `orders.waiting_for`, `stopped_at` and `reason`, so the orders list can say who a wait is on and where and why an order ended |
 | `0042_flow_archived.sql` | `flows.archived_at`: a never-published draft archived out of the flows list |
 | `0043_products_catalog_at.sql` | `products.catalog_at` (nullable, ms): when the product catalog last set the row's name and price |
+| `0044_balance_entries_order.sql` | Index `balance_entries_order (order_id)`, for reversing an order's account charges |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -136,7 +137,7 @@ writes embeds its step key.
 | `messages` | The mock outbox for `commerce.notify`: recipient, subject, body |
 
 `reservations`, `stock_movements`, `entitlements`, `payments`, `shipments`, `documents`, `messages`, `seller_orders` and `payouts` are each indexed by
-`order_id` (`<table>_order`), which is how compensation and the order page find an order's rows. `payouts` also has `payouts_seller (seller_id, created_at)`, `balance_entries` is indexed by `balance_entries_customer (customer_id, created_at)` (it has no `order_id` index), and `price_rules` by `price_rules_source (source_id)`.
+`order_id` (`<table>_order`), which is how compensation and the order page find an order's rows. `payouts` also has `payouts_seller (seller_id, created_at)`, `balance_entries` is indexed by `balance_entries_customer (customer_id, created_at)` and `balance_entries_order (order_id)`, and `price_rules` by `price_rules_source (source_id)`.
 
 ## Metrics
 
@@ -208,7 +209,7 @@ See [Email intake](https://docs.orderloop.app/guides/email-intake/#the-intake-lo
 
 | Kind | Name | Written by |
 |---|---|---|
-| `inbound` | `po.txt` | `startOrder`, when the input has `documentText` and no `documentKey` |
+| `inbound` | `po.txt` | `startOrder`, when the input has `documentText` and no `documentKey`. The order then keeps only the `documentKey` (in its agent's state and the Workflow's params); `ai.extract` reads the text back from R2 |
 | `email` | `message.eml` (under `inbound/`) | `receiveEmail`, the raw message an order started from |
 | `invoice` | `<nodeId>-<run>.html` | `commerce.invoice` |
 | `po` | `<nodeId>-<run>.html` | `commerce.generate_po` |
@@ -305,7 +306,7 @@ a customer's orders, team and mail bring in; a deployment holds only one custome
 | `customers` | `name`, `email`; `stripe_customer_id`, `stripe_payment_method_id` | Indexed by `lower(email)` |
 | `sellers` | `name`, `email` | Marketplace sellers |
 | `orders` (D1) | `contact_email` (a guest buyer's email), `title`, `external_id` | `title` is free text and can name a person. Orders are kept (see [Retention](#retention)); `contact_email` and `title` are cleared by [erasure](#export-and-erasure), or by the retention sweep where `PERSONAL_DATA_RETENTION_DAYS` is set |
-| OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText`, and the run's `vars` and node outputs | Durable Object storage, one per order, in the deployment's [jurisdiction](#data-residency). See [OrderAgent](order-agent.md#state) |
+| OrderAgent state | The whole `Order`: `contact` (`email`, `name`, `phone`), `meta` (including `meta.shipTo`, the ship-to address, and any other key a caller sends), `title`, `documentText` (only until it is stored in R2, which `startOrder` does first), and the run's `vars`, node outputs and timeline | Durable Object storage, one per order, in the deployment's [jurisdiction](#data-residency). See [OrderAgent](order-agent.md#state) |
 | R2 | `orders/<orderId>/inbound/po.txt` (the inbound document), `inbound/message.eml` (the raw email) | Served at `/docs/<key>` to signed-in users only. See [R2 documents](#r2-documents) |
 | `inbound_emails` | `sender`, `subject` | Deleted after 180 days; the `.eml` in R2 is not |
 | `messages` | `recipient`, `subject`, `body` | The `commerce.notify` outbox |

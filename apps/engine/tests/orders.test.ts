@@ -1744,8 +1744,8 @@ describe('inventory', () => {
   it('finishes a reserve step that died after holding some lines', async () => {
     const before = (await product('GSK-010')).reserved;
     await reserveInventory(env, order('ord_inv_c', two), 'reserve#1');
-    // Each line is one atomic batch, so a crash leaves a line wholly held or not at all: undo
-    // the second line as if the step had died before it.
+    // A line is held wholly or not at all: undo the second line as if the step had died before
+    // it (or another order had taken it), and the retry holds just that line.
     const [, second] = await db()
       .select()
       .from(reservations)
@@ -1796,6 +1796,47 @@ describe('inventory', () => {
     expect([a.short, b.short].sort()).toEqual([[], ['RACE-1']]);
     expect(a.reservationIds.length + b.reservationIds.length).toBe(1);
     expect((await product('RACE-1')).reserved).toBe(3);
+  });
+
+  it('guards each line in the shared batch: a later line short of what earlier lines left', async () => {
+    await db()
+      .insert(products)
+      .values([
+        { sku: 'PART-1', name: 'Part', price: 1, cost: 1, stock: 5 },
+        { sku: 'PART-2', name: 'Part two', price: 1, cost: 1, stock: 1 },
+      ])
+      .onConflictDoNothing();
+    // Each line alone fits what is free (5 and 1), so the read before the hold passes them; in the
+    // batch the first PART-1 line leaves 2, so the second is short, and PART-2's line still holds.
+    const r = await reserveInventory(
+      env,
+      order('ord_inv_part', [
+        { sku: 'PART-1', qty: 3 },
+        { sku: 'PART-1', qty: 3 },
+        { sku: 'PART-2', qty: 1 },
+      ]),
+      'reserve#1',
+    );
+    expect(r.short).toEqual(['PART-1']);
+    expect(r.reservationIds).toHaveLength(2);
+    expect((await product('PART-1')).reserved).toBe(3);
+    expect((await product('PART-2')).reserved).toBe(1);
+    const moves = await db()
+      .select()
+      .from(stockMovements)
+      .where(eq(stockMovements.orderId, 'ord_inv_part'))
+      .orderBy(stockMovements.id);
+    // The short line's movement is recorded but never applied.
+    expect(moves.map((m) => [m.sku, m.qty, m.applied])).toEqual([
+      ['PART-1', 3, true],
+      ['PART-1', 3, false],
+      ['PART-2', 1, true],
+    ]);
+    // Releasing moves each held line once, and a repeat moves nothing.
+    expect(await releaseInventory(env, 'ord_inv_part')).toBe(2);
+    expect(await releaseInventory(env, 'ord_inv_part')).toBe(0);
+    expect((await product('PART-1')).reserved).toBe(0);
+    expect((await product('PART-2')).reserved).toBe(0);
   });
 
   it('releases a hold once when a cancel races a rollback and a shipment', async () => {

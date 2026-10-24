@@ -1,5 +1,12 @@
+import { runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { b2bOrderFlow, type Order, type OrderState } from '@orderloop/core';
+import {
+  b2bOrderFlow,
+  type Order,
+  type OrderState,
+  TIMELINE_BROADCAST,
+  TIMELINE_CAP,
+} from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
 
 const flow = { ...b2bOrderFlow(), version: 1, publishedAt: 0 };
@@ -70,5 +77,63 @@ describe('OrderAgent reports', () => {
     const s = (await agent.snapshot()) as OrderState;
     expect(s.status).toBe('completed');
     expect(s.nodes.reserve!.status).toBe('rolled_back');
+  });
+
+  it('broadcasts a small state and keeps the flow and whole timeline for snapshots', async () => {
+    const agent = env.ORDER_AGENT.getByName('agent-slim');
+    await agent.init({ ...order, id: 'ord_agent_slim' }, flow, 'ord_agent_slim-g1');
+    const entries = TIMELINE_CAP + 20;
+    for (let i = 0; i < entries; i++)
+      await agent.report({
+        generation: 1,
+        log: { at: i, kind: 'node', message: `step ${i}`, key: `k${i}` },
+      });
+    // A retried step's line replaces its earlier copy and moves to the end.
+    await agent.report({
+      generation: 1,
+      log: { at: 9999, kind: 'node', message: 'retried', key: `k${entries - 10}` },
+    });
+
+    const synced = await runInDurableObject(agent, async (a) => a.state);
+    expect(synced.flow).toBeNull();
+    expect(synced.timeline).toHaveLength(TIMELINE_BROADCAST);
+    expect(synced.timeline.at(-1)!.message).toBe('retried');
+
+    const s = (await agent.snapshot()) as OrderState;
+    expect(s.flow).toEqual(flow);
+    expect(s.timeline).toHaveLength(TIMELINE_CAP);
+    expect(s.timeline.at(-1)!.message).toBe('retried');
+    expect(s.timeline.filter((t) => t.key === `k${entries - 10}`)).toHaveLength(1);
+    // The broadcast is the snapshot's newest entries.
+    expect(s.timeline.slice(-TIMELINE_BROADCAST)).toEqual(synced.timeline);
+    expect(await agent.getFlow()).toEqual(flow);
+  });
+
+  it('moves the flow and timeline out of the state of an order begun before', async () => {
+    const agent = env.ORDER_AGENT.getByName('agent-legacy');
+    const timeline = Array.from({ length: 120 }, (_, i) => ({
+      at: i,
+      kind: 'node' as const,
+      message: `old ${i}`,
+    }));
+    await runInDurableObject(agent, async (a) => {
+      a.setState({
+        ...a.state,
+        orderId: 'ord_agent_legacy',
+        order: { ...order, id: 'ord_agent_legacy' },
+        flow,
+        instanceId: 'ord_agent_legacy-g1',
+        generation: 1,
+        status: 'running',
+        timeline,
+      });
+    });
+    await agent.report({ generation: 1, log: { at: 500, kind: 'node', message: 'new' } });
+    const synced = await runInDurableObject(agent, async (a) => a.state);
+    expect(synced.flow).toBeNull();
+    expect(synced.timeline).toHaveLength(TIMELINE_BROADCAST);
+    const s = (await agent.snapshot()) as OrderState;
+    expect(s.flow).toEqual(flow);
+    expect(s.timeline.map((t) => t.message)).toEqual([...timeline.map((t) => t.message), 'new']);
   });
 });

@@ -111,7 +111,10 @@ describe('email intake', () => {
       title: 'PO NW-4411',
       model: 'b2b',
     });
-    expect(s.order!.documentText).toContain('--- Attachment: po.csv ---');
+    // The document is kept in R2; the order carries only its key.
+    expect(s.order!.documentText).toBeUndefined();
+    const doc = await env.DOCS.get(s.order!.documentKey!);
+    expect(await doc!.text()).toContain('--- Attachment: po.csv ---');
     expect(s.order!.meta).toMatchObject({
       via: 'email',
       senderMatch: 'customer',

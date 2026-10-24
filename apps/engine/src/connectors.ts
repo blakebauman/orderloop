@@ -78,7 +78,9 @@ export async function findCustomerByName(env: Env, name: string) {
       .trim();
   const needle = norm(name);
   if (!needle) return undefined;
-  const matches = (await db(env).select().from(customers)).filter((c) => norm(c.name) === needle);
+  const matches = (
+    await db(env).select({ id: customers.id, name: customers.name }).from(customers)
+  ).filter((c) => norm(c.name) === needle);
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -188,16 +190,22 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
   const mine = new Set(held.map((r) => r.id));
 
   const { lines } = await stockedLines(env, order);
-  const free = new Map<string | undefined, Map<string, number>>();
-  for (const loc of new Set(lines.map(([, l]) => locationOf(l))))
-    free.set(
-      loc,
-      await available(
-        env,
-        lines.filter(([, l]) => locationOf(l) === loc).map(([, l]) => l.sku),
-        loc,
+  const locs = [...new Set(lines.map(([, l]) => locationOf(l)))];
+  const free = new Map(
+    await Promise.all(
+      locs.map(
+        async (loc) =>
+          [
+            loc,
+            await available(
+              env,
+              lines.filter(([, l]) => locationOf(l) === loc).map(([, l]) => l.sku),
+              loc,
+            ),
+          ] as const,
       ),
-    );
+    ),
+  );
   const short = lines
     .filter(([i, l]) => {
       if (mine.has(idFor(i, l.sku))) return false;
@@ -208,6 +216,7 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
     .map(([, l]) => l.sku);
 
   const reservationIds: string[] = [];
+  const moves: StockMove[] = [];
   for (const [i, line] of lines) {
     if (short.includes(line.sku)) continue;
     // Keyed by order, step and line, so neither another order nor a repeated SKU collides.
@@ -244,15 +253,16 @@ export async function reserveInventory(env: Env, order: Order, stepKey: string) 
               sql`${products.stock} - ${products.reserved} >= ${line.qty}`,
             ),
           );
-    await moveStock(
-      env,
-      { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty, locationId },
-      d.insert(reservations).select(free).onConflictDoNothing(),
-      sql`exists (select 1 from ${reservations} where ${eq(reservations.id, id)})`,
-    );
+    moves.push({
+      m: { id, orderId: order.id, sku: line.sku, kind: 'hold', qty: line.qty, locationId },
+      first: d.insert(reservations).select(free).onConflictDoNothing(),
+      guard: sql`exists (select 1 from ${reservations} where ${eq(reservations.id, id)})`,
+    });
     reservationIds.push(id);
   }
   if (!reservationIds.length) return { reservationIds, short };
+  // One batch (one transaction) for every line; each line's statements keep their own guard.
+  await moveStocks(env, moves);
   // Lines another order took between the read above and the hold are short after all.
   const got = new Set(
     (
@@ -281,32 +291,32 @@ async function settleReservations(env: Env, orderId: string, status: 'released' 
     .select()
     .from(reservations)
     .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'held')));
-  let moved = 0;
-  for (const r of held) {
-    const kind = status === 'released' ? 'release' : 'consume';
-    await moveStock(
-      env,
-      {
-        id: `${kind}_${r.id}`,
+  if (!held.length) return 0;
+  const kind = status === 'released' ? 'release' : 'consume';
+  const ids = held.map((r) => `${kind}_${r.id}`);
+  await moveStocks(
+    env,
+    held.map((r, i) => ({
+      m: {
+        id: ids[i]!,
         orderId,
         sku: r.sku,
         kind,
         qty: r.qty,
         locationId: r.locationId ?? undefined,
       },
-      d
+      first: d
         .update(reservations)
         .set({ status })
         .where(and(eq(reservations.id, r.id), eq(reservations.status, 'held'))),
-      sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, status))})`,
-    );
-    const [row] = await d
-      .select({ applied: stockMovements.applied })
-      .from(stockMovements)
-      .where(eq(stockMovements.id, `${kind}_${r.id}`));
-    if (row?.applied) moved += 1;
-  }
-  return moved;
+      guard: sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, status))})`,
+    })),
+  );
+  const applied = await d
+    .select({ id: stockMovements.id })
+    .from(stockMovements)
+    .where(and(inArray(stockMovements.id, ids), eq(stockMovements.applied, true)));
+  return applied.length;
 }
 
 /** Compensation: release every held reservation for the order. Idempotent. */
@@ -341,10 +351,10 @@ export async function restoreShippedStock(env: Env, orderId: string) {
     .select()
     .from(reservations)
     .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'consumed')));
-  for (const r of consumed)
-    await moveStock(
-      env,
-      {
+  await moveStocks(
+    env,
+    consumed.map((r) => ({
+      m: {
         id: `unconsume_${r.id}`,
         orderId,
         sku: r.sku,
@@ -352,33 +362,33 @@ export async function restoreShippedStock(env: Env, orderId: string) {
         qty: r.qty,
         locationId: r.locationId ?? undefined,
       },
-      d
+      first: d
         .update(reservations)
         .set({ status: 'restored' })
         .where(and(eq(reservations.id, r.id), eq(reservations.status, 'consumed'))),
-      sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, 'restored'))})`,
-    );
+      guard: sql`exists (select 1 from ${reservations} where ${and(eq(reservations.id, r.id), eq(reservations.status, 'restored'))})`,
+    })),
+  );
   return consumed.length;
 }
 
 /** Adds returned or received stock to central stock, once per step and line. */
 export async function restock(env: Env, orderId: string, stepKey: string, lines: StockLine[]) {
-  for (const [i, l] of lines.entries()) {
-    const id = `stk_${orderId}_${stepKey}_${i}_${l.sku}`.replace(/[^\w-]/g, '_');
-    await moveStock(env, { id, orderId, sku: l.sku, kind: 'restock', qty: l.qty });
-  }
+  await moveStocks(
+    env,
+    lines.map((l, i) => ({
+      m: {
+        id: `stk_${orderId}_${stepKey}_${i}_${l.sku}`.replace(/[^\w-]/g, '_'),
+        orderId,
+        sku: l.sku,
+        kind: 'restock',
+        qty: l.qty,
+      },
+    })),
+  );
 }
 
-/**
- * Records one inventory change in the ledger and applies it in the same batch, only if it hasn't
- * been applied yet. D1 runs a batch as one transaction, so a crash can't leave the ledger and the
- * stock row disagreeing, and a retry with the same id changes nothing. `first` runs at the start
- * of the batch (the reservation row it belongs to); `guard`, checked after it, must hold for the
- * change to apply and be marked applied. A `locationId` moves a store's stock instead of central
- * stock.
- */
-async function moveStock(
-  env: Env,
+type StockMove = {
   m: {
     id: string;
     orderId: string;
@@ -386,10 +396,30 @@ async function moveStock(
     kind: 'hold' | 'restock' | 'release' | 'consume';
     qty: number;
     locationId?: string;
-  },
-  first?: BatchItem<'sqlite'>,
-  guard?: SQL,
-) {
+  };
+  first?: BatchItem<'sqlite'>;
+  guard?: SQL;
+};
+
+/**
+ * Records inventory changes in the ledger and applies them, in one batch: one D1 transaction,
+ * whose statements run in order. Each change's statements are those of `moveStatements`, so a
+ * line's guard sees the lines before it exactly as it would in a batch of its own.
+ */
+async function moveStocks(env: Env, moves: StockMove[]) {
+  if (!moves.length) return;
+  const [head, ...rest] = moves.flatMap((x) => moveStatements(env, x));
+  await db(env).batch([head!, ...rest]);
+}
+
+/**
+ * One inventory change's statements: record it in the ledger and apply it, only if it hasn't been
+ * applied yet. They run in one transaction, so a crash can't leave the ledger and the stock row
+ * disagreeing, and a retry with the same id changes nothing. `first` runs before them (the
+ * reservation row it belongs to); `guard`, checked after it, must hold for the change to apply and
+ * be marked applied. A `locationId` moves a store's stock instead of central stock.
+ */
+function moveStatements(env: Env, { m, first, guard }: StockMove): BatchItem<'sqlite'>[] {
   const d = db(env);
   const pending = and(
     sql`exists (select 1 from ${stockMovements} where ${and(eq(stockMovements.id, m.id), eq(stockMovements.applied, false))})`,
@@ -414,7 +444,7 @@ async function moveStock(
     .update(stockMovements)
     .set({ applied: true })
     .where(and(eq(stockMovements.id, m.id), guard));
-  await (first ? d.batch([first, record, apply, mark]) : d.batch([record, apply, mark]));
+  return first ? [first, record, apply, mark] : [record, apply, mark];
 }
 
 /** What a movement does to a stock row (central or a store's). */
@@ -711,12 +741,13 @@ export async function reverseBalance(env: Env, orderId: string) {
         sql`${balanceEntries.id} not like 'rev_%'`,
       ),
     );
-  let reversed = 0;
-  for (const e of entries) {
-    const [, , marked] = await d.batch(reverseBalanceEntry(env, e, Date.now()));
-    if (marked.length) reversed += 1;
-  }
-  return reversed;
+  if (!entries.length) return 0;
+  // One batch for every entry; each entry's three statements keep their own guards.
+  const now = Date.now();
+  const [head, ...rest] = entries.flatMap((e) => reverseBalanceEntry(env, e, now));
+  const results = await d.batch([head!, ...rest]);
+  // Every third result is an entry's `mark`, which returns the row only when it reversed it.
+  return results.filter((r, i) => i % 3 === 2 && (r as unknown[]).length).length;
 }
 
 // ── Marketplace ────────────────────────────────────────────────────────────

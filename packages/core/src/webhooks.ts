@@ -31,14 +31,30 @@ export const WEBHOOK_URL_RULE = 'Use an https URL (plain http is allowed only fo
 
 const enc = new TextEncoder();
 
+/** Imported keys per secret, so a delivery or check doesn't import its key again. Bounded. */
+const keys = new Map<string, ReturnType<typeof crypto.subtle.importKey>>();
+const MAX_KEYS = 64;
+
+function hmacKey(secret: string) {
+  let key = keys.get(secret);
+  if (!key) {
+    if (keys.size >= MAX_KEYS) keys.clear();
+    key = crypto.subtle.importKey(
+      'raw',
+      enc.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    // A failed import is not kept, so the next call tries again.
+    key.catch(() => keys.delete(secret));
+    keys.set(secret, key);
+  }
+  return key;
+}
+
 async function hmacHex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
+  const key = await hmacKey(secret);
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(message)));
   return Array.from(sig, (b) => b.toString(16).padStart(2, '0')).join('');
 }
