@@ -36,6 +36,35 @@ const PLUGIN_PATH = /^\/plugins\/([a-z][a-z0-9-]{1,30})\//;
 /** The plugin a path is forwarded to, or null. */
 export const pluginPathId = (pathname: string) => PLUGIN_PATH.exec(pathname)?.[1] ?? null;
 
+/**
+ * Plugins' aliases, from the deployment's registry (`plugins.<id>.alias`, rendered as
+ * `PLUGIN_ALIASES`): another path a plugin's pages answer at, such as `/punchout/` for
+ * `/plugins/punchout/`. The registry chooses it, never the plugin, and fleet refuses one that is
+ * an app path or another plugin's.
+ */
+export function pluginAliases(): Record<string, string> {
+  const raw = (env as { PLUGIN_ALIASES?: string }).PLUGIN_ALIASES;
+  try {
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (e): e is [string, string] =>
+          typeof e[1] === 'string' && /^\/[a-z][a-z0-9-]{1,30}\/$/.test(e[0]),
+      ),
+    );
+  } catch {
+    console.error('PLUGIN_ALIASES is not JSON; no aliases');
+    return {};
+  }
+}
+
+/** The plugin path an aliased path stands for (`/punchout/cxml/setup` → `/plugins/punchout/cxml/setup`), or null. */
+export function unalias(pathname: string): string | null {
+  for (const [alias, id] of Object.entries(pluginAliases()))
+    if (pathname.startsWith(alias)) return `/plugins/${id}/${pathname.slice(alias.length)}`;
+  return null;
+}
+
 /** The largest request body forwarded to a plugin. */
 export const MAX_PLUGIN_BODY = 10 * 1024 * 1024;
 
@@ -197,6 +226,9 @@ export async function pluginFetch(request: Request): Promise<Response> {
     request.body && !['GET', 'HEAD'].includes(request.method)
       ? capped(request.body, MAX_PLUGIN_BODY)
       : null;
+  // Where its pages also answer, so a page can show the shorter address (its own paths still work).
+  const alias = Object.entries(pluginAliases()).find(([, p]) => p === id)?.[0];
+  if (alias) headers.set('x-orderloop-alias', alias);
   const forwarded = new Request(`https://plugin${url.pathname}${url.search}`, {
     method: request.method,
     headers,

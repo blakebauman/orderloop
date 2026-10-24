@@ -91,8 +91,8 @@ function list(partners: Partner[], origin: string, notice = ''): Response {
 <h2>Partners</h2>
 ${partners.length ? `<table><tr><th>Partner</th><th>Protocol</th><th>Flow</th><th>Returns to</th><th>Status</th><th></th></tr>${rows}</table>` : '<p>No partners yet.</p>'}
 <h2>Setting up a buyer's system</h2>
-<ul><li>cXML setup URL: <code>${h(origin)}${BASE}cxml/setup</code> (PunchOutSetupRequest), and order URL <code>${h(origin)}${BASE}cxml/order</code> (OrderRequest). The buyer's From credential and the Sender SharedSecret identify them.</li>
-<li>OCI URL: <code>${h(origin)}${BASE}oci/setup</code> with <code>USERNAME</code>, <code>PASSWORD</code> (the secret) and <code>HOOK_URL</code>, opened with GET.</li></ul>
+<ul><li>cXML setup URL: <code>${h(origin)}cxml/setup</code> (PunchOutSetupRequest), and order URL <code>${h(origin)}cxml/order</code> (OrderRequest). The buyer's From credential and the Sender SharedSecret identify them.</li>
+<li>OCI URL: <code>${h(origin)}oci/setup</code> with <code>USERNAME</code>, <code>PASSWORD</code> (the secret) and <code>HOOK_URL</code>, opened with GET.</li></ul>
 <h2>Add a partner</h2>
 <form method="post" action="${BASE}partners">
 <label>Name <input name="name" required maxlength="120"></label>
@@ -111,8 +111,11 @@ ${partners.length ? `<table><tr><th>Partner</th><th>Protocol</th><th>Flow</th><t
 
 export async function adminPages(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  // The app's address isn't forwarded to plugins; the page names the paths on it.
-  const origin = 'https://<your OrderLoop address>';
+  // The app's address isn't forwarded to plugins; the page names the paths on it, under the
+  // deployment's alias for the plugin when it has one (`/punchout/`), else its own.
+  const alias = request.headers.get('x-orderloop-alias');
+  const mount = alias && /^\/[a-z][a-z0-9-]{1,30}\/$/.test(alias) ? alias : BASE;
+  const origin = `https://<your OrderLoop address>${mount}`;
   const path = url.pathname;
   if (request.method === 'GET' && path === BASE) return list(await listPartners(env), origin);
   if (request.method !== 'POST') return new Response('Not found', { status: 404 });

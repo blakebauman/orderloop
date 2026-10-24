@@ -10,6 +10,7 @@ import {
   pluginBinding,
   pluginKey,
   pluginOwnSecrets,
+  RESERVED_PATH_SEGMENTS,
   renderCatalog,
   renderCatalogEdge,
   renderEngine,
@@ -626,4 +627,46 @@ test('the publisher tool signs what core verifies', async () => {
   );
   assert.equal(ok, true);
   assert.equal(signingMessage('a', 'b', 'c'), 'orderloop-plugin:1:a:b:c');
+});
+
+test('a plugin alias is one free path segment, rendered into the web Worker', () => {
+  const raw = { id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1', catalogKvId: 'a'.repeat(32) };
+  const d = toDeployment({
+    ...raw,
+    plugins: { punchout: { alias: '/punchout/', runtime: 'sandboxed' } },
+  });
+  assert.equal(renderWeb(base('web'), d).vars.PLUGIN_ALIASES, '{"/punchout/":"punchout"}');
+  // None: empty, so the base config's never carries over.
+  const none = toDeployment({ ...raw, plugins: { punchout: { runtime: 'sandboxed' } } });
+  assert.equal(renderWeb(base('web'), none).vars.PLUGIN_ALIASES, '');
+  const refused = (alias: unknown, more = {}) =>
+    assert.throws(() =>
+      toDeployment({ ...raw, plugins: { punchout: { alias, runtime: 'sandboxed' }, ...more } }),
+    );
+  for (const alias of ['punchout', '/Punchout/', '/a/', '/punch/out/', '/punchout', 7, '/../'])
+    refused(alias);
+  for (const reserved of ['/orders/', '/api/', '/plugins/', '/carts/', '/login/'])
+    refused(reserved);
+  assert.throws(
+    () =>
+      toDeployment({
+        ...raw,
+        plugins: {
+          punchout: { alias: '/buy/', runtime: 'sandboxed' },
+          ledger: { alias: '/buy/', runtime: 'sandboxed' },
+        },
+      }),
+    /also/,
+  );
+});
+
+test('the reserved path segments cover every top-level path the web app serves', () => {
+  const routes = readFileSync(new URL('../apps/web/app/routes.ts', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../apps/web/workers/app.ts', import.meta.url), 'utf8');
+  const segments = new Set<string>();
+  for (const m of routes.matchAll(/route\('([a-z0-9-]+)/g)) segments.add(m[1]!);
+  for (const m of worker.matchAll(/'\/([a-z0-9-]+)[/']/g)) segments.add(m[1]!);
+  for (const s of ['ucp', 'scim', 'mcp', 'a2a', 'oauth']) segments.add(s); // via *_PATH constants
+  const missing = [...segments].filter((s) => !RESERVED_PATH_SEGMENTS.has(s));
+  assert.deepEqual(missing, []);
 });

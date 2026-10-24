@@ -63,6 +63,10 @@
     { "name": "WEBHOOK_LIMIT", "namespace_id": "1005", "simple": { "limit": 1200, "period": 60 } }
   ],
   "vars": {
+    // Plugins' other paths, JSON of alias → plugin id (e.g. "/punchout/" → punchout): a request
+    // under the alias is answered as under /plugins/<id>/. scripts/fleet.ts renders it from the
+    // registry's plugins.<id>.alias; this is orderloop.app's (deployments/orderloop.jsonc).
+    "PLUGIN_ALIASES": "{\"/punchout/\":\"punchout\"}",
     // Inbound orders: JSON from "model:channel" or "model:*" to a flow id. Anything not routed
     // starts the model's default template.
     "ORDER_ROUTES": "",

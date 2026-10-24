@@ -179,7 +179,44 @@ export type Deployment = {
 /** What a plugin may ask of the core through ORDERLOOP (`PLUGIN_CAPABILITIES` in core). */
 const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start'];
 
+/**
+ * Top-level path segments the web app serves itself: its pages (apps/web/app/routes.ts) and what
+ * its Worker answers before them (apps/web/workers/app.ts). A plugin alias may not be one of them;
+ * fleet.test.ts reads both files so a new route can't be missed.
+ */
+export const RESERVED_PATH_SEGMENTS = new Set([
+  'account',
+  'agents',
+  'api',
+  'approvals',
+  'assets',
+  'audit',
+  'a2a',
+  'cart',
+  'carts',
+  'commerce',
+  'docs',
+  'flows',
+  'health',
+  'login',
+  'logout',
+  'mcp',
+  'oauth',
+  'orders',
+  'plugins',
+  'promotions',
+  'scim',
+  'setup',
+  'team',
+  'ucp',
+]);
+
+/** A plugin alias: one lowercase path segment, as `/<segment>/`. */
+const ALIAS_RE = /^\/([a-z][a-z0-9-]{1,30})\/$/;
+
 export type PluginEntry = {
+  /** Another path the plugin's pages answer at, besides `/plugins/<id>/` (e.g. `/punchout/`). */
+  alias?: string;
   d1Id?: string;
   personalData?: 'send';
   capabilities?: string[];
@@ -344,6 +381,20 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       throw new Error(
         `${file}: plugins.${p}.personalData can only be "send" (to grant buyer details)`,
       );
+    const alias = (v as { alias?: unknown } | null)?.alias;
+    if (alias !== undefined) {
+      const seg = typeof alias === 'string' ? ALIAS_RE.exec(alias)?.[1] : undefined;
+      if (!seg)
+        throw new Error(
+          `${file}: plugins.${p}.alias must be one lowercase path segment, like "/${p}/"`,
+        );
+      if (RESERVED_PATH_SEGMENTS.has(seg))
+        throw new Error(`${file}: plugins.${p}.alias "${alias}" is one of the app's own paths`);
+      const taken = Object.entries(plugins as Record<string, { alias?: unknown }>).find(
+        ([q, w]) => q !== p && w?.alias === alias,
+      );
+      if (taken) throw new Error(`${file}: plugins.${p}.alias "${alias}" is also ${taken[0]}'s`);
+    }
     const caps = (v as { capabilities?: unknown } | null)?.capabilities;
     if (
       caps !== undefined &&
@@ -355,7 +406,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
         `${file}: plugins.${p}.capabilities must list each of ${PLUGIN_CAPABILITIES.join(', ')} at most once`,
       );
     const extra = Object.keys((v as object) ?? {}).filter(
-      (k) => !['d1Id', 'personalData', 'capabilities', 'runtime', 'secrets'].includes(k),
+      (k) => !['alias', 'd1Id', 'personalData', 'capabilities', 'runtime', 'secrets'].includes(k),
     );
     if (extra.length)
       throw new Error(`${file}: plugins.${p} has unknown keys: ${extra.join(', ')}`);
@@ -365,7 +416,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       (d1 !== undefined && (typeof d1 !== 'string' || !d1))
     )
       throw new Error(
-        `${file}: plugins.${p} must be { "d1Id"?, "personalData"?, "capabilities"?, "runtime"?, "secrets"? }`,
+        `${file}: plugins.${p} must be { "alias"?, "d1Id"?, "personalData"?, "capabilities"?, "runtime"?, "secrets"? }`,
       );
   }
   const installs = raw.pluginInstalls;
@@ -779,6 +830,14 @@ export function renderWeb(base: Config, d: Deployment): Config {
     ...(budgets.has(r.name) ? { simple: { ...r.simple, limit: budgets.get(r.name) } } : {}),
   }));
   storage(config, d);
+  // Plugins' aliases, alias → plugin id; always set, so one deployment's never carries over.
+  const aliases = Object.fromEntries(
+    Object.entries(d.plugins).flatMap(([p, v]) => (v.alias ? [[v.alias, p]] : [])),
+  );
+  config.vars = {
+    ...config.vars,
+    PLUGIN_ALIASES: Object.keys(aliases).length ? JSON.stringify(aliases) : '',
+  };
   if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };
   if (d.sso)
     config.vars = { ...config.vars, OIDC_ISSUER: d.sso.issuer, OIDC_CLIENT_ID: d.sso.clientId };

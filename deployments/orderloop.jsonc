@@ -13,6 +13,11 @@
   // Punchout from customers' procurement systems (plugins/punchout, docs/plugins.md#the-host-api):
   // sandboxed, so nothing to provision. It opens carts for their buyers and starts their POs.
   "plugins": {
-    "punchout": { "runtime": "sandboxed", "capabilities": ["carts:external", "orders:start"] }
+    // Its procurement URLs read https://orderloop.app/punchout/cxml/setup, not /plugins/punchout/.
+    "punchout": {
+      "alias": "/punchout/",
+      "runtime": "sandboxed",
+      "capabilities": ["carts:external", "orders:start"]
+    }
   }
 }

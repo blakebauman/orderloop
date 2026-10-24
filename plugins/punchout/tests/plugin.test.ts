@@ -295,6 +295,26 @@ describe('the admin page', () => {
     expect(await status(res)).toBe('401');
   });
 
+  it('names the setup URLs under the deployment’s alias when it has one', async () => {
+    expect(await (await admin('/plugins/punchout/')).text()).toContain(
+      'https://&#60;your OrderLoop address&#62;/plugins/punchout/cxml/setup',
+    );
+    const path = '/plugins/punchout/';
+    const headers = new Headers({
+      'x-orderloop-alias': '/punchout/',
+      [PRINCIPAL_HEADER]: await signPrincipal(
+        KEY,
+        { kind: 'user', id: 'usr_admin', name: 'Admin', role: 'admin' },
+        path,
+      ),
+    });
+    const page = await (
+      await plugin.fetch(new Request(`https://plugin${path}`, { headers }))
+    ).text();
+    expect(page).toContain('https://&#60;your OrderLoop address&#62;/punchout/cxml/setup');
+    expect(page).toContain('/punchout/oci/setup');
+  });
+
   it('refuses a partner without return hosts', async () => {
     const res = await admin('/plugins/punchout/partners', {
       name: 'X',
