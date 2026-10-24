@@ -5,6 +5,7 @@
  */
 import {
   type AttributeDef,
+  gtin14,
   LIMITS,
   type Localized,
   type ProductData,
@@ -163,10 +164,14 @@ export function validateProduct(
 
   checkAttributes(p.attributes, c.product, c.requiredProduct, 'attributes', issues);
   const skus = new Set<string>();
+  const gtins = new Set<string>();
   const combos = new Set<string>();
   p.variants.forEach((v, i) => {
     if (skus.has(v.sku)) issues.push({ path: `variants.${i}.sku`, message: 'duplicate SKU' });
     skus.add(v.sku);
+    const g = v.gtin && gtin14(v.gtin);
+    if (g && gtins.has(g)) issues.push({ path: `variants.${i}.gtin`, message: 'duplicate GTIN' });
+    if (g) gtins.add(g);
     checkAttributes(v.attributes, c.variant, c.requiredVariant, `variants.${i}.attributes`, issues);
     if (type.variantAxes.length) {
       const combo = type.variantAxes.map((a) => String(v.attributes[a] ?? '')).join('\u0000');
@@ -207,13 +212,27 @@ export function pickLocale(
   return value[locale] ?? value[fallback] ?? Object.values(value)[0];
 }
 
-/** Every alias a product claims: its variant SKUs and GTINs. Slugs are claimed per locale. */
+/**
+ * Every alias a product claims: its variant SKUs and GTINs (as GTIN-14, so a UPC and its EAN are
+ * one claim). Slugs are claimed per locale.
+ */
 export function productAliases(p: Pick<ProductData, 'variants' | 'slug'>): string[] {
   const out: string[] = [];
   for (const v of p.variants) {
     out.push(`sku:${v.sku}`);
-    if (v.gtin) out.push(`gtin:${v.gtin}`);
+    const g = v.gtin && gtin14(v.gtin);
+    if (g) out.push(`gtin:${g}`);
   }
   for (const [locale, slug] of Object.entries(p.slug ?? {})) out.push(`slug:${locale}:${slug}`);
   return out;
+}
+
+/**
+ * An alias as it is claimed: a `gtin:` alias in any GTIN length becomes its GTIN-14, and an invalid
+ * GTIN is null (nothing can hold it). Other aliases are returned as they are.
+ */
+export function claimedAlias(alias: string): string | null {
+  if (!alias.startsWith('gtin:')) return alias;
+  const g = gtin14(alias.slice(5));
+  return g ? `gtin:${g}` : null;
 }

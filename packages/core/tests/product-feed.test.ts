@@ -120,6 +120,25 @@ describe('CSV products', () => {
     });
   });
 
+  it('reads gtin and mpn per variant row', async () => {
+    const rows = await read(
+      [
+        'key,type,title:en,sku,gtin,mpn,attr.size,attr.color',
+        'tee,apparel,Tee,TEE-S,036000291452,CT-100-S,S,red',
+        'tee,,,TEE-M,,CT-100-M,M,red',
+      ].join('\n'),
+    );
+    expect(rows[0]?.product?.variants).toEqual([
+      {
+        sku: 'TEE-S',
+        gtin: '036000291452',
+        mpn: 'CT-100-S',
+        attributes: { size: 'S', color: 'red' },
+      },
+      { sku: 'TEE-M', mpn: 'CT-100-M', attributes: { size: 'M', color: 'red' } },
+    ]);
+  });
+
   it('reports a bad row against its product and keeps going', async () => {
     const rows = await read(
       [

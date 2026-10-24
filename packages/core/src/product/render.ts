@@ -12,6 +12,7 @@ export type Option = { code: string; label: string };
 export type PublishedVariant = {
   sku: string;
   gtin?: string;
+  mpn?: string;
   status: string;
   options: Record<string, Option>;
   attributes: Record<string, Json>;
@@ -279,6 +280,7 @@ export function renderForChannel(
       return {
         sku: v.sku,
         gtin: v.gtin,
+        mpn: v.mpn,
         status: v.status,
         options,
         attributes: attrs(v.attributes, c.variant, axes),
@@ -345,7 +347,8 @@ export function renderForChannel(
         version: product.version,
         title,
         brand: product.brand ?? '',
-        skus: variants.map((v) => `${v.sku} ${v.gtin ?? ''}`).join(' '),
+        // Identifiers, so a search for a SKU, GTIN or part number finds the product.
+        skus: variants.map((v) => [v.sku, v.gtin, v.mpn].filter(Boolean).join(' ')).join(' '),
         body,
       },
     };

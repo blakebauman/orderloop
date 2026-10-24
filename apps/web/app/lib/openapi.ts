@@ -408,7 +408,8 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/catalog/aliases/{alias}': {
         get: {
-          summary: 'The product holding a SKU, GTIN or slug (`sku:ABC`, `gtin:…`, `slug:en:…`)',
+          summary:
+            'The product holding a SKU, GTIN (any length: a UPC finds its EAN) or slug (`sku:ABC`, `gtin:…`, `slug:en:…`)',
           parameters: [{ name: 'alias', in: 'path', required: true, schema: { type: 'string' } }],
           responses: { '200': ok('{ key }'), ...errors },
         },

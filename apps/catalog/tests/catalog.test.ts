@@ -119,6 +119,24 @@ describe('aliases', () => {
     expect(await alias(`sku:${sku}`)).toEqual({ key: second.key });
   });
 
+  it('claims a GTIN in any length as one, and finds it by any of them', async () => {
+    // 4006381333931 as EAN-13 and as GTIN-14; tests share the catalog, so this one is unique here.
+    const first = product();
+    first.variants = [{ sku: `${first.key}-S`, gtin: '4006381333931', attributes: { size: 'S' } }];
+    expect((await api.putProducts([first], { by }))[0]?.status).toBe('created');
+    for (const g of ['4006381333931', '04006381333931'])
+      expect(await api.resolveAlias(`gtin:${g}`)).toBe(first.key);
+    expect(await api.resolveAlias('gtin:4006381333932')).toBeNull();
+    const second = product();
+    second.variants = [
+      { sku: `${second.key}-S`, gtin: '04006381333931', attributes: { size: 'S' } },
+    ];
+    expect((await api.putProducts([second], { by }))[0]).toMatchObject({
+      status: 'rejected',
+      issues: [{ path: 'gtin:04006381333931', message: `already used by ${first.key}` }],
+    });
+  });
+
   it('takes over a claim whose product no longer holds it', async () => {
     const p = product();
     const sku = `${p.key}-S`;

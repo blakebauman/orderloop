@@ -17,13 +17,18 @@ list price current for [orders](#orders).
 |---|---|
 | Product | A `key`, a `type`, localized `title`, `slug` and `description`, a `brand`, `categories`, `media`, attribute values, `variants`, and a listing per channel. `status` is one of <Values of="product-statuses" />; only `active` products are published. `extra` is passed through to readers but never indexed |
 | Product type | The shape of a product: its attributes and variant axes. Referenced as `code` (the latest version) or `code@version`; a stored product records the version it was validated against |
-| Variant | One sellable SKU. `sku` is unique within the product, `gtin` is optional (8, or 12 to 14 digits), and it can carry its own attribute values, prices and media. A product has 1 to 250 variants |
+| Variant | One sellable SKU. `sku` is unique within the product. `gtin` is optional: a GTIN-8, UPC (12 digits), EAN (13) or GTIN-14, with a valid GS1 check digit, published as written. `mpn` is the optional manufacturer part number (up to 70 characters). A variant can carry its own attribute values, prices and media. A product has 1 to 250 variants |
 | Channel | A place you sell: a `code`, a `name`, one `currency`, its `locales` and a `defaultLocale` that missing translations fall back to |
 | Category | A tree node: `code`, `parent` (or `null`), a localized `name`, an optional localized `slug` and a `position` |
 
 SKUs, GTINs and slugs identify one product: a product that claims one another product holds is
-rejected with `already used by <key>`. `GET /api/v1/catalog/aliases/:alias` finds the holder of
-`sku:<sku>`, `gtin:<gtin>` or `slug:<locale>:<slug>`.
+rejected with `already used by <key>`. A GTIN is one identifier in every length, so a UPC and the
+same item's EAN or GTIN-14 (the UPC with leading zeros) are the same claim, and either finds it.
+`GET /api/v1/catalog/aliases/:alias` finds the holder of `sku:<sku>`, `gtin:<gtin>` or
+`slug:<locale>:<slug>`.
+
+An MPN is unique only within its brand, so it isn't claimed: two products may share one. Search
+matches SKUs, GTINs and MPNs, so a shopper can find a product by any of them.
 
 ### Product types and versions
 
@@ -143,7 +148,7 @@ Row numbers in errors count the header as row 1.
 | `title:<locale>`, `slug:<locale>`, `description:<locale>` | Localized text, one column per locale |
 | `price.<channel>`, `compareAt.<channel>` | Decimal prices in the channel's currency (`18.00`) |
 | `visible.<channel>` | `true` or `false`; a channel with a price column is visible unless this says otherwise |
-| `sku`, `gtin`, `variantPrice.<channel>` | Variant fields; `variantPrice` overrides the product price |
+| `sku`, `gtin`, `mpn`, `variantPrice.<channel>` | Variant fields; `variantPrice` overrides the product price |
 | `attr.<code>`, `attr.<code>:<locale>` | An attribute, product- or variant-scoped as its type says; the `:<locale>` form is for localized text |
 
 Attribute cells are read by kind: `|` separates `multi_enum` values, money is `12.34 USD`, a measure
