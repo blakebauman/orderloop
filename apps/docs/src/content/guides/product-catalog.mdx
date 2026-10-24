@@ -198,13 +198,19 @@ SKU puts the product with that SKU first.
 ## Freshness
 
 Documents and listings are cached. A change appears within about a minute: published documents are
-fresh for 60 seconds, then revalidated with their `ETag` (an unchanged one costs a `304`), and a
-category's listing index is rebuilt at most every 15 seconds, however many products changed. Search
-and listings pick up a product once it is published, which follows its write by moments.
+fresh for 60 seconds, then revalidated with their `ETag` (an unchanged one costs a `304`; listing
+pages and batches carry an `ETag` too), and a category's listing index is rebuilt at most every 15
+seconds (a very large category, past 300,000 products, waits a little longer, up to 5 minutes),
+however many products changed. Search and listings pick up a product once it is published, which
+follows its write by moments.
 
 Set `urgent: true` on a write or a delete for a takedown or a price correction: the cached copies of
 those products are purged as soon as they are republished. Purges are rationed, so use it
-sparingly; the rest of a feed shouldn't be urgent.
+sparingly; the rest of a feed shouldn't be urgent. When many urgent changes queue up, one waiting
+longer than a minute is dropped instead of purged, since by then its cached copies have expired
+anyway. A purge clears the product's document at once; the card in listing pages, search results
+and batches can still show the old version for up to about a minute more, while the card store
+catches up around the world.
 
 A change to a channel's currency or locales, a category that moved, or an improvement to how documents are
 rendered reaches published products only on a reindex. `POST /api/v1/catalog/reindex` (`admin`) republishes

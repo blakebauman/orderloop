@@ -1,8 +1,8 @@
-import { runDurableObjectAlarm } from 'cloudflare:test';
+import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { DOC_FORMAT, ListingIndex, paths } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { withAncestors } from '../src/listings';
+import { DEBOUNCE_MS, debounceMs, type ListingIndexer, withAncestors } from '../src/listings';
 import { api, by, product, settle, setup } from './helpers';
 
 beforeAll(async () => {
@@ -111,6 +111,67 @@ describe('listing indexes', () => {
     await stub.apply('web', 'order-test', [{ key: 'x', at: 300, entry: null }]);
     await stub.apply('web', 'order-test', [{ key: 'x', at: 250, entry }]);
     expect(await stub.count()).toBe(0);
+  });
+});
+
+describe('build pacing', () => {
+  const entry = (version: number, price: number) => ({
+    key: 'y',
+    uid: 11,
+    version,
+    categories: ['pace-test'],
+    terms: { brand: ['acme'] },
+    numbers: { price: [price] },
+    createdAt: 1,
+  });
+  const storage = (o: ListingIndexer) => (o as unknown as { ctx: DurableObjectState }).ctx.storage;
+  const put = (o: ListingIndexer, k: string, v: string | number) =>
+    storage(o).sql.exec('INSERT OR REPLACE INTO settings VALUES (?, ?)', k, String(v));
+  const dirty = (o: ListingIndexer) =>
+    storage(o).sql.exec<{ v: string }>('SELECT v FROM settings WHERE k = ?', 'dirty').one().v;
+
+  it('waits longer between builds of a larger listing, at most five minutes', () => {
+    expect(debounceMs(0)).toBe(DEBOUNCE_MS);
+    expect(debounceMs(300_000)).toBe(DEBOUNCE_MS);
+    expect(debounceMs(1_000_000)).toBe(50_000);
+    expect(debounceMs(6_000_000)).toBe(300_000);
+    expect(debounceMs(50_000_000)).toBe(300_000);
+  });
+
+  it('schedules the next build by the size of the last one', async () => {
+    await runInDurableObject(indexer('pace-test'), async (o) => {
+      // No test delay here, so the debounce alone decides.
+      const self = o as unknown as { env: Env };
+      self.env = { ...self.env, LISTING_DELAY_MS: '0' } as Env;
+      const builtAt = Date.now();
+      put(o, 'built', builtAt);
+      put(o, 'members', 2_000_000);
+      await storage(o).deleteAlarm();
+      await o.apply('web', 'pace-test', [{ key: 'y', at: 1, entry: entry(1, 100) }]);
+      expect(await storage(o).getAlarm()).toBe(builtAt + 100_000);
+      put(o, 'members', 10);
+      await storage(o).deleteAlarm();
+      await o.apply('web', 'pace-test', [{ key: 'y', at: 2, entry: entry(2, 200) }]);
+      expect(await storage(o).getAlarm()).toBe(builtAt + DEBOUNCE_MS);
+      await storage(o).deleteAlarm();
+    });
+  });
+
+  it('skips a rebuild for a change that leaves the entry as it was', async () => {
+    await runInDurableObject(indexer('pace-test'), async (o) => {
+      put(o, 'dirty', 0);
+      // A new version (a new description, say) listing as before: only `at` moves.
+      await o.apply('web', 'pace-test', [{ key: 'y', at: 3, entry: entry(3, 200) }]);
+      expect(dirty(o)).toBe('0');
+      const at = storage(o).sql.exec<{ at: number }>('SELECT at FROM members WHERE key = ?', 'y');
+      expect(at.one().at).toBe(3);
+      // An older change can't undo it, and a new price rebuilds.
+      await o.apply('web', 'pace-test', [{ key: 'y', at: 2, entry: entry(2, 100) }]);
+      expect(dirty(o)).toBe('0');
+      await o.apply('web', 'pace-test', [{ key: 'y', at: 4, entry: entry(4, 300) }]);
+      expect(dirty(o)).toBe('1');
+      await storage(o).deleteAlarm();
+    });
   });
 });
 

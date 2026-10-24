@@ -105,6 +105,32 @@ describe('category listings', () => {
     expect((await get('/v1/web/en/categories/tees/other')).status).toBe(404);
   });
 
+  it('tags a page with an ETag of its body and answers 304 when it still matches', async () => {
+    const path = '/v1/web/en/categories/tees/products?limit=2';
+    const r = await get(path);
+    const etag = r.headers.get('etag') ?? '';
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    const again = await get(path, { headers: { 'if-none-match': etag } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get('etag')).toBe(etag);
+    expect(again.headers.get('cache-tag')).toBe('cat:tees,ch:web');
+    expect(await again.text()).toBe('');
+    expect((await get(path, { headers: { 'if-none-match': '"other", *' } })).status).toBe(304);
+    expect((await get(path, { headers: { 'if-none-match': '"other"' } })).status).toBe(200);
+    // Another page, another body: another ETag.
+    const next = await get('/v1/web/en/categories/tees/products?limit=2&cursor=2');
+    expect(next.headers.get('etag')).not.toBe(etag);
+    // A card that changes changes the page's ETag, though the index didn't.
+    await env.CARDS.put(
+      paths.card(DOC_FORMAT, 'web', 'en', 5),
+      JSON.stringify({ key: 'p5', v: 2 }),
+    );
+    const changed = await get(path, { headers: { 'if-none-match': etag } });
+    expect(changed.status).toBe(200);
+    expect(changed.headers.get('etag')).not.toBe(etag);
+    await env.CARDS.put(paths.card(DOC_FORMAT, 'web', 'en', 5), JSON.stringify({ key: 'p5' }));
+  });
+
   it('keeps the internal index path off the public API', async () => {
     expect((await get('/_idx/web/tees')).status).toBe(404);
   });

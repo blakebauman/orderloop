@@ -19,20 +19,31 @@ export const FRESH = 'public, max-age=60, stale-while-revalidate=86400, stale-if
 /** A miss is remembered briefly, so a product that appears is seen within half a minute. */
 export const MISSING = 'public, max-age=30';
 const JSON_TYPE = 'application/json; charset=utf-8';
-/** Listing indexes: rebuilt at most every 15 s, so cached for 30. */
+/** Listing indexes: rebuilt at most every 15 s (longer for large ones), so cached for 30. */
 const INDEX_FRESH = 'public, max-age=30, stale-while-revalidate=300';
 /** Where Delivery fetches a listing index from itself, through the cache. Not a public route. */
 const INDEX_PATH = '/_idx/';
-/** Decoded indexes an isolate keeps, by bytes. */
-const INDEX_BUDGET = 64 * 1024 * 1024;
+/** Decoded indexes an isolate keeps, by bytes (an isolate has 128 MB in all). */
+const INDEX_BUDGET = 32 * 1024 * 1024;
+/** The largest index an isolate will download and decode at all. */
+const INDEX_MAX = 64 * 1024 * 1024;
 /** How long an isolate trusts a decoded index before revalidating it. */
 const INDEX_TRUST_MS = 30_000;
+/** How long a request waits on another's load of the same index before loading it itself. */
+const SHARED_LOAD_MS = 5_000;
 /** Facet values returned per attribute, most frequent first. */
 const FACET_VALUES = 50;
+/** Key → uid entries an isolate remembers (a uid never changes while its product exists). */
+const UID_ENTRIES = 50_000;
 
 type Held = { index: ListingIndex; etag: string; bytes: number; checked: number };
 const held = new Map<string, Held>();
 let heldBytes = 0;
+/** Index loads in flight, so concurrent requests for one category download it once. */
+const loading = new Map<string, Promise<ListingIndex | null>>();
+const uidCache = new Map<string, number>();
+
+class IndexTooLarge extends Error {}
 
 function keep(id: string, h: Held) {
   const old = held.get(id);
@@ -74,6 +85,38 @@ function missing(error: string, cacheTags: string[]) {
   });
 }
 
+/** A strong ETag for a body assembled here: a hash of its bytes. */
+async function bodyEtag(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  let hex = '';
+  for (const b of new Uint8Array(digest, 0, 16)) hex += b.toString(16).padStart(2, '0');
+  return `"${hex}"`;
+}
+
+/** Whether an If-None-Match header names `etag` (weak or strong, or `*`). */
+export function matches(ifNoneMatch: string | null, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  return ifNoneMatch
+    .split(',')
+    .map((t) => t.trim().replace(/^W\//, ''))
+    .some((t) => t === '*' || t === etag);
+}
+
+/**
+ * An assembled JSON body with its ETag, or a 304 when the request already has it: what lets the
+ * cache revalidate a stale listing or batch without storing it again.
+ */
+async function assembled(
+  request: Request,
+  body: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const etag = await bodyEtag(body);
+  if (matches(request.headers.get('if-none-match'), etag))
+    return new Response(null, { status: 304, headers: { ...headers, etag } });
+  return json(body, 200, { ...headers, etag });
+}
+
 export class Delivery extends WorkerEntrypoint<Env> {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -94,9 +137,9 @@ export class Delivery extends WorkerEntrypoint<Env> {
         return this.document(request, route, key);
       }
       case 'batch':
-        return this.batch(route);
+        return this.batch(request, route);
       case 'listing':
-        return this.listing(route);
+        return this.listing(request, route);
       case 'search':
         return this.search(route);
       case 'categories': {
@@ -137,20 +180,53 @@ export class Delivery extends WorkerEntrypoint<Env> {
     return json(object.body, 200, headers);
   }
 
+  /**
+   * Products' uids, from this isolate's memory or KV (`null` for a key never published). A key
+   * deleted and created again gets a new uid, so a remembered uid whose card is gone is looked up
+   * again (`refresh`).
+   */
+  private async uids(keys: string[], refresh = false): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    const unknown = refresh ? keys : keys.filter((k) => !uidCache.has(k));
+    if (unknown.length) {
+      const found = await this.env.CARDS.get(unknown.map((k) => paths.uid(DOC_FORMAT, k)));
+      for (const k of unknown) {
+        const v = found.get(paths.uid(DOC_FORMAT, k));
+        if (v) {
+          uidCache.delete(k);
+          uidCache.set(k, Number(v));
+          if (uidCache.size > UID_ENTRIES) uidCache.delete(uidCache.keys().next().value as string);
+        } else uidCache.delete(k);
+        out.set(k, v ? Number(v) : null);
+      }
+    }
+    for (const k of keys) if (!out.has(k)) out.set(k, uidCache.get(k) ?? null);
+    return out;
+  }
+
   /** Cards for up to 100 keys, in the order asked, `null` for any not published. */
-  private async batch(route: Extract<Route, { kind: 'batch' }>): Promise<Response> {
-    const uids = await this.env.CARDS.get(route.keys.map((k) => paths.uid(DOC_FORMAT, k)));
-    const cardKeys = route.keys.map((k) => {
-      const uid = uids.get(paths.uid(DOC_FORMAT, k));
-      return uid ? paths.card(DOC_FORMAT, route.channel, route.locale, Number(uid)) : null;
-    });
-    const wanted = cardKeys.filter((k): k is string => k !== null);
-    const cards = wanted.length
-      ? await this.env.CARDS.get(wanted)
-      : new Map<string, string | null>();
+  private async batch(
+    request: Request,
+    route: Extract<Route, { kind: 'batch' }>,
+  ): Promise<Response> {
+    const card = (uid: number | null | undefined) =>
+      uid ? paths.card(DOC_FORMAT, route.channel, route.locale, uid) : null;
+    const read = async (keys: string[], refresh: boolean) => {
+      const uids = await this.uids(keys, refresh);
+      const wanted = keys.map((k) => card(uids.get(k))).filter((k): k is string => k !== null);
+      const cards = wanted.length
+        ? await this.env.CARDS.get(wanted)
+        : new Map<string, string | null>();
+      return new Map(keys.map((k) => [k, cards.get(card(uids.get(k)) ?? '') ?? null]));
+    };
+    const remembered = new Set(route.keys.filter((k) => uidCache.has(k)));
+    const found = await read(route.keys, false);
+    // A card missing under a remembered uid: the uid may have changed (see `uids`).
+    const recheck = route.keys.filter((k) => found.get(k) === null && remembered.has(k));
+    if (recheck.length) for (const [k, v] of await read(recheck, true)) found.set(k, v);
     // Cards are stored serialized: join them as they are.
-    const body = `{"products":[${cardKeys.map((k) => (k && cards.get(k)) ?? 'null').join(',')}]}`;
-    return json(body, 200, {
+    const body = `{"products":[${route.keys.map((k) => found.get(k) ?? 'null').join(',')}]}`;
+    return assembled(request, body, {
       'cache-control': FRESH,
       'cache-tag': [tags.channel(route.channel), ...route.keys.map(tags.product)].join(','),
     });
@@ -184,6 +260,29 @@ export class Delivery extends WorkerEntrypoint<Env> {
     const id = `${channel}/${category}`;
     const h = held.get(id);
     if (h && Date.now() - h.checked < INDEX_TRUST_MS) return h.index;
+    // Another request is loading it: wait for that (briefly; a load that fails or stalls, say
+    // because its request was cancelled, is done again here).
+    const inFlight = loading.get(id);
+    if (inFlight) {
+      const shared = await Promise.race([
+        inFlight.then(
+          (index) => ({ index }),
+          () => null,
+        ),
+        scheduler.wait(SHARED_LOAD_MS).then(() => null),
+      ]);
+      if (shared) return shared.index;
+    }
+    const load = this.fetchIndex(id, h);
+    loading.set(id, load);
+    try {
+      return await load;
+    } finally {
+      if (loading.get(id) === load) loading.delete(id);
+    }
+  }
+
+  private async fetchIndex(id: string, h: Held | undefined): Promise<ListingIndex | null> {
     const self = (this.ctx as unknown as { exports: { Delivery: Fetcher } }).exports.Delivery;
     const r = await self.fetch(
       new Request(`https://catalog.internal${INDEX_PATH}${id}`, {
@@ -195,8 +294,17 @@ export class Delivery extends WorkerEntrypoint<Env> {
       return h.index;
     }
     if (!r.ok) {
-      if (h) held.delete(id);
+      if (h) {
+        held.delete(id);
+        heldBytes -= h.bytes;
+      }
       return null;
+    }
+    // Checked before buffering: an index this large would take the isolate's memory with it.
+    const length = Number(r.headers.get('content-length') ?? 0);
+    if (length > INDEX_MAX) {
+      await r.body?.cancel();
+      throw new IndexTooLarge(`listing index ${id} is ${length} bytes`);
     }
     const buffer = await r.arrayBuffer();
     const index = new ListingIndex(buffer);
@@ -210,9 +318,21 @@ export class Delivery extends WorkerEntrypoint<Env> {
   }
 
   /** One page of a category: filtered, sorted, faceted over the whole result, cards in order. */
-  private async listing(route: Extract<Route, { kind: 'listing' }>): Promise<Response> {
+  private async listing(
+    request: Request,
+    route: Extract<Route, { kind: 'listing' }>,
+  ): Promise<Response> {
     const cacheTags = [tags.category(route.category), tags.channel(route.channel)];
-    const index = await this.loadIndex(route.channel, route.category);
+    let index: ListingIndex | null;
+    try {
+      index = await this.loadIndex(route.channel, route.category);
+    } catch (err) {
+      if (!(err instanceof IndexTooLarge)) throw err;
+      console.error(err.message);
+      return json(JSON.stringify({ error: 'listing unavailable' }), 503, {
+        'cache-control': MISSING,
+      });
+    }
     if (!index) return missing('no such category', cacheTags);
     if (route.sort !== 'newest' && !index.sorts.includes(route.sort))
       return json(
@@ -256,7 +376,7 @@ export class Delivery extends WorkerEntrypoint<Env> {
     const body =
       `{"total":${r.total},"next":${r.next ?? 'null'},"sorts":${JSON.stringify(['newest', ...index.sorts])},` +
       `"products":[${products.join(',')}],"facets":${JSON.stringify(facets)},"ranges":${JSON.stringify(ranges)}}`;
-    return json(body, 200, { 'cache-control': FRESH, 'cache-tag': cacheTags.join(',') });
+    return assembled(request, body, { 'cache-control': FRESH, 'cache-tag': cacheTags.join(',') });
   }
 
   /**

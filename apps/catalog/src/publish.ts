@@ -33,11 +33,16 @@ function channelAliases(all: string[], channel: Channel): string[] {
   );
 }
 
-/** Publishes `keys` and returns the listing changes they make (send them once this returns). */
+/**
+ * Publishes `keys` and returns the listing changes they make (send them once this returns). An
+ * alias pointer already published for the same key is left as it is, except for a key in `forced`
+ * (a reindex), which rewrites everything.
+ */
 export async function publishKeys(
   shard: CatalogShard,
   keys: string[],
   config: CatalogConfig,
+  forced: Set<string> = new Set(),
 ): Promise<ListingChange[]> {
   const env = shard.publishEnv;
   const resolve = typeResolver(config);
@@ -77,12 +82,19 @@ export async function publishKeys(
           env.CARDS.put(paths.card(DOC_FORMAT, channel.code, r.locale, current?.uid ?? 0), r.card),
         );
       }
+      // A pointer holds only the key, so one this product already published is the same bytes.
+      const published = new Set(forced.has(key) ? [] : (prev?.aliases ?? []));
       for (const alias of nextAliases)
-        tasks.push(() =>
-          env.PUBLISHED.put(paths.alias(DOC_FORMAT, channel.code, alias), JSON.stringify({ key }), {
-            httpMetadata: JSON_TYPE,
-          }),
-        );
+        if (!published.has(alias))
+          tasks.push(() =>
+            env.PUBLISHED.put(
+              paths.alias(DOC_FORMAT, channel.code, alias),
+              JSON.stringify({ key }),
+              {
+                httpMetadata: JSON_TYPE,
+              },
+            ),
+          );
 
       // Take down what was published and isn't any more.
       if (prev) {
@@ -122,6 +134,7 @@ export async function publishKeys(
           channel: channel.code,
           key,
           at,
+          rev: config.rev,
           entry: pub.index,
           left: prev?.categories ?? [],
           search: pub.rendered?.map((r) => ({ ...r.search, locale: r.locale })) ?? null,

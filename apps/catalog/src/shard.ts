@@ -55,12 +55,17 @@ type Row = {
 
 /** Alarm passes: products published per pass. */
 const PUBLISH_BATCH = 100;
+/** Cache tags per purge message: what one purge call takes. */
+const PURGE_TAGS = 100;
+/** How long a shard trusts its copy of the config without a newer revision asking for more. */
+const CONFIG_TTL_MS = 2_000;
 /** How long a batch id is remembered: longer than a feed part can wait to be redelivered. */
 const APPLIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class CatalogShard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private config: CatalogConfig | undefined;
+  private configAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -79,7 +84,21 @@ export class CatalogShard extends DurableObject<Env> {
         key TEXT NOT NULL, channel TEXT NOT NULL, locales TEXT NOT NULL, aliases TEXT NOT NULL,
         PRIMARY KEY (key, channel));
       CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS outbox_key ON outbox (key);
+      CREATE INDEX IF NOT EXISTS applied_at ON applied (at);
     `);
+    // Added later, so shards created before them gain them here. `rev`: the config revision a write
+    // was validated against (null: unknown, so the alarm fetches the latest). `forced`: a reindex,
+    // which rewrites what an ordinary publish skips as unchanged.
+    const columns = new Set(
+      this.sql
+        .exec<{ name: string }>('SELECT name FROM pragma_table_info(?)', 'outbox')
+        .toArray()
+        .map((c) => c.name),
+    );
+    if (!columns.has('rev')) this.sql.exec('ALTER TABLE outbox ADD COLUMN rev INTEGER');
+    if (!columns.has('forced'))
+      this.sql.exec('ALTER TABLE outbox ADD COLUMN forced INTEGER NOT NULL DEFAULT 0');
   }
 
   private setting(k: string): number | undefined {
@@ -92,10 +111,20 @@ export class CatalogShard extends DurableObject<Env> {
     else if (known !== n) throw new Error(`shard ${known} was called as shard ${n}`);
   }
 
-  /** The config at revision `rev` or later, fetched from CatalogMeta when this copy is older. */
+  /**
+   * The config at revision `rev` or later, fetched from CatalogMeta when this copy is older than
+   * that or than CONFIG_TTL_MS. Without a revision, always fetched.
+   */
   async loadConfig(rev?: number): Promise<CatalogConfig> {
-    if (!this.config || rev === undefined || this.config.rev < rev)
+    if (
+      !this.config ||
+      rev === undefined ||
+      this.config.rev < rev ||
+      Date.now() - this.configAt > CONFIG_TTL_MS
+    ) {
       this.config = await meta(this.env).getConfig();
+      this.configAt = Date.now();
+    }
     return this.config;
   }
 
@@ -108,6 +137,24 @@ export class CatalogShard extends DurableObject<Env> {
       .toArray()[0];
   }
 
+  /** A stored product's version and content hash, without its body. */
+  private head(key: string): { version: number; hash: string } | undefined {
+    return this.sql
+      .exec<{ version: number; hash: string }>(
+        'SELECT version, hash FROM products WHERE key = ?',
+        key,
+      )
+      .toArray()[0];
+  }
+
+  /** The aliases a stored product claims (its body parsed). */
+  private storedAliases(key: string): string[] {
+    const row = this.sql
+      .exec<{ body: string }>('SELECT body FROM products WHERE key = ?', key)
+      .toArray()[0];
+    return row ? productAliases(JSON.parse(row.body) as ProductData) : [];
+  }
+
   async apply(batch: ApplyBatch): Promise<WriteResult[]> {
     this.shardNumber(batch.shard);
     const done = this.sql
@@ -116,13 +163,15 @@ export class CatalogShard extends DurableObject<Env> {
     if (done) return JSON.parse(done.result) as WriteResult[];
 
     // 1. What changes: rows whose content hash differs from what's stored. A key repeated in the
-    // batch keeps its last row.
+    // batch keeps its last row. Only a changed row's stored body is parsed (for its old aliases):
+    // in a daily full feed, most rows are unchanged.
     const last = new Map(batch.rows.map((data, i) => [data.key, i]));
     const planned = batch.rows.map((data, i) => {
       const hash = contentHash(data);
-      const before = this.read(data.key);
-      const prevAliases = before ? productAliases(JSON.parse(before.body) as ProductData) : [];
+      const before = this.head(data.key);
       const repeated = last.get(data.key) !== i;
+      const changes = !repeated && hash !== before?.hash;
+      const prevAliases = changes && before ? this.storedAliases(data.key) : [];
       return { data, hash, before, prevAliases, aliases: productAliases(data), repeated };
     });
     const changed = planned.filter((p) => !p.repeated && p.hash !== p.before?.hash);
@@ -165,7 +214,7 @@ export class CatalogShard extends DurableObject<Env> {
           });
           continue;
         }
-        const current = this.read(p.data.key);
+        const current = this.head(p.data.key);
         if (current?.hash === p.hash) {
           results.push({ key: p.data.key, status: 'unchanged', version: current.version });
           continue;
@@ -217,9 +266,10 @@ export class CatalogShard extends DurableObject<Env> {
           );
         }
         this.sql.exec(
-          'INSERT INTO outbox (key, urgent) VALUES (?, ?)',
+          'INSERT INTO outbox (key, urgent, rev) VALUES (?, ?, ?)',
           p.data.key,
           batch.urgent ? 1 : 0,
+          batch.rev,
         );
         const next = new Set(p.aliases);
         for (const a of p.prevAliases)
@@ -324,8 +374,10 @@ export class CatalogShard extends DurableObject<Env> {
     if (!count) return 0;
     // A product already waiting publishes its latest state anyway: don't queue it twice.
     this.sql.exec(
-      'INSERT INTO outbox (key, urgent) SELECT key, 0 FROM products WHERE key NOT IN (SELECT key FROM outbox)',
+      'INSERT INTO outbox (key, urgent, forced) SELECT key, 0, 1 FROM products WHERE key NOT IN (SELECT key FROM outbox)',
     );
+    // One already waiting is rewritten in full too.
+    this.sql.exec('UPDATE outbox SET forced = 1');
     await this.schedulePublish();
     return count;
   }
@@ -443,36 +495,44 @@ export class CatalogShard extends DurableObject<Env> {
     return this.sql.exec<{ n: number }>('SELECT COUNT(DISTINCT key) AS n FROM outbox').one().n;
   }
 
+  private hasPending(): boolean {
+    return !!this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM outbox) AS e').one().e;
+  }
+
   override async alarm() {
     this.sql.exec('DELETE FROM applied WHERE at < ?', Date.now() - APPLIED_TTL_MS);
-    const config = await this.loadConfig();
     const rows = this.sql
-      .exec<{ seq: number; key: string; urgent: number }>(
-        'SELECT seq, key, urgent FROM outbox ORDER BY seq LIMIT ?',
+      .exec<{ seq: number; key: string; urgent: number; rev: number | null; forced: number }>(
+        'SELECT seq, key, urgent, rev, forced FROM outbox ORDER BY seq LIMIT ?',
         PUBLISH_BATCH * 4,
       )
       .toArray();
     if (!rows.length) return;
     const keys = [...new Set(rows.map((r) => r.key))].slice(0, PUBLISH_BATCH);
     const included = new Set(keys);
-    const upTo = rows.filter((r) => included.has(r.key)).at(-1)?.seq ?? 0;
-    const changes = await publishKeys(this, keys, config);
+    const mine = rows.filter((r) => included.has(r.key));
+    const upTo = mine.at(-1)?.seq ?? 0;
+    // The config these writes were validated against, or later; a row without a revision (a
+    // removal, a reindex) takes the latest.
+    const revs = mine.map((r) => r.rev);
+    const config = await this.loadConfig(
+      revs.includes(null) ? undefined : Math.max(...(revs as number[])),
+    );
+    const forced = new Set(mine.filter((r) => r.forced).map((r) => r.key));
+    const changes = await publishKeys(this, keys, config, forced);
     // Listing indexes follow from these (listings.ts). Sent before the outbox rows go, so a crash
     // here republishes and sends them again; indexers order changes by `at`.
     for (let i = 0; i < changes.length; i += 100)
       await this.env.CHANGES.sendBatch(changes.slice(i, i + 100).map((body) => ({ body })));
     // Urgent changes don't wait out the edge cache's minute: their tags go to catalog-edge's purge
-    // queue, which it drains at the rate Cloudflare allows. Sent after publishing, so a purge never
-    // refills from the old document.
-    const urgent = [
-      ...new Set(rows.filter((r) => r.urgent && included.has(r.key)).map((r) => r.key)),
-    ];
-    for (let i = 0; i < urgent.length; i += 100)
-      await this.env.PURGE.sendBatch(
-        urgent
-          .slice(i, i + 100)
-          .map((key) => ({ body: { tags: [tags.product(key)] } satisfies PurgeMessage })),
-      );
+    // queue, which it drains at the rate Cloudflare allows (a call of up to 100 tags at a time, so
+    // a message carries that many). Sent after publishing, so a purge never refills from the old
+    // document.
+    const urgent = [...new Set(mine.filter((r) => r.urgent).map((r) => tags.product(r.key)))];
+    const messages: { body: PurgeMessage }[] = [];
+    for (let i = 0; i < urgent.length; i += PURGE_TAGS)
+      messages.push({ body: { tags: urgent.slice(i, i + PURGE_TAGS) } });
+    if (messages.length) await this.env.PURGE.sendBatch(messages);
     // Every outbox row up to the last one published is covered: later rows for the same key
     // republish the same (latest) state.
     this.sql.exec(
@@ -480,7 +540,7 @@ export class CatalogShard extends DurableObject<Env> {
       upTo,
       JSON.stringify(keys),
     );
-    if (this.pending()) await this.ctx.storage.setAlarm(Date.now());
+    if (this.hasPending()) await this.ctx.storage.setAlarm(Date.now());
   }
 
   // --- Used by the publisher ---
