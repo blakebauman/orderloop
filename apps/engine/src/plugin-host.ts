@@ -22,12 +22,14 @@ import {
   type PluginManifest,
   type PluginRpc,
   type PluginRuntime,
+  parseManifest,
   pluginBinding,
   pluginKey,
   scrubCredentials,
 } from '@orderloop/core';
 import { createDb, pluginErrors } from '@orderloop/db';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
+import { pluginStorage } from './namespaces';
 
 export type PluginStub = Fetcher & { [K in keyof PluginRpc]: PluginRpc[K] };
 
@@ -72,10 +74,25 @@ export function installedPlugins(env: Env): { id: string; runtime: PluginRuntime
 }
 
 /**
- * The last manifest each plugin answered with (kept by `pluginStatuses`). The capabilities read it
- * to know what a plugin declared (egress hosts, secrets) without calling into the plugin again.
+ * The last manifest each plugin answered with (kept by `pluginStatuses`). A sandboxed plugin's
+ * rules (egress, secrets, limits) are never taken from here but from its pinned manifest
+ * (`pinnedManifest`): what its code answers with is only checked against that.
  */
 export const knownManifests = new Map<string, PluginManifest>();
+
+/**
+ * A sandboxed plugin's manifest as CI read it and sealed it into the bundle its pin names: what
+ * the engine enforces. Null for a plugin that isn't sandboxed here.
+ */
+export async function pinnedManifest(env: Env, id: string): Promise<PluginManifest | null> {
+  const sha = bundles(env)[id];
+  return sha ? (await verifiedBundle(env, id, sha)).manifest : null;
+}
+
+/** The manifest a plugin's secrets are read and scrubbed by: its pinned one, else its last. */
+async function declared(env: Env, id: string) {
+  return (await pinnedManifest(env, id).catch(() => null)) ?? knownManifests.get(id) ?? null;
+}
 
 /** The per-call limits for a sandboxed plugin: its manifest's, within the caps for `kind`. */
 export function limitsFor(kind: CallKind, manifest?: Pick<PluginManifest, 'limits'>) {
@@ -91,7 +108,11 @@ const sha256 = async (text: string) =>
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
-type Bundle = { code: string; migrations: { name: string; sql: string }[] };
+type Bundle = {
+  code: string;
+  migrations: { name: string; sql: string }[];
+  manifest: PluginManifest;
+};
 
 /**
  * Bundles this isolate has read and checked against their pins, so the loader never runs one
@@ -109,7 +130,10 @@ async function verifiedBundle(env: Env, id: string, sha: string): Promise<Bundle
 }
 
 function devBundle(env: Env, id: string): string | undefined {
-  const raw = (env as unknown as Vars).PLUGIN_DEV_BUNDLES;
+  const e = env as unknown as Vars;
+  // Only in local dev, which sets both (apps/web/vite.config.ts).
+  if (e.DEV_SANDBOX !== 'true') return undefined;
+  const raw = e.PLUGIN_DEV_BUNDLES;
   if (typeof raw !== 'string') return undefined;
   try {
     const body = (JSON.parse(raw) as Record<string, unknown>)[id];
@@ -128,21 +152,23 @@ async function loadBundle(env: Env, id: string, sha: string): Promise<Bundle> {
     throw new Error(`Plugin “${id}”: bundle ${sha.slice(0, 12)} is not published`);
   if ((await sha256(body)) !== sha)
     throw new Error(`Plugin “${id}”: bundle ${sha.slice(0, 12)} doesn't match its pin`);
-  return JSON.parse(body) as Bundle;
+  const bundle = JSON.parse(body) as Bundle;
+  const manifest = parseManifest(bundle.manifest);
+  if (manifest.id !== id) throw new Error(`Plugin “${id}”: its bundle is for “${manifest.id}”`);
+  return { ...bundle, manifest };
 }
 
 type Exports = Record<string, (opts: { props: Vars }) => unknown>;
 const capabilities = () => workerExports as unknown as Exports;
 
 /**
- * The plugin to call: its binding, or its sandbox with the limits for `kind`; null when it isn't
- * installed. `manifest` (when the caller has it) narrows the limits to what the plugin asked for.
+ * The plugin to call: its binding, or its sandbox with the limits for `kind` (within what its
+ * pinned manifest asks for); null when it isn't installed.
  */
 export async function pluginStub(
   env: Env,
   id: string,
   kind: CallKind = 'call',
-  manifest?: Pick<PluginManifest, 'limits'>,
 ): Promise<PluginStub | null> {
   const bound = (env as unknown as Vars)[pluginBinding(id)];
   if (typeof (bound as Fetcher | undefined)?.fetch === 'function') return bound as PluginStub;
@@ -160,15 +186,16 @@ export async function pluginStub(
       env: {
         __ORDERLOOP_SANDBOX: true,
         ...keys,
-        SECRETS: caps.PluginSecrets!({ props: { id } }),
+        SECRETS: caps.PluginSecrets!({ props: { id, sha } }),
         STORAGE: caps.PluginDb!({ props: { id, sha } }),
       },
-      globalOutbound: caps.PluginEgress!({ props: { id } }),
-      tails: [caps.PluginTail!({ props: { id } })],
+      globalOutbound: caps.PluginEgress!({ props: { id, sha } }),
+      tails: [caps.PluginTail!({ props: { id, sha } })],
     } as unknown as WorkerLoaderWorkerCode;
   });
+  // The limits it asked for in its pinned manifest, never more than the caps.
   return worker.getEntrypoint(undefined, {
-    limits: limitsFor(kind, manifest ?? knownManifests.get(id)),
+    limits: limitsFor(kind, bundle.manifest),
   }) as unknown as PluginStub;
 }
 
@@ -216,21 +243,32 @@ export async function resolveSecret(env: Env, id: string, name: string) {
 
 /** Every value of the plugin's declared secrets that is set, for scrubbing what it writes back. */
 export async function knownSecretValues(env: Env, id: string): Promise<string[]> {
-  const m = knownManifests.get(id);
+  const m = await declared(env, id);
   if (!m) return [];
   const values = await Promise.all(m.secrets.map((s) => resolveSecret(env, id, s.name)));
   return values.filter((v): v is string => !!v);
 }
 
-/** A sandboxed plugin's `SECRETS`: whether any declared secret is set, and exposed ones' values. */
-export class PluginSecrets extends WorkerEntrypoint<Env, { id: string }> {
+type Pinned = { id: string; sha: string };
+
+/** The pinned manifest a capability enforces, from the bundle its props name. */
+const policy = async (env: Env, { id, sha }: Pinned) =>
+  (await verifiedBundle(env, id, sha)).manifest;
+
+/**
+ * A sandboxed plugin's `SECRETS`: whether a secret its pinned manifest declares is set, and the
+ * value of one it marks `expose`. Never an injected one.
+ */
+export class PluginSecrets extends WorkerEntrypoint<Env, Pinned> {
   async has(name: string): Promise<boolean> {
+    const m = await policy(this.env, this.ctx.props);
+    if (!m.secrets.some((s) => s.name === name)) return false;
     return (await resolveSecret(this.env, this.ctx.props.id, name)) !== undefined;
   }
 
   async get(name: string): Promise<string | null> {
-    const declared = knownManifests.get(this.ctx.props.id)?.secrets.find((s) => s.name === name);
-    if (!declared?.expose) return null;
+    const m = await policy(this.env, this.ctx.props);
+    if (!m.secrets.find((s) => s.name === name)?.expose) return null;
     return (await resolveSecret(this.env, this.ctx.props.id, name)) ?? null;
   }
 }
@@ -277,7 +315,11 @@ export function isPrivateAddress(host: string): boolean {
 export function egressRefusal(manifest: Pick<PluginManifest, 'egress'>, url: URL): string | null {
   if (url.protocol !== 'https:') return 'only https is allowed';
   if (url.username || url.password) return 'credentials in the URL are not allowed';
-  const host = url.hostname.replace(/^\[|\]$/g, '');
+  // One spelling for every check: no brackets, no trailing dot, lower case.
+  const host = url.hostname
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '')
+    .toLowerCase();
   if (isPrivateAddress(host) || BLOCKED_HOST.test(host)) return `${host} is not a public host`;
   if (!egressAllows(manifest.egress, host)) return `${host} is not in the plugin's egress`;
   return null;
@@ -289,31 +331,41 @@ export function egressRefusal(manifest: Pick<PluginManifest, 'egress'>, url: URL
  * host. Redirects are followed here, at most `MAX_REDIRECTS`, each checked again, and an injected
  * credential never follows a redirect to another host.
  */
-export class PluginEgress extends WorkerEntrypoint<Env, { id: string }> {
+export class PluginEgress extends WorkerEntrypoint<Env, Pinned> {
   override async fetch(request: Request): Promise<Response> {
     const id = this.ctx.props.id;
-    const manifest = knownManifests.get(id);
-    if (!manifest) return refuse(id, request.url, 'the plugin is not loaded');
-    const body =
-      request.method === 'GET' || request.method === 'HEAD' ? null : await request.arrayBuffer();
+    const manifest = await policy(this.env, this.ctx.props);
+    let body: ArrayBuffer | null = null;
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+      // Kept to replay on a redirect, so capped: a plugin can't make the engine hold more.
+      if (Number(request.headers.get('content-length') ?? 0) > MAX_EGRESS_BODY)
+        return refuse(id, request.url, 'the request body is too large', 413);
+      body = await readCapped(request.body, MAX_EGRESS_BODY);
+      if (!body) return refuse(id, request.url, 'the request body is too large', 413);
+    }
     let url = new URL(request.url);
     let method = request.method;
     let payload: ArrayBuffer | null = body;
+    const headers = new Headers(request.headers);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const why = egressRefusal(manifest, url);
       if (why) return refuse(id, url.toString(), why);
-      const headers = new Headers(request.headers);
+      const host = url.hostname.replace(/\.$/, '').toLowerCase();
       for (const s of manifest.secrets) {
         if (!s.inject) continue;
         headers.delete(s.inject.header);
-        if (!egressAllows([s.inject.host], url.hostname)) continue;
+        // An exact host only (the manifest refuses a wildcard for `inject`).
+        if (host !== s.inject.host) continue;
         const value = await resolveSecret(this.env, id, s.name);
         if (value) headers.set(s.inject.header, s.inject.format.replace('{}', value));
       }
       const res = await fetch(url, { method, headers, body: payload, redirect: 'manual' });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (!location) return res;
-      url = new URL(location, url);
+      const next = new URL(location, url);
+      // Credentials the plugin set itself don't follow it to another origin.
+      if (next.origin !== url.origin) for (const h of CROSS_ORIGIN_DROPPED) headers.delete(h);
+      url = next;
       if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
         method = 'GET';
         payload = null;
@@ -323,9 +375,45 @@ export class PluginEgress extends WorkerEntrypoint<Env, { id: string }> {
   }
 }
 
-function refuse(id: string, url: string, why: string) {
-  console.warn(JSON.stringify({ plugin: id, egress: 'refused', url: url.slice(0, 200), why }));
-  return new Response(`Refused by OrderLoop: ${why}`, { status: 403 });
+/** Request headers dropped when a redirect leaves the origin the plugin asked for. */
+const CROSS_ORIGIN_DROPPED = ['authorization', 'cookie', 'proxy-authorization'];
+
+/** The largest request body a sandboxed plugin may send out (as a plugin page may receive). */
+const MAX_EGRESS_BODY = 10 * 1024 * 1024;
+
+/** The stream's bytes, or null once more than `max` have come. */
+async function readCapped(stream: ReadableStream<Uint8Array>, max: number) {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out.buffer;
+}
+
+function refuse(id: string, url: string, why: string, status = 403) {
+  // The origin and path only: a query string or redirect target may carry what it shouldn't.
+  let where = url;
+  try {
+    const u = new URL(url);
+    where = `${u.origin}${u.pathname}`.slice(0, 200);
+  } catch {}
+  console.warn(JSON.stringify({ plugin: id, egress: 'refused', url: where, why }));
+  return new Response(`Refused by OrderLoop: ${why}`, { status });
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -338,37 +426,43 @@ type Result = { rows: Record<string, unknown>[]; changes: number };
  * the bundle it runs applied once, forward only (`_orderloop_migrations` records them by name).
  */
 export class PluginStorage extends DurableObject<Env> {
-  private migrated = new Set<string>();
+  // JS-private (#), so over RPC this object answers only `query` and `batch`.
+  #migrated = new Set<string>();
 
-  private async migrate(id: string, sha: string) {
-    if (this.migrated.has(sha)) return;
-    const sql = this.ctx.storage.sql;
-    sql.exec(
-      'CREATE TABLE IF NOT EXISTS _orderloop_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)',
-    );
-    const done = new Set(
-      sql
-        .exec<{ name: string }>('SELECT name FROM _orderloop_migrations')
-        .toArray()
-        .map((r) => r.name),
-    );
-    const { migrations } = await loadBundle(this.env, id, sha);
-    for (const m of migrations) {
-      if (done.has(m.name)) continue;
-      this.ctx.storage.transactionSync(() => {
-        for (const statement of m.sql.split(/;\s*(?:\r?\n|$)/).filter((x) => x.trim()))
-          sql.exec(statement);
-        sql.exec(
-          'INSERT INTO _orderloop_migrations (name, applied_at) VALUES (?, ?)',
-          m.name,
-          Date.now(),
-        );
-      });
-    }
-    this.migrated.add(sha);
+  async #migrate(id: string, sha: string) {
+    if (this.#migrated.has(sha)) return;
+    // The bundle is read first; the check and the writes then run with no other request in
+    // between, so two cold calls never both apply a migration.
+    const { migrations } = await verifiedBundle(this.env, id, sha);
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (this.#migrated.has(sha)) return;
+      const sql = this.ctx.storage.sql;
+      sql.exec(
+        'CREATE TABLE IF NOT EXISTS _orderloop_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)',
+      );
+      const done = new Set(
+        sql
+          .exec<{ name: string }>('SELECT name FROM _orderloop_migrations')
+          .toArray()
+          .map((r) => r.name),
+      );
+      for (const m of migrations) {
+        if (done.has(m.name)) continue;
+        // Each file whole (SQLite runs every statement in it, triggers included).
+        this.ctx.storage.transactionSync(() => {
+          sql.exec(m.sql);
+          sql.exec(
+            'INSERT INTO _orderloop_migrations (name, applied_at) VALUES (?, ?)',
+            m.name,
+            Date.now(),
+          );
+        });
+      }
+      this.#migrated.add(sha);
+    });
   }
 
-  private run({ sql, params }: Statement): Result {
+  #run({ sql, params }: Statement): Result {
     if (/\b_orderloop_migrations\b/i.test(sql)) throw new Error('That table is the engine’s');
     const cursor = this.ctx.storage.sql.exec(sql, ...params);
     const rows = cursor.toArray() as Record<string, unknown>[];
@@ -376,28 +470,28 @@ export class PluginStorage extends DurableObject<Env> {
   }
 
   async query(id: string, sha: string, statement: Statement): Promise<Result> {
-    await this.migrate(id, sha);
-    return this.run(statement);
+    await this.#migrate(id, sha);
+    return this.#run(statement);
   }
 
   async batch(id: string, sha: string, statements: Statement[]): Promise<Result[]> {
-    await this.migrate(id, sha);
-    return this.ctx.storage.transactionSync(() => statements.map((s) => this.run(s)));
+    await this.#migrate(id, sha);
+    return this.ctx.storage.transactionSync(() => statements.map((s) => this.#run(s)));
   }
 }
 
 /** A sandboxed plugin's `STORAGE`: SQL against its own `PluginStorage`, and nothing else. */
-export class PluginDb extends WorkerEntrypoint<Env, { id: string; sha: string }> {
-  private storage() {
-    return this.env.PLUGIN_STORAGE.getByName(this.ctx.props.id);
+export class PluginDb extends WorkerEntrypoint<Env, Pinned> {
+  #storage() {
+    return pluginStorage(this.env, this.ctx.props.id);
   }
 
   async query(sql: string, params: unknown[] = []) {
-    return this.storage().query(this.ctx.props.id, this.ctx.props.sha, { sql, params });
+    return this.#storage().query(this.ctx.props.id, this.ctx.props.sha, { sql, params });
   }
 
   async batch(statements: Statement[]) {
-    return this.storage().batch(this.ctx.props.id, this.ctx.props.sha, statements);
+    return this.#storage().batch(this.ctx.props.id, this.ctx.props.sha, statements);
   }
 }
 
@@ -410,24 +504,29 @@ const ERRORS_KEPT = 100;
  * A sandboxed plugin's Tail Worker: its logs go to the engine's (Workers Logs), tagged with the
  * plugin and scrubbed of its secrets, and its exceptions to `plugin_errors` for the Plugins page.
  */
-export class PluginTail extends WorkerEntrypoint<Env, { id: string }> {
+export class PluginTail extends WorkerEntrypoint<Env, Pinned> {
   override async tail(events: TraceItem[]) {
     const id = this.ctx.props.id;
     const known = await knownSecretValues(this.env, id);
     const clean = (s: unknown) => scrubCredentials(String(s), known).slice(0, 2000);
     const db = createDb(this.env.DB);
+    let inserted = 0;
     for (const e of events) {
       for (const log of e.logs)
         console.log(
           JSON.stringify({
             plugin: id,
             level: log.level,
-            message: clean(JSON.stringify(log.message)),
+            // Each part scrubbed before it is serialized, so an escaped secret still matches.
+            message: (Array.isArray(log.message) ? log.message : [log.message]).map((m) =>
+              clean(typeof m === 'string' ? m : JSON.stringify(m)),
+            ),
           }),
         );
       for (const x of e.exceptions) {
         const message = clean(`${x.name}: ${x.message}`);
         console.error(JSON.stringify({ plugin: id, exception: message }));
+        inserted++;
         await db.insert(pluginErrors).values({
           id: crypto.randomUUID(),
           pluginId: id,
@@ -436,7 +535,8 @@ export class PluginTail extends WorkerEntrypoint<Env, { id: string }> {
         });
       }
     }
-    // Only the latest are kept.
+    // Only the latest are kept (pruned only when something was added).
+    if (!inserted) return;
     const keep = db
       .select({ id: pluginErrors.id })
       .from(pluginErrors)

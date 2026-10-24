@@ -43,6 +43,14 @@ export default definePlugin<Env>({
     probe: {
       async execute({ req, env, fail }) {
         switch (req.config.behave) {
+          case 'post_big': {
+            // More than the sandbox may send out in one request.
+            const res = await fetch('https://eu.allowed.test/upload', {
+              method: 'POST',
+              body: new Uint8Array(11 * 1024 * 1024),
+            });
+            return { output: { status: res.status, body: await res.text() }, summary: 'Posted' };
+          }
           case 'env':
             // What the runtime gives it (sandboxed: only its capabilities).
             return { output: { keys: Object.keys(env as object).sort() }, summary: 'Listed env' };

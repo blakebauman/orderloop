@@ -18,7 +18,7 @@ import {
   scrubCredentials,
 } from '@orderloop/core';
 import { knownSecretValues } from './plugin-host';
-import { callPlugin, manifests, plugin } from './plugins';
+import { callPlugin, manifests, plugin, scrubbedValue } from './plugins';
 
 type Ask = Extract<ProvideRequest, { surface: ProviderSurface }>;
 
@@ -59,7 +59,13 @@ export async function provide<R extends Ask>(
   req: ProviderCall<R>,
 ): Promise<Value<R>> {
   const what = `${PROVIDER_SURFACE_LABELS[req.surface]} provider “${id}”`;
-  const stub = await plugin(env, id);
+  let stub: Awaited<ReturnType<typeof plugin>>;
+  try {
+    stub = await plugin(env, id);
+  } catch (err) {
+    // A sandboxed bundle that can't be loaded (unpublished, not its pin, an R2 blip): retried.
+    throw fromProvider(new Error(`${what}: ${message(err)}`), id);
+  }
   if (typeof stub?.provide !== 'function')
     throw fromProvider(new NonRetryableError(`${what} is not installed`), id);
   const manifest = (await manifests(env)).find((m) => m.id === id);
@@ -93,5 +99,5 @@ export async function provide<R extends Ask>(
     const failed = `${what}: ${scrubCredentials(outcome.message, await knownSecretValues(env, id))}`;
     throw fromProvider(outcome.retry ? new Error(failed) : new NonRetryableError(failed), id);
   }
-  return outcome.value;
+  return scrubbedValue(env, id, outcome.value);
 }

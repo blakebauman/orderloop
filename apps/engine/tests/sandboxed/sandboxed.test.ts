@@ -13,7 +13,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import { egressRefusal, limitsFor, pluginStub } from '../../src/plugin-host';
+import { egressRefusal, knownManifests, limitsFor, pluginStub } from '../../src/plugin-host';
 import { manifests, pluginStatuses } from '../../src/plugins';
 import { edge, node, probeFlow, settled, stampFlow, stampInput } from '../plugin-helpers';
 
@@ -91,7 +91,7 @@ beforeAll(async () => {
   await publishFlow(db(), stampFlow('test-sbx-stamp', 'completed'));
   await publishFlow(db(), stampFlow('test-sbx-stamp-fails', 'failed'));
   await publishFlow(db(), ratesFlow('test-sbx-rates'));
-  for (const behave of ['env', 'leak', 'throw'])
+  for (const behave of ['env', 'leak', 'throw', 'post_big'])
     await publishFlow(db(), probeFlow(`test-sbx-probe-${behave}`, behave));
   const urls: Record<string, string> = {
     allowed: 'https://eu.allowed.test/',
@@ -197,7 +197,7 @@ describe('a sandboxed plugin', () => {
         string,
         (o: unknown) => { get(n: string): Promise<string | null>; has(n: string): Promise<boolean> }
       >
-    ).PluginSecrets!({ props: { id: 'fixture-carrier' } });
+    ).PluginSecrets!({ props: { id: 'fixture-carrier', sha: bundles['fixture-carrier']!.sha } });
     expect(await secrets.has('API_KEY')).toBe(true);
     expect(await secrets.get('API_KEY')).toBeNull();
   });
@@ -247,7 +247,7 @@ describe('a sandboxed plugin', () => {
     // Worker's tail events, so the handler is driven here as the runtime would).
     const tail = (
       exports as unknown as Record<string, (o: unknown) => { tail(e: unknown[]): Promise<void> }>
-    ).PluginTail!({ props: { id: 'example' } });
+    ).PluginTail!({ props: { id: 'example', sha: bundles.example!.sha } });
     await tail.tail([
       {
         logs: [{ level: 'log', message: ['token ping-secret-8f2d'], timestamp: 1 }],
@@ -258,6 +258,49 @@ describe('a sandboxed plugin', () => {
     ]);
     const rows = await db().select().from(pluginErrors).where(eq(pluginErrors.pluginId, 'example'));
     expect(rows.map((r) => r.message)).toEqual(['Error: Probe exploded holding [redacted]']);
+  });
+
+  it('keeps the credential an upstream echoes out of the order', async () => {
+    const { done } = await run('test-sbx-rates', { meta: { shipTo, simulate: 'echo_rates' } });
+    const title = (done.nodes.rates as { output?: { option?: { title?: string } } }).output?.option
+      ?.title;
+    expect(title).toBe('sent Bearer [redacted]');
+    expect(JSON.stringify(done)).not.toMatch(/sk-store-/);
+  });
+
+  it('refuses a request body over the cap', async () => {
+    const { done } = await probe('post_big');
+    expect((done.nodes.probe as { output?: { status?: number } }).output?.status).toBe(413);
+  });
+
+  it('enforces its pinned rules in an isolate that has never asked it for its manifest', async () => {
+    knownManifests.clear();
+    expect(await fetched('test-sbx-fetch-allowed')).toMatchObject({ output: { status: 200 } });
+    expect((await fetched('test-sbx-fetch-undeclared')).output?.status).toBe(403);
+  });
+
+  it('is refused when its code answers with another manifest than the one pinned', async () => {
+    const original = JSON.parse(bundles.example!.body) as { manifest: { egress: string[] } };
+    original.manifest.egress = [...original.manifest.egress, 'attacker.test'];
+    const body = JSON.stringify(original);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+    const sha = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await env.DOCS.put(`plugins/example/${sha}.json`, body);
+    const drifted = { ...env, PLUGIN_BUNDLES: JSON.stringify({ example: sha }) } as Env;
+    const [status] = await pluginStatuses(drifted, true);
+    expect(status).toMatchObject({ id: 'example', healthy: false });
+    expect(status!.error).toMatch(/differs from the one pinned/);
+  });
+
+  it('applies its migrations once when two first calls race', async () => {
+    const stub = env.PLUGIN_STORAGE.getByName('race-example');
+    const q = () =>
+      stub.query('example', bundles.example!.sha, {
+        sql: 'SELECT count(*) AS n FROM stamps',
+        params: [],
+      });
+    const [a, b] = await Promise.all([q(), q()]);
+    expect([a, b].map((r) => (r as { rows: { n: number }[] }).rows[0]!.n)).toEqual([0, 0]);
   });
 
   it('runs only a bundle that matches its pin', async () => {

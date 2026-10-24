@@ -40,6 +40,7 @@ import {
   knownManifests,
   knownSecretValues,
   type PluginStub,
+  pinnedManifest,
   pluginStub,
 } from './plugin-host';
 
@@ -94,6 +95,21 @@ export async function scrubbed(env: Env, id: string, text: string) {
 }
 
 /**
+ * `value` (a node's output or variables, a provider's answer) with the plugin's own secret values
+ * replaced wherever they appear: an upstream that echoes a request must not land one in an order.
+ * Only exact values: anything else in a plugin's data is left as it is.
+ */
+export async function scrubbedValue<T>(env: Env, id: string, value: T): Promise<T> {
+  if (value === undefined) return value;
+  const known = (await knownSecretValues(env, id)).filter((k) => k.length >= 4);
+  if (!known.length) return value;
+  let text = JSON.stringify(value);
+  for (const k of known.sort((a, b) => b.length - a.length))
+    text = text.split(JSON.stringify(k).slice(1, -1)).join('[redacted]');
+  return JSON.parse(text) as T;
+}
+
+/**
  * A call into plugin `id`, held to `ms`: what it throws comes back scrubbed of its secrets (a
  * plugin's error text reaches the order's timeline), as a `NonRetryableError` if it was one.
  */
@@ -140,38 +156,48 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
   const cached = caches.get(env);
   const age = cached && cached.key === key ? Date.now() - cached.at : Number.POSITIVE_INFINITY;
   if (cached && age < (fresh ? FRESH_MIN_MS : cached.ttl)) return cached.statuses;
-  const got = await Promise.all(
-    installed.map(async ({ id, runtime }): Promise<PluginStatus> => {
-      try {
-        const stub = await pluginStub(env, id, 'serve');
-        if (!stub) throw new Error('not installed');
-        const m = parseManifest(
-          await callPlugin(env, id, stub.manifest(), `${id}.manifest()`, 10_000),
+  const check = async ({ id, runtime }: (typeof installed)[number]): Promise<PluginStatus> => {
+    try {
+      const stub = await pluginStub(env, id, 'serve');
+      if (!stub) throw new Error('not installed');
+      const m = parseManifest(
+        await callPlugin(env, id, stub.manifest(), `${id}.manifest()`, 10_000),
+      );
+      if (m.id !== id) throw new Error(`id “${m.id}” is installed as “${id}”`);
+      // A sandboxed plugin runs by the manifest CI pinned with its bundle; one whose code now
+      // answers otherwise (more egress, a secret it may read) is refused, not believed.
+      const pinned = runtime === 'sandboxed' ? await pinnedManifest(env, id) : null;
+      if (pinned && JSON.stringify(pinned) !== JSON.stringify(m))
+        throw new Error('Its manifest differs from the one pinned with its bundle');
+      if (m.personalData === 'send' && grants(env)[m.id]?.personalData !== 'send')
+        throw new Error(
+          'It asks for buyer details (personalData: "send"), which this deployment does not grant',
         );
-        if (m.id !== id) throw new Error(`id “${m.id}” is installed as “${id}”`);
-        if (m.personalData === 'send' && grants(env)[m.id]?.personalData !== 'send')
-          throw new Error(
-            'It asks for buyer details (personalData: "send"), which this deployment does not grant',
-          );
-        lastGood.set(id, m);
-        return { id, runtime, manifest: m, healthy: true };
-      } catch (err) {
-        console.error('plugin manifest refused', id, err);
-        // The last good manifest stands in, but never past a grant the deployment has withdrawn.
-        const fallback = lastGood.get(id);
-        const allowed =
-          fallback &&
-          (fallback.personalData !== 'send' || grants(env)[fallback.id]?.personalData === 'send');
-        return {
-          id,
-          runtime,
-          manifest: allowed ? fallback : null,
-          healthy: false,
-          error: message(err),
-        };
-      }
-    }),
-  );
+      lastGood.set(id, m);
+      return { id, runtime, manifest: m, healthy: true };
+    } catch (err) {
+      console.error('plugin manifest refused', id, err);
+      // The last good manifest stands in, but never past a grant the deployment has withdrawn.
+      const fallback = lastGood.get(id);
+      const allowed =
+        fallback &&
+        (fallback.personalData !== 'send' || grants(env)[fallback.id]?.personalData === 'send');
+      return {
+        id,
+        runtime,
+        manifest: allowed ? fallback : null,
+        healthy: false,
+        error: message(err),
+      };
+    }
+  };
+  // Worker plugins at once; sandboxed ones one at a time (Worker Loader limits how many Dynamic
+  // Workers a request has in flight).
+  const workers = Promise.all(installed.filter((p) => p.runtime === 'worker').map(check));
+  const inTurn: PluginStatus[] = [];
+  for (const p of installed.filter((x) => x.runtime === 'sandboxed')) inTurn.push(await check(p));
+  const byId = new Map([...(await workers), ...inTurn].map((x) => [x.id, x]));
+  const got = installed.map((p) => byId.get(p.id)!);
   const ids = new Set(got.flatMap((s) => (s.manifest ? [s.manifest.id] : [])));
   const statuses = got.map((s): PluginStatus => {
     const absent = s.manifest?.requires.filter((r) => !ids.has(r)) ?? [];
@@ -272,9 +298,11 @@ export async function execPluginNode({
   // it can't overwrite the flow's own variables or another plugin's.
   return {
     branches: [outcome.branch],
-    output: outcome.output,
+    output: await scrubbedValue(env, id, outcome.output),
     summary: outcome.summary === undefined ? undefined : await scrubbed(env, id, outcome.summary),
-    ...(outcome.vars ? { pluginVars: { id, vars: outcome.vars } } : {}),
+    ...(outcome.vars
+      ? { pluginVars: { id, vars: await scrubbedValue(env, id, outcome.vars) } }
+      : {}),
   };
 }
 
@@ -290,7 +318,9 @@ export function pluginRollback(type: string, nodeId: string, stepKey: string) {
       stub.compensate({ type, nodeId, stepKey, orderId, output }),
       `${type} (compensate)`,
     );
-    return typeof said === 'string' ? said.slice(0, PLUGIN_SUMMARY_MAX) : 'Undone';
+    return typeof said === 'string'
+      ? (await scrubbed(env, id!, said)).slice(0, PLUGIN_SUMMARY_MAX)
+      : 'Undone';
   };
 }
 

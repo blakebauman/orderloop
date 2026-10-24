@@ -10,6 +10,10 @@ import { defineConfig } from 'vitest/config';
  */
 async function carrierUpstream(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.hostname === 'api.carrier.test' && url.pathname === '/echo')
+    return Response.json({
+      options: [{ id: 'echo', title: `sent ${request.headers.get('authorization')}`, amount: 8 }],
+    });
   if (url.hostname === 'api.carrier.test' && url.pathname === '/rates') {
     const auth = request.headers.get('authorization') ?? '';
     return Response.json({

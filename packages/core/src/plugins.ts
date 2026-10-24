@@ -47,6 +47,8 @@ const RESERVED_IDS = new Set([
   'secrets',
   'grants',
   'key',
+  'storage',
+  'dev-bundles',
 ]);
 
 /**
@@ -255,7 +257,11 @@ export const pluginManifestSchema = z
            */
           inject: z
             .object({
-              host: z.string().regex(EGRESS_HOST_RE, 'A host name, or *. and one'),
+              // An exact host: a credential never goes to every subdomain of a shared suffix.
+              host: z
+                .string()
+                .regex(EGRESS_HOST_RE, 'A host name')
+                .refine((h) => !h.startsWith('*.'), { message: 'Inject into one exact host' }),
               header: z
                 .string()
                 .regex(/^[A-Za-z0-9-]{1,64}$/, 'A header name')
@@ -327,7 +333,7 @@ export const pluginManifestSchema = z
           path: ['secrets', i],
           message: 'A secret is either injected or exposed, not both',
         });
-      if (x.inject && !egressAllows(m.egress, x.inject.host.replace(/^\*\./, '')))
+      if (x.inject && !egressAllows(m.egress, x.inject.host))
         ctx.addIssue({
           code: 'custom',
           path: ['secrets', i, 'inject', 'host'],

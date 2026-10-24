@@ -21,28 +21,43 @@ export type BundleOptions = {
 };
 
 /**
- * A sandboxed plugin as the engine loads it: its code as one ES module and its migrations, in
- * order. `sha` (SHA-256, hex, of the canonical JSON of both) names it in R2 and pins it in the
- * deployment (`PLUGIN_BUNDLES`), so the engine runs exactly what CI built and verified.
+ * A sandboxed plugin as the engine loads it: its code as one ES module, its migrations in order,
+ * and its manifest as CI read it from `src/manifest.ts`. `sha` (SHA-256, hex, of the canonical
+ * JSON of all three) names it in R2 and pins it in the deployment (`PLUGIN_BUNDLES`). The engine
+ * enforces the plugin's egress, secrets and limits from this pinned manifest, and refuses the
+ * plugin if the one its code answers with differs.
  */
-export type SandboxBundle = { code: string; migrations: { name: string; sql: string }[] };
+export type SandboxBundle = {
+  code: string;
+  migrations: { name: string; sql: string }[];
+  manifest: PluginManifest;
+};
 
 /** The bundle's bytes as stored, and its name. */
 export function sealBundle(bundle: SandboxBundle) {
-  const body = JSON.stringify({ code: bundle.code, migrations: bundle.migrations });
+  const body = JSON.stringify({
+    code: bundle.code,
+    migrations: bundle.migrations,
+    manifest: bundle.manifest,
+  });
   return { body, sha: createHash('sha256').update(body).digest('hex') };
 }
 
-/** Builds a plugin's sandbox bundle from its entry and its migrations folder (if any). */
+/**
+ * Builds a plugin's sandbox bundle from its entry, its migrations folder (if any) and its manifest
+ * module (`src/manifest.ts` next to the entry). This runs the plugin's manifest module: in CI, only
+ * in a job that holds no secrets.
+ */
 export async function buildSandboxBundle(entry: string, migrationsDir?: string) {
   const code = await bundleCode(entry);
+  const manifest = await readManifest(join(dirname(entry), 'manifest.ts'));
   const migrations = [];
   if (migrationsDir)
     for (const name of (await readdir(migrationsDir).catch(() => []))
       .filter((f) => f.endsWith('.sql'))
       .sort())
       migrations.push({ name, sql: await readFile(join(migrationsDir, name), 'utf8') });
-  return sealBundle({ code, migrations });
+  return { ...sealBundle({ code, migrations, manifest }), manifest };
 }
 
 /**

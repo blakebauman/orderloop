@@ -49,6 +49,8 @@ export default defineConfig(async () => {
     ? {
         PLUGIN_BUNDLES: JSON.stringify(Object.fromEntries(bundles.map((b) => [b.id, b.sha]))),
         PLUGIN_DEV_BUNDLES: JSON.stringify(Object.fromEntries(bundles.map((b) => [b.id, b.body]))),
+        // The engine reads PLUGIN_DEV_BUNDLES only with this set (local dev only).
+        DEV_SANDBOX: 'true',
       }
     : {};
   return {

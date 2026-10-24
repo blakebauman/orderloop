@@ -52,6 +52,7 @@ export default {
             'fetch',
             'env',
             'throw',
+            'post_big',
           ],
           default: 'echo',
         },

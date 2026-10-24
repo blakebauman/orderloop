@@ -25,7 +25,7 @@ const PATTERNS: RegExp[] = [
 
 /** `password=…`, `api_key: …`, `"token":"…"`: the value after a name that says it's secret. */
 const NAMED =
-  /\b([A-Za-z_-]*(?:secret|token|password|passwd|api[_-]?key|apikey|auth)[A-Za-z_-]*)(["']?\s*[:=]\s*["']?)(?!Bearer\b|Basic\b|\[redacted\])([^\s"'&,;]{6,})/gi;
+  /\b((?:[A-Za-z_-]*(?:secret|token|password|passwd|api[_-]?key|apikey)[A-Za-z_-]*|[A-Za-z_-]*auth(?:orization|[_-]?token|[_-]?key)?)\b)(["']?\s*[:=]\s*["']?)(?!Bearer\b|Basic\b|\[redacted\])([^\s"'&,;]{6,})/gi;
 
 /** Credentials in a URL: `https://user:pass@host`. */
 const URL_AUTH = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;

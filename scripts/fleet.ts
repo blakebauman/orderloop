@@ -177,7 +177,14 @@ export type PluginEntry = {
 };
 
 /** Ids whose binding would be one of the engine's plugin variables (`RESERVED_IDS` in core). */
-const RESERVED_PLUGIN_IDS = new Set(['bundles', 'secrets', 'grants', 'key']);
+const RESERVED_PLUGIN_IDS = new Set([
+  'bundles',
+  'secrets',
+  'grants',
+  'key',
+  'storage',
+  'dev-bundles',
+]);
 
 const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,62}$/;
 

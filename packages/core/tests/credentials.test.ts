@@ -29,6 +29,13 @@ describe('scrubCredentials', () => {
     expect(scrubCredentials('order ord_northwind_2026_shipment_label done')).toBe(
       'order ord_northwind_2026_shipment_label done',
     );
+    // Words that only start like a secret's name keep what follows.
+    expect(scrubCredentials('Not authorized: invalid_address')).toBe(
+      'Not authorized: invalid_address',
+    );
+    expect(scrubCredentials('Payment authorized: pi_123456')).toBe('Payment authorized: pi_123456');
+    expect(scrubCredentials('auth_token=abc123def')).toBe('auth_token=[redacted]');
+    expect(scrubCredentials('client_secret: abcdef12')).toBe('client_secret: [redacted]');
     expect(scrubCredentials('Carrier refused: address line 2 too long')).toBe(
       'Carrier refused: address line 2 too long',
     );

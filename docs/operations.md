@@ -189,6 +189,12 @@ check stops the deploy with `CLOUDFLARE_API_TOKEN needs Account Secrets Store Ed
 stops, naming the missing `PLUGIN_<ID>_<NAME>`, when a required secret isn't set. A required
 secret removed afterwards fails the plugin's manifest, so deep health names it.
 
+Moving a deployment onto its own account's Secrets Store: a Worker plugin's old plain secrets stay
+on its Worker (`--secrets-file` never removes one), and a Secrets Store binding of the same name
+then fails its deploy. Delete each first (`wrangler secret delete <NAME> --name
+orderloop-plugin-<id><suffix>`), then merge the registry change. Two deployments must never share
+a `secretsStore`: its names (`PLUGIN_<ID>_<NAME>`) aren't per deployment.
+
 ## Holding and checking deployments
 
 - **Hold a customer** on what they run now (a change freeze, an incident) with `"hold": true` in

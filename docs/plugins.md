@@ -309,8 +309,10 @@ account:
   secrets (`toJSON(secrets)`, as `ENV_SECRETS`); each plugin gets only those with its own prefix,
   never another plugin's nor the core's. A `PLUGIN_<ID>_` secret whose name isn't a secret name, or
   is reserved (`PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS`, `STORAGE`), fails the deploy.
-- **Check plugin secrets** runs before anything deploys: each plugin's manifest is read from its
-  `src/manifest.ts` (`readManifest`, by `scripts/plugin-bundle.ts`) and every secret it needs
+- **Check plugin secrets** runs before anything deploys: each plugin's manifest, as the
+  `plugin-bundles` job read it from its `src/manifest.ts` (`readManifest`, by
+  `scripts/plugin-bundle.ts`, in a job with no environment, no secrets and no Cloudflare token,
+  since reading a manifest runs the plugin's code), and every secret it needs
   (not `optional`) must be set: in the environment, or listed in the registry and present in the
   store (`missingPluginSecrets`, by name only, through the Secrets Store API). The CI token then
   needs Account Secrets Store Edit (also needed to deploy a Worker that binds the store).
@@ -335,38 +337,50 @@ A deployment runs each plugin one of two ways, set by `plugins.<id>.runtime` in 
 
 A sandboxed plugin, in `apps/engine/src/plugin-host.ts`:
 
-- **Bundle and pin.** CI builds it (`scripts/plugin-bundle.ts`: its code as one module, and its
-  migrations), publishes it to the deployment's `DOCS` bucket as `plugins/<id>/<sha>.json`, and
-  pins the shas in the engine's `PLUGIN_BUNDLES` (**Publish sandboxed plugins**, before the engine
-  deploys). The engine loads a bundle only if it hashes to its pin, before Worker Loader runs it.
-  Bundles are never removed, so rolling the engine back restores the old pins.
+- **Bundle and pin.** CI's `plugin-bundles` job (no secrets) builds it (`scripts/plugin-bundle.ts`:
+  its code as one module, its migrations, and its manifest from `src/manifest.ts`); the deploy job
+  checks the hash again, publishes it to the deployment's `DOCS` bucket (in its jurisdiction) as
+  `plugins/<id>/<sha>.json`, and pins the shas in the engine's `PLUGIN_BUNDLES` (**Publish
+  sandboxed plugins**, before the engine deploys). The engine loads a bundle only if it hashes to
+  its pin, before Worker Loader runs it. Bundles are never removed, so rolling the engine back
+  restores the old pins.
+- **Its pinned manifest is its rules.** Egress, `inject` and `expose`, and limits are enforced from
+  the manifest sealed in the bundle (`pinnedManifest`), never from what its code answers with; a
+  plugin whose `manifest()` answers otherwise is refused (`pluginStatuses`: "differs from the one
+  pinned"). The Plugins page and the editor still show the answered manifest, which then matches.
 - **Its env is capabilities only**: `STORAGE` (`PluginDb`, SQL against its own `PluginStorage`
   SQLite Durable Object; `pluginDb(env)` in the SDK gives it D1's `prepare().bind().first/all/run`
   and `batch`), `SECRETS` (`PluginSecrets`: `has` for any declared secret, `get` only for one marked
   `expose`), and `PLUGIN_KEY` (derived from `PRINCIPAL_KEY` as a Worker plugin's is). The bundle's
-  migrations are applied to its storage once each, forward only.
+  migrations are applied to its storage once each, forward only, each file whole, with no other
+  request let in meanwhile. Its storage is in the deployment's jurisdiction (`pluginStorage`), and
+  only `query` and `batch` answer over RPC (the rest is JS-private).
 - **Egress** (`globalOutbound` is `PluginEgress`): https only, to a public host in its manifest's
   `egress` (a name, or `*.` and one); never a private, loopback, link-local, CGNAT, multicast or
   metadata address, an internal name or a wildcard-DNS service (`egressRefusal`, whatever `egress`
   says), nor a URL with credentials. Redirects are followed by the gateway, at most 5, each
-  checked again. A secret declared `inject: { host, header, format }` is added for its host as
-  `header` (`format` with `{}` for the value) and stripped from anything else, so the plugin never
-  sees it. A refusal is a `403` the plugin sees, and a log line naming the plugin and the host.
+  checked again; when one leaves the origin, `authorization`, `cookie` and `proxy-authorization`
+  are dropped. A secret declared `inject: { host, header, format }` (an exact host, never `*.`) is
+  added for that host as `header` (`format` with `{}` for the value) and stripped from anything
+  else, so the plugin never sees it. A request body over 10 MiB is refused with `413`. A refusal is
+  a `403` the plugin sees, and a log line naming the plugin, the origin and path (no query).
 - **Limits per call** (`limitsFor`): the manifest's `limits`, within `PLUGIN_LIMIT_CAPS`: 200 ms of
   CPU and 20 subrequests for a node, provider op or compensation; 1,000 ms for a page or delivery.
   Local workerd doesn't enforce them; Cloudflare does.
 - **Logs** (`tails` is `PluginTail`): its console goes to the engine's logs tagged with the plugin,
   and its exceptions to `plugin_errors` (migration `0046`, the latest 100 per plugin), shown on the
   Plugins page; both scrubbed of its secrets first.
-- **Scrubbing.** Everything a plugin returns as text (a `fail` message, a summary, an error it
-  throws, a provider's failure) passes `scrubCredentials` (`packages/core/src/credentials.ts`)
-  with its own secrets' values before it reaches the timeline: those values exactly, then anything
-  shaped like a credential (prefixed keys, private keys, JWTs, URL credentials, `secret=…`
-  pairs, long random runs).
+- **Scrubbing.** Text a plugin returns (a `fail` message, a summary, a compensation's line, an error
+  it throws, a provider's failure, its manifest error) passes `scrubCredentials`
+  (`packages/core/src/credentials.ts`) with its own secrets' values: those values exactly, then
+  anything shaped like a credential (prefixed keys, private keys, JWTs, URL credentials,
+  `secret=…` pairs, long random runs). Its data (a node's `output` and `vars`, a provider's answer)
+  has its secrets' exact values replaced (`scrubbedValue`), so an upstream that echoes a request
+  can't land one in an order. Both apply to Worker plugins too.
 - **Pages** go through the engine: the web app builds the request as for any plugin (signed
   principal, allowlisted headers, its CSP on the response) and calls `EngineRpc.pluginFetch`.
-- **Deliveries** to sandboxed plugins run one at a time (Worker Loader limits how many Dynamic
-  Workers a request has in flight).
+- **Deliveries** to sandboxed plugins, and their manifest checks, run one at a time (Worker Loader
+  limits how many Dynamic Workers a request has in flight).
 
 Write a plugin for either runtime the same way: `definePlugin`, `pluginDb(env)` for its database,
 `secret(env, name)` for secrets, and its manifest in `src/manifest.ts` (no Worker imports) for CI

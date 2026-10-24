@@ -30,8 +30,13 @@ export default definePlugin<Env>({
     'shipping.rates': {
       async quote({ req }) {
         if (req.order.meta?.simulate === 'provider_down') throw new Error('carrier unreachable');
-        if (req.order.meta?.simulate === 'live_rates') {
-          const res = await fetch('https://api.carrier.test/rates', { method: 'POST' });
+        if (
+          req.order.meta?.simulate === 'live_rates' ||
+          req.order.meta?.simulate === 'echo_rates'
+        ) {
+          // "echo_rates": an upstream that echoes the request's credential into its answer.
+          const path = req.order.meta.simulate === 'echo_rates' ? 'echo' : 'rates';
+          const res = await fetch(`https://api.carrier.test/${path}`, { method: 'POST' });
           return (await res.json()) as { options: unknown[] };
         }
         return {
