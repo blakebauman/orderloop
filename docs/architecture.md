@@ -680,7 +680,7 @@ Bundle: about 32 KiB (9.4 KiB gzipped), because it imports only `@orderloop/core
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
 | `CATALOG` | web | Service `orderloop-catalog`, entrypoint `CatalogApi` (`/api/v1/catalog`) |
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
-| `PLUGIN_<ID>` | engine, web | Service `orderloop-plugin-<id>`, one per installed plugin, rendered from the registry's `plugins`; the default entrypoint implements `PluginRpc` ([Plugins](plugins.md)) |
+| `PLUGIN_<ID>` | engine, web | Service `orderloop-plugin-<id>`, one per installed plugin, rendered from the registry's `plugins`; the default entrypoint implements `PluginRpc`. The plugin's Worker holds its own `PLUGIN_KEY`, never `PRINCIPAL_KEY` ([Plugins](plugins.md)) |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite, migration tag `v1`), 64 of them |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
@@ -711,12 +711,16 @@ so a plugin's `<id>.<name>` nodes validate only while it is installed, and the p
 The engine (`apps/engine/src/plugins.ts`) finds plugins by their `PLUGIN_*` service bindings, caches
 their statuses (`pluginStatuses`: manifest, `healthy`, `error`) for about 60 seconds and keeps a
 plugin's last good manifest while it can't answer. It runs a plugin node inside its own `step.do`
-under a timeout, with the order redacted unless the manifest sets `personalData: 'send'`, checks the
-result (`checkExecResult`) and puts its variables under `vars.<id>`; events go through the outbox.
-The web app forwards `/plugins/<id>/*` with a signed principal
-(`apps/web/app/lib/plugins.server.ts`), which filters request headers, applies the manifest's
-`pageRole`, rate-limits and size-caps public paths, and puts the app's own security headers on the
-response; it reads node specs through `useNodes()` and shows each plugin's status at `/plugins`
+under a timeout, with the order and event data redacted (`pluginOrder`, from an allowlist) unless the
+manifest sets `personalData: 'send'` and the deployment grants it (`PLUGIN_GRANTS`), checks the
+result (`checkExecResult`) and merges its variables into `vars.plugins.<id>`; events go through the
+outbox. A plugin that is bound but not answering is retried, and a node's branch is checked against
+the manifests the run was planned with (`flowManifests`). The web app forwards `/plugins/<id>/*`
+with a principal signed with the plugin's own key (`pluginKey`, no session id;
+`apps/web/app/lib/plugins.server.ts`), which filters request headers, applies the manifest's
+`pageRole`, rate-limits signed-in requests per person and public paths per caller, size-caps
+bodies, passes only allowlisted response headers and same-plugin redirects, and puts the app's
+own security headers on the response (a CSP that allows no script); it reads node specs through `useNodes()` and shows each plugin's status at `/plugins`
 (`apps/web/app/routes/plugins.tsx`, admin). `EngineRpc` has
 `pluginCatalog` and `pluginUsage`, and deep health a `plugin_<id>` check each. Plugins are written
 with `packages/plugin-sdk`. See
