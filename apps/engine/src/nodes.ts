@@ -9,9 +9,13 @@
 
 import { NonRetryableError } from 'cloudflare:workflows';
 import {
+  type AppliedPromotion,
+  applyPromotion,
   assessBranch,
   assessQuestionsSchema,
   BASE_CURRENCY,
+  checkAddress,
+  choosePromotions,
   computeTotals,
   describeAnswers,
   durationMs,
@@ -31,9 +35,13 @@ import {
   type OrderLine,
   PROVIDER_MAX_TAX_RATE,
   type PricedBy,
+  type Promotion,
   pickOption,
   policyRulesSchema,
+  promoCodesOf,
+  promotionProblem,
   type RunContext,
+  regionalTaxRate,
   resolvePrice,
   SHIPPING_SELECTIONS,
   type ShippingSelection,
@@ -41,6 +49,7 @@ import {
   shipToCountry,
   stockLines,
   stringList,
+  taxRegionsSchema,
   toBase,
   truthy,
 } from '@orderloop/core';
@@ -68,6 +77,11 @@ export type ExecInput = {
   stepKey: string;
   /** The node types this run was planned with (its `load-plugins` snapshot, for plugin nodes). */
   registry?: NodeRegistry;
+  /**
+   * Pricing a checkout or cart (`quoteCheckout`), not running an order: nothing is written, so a
+   * quote never redeems a promotion.
+   */
+  dryRun?: boolean;
 };
 
 type Exec = (i: ExecInput) => Promise<NodeResult>;
@@ -199,6 +213,74 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
+  'commerce.discount': async ({ env, ctx, config, stepKey, dryRun }) => {
+    const codes = promoCodesOf(ctx.order.meta);
+    if (!codes.length)
+      return { output: { applied: [], refused: [] }, summary: 'No promotion codes' };
+    const found = await cx.promotionsByCode(env, codes);
+    const refused: { code: string; reason: string }[] = codes
+      .filter((c) => !found.some((p) => p.code === c))
+      .map((code) => ({ code, reason: `${code} isn't a promotion.` }));
+    const usable: Promotion[] = [];
+    for (const p of found) {
+      const redeemed = await cx.redemptionsOf(env, p.id, ctx.order.id, ctx.order.customerId);
+      const why = promotionProblem(p, {
+        now: ctx.now,
+        customerId: ctx.order.customerId,
+        currency: ctx.order.currency,
+        fxRate: ctx.order.fxRate,
+        lines: ctx.order.lines,
+        redeemed,
+      });
+      if (why) refused.push({ code: p.code, reason: why });
+      else usable.push(p);
+    }
+    const chosen = choosePromotions(usable, ctx.order.lines, {
+      fxRate: ctx.order.fxRate,
+      shipping: ctx.order.shipping ?? 0,
+      stack: config.stack === true,
+    });
+    for (const p of usable)
+      if (!chosen.includes(p))
+        refused.push({ code: p.code, reason: `${p.code} isn't combined with another code.` });
+    let lines = ctx.order.lines;
+    let shipping = ctx.order.shipping;
+    const applied: AppliedPromotion[] = [];
+    for (const p of chosen) {
+      const r = applyPromotion(p, lines, { fxRate: ctx.order.fxRate });
+      const amount = p.kind === 'free_shipping' ? (shipping ?? 0) : r.amount;
+      // The redemption is the order's once it holds it; a code used up meanwhile is refused.
+      const held =
+        dryRun ||
+        (await cx.redeemPromotion(env, {
+          promotion: p,
+          orderId: ctx.order.id,
+          customerId: ctx.order.customerId,
+          amount,
+          stepKey,
+        }));
+      if (!held) {
+        refused.push({ code: p.code, reason: `${p.code} has been used up.` });
+        continue;
+      }
+      lines = r.lines;
+      if (p.kind === 'free_shipping') shipping = 0;
+      applied.push({ id: p.id, code: p.code, kind: p.kind, amount });
+    }
+    const t = computeTotals({ ...ctx.order, lines, shipping });
+    const off = applied.reduce((s, a) => s + a.amount, 0);
+    return {
+      order: { lines, ...t },
+      output: { applied, refused },
+      vars: { promotionsRefused: refused.map((r) => r.reason) },
+      summary: applied.length
+        ? `${applied.map((a) => a.code).join(', ')} · ${cash(off, ctx)} off`
+        : refused.length
+          ? refused.map((r) => r.reason).join(' ')
+          : 'No promotion codes',
+    };
+  },
+
   'commerce.shipping_rate': async ({ env, ctx, config, node, stepKey }) => {
     const rates = shippingConfigSchema.safeParse(config.rates);
     if (!rates.success)
@@ -285,7 +367,14 @@ export const EXECUTORS: Record<string, Exec> = {
   'commerce.tax': async ({ env, ctx, config, node, stepKey }) => {
     const taxShipping = config.includeShipping !== false;
     const by = providerOf(config);
-    let rate = num(config.rate, 0.08);
+    const regions = taxRegionsSchema.safeParse(config.regions ?? []);
+    const shipTo = checkAddress(ctx.order.meta?.shipTo).address;
+    let rate = regionalTaxRate(
+      regions.success ? regions.data : [],
+      shipToCountry(ctx.order),
+      shipTo?.region,
+      num(config.rate, 0.08),
+    );
     if (by) {
       // What computeTotals will tax: the lines' subtotal and rounded shipping, not stored totals.
       const { subtotal, shipping } = computeTotals({ ...ctx.order, taxRate: 0 });
@@ -966,6 +1055,12 @@ export const ROLLBACKS: Record<
 > = {
   'commerce.reserve_inventory': async (env, orderId) =>
     `Released ${await cx.releaseInventory(env, orderId)} reservations`,
+  'commerce.discount': async (env, orderId) => {
+    const n = await cx.releaseRedemptions(env, orderId);
+    return n
+      ? `Gave back ${n} promotion ${n === 1 ? 'redemption' : 'redemptions'}`
+      : 'No promotions to give back';
+  },
   'commerce.authorize_payment': async (env, orderId) =>
     `Voided ${await cx.voidAuthorizations(env, orderId)} authorizations`,
   'commerce.pickup_ready': async (env, _orderId, output) => {

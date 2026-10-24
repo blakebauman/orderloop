@@ -18,10 +18,12 @@ import {
   newId,
   type Order,
   type OrderLine,
+  PROMOTION_KINDS,
   PROVIDER_MAX_RATE,
   type PriceRule,
   type PriceSource,
   type PriceSourceKind,
+  type Promotion,
   parseCarrierQuote,
   type RateRequest,
   rankStores,
@@ -48,6 +50,8 @@ import {
   priceRules,
   priceSources,
   products,
+  promotionRedemptions,
+  promotions,
   reservations,
   sellerOrders,
   sellers,
@@ -91,6 +95,98 @@ export async function findCustomerByName(env: Env, name: string) {
 export async function getProducts(env: Env, skus?: string[]) {
   const q = db(env).select().from(products);
   return skus ? q.where(inArray(products.sku, skus)) : q;
+}
+
+/** The promotions with these codes, as the discount node reads them. */
+export async function promotionsByCode(env: Env, codes: string[]): Promise<Promotion[]> {
+  if (!codes.length) return [];
+  const rows = await db(env).select().from(promotions).where(inArray(promotions.code, codes));
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    kind: (PROMOTION_KINDS as readonly string[]).includes(r.kind)
+      ? (r.kind as Promotion['kind'])
+      : 'pct',
+    value: r.value,
+    currency: r.currency,
+    minSubtotal: r.minSubtotal,
+    skus: r.skus ? (JSON.parse(r.skus) as string[]) : null,
+    customerId: r.customerId,
+    validFrom: r.validFrom,
+    validTo: r.validTo,
+    maxRedemptions: r.maxRedemptions,
+    perCustomerLimit: r.perCustomerLimit,
+    status: r.status === 'paused' ? 'paused' : 'active',
+  }));
+}
+
+/** Redemptions of a promotion by orders other than `orderId`: all, and the customer's. */
+export async function redemptionsOf(
+  env: Env,
+  promotionId: string,
+  orderId: string,
+  customerId: string | undefined,
+) {
+  const row = await db(env)
+    .select({
+      total: sql<number>`count(*)`,
+      byCustomer: sql<number>`coalesce(sum(case when ${promotionRedemptions.customerId} = ${customerId ?? null} then 1 else 0 end), 0)`,
+    })
+    .from(promotionRedemptions)
+    .where(
+      and(
+        eq(promotionRedemptions.promotionId, promotionId),
+        sql`${promotionRedemptions.orderId} <> ${orderId}`,
+      ),
+    )
+    .get();
+  return { total: row?.total ?? 0, byCustomer: row?.byCustomer ?? 0 };
+}
+
+/**
+ * Records that `orderId` redeemed the promotion, once (keyed by promotion and order), and only
+ * while it is under its limit: the count and the insert are one statement, so two orders racing
+ * for the last redemption can't both have it. True when the order holds the redemption.
+ */
+export async function redeemPromotion(
+  env: Env,
+  r: {
+    promotion: Pick<Promotion, 'id' | 'maxRedemptions'>;
+    orderId: string;
+    customerId: string | undefined;
+    amount: number;
+    stepKey: string;
+  },
+): Promise<boolean> {
+  const max = r.promotion.maxRedemptions ?? Number.MAX_SAFE_INTEGER;
+  await env.DB.prepare(
+    `INSERT INTO promotion_redemptions (promotion_id, order_id, customer_id, amount, step_key, created_at)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6
+     WHERE (SELECT count(*) FROM promotion_redemptions WHERE promotion_id = ?1 AND order_id <> ?2) < ?7
+     ON CONFLICT (promotion_id, order_id) DO NOTHING`,
+  )
+    .bind(r.promotion.id, r.orderId, r.customerId ?? null, r.amount, r.stepKey, Date.now(), max)
+    .run();
+  const held = await db(env)
+    .select({ id: promotionRedemptions.promotionId })
+    .from(promotionRedemptions)
+    .where(
+      and(
+        eq(promotionRedemptions.promotionId, r.promotion.id),
+        eq(promotionRedemptions.orderId, r.orderId),
+      ),
+    )
+    .get();
+  return !!held;
+}
+
+/** Gives back what an order redeemed (a failed or cancelled order); safe to repeat. */
+export async function releaseRedemptions(env: Env, orderId: string): Promise<number> {
+  const r = await env.DB.prepare('DELETE FROM promotion_redemptions WHERE order_id = ?')
+    .bind(orderId)
+    .run();
+  return r.meta.changes ?? 0;
 }
 
 /** Units of `currency` per one base currency, or null when there is no rate for it. */

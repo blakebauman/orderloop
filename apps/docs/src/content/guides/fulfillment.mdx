@@ -185,7 +185,9 @@ the configured services (`source`). A pickup, carry-out or digital-only order sh
 `ok` without rating anything.
 
 [`commerce.tax`](/reference/nodes/#commerce.tax) then taxes the subtotal plus shipping; set its
-`includeShipping` to `false` to tax the subtotal only. The order's `total` is
+`includeShipping` to `false` to tax the subtotal only. Its **Rates by region** gives rates for
+ship-to countries, or regions within them (`[{ "country": "US", "region": "CA", "rate": 0.0725 }]`):
+a match on country and region wins, then the country alone, then the node's own **Rate**. The order's `total` is
 `subtotal + shipping + tax`. A [Create shipment](/reference/nodes/#commerce.ship) node with
 `carrier` set to `from_order` (as on the built-in flows) books the charged option's carrier, or UPS
 when no shipping-rate node ran.

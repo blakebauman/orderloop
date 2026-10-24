@@ -21,6 +21,7 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'webhook.unsubscribed': 'Removed a webhook subscription',
   'webhook.rotated': 'Rotated a webhook signing secret',
   'stock.review_run': 'Ran the stock review',
+  'promotion.saved': 'Saved a promotion',
   'catalog.products_written': 'Wrote catalog products',
   'catalog.products_deleted': 'Deleted catalog products',
   'catalog.type_saved': 'Saved a product type',
