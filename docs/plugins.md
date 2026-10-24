@@ -633,8 +633,9 @@ throws when the plugin is gone, since there is nothing to undo it with.
   forms posting back to it, since a script would run with the viewer's session on the app's origin.
   Only the headers in `RESPONSE_ALLOWED` pass from the plugin's response, so none that acts on the
   whole origin (`set-cookie`, HSTS, service-worker scope, reporting, site-data clearing,
-  permissions); a redirect must lead to `/plugins/<id>/…` on the app's origin or the response is
-  `502`.
+  permissions); a redirect must lead to `/plugins/<id>/…` on the app's origin, or to an external cart's start
+  link (`/cart/start/<cartId>/<token>`, which only the plugin that opened the cart holds), or the
+  response is `502`.
 - An outbound event reaches a plugin only while it is installed and subscribed when the event is
   emitted; there is no replay for a plugin installed later.
 

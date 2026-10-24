@@ -44,7 +44,8 @@ stops working at once. **Disable** refuses new sessions and orders from that par
 - cXML order URL: `https://<your OrderLoop address>/plugins/punchout/cxml/order`
 - Your supplier credential (domain and identity) as entered on the partner, and their secret.
 - For OCI: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET` and the
-  parameters `USERNAME`, `PASSWORD` and `HOOK_URL`.
+  parameters `USERNAME`, `PASSWORD` and `HOOK_URL`. OCI sends the secret in the URL, where browsers and proxies
+  may keep it, so rotate an OCI partner's secret regularly.
 
 ## What happens in a session
 
@@ -60,5 +61,8 @@ stops working at once. **Disable** refuses new sessions and orders from that par
    for the partner's customer, with the PO number as its external id and the channel **EDI**. A PO
    sent again starts nothing new: the same order is answered.
 
-A setup or order request with an unknown identity or wrong secret is refused with status `401`,
-and a return URL on a host not listed with `403`.
+A cXML setup or order request with an unknown identity or wrong secret is answered with cXML
+status `401`, and a return URL on a host not listed with `403`, each over HTTP 200 as cXML
+expects. A buyer who opens the catalog again with the cookie of a cart already sent back gets a
+new cart. OCI setup takes the buyer straight to the cart, which may be shown inside the
+partner's frame origins.
