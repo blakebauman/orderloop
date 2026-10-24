@@ -17,6 +17,7 @@
 
 import { DurableObject, WorkerEntrypoint, exports as workerExports } from 'cloudflare:workers';
 import {
+  ASSISTANT_PUBLISHER,
   egressAllows,
   PLUGIN_LIMIT_CAPS,
   PLUGIN_SECRET_NAME_RE,
@@ -82,7 +83,7 @@ export function boundPlugins(env: Env): string[] {
 }
 
 /** A runtime install that is active: its pin, and the buyer-details grant its admin approved. */
-type Active = { sha: string; personalData: boolean };
+type Active = { sha: string; personalData: boolean; publisher: string };
 
 /** How long an isolate trusts its read of the active runtime installs. */
 const INSTALLS_TTL_MS = 15_000;
@@ -95,18 +96,29 @@ export const dropInstallsCache = () => {
 
 /** The runtime installs that are active, by plugin id (cached for `INSTALLS_TTL_MS`). */
 export async function activeInstalls(env: Env): Promise<Map<string, Active>> {
-  if (installsCache && Date.now() - installsCache.at < INSTALLS_TTL_MS) return installsCache.rows;
-  const rows = await createDb(env.DB)
-    .select({
-      id: installedPluginRows.id,
-      sha: installedPluginRows.sha,
-      personalData: installedPluginRows.personalDataGranted,
-    })
-    .from(installedPluginRows)
-    .where(eq(installedPluginRows.status, 'active'));
-  const out = new Map(rows.map((r) => [r.id, { sha: r.sha, personalData: r.personalData === 1 }]));
-  installsCache = { at: Date.now(), rows: out };
-  return out;
+  let all =
+    installsCache && Date.now() - installsCache.at < INSTALLS_TTL_MS ? installsCache.rows : null;
+  if (!all) {
+    const rows = await createDb(env.DB)
+      .select({
+        id: installedPluginRows.id,
+        sha: installedPluginRows.sha,
+        personalData: installedPluginRows.personalDataGranted,
+        publisher: installedPluginRows.publisher,
+      })
+      .from(installedPluginRows)
+      .where(eq(installedPluginRows.status, 'active'));
+    all = new Map(
+      rows.map((r) => [
+        r.id,
+        { sha: r.sha, personalData: r.personalData === 1, publisher: r.publisher },
+      ]),
+    );
+    installsCache = { at: Date.now(), rows: all };
+  }
+  // The assistant's drafts run only while the deployment allows them: turning it off stops them.
+  if ((env as unknown as Vars).ASSISTANT_PLUGINS === 'on') return all;
+  return new Map([...all].filter(([, a]) => a.publisher !== ASSISTANT_PUBLISHER));
 }
 
 /**
@@ -190,7 +202,7 @@ type Bundle = {
  */
 const verified = new Map<string, Bundle>();
 
-async function verifiedBundle(env: Env, id: string, sha: string): Promise<Bundle> {
+export async function verifiedBundle(env: Env, id: string, sha: string): Promise<Bundle> {
   const key = `${id}@${sha}`;
   const hit = verified.get(key);
   if (hit) return hit;

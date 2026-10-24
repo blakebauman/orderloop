@@ -65,6 +65,7 @@ export const AUDIT_ACTIONS = {
   'plugin.rolled_back': 'Rolled back a plugin',
   'plugin.uninstalled': 'Uninstalled a plugin',
   'plugin.refused': 'Plugin change refused',
+  'plugin.cases_run': 'Ran a drafted plugin’s test cases',
   'personal_data.exported': "Exported a person's data",
   'personal_data.erased': 'Erased a person from orders and accounts',
   ...BUSINESS_AUDIT_ACTIONS,
@@ -144,6 +145,7 @@ export function describe(e: AuditEvent): string {
     if (typeof d.publisher === 'string') parts.push(`signed by ${d.publisher}`);
     if (typeof d.secret === 'string') parts.push(d.secret);
     if (d.personalData === true) parts.push('buyer details granted');
+    if (typeof d.cases === 'string') parts.push(`${d.cases} cases pass`);
     if (typeof d.error === 'string') parts.push(d.error);
   }
   if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))

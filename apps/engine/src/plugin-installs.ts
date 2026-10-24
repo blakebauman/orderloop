@@ -7,27 +7,42 @@
  * Once active it runs exactly as a CI-pinned sandboxed plugin (plugin-host.ts). The web app has
  * authorized the caller (an admin) before any call here; `by` is who, for the rows. See
  * docs/plugins.md, "Installing at runtime".
+ *
+ * A plugin the assistant drafts (assistant/plugin-draft.ts) is staged the same way, under the
+ * publisher `assistant`, which the deployment trusts only with `ASSISTANT_PLUGINS` on; it carries
+ * test cases that must all pass before it can be approved.
  */
 
 import { WorkerEntrypoint, exports as workerExports } from 'cloudflare:workers';
 import {
+  ASSISTANT_PUBLISHER,
   boundText,
   PLUGIN_BUNDLE_MAX_BYTES,
+  type PluginCase,
+  type PluginCaseResult,
   type PluginInstallStatus,
   type PluginInstallView,
   type PluginManifest,
   type PluginRpc,
   parseManifest,
   pluginBundleFileSchema,
+  pluginCasesSchema,
   type Refusable,
   secretContext,
   verifyBundleSignature,
 } from '@orderloop/core';
 import { createDb, installedPlugins, pluginSecrets } from '@orderloop/db';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { sealSecret } from './data-key';
 import { pluginStorage } from './namespaces';
-import { dropInstallsCache, knownManifests, registryOwns, resolveSecret } from './plugin-host';
+import { runCases } from './plugin-cases';
+import {
+  dropInstallsCache,
+  knownManifests,
+  registryOwns,
+  resolveSecret,
+  verifiedBundle,
+} from './plugin-host';
 import { pluginUsage } from './plugins';
 
 /** An install refused for a reason the admin can act on; its message is shown as it is. */
@@ -74,7 +89,20 @@ function publishers(env: Env): Record<string, string> {
   }
 }
 
-const sha256 = async (text: string) =>
+/** Whether this deployment lets the assistant draft plugins (`pluginInstalls.assistant`). */
+export const assistantDrafts = (env: Env) =>
+  (env as unknown as { ASSISTANT_PLUGINS?: string }).ASSISTANT_PLUGINS === 'on';
+
+/** Whether versions signed by (or drafted as) `publisher` may start running. */
+const trusted = (env: Env, publisher: string) =>
+  publisher === ASSISTANT_PUBLISHER ? assistantDrafts(env) : !!publishers(env)[publisher];
+
+const notTrusted = (row: Row) =>
+  row.publisher === ASSISTANT_PUBLISHER
+    ? `${row.id} ${row.version} was drafted by the assistant, which this deployment no longer allows`
+    : `${row.publisher}, who signed ${row.id} ${row.version}, is no longer trusted`;
+
+export const sha256 = async (text: string) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -102,7 +130,20 @@ async function view(env: Env, row: Row): Promise<PluginInstallView> {
     approvedAt: row.approvedAt,
     manifest,
     secrets,
+    request: row.request,
+    cases: row.cases ? (JSON.parse(row.cases) as PluginCaseResult[]) : null,
+    code: row.publisher === ASSISTANT_PUBLISHER ? await draftRules(env, row) : null,
   };
+}
+
+/** An assistant draft's rule code, as the model wrote it (the bundle keeps it as `rules`). */
+async function draftRules(env: Env, row: Row): Promise<string | null> {
+  try {
+    const bundle = (await verifiedBundle(env, row.id, row.sha)) as { rules?: unknown };
+    return typeof bundle.rules === 'string' ? bundle.rules : null;
+  } catch {
+    return null;
+  }
 }
 
 const rowsOf = (env: Env, id: string) =>
@@ -168,6 +209,8 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
   const parsed = pluginBundleFileSchema.safeParse(raw);
   if (!parsed.success) throw new InstallRefused('That is not a plugin bundle (.olplugin)');
   const file = parsed.data;
+  if (file.publisher === ASSISTANT_PUBLISHER)
+    throw new InstallRefused('Only the assistant drafts plugins as “assistant”');
   const key = keys[file.publisher];
   if (!key)
     throw new InstallRefused(`“${file.publisher}” is not a publisher this deployment trusts`);
@@ -187,6 +230,29 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
     throw new InstallRefused(
       `The bundle is ${manifest.id} ${manifest.version}, signed as ${file.id} ${file.version}`,
     );
+  return stageBundle(env, { sha: file.sha, body: file.body, bundle, manifest }, file.publisher, by);
+}
+
+/**
+ * Stores a checked bundle `pending`, for an admin to review: an upload's (signed), or a draft the
+ * assistant wrote for `request`, with its cases' results. Refused for an id the registry installs,
+ * a test fixture, malformed migrations, another publisher's id, a version already uploaded, or
+ * code that doesn't answer with its sealed manifest.
+ */
+export async function stageBundle(
+  env: Env,
+  staged: {
+    sha: string;
+    body: string;
+    bundle: { code: string; migrations: unknown };
+    manifest: PluginManifest;
+  },
+  publisher: string,
+  by: string,
+  draft?: { request: string; cases: PluginCaseResult[] },
+): Promise<PluginInstallView> {
+  const { sha, body, bundle, manifest } = staged;
+  const file = { id: manifest.id, version: manifest.version, sha, publisher };
   if (!isMigrations(bundle.migrations))
     throw new InstallRefused('The bundle’s migrations are malformed');
   if (
@@ -200,17 +266,24 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
   const installed = rows.filter((r) => r.status !== 'uninstalled');
   if (installed.some((r) => r.publisher !== file.publisher))
     throw new InstallRefused(
-      `${file.id} is installed from another publisher: uninstall it before installing this one`,
+      file.publisher === ASSISTANT_PUBLISHER
+        ? `${file.id} is installed from a file: the assistant only revises plugins it drafted`
+        : `${file.id} is installed from another publisher: uninstall it before installing this one`,
     );
   const same = installed.find((r) => r.sha === file.sha);
   // Uploading the same file again (a retry) answers with the review it got the first time.
   if (same?.status === 'pending') return view(env, same);
   if (same) throw new InstallRefused(`${file.id} ${file.version} is already uploaded`);
+  // A version names one bundle, ever (`installed_plugins_version`).
+  if (rows.some((r) => r.version === file.version && r.sha !== file.sha))
+    throw new InstallRefused(
+      `${file.id} ${file.version} was uploaded before with other contents: give this one a new version`,
+    );
   await dryRun(env, file.id, file.sha, bundle.code, manifest);
   // Its first install (or the first since an uninstall): whatever the id stored before, under a
   // registry plugin of that id since removed, or an earlier install, is gone.
   if (!installed.length) await pluginStorage(env, file.id).destroy();
-  await env.DOCS.put(`plugins/${file.id}/${file.sha}.json`, file.body, {
+  await env.DOCS.put(`plugins/${file.id}/${file.sha}.json`, body, {
     httpMetadata: { contentType: 'application/json' },
   });
   const row: Row = {
@@ -225,8 +298,10 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
     uploadedAt: Date.now(),
     approvedBy: null,
     approvedAt: null,
+    request: draft?.request ?? null,
+    cases: draft ? JSON.stringify(draft.cases) : null,
   };
-  await db(env)
+  const insert = db(env)
     .insert(installedPlugins)
     .values(row)
     // Only an uninstalled row of the same file is replaced, and wholly: never one that runs.
@@ -240,9 +315,18 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
         uploadedAt: row.uploadedAt,
         approvedBy: null,
         approvedAt: null,
+        request: row.request,
+        cases: row.cases,
       },
       setWhere: eq(installedPlugins.status, 'uninstalled'),
     });
+  try {
+    await insert;
+  } catch (err) {
+    // Two drafts (or uploads) of one version at once: `installed_plugins_version` lets one in.
+    if (String(err).includes('UNIQUE')) throw new InstallRefused(changedMeanwhile(file.id));
+    throw err;
+  }
   return view(env, row);
 }
 
@@ -251,10 +335,7 @@ async function find(env: Env, id: string, sha: string) {
   const rows = await rowsOf(env, id);
   const row = rows.find((r) => r.sha === sha);
   if (!row) throw new InstallRefused(`${id} (${sha.slice(0, 12)}) is not uploaded`);
-  if (!publishers(env)[row.publisher])
-    throw new InstallRefused(
-      `${row.publisher}, who signed ${id} ${row.version}, is no longer trusted`,
-    );
+  if (!trusted(env, row.publisher)) throw new InstallRefused(notTrusted(row));
   return { row, rows };
 }
 
@@ -319,6 +400,21 @@ export async function approvePlugin(
   if (missing.length) throw new InstallRefused(`Set ${missing.join(', ')} before approving`);
   if (v.manifest.personalData === 'send' && !grant.personalData)
     throw new InstallRefused(`${id} needs buyer details: grant them, or don't install it`);
+  // A draft runs only once it has a case for every step and they all pass, run again now on the
+  // bundle that would run.
+  if (row.publisher === ASSISTANT_PUBLISHER) {
+    const results = await rerun(env, row, v.cases ?? []);
+    const failing = results.filter((c) => !c.pass).length;
+    const untested = v.manifest.nodes.filter(
+      (n) => !results.some((c) => `${id}.${c.node}` === n.type),
+    );
+    if (untested.length)
+      throw new InstallRefused(
+        `Add a test case for ${untested.map((n) => n.label).join(', ')} before approving`,
+      );
+    if (failing)
+      throw new InstallRefused(`${failing} of ${results.length} cases fail: fix ${id} first`);
+  }
   const personalData = v.manifest.personalData === 'send' && grant.personalData;
   await activate(env, row, 'pending', {
     approvedBy: by,
@@ -364,10 +460,7 @@ export async function setPluginEnabled(env: Env, id: string, enabled: boolean) {
   if (!row) throw new InstallRefused(`${id} is not installed at runtime`);
   const to = enabled ? 'active' : 'disabled';
   if (row.status === to) return { id, status: to };
-  if (enabled && !publishers(env)[row.publisher])
-    throw new InstallRefused(
-      `${row.publisher}, who signed ${id} ${row.version}, is no longer trusted`,
-    );
+  if (enabled && !trusted(env, row.publisher)) throw new InstallRefused(notTrusted(row));
   const r = await db(env)
     .update(installedPlugins)
     .set({ status: to })
@@ -419,6 +512,52 @@ export async function uninstallPlugin(env: Env, id: string) {
   dropInstallsCache();
   knownManifests.delete(id);
   return { id };
+}
+
+/**
+ * Runs `cases` on a stored draft's bundle and keeps them, with their results, on its row, if no one
+ * changed its cases since `row` was read (else an admin's edit would be lost, or approved unseen).
+ */
+async function rerun(env: Env, row: Row, cases: PluginCase[]): Promise<PluginCaseResult[]> {
+  const parsed = pluginCasesSchema.safeParse(cases);
+  if (!parsed.success)
+    throw new InstallRefused(
+      `Those cases don't read: ${parsed.error.issues[0]?.path.join('.')}: ${parsed.error.issues[0]?.message}`,
+    );
+  const bundle = await verifiedBundle(env, row.id, row.sha);
+  const results = await runCases(env, bundle.code, bundle.manifest, parsed.data);
+  const r = await db(env)
+    .update(installedPlugins)
+    .set({ cases: JSON.stringify(results) })
+    .where(
+      and(
+        eq(installedPlugins.id, row.id),
+        eq(installedPlugins.sha, row.sha),
+        row.cases === null ? isNull(installedPlugins.cases) : eq(installedPlugins.cases, row.cases),
+      ),
+    );
+  if (!changed(r)) throw new InstallRefused(changedMeanwhile(row.id));
+  return results;
+}
+
+/**
+ * Saves an assistant draft's test cases, as an admin edited them, and runs them. Only a draft under
+ * review: once approved, a change is a new draft.
+ */
+export async function runPluginCases(
+  env: Env,
+  id: string,
+  sha: string,
+  cases: PluginCase[],
+): Promise<PluginCaseResult[]> {
+  const { row } = await find(env, id, sha);
+  if (row.publisher !== ASSISTANT_PUBLISHER)
+    throw new InstallRefused(`${id} was uploaded from a file: it has no test cases`);
+  if (row.status !== 'pending')
+    throw new InstallRefused(
+      `${id} ${row.version} is ${row.status}: ask the assistant to revise it`,
+    );
+  return rerun(env, row, cases);
 }
 
 /** Every runtime install, newest first, without a secret's value. */

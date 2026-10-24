@@ -45,6 +45,31 @@ The page is admin-only: **Plugins** in the account menu.
 6. Confirm who you are and select **Approve and install**. Once approved, the plugin runs on every
    order whose flow uses it. The version that ran before, if any, is kept as an earlier version.
 
+## Drafts from the assistant
+
+An admin can also ask the [assistant](/guides/assistant/#plugin-drafts) to write a business rule
+as a plugin, such as "hold orders over $5,000 shipping outside the US". The draft appears on the
+Plugins page as **pending**, marked "Drafted by the assistant" instead of a publisher's signature,
+and doesn't run. It adds rule steps that read only the order's commercial facts, never buyer names,
+emails or addresses, and it can't reach outside hosts, secrets or storage. It is available only
+when OrderLoop has turned it on for the workspace.
+
+The review shows more than an upload's:
+
+- **Asked for**: what you asked the assistant.
+- **Rule code, as the assistant wrote it**: read it before approving. The cases show what it does
+  on the orders they describe, not that it is safe.
+- **Test cases**: a table of each case, its step, the branch it expects and the branch it got.
+
+Edit the cases as JSON (each has a name, the step, the order fields that matter, its settings and
+the branch it must take) and select **Run cases**; the results replace the table. **Approve and
+install** stays disabled until every step has a case and every case passes, and it needs the
+identity check below like any plugin. Approving re-runs the cases. To revise a draft, ask the
+assistant again naming the plugin; it drafts the plugin's next version. A new request always gets a
+plugin of its own. Once approved, a draft's cases are fixed: ask for a new version to change them.
+If OrderLoop turns the feature off, drafted plugins stop running and can't be approved, rolled back
+to or turned on.
+
 ## Confirming who you are
 
 Approving, rolling back and uninstalling each ask you to prove you are the admin, because they change
@@ -89,6 +114,6 @@ Both need `admin`. See the [REST API](/reference/rest-api/#routes).
 ## Audit
 
 Every action, and every refusal, is recorded under **Plugins** in the
-[audit log](/guides/team-and-roles/#audit-log): `plugin.uploaded`, `plugin.approved`,
+[audit log](/guides/team-and-roles/#audit-log): `plugin.uploaded`, `plugin.drafted` (the assistant drafted a version), `plugin.cases_run` (a draft's cases were run), `plugin.draft_refused` (a draft the assistant couldn't use), `plugin.approved`,
 `plugin.secret_set` (names the secret, never its value), `plugin.disabled`, `plugin.enabled`,
 `plugin.rolled_back`, `plugin.uninstalled` and `plugin.refused` (with the reason).

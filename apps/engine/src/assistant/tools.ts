@@ -31,6 +31,7 @@ import {
   requireRole,
   runAction,
 } from './data';
+import { draftPlugin } from './plugin-draft';
 
 const orderId = z.string().describe('The order id (ord_…) or its #reference, e.g. #k3x9q2');
 
@@ -68,6 +69,15 @@ export const TOOL_INPUTS = {
   list_flows: z.object({}),
   get_flow: z.object({ flowId: z.string() }),
   propose_flow_change: z.object({ flowId: z.string(), instruction: z.string() }),
+  draft_plugin: z.object({
+    instruction: z
+      .string()
+      .describe('The rule in plain words, e.g. “hold orders over $5,000 shipping outside the US”'),
+    pluginId: z
+      .string()
+      .optional()
+      .describe('A plugin the assistant drafted (ai-…), to revise as its next version'),
+  }),
   decide_approval: z.object({
     orderId,
     nodeId: z
@@ -134,6 +144,13 @@ export async function runTool<T extends AssistantTool>(
       const c = opts.context;
       const onScreen = c?.kind === 'flow' && c.id === i.flowId ? c : undefined;
       return proposeFlowChange(env, i.flowId, i.instruction, onScreen);
+    }
+    case 'draft_plugin': {
+      const i = input as ToolInput<'draft_plugin'>;
+      return draftPlugin(env, p, i.instruction, {
+        pluginId: i.pluginId,
+        via: opts.via === 'MCP' ? 'mcp' : opts.via === 'A2A' ? 'a2a' : 'assistant',
+      });
     }
   }
   throw new Error(`Unknown tool: ${name}`);

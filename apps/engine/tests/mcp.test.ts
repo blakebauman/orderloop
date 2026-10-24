@@ -133,6 +133,12 @@ describe('MCP', () => {
     expect(operator.find((t) => t.name === 'cancel_order')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: true },
     });
+    // An admin also drafts plugins: no confirm, but it saves a draft, so it isn't read-only.
+    const admin = await tools(person('admin', 'ann@example.com'));
+    expect(admin).toHaveLength(14);
+    expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    });
   });
 
   it('reads with structured content, and acts as the person via MCP', async () => {
