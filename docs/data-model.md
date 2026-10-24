@@ -234,8 +234,8 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 |---|---|
 | `products` | Primary key `key`; `uid` (unique, from `productUid`: the shard number and a per-shard sequence packed into 32 bits), `type`, `type_version`, `status`, `version` (starts at 1, +1 per change), `hash` (content hash), `body` (the product as JSON), `created_at`, `updated_at`, `updated_by` |
 | `aliases` | `alias` (a SKU, GTIN or slug, as `productAliases` writes it) and its `owner` product key: the claims that hash to this shard (`aliasShard`), which may belong to products on other shards |
-| `outbox` | `seq`, `key`, `urgent`: products waiting to publish; the alarm deletes rows once their product is published |
-| `applied` | `batch` id, `at` and the `result` of every `apply` batch, so a retried batch returns its first answer. The alarm deletes rows older than 7 days (longer than a feed part waits for redelivery) |
+| `outbox` | `seq`, `key`, `urgent`, `rev` (the config revision the write was validated against; null for a removal or a reindex) and `forced` (1 for a reindex, which rewrites unchanged alias pointers): products waiting to publish; the alarm deletes rows once their product is published. Indexed on `key`. `rev` and `forced` were added later: the constructor adds them to a table that lacks them |
+| `applied` | `batch` id, `at` and the `result` of every `apply` batch, so a retried batch returns its first answer. The alarm deletes rows older than 7 days (longer than a feed part waits for redelivery). Indexed on `at` |
 | `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published |
 | `settings` | `shard` (the number this object was first called as; a call as another number throws) and `seq` (the next `uid` sequence) |
 
@@ -277,8 +277,10 @@ Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and e
 
 A listing index is rebuilt from `ListingIndexer`, the Durable Object for one channel and category
 (`<channel>:<category>`), which holds the listing's members in SQLite: `members` (`key` primary key,
-`uid`, `at`, `created_at`, `live`), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
-(`channel`, `category`, `dirty`, `built`). A member holds the latest change by `at`; a removed
+`uid`, `at`, `created_at`, `live`, and `sig`, the entry's `entrySignature`, added to older tables by
+the constructor), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
+(`channel`, `category`, `dirty`, `built`, `members` at the last build, and `rev`, the highest config
+revision its changes carried). A member holds the latest change by `at`; a removed
 one stays as a tombstone (`live` 0) for 24 hours. A product is a member of its categories and
 all their ancestors. See [Architecture](architecture.md#listing-indexes).
 

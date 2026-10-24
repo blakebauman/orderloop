@@ -158,14 +158,15 @@ rendering and routing are covered in core (`product-*.test.ts`), not repeated he
 | writing products | A product stored at version 1 and published in every locale (the document, its enum labels per locale, an alias pointer per SKU and slug, the KV card, `getProduct`, `resolveAlias`); an unchanged product writes nothing and leaves the outbox empty, a change is version 2 and republished; invalid products are `rejected` with every issue beside valid ones in the same call (a bad enum value, an unknown type); a key repeated in one batch keeps the last row and rejects the earlier |
 | aliases | A SKU another product holds is refused with `already used by <key>` and a slug the refused product claimed first is given back; the SKU is free once its holder drops it; a claim whose product no longer holds it (a release that never happened) is taken over |
 | shard batches | A batch id is applied once (a repeat with different rows returns the first results and stores nothing new); a shard refuses to be called as another shard number |
+| urgent purges | Three urgent products on one shard send one `PURGE` message carrying their three `p:<key>` tags (the shard's `PURGE` binding replaced by a spy through `runInDurableObject`) |
 | unpublishing | A draft's documents, cards and alias pointers are deleted while it still owns its SKUs, and come back when it is active again; a dropped variant's pointer goes; deleting a product removes its documents and claims, and an unknown key is `unchanged` |
 | types, channels and categories | Types add versions only (a removed attribute is refused with a reason, a new type must start at 1) and an unversioned product pins to the latest; categories with an unknown parent or a cycle are refused and the published tree has localized names; a channel whose default locale isn't published is refused |
 
 `apps/catalog/tests/deletes.test.ts` covers the deletes: a type products use is refused with a count and an unused one loses every version (an unknown one is refused); a category with products or with children outside the set is refused, and leaves and their parent delete together; a channel's delete takes down its documents, alias pointers, cards and category tree and leaves other channels alone.
 
 The writing-products group also checks the `u:f1:<key>` uid entry in KV, and its second write is
-urgent (`putProducts(…, { urgent: true })`) so the alarm's purge send runs; no test reads the purge
-queue.
+urgent (`putProducts(…, { urgent: true })`) so the alarm's purge send runs; only the urgent-purges
+group reads what is sent.
 
 ### Listing indexes
 
@@ -176,6 +177,7 @@ queue.
 | ancestors | A product is listed in its category and every ancestor, with facets and sorts in the index |
 | moving | A product moved between categories leaves the old listing (through `left`) and enters the new; one that stops being listed is dropped |
 | ordering | The latest change by `at` wins when changes arrive out of order |
+| build pacing | `debounceMs` (15 s up to 300,000 members, a second per 20,000 beyond, at most 5 minutes); inside the indexer (`runInDurableObject`, `LISTING_DELAY_MS` set to `0`), the next build is due `debounceMs(members)` after the last; a change with the stored entry signature only moves `at` and doesn't set `dirty`, while an older one changes nothing and a new price does |
 | `withAncestors` | Every ancestor once; a cycle stops |
 
 ### Keyword search
@@ -267,9 +269,9 @@ entrypoint through `exports`.
 | Group | Covers |
 |---|---|
 | documents | A product document with its content type, `Cache-Control` (`FRESH`), a quoted `etag` and CORS; a `304` with no body when `If-None-Match` matches; SKU and slug lookups (a slug in its own locale); a missing product or SKU is `404` with `MISSING`; the category tree; `HEAD` has no body |
-| batches | Cards in the order asked, `null` for unknown keys, a repeated key once; no `keys`, 101 keys or a malformed key is `400` (`at most 100 keys`) |
+| batches | Cards in the order asked, `null` for unknown keys, a repeated key once; a strong `etag` of the body and a `304` (with `FRESH`, no body) for a matching weak or strong `If-None-Match`, another key order another `etag`; a product whose uid changed (old card deleted, new uid in KV) is found again; no `keys`, 101 keys or a malformed key is `400` (`at most 100 keys`) |
 | the gateway | `POST` is `405`; `OPTIONS` is `204` allowing `if-none-match`; a wrong version prefix or unknown kind is `404`; a bad channel, locale or slug is `400`; `/health` is `{ ok: true }` |
-| purging | A queue batch with a repeated tag is acknowledged (`ackAll`, no retry) |
+| purging | A queue batch with a repeated tag acknowledges every message, with no wait since `purge` skipped; `drain` with a fake clock and purge: whole messages packed into calls of at most 100 deduplicated tags (a 250-tag message split), `PURGE_PACE_MS` after each call; a message over a minute old acknowledged unpurged, and once five paced calls have taken the minute, the rest too; a refused call retries the messages it hadn't covered and keeps the purged one acknowledged |
 
 `apps/catalog-edge/tests/listing.test.ts` writes a listing index (built with core's `buildListingIndex` and `listingSpec`) and its cards, and requests `categories/<code>/products` through the gateway:
 
@@ -278,6 +280,7 @@ entrypoint through `exports`.
 | pages | Newest first with `total` and `next`, facets over the whole result with labels, range `min`, `max` and buckets |
 | filters and sorts | Term and range filters, price sorts, facet counts that stay disjunctive |
 | refusals | A sort the index lacks, bad filters, ranges, cursors and limits (`400`) and an unknown category (`404`) |
+| ETags | A page's strong `etag` and a `304` (keeping `cache-tag`) when `If-None-Match` names it or is `*`; another page, or a changed card under the same index, another `etag` |
 | the internal path | `/_idx/…` is not reachable through the gateway |
 | cache keys | Equivalent pages (filter order, value order, default `sort`, `cursor` and `limit` spelled out) have one canonical URL |
 
@@ -292,7 +295,7 @@ entrypoint through `exports`.
 
 Workers Caching isn't emulated locally, so these tests check what reaches the cache (canonical URLs,
 headers, `304`s) and not hits, misses, stale serving or tag purges: `Delivery.purge` is a no-op
-without it, so the test only checks the acknowledgement. Nothing in the repository tests those; the
+without it, so the queue test checks the acknowledgements and `drain` is tested with a fake purge. Nothing in the repository tests those; the
 deploy's smoke test requests only `/health`, which the gateway answers without the cache.
 
 ## The Claude Code toolkit

@@ -354,7 +354,7 @@ lists it, a dropped locale, SKU or variant, a deleted product) is deleted. Which
 aliases are published per product and channel is kept in the shard's `published` table, and
 recorded only after every write succeeded, so a failed pass republishes in full. Publishing the
 same product twice writes the same bytes. `publishKeys` also returns a `ListingChange` per product
-and channel it touched: `{ channel, key, at, entry, left }`, where `entry` is what the product lists
+and channel it touched: `{ channel, key, at, rev, entry, left }` (`rev` being the config revision it published with), where `entry` is what the product lists
 as now (`null` when it no longer lists in the channel) and `left` the categories it was published in
 before, which the `published` row's JSON now keeps beside `uid` and `aliases`. `search` is what
 keyword search indexes, one `SearchEntry` (`title`, `brand`, `skus`, `body`) per locale, or `null` when
@@ -364,8 +364,19 @@ the product no longer lists in the channel. See [Listing indexes](#listing-index
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards
 by key. After the alarm has published a pass, it sends the cache tag `p:<key>` of every product whose
-outbox rows were `urgent` to the `PURGE` queue (`PurgeMessage`: `{ tags }`), 100 messages a
-`sendBatch`. It sends after publishing so a purge never refills the cache from the old document.
+outbox rows were `urgent` to the `PURGE` queue (`PurgeMessage`: `{ tags }`), up to 100 tags a
+message (what one purge call takes), in one `sendBatch`. It sends after publishing so a purge never
+refills the cache from the old document.
+
+Outbox rows also carry `rev`, the config revision the write was validated against (null for a
+removal or a reindex), and `forced` (set by `republishAll`). Both columns were added after the
+table, so the constructor adds them when missing (`ALTER TABLE … ADD COLUMN`), and indexes
+`outbox(key)` and `applied(at)` with `CREATE INDEX IF NOT EXISTS`. The alarm calls
+`loadConfig(max rev)`, which reuses the shard's copy of the config unless it is older than that
+revision or than 2 seconds, and fetches the latest from `CatalogMeta` when any row has no revision.
+An alias pointer the product already published (same key) is not written again, except for a
+`forced` row, so a reindex still rewrites every pointer. A write reads each stored row's `version`
+and `hash` first and parses the stored body (for the old aliases) only for rows whose hash changed.
 The pass's listing changes go to the `CHANGES` queue first (100 a `sendBatch`), before the outbox rows
 are deleted, so a crash between the two republishes and sends them again.
 
@@ -449,15 +460,20 @@ parts:
   batch. A category that moved reaches its old listings only on a `reindex`. A failed batch retries
   whole; changes are idempotent.
 - **`ListingIndexer`** is a Durable Object per `<channel>:<category>` (`LISTINGS`, SQLite) with tables
-  `members` (key, uid, `at`, `created_at`, `live`), `terms`, `nums` and `settings`. Changes arrive at
+  `members` (key, uid, `at`, `created_at`, `live`, `sig`), `terms`, `nums` and `settings`. Changes arrive at
   least once and in any order, so a member keeps the change with the latest `at`; a removal is a
   tombstone (`live` 0) that stays 24 hours so a late older change can't bring the product back. A
-  change that alters anything sets `dirty` and an alarm, at least `DEBOUNCE_MS` (15 seconds) after the
-  last build, so a feed that touches a category thousands of times rebuilds it a handful of times;
-  changes during a build rebuild once more after the debounce. The alarm streams the members, ordered
+  change whose entry has the member's stored signature (`entrySignature`: uid, `createdAt`, terms and
+  numbers, which is all the index uses) only moves `at`. A
+  change that alters anything sets `dirty` and an alarm, at least `debounceMs(members)` after the
+  last build (a second per 20,000 members of the last build, at least `DEBOUNCE_MS`, 15 seconds, and
+  at most 5 minutes), so a feed that touches a category thousands of times rebuilds it a handful of times;
+  changes during a build rebuild once more after the debounce. The build uses the config at the
+  highest `rev` its changes carry (`ListingChange.rev`), from an isolate copy at most 2 seconds old.
+  The alarm streams the members, ordered
   newest first, into `ListingIndexBuilder` (ids, then each term value's members, then each numeric
-  column, then `finish`) and puts `idx/f1/<channel>/<category>.bin` in `PUBLISHED` with custom
-  metadata `members` and `builtAt`. `buildListingIndex` is the same builder over an in-memory array
+  column, counted per member with a `GROUP BY uid` and then filled in place, then `finish`) and puts `idx/f1/<channel>/<category>.bin` in `PUBLISHED` with custom
+  metadata `members` and `builtAt`, and records `members` in `settings` for the next debounce. `buildListingIndex` is the same builder over an in-memory array
   (tests). A channel that no longer exists keeps its last index.
 
 Measured in workerd (a measurement, not a guarantee): 50,000 members apply in about 0.8 seconds and
@@ -583,7 +599,13 @@ matches is a `304` with no body read. Responses carry the object's `etag` and `l
 and, for documents and category trees, `Cache-Control: public, max-age=60, stale-while-revalidate=86400,
 stale-if-error=604800` (a minute fresh, a day stale while revalidating, a week if R2 fails). A
 missing product, SKU, slug or category tree is `404` with `{ "error": … }` and `public, max-age=30`.
-Batches, listing pages and searches carry the same fresh `Cache-Control`. Cache tags: `p:<key>` and `ch:<channel>` on a
+Batches, listing pages and searches carry the same fresh `Cache-Control`. Batches and listing pages,
+which `Delivery` assembles, carry a strong `etag` (the first 16 bytes of the body's SHA-256, in hex),
+and a request whose `If-None-Match` names it is a `304` with no body, so the cache revalidates them
+without storing them again. A batch keeps key → uid entries in the isolate (up to 50,000, oldest out
+first); a remembered uid whose card is missing is read from KV again, since a product deleted and
+created anew has a new uid. Cards live in KV, which is eventually consistent: after a purge, a page
+refilled at another location can still carry the old card for up to about a minute. Cache tags: `p:<key>` and `ch:<channel>` on a
 document (a SKU or slug miss only `ch:<channel>`), `cats` and `ch:<channel>` on a category tree,
 `ch:<channel>` and one `p:<key>` per key on a batch, `cat:<code>` and `ch:<channel>` on a listing page, `ch:<channel>` on a search page.
 
@@ -594,9 +616,12 @@ within each, joins them with `,`, and omits `sort=newest`, `cursor=0` and the de
 equivalent requests share one cache entry. `Delivery` loads the index through its own `/_idx/<channel>/<category>`
 path, called on itself so it goes through Workers Caching (`public, max-age=30, stale-while-revalidate=300`,
 tags `cat:<code>` and `ch:<channel>`); the gateway never routes `/_idx/`, so it is not public. Each
-isolate keeps decoded indexes (zero-copy views over the bytes) up to 64 MiB, least recently used out
+isolate keeps decoded indexes (zero-copy views over the bytes) up to 32 MiB, least recently used out
 first; one is trusted for 30 seconds and then revalidated with its ETag, so an unchanged index is a
-`304` and nothing is downloaded or decoded again. A page reads its cards from KV in one bulk `get` (a
+`304` and nothing is downloaded or decoded again. Concurrent requests for one index share one load
+(a request waits on another's for at most 5 seconds, then loads it itself). An index whose
+`content-length` is over 64 MiB is never buffered: the page is `503` (`listing unavailable`,
+`MISSING`) and the size is logged. A page reads its cards from KV in one bulk `get` (a
 card missing from KV is skipped) and returns facets (`{ attr: { label, values: [{ value, label, count }] } }`,
 the top 50 values by count, counted disjunctively over the whole result) and ranges
 (`{ attr: { label, min, max, buckets } }`), with labels in the request's locale (the code when none).
@@ -604,15 +629,20 @@ An unknown category is `404` (`no such category`, `MISSING`); a sort the index l
 (`unsupported sort`, with the available `sorts`); a malformed filter, range, sort, cursor or limit is `400`.
 
 The Worker is also the consumer of the purge queue (`orderloop-catalog-purge`) the catalog's
-`PURGE` binding feeds. A batch's tags are deduplicated and purged at most 100 a call through
-`Delivery.purge`, since Workers Caching scopes a purge to the entrypoint that calls it. Purges are
-rationed (the Free-plan limits: about 5 calls a minute), so the consumer runs one batch at a time and
-when a call is refused it calls `retryAll` with a 30 second delay; after `max_retries` the
-messages go to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (local
+`PURGE` binding feeds. `drain` (`src/index.ts`) takes a batch's messages oldest first, packs whole
+messages into calls of at most `PURGE_TAGS` (100) deduplicated tags (a larger message is split) and
+purges through `Delivery.purge`, since Workers Caching scopes a purge to the entrypoint that calls it.
+Purges are rationed (the Free-plan limits: about 5 calls a minute), so the consumer runs one batch at
+a time and waits `PURGE_PACE_MS` (12 seconds, `scheduler.wait`) after each call. Before each call it
+acknowledges unpurged every message older than `PURGE_STALE_MS` (a minute, by its timestamp): with
+`max-age=60` the cache has caught up by then, so a backlog drains instead of spending the ration, and
+a batch takes about a minute at most. When a call is refused, the messages it hadn't covered are
+retried with a 30 second delay (those already purged stay acknowledged); after `max_retries` they go
+to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (local
 development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent
 writes queue a purge.
 
-Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `@orderloop/core/product/listing` (the zod-free index decoder) and `@orderloop/core/product/search` (the zod-free query helpers), never zod or the model.
+Bundle: about 32 KiB (9.4 KiB gzipped), because it imports only `@orderloop/core/product/paths`, `@orderloop/core/product/listing` (the zod-free index decoder) and `@orderloop/core/product/search` (the zod-free query helpers), never zod or the model.
 
 ## Bindings
 

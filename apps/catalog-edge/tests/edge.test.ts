@@ -2,7 +2,7 @@ import { createExecutionContext, createMessageBatch, getQueueResult } from 'clou
 import { env, exports } from 'cloudflare:workers';
 import { DOC_FORMAT, paths } from '@orderloop/core/product/paths';
 import { beforeAll, describe, expect, it } from 'vitest';
-import worker from '../src';
+import worker, { drain, PURGE_PACE_MS } from '../src';
 import { FRESH, MISSING } from '../src/delivery';
 
 const get = (path: string, init?: RequestInit) =>
@@ -96,6 +96,36 @@ describe('batches', () => {
     expect(r.headers.get('cache-control')).toBe(FRESH);
   });
 
+  it('tags a batch with an ETag of its body and answers 304 when it still matches', async () => {
+    const r = await get('/v1/web/en/products?keys=tee,hat');
+    const etag = r.headers.get('etag') ?? '';
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    const again = await get('/v1/web/en/products?keys=tee,hat', {
+      headers: { 'if-none-match': `W/${etag}` },
+    });
+    expect(again.status).toBe(304);
+    expect(again.headers.get('etag')).toBe(etag);
+    expect(again.headers.get('cache-control')).toBe(FRESH);
+    expect(await again.text()).toBe('');
+    const other = await get('/v1/web/en/products?keys=hat,tee');
+    expect(other.headers.get('etag')).not.toBe(etag);
+  });
+
+  it('finds a product again whose uid changed (deleted and created anew)', async () => {
+    await env.CARDS.put(paths.uid(DOC_FORMAT, 'cap'), '80');
+    await env.CARDS.put(paths.card(DOC_FORMAT, 'web', 'en', 80), card('cap', 'Cap'));
+    expect(await (await get('/v1/web/en/products?keys=cap')).json()).toEqual({
+      products: [{ key: 'cap', title: 'Cap' }],
+    });
+    // What the publisher leaves after a delete and a new create: a new uid, the old card gone.
+    await env.CARDS.delete(paths.card(DOC_FORMAT, 'web', 'en', 80));
+    await env.CARDS.put(paths.uid(DOC_FORMAT, 'cap'), '81');
+    await env.CARDS.put(paths.card(DOC_FORMAT, 'web', 'en', 81), card('cap', 'New cap'));
+    expect(await (await get('/v1/web/en/products?keys=cap')).json()).toEqual({
+      products: [{ key: 'cap', title: 'New cap' }],
+    });
+  });
+
   it('refuses a batch without keys, with too many, or with a bad one', async () => {
     expect((await get('/v1/web/en/products')).status).toBe(400);
     const many = Array.from({ length: 101 }, (_, i) => `k${i}`).join(',');
@@ -133,7 +163,95 @@ describe('purging', () => {
     const ctx = Object.assign(createExecutionContext(), { exports });
     await worker.queue(batch, env, ctx);
     const result = await getQueueResult(batch, ctx);
-    expect(result.ackAll).toBe(true);
+    expect(result.explicitAcks.sort()).toEqual(['a', 'b']);
+    expect(result.retryMessages).toEqual([]);
     expect(result.retryBatch.retry).toBe(false);
+  });
+
+  // A clock that the pacing advances, so 12-second waits take no time.
+  const clock = (start: number) => {
+    const c = { now: start, waits: [] as number[] };
+    return {
+      c,
+      wait: async (ms: number) => {
+        c.waits.push(ms);
+        c.now += ms;
+      },
+      now: () => c.now,
+    };
+  };
+  const tagsFor = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => `p:${prefix}${i}`);
+  const run = async (
+    messages: { id: string; age: number; tags: string[] }[],
+    refuseCall?: number,
+  ) => {
+    const start = Date.UTC(2026, 9, 1);
+    const t = clock(start);
+    const batch = createMessageBatch(
+      'orderloop-catalog-purge',
+      messages.map((m) => ({
+        id: m.id,
+        timestamp: new Date(start - m.age),
+        attempts: 1,
+        body: { tags: m.tags },
+      })),
+    );
+    const calls: string[][] = [];
+    await drain(
+      batch,
+      async (tags) => {
+        calls.push(tags);
+        return { success: calls.length !== refuseCall };
+      },
+      t.wait,
+      t.now,
+    );
+    const ctx = createExecutionContext();
+    return { calls, waits: t.c.waits, result: await getQueueResult(batch, ctx) };
+  };
+
+  it('packs whole messages into calls of up to 100 tags, one call every 12 seconds', async () => {
+    const { calls, waits, result } = await run([
+      { id: 'a', age: 0, tags: tagsFor('a', 60) },
+      { id: 'b', age: 0, tags: tagsFor('b', 60) },
+      { id: 'c', age: 0, tags: [...tagsFor('c', 30), 'p:a0'] },
+      { id: 'd', age: 0, tags: tagsFor('d', 250) },
+    ]);
+    expect(calls.map((c) => c.length)).toEqual([60, 90, 100, 100, 50]);
+    expect(calls[1]).not.toContain('p:a0');
+    expect(waits).toEqual(Array(5).fill(PURGE_PACE_MS));
+    expect(result.explicitAcks.sort()).toEqual(['a', 'b', 'c', 'd']);
+    expect(result.retryMessages).toEqual([]);
+  });
+
+  it('acknowledges messages over a minute old without purging, as the backlog ages', async () => {
+    const { calls, result } = await run([
+      { id: 'old', age: 61_000, tags: ['p:old'] },
+      ...Array.from({ length: 10 }, (_, i) => ({
+        id: `m${i}`,
+        age: 0,
+        tags: tagsFor(`m${i}-`, 100),
+      })),
+    ]);
+    // Five paced calls take the minute; by then the rest is fresh in the cache without them.
+    expect(calls).toHaveLength(5);
+    expect(calls.flat()).not.toContain('p:old');
+    expect(result.explicitAcks).toHaveLength(11);
+    expect(result.retryMessages).toEqual([]);
+  });
+
+  it('retries what a refused call left, keeping what was purged acknowledged', async () => {
+    const { calls, result } = await run(
+      [
+        { id: 'a', age: 0, tags: tagsFor('a', 100) },
+        { id: 'b', age: 0, tags: tagsFor('b', 100) },
+        { id: 'c', age: 0, tags: tagsFor('c', 100) },
+      ],
+      2,
+    );
+    expect(calls).toHaveLength(2);
+    expect(result.explicitAcks).toEqual(['a']);
+    expect(result.retryMessages.map((m) => m.msgId).sort()).toEqual(['b', 'c']);
   });
 });

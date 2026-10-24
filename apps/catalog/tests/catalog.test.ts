@@ -162,6 +162,44 @@ describe('shard batches', () => {
   });
 });
 
+describe('urgent purges', () => {
+  it('sends an urgent pass’s cache tags as one message of up to 100 tags', async () => {
+    const { validateProduct } = await import('@orderloop/core/product');
+    const type = productTypeSchema.parse(apparel);
+    // Three products on one shard.
+    const first = product();
+    const n = productShard(first.key);
+    const inputs = [first];
+    while (inputs.length < 3) {
+      const p = product();
+      if (productShard(p.key) === n) inputs.push(p);
+    }
+    const rows = inputs.map((p) => {
+      const v = validateProduct(p, () => type);
+      if (!v.ok) throw new Error('fixture is invalid');
+      return v.data;
+    });
+    const stub = env.SHARD.getByName(`shard-${n}`);
+    const sent: { body: { tags: string[] } }[][] = [];
+    const spy = {
+      sendBatch: async (m: { body: { tags: string[] } }[]) => {
+        sent.push(m);
+      },
+    };
+    await runInDurableObject(stub, (shard) => {
+      const self = shard as unknown as { env: Env };
+      self.env = new Proxy(self.env, {
+        get: (t, k) => (k === 'PURGE' ? spy : t[k as keyof Env]),
+      });
+    });
+    await stub.apply({ shard: n, batchId: crypto.randomUUID(), rows, rev: 0, by, urgent: true });
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toHaveLength(1);
+    expect(sent[0]?.[0]?.body.tags.sort()).toEqual(rows.map((r) => `p:${r.key}`).sort());
+  });
+});
+
 describe('unpublishing', () => {
   it('takes a product down when it becomes a draft, and back up when active', async () => {
     const p = product();

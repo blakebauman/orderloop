@@ -10,8 +10,10 @@
  *
  * Members are stored normalized (a row per member, per term value, per number), and a build streams
  * them column by column into ListingIndexBuilder, so a category of a million members builds without
- * ever holding a million objects. Builds wait at least DEBOUNCE_MS after the last one, so a feed
- * touching a category ten thousand times rebuilds it a handful of times.
+ * ever holding a million objects. Builds wait at least `debounceMs(members)` after the last one
+ * (15 s, longer for a large category, whose build costs more), so a feed touching a category ten
+ * thousand times rebuilds it a handful of times. A change that leaves a member's entry as it was (a
+ * new description, say: most changes reach the root categories this way) doesn't rebuild at all.
  */
 import { DurableObject } from 'cloudflare:workers';
 import {
@@ -22,7 +24,7 @@ import {
   paths,
   type SearchEntry,
 } from '@orderloop/core/product';
-import { indexer, meta } from './config';
+import { type CatalogConfig, indexer, meta } from './config';
 import type { OrderLine } from './orders';
 
 /** One product's state in one channel's listings, from the publisher. */
@@ -31,6 +33,8 @@ export type ListingChange = {
   key: string;
   /** When it was published; the latest wins. */
   at: number;
+  /** The config revision it was published with. */
+  rev?: number;
   /** What it lists as now, or null when it no longer lists in the channel. */
   entry: IndexEntry | null;
   /** The categories it was listed in before this change. */
@@ -41,15 +45,49 @@ export type ListingChange = {
   search: (SearchEntry & { locale: string })[] | null;
 };
 
-type Item = { key: string; at: number; entry: IndexEntry | null };
+type Item = { key: string; at: number; rev?: number; entry: IndexEntry | null };
 
 /** Minimum time between two builds of one listing. */
 export const DEBOUNCE_MS = 15_000;
+/** The longest a listing waits between builds, however large. */
+export const MAX_DEBOUNCE_MS = 5 * 60_000;
+
+/**
+ * Time between two builds of a listing of `members`: a second per 20,000 members (a build's cost
+ * grows with its size), at least 15 s and at most 5 minutes.
+ */
+export function debounceMs(members: number): number {
+  return Math.min(MAX_DEBOUNCE_MS, Math.max(DEBOUNCE_MS, members / 20));
+}
+
+/**
+ * What a member contributes to the built index. An entry's version and categories don't reach it
+ * (the index is per category), so a change to neither of the rest leaves the index as it was.
+ */
+export function entrySignature(e: IndexEntry): string {
+  const sorted = (o: Record<string, unknown[]>) =>
+    Object.keys(o)
+      .sort()
+      .map((k) => [k, o[k]]);
+  return JSON.stringify([e.uid, e.createdAt, sorted(e.terms), sorted(e.numbers)]);
+}
 /** Tombstones are kept long enough to outlive any redelivered change. */
 const TOMBSTONE_MS = 24 * 60 * 60 * 1000;
 
 const CATEGORY_TTL_MS = 30_000;
 let parentsCache: { at: number; parents: Map<string, string | null> } | undefined;
+
+/** How long an isolate's indexers trust their copy of the config without a newer revision. */
+const CONFIG_TTL_MS = 2_000;
+let configCache: { at: number; config: CatalogConfig } | undefined;
+
+/** The config at revision `rev` or later (per isolate, shared by its indexers). */
+async function configAt(env: Env, rev: number): Promise<CatalogConfig> {
+  const c = configCache;
+  if (c && c.config.rev >= rev && Date.now() - c.at < CONFIG_TTL_MS) return c.config;
+  configCache = { at: Date.now(), config: await meta(env).getConfig() };
+  return configCache.config;
+}
 
 async function categoryParents(env: Env): Promise<Map<string, string | null>> {
   if (parentsCache && Date.now() - parentsCache.at < CATEGORY_TTL_MS) return parentsCache.parents;
@@ -83,9 +121,11 @@ export async function applyChanges(env: Env, changes: ListingChange[]): Promise<
   };
   for (const c of changes) {
     const now = withAncestors(c.entry?.categories ?? [], parents);
-    for (const category of now) push(c.channel, category, { key: c.key, at: c.at, entry: c.entry });
+    for (const category of now)
+      push(c.channel, category, { key: c.key, at: c.at, rev: c.rev, entry: c.entry });
     for (const category of withAncestors(c.left, parents))
-      if (!now.has(category)) push(c.channel, category, { key: c.key, at: c.at, entry: null });
+      if (!now.has(category))
+        push(c.channel, category, { key: c.key, at: c.at, rev: c.rev, entry: null });
   }
   await Promise.all(
     [...groups.values()].map((g) =>
@@ -112,6 +152,13 @@ export class ListingIndexer extends DurableObject<Env> {
       CREATE INDEX IF NOT EXISTS nums_uid ON nums (uid);
       CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);
     `);
+    // Added later, so indexers created before it gain it here: a live member's entry signature
+    // (null for one stored before it, which therefore rebuilds on its next change).
+    const columns = this.sql
+      .exec<{ name: string }>('SELECT name FROM pragma_table_info(?)', 'members')
+      .toArray();
+    if (!columns.some((c) => c.name === 'sig'))
+      this.sql.exec('ALTER TABLE members ADD COLUMN sig TEXT');
   }
 
   private setting(k: string): string | undefined {
@@ -134,31 +181,40 @@ export class ListingIndexer extends DurableObject<Env> {
         this.set('channel', channel);
         this.set('category', category);
       }
+      let rev = Number(this.setting('rev') ?? 0);
       for (const item of items) {
         const row = this.sql
-          .exec<{ at: number; uid: number | null }>(
-            'SELECT at, uid FROM members WHERE key = ?',
+          .exec<{ at: number; uid: number | null; sig: string | null }>(
+            'SELECT at, uid, sig FROM members WHERE key = ?',
             item.key,
           )
           .toArray()[0];
         if (row && row.at >= item.at) continue;
+        const e = item.entry;
+        const sig = e ? entrySignature(e) : null;
+        if (row && sig !== null && row.sig === sig) {
+          // Listed as it was: only the newer `at` is kept, so an older change can't undo it.
+          this.sql.exec('UPDATE members SET at = ? WHERE key = ?', item.at, item.key);
+          continue;
+        }
         if (row?.uid !== null && row?.uid !== undefined) this.clear(row.uid);
         changed = true;
-        const e = item.entry;
+        if (item.rev !== undefined && item.rev > rev) rev = item.rev;
         if (!e) {
           this.sql.exec(
-            'INSERT OR REPLACE INTO members VALUES (?, NULL, ?, NULL, 0)',
+            'INSERT OR REPLACE INTO members (key, uid, at, created_at, live, sig) VALUES (?, NULL, ?, NULL, 0, NULL)',
             item.key,
             item.at,
           );
           continue;
         }
         this.sql.exec(
-          'INSERT OR REPLACE INTO members VALUES (?, ?, ?, ?, 1)',
+          'INSERT OR REPLACE INTO members (key, uid, at, created_at, live, sig) VALUES (?, ?, ?, ?, 1, ?)',
           item.key,
           e.uid,
           item.at,
           e.createdAt,
+          sig,
         );
         for (const [attr, values] of Object.entries(e.terms))
           for (const v of values)
@@ -167,14 +223,22 @@ export class ListingIndexer extends DurableObject<Env> {
           for (const v of values)
             this.sql.exec('INSERT INTO nums VALUES (?, ?, ?)', e.uid, attr, v);
       }
-      if (changed) this.set('dirty', 1);
+      if (changed) {
+        this.set('dirty', 1);
+        this.set('rev', rev);
+      }
     });
     if (changed && (await this.ctx.storage.getAlarm()) === null) {
       const last = Number(this.setting('built') ?? 0);
       // LISTING_DELAY_MS holds every build back (0 in production; tests run builds themselves).
       const delay = Number(this.env.LISTING_DELAY_MS) || 0;
-      await this.ctx.storage.setAlarm(Math.max(Date.now() + delay, last + DEBOUNCE_MS));
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + delay, last + this.debounce()));
     }
+  }
+
+  /** The wait after a build, by the size of the last one. */
+  private debounce(): number {
+    return debounceMs(Number(this.setting('members') ?? 0));
   }
 
   /** Listed members (tests and status). */
@@ -187,7 +251,7 @@ export class ListingIndexer extends DurableObject<Env> {
     if (this.setting('dirty') !== '1') return;
     const channelCode = this.setting('channel') ?? '';
     const category = this.setting('category') ?? '';
-    const config = await meta(this.env).getConfig();
+    const config = await configAt(this.env, Number(this.setting('rev') ?? 0));
     const channel = config.channels.find((c) => c.code === channelCode);
     // A channel that no longer exists keeps its last index; nothing new to build for it.
     if (!channel) return;
@@ -195,13 +259,15 @@ export class ListingIndexer extends DurableObject<Env> {
     const builtAt = Date.now();
     this.set('dirty', 0);
     const bytes = this.build(spec, builtAt);
+    const members = this.count();
     await this.env.PUBLISHED.put(paths.listing(DOC_FORMAT, channelCode, category), bytes, {
       httpMetadata: { contentType: 'application/octet-stream' },
-      customMetadata: { members: String(this.count()), builtAt: String(builtAt) },
+      customMetadata: { members: String(members), builtAt: String(builtAt) },
     });
     this.set('built', builtAt);
+    this.set('members', members);
     // Changes that arrived while building rebuild once more, after the debounce.
-    if (this.setting('dirty') === '1') await this.ctx.storage.setAlarm(builtAt + DEBOUNCE_MS);
+    if (this.setting('dirty') === '1') await this.ctx.storage.setAlarm(builtAt + this.debounce());
   }
 
   /** Streams the members into the builder, one column at a time. */
@@ -254,26 +320,32 @@ export class ListingIndexer extends DurableObject<Env> {
       flush();
     }
 
+    // Two passes per attribute, so nothing grows with the values: the count per member first (the
+    // offsets), then each value straight into its place.
     for (const attr of spec.numbers) {
       const counts = new Uint32Array(n);
-      const pairs: number[] = [];
+      let total = 0;
+      for (const r of this.sql.exec<{ uid: number; c: number }>(
+        'SELECT uid, COUNT(*) AS c FROM nums WHERE attr = ? GROUP BY uid',
+        attr,
+      )) {
+        const m = member(r.uid);
+        if (m < 0) continue;
+        counts[m] = r.c;
+        total += r.c;
+      }
+      if (!total) continue;
+      const offsets = new Uint32Array(n + 1);
+      for (let j = 0; j < n; j++) offsets[j + 1] = (offsets[j] as number) + (counts[j] as number);
+      const flat = new Float64Array(total);
+      const fill = Uint32Array.from(offsets.subarray(0, n));
       for (const r of this.sql.exec<{ uid: number; value: number }>(
         'SELECT uid, value FROM nums WHERE attr = ?',
         attr,
       )) {
         const m = member(r.uid);
         if (m < 0) continue;
-        counts[m] = (counts[m] as number) + 1;
-        pairs.push(m, r.value);
-      }
-      if (!pairs.length) continue;
-      const offsets = new Uint32Array(n + 1);
-      for (let j = 0; j < n; j++) offsets[j + 1] = (offsets[j] as number) + (counts[j] as number);
-      const flat = new Float64Array(offsets[n] as number);
-      const fill = Uint32Array.from(offsets.subarray(0, n));
-      for (let p = 0; p < pairs.length; p += 2) {
-        const m = pairs[p] as number;
-        flat[fill[m] as number] = pairs[p + 1] as number;
+        flat[fill[m] as number] = r.value;
         fill[m] = (fill[m] as number) + 1;
       }
       b.numbers(attr, offsets, flat);

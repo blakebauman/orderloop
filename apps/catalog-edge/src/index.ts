@@ -4,7 +4,8 @@
  * parses the route and forwards the route's canonical URL to the cached Delivery entrypoint
  * (delivery.ts). It records each request in Analytics Engine without waiting on it.
  *
- * Its queue consumer drains the catalog's purge queue: one batch at a time, up to 100 tags a call.
+ * Its queue consumer drains the catalog's purge queue: one batch at a time, up to 100 tags a call,
+ * one call every 12 seconds (purges are rationed: 5 a minute).
  */
 import type { PurgeMessage } from '@orderloop/core/product';
 import type { Delivery } from './delivery';
@@ -19,6 +20,62 @@ const CORS = {
 };
 
 type Exports = { Delivery: Service<Delivery> };
+
+/** Tags per purge call, and the pause after each call: Cloudflare allows 5 calls a minute. */
+export const PURGE_TAGS = 100;
+export const PURGE_PACE_MS = 12_000;
+/**
+ * A message older than this needs no purge: every cached response is fresh for a minute
+ * (`max-age=60`), so by now the change has reached the edge by revalidation alone.
+ */
+export const PURGE_STALE_MS = 60_000;
+
+/** `skipped`: nothing was purged (no Workers Caching here), so nothing was rationed either. */
+type Purge = (tags: string[]) => Promise<{ success: boolean; skipped?: true }>;
+
+/**
+ * Purges a batch's tags, paced, oldest message first. Before each call, messages that have gone
+ * stale are acknowledged unpurged, so a backlog drains instead of spending the ration on changes
+ * the cache has already caught up with. A refused call retries what it didn't cover.
+ */
+export async function drain(
+  batch: MessageBatch<PurgeMessage>,
+  purge: Purge,
+  wait: (ms: number) => Promise<void> = (ms) => scheduler.wait(ms),
+  now: () => number = Date.now,
+): Promise<void> {
+  const queue = [...batch.messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const done = new Set<string>();
+  while (queue.length) {
+    while (queue.length && now() - (queue[0] as Message).timestamp.getTime() >= PURGE_STALE_MS)
+      (queue.shift() as Message).ack();
+    // Whole messages, up to PURGE_TAGS tags (one larger than that goes alone, split below).
+    const take: Message<PurgeMessage>[] = [];
+    const tags = new Set<string>();
+    for (const m of queue) {
+      const fresh = m.body.tags.filter((t) => !done.has(t) && !tags.has(t));
+      if (take.length && tags.size + fresh.length > PURGE_TAGS) break;
+      take.push(m);
+      for (const t of fresh) tags.add(t);
+    }
+    if (!take.length) break;
+    queue.splice(0, take.length);
+    const all = [...tags];
+    for (let i = 0; i < all.length; i += PURGE_TAGS) {
+      const chunk = all.slice(i, i + PURGE_TAGS);
+      const r = await purge(chunk);
+      if (!r.success) {
+        // Rate limited (or refused): try these again once the bucket refills; by then the stale
+        // check above may acknowledge them instead.
+        for (const m of [...take, ...queue]) m.retry({ delaySeconds: 30 });
+        return;
+      }
+      for (const t of chunk) done.add(t);
+      if (!r.skipped) await wait(PURGE_PACE_MS);
+    }
+    for (const m of take) m.ack();
+  }
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -72,16 +129,7 @@ export default {
   },
 
   async queue(batch, _env, ctx) {
-    const all = [...new Set(batch.messages.flatMap((m) => (m.body as PurgeMessage).tags))];
     const exports = (ctx as unknown as { exports: Exports }).exports;
-    for (let i = 0; i < all.length; i += 100) {
-      const r = await exports.Delivery.purge(all.slice(i, i + 100));
-      if (!r.success) {
-        // Rate limited (or refused): try the whole batch again once the bucket refills.
-        batch.retryAll({ delaySeconds: 30 });
-        return;
-      }
-    }
-    batch.ackAll();
+    await drain(batch as MessageBatch<PurgeMessage>, (t) => exports.Delivery.purge(t));
   },
 } satisfies ExportedHandler<Env>;

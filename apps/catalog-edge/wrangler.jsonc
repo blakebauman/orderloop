@@ -8,7 +8,9 @@
   "routes": [{ "pattern": "catalog.orderloop.app", "custom_domain": true }],
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  // Logs from a 5% sample of requests: the edge serves every shopper read, and per-request detail
+  // is in Analytics Engine.
+  "observability": { "enabled": true, "head_sampling_rate": 0.05 },
   "upload_source_maps": true,
   // Workers Caching: tiered, collapses concurrent misses, revalidates in the background. Kept across
   // deploys (paths carry the document format), so a deploy doesn't start from a cold cache.
@@ -28,8 +30,10 @@
   "queues": {
     "consumers": [
       {
-        // Cache tags of urgent changes. One batch at a time, at most one every 12 seconds: purges
-        // are rationed (5 a minute, 100 tags each).
+        // Cache tags of urgent changes, up to 100 a message. One batch at a time; the consumer
+        // makes one purge call (100 tags) every 12 seconds, since purges are rationed (5 a
+        // minute), and acknowledges unpurged a message over a minute old, which max-age=60 has
+        // already made fresh.
         "queue": "orderloop-catalog-purge",
         "max_batch_size": 100,
         "max_batch_timeout": 12,
