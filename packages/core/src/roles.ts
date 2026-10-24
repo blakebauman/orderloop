@@ -190,6 +190,39 @@ export type PlatformCaller = {
 
 const PLATFORM_VERSION = 'u1';
 
+/**
+ * The buyer an external cart was opened for (by a plugin, say a punchout session), on that cart's
+ * socket. Not a Principal: no role, and admitted only to the one cart, so its header is its own
+ * envelope (`g1`) that `verifyPrincipal` and `verifyPlatform` never accept, signed for that cart's
+ * path alone.
+ */
+export type CartGuest = { cartId: string; id: string; name: string };
+
+const GUEST_VERSION = 'g1';
+
+export function signCartGuest(
+  secret: string,
+  g: CartGuest,
+  path: string,
+  now = Date.now(),
+): Promise<string> {
+  return seal(secret, GUEST_VERSION, { g, path, exp: now + PRINCIPAL_TTL_MS });
+}
+
+/** The cart guest a forwarded request is from, or null (see `verifyPrincipal`). */
+export async function verifyCartGuest(
+  secrets: readonly (string | undefined)[],
+  header: string | null | undefined,
+  path: string,
+  now = Date.now(),
+): Promise<CartGuest | null> {
+  const body = await unseal(secrets, GUEST_VERSION, header, path, now);
+  const g = body?.g as Partial<CartGuest> | undefined;
+  if (!g || typeof g.cartId !== 'string' || typeof g.id !== 'string' || typeof g.name !== 'string')
+    return null;
+  return { cartId: g.cartId, id: g.id, name: g.name };
+}
+
 /** The header value for a platform calling `path` (same header and key as `signPrincipal`). */
 export function signPlatform(
   secret: string,

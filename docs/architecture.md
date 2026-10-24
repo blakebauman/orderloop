@@ -937,6 +937,22 @@ the rest is in its SQL, paged by `history`).
   no longer read it. Chat messages are posted as
   the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
 
+### External carts
+
+A plugin with the `carts:external` capability opens a cart for a buyer outside OrderLoop (a
+punchout session) through the host API ([Plugins](plugins.md#the-host-api)). The cart carries
+`external`: the plugin, its `sessionRef`, `expiresAt` (an alarm cancels it then), the `returnUrl`
+it goes back to, the origins that may frame it and the buyer. The plugin gets a one-time start path;
+redeeming it (`CartAgent.redeemStart`, the token kept only as a hash) admits the buyer as a
+`CartGuest`, whose socket header is its own envelope (`signCartGuest` / `verifyCartGuest`, `g1`)
+signed for that cart's path alone, which `cartGate` accepts only for an external cart that is
+still open (`410` once it was canceled). A guest edits lines (at most 20 changes in 10 seconds, each prices the cart) and chats, but can't
+lock, rename, submit or cancel; the cart's chat is shared with them. Guest sockets are checked
+every 30 seconds too, and closed once the cart is canceled, submitted or past its time, or the
+plugin loses its grant. A cart past `expiresAt` takes no start link and admits no guest even before
+its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
+`renderReturn`, keeps the fields (`returnForm` returns them again) and marks the cart `returned`.
+
 ## The assistant
 
 `AssistantAgent` (`apps/engine/src/assistant/agent.ts`) is an `AIChatAgent` from

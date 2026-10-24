@@ -21,11 +21,14 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
   atLeast,
+  type CartReturn,
+  type CartReturnRequest,
   type OutboundEvent,
   type OutboundPayload,
   type PluginCompensateRequest,
   type PluginExecRequest,
   type PluginExecResult,
+  type PluginHostRpc,
   type PluginManifest,
   type PluginRpc,
   PRINCIPAL_HEADER,
@@ -56,7 +59,19 @@ export {
  * (`pluginKey` in @orderloop/core, derived for this plugin alone), and the one before a rotation.
  * A plugin never holds the deployment's principal key.
  */
-export type PluginEnv = { PLUGIN_KEY?: string; PLUGIN_KEY_PREVIOUS?: string };
+export type PluginEnv = {
+  PLUGIN_KEY?: string;
+  PLUGIN_KEY_PREVIOUS?: string;
+  /** What it may ask of the core, as itself (`PluginHostRpc`); each method needs a granted capability. */
+  ORDERLOOP?: PluginHostRpc;
+};
+
+/** The core's host binding, or a clear error where the deployment hasn't bound it. */
+export function host(env: PluginEnv): PluginHostRpc {
+  if (!env.ORDERLOOP)
+    throw new Error('ORDERLOOP is not bound: this deployment gives the plugin no host API');
+  return env.ORDERLOOP;
+}
 
 /** A manifest as written: defaults may be left out. */
 export type ManifestInput = z.input<typeof pluginManifestSchema>;
@@ -129,6 +144,11 @@ export type PluginDefinition<E> = {
   >;
   pages?(request: Request, ctx: PageContext<E>): Response | Promise<Response>;
   providers?: ProviderHandlers<E>;
+  /**
+   * With the `carts:external` capability: the form fields that return a cart this plugin opened
+   * to the buyer's system. Called once per return; the core posts them to the cart's `returnUrl`.
+   */
+  renderReturn?(req: CartReturnRequest, env: E): CartReturn | Promise<CartReturn>;
 };
 
 /** The ops each surface has. */
@@ -174,6 +194,10 @@ export function checkDefinition<E>(def: PluginDefinition<E>): PluginManifest {
   for (const surface of Object.keys(providers))
     if (!(manifest.provides as string[]).includes(surface))
       problems.push(`providers.${surface} is not in the manifest's provides`);
+  if (manifest.capabilities.includes('carts:external') && !def.renderReturn)
+    problems.push('the manifest asks for carts:external but there is no renderReturn handler');
+  if (def.renderReturn && !manifest.capabilities.includes('carts:external'))
+    problems.push('renderReturn is set but the manifest does not ask for carts:external');
   if ((manifest.nav.length || manifest.publicPaths.length) && !def.pages)
     problems.push('the manifest has pages (nav or publicPaths) but there is no pages handler');
   if (problems.length) throw new Error(`Plugin ${manifest.id}: ${problems.join('; ')}`);
@@ -238,6 +262,11 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
         key: runKey(req.orderId, req.stepKey),
         fail: (message, opts) => ({ fail: { message, retry: opts?.retry === true } }),
       });
+    }
+
+    async renderReturn(req: CartReturnRequest): Promise<CartReturn> {
+      if (!def.renderReturn) throw new Error(`${manifest.id} doesn't return carts`);
+      return def.renderReturn(req, this.env);
     }
 
     async deliver(payload: OutboundPayload) {

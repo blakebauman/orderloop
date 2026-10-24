@@ -45,6 +45,7 @@ const manifest: PluginManifest = {
   provides: [],
   egress: [],
   limits: {},
+  capabilities: [],
 };
 const sandboxedManifest: PluginManifest = { ...manifest, id: 'sbx', publicPaths: [] };
 const pluginCatalog = vi.fn(

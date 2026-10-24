@@ -39,7 +39,14 @@ const cart = (c: Partial<Cart> = {}): Cart => ({
   ...c,
 });
 
-const external = { pluginId: 'punchout', sessionRef: 'cookie-1', expiresAt: 1_000 };
+const external = {
+  pluginId: 'punchout',
+  sessionRef: 'cookie-1',
+  expiresAt: 1_000,
+  returnUrl: 'https://buyer.example/return',
+  frameOrigins: [],
+  buyer: { id: 'b1', name: 'Cy' },
+};
 const operator: CartActor = { kind: 'staff', id: 'usr_1', name: 'Ada', role: 'operator' };
 const viewer: CartActor = { kind: 'staff', id: 'usr_2', name: 'Bo', role: 'viewer' };
 const guest: CartActor = { kind: 'guest', id: 'buyer_1', name: 'Cy' };

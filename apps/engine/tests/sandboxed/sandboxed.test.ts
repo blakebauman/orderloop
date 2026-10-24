@@ -125,7 +125,7 @@ describe('a sandboxed plugin', () => {
   it('gets only its capabilities as env', async () => {
     const { done } = await probe('env');
     expect((done.nodes.probe as { output?: unknown }).output).toEqual({
-      keys: ['PLUGIN_KEY', 'SECRETS', 'STORAGE', '__ORDERLOOP_SANDBOX'],
+      keys: ['ORDERLOOP', 'PLUGIN_KEY', 'SECRETS', 'STORAGE', '__ORDERLOOP_SANDBOX'],
     });
   });
 
