@@ -353,8 +353,14 @@ a product document and alias pointers to R2 (`PUBLISHED`, under `docs/f1/<channe
 (`CARDS`, `c:f1:<channel>:<locale>:<uid in base 36>`). Slug aliases are published only in the
 channel's locales. What was published before and no longer is (a draft, a channel that no longer
 lists it, a dropped locale, SKU or variant, a deleted product) is deleted. Which locales and
-aliases are published per product and channel is kept in the shard's `published` table, and
-recorded only after every write succeeded, so a failed pass republishes in full. Publishing the
+aliases are published per product and channel is kept in the shard's `published` table. Before a
+pass writes anything, each row is recorded as the union of what was published and what the pass
+will publish; once every write has succeeded it is recorded exactly. A pass that fails partway
+therefore leaves a row covering whatever it may have stored, so the next pass for that product takes
+it down even if the product was deleted in between (before this, the deleted product's cards and
+documents could outlive it). A failed pass republishes in full. Cards are keyed by uid: when a
+deleted key is created again before its delete published, it has a new uid and every card under the
+old one is deleted, in every locale. Publishing the
 same product twice writes the same bytes. `publishKeys` also returns a `ListingChange` per product
 and channel it touched: `{ channel, key, at, rev, entry, left }` (`rev` being the config revision it published with), where `entry` is what the product lists
 as now (`null` when it no longer lists in the channel) and `left` the categories it was published in
@@ -388,8 +394,9 @@ Measured on production in October 2026 (a pass is 100 products, about 500 writes
   consumers).
 
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
-the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards
-by key. After the alarm has published a pass, it sends the cache tag `p:<key>` of every product whose
+the product publishes in any channel, and again when the key's uid changed (a key deleted and
+created again), which is how `catalog-edge` finds cards by key. Publishing a deleted product deletes
+the entry, so the batch lookup can't reach a card through a uid that is gone. After the alarm has published a pass, it sends the cache tag `p:<key>` of every product whose
 outbox rows were `urgent` to the `PURGE` queue (`PurgeMessage`: `{ tags }`), up to 100 tags a
 message (what one purge call takes), in one `sendBatch`. It sends after publishing so a purge never
 refills the cache from the old document.
