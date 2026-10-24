@@ -1,13 +1,14 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
+  b2bOrderFlow,
   type CartState,
   isQuoteCurrent,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
-import { carts, createDb, orders, sessions, users } from '@orderloop/db';
+import { carts, createDb, orders, promotions, publishFlow, sessions, users } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
@@ -168,6 +169,65 @@ describe('pricing a cart', () => {
 });
 
 describe('promotion codes on a cart', () => {
+  it('takes a code off the price when the cart’s flow applies promotions, and refuses an unknown one', async () => {
+    // The B2B flow with Apply promotions between pricing and tax.
+    const base = b2bOrderFlow();
+    const flow = {
+      ...base,
+      id: 'test-cart-promos',
+      nodes: [
+        ...base.nodes,
+        {
+          id: 'promo',
+          type: 'commerce.discount',
+          label: 'Promotions',
+          config: {},
+          position: { x: 0, y: 0 },
+        },
+      ],
+      edges: [
+        ...base.edges.map((e) =>
+          e.source === 'price' && e.target === 'tax' ? { ...e, target: 'promo' } : e,
+        ),
+        { id: 'e-promo-tax', source: 'promo', target: 'tax' },
+      ],
+    };
+    await publishFlow(db(), flow);
+    await db()
+      .insert(promotions)
+      .values({
+        id: 'promo_cart10',
+        code: 'CART10',
+        kind: 'pct',
+        value: 10,
+        createdAt: 0,
+        updatedAt: 0,
+      })
+      .onConflictDoNothing();
+    const made = await api().createCart({
+      title: 'Promo cart',
+      flowId: flow.id,
+      customerId: 'cus_northwind',
+      createdBy: 'usr_cart_ada',
+    });
+    if (!made.ok) throw new Error(made.error);
+    const ada = staff(await who('operator', 'ada'));
+    await cart(made.id).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 10 });
+    expect((await state(made.id)).cart!.quote!.subtotal).toBe(215);
+    await cart(made.id).applyAs(ada, { op: 'promo_add', code: 'cart10' });
+    const priced = (await state(made.id)).cart!;
+    expect(priced.quote!.subtotal).toBe(193.5);
+    expect(priced.issues.filter((i) => i.code === 'promotion')).toEqual([]);
+    await cart(made.id).applyAs(ada, { op: 'promo_add', code: 'NOPE' });
+    expect((await state(made.id)).cart!.issues).toContainEqual(
+      expect.objectContaining({
+        kind: 'warning',
+        code: 'promotion',
+        content: "NOPE isn't a promotion.",
+      }),
+    );
+  });
+
   it('keeps the codes, and says so when the cart’s flow never applies them', async () => {
     const id = await open();
     const ada = staff(await who('operator', 'ada'));
