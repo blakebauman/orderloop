@@ -256,8 +256,8 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
 
 1. Add the plugin to the deployment's registry file, `deployments/<id>.jsonc`:
    `"plugins": { "qbd-sync": {} }`. `loadDeployments` refuses an id that isn't a plugin id, one that is a
-   fixture (`example`, `fixture-carrier`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id` and
-   `personalData`, and no other key.
+   fixture (`example`, `fixture-carrier`), and one without `plugins/<id>/wrangler.jsonc`. An entry holds `d1Id`,
+   `personalData`, `runtime` (`worker` or `sandboxed`, see [Runtimes](#runtimes)) and `secrets`, and no other key. A deployment on its own Cloudflare account also sets `secretsStore: { storeId }` at the top level ([Secrets](#secrets)).
    **Granting buyer details**: a plugin whose manifest says `personalData: 'send'` is refused (its
    status is `healthy: false` with `error` `It asks for buyer details…`) unless its entry says
    `"personalData": "send"`: `"plugins": { "qbd-sync": { "personalData": "send" } }`. Only that value
@@ -265,16 +265,19 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
    (`{"qbd-sync":{"personalData":"send"}}`), which the engine reads on every status check. Removing
    the grant refuses the plugin on the next deploy, even if its last good manifest asked for `send`.
    Grant it only after reviewing what the plugin does with buyer details.
-2. Run `./scripts/provision.sh <deployment>`. For each plugin it creates the D1 database
+2. Run `./scripts/provision.sh <deployment>`. For each `worker` plugin it creates the D1 database
    `orderloop-plugin-<id><suffix>` and records its id with `fleet.ts set-plugin-d1`, as `plugins.<id>.d1Id`.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
+   A sandboxed plugin needs nothing created; with a `secretsStore` it checks the store exists.
 3. Merge. CI's deploy job (`.github/workflows/deploy.yml`) renders `plugins/<id>/wrangler.<deployment>.json`,
    writes one secrets file per plugin (`fleet.ts secrets plugin <out> <plugin>`), holding that
    plugin's own `PLUGIN_KEY`, during a rotation `PLUGIN_KEY_PREVIOUS`, and its own secrets
    ([Secrets](#secrets)); then in the **Deploy
    plugins** step applies each plugin's D1 migrations and deploys its Worker with its file, all
    before the engine, because the engine and web Worker bind
-   to it. The engine's and web Worker's configs gain a service binding per plugin.
+   to it. The engine's and web Worker's configs gain a service binding per `worker` plugin. A
+   sandboxed plugin has no Worker: **Publish sandboxed plugins** puts its bundle in `DOCS` and pins
+   its sha in the engine's `PLUGIN_BUNDLES` ([Runtimes](#runtimes)).
 
 A plugin never holds `PRINCIPAL_KEY`. `pluginKey(principalKey, id)` (`packages/core/src/plugins.ts`,
 mirrored by `scripts/fleet.ts`; `scripts/fleet.test.ts` holds both to the same vector) is the
@@ -379,15 +382,21 @@ the shell (for people at or above its `pageRole`). Admins see what is installed 
 
 ## The Plugins page
 
-`apps/web/app/routes/plugins.tsx` is an admin-only page. For each `PLUGIN_*` binding
-(`EngineRpc.pluginCatalog`) it shows whether the plugin is answering, refused, or not answering
-while running its last manifest, with the `error`; its contract version, whether buyer details are
-redacted or sent, who may open its pages and its public paths, its events, what it `requires`, and
-its nodes with their category, outputs and whether they roll back. For a plugin with a manifest it
-adds what uses it (`pluginUsage`: published flows and the number of orders not yet ended) and, for one
-with events or earlier deliveries, its ten most recent deliveries (subscription `plugin:<id>`) with
-status, attempts and last error. A refused plugin has no manifest, so its id comes from its binding
-and the page shows the same usage and deliveries, when its flows and orders matter most. It is read-only: installing and removing a plugin is a change to the deployment.
+`apps/web/app/routes/plugins.tsx` is an admin-only page. For each installed plugin
+(`EngineRpc.pluginCatalog`, a `PluginStatus` with its `id` and `runtime`) it shows whether the plugin
+is answering, refused, or not answering while running its last manifest, with the `error`; its
+contract version, how it runs (as its own Worker, or sandboxed in the engine, with the hosts its
+`egress` allows), whether buyer details are redacted or sent, who may open its pages and its public
+paths, its events, what it `provides` behind built-in nodes, what it `requires`, its secrets (name,
+description and how each reaches the plugin: added to requests to a host, or readable by the plugin;
+never a value), and its nodes with their category, outputs and whether they roll back. For a plugin
+with a manifest it adds what uses it (`pluginUsage`: published flows, the number of orders not yet
+ended, and labels it couldn't void) and, for one with events or earlier deliveries, its ten most
+recent deliveries (subscription `plugin:<id>`) with status, attempts and last error. A sandboxed
+plugin with exceptions also lists its ten most recent (`plugin_errors`, newest first). A refused
+plugin has no manifest but still has an id, and the page shows the same usage and deliveries, when
+its flows and orders matter most. It is read-only: installing and removing a plugin is a change to
+the deployment.
 
 ## Removing
 

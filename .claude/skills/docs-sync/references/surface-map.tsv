@@ -102,11 +102,11 @@
 ^packages/core/package\.json$	docs/architecture.md	prose
 ^apps/web/app/lib/catalog-api\.server\.ts$	guides/product-catalog reference/rest-api guides/team-and-roles docs/architecture.md docs/configuration.md docs/testing.md	prose
 ^packages/core/src/audit\.ts$	guides/team-and-roles reference/rest-api	prose
-^(packages/core/src/plugins|apps/engine/src/plugins|apps/web/app/lib/(plugins\.server|nodes))\.tsx?$	docs/plugins.md docs/architecture.md	prose
+^(packages/core/src/(plugins|credentials)|apps/engine/src/(plugins|plugin-host)|apps/web/app/lib/(plugins\.server|nodes))\.tsx?$	docs/plugins.md docs/architecture.md docs/configuration.md docs/data-model.md	prose
 ^plugins/	docs/plugins.md docs/testing.md	prose
 ^packages/plugin-sdk/	docs/plugins.md docs/testing.md docs/architecture.md	prose
-^(apps/web/app/routes/plugins|apps/web/tests/api\.test)\.tsx?$	docs/plugins.md reference/rest-api guides/team-and-roles	prose
-^(scripts/plugin-check\.ts|apps/engine/tests/plugin[^/]*|apps/engine/tests/plugins/|apps/web/tests/plugins\.test\.ts|packages/core/tests/plugins\.test\.ts)	docs/plugins.md docs/testing.md	prose
+^(apps/web/app/routes/plugins|apps/web/tests/api\.test)\.tsx?$	docs/plugins.md reference/rest-api guides/team-and-roles guides/fulfillment	prose
+^(scripts/plugin-check\.ts|apps/engine/tests/plugin[^/]*|apps/engine/tests/(plugins|sandboxed)/|apps/web/tests/plugins\.test\.ts|packages/core/tests/plugins\.test\.ts)	docs/plugins.md docs/testing.md	prose
 ^deployments/	docs/plugins.md	prose
 ^apps/web/app/lib/(api\.server|openapi)\.ts$	docs/plugins.md	prose
 ^apps/engine/src/outbox\.ts$	docs/plugins.md	prose

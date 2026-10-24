@@ -216,6 +216,13 @@ plugin that provides that service (rates, labels, tax or address validation). A 
 when your administrator has installed it for the workspace; the admin-only **Plugins** page and
 `GET /api/v1/plugins` (`provides`) show what each one offers.
 
+The **Plugins** page also shows how each plugin runs: on its own, or sandboxed inside OrderLoop,
+where the page lists the outside hosts it may reach (it can reach no others) and each secret it
+uses. A secret is either added to requests to one named host, so the plugin never sees it, or marked
+readable by the plugin; the page never shows a value. A sandboxed plugin's recent errors (the ten
+newest, with secrets masked) are listed there too, and `runtime` in `GET /api/v1/plugins` says which
+kind it is.
+
 The node keeps its fields, outputs and events; the plugin supplies the part a real service does:
 
 | Node | The provider |
