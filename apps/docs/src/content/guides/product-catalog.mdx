@@ -206,9 +206,8 @@ follows its write by moments.
 
 Set `urgent: true` on a write or a delete for a takedown or a price correction: the cached copies of
 those products are purged as soon as they are republished. Purges are rationed, so use it
-sparingly; the rest of a feed shouldn't be urgent. When many urgent changes queue up, one waiting
-longer than a minute is dropped instead of purged, since by then its cached copies have expired
-anyway. A purge clears the product's document at once; the card in listing pages, search results
+sparingly; the rest of a feed shouldn't be urgent. When many urgent changes queue up, they are
+purged in turn at the rate Cloudflare allows (about 500 products a minute). A purge clears the product's document at once; the card in listing pages, search results
 and batches can still show the old version for up to about a minute more, while the card store
 catches up around the world.
 

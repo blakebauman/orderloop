@@ -34,9 +34,9 @@ function channelAliases(all: string[], channel: Channel): string[] {
 }
 
 /**
- * Publishes `keys` and returns the listing changes they make (send them once this returns). An
- * alias pointer already published for the same key is left as it is, except for a key in `forced`
- * (a reindex), which rewrites everything.
+ * Publishes `keys` and returns the listing changes they make (send them once this returns). A key in
+ * `forced` (a reindex) is marked so on its listing changes, so its indexes rebuild even when its
+ * entries look unchanged.
  */
 export async function publishKeys(
   shard: CatalogShard,
@@ -82,19 +82,15 @@ export async function publishKeys(
           env.CARDS.put(paths.card(DOC_FORMAT, channel.code, r.locale, current?.uid ?? 0), r.card),
         );
       }
-      // A pointer holds only the key, so one this product already published is the same bytes.
-      const published = new Set(forced.has(key) ? [] : (prev?.aliases ?? []));
+      // Every pointer is written on every publish, even one this product already published: when
+      // an alias moves between products on two shards, the old owner's later publish can delete
+      // the new owner's pointer, and the new owner's next publish is what puts it back.
       for (const alias of nextAliases)
-        if (!published.has(alias))
-          tasks.push(() =>
-            env.PUBLISHED.put(
-              paths.alias(DOC_FORMAT, channel.code, alias),
-              JSON.stringify({ key }),
-              {
-                httpMetadata: JSON_TYPE,
-              },
-            ),
-          );
+        tasks.push(() =>
+          env.PUBLISHED.put(paths.alias(DOC_FORMAT, channel.code, alias), JSON.stringify({ key }), {
+            httpMetadata: JSON_TYPE,
+          }),
+        );
 
       // Take down what was published and isn't any more.
       if (prev) {
@@ -135,6 +131,7 @@ export async function publishKeys(
           key,
           at,
           rev: config.rev,
+          ...(forced.has(key) ? { forced: true } : {}),
           entry: pub.index,
           left: prev?.categories ?? [],
           search: pub.rendered?.map((r) => ({ ...r.search, locale: r.locale })) ?? null,

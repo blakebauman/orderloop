@@ -294,9 +294,11 @@ export class Delivery extends WorkerEntrypoint<Env> {
       return h.index;
     }
     if (!r.ok) {
-      if (h) {
+      // What is held now, not `h`: it may have been evicted (and its bytes counted off) meanwhile.
+      const cur = held.get(id);
+      if (cur) {
         held.delete(id);
-        heldBytes -= h.bytes;
+        heldBytes -= cur.bytes;
       }
       return null;
     }
