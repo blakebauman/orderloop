@@ -225,7 +225,7 @@ A new row gets `cost` 0 and the column defaults; an existing row keeps everythin
 is the publish change's `at`, and an upsert applies only where it is null or older, so out-of-order
 queue delivery can't overwrite a newer name or price. Rows are never deleted when a product stops
 listing. The catalog's own source of truth is the SQLite storage of its Durable Objects, and what it publishes goes to its own
-R2 bucket (`orderloop-catalog`, not `orderloop-docs`) and KV namespace. Each object creates its
+R2 bucket (`orderloop-catalog`, not `orderloop-docs`) and KV namespace, written by `CatalogPublisher` objects (`pub-<shard>-<n>`), which keep no state of their own. Each object creates its
 tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files for them.
 
 `CatalogShard` (64, `shard-<n>`):
@@ -323,7 +323,7 @@ names or addresses (`invoices.hosted_url` leads to the Stripe-hosted page).
 
 ### Data residency
 
-A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to all its objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer` and `SearchShard`, all reached through `apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
+A deployment's `jurisdiction` in the registry (`eu` or `fedramp`, [Operations](operations.md#the-registry)) places its D1 database and R2 bucket in that jurisdiction, and the engine's `DATA_JURISDICTION` does the same for its Durable Objects: `OrderAgent` (the order's live state, including the whole `Order`), `AssistantAgent` and `A2AAgent`. All access goes through `apps/engine/src/namespaces.ts`. The catalog Worker applies it the same way to all its objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard` and `CatalogPublisher`, all reached through `apps/catalog/src/config.ts`) and to its R2 bucket; its KV namespace of listing cards has no jurisdiction, so cards (names, prices and attributes of published products, no personal data) are outside it.
 
 Each is fixed when the resource is created. Set the jurisdiction before the deployment's first order: with a different value the Durable Objects get different ids, and existing orders' live state is stranded (D1 and R2 can't move either). Local dev and tests leave it empty; workerd doesn't implement jurisdictions.
 

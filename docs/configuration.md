@@ -31,14 +31,15 @@ Set in `vars` in `apps/engine/wrangler.jsonc`.
 
 ## Catalog variables
 
-The catalog Worker has four variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
+The catalog Worker has five variables and no secrets (`apps/catalog/wrangler.jsonc`); the catalog-edge Worker has neither variables nor secrets (`apps/catalog-edge/wrangler.jsonc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
+| `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`, `CatalogPublisher`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
 | `FEED_CHUNK` | `25000` | Products one `FeedImport` split step reads before handing off to the next (a string; `25000` when unset or not a number, `FEED_CHUNK` in core). Lower it only in tests, where `apps/catalog/vitest.config.ts` sets `300` so a small feed spans several steps |
 | `ORDERS_CHANNEL` | `web` | The channel code whose prices feed Order Loop's `products` table (`apps/catalog/src/orders.ts`, `publishKeys`): each active variant priced there in `BASE_CURRENCY` (`USD`) is upserted with its name and price. A channel in another currency writes nothing. Changing it applies to products as they next publish (or on `reindex`); rows already written stay. See [Order Loop's products](architecture.md#order-loops-products) |
 | `LISTING_DELAY_MS` | `0` | The least time before a listing index builds after a change (`ListingIndexer.apply`, `apps/catalog/src/listings.ts`), on top of the debounce (15 s, or a second per 20,000 members of the last build, at most 5 minutes). `0` builds a new category's index at once. The tests set it to an hour and run each build themselves (`runDurableObjectAlarm`), so no build is left running when a test file ends |
+| `PUBLISH_FANOUT` | `8` | Publishers (`CatalogPublisher`) each shard spreads a pass's storage writes over (`apps/catalog/src/publisher.ts`, `publishKeys`). One invocation has only six storage calls in flight, so this multiplies how fast a shard publishes. A string; `8` when unset, `0` or not a number, and a negative value becomes 1. `1` makes the shard do its writes itself. Raising it creates more publisher objects (`pub-<shard>-<n>`); lowering it strands none, since publishers keep no state |
 
 ## Compatibility flags
 
@@ -112,6 +113,7 @@ created through the API and stored in D1; they are not configuration.
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite-backed, migration `v3`), one per channel and category, named `<channel>:<category>` |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite-backed, migration `v4`), 16 shards named `search-<n>` |
+| `PUBLISHERS` | catalog | Durable Object `CatalogPublisher` (SQLite-backed, migration `v5`), `PUBLISH_FANOUT` (8) per shard named `pub-<shard>-<n>`: does the storage writes of a shard's publishes |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, packed up to 64 KB a message, and the catalog Worker consumes them (`max_batch_size` 100 messages, `max_batch_timeout` 2 seconds, `max_retries` 10, dead-letter queue `orderloop-catalog-changes-dlq`) |
 | `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`) and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |

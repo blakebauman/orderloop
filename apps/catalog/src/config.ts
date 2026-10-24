@@ -52,4 +52,6 @@ export const feeds = (env: Env) => scope(env, env.FEEDS).getByName('feeds');
 export const indexer = (env: Env, channel: string, category: string) =>
   scope(env, env.LISTINGS).getByName(`${channel}:${category}`);
 export const searcher = (env: Env, n: number) => scope(env, env.SEARCH).getByName(`search-${n}`);
+export const publisher = (env: Env, shard: number, n: number) =>
+  scope(env, env.PUBLISHERS).getByName(`pub-${shard}-${n}`);
 export const shardFor = (env: Env, key: string) => shard(env, productShard(key));

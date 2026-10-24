@@ -13,6 +13,7 @@ export { FeedImport } from './feed-import';
 export { CatalogFeeds } from './feeds';
 export { ListingIndexer } from './listings';
 export { CatalogMeta } from './meta';
+export { CatalogPublisher } from './publisher';
 export { SearchApi, SearchShard } from './search';
 export { CatalogShard } from './shard';
 
