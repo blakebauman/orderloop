@@ -21,7 +21,7 @@ import {
   type OAuthHelpers,
   OAuthResourceServer,
 } from '@cloudflare/workers-oauth-provider';
-import { A2A_PATH, type Principal, ROLES } from '@orderloop/core';
+import { A2A_PATH, type Principal, ROLES, type Role } from '@orderloop/core';
 import { clientIp } from './audit.server';
 import {
   apiPrincipal,
@@ -38,6 +38,12 @@ import { overBudget } from './rate-limit';
 
 export const MCP_PATH = '/mcp';
 export const AUTHORIZE_PATH = '/oauth/authorize';
+
+/**
+ * The roles an app can be granted: a grant's scope is one of them. Admin is never offered (the
+ * consent page lists these), so a connected app never acts as an admin.
+ */
+export const GRANTABLE_ROLES = ROLES.filter((r) => r !== 'admin') as Exclude<Role, 'admin'>[];
 
 /** The protected endpoints, each its own OAuth resource. */
 const ENDPOINTS = { [MCP_PATH]: 'OrderLoop MCP', [A2A_PATH]: 'OrderLoop A2A' } as const;
@@ -87,6 +93,8 @@ function resourceServer(origin: string, as: OAuthAuthorizationServer<Env>, path:
       resource: resource(origin, path),
       authorization_servers: [origin],
       resource_name: ENDPOINTS[path],
+      // Also named in the 401 challenge's `scope`, so a client knows what to ask for.
+      scopes_supported: GRANTABLE_ROLES,
     },
     validateToken: (env, request) => async (res, token) => {
       if (issuedToken(token)) return as.validateToken<Props>(res, token, env);

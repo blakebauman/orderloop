@@ -81,6 +81,8 @@ describe('MCP and A2A on the web Worker', () => {
     expect(res.headers.get('www-authenticate')).toContain(
       'https://app.test/.well-known/oauth-protected-resource/mcp',
     );
+    // The roles an app can be granted, never admin.
+    expect(res.headers.get('www-authenticate')).toContain('scope="viewer approver operator"');
     expect(engineFetch).not.toHaveBeenCalled();
   });
 
@@ -94,6 +96,7 @@ describe('MCP and A2A on the web Worker', () => {
       expect(await res.json()).toMatchObject({
         resource: `https://app.test${path}`,
         authorization_servers: ['https://app.test'],
+        scopes_supported: ['viewer', 'approver', 'operator'],
       });
     }
   });

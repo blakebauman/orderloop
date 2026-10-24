@@ -61,7 +61,9 @@ request. In Cursor's `mcp.json`:
 }
 ```
 
-A client that runs OAuth itself finds the authorization server from
+A client that runs OAuth itself starts from the `401` a request without a token gets: its
+`WWW-Authenticate` names the resource metadata and the scopes, `viewer approver operator` (the
+roles an app can be granted). It finds the authorization server from
 `/.well-known/oauth-protected-resource/mcp`. It registers with dynamic client registration at
 `/oauth/register` or with a Client ID Metadata Document (an `https` `client_id`), sends the person
 to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.

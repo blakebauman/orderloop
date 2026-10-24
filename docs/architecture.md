@@ -134,7 +134,9 @@ discovery, registration and token paths, to `@cloudflare/workers-oauth-provider`
 (`apps/web/app/lib/oauth.server.ts`). There it is one `OAuthAuthorizationServer` (issuer the
 origin; resources `/mcp` and `/a2a`, with `/mcp` the default and the resource of grants made
 before A2A) and one `OAuthResourceServer` per endpoint, which publishes
-`/.well-known/oauth-protected-resource/<path>` and accepts only tokens issued for it. The
+`/.well-known/oauth-protected-resource/<path>` with `scopes_supported: GRANTABLE_ROLES` (every
+role but admin, which the provider also names as `scope` in the `401` challenge; the consent page
+offers the same set) and accepts only tokens issued for it. The
 authorization server does dynamic client registration, Client ID Metadata Documents, tokens of
 1 hour (access) and 30 days (refresh), and keeps grants in KV `OAUTH_KV`. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
 the approver and the role they chose. A bearer that is not an issued
