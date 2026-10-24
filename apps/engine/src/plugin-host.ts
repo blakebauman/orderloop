@@ -21,6 +21,7 @@ import {
   egressAllows,
   PLUGIN_LIMIT_CAPS,
   PLUGIN_SECRET_NAME_RE,
+  type PluginCapability,
   type PluginManifest,
   type PluginRpc,
   type PluginRuntime,
@@ -240,6 +241,24 @@ async function loadBundle(env: Env, id: string, sha: string): Promise<Bundle> {
   return { ...bundle, manifest };
 }
 
+type Grant = { personalData?: 'send'; capabilities?: PluginCapability[] };
+
+/**
+ * What the deployment grants each plugin beyond the defaults, from its registry entry
+ * (`PLUGIN_GRANTS`, rendered by scripts/fleet.ts):
+ * `{ "<id>": { "personalData": "send", "capabilities": ["orders:start"] } }`. A manifest can't
+ * grant itself buyer details or a capability.
+ */
+export function registryGrants(env: Env): Record<string, Grant> {
+  const raw = (env as unknown as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
+  try {
+    return raw ? (JSON.parse(raw) as Record<string, Grant>) : {};
+  } catch {
+    console.error('PLUGIN_GRANTS is not JSON; granting nothing');
+    return {};
+  }
+}
+
 type Exports = Record<string, (opts: { props: Vars }) => unknown>;
 const capabilities = () => workerExports as unknown as Exports;
 
@@ -270,6 +289,11 @@ export async function pluginStub(
         ...keys,
         SECRETS: caps.PluginSecrets!({ props: { id, sha } }),
         STORAGE: caps.PluginDb!({ props: { id, sha } }),
+        // What it may ask of the core (plugin-api.ts), as itself: the props are the loader's.
+        // Bound only with a granted capability, as a Worker plugin's binding is.
+        ...(registryOwns(env, id) && registryGrants(env)[id]?.capabilities?.length
+          ? { ORDERLOOP: caps.PluginHost!({ props: { id } }) }
+          : {}),
       },
       globalOutbound: caps.PluginEgress!({ props: { id, sha } }),
       tails: [caps.PluginTail!({ props: { id, sha } })],

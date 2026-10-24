@@ -20,9 +20,11 @@ optional:
 - **Event subscriptions** to outbound events, delivered over the binding instead of HTTP.
 - **Pages** under `/plugins/<id>/`, served by the plugin and linked from the nav.
 - **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person.
+- **Host calls**: with capabilities the deployment grants, it opens external carts for buyers it
+  has authenticated and starts orders, through its `ORDERLOOP` binding ([The host API](#the-host-api)).
 
 It is not a way to change the core. A plugin owns its tables (the core's schema and migrations never
-mention one), reaches OrderLoop only through `PluginRpc`, and gets no `env` of the engine or web app.
+mention one), reaches OrderLoop only through `PluginRpc` and, where granted, the host API, and gets no `env` of the engine or web app.
 It cannot add a trigger, wait for an event, loop, or change the planner. Nothing in
 `packages/core/src/graph.ts` knows a plugin exists except `validateGraph`, which takes a node
 registry. A deployment with no `plugins` runs the built-in catalog alone (`staticRegistry`) and adds
@@ -40,6 +42,7 @@ Every plugin's default entrypoint is a `WorkerEntrypoint` implementing `PluginRp
 | `compensate(req)` | When the order fails after a node with `rollback: true`, within `PLUGIN_CALL_MS` | Undo that run; return a one-line description (cut to `PLUGIN_SUMMARY_MAX` characters). May run more than once |
 | `deliver(payload)` | From the outbox, for events the manifest lists, within 30 seconds | Record the event; throw to be retried |
 | `fetch(request)` | For `/plugins/<id>/*` | Serve the page; verify the principal header and its role unless the path is public |
+| `renderReturn(req)` | With `carts:external`, when an external cart it opened is sent back (`PLUGIN_CALL_MS`) | Return `{ fields }`, the form fields the core posts to the cart's `returnUrl`; checked by `checkCartReturn` ([The host API](#the-host-api)) |
 
 A call that outlasts its limit fails with `<what> took longer than <n>s`.
 
@@ -72,6 +75,7 @@ The manifest (`pluginManifestSchema`) has:
 | `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
 | `egress` | Hosts a sandboxed plugin may reach (a name, or `*.` and one), at most 20 ([Runtimes](#runtimes)) |
 | `limits` | `{ cpuMs?, subRequests? }` per call for a sandboxed plugin, within `PLUGIN_LIMIT_CAPS` |
+| `capabilities` | What it asks the core to do through `ORDERLOOP` (`PLUGIN_CAPABILITIES`: `carts:external`, `orders:start`), each at most once; each takes effect only with the deployment's grant ([The host API](#the-host-api)) |
 | `provides` | Surfaces from `PROVIDER_SURFACES` (`shipping.rates`, `shipping.labels`, `tax`, `address`) the plugin can do behind built-in nodes. All but `shipping.rates` need `personalData: 'send'` (`SURFACE_NEEDS_BUYER`) ([Providers](#providers)) |
 | `secrets` | Up to 20 `{ name, description?, optional?, inject?, expose? }` (`inject: { host, header, format }`, a host in `egress`: added by the egress gateway, never seen by a sandboxed plugin; `expose`: readable by a sandboxed plugin's code; not both): env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
 
@@ -265,6 +269,11 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
    (`{"qbd-sync":{"personalData":"send"}}`), which the engine reads on every status check. Removing
    the grant refuses the plugin on the next deploy, even if its last good manifest asked for `send`.
    Grant it only after reviewing what the plugin does with buyer details.
+   **Granting capabilities**: a plugin whose manifest lists `capabilities` is refused (`It asks to
+   <capabilities>, which this deployment does not grant`) unless its entry lists them:
+   `"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }`. They go into
+   `PLUGIN_GRANTS` beside `personalData`, and give a Worker plugin its `ORDERLOOP` binding
+   ([The host API](#the-host-api)). A runtime install never gets a capability.
 2. Run `./scripts/provision.sh <deployment>`. For each `worker` plugin it creates the D1 database
    `orderloop-plugin-<id><suffix>` and records its id with `fleet.ts set-plugin-d1`, as `plugins.<id>.d1Id`.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
@@ -326,6 +335,34 @@ account:
   it reaches the plugin (injected for a host, or readable by the plugin) and its description, never
   its value.
 
+## The host API
+
+A plugin asks the core for anything only through `ORDERLOOP`, typed `PluginHostRpc`
+(`packages/core/src/plugin-host.ts`) and served by the engine's `PluginHost` entrypoint
+(`apps/engine/src/plugin-api.ts`); `host(env)` in the SDK returns it. Who is calling is the
+binding's own `props.id`, never an argument: fleet rendering gives a Worker plugin a service binding
+to `PluginHost` with `props: { id }` (only when its registry entry grants a capability), and the
+sandbox loader gives a sandboxed one `ctx.exports.PluginHost({ props: { id } })` on the same
+condition. Every call checks, at that moment, that the registry installs the plugin (`registryOwns`),
+its manifest declares the capability and the registry grants it (`mayUse`), so withdrawing a grant
+takes effect at once and a runtime install of the same id never inherits it.
+
+| Method | Needs | Does |
+|---|---|---|
+| `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
+| `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
+| `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys in any namespace the core starts orders under (`RESERVED_ORDER_KEY_PREFIXES`: `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:`, `replenish:`). A replay answers the same order with `replayed: true`; the same key with a different request is refused |
+
+`plugins/punchout` is the plugin that uses it: cXML and OCI punchout, installed with
+`"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }` (and its `d1Id`, or
+`"runtime": "sandboxed"`). Its partners and their secret hashes are in its own database; see the
+[Punchout guide](https://docs.orderloop.app/guides/punchout/).
+
+When an external cart's buyer sends it back (`CartAgent.transferAs`; only the buyer, since the fields are posted from the browser that asked), the core
+holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (`checkCartReturn`:
+string fields only, at most 2,000 and 1 MiB) and keeps it, marks the cart `returned`, and posts the
+fields to the cart's `returnUrl`. The plugin never chooses where they go.
+
 ## Runtimes
 
 A deployment runs each plugin one of two ways, set by `plugins.<id>.runtime` in its registry:
@@ -351,7 +388,7 @@ A sandboxed plugin, in `apps/engine/src/plugin-host.ts`:
 - **Its env is capabilities only**: `STORAGE` (`PluginDb`, SQL against its own `PluginStorage`
   SQLite Durable Object; `pluginDb(env)` in the SDK gives it D1's `prepare().bind().first/all/run`
   and `batch`), `SECRETS` (`PluginSecrets`: `has` for any declared secret, `get` only for one marked
-  `expose`), and `PLUGIN_KEY` (derived from `PRINCIPAL_KEY` as a Worker plugin's is). The bundle's
+  `expose`), `ORDERLOOP` (`PluginHost`, only with a granted capability), and `PLUGIN_KEY` (derived from `PRINCIPAL_KEY` as a Worker plugin's is). The bundle's
   migrations are applied to its storage once each, forward only, each file whole, with no other
   request let in meanwhile. Its storage is in the deployment's jurisdiction (`pluginStorage`), and
   only `query` and `batch` answer over RPC (the rest is JS-private).

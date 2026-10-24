@@ -86,6 +86,7 @@ describe('plugin manifests', () => {
       provides: [],
       egress: [],
       limits: {},
+      capabilities: [],
     });
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
   });

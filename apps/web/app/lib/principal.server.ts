@@ -1,10 +1,12 @@
 import { env } from 'cloudflare:workers';
 import {
+  type CartGuest,
   DEV_PRINCIPAL_KEY,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
   pluginKey,
+  signCartGuest,
   signPrincipal,
 } from '@orderloop/core';
 
@@ -15,6 +17,11 @@ import {
  */
 export async function setPrincipalHeader(headers: Headers, p: ProxiedPrincipal, path: string) {
   headers.set(PRINCIPAL_HEADER, await signPrincipal(principalKey(), p, path));
+}
+
+/** The header for an external cart's buyer on that cart's socket (`signCartGuest`). */
+export async function setGuestHeader(headers: Headers, g: CartGuest, path: string) {
+  headers.set(PRINCIPAL_HEADER, await signCartGuest(principalKey(), g, path));
 }
 
 /**
@@ -36,7 +43,7 @@ export async function setPluginPrincipalHeader(
   );
 }
 
-function principalKey() {
+export function principalKey() {
   const key =
     (env as { PRINCIPAL_KEY?: string }).PRINCIPAL_KEY ||
     (import.meta.env.DEV ? DEV_PRINCIPAL_KEY : undefined);

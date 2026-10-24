@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // cXML and OCI punchout (src/index.ts). Installed per deployment through its registry, with
+  // capabilities ["carts:external", "orders:start"] granted.
+  "name": "orderloop-plugin-punchout",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  // Its own database: partners and sessions (migrations/).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orderloop-plugin-punchout",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

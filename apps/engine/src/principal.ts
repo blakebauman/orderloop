@@ -8,12 +8,14 @@
  */
 
 import {
+  type CartGuest,
   isRole,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
   SESSION_IDLE_MS,
   SESSION_TOUCH_MS,
+  verifyCartGuest,
   verifyPrincipal,
 } from '@orderloop/core';
 import { apiTokens, createDb, sessions, users } from '@orderloop/db';
@@ -23,6 +25,15 @@ import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
 export function forwardedPrincipal(env: Env, request: Request): Promise<ProxiedPrincipal | null> {
   if (!env.PRINCIPAL_KEY) console.error('PRINCIPAL_KEY is not set: refusing forwarded requests');
   return verifyPrincipal(
+    [env.PRINCIPAL_KEY, env.PRINCIPAL_KEY_PREVIOUS],
+    request.headers.get(PRINCIPAL_HEADER),
+    new URL(request.url).pathname,
+  );
+}
+
+/** The external cart's buyer the web app signed onto this request, or null (see `verifyCartGuest`). */
+export function forwardedGuest(env: Env, request: Request): Promise<CartGuest | null> {
+  return verifyCartGuest(
     [env.PRINCIPAL_KEY, env.PRINCIPAL_KEY_PREVIOUS],
     request.headers.get(PRINCIPAL_HEADER),
     new URL(request.url).pathname,

@@ -18,6 +18,7 @@ import {
   type NodeRegistry,
   type OutboundPayload,
   PLUGIN_SUMMARY_MAX,
+  type PluginCapability,
   type PluginManifest,
   type PluginOutcome,
   type PluginStatus,
@@ -43,6 +44,7 @@ import {
   type PluginStub,
   pinnedManifest,
   pluginStub,
+  registryGrants,
   registryOwns,
 } from './plugin-host';
 
@@ -66,18 +68,36 @@ const caches = new WeakMap<object, Cached>();
  * for a runtime install, what the admin approved. A manifest can't grant itself buyer details.
  */
 async function grants(env: Env): Promise<Record<string, { personalData?: 'send' }>> {
-  const raw = (env as unknown as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
-  let out: Record<string, { personalData?: 'send' }> = {};
-  try {
-    out = raw ? (JSON.parse(raw) as Record<string, { personalData?: 'send' }>) : {};
-  } catch {
-    console.error('PLUGIN_GRANTS is not JSON; granting nothing');
-  }
+  const out: Record<string, { personalData?: 'send' }> = {};
+  for (const [id, g] of Object.entries(registryGrants(env)))
+    if (g.personalData === 'send') out[id] = { personalData: 'send' };
   // A runtime install's grant is its own: never one for a registry plugin of the same id.
   for (const [id, a] of await activeInstalls(env))
     if (a.personalData && !registryOwns(env, id)) out[id] = { personalData: 'send' };
   return out;
 }
+
+/**
+ * Capabilities `m` declares that the deployment doesn't grant it. Only the registry grants them
+ * (`plugins.<id>.capabilities`): a runtime install never gets one.
+ */
+function ungrantedCapabilities(env: Env, m: PluginManifest): PluginCapability[] {
+  const granted = registryGrants(env)[m.id]?.capabilities ?? [];
+  return m.capabilities.filter((c) => !granted.includes(c));
+}
+
+/**
+ * Whether plugin `id` may use `capability` now: installed, its manifest declares it, and the
+ * deployment grants it. Withdrawing the grant takes effect at once.
+ */
+export async function mayUse(env: Env, id: string, capability: PluginCapability): Promise<boolean> {
+  // A grant is the registry's plugin's: never one a runtime install of the same id would get.
+  if (!registryOwns(env, id)) return false;
+  if (!(registryGrants(env)[id]?.capabilities ?? []).includes(capability)) return false;
+  const status = (await pluginStatuses(env)).find((p) => p.id === id);
+  return !!status?.manifest?.capabilities.includes(capability);
+}
+
 /**
  * The last manifest each plugin answered with (`knownManifests`), kept while it can't answer
  * (mid-deploy, a blip), so its nodes don't read as not installed and fail running orders.
@@ -185,6 +205,11 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
         throw new Error(
           'It asks for buyer details (personalData: "send"), which this deployment does not grant',
         );
+      const ungranted = ungrantedCapabilities(env, m);
+      if (ungranted.length)
+        throw new Error(
+          `It asks to ${ungranted.join(' and ')}, which this deployment does not grant`,
+        );
       lastGood.set(id, m);
       return { id, runtime, source, manifest: m, healthy: true };
     } catch (err) {
@@ -193,7 +218,8 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
       const fallback = lastGood.get(id);
       const allowed =
         fallback &&
-        (fallback.personalData !== 'send' || granted[fallback.id]?.personalData === 'send');
+        (fallback.personalData !== 'send' || granted[fallback.id]?.personalData === 'send') &&
+        !ungrantedCapabilities(env, fallback).length;
       return {
         id,
         runtime,

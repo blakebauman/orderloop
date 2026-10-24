@@ -9,7 +9,7 @@ export default {
   apiVersion: 1,
   id: 'example',
   name: 'Example',
-  version: '3',
+  version: '4',
   nodes: [
     {
       type: 'example.stamp',
@@ -63,6 +63,8 @@ export default {
   events: ['order.completed'],
   nav: [{ label: 'Example', path: '/plugins/example/', icon: 'Puzzle' }],
   publicPaths: ['/plugins/example/public/ping'],
+  // Opens external carts and starts orders through ORDERLOOP (granted in the engine's tests).
+  capabilities: ['carts:external', 'orders:start'],
   secrets: [
     {
       name: 'PING_TOKEN',
