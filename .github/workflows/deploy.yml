@@ -169,6 +169,26 @@ jobs:
           curl -fsSL --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
           # The public catalog API answers on its own host.
           curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$CATALOG_DOMAIN/health"
+      # A latency budget on the deployed app, once it is up. It warns rather than fails: a slow
+      # runner or network blip must not roll production back. The best of three runs counts, so a
+      # cold start alone doesn't trip it.
+      - name: Latency check
+        continue-on-error: true
+        run: |
+          check() {
+            local url=$1 budget=$2 best=999
+            for _ in 1 2 3; do
+              t=$(curl -fsSL -o /dev/null -w '%{time_total}' "$url") || continue
+              best=$(awk -v a="$t" -v b="$best" 'BEGIN { print (a < b) ? a : b }')
+            done
+            echo "$url: ${best}s (budget ${budget}s)"
+            if awk -v a="$best" -v b="$budget" 'BEGIN { exit !(a > b) }'; then
+              echo "::warning title=Latency budget::$url took ${best}s, over its ${budget}s budget"
+            fi
+          }
+          check "https://$DOMAIN/login" 1.5
+          check "https://$DOMAIN/health/deep" 1.0
+          check "https://$CATALOG_DOMAIN/health" 0.5
       # Any failure once the catalog has shipped puts each Worker that deployed back on its
       # previous version, so the deployment never runs a new engine behind an old web app (or the
       # reverse). D1 migrations are not rolled back, which is why they must be additive.

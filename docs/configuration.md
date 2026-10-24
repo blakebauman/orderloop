@@ -161,7 +161,8 @@ every request.
 The catalog Worker turns `observability` on at the default sampling and sets `limits.cpu_ms` to 300,000, since a feed step parses and validates up to 25,000 products. Both app Workers log and trace every request (`observability` with `head_sampling_rate` 1, invocation logs
 and traces on); lower the rate once traffic makes the volume or cost matter. `limits.cpu_ms` stops a
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
-waits, such as model calls, don't count against it. The web app also sets `placement.mode` to `smart`, so
-it runs near D1 and the engine rather than near the visitor.
+waits, such as model calls, don't count against it. Both app Workers set `placement.mode` to `smart`: the web
+app runs near D1 and the engine rather than near the visitor, and the engine runs near D1 rather
+than near the web app (keep it only while Observability shows lower D1 latency).
 
 Each audit write logs one JSON line, `{"type":"audit_event", …}` with the sealed row, to Workers Logs, where Logpush can carry it to a SIEM; a failed write logs `{"type":"audit_write_failed","action":…,"error":…}` instead, to alert on. Writing still never throws.

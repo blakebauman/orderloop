@@ -180,8 +180,10 @@ type-check, build, tests, the fleet tests (`pnpm test:fleet`) and
 `pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
-D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's
-and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
+D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's,
+checks their latency (the best of three requests to `/login`, `/health/deep` and the catalog's
+`/health` against budgets of 1.5 s, 1 s and 0.5 s; over budget is a warning on the run, never a
+failure or a rollback) and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
 deployment before its migration. If anything fails once the catalog has deployed (the engine deploy,
 the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed;
 the plugins, catalog-edge and then the catalog go last, and one with no earlier version (a deployment's first) is left as it is. D1 is not rolled
