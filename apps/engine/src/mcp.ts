@@ -143,7 +143,8 @@ const handler = createMcpHandler(
   (ctx) => createServer(ctx.authInfo?.extra?.principal as Principal),
   {
     // 2025-era requests (no envelope) get a fresh server each, as 2026-07-28 ones do. The engine
-    // is reached only through the service binding, and the web Worker checks Origin first.
+    // is reached only through the service binding: the web Worker authenticates the caller and
+    // refuses a malformed Origin first.
     legacy: 'stateless',
     onerror: (err) => console.error('mcp', err),
   },
