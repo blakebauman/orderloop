@@ -157,7 +157,10 @@ export default defineConfig(async () => {
             TEST_CARRIER_MIGRATIONS: await readD1Migrations(
               '../../plugins/fixture-carrier/migrations',
             ),
-            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+            PLUGIN_GRANTS: JSON.stringify({
+              'fixture-carrier': { personalData: 'send' },
+              example: { capabilities: ['carts:external', 'orders:start'] },
+            }),
           },
           [
             await bundlePlugin('../../plugins/example/src/index.ts', {
@@ -185,7 +188,10 @@ export default defineConfig(async () => {
               Object.fromEntries(Object.entries(sandboxed).map(([id, b]) => [id, b.sha])),
             ),
             PLUGIN_SECRETS: JSON.stringify({ example: { PING_TOKEN: 'ping-secret-8f2d' } }),
-            PLUGIN_GRANTS: JSON.stringify({ 'fixture-carrier': { personalData: 'send' } }),
+            PLUGIN_GRANTS: JSON.stringify({
+              'fixture-carrier': { personalData: 'send' },
+              example: { capabilities: ['carts:external', 'orders:start'] },
+            }),
           },
           [],
           {

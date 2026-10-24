@@ -16,9 +16,11 @@ import {
   atLeast,
   BASE_CURRENCY,
   CART_CHAT_BROADCAST,
+  CART_START_TTL_MS,
   type Cart,
   type CartActor,
   type CartChatMessage,
+  type CartGuest,
   type CartMember,
   type CartOp,
   type CartState,
@@ -27,21 +29,37 @@ import {
   canReadCart,
   cartReadyProblem,
   chatBody,
+  checkCartReturn,
   EMPTY_CART_STATE,
   finishCart,
   isFinalCart,
   newId,
+  type PluginCart,
   type ProxiedPrincipal,
 } from '@orderloop/core';
 import { carts, createDb } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
 import { loadFlowVersion } from '../flows';
 import { startOrderOnce } from '../orders';
-import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
+import { pluginStub } from '../plugin-host';
+import { callPlugin, mayUse } from '../plugins';
+import { forwardedGuest, forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
 import { quoteCheckout } from '../ucp/quote';
 
-/** Per-connection state: who opened the socket, and how they show in the members list. */
-type ConnectionState = { principal: ProxiedPrincipal | null; member: CartMember | null };
+/**
+ * Per-connection state: who opened the socket (a staff principal, or the buyer an external cart was
+ * opened for), and how they show in the members list.
+ */
+type ConnectionState = {
+  principal: ProxiedPrincipal | null;
+  guest?: CartGuest | null;
+  member: CartMember | null;
+};
+
+const sha256 = async (s: string) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 
 /** Messages a person may send in a burst, and how long the burst lasts. */
 const CHAT_BURST = 10;
@@ -79,6 +97,11 @@ export class CartAgent extends Agent<Env, CartState> {
     if (this.tablesReady) return;
     this
       .sql`CREATE TABLE IF NOT EXISTS cart_chat (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, author_id TEXT NOT NULL, author_name TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL, edited_at INTEGER)`;
+    // One-time start links for an external cart's buyer (only the hash is kept), and its return.
+    this
+      .sql`CREATE TABLE IF NOT EXISTS cart_starts (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER)`;
+    this
+      .sql`CREATE TABLE IF NOT EXISTS cart_return (id INTEGER PRIMARY KEY, url TEXT NOT NULL, fields TEXT NOT NULL)`;
     this.tablesReady = true;
   }
 
@@ -131,9 +154,108 @@ export class CartAgent extends Agent<Env, CartState> {
   /** Makes this object the cart `init` describes; a second call returns the cart as it is. */
   async create(init: Cart): Promise<Cart> {
     if (this.state.cart) return this.state.cart;
-    await this.save(init);
+    // Indexed first: a cart the index refuses (a second open of one session) never comes to be.
+    await this.index(init);
+    this.setState({ ...this.state, cart: init });
+    if (init.external) await this.schedule(new Date(init.external.expiresAt), 'expire');
     if (init.lines.length) await this.reprice();
     return this.cart();
+  }
+
+  /** An external cart that hasn't gone back by its time is canceled. */
+  async expire() {
+    const c = this.state.cart;
+    if (!c || isFinalCart(c) || !c.external || this.submitting) return;
+    await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    for (const conn of this.getConnections()) conn.close(4410, 'Cart expired');
+  }
+
+  /** A start link for an open external cart's buyer (else null): works once, within `CART_START_TTL_MS`. */
+  async issueStart(): Promise<string | null> {
+    const c = this.state.cart;
+    if (!c?.external || isFinalCart(c)) return null;
+    this.tables();
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    const token = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const now = Date.now();
+    this.sql`DELETE FROM cart_starts WHERE expires_at < ${now}`;
+    this
+      .sql`INSERT INTO cart_starts (hash, expires_at) VALUES (${await sha256(token)}, ${now + CART_START_TTL_MS})`;
+    return token;
+  }
+
+  /** The buyer a start link admits, or null for one that is unknown, used, expired or too late. */
+  async redeemStart(token: string): Promise<CartGuest | null> {
+    const c = this.state.cart;
+    if (!c?.external || isFinalCart(c) || typeof token !== 'string' || token.length > 100)
+      return null;
+    this.tables();
+    const hash = await sha256(token);
+    const now = Date.now();
+    const used = this.sql<{ hash: string }>`
+      UPDATE cart_starts SET used_at = ${now}
+      WHERE hash = ${hash} AND used_at IS NULL AND expires_at > ${now} RETURNING hash`;
+    if (!used.length) return null;
+    return { cartId: c.id, id: `guest:${c.external.buyer.id}`, name: c.external.buyer.name };
+  }
+
+  /**
+   * Sends an external cart back to the buyer's system: priced and ready, it is held while the
+   * plugin that opened it renders the return (`renderReturn`), then `returned`. The fields are
+   * kept, so the buyer's page can post them again (`returnForm`) if it was closed meanwhile.
+   */
+  async transferAs(
+    actor: CartActor,
+  ): Promise<
+    { ok: true; url: string; fields: Record<string, string> } | { ok: false; error: string }
+  > {
+    const c = this.cart();
+    if (!c.external) return { ok: false, error: 'Only an external cart goes back to a buyer.' };
+    if (actor.kind === 'staff' && !atLeast(actor.role, 'operator'))
+      return { ok: false, error: 'This needs the Operator role.' };
+    if (this.submitting) return { ok: false, error: 'The cart is being sent.' };
+    const problem = cartReadyProblem(c);
+    if (problem) return { ok: false, error: problem };
+    const { pluginId, returnUrl } = c.external;
+    const held = c;
+    this.submitting = true;
+    this.setState({ ...this.state, cart: { ...c, status: 'locked' } });
+    try {
+      if (!(await mayUse(this.env, pluginId, 'carts:external')))
+        throw new Error('The plugin that opened this cart can no longer return it.');
+      const stub = await pluginStub(this.env, pluginId, 'call');
+      if (!stub) throw new Error(`Plugin “${pluginId}” is not installed.`);
+      const view: PluginCart = {
+        id: c.id,
+        title: c.title,
+        status: c.status,
+        customerId: c.customerId,
+        lines: c.lines,
+        quote: c.quote,
+        orderId: c.orderId,
+        updatedAt: c.updatedAt,
+        sessionRef: c.external.sessionRef,
+      };
+      const answer = await callPlugin(
+        this.env,
+        pluginId,
+        stub.renderReturn({ cart: view }),
+        `${pluginId}.renderReturn()`,
+      );
+      const checked = checkCartReturn(answer);
+      if (!checked.ok) throw new Error(checked.error);
+      this.tables();
+      this
+        .sql`INSERT OR REPLACE INTO cart_return (id, url, fields) VALUES (1, ${returnUrl}, ${JSON.stringify(checked.fields)})`;
+      await this.save(finishCart(held, { status: 'returned' }, Date.now()));
+      return { ok: true, url: returnUrl, fields: checked.fields };
+    } catch (err) {
+      this.setState({ ...this.state, cart: held });
+      console.error(`returning cart ${c.id}`, err);
+      return { ok: false, error: err instanceof Error ? err.message : 'The cart didn’t go back.' };
+    } finally {
+      this.submitting = false;
+    }
   }
 
   async snapshot(): Promise<CartState | null> {
@@ -277,10 +399,13 @@ export class CartAgent extends Agent<Env, CartState> {
 
   override async onConnect(connection: Connection<ConnectionState>, ctx: ConnectionContext) {
     const principal = await forwardedPrincipal(this.env, ctx.request);
+    const guest = principal ? null : await forwardedGuest(this.env, ctx.request);
     const member: CartMember | null = principal
       ? { id: principal.id, name: principal.name, kind: 'staff' }
-      : null;
-    connection.setState({ principal, member });
+      : guest && guest.cartId === this.state.cart?.id
+        ? { id: guest.id, name: guest.name, kind: 'guest' }
+        : null;
+    connection.setState({ principal, guest, member });
     this.syncMembers();
     await this.keepChecking();
   }
@@ -300,6 +425,11 @@ export class CartAgent extends Agent<Env, CartState> {
   async recheckConnections() {
     let open = 0;
     for (const c of this.getConnections<ConnectionState>()) {
+      // A guest stays while the cart is theirs to see; it ends with the cart (`expire`).
+      if (c.state?.guest) {
+        open++;
+        continue;
+      }
       const stored = c.state?.principal ?? null;
       const p = stored ? await livePrincipal(this.env, stored) : null;
       if (!p || !atLeast(p.role, 'viewer')) c.close(4401, 'Session ended');
@@ -331,7 +461,14 @@ export class CartAgent extends Agent<Env, CartState> {
   private async caller(): Promise<CartActor> {
     const { connection } = getCurrentAgent();
     if (!connection) throw new Error('Call this over the cart’s socket.');
-    const stored = (connection.state as ConnectionState | null)?.principal ?? null;
+    const state = connection.state as ConnectionState | null;
+    const guest = state?.guest;
+    if (guest) {
+      const c = this.cart();
+      if (guest.cartId !== c.id || !c.external) throw new Error('This isn’t your cart.');
+      return { kind: 'guest', id: guest.id, name: guest.name };
+    }
+    const stored = state?.principal ?? null;
     const p = stored ? await livePrincipal(this.env, stored) : null;
     if (!p) {
       setTimeout(() => connection.close(4401, 'Session ended'), 100);
@@ -361,6 +498,25 @@ export class CartAgent extends Agent<Env, CartState> {
   @callable()
   async cancel() {
     return this.cancelAs(await this.caller());
+  }
+
+  /** Sends an external cart back to its buyer's system (`transferAs`). */
+  @callable()
+  async transfer() {
+    return this.transferAs(await this.caller());
+  }
+
+  /** What a returned cart posted, to post again; null before it went back. */
+  @callable()
+  async returnForm(): Promise<{ url: string; fields: Record<string, string> } | null> {
+    await this.caller();
+    if (this.cart().status !== 'returned') return null;
+    this.tables();
+    const r = this.sql<{
+      url: string;
+      fields: string;
+    }>`SELECT url, fields FROM cart_return WHERE id = 1`[0];
+    return r ? { url: r.url, fields: JSON.parse(r.fields) as Record<string, string> } : null;
   }
 
   private sent = new Map<string, number[]>();
