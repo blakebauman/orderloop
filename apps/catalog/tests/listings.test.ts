@@ -2,7 +2,13 @@ import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { DOC_FORMAT, ListingIndex, paths } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DEBOUNCE_MS, debounceMs, type ListingIndexer, withAncestors } from '../src/listings';
+import {
+  applyChanges,
+  DEBOUNCE_MS,
+  debounceMs,
+  type ListingIndexer,
+  withAncestors,
+} from '../src/listings';
 import { api, by, product, settle, setup } from './helpers';
 
 beforeAll(async () => {
@@ -169,6 +175,29 @@ describe('build pacing', () => {
       await o.apply('web', 'pace-test', [{ key: 'y', at: 2, entry: entry(2, 100) }]);
       expect(dirty(o)).toBe('0');
       await o.apply('web', 'pace-test', [{ key: 'y', at: 4, entry: entry(4, 300) }]);
+      expect(dirty(o)).toBe('1');
+      await storage(o).deleteAlarm();
+    });
+  });
+
+  it('rebuilds for a reindex even when the entry is unchanged', async () => {
+    // A reindex (a new document format, a new locale) changes what the index holds, not the
+    // entries: its changes are forced, through applyChanges' grouping as well.
+    await runInDurableObject(indexer('pace-test'), async (o) => {
+      put(o, 'dirty', 0);
+    });
+    await applyChanges(env, [
+      {
+        channel: 'web',
+        key: 'y',
+        at: 5,
+        forced: true,
+        entry: entry(5, 300),
+        left: [],
+        search: null,
+      },
+    ]);
+    await runInDurableObject(indexer('pace-test'), async (o) => {
       expect(dirty(o)).toBe('1');
       await storage(o).deleteAlarm();
     });

@@ -339,6 +339,9 @@ export class CatalogShard extends DurableObject<Env> {
    * entries. Returns how many it took down; call again until it answers 0.
    */
   async forgetChannel(channel: string, limit: number): Promise<number> {
+    // The channel is gone from the config by now: the next pass must not publish into it from a
+    // copy fetched before (loadConfig trusts one for CONFIG_TTL_MS).
+    this.config = undefined;
     const rows = this.sql
       .exec<{ key: string }>('SELECT key FROM published WHERE channel = ? LIMIT ?', channel, limit)
       .toArray();

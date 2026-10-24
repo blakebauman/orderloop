@@ -35,6 +35,9 @@ export type ListingChange = {
   at: number;
   /** The config revision it was published with. */
   rev?: number;
+  /** Sent by a reindex: rebuild even when the entry looks unchanged (a new document format, locale
+   * or label changes what the index holds without changing the entry). */
+  forced?: boolean;
   /** What it lists as now, or null when it no longer lists in the channel. */
   entry: IndexEntry | null;
   /** The categories it was listed in before this change. */
@@ -45,7 +48,13 @@ export type ListingChange = {
   search: (SearchEntry & { locale: string })[] | null;
 };
 
-type Item = { key: string; at: number; rev?: number; entry: IndexEntry | null };
+type Item = {
+  key: string;
+  at: number;
+  rev?: number;
+  forced?: boolean;
+  entry: IndexEntry | null;
+};
 
 /** Minimum time between two builds of one listing. */
 export const DEBOUNCE_MS = 15_000;
@@ -122,7 +131,13 @@ export async function applyChanges(env: Env, changes: ListingChange[]): Promise<
   for (const c of changes) {
     const now = withAncestors(c.entry?.categories ?? [], parents);
     for (const category of now)
-      push(c.channel, category, { key: c.key, at: c.at, rev: c.rev, entry: c.entry });
+      push(c.channel, category, {
+        key: c.key,
+        at: c.at,
+        rev: c.rev,
+        forced: c.forced,
+        entry: c.entry,
+      });
     for (const category of withAncestors(c.left, parents))
       if (!now.has(category))
         push(c.channel, category, { key: c.key, at: c.at, rev: c.rev, entry: null });
@@ -192,7 +207,7 @@ export class ListingIndexer extends DurableObject<Env> {
         if (row && row.at >= item.at) continue;
         const e = item.entry;
         const sig = e ? entrySignature(e) : null;
-        if (row && sig !== null && row.sig === sig) {
+        if (row && sig !== null && row.sig === sig && !item.forced) {
           // Listed as it was: only the newer `at` is kept, so an older change can't undo it.
           this.sql.exec('UPDATE members SET at = ? WHERE key = ?', item.at, item.key);
           continue;

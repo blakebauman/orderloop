@@ -389,8 +389,10 @@ table, so the constructor adds them when missing (`ALTER TABLE … ADD COLUMN`),
 `outbox(key)` and `applied(at)` with `CREATE INDEX IF NOT EXISTS`. The alarm calls
 `loadConfig(max rev)`, which reuses the shard's copy of the config unless it is older than that
 revision or than 2 seconds, and fetches the latest from `CatalogMeta` when any row has no revision.
-An alias pointer the product already published (same key) is not written again, except for a
-`forced` row, so a reindex still rewrites every pointer. A write reads each stored row's `version`
+Every alias pointer is written on every publish, even one the product already published: when an
+alias moves between products on two shards, the old owner's later publish can delete the new
+owner's pointer, and the new owner's next publish puts it back. A `forced` row (a reindex) is marked
+`forced` on its listing changes, so its listings rebuild even when no entry changed. A write reads each stored row's `version`
 and `hash` first and parses the stored body (for the old aliases) only for rows whose hash changed.
 The pass's listing changes go to the `CHANGES` queue first (100 a `sendBatch`), before the outbox rows
 are deleted, so a crash between the two republishes and sends them again.
@@ -479,7 +481,8 @@ parts:
   least once and in any order, so a member keeps the change with the latest `at`; a removal is a
   tombstone (`live` 0) that stays 24 hours so a late older change can't bring the product back. A
   change whose entry has the member's stored signature (`entrySignature`: uid, `createdAt`, terms and
-  numbers, which is all the index uses) only moves `at`. A
+  numbers, which is all the index uses) only moves `at`, unless the change is `forced` (a reindex,
+whose new document format, locale or labels change the index without changing the entry). A
   change that alters anything sets `dirty` and an alarm, at least `debounceMs(members)` after the
   last build (a second per 20,000 members of the last build, at least `DEBOUNCE_MS`, 15 seconds, and
   at most 5 minutes), so a feed that touches a category thousands of times rebuilds it a handful of times;
@@ -648,10 +651,10 @@ The Worker is also the consumer of the purge queue (`orderloop-catalog-purge`) t
 messages into calls of at most `PURGE_TAGS` (100) deduplicated tags (a larger message is split) and
 purges through `Delivery.purge`, since Workers Caching scopes a purge to the entrypoint that calls it.
 Purges are rationed (the Free-plan limits: about 5 calls a minute), so the consumer runs one batch at
-a time and waits `PURGE_PACE_MS` (12 seconds, `scheduler.wait`) after each call. Before each call it
-acknowledges unpurged every message older than `PURGE_STALE_MS` (a minute, by its timestamp): with
-`max-age=60` the cache has caught up by then, so a backlog drains instead of spending the ration, and
-a batch takes about a minute at most. When a call is refused, the messages it hadn't covered are
+a time and waits `PURGE_PACE_MS` (12 seconds, `scheduler.wait`) after each call. A message is never
+dropped for its age: documents stay servable stale for a day (`stale-while-revalidate`), so a missed
+purge would serve the old copy once more. After `PURGE_CALLS` (40) calls, 8 minutes, the batch hands
+its remaining messages back to the queue at once, inside the consumer's 15-minute limit. When a call is refused, the messages it hadn't covered are
 retried with a 30 second delay (those already purged stay acknowledged); after `max_retries` they go
 to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (local
 development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent

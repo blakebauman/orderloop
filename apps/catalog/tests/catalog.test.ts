@@ -217,6 +217,21 @@ describe('unpublishing', () => {
     expect(await doc(p.key)).toMatchObject({ version: 3 });
   });
 
+  it('puts back an alias pointer on the next publish, so a lost one repairs itself', async () => {
+    // Two shards handing a SKU between products can leave the new owner's pointer deleted by the
+    // old owner's later publish; the new owner's next write must restore it.
+    const p = product();
+    await api.putProducts([p], { by });
+    await settle();
+    await env.PUBLISHED.delete(paths.alias(DOC_FORMAT, 'web', `sku:${p.key}-S`));
+    await api.putProducts(
+      [{ ...p, channels: { web: { visible: true, price: { amount: 1799, currency: 'USD' } } } }],
+      { by },
+    );
+    await settle();
+    expect(await alias(`sku:${p.key}-S`)).toEqual({ key: p.key });
+  });
+
   it('removes a dropped variant’s alias, and everything of a deleted product', async () => {
     const p = product();
     await api.putProducts([p], { by });

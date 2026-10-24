@@ -25,30 +25,33 @@ type Exports = { Delivery: Service<Delivery> };
 export const PURGE_TAGS = 100;
 export const PURGE_PACE_MS = 12_000;
 /**
- * A message older than this needs no purge: every cached response is fresh for a minute
- * (`max-age=60`), so by now the change has reached the edge by revalidation alone.
+ * Calls one batch makes before handing the rest back to the queue: 40 paced calls take 8 minutes,
+ * well inside a consumer's 15. An urgent purge is never dropped for its age: a document stays
+ * servable stale for a day (`stale-while-revalidate`), so a missed purge would mean the old
+ * copy is served once more, perhaps hours later.
  */
-export const PURGE_STALE_MS = 60_000;
+export const PURGE_CALLS = 40;
 
 /** `skipped`: nothing was purged (no Workers Caching here), so nothing was rationed either. */
 type Purge = (tags: string[]) => Promise<{ success: boolean; skipped?: true }>;
 
 /**
- * Purges a batch's tags, paced, oldest message first. Before each call, messages that have gone
- * stale are acknowledged unpurged, so a backlog drains instead of spending the ration on changes
- * the cache has already caught up with. A refused call retries what it didn't cover.
+ * Purges a batch's tags, paced, oldest message first. A refused call retries what it didn't cover
+ * once the bucket refills; after PURGE_CALLS calls the rest goes back to the queue at once.
  */
 export async function drain(
   batch: MessageBatch<PurgeMessage>,
   purge: Purge,
   wait: (ms: number) => Promise<void> = (ms) => scheduler.wait(ms),
-  now: () => number = Date.now,
 ): Promise<void> {
   const queue = [...batch.messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   const done = new Set<string>();
+  let calls = 0;
   while (queue.length) {
-    while (queue.length && now() - (queue[0] as Message).timestamp.getTime() >= PURGE_STALE_MS)
-      (queue.shift() as Message).ack();
+    if (calls >= PURGE_CALLS) {
+      for (const m of queue) m.retry({ delaySeconds: 0 });
+      return;
+    }
     // Whole messages, up to PURGE_TAGS tags (one larger than that goes alone, split below).
     const take: Message<PurgeMessage>[] = [];
     const tags = new Set<string>();
@@ -65,11 +68,11 @@ export async function drain(
       const chunk = all.slice(i, i + PURGE_TAGS);
       const r = await purge(chunk);
       if (!r.success) {
-        // Rate limited (or refused): try these again once the bucket refills; by then the stale
-        // check above may acknowledge them instead.
+        // Rate limited (or refused): try these again once the bucket refills.
         for (const m of [...take, ...queue]) m.retry({ delaySeconds: 30 });
         return;
       }
+      calls++;
       for (const t of chunk) done.add(t);
       if (!r.skipped) await wait(PURGE_PACE_MS);
     }

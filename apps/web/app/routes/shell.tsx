@@ -26,7 +26,7 @@ import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
 import { db } from '~/lib/env.server';
-import { NodesProvider } from '~/lib/nodes';
+import { PluginsProvider } from '~/lib/plugins';
 import { pluginManifests } from '~/lib/plugins.server';
 import { type ThemeChoice, useTheme } from '~/lib/theme';
 import type { Route } from './+types/shell';
@@ -139,11 +139,11 @@ function PendingCount({ n }: { n: number }) {
 export default function Shell() {
   const { plugins } = useLoaderData<typeof loader>();
   return (
-    <NodesProvider plugins={plugins}>
+    <PluginsProvider plugins={plugins}>
       <AssistantProvider>
         <ShellFrame />
       </AssistantProvider>
-    </NodesProvider>
+    </PluginsProvider>
   );
 }
 
