@@ -71,7 +71,9 @@ import {
   parseEdiPartners,
   parseOrderRoutes,
   parseX12,
+  RESERVED_ORDER_KEY_PREFIXES,
   type Role,
+  reservedOrderKey,
   type ShopifyOrder,
   SIGNATURE_HEADER,
   shopifyToInbound,
@@ -301,6 +303,14 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;
         if (idempotencyKey && idempotencyKey.length > 255)
           return json({ error: 'Idempotency-Key must be at most 255 characters' }, 400);
+        // Keys the core starts orders under itself aren't a caller's to take.
+        if (idempotencyKey && reservedOrderKey(idempotencyKey))
+          return json(
+            {
+              error: `Idempotency-Key may not start with ${RESERVED_ORDER_KEY_PREFIXES.join(', ')}`,
+            },
+            400,
+          );
         if (!(await currencies()).some((c) => c.currency === parsed.data.input.currency))
           return json(
             {

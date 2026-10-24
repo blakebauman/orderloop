@@ -85,6 +85,14 @@ export default definePlugin<Env>({
     },
   },
 
+  // A cart it opened goes back as one field per line and the cart's id (tests check them).
+  renderReturn: ({ cart }) => ({
+    fields: {
+      cart: cart.id,
+      session: cart.sessionRef,
+      ...Object.fromEntries(cart.lines.map((l, i) => [`line[${i + 1}]`, `${l.sku}x${l.qty}`])),
+    },
+  }),
   events: {
     async 'order.completed'(payload, env) {
       await pluginDb(env)

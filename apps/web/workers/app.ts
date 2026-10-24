@@ -23,6 +23,7 @@ import {
   Throttled,
   TokenExpired,
 } from '../app/lib/auth.server';
+import { cartGuest } from '../app/lib/cart-guest.server';
 import { withSecurityHeaders } from '../app/lib/csp';
 import { demoRefusal } from '../app/lib/demo.server';
 import { docs, engine } from '../app/lib/env.server';
@@ -30,7 +31,7 @@ import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
 import { pluginFetch, pluginPathId } from '../app/lib/plugins.server';
-import { setPrincipalHeader } from '../app/lib/principal.server';
+import { setGuestHeader, setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
 import { scimFetch } from '../app/lib/scim.server';
@@ -176,6 +177,23 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   const assistant = url.pathname.startsWith('/agents/assistant-agent/');
   if (order || cart || assistant) {
     const caller = await principal(request);
+    // An external cart's buyer, on their own cart's socket only, with no staff sign-in.
+    if (!caller && cart) {
+      // The raw segment: a cart id has nothing to decode, and cartGuest refuses anything else
+      // (decoding a malformed escape would throw before the refusal).
+      const guest = await cartGuest(request, url.pathname.split('/')[3] ?? '');
+      if (!guest) return new Response('Unauthorized', { status: 401 });
+      const headers = new Headers(request.headers);
+      headers.delete('cookie');
+      headers.delete('authorization');
+      await setGuestHeader(headers, guest, url.pathname);
+      return engine().fetch(
+        new Request(
+          `https://engine${url.pathname}${url.search}`,
+          new Request(request, { headers }),
+        ),
+      );
+    }
     if (!caller) return new Response('Unauthorized', { status: 401 });
     const due = setupDue(caller);
     if (due) return new Response(due, { status: 403 });

@@ -115,6 +115,11 @@
     // nodes send a model (core's redact.ts); "send" includes them. The registry's aiPersonalData
     // sets it per deployment.
     "AI_PERSONAL_DATA": "redact",
+    // The app's origin and the hosts the deployment serves (comma-separated): an external cart's
+    // start link is on APP_ORIGIN, and its return never posts to one of OWN_HOSTS.
+    // scripts/fleet.ts sets both per deployment; local dev overrides them in apps/web/vite.config.ts.
+    "APP_ORIGIN": "https://orderloop.app",
+    "OWN_HOSTS": "orderloop.app,catalog.orderloop.app",
     // Days audit events are kept before the daily sweep archives them to R2 and deletes them.
     // At least 90; the registry's auditRetentionDays sets it per deployment.
     "AUDIT_RETENTION_DAYS": "400",

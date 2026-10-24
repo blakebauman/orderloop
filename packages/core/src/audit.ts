@@ -43,6 +43,7 @@ export const AUDIT_VIA = {
   assistant: 'the assistant',
   mcp: 'MCP',
   a2a: 'A2A',
+  plugin: 'a plugin',
 } as const;
 
 export type AuditVia = keyof typeof AUDIT_VIA;

@@ -211,6 +211,7 @@ describe('category listings', () => {
       expect((await blob(bad)).status, bad).toBe(404);
   });
 
+  // About 200 pages fetched one after another: quick locally, but past the 5s default on a busy CI runner.
   it('merges every segment into one order per sort, paging without skips or repeats', async () => {
     const order = (sort: string, hits: IndexEntry[]) => {
       const newest = (a: IndexEntry, b: IndexEntry) => b.createdAt - a.createdAt || a.uid - b.uid;
@@ -258,7 +259,7 @@ describe('category listings', () => {
       ['globex', 100],
       ['hooli', 100],
     ]);
-  });
+  }, 30_000);
 });
 
 describe('held listing indexes', () => {
