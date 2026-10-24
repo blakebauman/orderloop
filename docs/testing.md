@@ -111,8 +111,6 @@ Workflows against local D1 and R2, from the engine's own `wrangler.jsonc`:
   different body under one key is refused). `loseNextResponse` carries a request out and drops the
   answer; `failNext` answers 500 untouched. Run one with `pnpm --filter @orderloop/engine exec vitest run --project stripe`.
 
-From the reviews, `tests/sandboxed/` also proves: an upstream echoing the injected credential leaves `[redacted]` in the order (`scrubbedValue`); a request body over 10 MiB gets `413`; egress and secrets hold with `knownManifests` cleared (they read the pinned manifest); a bundle whose sealed manifest differs from what the plugin's code answers is refused; and two racing first calls to a plugin's storage apply its migrations once.
-
 | File | Covers |
 |---|---|
 | `tests/agent.test.ts` | `OrderAgent.report`: replayed snapshots ignored, timeline keys deduped, a new generation accepted; terminal statuses and rolled-back nodes kept once set; the synced state without the flow and with the newest 50 entries while `snapshot()` and `getFlow()` return the flow and the whole capped timeline; an agent whose state still holds the flow moving it and its timeline to SQL |
@@ -156,6 +154,8 @@ the way a deployment runs a `sandboxed` plugin, through Worker Loader, with no a
 service binding. `vitest.config.ts` builds each bundle with `buildSandboxBundle` (from
 `@orderloop/plugin-sdk/testing`: its code as one module, its migrations, and the sha) and passes the
 set to the tests as `TEST_BUNDLES`; the project's bindings are:
+
+From the reviews, `tests/sandboxed/` also proves: an upstream echoing the injected credential leaves `[redacted]` in the order (`scrubbedValue`); a request body over 10 MiB gets `413`; egress and secrets hold with `knownManifests` cleared (they read the pinned manifest); a bundle whose sealed manifest differs from what the plugin's code answers is refused; and two racing first calls to a plugin's storage apply its migrations once.
 
 | Binding | Value |
 |---|---|
