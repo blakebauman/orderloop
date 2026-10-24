@@ -32,8 +32,10 @@ column counts the orders that have used it.
 
 ## In a flow
 
-Add **Apply promotions** after **Price lines**, and before **Calculate tax** so tax is worked
-out on the discounted prices. For free shipping, place it after **Shipping rate** too. With
+The built-in Storefront, Omnichannel and B2B order flows already have a **Promotions** step in
+place. A workspace that already had those flows keeps its own versions: publish a new version
+with the step to use codes there. On other flows, add **Apply promotions** after **Price lines**,
+and before **Calculate tax** so tax is worked out on the discounted prices. For free shipping, place it after **Shipping rate** too. With
 **Stack codes** off (the default) only the code worth the most applies; on, every code that
 applies is used, each on the prices the one before left.
 

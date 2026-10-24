@@ -150,6 +150,7 @@ describe('quoteNodes', () => {
       'commerce.validate',
       'commerce.price',
       'commerce.shipping_rate',
+      'commerce.discount',
       'commerce.tax',
       'commerce.policy',
     ]);
