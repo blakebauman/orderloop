@@ -19,3 +19,17 @@ it('keeps the plugin contract', async () => {
     }),
   ).toEqual([]);
 });
+
+it('lets its public ping authenticate callers with its own secret', async () => {
+  const ctx = { waitUntil() {}, passThroughOnException() {} } as never;
+  const ping = (plugin: InstanceType<typeof ExamplePlugin>, auth?: string) =>
+    plugin.fetch(
+      new Request('https://app.test/plugins/example/public/ping', {
+        headers: auth ? { authorization: auth } : {},
+      }),
+    );
+  expect((await ping(new ExamplePlugin(ctx, env))).status).toBe(200);
+  const guarded = new ExamplePlugin(ctx, { ...env, PING_TOKEN: 't0ken' });
+  expect((await ping(guarded)).status).toBe(401);
+  expect((await ping(guarded, 'Bearer t0ken')).status).toBe(200);
+});

@@ -9,6 +9,7 @@ import {
   pluginKey,
   pluginOf,
   pluginOrder,
+  pluginSecretVar,
   pluginView,
   signPrincipal,
   staticRegistry,
@@ -72,6 +73,7 @@ describe('plugin manifests', () => {
       requires: [],
       pageRole: 'operator',
       personalData: 'redact',
+      secrets: [],
     });
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
   });
@@ -97,6 +99,21 @@ describe('plugin manifests', () => {
     );
   });
 
+  it('declares secrets by env name, none reserved or repeated', () => {
+    const secrets = [
+      { name: 'API_KEY', description: 'The carrier key' },
+      { name: 'HOOK', optional: true },
+    ];
+    expect(parseManifest(manifest({ secrets })).secrets).toEqual(secrets);
+    expect(() => parseManifest(manifest({ secrets: [{ name: 'api-key' }] }))).toThrow(/upper-case/);
+    expect(() => parseManifest(manifest({ secrets: [{ name: 'PLUGIN_KEY' }] }))).toThrow(
+      /reserved/,
+    );
+    expect(() => parseManifest(manifest({ secrets: [{ name: 'A' }, { name: 'A' }] }))).toThrow(
+      /Duplicate secret/,
+    );
+  });
+
   it('refuses a node type the built-in catalog has', () => {
     // A plugin can't be named after a built-in category, so a collision needs a forged manifest.
     const forged = { ...parseManifest(manifest()), id: 'commerce' };
@@ -106,6 +123,7 @@ describe('plugin manifests', () => {
 
   it('names bindings and namespaces', () => {
     expect(pluginBinding('qbd-sync')).toBe('PLUGIN_QBD_SYNC');
+    expect(pluginSecretVar('qbd-sync', 'API_KEY')).toBe('PLUGIN_QBD_SYNC_API_KEY');
     expect(pluginOf('example.stamp')).toBe('example');
     expect(pluginOf('commerce.ship')).toBeNull();
     expect(pluginOf('nodot')).toBeNull();

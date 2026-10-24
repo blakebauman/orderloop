@@ -121,6 +121,26 @@ describe('definePlugin', () => {
     ).toThrow(/no pages handler/);
   });
 
+  it('refuses its manifest until every required secret is set', async () => {
+    const Plugin = definePlugin({
+      manifest: {
+        ...manifest,
+        nodes: [],
+        events: [],
+        nav: [],
+        publicPaths: [],
+        secrets: [{ name: 'API_KEY' }, { name: 'HOOK_SECRET', optional: true }],
+      },
+    });
+    const make = (env: Record<string, string>) => new Plugin({} as never, env as never);
+    await expect(make({ PLUGIN_KEY: KEY }).manifest()).rejects.toThrow(
+      /demo is missing a secret: set PLUGIN_DEMO_API_KEY/,
+    );
+    await expect(make({ PLUGIN_KEY: KEY, API_KEY: '' }).manifest()).rejects.toThrow(/API_KEY/);
+    const m = await make({ PLUGIN_KEY: KEY, API_KEY: 'k' }).manifest();
+    expect(m.secrets.map((s) => s.name)).toEqual(['API_KEY', 'HOOK_SECRET']);
+  });
+
   it('runs a node with its write key, and fails it on request', async () => {
     const { plugin, env } = instance(good());
     expect(await plugin.execute(req())).toEqual({

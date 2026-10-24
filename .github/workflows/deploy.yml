@@ -21,7 +21,7 @@ jobs:
     # The deployment's GitHub environment holds its secrets (PRINCIPAL_KEY and DATA_KEY, required,
     # and PRINCIPAL_KEY_PREVIOUS and DATA_KEY_PREVIOUS during a rotation; SETUP_TOKEN, SHOPIFY_WEBHOOK_SECRET,
     # STRIPE_WEBHOOK_SECRET, OIDC_CLIENT_SECRET, INTAKE_ALLOWLIST, SHIPPING_CARRIER_AUTH, STRIPE_SECRET_KEY,
-    # UCP_SIGNING_KEY) and, if it
+    # UCP_SIGNING_KEY; and each installed plugin's PLUGIN_<ID>_<NAME>, docs/plugins.md) and, if it
     # should, a required reviewer.
     # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID can be repository secrets.
     environment:
@@ -99,7 +99,16 @@ jobs:
         run: |
           node scripts/fleet.ts secrets engine "$RUNNER_TEMP/engine-secrets.json" "$ID"
           node scripts/fleet.ts secrets web "$RUNNER_TEMP/web-secrets.json"
-          # Each plugin gets only its own key, derived from PRINCIPAL_KEY; never the key itself.
+      # Each plugin gets its own key, derived from PRINCIPAL_KEY (never the key itself), and the
+      # environment's PLUGIN_<ID>_* secrets under their own names. Plugin secrets aren't listed
+      # one by one, so only this step, and only with plugins installed, sees all of them.
+      - name: Collect plugin secrets
+        if: env.PLUGINS != ''
+        env:
+          PRINCIPAL_KEY: ${{ secrets.PRINCIPAL_KEY }}
+          PRINCIPAL_KEY_PREVIOUS: ${{ secrets.PRINCIPAL_KEY_PREVIOUS }}
+          ENV_SECRETS: ${{ toJSON(secrets) }}
+        run: |
           for p in $PLUGINS; do
             node scripts/fleet.ts secrets plugin "$RUNNER_TEMP/plugin-$p-secrets.json" "$p"
           done

@@ -4,4 +4,6 @@ interface Env {
   PLUGIN_KEY?: string;
   /** The key before a rotation, still accepted until the web Worker signs with the new one. */
   PLUGIN_KEY_PREVIOUS?: string;
+  /** Optional: the deployment's PLUGIN_EXAMPLE_PING_TOKEN, under its own name. */
+  PING_TOKEN?: string;
 }
