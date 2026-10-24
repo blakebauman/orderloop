@@ -228,6 +228,8 @@ export function finishCart(
     orderId: how.status === 'submitted' ? how.orderId : cart.orderId,
     updatedAt: now,
     version: cart.version + 1,
+    // Ending the cart changes nothing it was priced on.
+    quotedVersion: cart.quotedVersion === cart.version ? cart.version + 1 : cart.quotedVersion,
   };
 }
 

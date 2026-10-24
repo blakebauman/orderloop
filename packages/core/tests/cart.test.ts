@@ -240,6 +240,9 @@ describe('cart readiness', () => {
     });
     expect(cartReadyProblem(done)).toMatch(/submitted/);
     expect(finishCart(cart(), { status: 'returned' }, 70).orderId).toBeNull();
+    expect(
+      isQuoteCurrent(finishCart(cart({ quote, quotedVersion: 1 }), { status: 'canceled' }, 70)),
+    ).toBe(true);
   });
 
   it('expires only an open external cart past its time', () => {
