@@ -1,6 +1,6 @@
 /**
  * The Durable Object namespaces, in the deployment's jurisdiction. Where the registry sets one
- * (`DATA_JURISDICTION`, e.g. `eu`), every order, assistant and A2A object is created and kept
+ * (`DATA_JURISDICTION`, e.g. `eu`), every order, assistant, A2A and cart object is created and kept
  * there, as D1 and R2 already are; empty leaves them where Cloudflare places them. Everything that
  * reaches an object goes through here (tests/namespaces.test.ts checks), since an object reached
  * without the jurisdiction is a different, empty one.
@@ -32,6 +32,8 @@ export const orderAgent = (env: Env, orderId: string) =>
 
 export const a2aAgent = (env: Env, name: string) => scope(env, env.A2A_AGENT).getByName(name);
 
+export const cartAgent = (env: Env, cartId: string) => scope(env, env.CART_AGENT).getByName(cartId);
+
 /** A sandboxed plugin's own storage, in the deployment's jurisdiction like every other object. */
 export const pluginStorage = (env: Env, pluginId: string) =>
   scope(env, env.PLUGIN_STORAGE).getByName(pluginId);
@@ -42,4 +44,5 @@ export const scopedEnv = (env: Env): Env => ({
   ORDER_AGENT: scope(env, env.ORDER_AGENT),
   ASSISTANT_AGENT: scope(env, env.ASSISTANT_AGENT),
   A2A_AGENT: scope(env, env.A2A_AGENT),
+  CART_AGENT: scope(env, env.CART_AGENT),
 });

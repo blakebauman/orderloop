@@ -16,6 +16,7 @@ import {
   checkAddress,
   type FlowVersion,
   type Order,
+  type OrderChannel,
   quoteNodes,
   type RunContext,
   type ShippingOption,
@@ -35,14 +36,30 @@ const issue = (code: string, content: string, path: string): CheckoutIssue => ({
   severity: 'recoverable',
 });
 
+/**
+ * What a caller other than UCP adds to the draft: a cart is priced for its customer (contract
+ * prices, credit) and carries its promo codes in `meta`.
+ */
+export type DraftExtra = {
+  customerId?: string;
+  channel?: OrderChannel;
+  meta?: Record<string, unknown>;
+};
+
 /** The order a session would start, before any node has priced it. */
-export function draftOrder(flow: FlowVersion, s: CheckoutSession, ships: boolean): Order {
+export function draftOrder(
+  flow: FlowVersion,
+  s: CheckoutSession,
+  ships: boolean,
+  extra: DraftExtra = {},
+): Order {
   const name = [s.buyer.firstName, s.buyer.lastName].filter(Boolean).join(' ');
   return {
     id: `quote_${s.id}`,
     model: flow.model,
-    channel: 'agent',
+    channel: extra.channel ?? 'agent',
     externalId: s.id,
+    ...(extra.customerId ? { customerId: extra.customerId } : {}),
     currency: s.currency,
     lines: s.lines.map((l) => ({ sku: l.sku, qty: l.qty })),
     ...(s.buyer.email
@@ -56,7 +73,7 @@ export function draftOrder(flow: FlowVersion, s: CheckoutSession, ships: boolean
       : {}),
     fulfillment: { method: ships ? 'ship' : 'digital' },
     ...(s.shippingOption ? { shippingOption: s.shippingOption } : {}),
-    meta: s.shipTo ? { shipTo: s.shipTo } : {},
+    meta: { ...extra.meta, ...(s.shipTo ? { shipTo: s.shipTo } : {}) },
     createdAt: s.createdAt,
     subtotal: 0,
     shipping: 0,
@@ -69,6 +86,7 @@ export async function quoteCheckout(
   env: Env,
   flow: FlowVersion,
   s: CheckoutSession,
+  extra: DraftExtra = {},
 ): Promise<Quoted> {
   const issues: CheckoutIssue[] = [];
   const products = new Map(
@@ -110,7 +128,7 @@ export async function quoteCheckout(
     );
 
   const ctx: RunContext = {
-    order: draftOrder(flow, s, ships),
+    order: draftOrder(flow, s, ships, extra),
     nodes: {},
     vars: {},
     input: {},

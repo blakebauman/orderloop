@@ -21,6 +21,8 @@ export default [
       // Demo data only: one-click scenarios, some with a simulated failure.
       route('orders/scenarios', 'routes/order-scenarios.tsx'),
       route('orders/:orderId', 'routes/order.tsx'),
+      route('carts', 'routes/carts.tsx'),
+      route('carts/:cartId', 'routes/cart.tsx'),
       route('flows', 'routes/flows.tsx'),
       route('flows/:flowId', 'routes/flow-editor.tsx'),
       route('approvals', 'routes/approvals.tsx'),

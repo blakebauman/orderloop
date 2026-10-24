@@ -156,6 +156,19 @@ describe('applyCartOp', () => {
     expect(apply(c, { op: 'add', sku: 'X', qty: 1 }, guest).cart.lines).toHaveLength(2);
   });
 
+  it('keeps a current quote current across lock, unlock and rename', () => {
+    const priced = cart({ quote, quotedVersion: 1 });
+    const locked = apply(priced, { op: 'lock' }).cart;
+    expect(isQuoteCurrent(locked)).toBe(true);
+    expect(cartReadyProblem(locked)).toBeNull();
+    expect(isQuoteCurrent(apply(locked, { op: 'unlock' }).cart)).toBe(true);
+    expect(isQuoteCurrent(apply(priced, { op: 'rename', title: 'New' }).cart)).toBe(true);
+    // A stale quote stays stale.
+    expect(isQuoteCurrent(apply(cart({ quote, quotedVersion: 0 }), { op: 'lock' }).cart)).toBe(
+      false,
+    );
+  });
+
   it('renames without repricing', () => {
     const r = apply(cart(), { op: 'rename', title: '  Office chairs ' });
     expect(r.cart.title).toBe('Office chairs');
@@ -195,7 +208,8 @@ describe('normalizePromoCode', () => {
 describe('cart readiness', () => {
   it('needs lines and a quote for this version without errors', () => {
     expect(cartReadyProblem(cart({ lines: [] }))).toMatch(/line/);
-    expect(cartReadyProblem(cart())).toMatch(/priced/);
+    expect(cartReadyProblem(cart())).toBe('The cart is being priced.');
+    expect(cartReadyProblem(cart({ quotedVersion: 1 }))).toBe('The cart could not be priced.');
     const priced = cart({ quote, quotedVersion: 1 });
     expect(isQuoteCurrent(priced)).toBe(true);
     expect(cartReadyProblem(priced)).toBeNull();
@@ -226,6 +240,9 @@ describe('cart readiness', () => {
     });
     expect(cartReadyProblem(done)).toMatch(/submitted/);
     expect(finishCart(cart(), { status: 'returned' }, 70).orderId).toBeNull();
+    expect(
+      isQuoteCurrent(finishCart(cart({ quote, quotedVersion: 1 }), { status: 'canceled' }, 70)),
+    ).toBe(true);
   });
 
   it('expires only an open external cart past its time', () => {

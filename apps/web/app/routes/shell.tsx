@@ -116,6 +116,7 @@ type NavItem = { to: string; label: string; end?: boolean; badge?: boolean; docu
 const NAV: NavItem[] = [
   { to: '/', label: 'Overview', end: true },
   { to: '/orders', label: 'Orders' },
+  { to: '/carts', label: 'Carts' },
   { to: '/approvals', label: 'Approvals', badge: true },
   { to: '/flows', label: 'Flows' },
   { to: '/commerce', label: 'Commerce' },

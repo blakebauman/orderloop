@@ -6,12 +6,11 @@
  */
 
 import { UCP_PATH } from '@orderloop/core';
-import { routeAgentRequest } from 'agents';
 import { A2A_PATH, handleA2A } from './a2a/route';
+import { routeAgents } from './agent-routes';
 import { retryLabelVoids } from './connectors';
 import { receiveEmail } from './email';
 import { handleMcp, MCP_PATH } from './mcp';
-import { scopedEnv } from './namespaces';
 import { sweep } from './retention';
 import { handleUcp } from './ucp/rest';
 
@@ -19,6 +18,7 @@ export { A2AAgent } from './a2a/agent';
 export { OrderAgent } from './agent';
 export { EngineApi } from './api';
 export { AssistantAgent } from './assistant/agent';
+export { CartAgent } from './cart/agent';
 // The sandbox's capabilities, reached as `ctx.exports` by the plugins it loads (plugin-host.ts).
 export {
   PluginDb,
@@ -39,10 +39,7 @@ export default {
     if (url.pathname === A2A_PATH) return handleA2A(request, env);
     if (url.pathname === UCP_PATH || url.pathname.startsWith(`${UCP_PATH}/`))
       return handleUcp(request, env);
-    return (
-      (await routeAgentRequest(request, scopedEnv(env))) ??
-      new Response('Not found', { status: 404 })
-    );
+    return routeAgents(request, env);
   },
 
   // The daily retention sweep (`triggers.crons` in wrangler.jsonc), and another try at labels a
