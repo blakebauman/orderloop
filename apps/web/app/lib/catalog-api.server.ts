@@ -31,7 +31,7 @@ import {
 import { audit } from './audit.server';
 import { forbidden } from './auth.server';
 import { readText } from './body';
-import { catalog } from './env.server';
+import { afterResponse, catalog } from './env.server';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 /** Up to 500 products a call: allow a few kilobytes each. */
@@ -232,9 +232,23 @@ export async function handleCatalog(
       if (!request.body) return json({ error: 'The feed file is the request body' }, 400);
       const name = (q.get('name') ?? `feed.${format}`).slice(0, 200);
       // Streamed to the catalog as it arrives: a feed of any size never sits in this Worker.
-      let feed: Awaited<ReturnType<typeof c.startFeed>>;
+      const started = c.startFeed(request.body, { name, format, by });
+      // The catalog finishes starting a stored feed even if this caller goes, so it's audited
+      // after the response too.
+      afterResponse(
+        started.then(
+          (feed) =>
+            audit(request, 'catalog.feed_started', {
+              actor: caller,
+              target: feed.id,
+              detail: { name, format, via: 'api' },
+            }),
+          () => {},
+        ),
+      );
+      let feed: Awaited<typeof started>;
       try {
-        feed = await c.startFeed(request.body, { name, format, by });
+        feed = await started;
       } catch (err) {
         // The catalog gave up on a body that stopped arriving: nothing was stored, send it again.
         if (err instanceof Error && err.message.startsWith('upload stalled'))
@@ -244,11 +258,6 @@ export async function handleCatalog(
           );
         throw err;
       }
-      await audit(request, 'catalog.feed_started', {
-        actor: caller,
-        target: feed.id,
-        detail: { name, format, via: 'api' },
-      });
       return json({ feed }, 202);
     }
   }

@@ -21,7 +21,12 @@ const catalog = {
   deleteCategories: vi.fn(),
 };
 vi.mock('cloudflare:workers', () => ({ env: {} }));
-vi.mock('~/lib/env.server', () => ({ catalog: () => catalog, engine: () => ({}), db: () => ({}) }));
+vi.mock('~/lib/env.server', () => ({
+  catalog: () => catalog,
+  engine: () => ({}),
+  db: () => ({}),
+  afterResponse: () => {},
+}));
 vi.mock('~/lib/flows.server', () => ({ ensureSeeded: async () => {}, listFlows: async () => [] }));
 vi.mock('~/lib/orders.server', () => ({ currencies: async () => [], listOrders: async () => [] }));
 const audit = vi.fn();

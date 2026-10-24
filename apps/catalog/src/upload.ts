@@ -24,13 +24,14 @@ export async function storeStream(
   // A read that never settles (a caller gone without closing its stream) times out here instead of
   // hanging until the runtime cancels the request, so the multipart upload is aborted and the
   // caller hears why.
-  const read = () =>
-    Promise.race([
-      reader.read(),
-      scheduler.wait(idleMs).then(() => {
-        throw new UploadStalled(idleMs);
-      }),
-    ]);
+  const read = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const idle = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new UploadStalled(idleMs)), idleMs);
+    });
+    // Cleared once the read settles, so a feed of many chunks leaves no timers behind.
+    return Promise.race([reader.read(), idle]).finally(() => clearTimeout(timer));
+  };
   let chunks: Uint8Array[] = [];
   let buffered = 0;
   let total = 0;

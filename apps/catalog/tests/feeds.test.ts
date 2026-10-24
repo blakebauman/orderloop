@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { FeedStatus } from '@orderloop/core/product';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { storeStream, UploadStalled } from '../src/upload';
 import { api, by, doc, product, settle, setup } from './helpers';
 
@@ -154,6 +154,26 @@ describe('storing streams', () => {
     expect(await env.PUBLISHED.head('test/stalled')).toBeNull();
     const pending = await env.PUBLISHED.list({ prefix: 'test/stalled', include: [] });
     expect(pending.objects).toEqual([]);
+  });
+  it("fails a stored feed whose import can't start instead of leaving it queued", async () => {
+    const create = vi
+      .spyOn(env.FEED_IMPORT, 'create')
+      .mockRejectedValueOnce(new Error('too many instances'));
+    try {
+      // Settled with then: expect().rejects would read properties off the RPC promise, and each
+      // read pipelines another call that rejects unhandled.
+      const err = await api
+        .startFeed(body('name,price\nx,1'), { name: 'orphan', format: 'csv', by })
+        .then(
+          () => null,
+          (e: Error) => e,
+        );
+      expect(err?.message).toContain('too many instances');
+    } finally {
+      create.mockRestore();
+    }
+    const feed = (await api.listFeeds(100)).find((f) => f.name === 'orphan');
+    expect(feed?.state).toBe('failed');
   });
 });
 

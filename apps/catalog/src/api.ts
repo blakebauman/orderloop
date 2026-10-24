@@ -188,10 +188,23 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
         format: m.format,
         by: m.by,
       });
-      await this.env.FEED_IMPORT.create({ id, params: { id, format: m.format, key, by: m.by } });
+      try {
+        await this.env.FEED_IMPORT.create({ id, params: { id, format: m.format, key, by: m.by } });
+      } catch (err) {
+        // Nothing will run it: say so rather than leave it queued.
+        await feeds(this.env).fail(
+          id,
+          `import didn't start: ${err instanceof Error ? err.message : err}`,
+        );
+        throw err;
+      }
       return status;
     })();
-    this.ctx.waitUntil(started.catch(() => {}));
+    this.ctx.waitUntil(
+      started.catch((err) =>
+        console.error(JSON.stringify({ type: 'feed_start_failed', id, error: String(err) })),
+      ),
+    );
     return started;
   }
 
