@@ -245,6 +245,7 @@ describe('MCP', () => {
     expect(admin).toHaveLength(14);
     expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      outputSchema: { type: 'object', properties: { id: {}, cases: {}, href: {} } },
     });
   });
 
