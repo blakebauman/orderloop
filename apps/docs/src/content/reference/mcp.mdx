@@ -76,10 +76,15 @@ assistant stops to confirm; over MCP they take two calls, described next.
 
 <McpTools />
 
-Each tool has a title, a description and a JSON input schema. Results come back as text and as
-`structuredContent`. A refusal from live data (nothing is waiting on that event, the approval is
+Each tool has a title, a description, a JSON input schema and an output schema. Results come back
+as JSON text and as `structuredContent` that matches the output schema; a field not in the schema
+may be added later, so a client should ignore fields it doesn't know. `assess_order` and
+`propose_flow_change` wait on a model: a client that sends a progress token hears when they start.
+A refusal from live data (nothing is waiting on that event, the approval is
 already decided, the order has finished, you started the order and the workspace [separates approvals](/guides/team-and-roles/#approvals)) is returned as a tool error the model can read, not a
-protocol error. A tool the role can't use is not listed, and calling it by name fails as unknown.
+protocol error. Any other failure is a tool error saying something went wrong on OrderLoop's side,
+without the details. A tool the role can't use is not listed, and calling it by name fails as
+unknown. On 2026-07-28 the tool list may be cached by the client for a minute.
 
 ## Actions take two calls
 
@@ -108,8 +113,8 @@ input (key order doesn't matter), or one that expired or was used, is refused wi
 call without it for a new preview. The role and the order's state are checked again when the
 action runs.
 
-Reads, `propose_flow_change` and `place_order` do not take a code. Over [A2A](/reference/a2a/),
-typed skills run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
+Reads and `propose_flow_change` do not take a code. Over [A2A](/reference/a2a/), typed skills
+(and `place_order`) run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
 
 Annotations also tell a client when to confirm:
 
@@ -119,7 +124,9 @@ Annotations also tell a client when to confirm:
 | `decide_approval`, `cancel_order`, `publish_flow` | `destructiveHint: true`; the first two are also `idempotentHint: true` |
 | `deliver_event`, `run_stock_review` | writes, not destructive |
 
-All tools set `openWorldHint: false`.
+`cancel_order`, `run_stock_review` and `assess_order` set `openWorldHint: true`: cancelling voids
+payments and cancels shipments with the carrier, the stock review places reorders with suppliers,
+and an assessment may fetch an `https` image. The other tools set it to `false`.
 
 ## Who did it
 
