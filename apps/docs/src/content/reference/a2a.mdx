@@ -66,7 +66,7 @@ the task ends `TASK_STATE_REJECTED` with the reason.
 
 <A2aSkills />
 
-Typed skills run directly: unlike the same actions over [MCP](/reference/mcp/#actions-take-two-calls),
+Typed skills run directly: unlike the same actions over [MCP](/reference/mcp/#actions-wait-for-the-person),
 they take no preview step, as the caller composed the call. A typed request puts the skill in a data part: `{ "skill": "find_orders", "input": { … } }`, with
 the `input` the same tool takes over MCP. `place_order` takes the body of
 `POST /api/v1/orders`: `flowId`, optional `version`, `input` and optional `vars`. A message with

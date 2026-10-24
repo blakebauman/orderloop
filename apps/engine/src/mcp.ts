@@ -11,7 +11,13 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import {
+  acceptedContent,
+  CLIENT_CAPABILITIES_META_KEY,
+  createMcpHandler,
+  inputRequired,
+  McpServer,
+} from '@modelcontextprotocol/server';
 import { ASSISTANT_TOOLS, type AssistantTool, atLeast, type Principal } from '@orderloop/core';
 import { z } from 'zod';
 import { previewAction, Refused } from './assistant/data';
@@ -48,6 +54,21 @@ const SLOW: Partial<Record<AssistantTool, string>> = {
   assess_order: 'Assessing the order…',
   propose_flow_change: 'Drafting the change…',
 };
+
+/** What the person answers when their client asks them to confirm an action. */
+const CONFIRM = z.object({ confirm: z.boolean().describe('Go ahead with this') });
+
+/**
+ * Whether the client asks its person itself (a 2026-07-28 request declaring form elicitation).
+ * Then an action's first call is an elicitation the client shows, not a code for the model.
+ */
+function canElicit(ctx: { mcpReq: { envelope?: object } }) {
+  const caps = (ctx.mcpReq.envelope as Record<string, unknown> | undefined)?.[
+    CLIENT_CAPABILITIES_META_KEY
+  ] as { elicitation?: { form?: object; url?: object } } | undefined;
+  const e = caps?.elicitation;
+  return !!e && (!!e.form || !e.url);
+}
 
 const refusal = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
@@ -106,6 +127,37 @@ function createServer(p: Principal) {
               (await runTool(env, p, name, raw, { via: 'MCP' })) as Record<string, unknown>,
             );
           const { confirmation, ...input } = raw;
+          if (!confirmation && canElicit(ctx)) {
+            // The retry carries the code back as request state, with the person's answer.
+            const code = ctx.mcpReq.requestState<string>();
+            if (typeof code === 'string' && code) {
+              if (acceptedContent(ctx.mcpReq.inputResponses, 'confirm', CONFIRM)?.confirm !== true)
+                return refusal('The person did not confirm. Nothing happened.');
+              if (!(await useConfirmation(env, p, name, input, code)))
+                return refusal(
+                  'That confirmation expired or was already used, or the input changed. Call again for a new preview.',
+                );
+              return result(
+                (await runTool(env, p, name, input as ToolInput<typeof name>, {
+                  via: 'MCP',
+                })) as Record<string, unknown>,
+              );
+            }
+            const preview = await previewAction(env, p, name, input as never);
+            if (preview.blocked) return refusal(preview.blocked);
+            const issued = await issueConfirmation(env, p, name, input);
+            return inputRequired({
+              inputRequests: {
+                confirm: inputRequired.elicit({
+                  message: [preview.title, ...preview.consequences.map((c) => `• ${c}`)].join('\n'),
+                  requestedSchema: CONFIRM,
+                }),
+              },
+              // Not trusted on the way back: useConfirmation checks it is this person's unused
+              // code for this tool and input.
+              requestState: issued.code,
+            });
+          }
           if (!confirmation) {
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);

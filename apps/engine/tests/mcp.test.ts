@@ -74,6 +74,7 @@ async function rpc(
   method: string,
   params: Record<string, unknown> = {},
   revision: Revision = '2025-06-18',
+  capabilities: Record<string, unknown> = {},
 ) {
   const headers = new Headers({
     'content-type': 'application/json',
@@ -89,7 +90,7 @@ async function rpc(
       ...params,
       _meta: {
         'io.modelcontextprotocol/protocolVersion': revision,
-        'io.modelcontextprotocol/clientCapabilities': {},
+        'io.modelcontextprotocol/clientCapabilities': capabilities,
         'io.modelcontextprotocol/clientInfo': { name: 'test', version: '0' },
       },
     };
@@ -338,5 +339,68 @@ describe('MCP', () => {
       return s.waits.some((w) => w.kind === 'approval') ? false : s;
     }, 'the decision');
     expect(JSON.stringify(s)).toContain('ann@example.com via MCP');
+  });
+
+  it('asks the person through a client that elicits, and acts once they agree', async () => {
+    const orderId = await waitingOrder();
+    const approver = person('approver', 'ann@example.com');
+    const decide = { orderId, decision: 'approved' };
+    const elicits = { elicitation: { form: {} } };
+    const ask = async (extra: Record<string, unknown> = {}, args = decide) =>
+      (
+        (await rpc(
+          approver,
+          'tools/call',
+          { name: 'decide_approval', arguments: args, ...extra },
+          '2026-07-28',
+          elicits,
+        )) as { body: { result: Record<string, unknown> } }
+      ).body.result;
+    const waiting = async () => (await state(orderId)).waits.some((w) => w.kind === 'approval');
+
+    // The first call asks; the model gets no code to send back itself.
+    const first = await ask();
+    expect(first).toMatchObject({
+      resultType: 'input_required',
+      inputRequests: {
+        confirm: { method: 'elicitation/create', params: { message: expect.any(String) } },
+      },
+    });
+    expect(JSON.stringify(first.inputRequests)).not.toContain('cfm_');
+    const requestState = first.requestState as string;
+    expect(await waiting()).toBe(true);
+
+    const accept = { confirm: { action: 'accept', content: { confirm: true } } };
+    // Declined, a forged state, or another input: nothing happens.
+    expect(
+      (await ask({ requestState, inputResponses: { confirm: { action: 'decline' } } })).isError,
+    ).toBe(true);
+    expect((await ask({ requestState: 'cfm_nope', inputResponses: accept })).isError).toBe(true);
+    expect(
+      (await ask({ requestState, inputResponses: accept }, { ...decide, decision: 'rejected' }))
+        .isError,
+    ).toBe(true);
+    expect(await waiting()).toBe(true);
+
+    const done = await ask({ requestState, inputResponses: accept });
+    expect(done.isError).toBeFalsy();
+    expect(done.structuredContent).toMatchObject({ done: expect.any(String) });
+    // Once.
+    expect((await ask({ requestState, inputResponses: accept })).isError).toBe(true);
+    await until(async () => !(await waiting()), 'the decision');
+    expect(JSON.stringify(await state(orderId))).toContain('ann@example.com via MCP');
+  });
+
+  it('falls back to the code on a 2026-07-28 client that cannot elicit', async () => {
+    const orderId = await waitingOrder();
+    const first = await call(
+      person('approver', 'ann@example.com'),
+      'decide_approval',
+      { orderId, decision: 'approved' },
+      '2026-07-28',
+    );
+    expect(first.structuredContent).toMatchObject({
+      confirmation: expect.stringMatching(/^cfm_/),
+    });
   });
 });

@@ -157,7 +157,13 @@ client. `assess_order` and `propose_flow_change` send one progress notification 
 has a progress token.
 
 An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
-`run_stock_review`) never runs on the first call, because a client may not ask its person. Its
+`run_stock_review`) never runs on the first call, because a client may not ask its person. When
+the request is 2026-07-28 and its envelope's client capabilities declare form elicitation
+(`canElicit` in `mcp.ts`), the first call returns `inputRequired` with a `confirm` elicitation
+built from `previewAction`, and the `cfm_…` code from `issueConfirmation` as `requestState`.
+The retry runs only when `acceptedContent(…, 'confirm', CONFIRM)` is `confirm: true` and
+`useConfirmation` accepts the returned state, which the SDK does not verify: the D1 row is what
+binds it to the principal, tool and input, once. Otherwise the two-call code flow below applies. Its
 schema gains an optional `confirmation`, and its description and the server `instructions` say to
 show the preview first. Without a code, the handler returns `previewAction` (the assistant's confirm
 card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmation`
