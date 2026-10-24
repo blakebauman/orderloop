@@ -255,6 +255,7 @@ describe('pluginContract', () => {
       execute: (r: PluginExecRequest) => plugin.execute(r),
       compensate: plugin.compensate.bind(plugin),
       provide: plugin.provide.bind(plugin),
+      renderReturn: plugin.renderReturn.bind(plugin),
       deliver: async () => {
         env.seen.add(`x${env.seen.size}`);
       },

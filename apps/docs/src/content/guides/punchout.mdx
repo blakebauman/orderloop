@@ -1,0 +1,64 @@
+---
+title: Punchout
+description: Let customers shop from inside their procurement system (Ariba, Coupa, SAP and others) over cXML or OCI, send the priced cart back, and start the order when their purchase order arrives.
+---
+
+With punchout, a customer's buyer starts in their own procurement system, "punches out" to your
+OrderLoop catalog, fills a [cart](/guides/carts/) priced for their company, and sends it back.
+Their system turns the cart into a purchase order after its own approvals, and sends that PO back
+to OrderLoop, which starts the order on your flow.
+
+Punchout is an add-on your workspace may have installed. When it is, admins see **Punchout** in
+the navigation.
+
+## Supported protocols
+
+| Protocol | Session starts with | The cart goes back as | The order arrives as |
+|---|---|---|---|
+| **cXML 1.2** (Ariba, Coupa, Jaggaer and most others) | A `PunchOutSetupRequest` posted to the setup URL | A `PunchOutOrderMessage`, posted to the buyer's `BrowserFormPost` URL | A cXML `OrderRequest` posted to the order URL |
+| **OCI 4.0** (SAP SRM and S/4HANA) | The catalog URL opened with `USERNAME`, `PASSWORD` and `HOOK_URL` | OCI `NEW_ITEM-…` fields posted to `HOOK_URL` | Your SAP integration's usual channel (EDI or email) |
+
+## Adding a partner
+
+On the **Punchout** page, add one partner per customer system:
+
+- **Protocol**: cXML or OCI.
+- **Identity**: for cXML, the customer's `From` credential: its **domain** (usually `NetworkID`
+  or `DUNS`) and identity (their network id). For OCI, the `USERNAME` their system sends.
+- **Customer**: the OrderLoop customer the carts and orders are for, so they get that customer's
+  contract prices.
+- **Flow**: the published flow that prices their carts and runs their orders. It needs a Price
+  lines step.
+- **Return hosts**: the host names their system may receive carts on (for example
+  `service.ariba.com`). OrderLoop sends a cart back only to an https URL on one of these hosts.
+- **Frame origins** (optional): origins allowed to show the catalog inside their system's page.
+- **Session minutes**: how long a cart stays open if the buyer never sends it back (at most 24 hours).
+
+Adding the partner shows its **secret once**: give it to the customer's procurement admin as the
+cXML `SharedSecret` (or the OCI `PASSWORD`). **Rotate secret** issues a new one and the old one
+stops working at once. **Disable** refuses new sessions and orders from that partner.
+
+## What to give the customer's procurement admin
+
+- cXML setup URL: `https://<your OrderLoop address>/plugins/punchout/cxml/setup`
+- cXML order URL: `https://<your OrderLoop address>/plugins/punchout/cxml/order`
+- Your supplier credential (domain and identity) as entered on the partner, and their secret.
+- For OCI: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET` and the
+  parameters `USERNAME`, `PASSWORD` and `HOOK_URL`.
+
+## What happens in a session
+
+1. The buyer clicks your catalog in their system. Their system sends the setup request; OrderLoop
+   checks the partner's identity and secret and that the return URL is one of its hosts, and
+   answers with a one-time link to a new cart.
+2. The buyer's browser opens the cart. A cXML `edit` session starts with the lines their system
+   sent back. They add and change lines, see prices for their company as they go, and can chat
+   with your team, who see the same cart on the [Carts](/guides/carts/) page.
+3. **Return cart to your system** sends the priced lines back. Each line carries its cart and line
+   reference (cXML `SupplierPartAuxiliaryID`, OCI `EXT_PRODUCT_ID`), so the PO can be traced to it.
+4. When their PO arrives (cXML `OrderRequest`, type `new`), the order starts on the partner's flow
+   for the partner's customer, with the PO number as its external id and the channel **EDI**. A PO
+   sent again starts nothing new: the same order is answered.
+
+A setup or order request with an unknown identity or wrong secret is refused with status `401`,
+and a return URL on a host not listed with `403`.

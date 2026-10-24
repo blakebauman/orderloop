@@ -62,7 +62,7 @@ describes them.
    recorded orders differently: copy the "Received" side of its diff into that file in
    `apps/docs/src/data/runs/`, keeping its `$comment` and `input`, and check the figure still reads
    right. A new figure is a new file there, a row in the test's `RUNS` and a tab in `index.mdx`.
-9. **Repo-level docs.** `README.md`, `CLAUDE.md` and `ROADMAP.md` describe the same system; if the
+9. **Repo-level docs.** `README.md`, `AGENTS.md` (the rules; `CLAUDE.md` only imports it) and `ROADMAP.md` describe the same system; if the
    change falsifies them, fix them too (a shipped roadmap item moves out of the roadmap).
 10. **Build:** `pnpm docs:build`. It fails on bad frontmatter, an unknown sidebar slug, an MDX
    syntax error, a broken import from `@orderloop/core`, and (via `apps/docs/scripts/check-links.mjs`) any
@@ -77,7 +77,7 @@ describes them.
 - Node catalog anchors are node types (`/reference/nodes/#commerce.policy`). Renaming a node type
   breaks links; the link check will name them.
 - Step names (`${nodeId}#${run}`) are durable identifiers. If a change renames them, that is a
-  code problem to raise, not a docs edit (CLAUDE.md).
+  code problem to raise, not a docs edit (AGENTS.md).
 - The live site only changes on `pnpm docs:deploy`. Deploying is a human decision; never run it
   unprompted.
 

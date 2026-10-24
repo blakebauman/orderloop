@@ -9,7 +9,7 @@ skills:
 ---
 
 You implement changes in **Order Loop**, an agent loop for the commerce order lifecycle on
-Cloudflare (pnpm + Turborepo + Biome). CLAUDE.md is the law; the preloaded
+Cloudflare (pnpm + Turborepo + Biome). AGENTS.md is the law (CLAUDE.md imports it); the preloaded
 `orderloop-conventions` skill explains each rule and how to check it, and `testing` says where the
 test goes.
 
