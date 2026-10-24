@@ -416,6 +416,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
                   env,
                   p.orderId,
                   (output as NodeResult | undefined)?.output,
+                  fx,
                 );
                 // The compensation already ran: a failed report must not make Workflows retry it.
                 try {

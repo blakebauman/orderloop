@@ -1,4 +1,9 @@
-import { CATEGORY_LABELS, pluginSecretVar, ROLE_LABELS } from '@orderloop/core';
+import {
+  CATEGORY_LABELS,
+  PROVIDER_SURFACE_LABELS,
+  pluginSecretVar,
+  ROLE_LABELS,
+} from '@orderloop/core';
 import { Link, useLoaderData } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
@@ -111,6 +116,12 @@ function PluginSection({ plugin: p }: { plugin: Plugin }) {
             </dd>
             <dt className="text-muted-foreground">Events</dt>
             <dd>{m.events.length ? m.events.join(', ') : 'None'}</dd>
+            {m.provides.length ? (
+              <>
+                <dt className="text-muted-foreground">Provides</dt>
+                <dd>{m.provides.map((x) => PROVIDER_SURFACE_LABELS[x]).join(', ')}</dd>
+              </>
+            ) : null}
             {m.secrets.length ? (
               <>
                 <dt className="text-muted-foreground">Secrets</dt>
@@ -166,7 +177,7 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
   return (
     <div className="mt-4 border-t pt-3 text-sm">
       <h3 className="caption mb-1.5">In use</h3>
-      {usage.flows.length || usage.orders.length ? (
+      {usage.flows.length || usage.orders.length || usage.labels.length ? (
         <p>
           {usage.flows.map((f, i) => (
             <span key={f.id}>
@@ -180,6 +191,12 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
           {usage.orders.length ? (
             <span className="block text-muted-foreground">
               {usage.orders.length} running {usage.orders.length === 1 ? 'order' : 'orders'}
+            </span>
+          ) : null}
+          {usage.labels.length ? (
+            <span className="block text-muted-foreground">
+              {usage.labels.length} {usage.labels.length === 1 ? 'label' : 'labels'} it couldn’t
+              void yet (retried daily)
             </span>
           ) : null}
         </p>

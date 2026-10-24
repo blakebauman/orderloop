@@ -207,12 +207,37 @@ the configured `services`. The `Authorization` header each carrier is sent is a 
 your administrator sets per carrier `id`, so credentials never appear in a flow. The request is made
 once, inside the node's step, so a retried or replayed run charges what was quoted.
 
+## Providers
+
+Five built-in nodes can hand their work to an installed plugin: `commerce.shipping_rate`,
+`commerce.ship`, `commerce.return_label`, `commerce.tax` and `commerce.address_validate`. Each has a
+**Provider** field in the flow editor, `builtin` by default, that lists `builtin` and every installed
+plugin that provides that service (rates, labels, tax or address validation). A plugin appears only
+when your administrator has installed it for the workspace; the admin-only **Plugins** page and
+`GET /api/v1/plugins` (`provides`) show what each one offers.
+
+The node keeps its fields, outputs and events; the plugin supplies the part a real service does:
+
+| Node | The provider |
+|---|---|
+| `commerce.shipping_rate` | Quotes shipping options. If it fails or offers nothing, the node falls back to the live carriers, then the configured services, and its summary says the provider was unavailable |
+| `commerce.ship`, `commerce.return_label` | Creates a label and tracking number per package, and voids it on rollback or cancel (a label it can't void is kept and tried again daily) |
+| `commerce.tax` | Returns the tax amount; more than half of what is taxable fails the node |
+| `commerce.address_validate` | Reports `valid`, `corrected` or `invalid` |
+
+OrderLoop still checks what comes back, applies free thresholds and currency conversion, computes
+the order's totals, writes the shipment records, consumes stock, sets `vars.tracking` and emits
+`order.shipped`. The provider is part of the published flow version, so a replay calls the same
+one. A flow that names a plugin depends on it: removing the plugin, or one that stops providing the
+service, makes the flow fail validation until you pick another provider. A package the provider
+returns no label for fails the node after voiding the labels that did come back.
+
 ## Undoing fulfillment
 
 | Event | Undone |
 |---|---|
 | A failed order rolls back | `commerce.reserve_inventory` releases held stock (at the location it was held at); `commerce.ship` cancels every shipment it booked and, once none of the order's shipments is live, restocks what they consumed (reservation `restored`); `commerce.pickup_ready` cancels the staged pickup; `commerce.deliver_digital` revokes the order's issued codes (`status` `revoked`); `commerce.authorize_payment` voids the authorization; `commerce.invoice` takes an on-account invoice back off the customer's balance |
-| A cancel | Does the same in one pass: releases holds, voids authorizations, cancels staged pickups along with open shipments, restocks shipped stock, reverses account charges, revokes codes, plus seller orders and payouts |
+| A cancel | Does the same in one pass: releases holds, voids authorizations, voids provider labels (a label the provider cannot void is left uncancelled and counted in the timeline), cancels staged pickups along with open shipments, restocks shipped stock, reverses account charges, revokes codes, plus seller orders and payouts |
 
 Codes issued for a mixed cart are revoked when its physical part later fails, for example when the
 store runs out between routing and reserving. A completed hand-over has consumed its stock and has no

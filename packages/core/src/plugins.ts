@@ -16,7 +16,11 @@ import {
   type NodeCategory,
   type NodeSpec,
   nodeOutputs,
+  nodeProvider,
   nodeSpec,
+  PROVIDER_SURFACE_LABELS,
+  PROVIDER_SURFACES,
+  type ProviderSurface,
   specDefaults,
   validateFields,
 } from './catalog';
@@ -48,6 +52,18 @@ export const PLUGIN_MANIFEST_MAX_BYTES = 64 * 1024;
 
 /** A nav or public path: plain characters only, so a link can't lead outside the plugin. */
 const PLUGIN_PAGE_PATH_RE = /^\/plugins\/[a-z][a-z0-9-]{1,30}\/[A-Za-z0-9._~/-]*$/;
+
+/**
+ * The surfaces whose work needs the buyer's address (a label's ship-to, tax by jurisdiction, the
+ * address itself), so a plugin providing them must ask for buyer details, and be granted them.
+ * Rates get the ship-to country only, as a redacted order has it.
+ */
+export const SURFACE_NEEDS_BUYER: Record<ProviderSurface, boolean> = {
+  'shipping.rates': false,
+  'shipping.labels': true,
+  tax: true,
+  address: true,
+};
 
 /**
  * The key the web app signs a plugin's page requests with, and the only one the plugin holds: an
@@ -186,6 +202,11 @@ export const pluginManifestSchema = z
       )
       .max(20)
       .default([]),
+    /**
+     * What the plugin can do behind built-in nodes (`PROVIDER_SURFACES`): a flow picks it in a
+     * node's Provider field, and the engine calls `provide` instead of the built-in connector.
+     */
+    provides: z.array(z.enum(PROVIDER_SURFACES)).default([]),
   })
   .superRefine((m, ctx) => {
     const prefix = `/plugins/${m.id}/`;
@@ -211,6 +232,16 @@ export const pluginManifestSchema = z
           message: RESERVED_PLUGIN_ENV.has(name) ? 'That name is reserved' : 'Duplicate secret',
         });
       names.add(name);
+    }
+    for (const [i, surface] of m.provides.entries()) {
+      if (m.provides.indexOf(surface) !== i)
+        ctx.addIssue({ code: 'custom', path: ['provides', i], message: 'Duplicate surface' });
+      if (SURFACE_NEEDS_BUYER[surface] && m.personalData !== 'send')
+        ctx.addIssue({
+          code: 'custom',
+          path: ['provides', i],
+          message: `Providing ${PROVIDER_SURFACE_LABELS[surface].toLowerCase()} needs the buyer's address: set personalData to "send"`,
+        });
     }
     for (const [key, paths] of [
       ['nav', m.nav.map((n) => n.path)],
@@ -395,6 +426,198 @@ export type PluginCompensateRequest = {
   output: unknown;
 };
 
+// ── Providers ────────────────────────────────────────────────────────────────
+
+/** A package to label: one per location the order ships from (`ref` names it in the result). */
+export type LabelPackage = {
+  ref: string;
+  locationId: string | null;
+  lines: { sku: string; qty: number }[];
+};
+
+/**
+ * What the engine asks a provider, inside the node's step (or, for rates and tax, while pricing a
+ * checkout, with `stepKey` `quote#<nodeId>`). Amounts are in the order's currency, except a rate
+ * request's `subtotal` and the rates returned, which are in `BASE_CURRENCY` as static rates are.
+ * Key every write by `orderId` and `stepKey` together, as a node's.
+ */
+export type ProvideRequest = {
+  nodeId: string;
+  stepKey: string;
+  orderId: string;
+  /** The node's config with defaults filled in. */
+  config: Record<string, unknown>;
+} & (
+  | {
+      surface: 'shipping.rates';
+      op: 'quote';
+      order: Order | RedactedOrder;
+      input: { itemCount: number; country?: string; subtotal: number; currency: string };
+    }
+  | {
+      surface: 'shipping.labels';
+      op: 'create';
+      order: Order | RedactedOrder;
+      input: { kind: 'shipment' | 'return'; carrier: string; packages: LabelPackage[] };
+    }
+  | {
+      surface: 'shipping.labels';
+      op: 'void';
+      /**
+       * Labels `create` returned, to void: on a rollback (`stepKey` is the creating step's) or when
+       * the order is cancelled (`stepKey` "cancel"). Key it by the label ids: it may run again.
+       */
+      input: { labels: { ref: string; id: string }[] };
+    }
+  | {
+      surface: 'tax';
+      op: 'calculate';
+      order: Order | RedactedOrder;
+      input: { subtotal: number; shipping: number; includeShipping: boolean; currency: string };
+    }
+  | {
+      surface: 'address';
+      op: 'validate';
+      order: Order | RedactedOrder;
+      input: { address: unknown };
+    }
+);
+
+export type ProvideOp = ProvideRequest['op'];
+
+const shortText = (max: number) => z.string().min(1).max(max);
+
+/**
+ * Text a provider returns that the engine stores and shows (tracking, carrier, label ids):
+ * printable, with no control or bidi characters, since it reaches the timeline, webhooks and UCP
+ * events.
+ */
+const plainText = (max: number) =>
+  shortText(max).regex(/^[A-Za-z0-9 ._:#+-]+$/, 'Use letters, digits, spaces and . _ : # + -');
+
+/** The most tax a provider may charge, as a share of what is taxable; more fails the node. */
+export const PROVIDER_MAX_TAX_RATE = 0.5;
+
+/** The highest shipping rate a provider may quote, in the base currency; a higher one is dropped. */
+export const PROVIDER_MAX_RATE = 100_000;
+
+const addressText = z.string().max(200);
+
+/** What each surface's ops return, before the engine applies it. */
+export const PROVIDE_RESULT_SCHEMAS = {
+  'shipping.rates': {
+    // Each option is checked as a live carrier's is (`parseCarrierQuote`); malformed ones drop.
+    quote: z.object({ options: z.array(z.unknown()).max(50) }),
+  },
+  'shipping.labels': {
+    // No label link: a URL anyone can fetch would carry the buyer's address to every plugin and
+    // webhook that sees the node's output.
+    create: z.object({
+      labels: z
+        .array(
+          z.object({
+            ref: shortText(120),
+            /** The provider's own id for the label, sent back to `void`. */
+            id: plainText(120),
+            tracking: plainText(80),
+            carrier: plainText(40).optional(),
+          }),
+        )
+        .min(1)
+        .max(50),
+    }),
+    void: z.object({ summary: z.string().transform(clip).optional() }),
+  },
+  tax: {
+    calculate: z.object({ amount: z.number().nonnegative().finite() }),
+  },
+  address: {
+    // `ShipAddress`'s keys only, so redaction (which goes by key) knows every field.
+    validate: z
+      .object({
+        status: z.enum(['valid', 'corrected', 'invalid']),
+        address: z
+          .strictObject({
+            name: addressText.optional(),
+            line1: addressText.optional(),
+            line2: addressText.optional(),
+            city: addressText.optional(),
+            region: addressText.optional(),
+            postalCode: addressText.optional(),
+            country: addressText.optional(),
+          })
+          .nullable(),
+        issues: z.array(z.string().max(PLUGIN_SUMMARY_MAX)).max(5),
+      })
+      .refine((r) => r.status !== 'corrected' || r.address !== null, {
+        message: 'A corrected address needs the address',
+        path: ['address'],
+      }),
+  },
+} as const;
+
+type ResultOf<
+  S extends ProviderSurface,
+  O extends string,
+> = S extends keyof typeof PROVIDE_RESULT_SCHEMAS
+  ? O extends keyof (typeof PROVIDE_RESULT_SCHEMAS)[S]
+    ? z.output<(typeof PROVIDE_RESULT_SCHEMAS)[S][O] & z.ZodType>
+    : never
+  : never;
+
+export type ProvideResult<S extends ProviderSurface = ProviderSurface, O extends string = string> =
+  | ResultOf<S, O>
+  | { fail: { message: string; retry?: boolean } };
+
+/** A checked provider result: what to apply, or how the call failed. */
+export type ProvideOutcome<T> =
+  | { kind: 'done'; value: T }
+  | { kind: 'fail'; message: string; retry: boolean };
+
+/**
+ * Checks what a provider returned for `surface` and `op`. Throws, naming the problem, for a result
+ * the engine must not apply (not the contract's shape, or over `PLUGIN_RESULT_MAX_BYTES`).
+ */
+export function checkProvideResult<S extends ProviderSurface, O extends ProvideOp>(
+  plugin: string,
+  surface: S,
+  op: O,
+  value: unknown,
+): ProvideOutcome<ResultOf<S, O>> {
+  const what = `${plugin} (${surface} ${op})`;
+  const sized = jsonSized('The result').safeParse(value ?? null);
+  if (!sized.success)
+    throw new Error(`${what} returned an invalid result: ${sized.error.issues[0]?.message}`);
+  const raw = value ?? {};
+  if (raw && typeof raw === 'object' && 'fail' in raw) {
+    const f = failSchema.safeParse(raw);
+    if (!f.success) throw new Error(`${what} returned an invalid failure`);
+    return { kind: 'fail', message: f.data.fail.message, retry: f.data.fail.retry === true };
+  }
+  const schema = (PROVIDE_RESULT_SCHEMAS[surface] as Record<string, z.ZodType>)[op];
+  if (!schema) throw new Error(`${surface} has no ${op}`);
+  const r = schema.safeParse(raw);
+  if (!r.success) {
+    const issue = r.error.issues[0];
+    throw new Error(
+      `${what} returned an invalid result: ${issue?.path.join('.') || 'result'}: ${issue?.message}`,
+    );
+  }
+  return { kind: 'done', value: r.data as ResultOf<S, O> };
+}
+
+/** The plugins a node depends on: its own type's, and the one its Provider field names. */
+export function nodePlugins(node: { type: string; config?: Record<string, unknown> }): string[] {
+  const own = pluginOf(node.type);
+  const provider = nodeProvider(nodeSpec(node.type), node.config)?.plugin;
+  return [...new Set([own, provider].filter((x): x is string => !!x))];
+}
+
+/** The plugins a flow depends on, for its `load-plugins` step, usage and removal checks. */
+export const flowPlugins = (graph: {
+  nodes: { type: string; config?: Record<string, unknown> }[];
+}) => new Set(graph.nodes.flatMap(nodePlugins));
+
 /**
  * The RPC every plugin Worker's default entrypoint implements. `fetch` serves its pages: a request
  * under `/plugins/<id>/` arrives with the signed principal header (`verifyPrincipal`), except on the
@@ -407,6 +630,8 @@ export interface PluginRpc {
   compensate(req: PluginCompensateRequest): Promise<string>;
   /** An outbound event. Idempotent on `payload.id`, which is stable across redeliveries. */
   deliver(payload: OutboundPayload): Promise<void>;
+  /** Does a built-in node's work for a surface in the manifest's `provides`. */
+  provide(req: ProvideRequest): Promise<ProvideResult>;
 }
 
 /**
@@ -422,12 +647,14 @@ export type PluginStatus = {
   error?: string;
 };
 
-/** What still uses a plugin's nodes; it can be removed only once both lists are empty. */
+/** What still uses a plugin; it can be removed only once every list is empty. */
 export type PluginUsage = {
-  /** Flows whose published version uses the plugin's nodes. */
+  /** Flows whose published version uses the plugin's nodes, or names it as a Provider. */
   flows: { id: string; version: number }[];
   /** Orders still running on a flow version that does. */
   orders: { id: string; flowId: string; version: number }[];
+  /** Labels it made that it couldn't void yet (`void_failed`), retried daily. */
+  labels: { id: string; orderId: string }[];
 };
 
 // ── Node registry ────────────────────────────────────────────────────────────
@@ -442,6 +669,8 @@ export type NodeRegistry = {
   pluginNodes(): { plugin: PluginManifest; spec: NodeSpec }[];
   /** Ids of the installed plugins. */
   installed(): string[];
+  /** The installed plugins that provide `surface`, for a node's Provider field. */
+  providers(surface: ProviderSurface): { id: string; name: string }[];
 };
 
 function toNodeSpec(n: PluginNodeSpec): NodeSpec {
@@ -484,10 +713,26 @@ export function withPlugins(manifests: readonly PluginManifest[]): NodeRegistry 
     withDefaults: (type, config) => specDefaults(spec(type), config),
     validate: (type, config) => {
       const s = spec(type);
-      return s ? validateFields(s, specDefaults(s, config)) : [missing(type)];
+      if (!s) return [missing(type)];
+      const merged = specDefaults(s, config);
+      const errors = validateFields(s, merged);
+      const p = nodeProvider(s, merged);
+      if (p) {
+        const m = manifests.find((x) => x.id === p.plugin);
+        if (!m) errors.push(`Provider: plugin “${p.plugin}” is not installed`);
+        else if (!m.provides.includes(p.surface))
+          errors.push(
+            `Provider: plugin “${p.plugin}” doesn't provide ${PROVIDER_SURFACE_LABELS[p.surface].toLowerCase()}`,
+          );
+      }
+      return errors;
     },
     pluginNodes: () => [...byType.values()],
     installed: () => manifests.map((m) => m.id),
+    providers: (surface) =>
+      manifests
+        .filter((m) => m.provides.includes(surface))
+        .map((m) => ({ id: m.id, name: m.name })),
   };
 }
 

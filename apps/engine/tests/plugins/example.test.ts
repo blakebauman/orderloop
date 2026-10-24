@@ -164,7 +164,7 @@ describe('an installed plugin', () => {
         'test-probe-echo',
       ]),
     );
-    expect(await api().pluginUsage('other')).toEqual({ flows: [], orders: [] });
+    expect(await api().pluginUsage('other')).toEqual({ flows: [], orders: [], labels: [] });
   });
 
   it('leaves the stock it reserved for the order that completed', async () => {

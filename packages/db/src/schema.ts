@@ -402,6 +402,9 @@ export const shipments = sqliteTable(
     tracking: text('tracking').notNull(),
     status: text('status').notNull(),
     createdAt: integer('created_at').notNull(),
+    /** The provider plugin that labelled it, and its id for the label; null when built in. */
+    provider: text('provider'),
+    externalId: text('external_id'),
   },
   (t) => [index('shipments_order').on(t.orderId)],
 );

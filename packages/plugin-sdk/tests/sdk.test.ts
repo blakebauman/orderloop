@@ -254,6 +254,7 @@ describe('pluginContract', () => {
       manifest: () => plugin.manifest(),
       execute: (r: PluginExecRequest) => plugin.execute(r),
       compensate: plugin.compensate.bind(plugin),
+      provide: plugin.provide.bind(plugin),
       deliver: async () => {
         env.seen.add(`x${env.seen.size}`);
       },
@@ -274,5 +275,90 @@ describe('pluginContract', () => {
     const { plugin, env } = instance(good());
     const old = { ...plugin, manifest: async () => ({ ...manifest, apiVersion: 0 }) as never };
     expect((await pluginContract(old as never, cases(env)))[0]).toMatch(/^manifest: .*apiVersion/);
+  });
+});
+
+describe('providers', () => {
+  const carrierManifest = {
+    apiVersion: 1 as const,
+    id: 'carrier',
+    name: 'Carrier',
+    version: '1',
+    personalData: 'send' as const,
+    provides: ['shipping.labels' as const, 'shipping.rates' as const],
+  };
+  type CEnv = { PLUGIN_KEY: string; labels: Map<string, string> };
+  const carrier = (opts: { keyless?: boolean } = {}) =>
+    definePlugin<CEnv>({
+      manifest: carrierManifest,
+      providers: {
+        'shipping.rates': {
+          quote: ({ req }) => ({
+            options: [{ id: 'ground', amount: 4 + req.input.itemCount, carrier: 'ups' }],
+          }),
+        },
+        'shipping.labels': {
+          create: ({ env, key, req }) => ({
+            labels: req.input.packages.map((p) => {
+              const id = opts.keyless ? `L${env.labels.size}` : `L_${key}_${p.ref}`;
+              env.labels.set(id, req.orderId);
+              return { ref: p.ref, id, tracking: `1Z${id.length}` };
+            }),
+          }),
+          void: ({ env, req }) => {
+            for (const l of req.input.labels) env.labels.delete(l.id);
+            return { summary: 'Voided' };
+          },
+        },
+      },
+    });
+  const run = (Plugin: ReturnType<typeof carrier>) => {
+    const env: CEnv = { PLUGIN_KEY: KEY, labels: new Map() };
+    return pluginContract(new Plugin({} as never, env) as never, {
+      effects: async (orderId) => [...env.labels.values()].filter((o) => o === orderId).length,
+    });
+  };
+
+  it('needs a handler for every op of every surface it provides', () => {
+    expect(() =>
+      checkDefinition({
+        manifest: carrierManifest,
+        providers: { 'shipping.labels': { create: () => ({ labels: [] }) } as never },
+      }),
+    ).toThrow(
+      /provides shipping.labels but providers has no shipping.labels.void.*provides shipping.rates but providers has no shipping.rates.quote/,
+    );
+    expect(() =>
+      checkDefinition({
+        manifest: { ...carrierManifest, provides: [] },
+        providers: { tax: { calculate: () => ({ amount: 0 }) } },
+      }),
+    ).toThrow(/providers.tax is not in the manifest's provides/);
+  });
+
+  it('passes a provider that keys its labels by the step, and catches one that does not', async () => {
+    expect(await run(carrier())).toEqual([]);
+    expect(await run(carrier({ keyless: true }))).toEqual([
+      'shipping.labels: create gave a different result when run again for the same step',
+      'shipping.labels: create wrote again for the same order and step key',
+      'shipping.labels: voiding twice left 1 effects; there were 0 before create',
+    ]);
+  });
+
+  it('refuses an op the plugin does not provide', async () => {
+    const env: CEnv = { PLUGIN_KEY: KEY, labels: new Map() };
+    const plugin = new (carrier())({} as never, env);
+    expect(
+      await plugin.provide({
+        surface: 'tax',
+        op: 'calculate',
+        nodeId: 'n',
+        stepKey: 'n#1',
+        orderId: 'o',
+        config: {},
+        order: {} as never,
+        input: { subtotal: 1, shipping: 0, includeShipping: true, currency: 'USD' },
+      }),
+    ).toEqual({ fail: { message: "carrier doesn't provide tax calculate" } });
   });
 });

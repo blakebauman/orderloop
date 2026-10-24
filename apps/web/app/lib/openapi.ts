@@ -632,7 +632,7 @@ export function openApiDocument(serverUrl: string) {
             'The installed plugins, with their node types, the events they receive and whether they answer (admin)',
           responses: {
             '200': ok(
-              '{ plugins: [{ binding, id, name, version, nodes, events, healthy, error? }] }: id and name are null for a plugin whose manifest was refused',
+              '{ plugins: [{ binding, id, name, version, nodes, events, provides, healthy, error? }] }: id and name are null for a plugin whose manifest was refused; provides lists what it can do behind built-in nodes (shipping.rates, shipping.labels, tax, address)',
             ),
             ...errors,
           },
@@ -640,11 +640,11 @@ export function openApiDocument(serverUrl: string) {
       },
       '/api/v1/plugins/{id}/usage': {
         get: {
-          summary: "What uses a plugin's nodes: check this is empty before removing it (admin)",
+          summary: 'What uses a plugin: check this is empty before removing it (admin)',
           parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
           responses: {
             '200': ok(
-              '{ flows: [{ id, version }], orders: [{ id, flowId, version }] }: published flows and running orders',
+              "{ flows: [{ id, version }], orders: [{ id, flowId, version }], labels: [{ id, orderId }] }: published flows that use its nodes or name it as a provider, running orders on them, and shipping labels it couldn't void yet (retried daily)",
             ),
             ...errors,
           },

@@ -23,6 +23,11 @@ Add a `node({...})` to `NODE_SPECS` in its category's section:
   lucide-react name), `fields` (config, with defaults that validate), `outputs` (the branches it can
   take; a plain node uses `OUT`).
 - `rollback: true` only if it has an effect outside the order that a failed order must undo.
+- `providerField(surface)` in `fields` if a plugin may do the node's outside work for one of the
+  `PROVIDER_SURFACES`; the executor then calls `provide` (`apps/engine/src/providers.ts`) when
+  `config.provider` names a plugin. A new surface needs its ops and result schema in
+  `PROVIDE_RESULT_SCHEMAS` (`packages/core/src/plugins.ts`), handlers in the SDK and contract
+  checks; see "Providers" in docs/plugins.md.
 
 Config validation runs through `validateConfig`; if a field has rules, add them where similar
 nodes have theirs and test them in `packages/core/tests/graph.test.ts` (node config section).
@@ -46,7 +51,8 @@ the `orderloop-conventions` invariants first.
 
 ## 3. The compensation: `ROLLBACKS` in `apps/engine/src/nodes.ts`
 
-Required when the spec has `rollback: true`. Signature `(env, orderId, output) => Promise<string>`,
+Required when the spec has `rollback: true`. Signature
+`(env, orderId, output, stepKey) => Promise<string>`,
 returning a summary. It must be idempotent (it can run twice) and must tolerate a missing or
 partial `output` (the step may have failed before writing all of it): see `commerce.pickup_ready`.
 

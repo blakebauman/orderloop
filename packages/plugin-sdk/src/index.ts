@@ -8,6 +8,8 @@
  * - Each node handler gets `key`, the one key to write by (the order id and the step key together),
  *   and `fail()` for failing the node.
  * - Events are dispatched by name; an event without a handler is ignored.
+ * - Providers are dispatched by surface and op; every surface in `provides` needs a handler for
+ *   each of its ops, and each gets the same `key` a node does.
  * - Pages get the person the web app signed onto the request, verified against both principal keys
  *   and checked against the manifest's `pageRole`; `publicPaths` get `principal: null`.
  * - The manifest call fails while a secret the manifest declares (and doesn't mark `optional`) is
@@ -27,6 +29,10 @@ import {
   type PluginManifest,
   type PluginRpc,
   PRINCIPAL_HEADER,
+  PROVIDE_RESULT_SCHEMAS,
+  type ProvideRequest,
+  type ProvideResult,
+  type ProviderSurface,
   type ProxiedPrincipal,
   parseManifest,
   type pluginManifestSchema,
@@ -67,6 +73,36 @@ export type NodeHandler<E> = {
   compensate?(ctx: CompensateContext<E>): string | undefined | Promise<string | undefined>;
 };
 
+/** One provider op's request, by surface and op. */
+export type ProvideFor<S extends ProviderSurface, O extends string> = Extract<
+  ProvideRequest,
+  { surface: S; op: O }
+>;
+
+export type ProviderContext<E, R> = {
+  req: R;
+  env: E;
+  /** `<orderId>:<stepKey>`, as a node's: write by it. */
+  key: string;
+  fail(message: string, opts?: { retry?: boolean }): { fail: { message: string; retry: boolean } };
+};
+
+type Op<E, S extends ProviderSurface, O extends string> = (
+  ctx: ProviderContext<E, ProvideFor<S, O>>,
+) => ProvideResult<S, O> | Promise<ProvideResult<S, O>>;
+
+/** Handlers for each surface the manifest `provides`, one per op. */
+export type ProviderHandlers<E> = {
+  'shipping.rates'?: { quote: Op<E, 'shipping.rates', 'quote'> };
+  'shipping.labels'?: {
+    create: Op<E, 'shipping.labels', 'create'>;
+    /** Voids what `create` made for the same key; safe to repeat. */
+    void: Op<E, 'shipping.labels', 'void'>;
+  };
+  tax?: { calculate: Op<E, 'tax', 'calculate'> };
+  address?: { validate: Op<E, 'address', 'validate'> };
+};
+
 export type PageContext<E> = {
   env: E;
   /** The verified person, or null on a public path. */
@@ -82,7 +118,11 @@ export type PluginDefinition<E> = {
     Record<OutboundEvent, (payload: OutboundPayload, env: E) => Promise<void> | void>
   >;
   pages?(request: Request, ctx: PageContext<E>): Response | Promise<Response>;
+  providers?: ProviderHandlers<E>;
 };
+
+/** The ops each surface has. */
+const opsOf = (surface: ProviderSurface) => Object.keys(PROVIDE_RESULT_SCHEMAS[surface]);
 
 /** The declared secrets, not `optional`, that `env` lacks. */
 export function missingSecrets(manifest: PluginManifest, env: object): string[] {
@@ -116,6 +156,14 @@ export function checkDefinition<E>(def: PluginDefinition<E>): PluginManifest {
   for (const event of subscribed)
     if (event !== '*' && !handled.includes(event))
       problems.push(`the manifest subscribes to ${event} but events has no handler for it`);
+  const providers = (def.providers ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  for (const surface of manifest.provides)
+    for (const op of opsOf(surface))
+      if (typeof providers[surface]?.[op] !== 'function')
+        problems.push(`the manifest provides ${surface} but providers has no ${surface}.${op}`);
+  for (const surface of Object.keys(providers))
+    if (!(manifest.provides as string[]).includes(surface))
+      problems.push(`providers.${surface} is not in the manifest's provides`);
   if ((manifest.nav.length || manifest.publicPaths.length) && !def.pages)
     problems.push('the manifest has pages (nav or publicPaths) but there is no pages handler');
   if (problems.length) throw new Error(`Plugin ${manifest.id}: ${problems.join('; ')}`);
@@ -163,6 +211,23 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
         key: runKey(req.orderId, req.stepKey),
       });
       return said ?? 'Nothing to undo';
+    }
+
+    async provide(req: ProvideRequest): Promise<ProvideResult> {
+      const handlers = def.providers as
+        | Record<string, Record<string, Op<E, ProviderSurface, string>> | undefined>
+        | undefined;
+      const h = manifest.provides.includes(req.surface)
+        ? handlers?.[req.surface]?.[req.op]
+        : undefined;
+      if (!h)
+        return { fail: { message: `${manifest.id} doesn't provide ${req.surface} ${req.op}` } };
+      return h({
+        req: req as never,
+        env: this.env,
+        key: runKey(req.orderId, req.stepKey),
+        fail: (message, opts) => ({ fail: { message, retry: opts?.retry === true } }),
+      });
     }
 
     async deliver(payload: OutboundPayload) {

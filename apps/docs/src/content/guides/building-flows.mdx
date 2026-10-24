@@ -50,6 +50,9 @@ lists them, and **Restore** brings one back.
   the branch it belongs to. A `control.loop` node has a second input, `next`, for its back-edge.
 - **Inspector.** The selected node's label and config fields, generated from the node's catalog
   entry, plus its per-node `retries` and `timeout`. Validation messages appear beside the field.
+  A **Provider** field (on shipping rate, create shipment, return label, tax and address
+  validation) picks `builtin` or an installed plugin that provides that service; see
+  [Providers](/guides/fulfillment/#providers).
   While the assistant panel is open, the inspector folds away to give the canvas room, and comes
   back when you select a node.
 - **Ask.** Opens the [assistant](/guides/assistant/) about this flow, with the graph on screen

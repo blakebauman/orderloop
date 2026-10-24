@@ -23,6 +23,7 @@ import {
 } from '@orderloop/core';
 import { getProducts } from '../connectors';
 import { EXECUTORS } from '../nodes';
+import { providerOfError } from '../providers';
 
 export type Quoted = { quote: CheckoutQuote | null; issues: CheckoutIssue[] };
 
@@ -154,6 +155,13 @@ export async function quoteCheckout(
           );
       }
     } catch (err) {
+      // A provider's failure (retryable or not) is an issue the platform can retry on, with a
+      // fixed message: a provider's own text never reaches the buyer's agent.
+      if (providerOfError(err)) {
+        console.warn(`pricing checkout ${s.id}: provider ${providerOfError(err)}`, err);
+        issues.push(issue('invalid', 'Shipping or tax could not be calculated right now.', '$'));
+        return { quote: null, issues };
+      }
       if (!(err instanceof NonRetryableError)) throw err;
       issues.push(issue('invalid', err.message, '$'));
       return { quote: null, issues };

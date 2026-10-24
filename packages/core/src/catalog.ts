@@ -28,7 +28,24 @@ export type FieldKind =
   /** A JSON Logic expression evaluated against the run context. */
   | 'logic'
   | 'json'
-  | 'list';
+  | 'list'
+  /** Who does the work: `builtin`, or the id of an installed plugin providing `surface`. */
+  | 'provider';
+
+/**
+ * What a plugin can stand behind a built-in node to do (its manifest's `provides`). The node keeps
+ * its contract: the core still applies totals, stock, shipments and branches from what the
+ * provider returns. See docs/plugins.md, "Providers".
+ */
+export const PROVIDER_SURFACES = ['shipping.rates', 'shipping.labels', 'tax', 'address'] as const;
+export type ProviderSurface = (typeof PROVIDER_SURFACES)[number];
+
+export const PROVIDER_SURFACE_LABELS: Record<ProviderSurface, string> = {
+  'shipping.rates': 'Shipping rates',
+  'shipping.labels': 'Shipping labels',
+  tax: 'Tax',
+  address: 'Address validation',
+};
 
 export type ConfigField = {
   key: string;
@@ -40,6 +57,8 @@ export type ConfigField = {
   default?: unknown;
   /** Overrides the kind's validation, for structured `json` fields. */
   schema?: z.ZodType;
+  /** A `provider` field's surface. */
+  surface?: ProviderSurface;
 };
 
 export type NodeSpec = {
@@ -66,6 +85,16 @@ export type NodeSpec = {
 const OUT = ['out'];
 
 const node = (spec: NodeSpec) => spec;
+
+/** The field that picks who does a node's work; installed providers come from the registry. */
+const providerField = (surface: ProviderSurface): ConfigField => ({
+  key: 'provider',
+  label: 'Provider',
+  kind: 'provider',
+  surface,
+  default: 'builtin',
+  hint: `Built in, or an installed plugin that provides ${PROVIDER_SURFACE_LABELS[surface].toLowerCase()}`,
+});
 
 export const NODE_SPECS = [
   // ── Triggers ────────────────────────────────────────────────────────────────
@@ -209,6 +238,7 @@ export const NODE_SPECS = [
         default: 'from_order',
         hint: 'from_order charges order.shippingOption, or the cheapest when the order names none',
       },
+      providerField('shipping.rates'),
     ],
     outputs: ['ok', 'unavailable'],
   }),
@@ -228,6 +258,7 @@ export const NODE_SPECS = [
         default: true,
         hint: 'Off taxes the subtotal only',
       },
+      providerField('tax'),
     ],
     outputs: OUT,
   }),
@@ -261,7 +292,7 @@ export const NODE_SPECS = [
     description:
       'Checks and normalises the ship-to in order.meta.shipTo. A correction is offered in vars.suggestedAddress.',
     icon: 'MapPin',
-    fields: [],
+    fields: [providerField('address')],
     outputs: ['valid', 'corrected', 'invalid'],
   }),
   node({
@@ -523,6 +554,7 @@ export const NODE_SPECS = [
         default: 'ups',
         hint: 'from_order books the carrier of the shipping option the order was charged for',
       },
+      providerField('shipping.labels'),
     ],
     outputs: OUT,
     rollback: true,
@@ -541,6 +573,7 @@ export const NODE_SPECS = [
         options: ['ups', 'fedex', 'dhl', 'freight'],
         default: 'ups',
       },
+      providerField('shipping.labels'),
     ],
     outputs: OUT,
   }),
@@ -880,6 +913,20 @@ export const NODE_SPECS = [
 export type NodeType = (typeof NODE_SPECS)[number]['type'];
 
 const BY_TYPE = new Map<string, NodeSpec>(NODE_SPECS.map((s) => [s.type, s]));
+
+/**
+ * The plugin a node's `provider` field names, and for what; null when the node does its own work
+ * (no provider field, or `builtin`).
+ */
+export function nodeProvider(
+  spec: NodeSpec | undefined,
+  config: Record<string, unknown> | undefined,
+): { plugin: string; surface: ProviderSurface } | null {
+  const f = spec?.fields.find((x) => x.kind === 'provider');
+  const v = config?.provider;
+  if (!f?.surface || typeof v !== 'string' || !v || v === 'builtin') return null;
+  return { plugin: v, surface: f.surface };
+}
 
 export function nodeSpec(type: string): NodeSpec | undefined {
   return BY_TYPE.get(type);

@@ -185,7 +185,8 @@ Plugins (`plugins/<id>/`, contract in `packages/core/src/plugins.ts`, see `docs/
 - namespace node types `<id>.<name>`;
 - key every write and compensation by order id + step key (the SDK's `key`), every delivery by its
   payload id;
-- pass `pluginContract` (`@orderloop/plugin-sdk/contract`) in their own tests.
+- pass `pluginContract` (`@orderloop/plugin-sdk/contract`) in their own tests;
+- as providers (`provides`), return only what the surface's schema allows (`PROVIDE_RESULT_SCHEMAS`); the node's executor applies it, and rates, tax and address ops write nothing, since they also price checkouts.
 
 The engine checks what a plugin returns (`checkExecResult`), times its calls out, and puts its
 `vars` under `vars.<id>`. The web app forwards only `/plugins/<id>/…`, with allowlisted request

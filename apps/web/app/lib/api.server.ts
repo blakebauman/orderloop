@@ -232,6 +232,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
             version: m?.version ?? null,
             nodes: m?.nodes.map((n) => n.type) ?? [],
             events: m?.events ?? [],
+            provides: m?.provides ?? [],
             healthy,
             ...(error ? { error } : {}),
           })),
