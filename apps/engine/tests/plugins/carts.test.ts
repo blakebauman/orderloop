@@ -332,8 +332,9 @@ describe('an external cart’s buyer', () => {
   });
 
   it('can’t use a start link once the cart’s time has passed', async () => {
-    const c = await open({ expiresAt: Date.now() + 150 });
-    await new Promise((r) => setTimeout(r, 200));
+    // A second's margin: opening refuses a time already past, and under load it can take a while.
+    const c = await open({ expiresAt: Date.now() + 1_000 });
+    await new Promise((r) => setTimeout(r, 1_100));
     expect(await cartAgent(c.cartId).redeemStart(c.token)).toBeNull();
     expect(await cartAgent(c.cartId).issueStart()).toBeNull();
   });
