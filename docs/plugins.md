@@ -170,8 +170,9 @@ throws when the plugin is gone, since there is nothing to undo it with.
   setup is due) and signs the principal header for that path; the plugin trusts nothing else. Paths in
   `publicPaths` skip all of that, for callers that authenticate to the plugin themselves.
 - **Editor and validation**: the shell loads the manifests (`pluginManifests`, from
-  `EngineRpc.pluginCatalog`) into `NodesProvider`; components read node specs with `useNodes()`
-  rather than `nodeSpec`. Server-side flow validation uses `nodeRegistry()`.
+  `EngineRpc.pluginCatalog`) into `PluginsProvider` (`apps/web/app/lib/plugins.tsx`); components
+  read node specs with `useNodes()` (`lib/nodes.tsx`) rather than `nodeSpec`, which builds the
+  registry from them where it is used, so the shell's chunk carries no node catalog or zod. Server-side flow validation uses `nodeRegistry()`.
 - **Health and usage**: `EngineRpc.health` adds a check per binding, named like it in lower case
   (`plugin_example`), that calls `manifest()`. `EngineRpc.pluginUsage(id)` backs the admin
   endpoint `GET /api/v1/plugins/:id/usage`.
