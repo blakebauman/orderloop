@@ -10,6 +10,7 @@ pnpm web:dev                 # web + engine together (engine is a Vite auxiliary
 pnpm test                    # turbo → vitest (core in node, engine and catalog e2e in workerd, web in node)
 pnpm lint                    # turbo → biome check
 pnpm check-types             # turbo → tsc --noEmit (web runs react-router typegen first)
+pnpm test:toolkit            # .claude/ toolkit: skill/agent lint and hook tests (see .claude/README.md)
 pnpm --filter @orderloop/engine types   # after changing apps/engine/wrangler.jsonc
 pnpm --filter @orderloop/web types      # after changing apps/web/wrangler.jsonc
 pnpm --filter @orderloop/catalog types  # after changing apps/catalog/wrangler.jsonc

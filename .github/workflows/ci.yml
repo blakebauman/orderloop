@@ -54,6 +54,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm test:fleet
 
+      # The Claude Code toolkit in .claude/: its skills, agents and hook wiring, and what the
+      # hooks allow, ask about and deny.
+      - name: Test toolkit
+        if: ${{ !cancelled() }}
+        run: pnpm test:toolkit
+
       # Known high or critical advisories in anything that ships (dev tooling excluded).
       - name: Audit dependencies
         if: ${{ !cancelled() }}

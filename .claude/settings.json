@@ -1,12 +1,39 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/block-generated.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-invariants.sh\"",
             "timeout": 10
           }
         ]
@@ -18,7 +45,17 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/docs-impact.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/rules-impact.sh\"",
             "timeout": 10
           }
         ]
@@ -38,19 +75,59 @@
   },
   "permissions": {
     "allow": [
+      "Bash(pnpm lint)",
+      "Bash(pnpm check-types)",
+      "Bash(pnpm test)",
+      "Bash(pnpm test:fleet)",
+      "Bash(pnpm test:toolkit)",
+      "Bash(pnpm turbo run *)",
+      "Bash(pnpm --filter @orderloop/core test)",
+      "Bash(pnpm --filter @orderloop/design test)",
+      "Bash(pnpm --filter @orderloop/engine test)",
+      "Bash(pnpm --filter @orderloop/web test)",
+      "Bash(pnpm --filter @orderloop/catalog test)",
+      "Bash(pnpm --filter @orderloop/catalog-edge test)",
+      "Bash(pnpm --filter @orderloop/engine types)",
+      "Bash(pnpm --filter @orderloop/web types)",
+      "Bash(pnpm --filter @orderloop/catalog types)",
+      "Bash(pnpm --filter @orderloop/catalog-edge types)",
+      "Bash(pnpm --filter @orderloop/engine exec vitest run *)",
+      "Bash(pnpm db:migrate:local)",
+      "Bash(pnpm db:seed:local)",
       "Bash(pnpm docs:dev)",
       "Bash(pnpm docs:build)",
       "Bash(pnpm --filter @orderloop/docs build)",
       "Bash(pnpm --filter @orderloop/docs lint)",
       "Bash(pnpm --filter @orderloop/docs check-types)",
-      "Bash(.claude/hooks/tests/docs-hooks.test.sh)",
       "Bash(pnpm sync:theme)",
-      "Bash(pnpm --filter @orderloop/design test)"
+      "Bash(node scripts/fleet.ts render *)",
+      "Bash(node scripts/fleet.ts matrix)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr checks *)",
+      "Bash(.claude/hooks/tests/docs-hooks.test.sh)",
+      "Bash(.claude/hooks/tests/guard-hooks.test.sh)",
+      "Bash(.claude/scripts/toolkit-check.sh)"
     ],
     "ask": [
+      "Bash(git push *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh run rerun *)",
+      "Bash(gh workflow run *)",
+      "Bash(./scripts/provision.sh *)"
+    ],
+    "deny": [
       "Bash(pnpm docs:deploy*)",
-      "Bash(pnpm --filter @orderloop/docs deploy*)",
-      "Bash(pnpm --filter @orderloop/docs run deploy*)"
+      "Bash(pnpm --filter @orderloop/docs run deploy*)",
+      "Bash(pnpm deploy*)",
+      "Bash(pnpm run deploy*)",
+      "Bash(wrangler deploy*)",
+      "Bash(npx wrangler deploy*)",
+      "Bash(wrangler rollback*)",
+      "Bash(pnpm db:migrate:remote*)",
+      "Bash(pnpm --filter @orderloop/web db:migrate:remote*)"
     ]
   }
 }
