@@ -1,4 +1,9 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
+import {
+  EXAMPLE_DB_ID,
+  EXAMPLE_PLUGIN,
+  examplePluginWorker,
+} from '@orderloop/plugin-example/test-worker';
 import agents from 'agents/vite';
 import { defineConfig } from 'vitest/config';
 
@@ -9,8 +14,13 @@ export default defineConfig(async () => {
   // The demo deployment's nightly reset (.github/workflows/demo-reset.yml).
   const demoReset = await readD1Migrations('../../packages/db/reset');
 
-  /** One workerd project: the engine Worker with these extra bindings. */
-  const project = (name: string, include: string[], bindings: Record<string, unknown> = {}) => ({
+  /** One workerd project: the engine Worker with these extra bindings (and auxiliary Workers). */
+  const project = (
+    name: string,
+    include: string[],
+    bindings: Record<string, unknown> = {},
+    plugins: Awaited<ReturnType<typeof examplePluginWorker>>[] = [],
+  ) => ({
     plugins: [
       // TC39 decorators (`@callable()`): Oxc doesn't transform them yet.
       ...agents(),
@@ -48,7 +58,12 @@ export default defineConfig(async () => {
             MIGRATION_DB: 'migration-test',
             DEMO_DB: 'demo-test',
             AUDIT_DB: 'audit-test',
+            // The example plugin's own database, so its tests can read what it wrote.
+            ...(plugins.length ? { EXAMPLE_DB: EXAMPLE_DB_ID } : {}),
           },
+          ...(plugins.length
+            ? { workers: plugins, serviceBindings: { PLUGIN_EXAMPLE: EXAMPLE_PLUGIN } }
+            : {}),
         },
       }),
     ],
@@ -63,8 +78,16 @@ export default defineConfig(async () => {
   return {
     test: {
       projects: [
-        // Payments in the default mock mode: `meta.simulate` drives declines.
+        // Payments in the default mock mode: `meta.simulate` drives declines. No plugins are
+        // installed, as in a deployment that never added one or has removed one.
         project('engine', ['tests/*.test.ts']),
+        // With the example plugin installed (tests/plugins/).
+        project(
+          'plugins',
+          ['tests/plugins/**/*.test.ts'],
+          { TEST_EXAMPLE_MIGRATIONS: await readD1Migrations('../../plugins/example/migrations') },
+          [await examplePluginWorker('test-principal-key')],
+        ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
         project('stripe', ['tests/stripe/**/*.test.ts'], {
           PAYMENTS_MODE: 'stripe',

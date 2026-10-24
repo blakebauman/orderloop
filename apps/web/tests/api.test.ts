@@ -7,6 +7,16 @@ const engine = {
   sendEvent: vi.fn(),
   exportDataSubject: vi.fn(),
   eraseDataSubject: vi.fn(),
+  pluginCatalog: vi.fn(async () => [
+    {
+      id: 'example',
+      name: 'Example',
+      version: '1',
+      nodes: [{ type: 'example.stamp' }],
+      events: ['order.completed'],
+    },
+  ]),
+  pluginUsage: vi.fn(async () => ({ flows: [{ id: 'f1', version: 2 }], orders: [] })),
 };
 
 const receipts = new Set<string>();
@@ -395,5 +405,31 @@ describe('data subject requests over REST', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ orders: ['ord_1'] });
     expect(audit).not.toHaveBeenCalled();
+  });
+});
+
+describe('plugins over REST', () => {
+  const get = (path: string, as = admin) =>
+    handleApi(new Request(`https://app.test/api/v1/${path}`), as);
+
+  it('lists the installed plugins and what uses one, for an admin', async () => {
+    expect((await get('plugins', operator)).status).toBe(403);
+    expect(await (await get('plugins')).json()).toEqual({
+      plugins: [
+        {
+          id: 'example',
+          name: 'Example',
+          version: '1',
+          nodes: ['example.stamp'],
+          events: ['order.completed'],
+        },
+      ],
+    });
+    expect(await (await get('plugins/example/usage')).json()).toEqual({
+      flows: [{ id: 'f1', version: 2 }],
+      orders: [],
+    });
+    expect(engine.pluginUsage).toHaveBeenCalledWith('example');
+    expect((await get('plugins/Not_An_Id/usage')).status).toBe(404);
   });
 });

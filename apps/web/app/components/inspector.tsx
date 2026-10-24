@@ -3,20 +3,14 @@
  * JSON Logic and JSON fields are edited as text and only committed when they parse.
  */
 
-import {
-  type ConfigField,
-  type FlowNode,
-  type NodeRun,
-  nodeOutputs,
-  nodeSpec,
-  withDefaults,
-} from '@orderloop/core';
+import type { ConfigField, FlowNode, NodeRun } from '@orderloop/core';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useEffect, useState } from 'react';
 import { statusLabel } from '~/lib/format';
+import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
 const SHORT_HINT = 32;
@@ -57,8 +51,9 @@ export function Inspector({
   run?: NodeRun;
   onChange?: (n: FlowNode) => void;
 }) {
-  const spec = nodeSpec(node.type);
-  const config = withDefaults(node.type, node.config);
+  const nodes = useNodes();
+  const spec = nodes.spec(node.type);
+  const config = nodes.withDefaults(node.type, node.config);
   const readOnly = !onChange;
   const set = (key: string, value: unknown) =>
     onChange?.({ ...node, config: { ...node.config, [key]: value } });
@@ -136,7 +131,7 @@ export function Inspector({
       <div>
         <h2 className="section-title mb-1.5">Outputs</h2>
         <div className="flex flex-wrap gap-1">
-          {nodeOutputs(node.type, config).map((o) => (
+          {nodes.outputs(node.type, config).map((o) => (
             <span key={o} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
               {o}
             </span>

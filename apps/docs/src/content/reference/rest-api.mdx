@@ -54,6 +54,8 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/ucp/settings` | `{ checkoutFlowId, links?, orderUrl? }` | `{ settings }`, or `422 { error }` when the flow cannot take checkouts (admin) |
 | `POST` | `/api/v1/ucp/platforms` | `{ name, profileUrl }` | `201 { platform, key }`; the key is shown once (admin) |
 | `DELETE` | `/api/v1/ucp/platforms/:id` | | `{ ok: true }`, or `404` (admin) |
+| `GET` | `/api/v1/plugins` | | `{ plugins }`: each installed plugin's `id`, `name`, `version`, node types and events (admin) |
+| `GET` | `/api/v1/plugins/:id/usage` | | `{ flows, orders }`: the published flows and running orders that use the plugin's nodes; both are empty when it can be removed (admin) |
 | `GET` | `/api/v1/webhook-subscriptions` | | `{ subscriptions }` |
 | `POST` | `/api/v1/webhook-subscriptions` | `{ url, events? }` | `201 { subscription, secret }` |
 | `POST` | `/api/v1/webhook-subscriptions/:id/rotate` | | `{ subscription, secret }` (admin) |
@@ -312,7 +314,7 @@ in [Product catalog](/guides/product-catalog/).
 These aren't part of `/api/v1`.
 
 - `GET /health` answers `{ ok: true, service: "orderloop-web" }`, with no authentication.
-- `GET /health/deep` also checks the database, document storage and the engine, with no
+- `GET /health/deep` also checks the database, document storage and the engine (and through it each installed plugin), with no
   authentication. It answers `{ ok, service, checks }`, where each check is `"ok"` or `"fail"`, and
   `503` when any check fails.
 - `/mcp`, `/a2a`, `/oauth/*` (except the `/oauth/authorize` consent page) and `/.well-known/oauth-*`

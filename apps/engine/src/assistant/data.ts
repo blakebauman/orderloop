@@ -47,6 +47,7 @@ import { copilot, modelView } from '../ai';
 import { recordAudit } from '../audit';
 import { assess, resolveImages } from '../clef';
 import { orderAgent } from '../namespaces';
+import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
 
 export class Refused extends Error {}
@@ -386,7 +387,7 @@ async function loadFlow(env: Env, flowId: string) {
 
 export async function getFlow(env: Env, flowId: string) {
   const { row, flow } = await loadFlow(env, flowId);
-  const { errors, warnings } = validateGraph(flow);
+  const { errors, warnings } = validateGraph(flow, await registry(env));
   return {
     id: row.id,
     name: row.name,
@@ -552,7 +553,7 @@ export async function previewAction<T extends ActionTool>(
       case 'publish_flow': {
         const i = input as ActionInput['publish_flow'];
         const { row, flow } = await loadFlow(env, i.flowId);
-        const { errors } = validateGraph(flow);
+        const { errors } = validateGraph(flow, await registry(env));
         const live = row.publishedVersion
           ? await getFlowVersionJson(createDb(env.DB), row.id, row.publishedVersion)
           : null;

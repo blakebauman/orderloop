@@ -23,6 +23,7 @@ import { handleMcp, MCP_PATH } from './mcp';
 import { orderAgent, scopedEnv } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
+import { manifests, pluginBindings, pluginUsage } from './plugins';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
 import { ucpProfile } from './ucp/config';
@@ -118,14 +119,27 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return { instanceId: instance.id };
   }
 
-  health() {
+  async health() {
+    // Each installed plugin answers with its manifest.
+    const plugins = Object.fromEntries(
+      pluginBindings(this.env).map(([name, stub]) => [name.toLowerCase(), () => stub.manifest()]),
+    );
     return runHealthChecks('orderloop-engine', {
       db: () => this.env.DB.prepare('select 1').first(),
       docs: () => this.env.DOCS.head('health'),
+      ...plugins,
     });
   }
 
   ucpProfile(origin: string) {
     return ucpProfile(this.env, origin);
+  }
+
+  pluginCatalog() {
+    return manifests(this.env);
+  }
+
+  pluginUsage(id: string) {
+    return pluginUsage(this.env, id);
   }
 }

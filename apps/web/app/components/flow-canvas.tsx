@@ -10,10 +10,9 @@ import {
   type FlowEdge,
   type FlowGraph,
   isBackEdge,
+  type NodeRegistry,
   type NodeRun,
-  nodeSpec,
   topologyKey,
-  withDefaults,
 } from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
 import {
@@ -511,8 +510,13 @@ function Inner({
 }
 
 /** A new node of `type` with defaults and a unique id. */
-export function makeNode(graph: FlowGraph, type: string, position: { x: number; y: number }) {
-  const spec = nodeSpec(type);
+export function makeNode(
+  nodes: NodeRegistry,
+  graph: FlowGraph,
+  type: string,
+  position: { x: number; y: number },
+) {
+  const spec = nodes.spec(type);
   const base = type.split('.')[1] ?? 'node';
   let i = 1;
   while (graph.nodes.some((n) => n.id === `${base}_${i}`)) i++;
@@ -520,7 +524,7 @@ export function makeNode(graph: FlowGraph, type: string, position: { x: number; 
     id: `${base}_${i}`,
     type,
     label: spec?.label ?? type,
-    config: withDefaults(type),
+    config: nodes.withDefaults(type),
     position,
   };
 }

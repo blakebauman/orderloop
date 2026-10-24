@@ -28,6 +28,7 @@ inbound mail ── Email Routing ──email()───────────
 | Path | Role |
 |---|---|
 | `packages/core` (`@orderloop/core`) | Flow schema, node catalog, planner and validation, inbound order payload and routing, layout, JSON Logic expressions, policy rules, address checks, the pricing chain resolver, templates, webhook signing, the `EngineRpc` contract. The product catalog's pure model is its own entry point, `@orderloop/core/product` (`src/product/`): types, validation, routing, rendering, the listing index and `listingSpec`, feed parsing and the `ProductCatalogRpc` contract. Where published objects live and their cache tags are the zod-free `@orderloop/core/product/paths` (`DOC_FORMAT`, the `CODE`, `LOCALE` and `SLUG` patterns, `BATCH_MAX`, `paths`, `tags`), and the listing index's decoder is the zod-free `@orderloop/core/product/listing` (`ListingIndex`); `catalog-edge` imports only those two. No bindings and no Cloudflare imports |
+| `plugins/<id>` | Optional features, each its own Worker and D1 database, installed per deployment; see [Plugins](plugins.md). `plugins/example` is a test-only fixture |
 | `packages/db` (`@orderloop/db`) | Drizzle schema for D1, numbered SQL migrations, demo seed data (`seed/`, local and tests only), flow persistence (`getFlowVersionJson`, `publishFlow`) |
 | `packages/ui` (`@orderloop/ui`) | shadcn/ui primitives, consumed as raw `.tsx` |
 | `apps/engine` (`@orderloop/engine`) | `OrderAgent`, `AssistantAgent`, `OrderLoop`, `Replenish`, node executors, connectors, AI calls, outbox, `EngineApi` |
@@ -57,9 +58,11 @@ inbound mail ── Email Routing ──email()───────────
 | `exportDataSubject(email)` | Everything held about the person with that email (`subjects.ts`): customer accounts, up to 500 orders with their agent state, messages, intake log rows, documents; see [Personal data](data-model.md#personal-data) |
 | `eraseDataSubject(email)` | Erases that person (100 orders a call, `done` says whether to call again) or returns `{ ok: false, reason: 'active_orders', orders }`. Calls each order's `OrderAgent.erasePersonalData` |
 | `runReplenish()` | Creates a `Replenish` instance now |
+| `pluginCatalog()` | The installed [plugins](plugins.md)' validated manifests (cached about 60 seconds per isolate) |
+| `pluginUsage(id)` | The published flows and running orders that use a plugin's nodes (`GET /api/v1/plugins/:id/usage`) |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject`, `ucpProfile` and `runReplenish` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject`, `ucpProfile`, `runReplenish`, `pluginCatalog` and `pluginUsage` forwards to the order's agent via
 `orderAgent(env, orderId)` (`apps/engine/src/namespaces.ts`). `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The forwarded requests (sockets, `/mcp`, `/a2a`, `/ucp/*`) carry a principal the engine believes only when it is signed with `PRINCIPAL_KEY` for that path and unexpired (`forwardedPrincipal`). The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
@@ -71,6 +74,7 @@ engine source.
 | Path | Handling |
 |---|---|
 | `GET /health` | `{ ok: true, service: "orderloop-web" }` |
+| `/plugins/:id/*` | `pluginFetch` (`apps/web/app/lib/plugins.server.ts`): forwarded to the plugin's `PLUGIN_<ID>` binding with a signed principal, or with none on the manifest's `publicPaths`; `404` when the plugin isn't installed ([Plugins](plugins.md)) |
 | `GET /health/deep` | `runHealthChecks` over this Worker's D1 and R2 and `EngineRpc.health()` (the engine's D1 and R2): `{ ok, service, checks: { db, docs, engine } }`, each `"ok"` or `"fail"`, with `503` when any fails. The deploy smoke test calls it |
 | `POST /api/v1/webhooks/events` | `handleSignedEvent`: authenticated by `readSigned`, an HMAC with the secret of the integration the signature names (`k=`, `findIntegration` in `apps/web/app/lib/integrations.server.ts`; the previous secret too during a rotation), then held to its scope (`allowsEvent` in `packages/core/src/integrations.ts`: its events, and its channel's orders only) |
 | `POST /api/v1/webhooks/orders` | `handleSignedOrder`: the same HMAC check (`readSigned`), then `inboundOrderSchema`, the integration's scope (`allowsOrder`: it may start orders, on its channel, naming only its `flows`), a currency check, the flow from `flowId`, `ORDER_ROUTES` or the model's default (`flowForOrder`), a check that it is published, and `EngineRpc.startOrderOnce` keyed `order:<channel>:<externalId>`. See [Inbound orders](https://docs.orderloop.app/guides/inbound-orders/) |
@@ -616,6 +620,7 @@ Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `
 | `ENGINE` | web | Service `orderloop-engine`, entrypoint `EngineApi` |
 | `CATALOG` | web | Service `orderloop-catalog`, entrypoint `CatalogApi` (`/api/v1/catalog`) |
 | `OAUTH_KV` | web | KV namespace for MCP and A2A OAuth clients, grants and tokens; created on first deploy |
+| `PLUGIN_<ID>` | engine, web | Service `orderloop-plugin-<id>`, one per installed plugin, rendered from the registry's `plugins`; the default entrypoint implements `PluginRpc` ([Plugins](plugins.md)) |
 | `SHARD` | catalog | Durable Object `CatalogShard` (SQLite, migration tag `v1`), 64 of them |
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
@@ -635,6 +640,19 @@ Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `
 | (queue consumer) | catalog-edge | `orderloop-catalog-purge`, dead-letter queue `orderloop-catalog-purge-dlq` |
 
 Variables and secrets are listed in [Configuration](configuration.md).
+
+## Plugins
+
+A deployment can install plugins: Workers of their own, with their own D1 databases, that add node
+types, receive outbound events and serve pages. The contract (`PluginManifest`, `PluginRpc`,
+`NodeRegistry`, `withPlugins`) is `packages/core/src/plugins.ts`; `validateGraph` takes a registry,
+so a plugin's `<id>.<name>` nodes validate only while it is installed, and the planner is untouched.
+The engine (`apps/engine/src/plugins.ts`) finds plugins by their `PLUGIN_*` service bindings, caches
+their manifests for about 60 seconds, runs a plugin node inside its own `step.do` and delivers events
+through the outbox. The web app forwards `/plugins/:id/*` with a signed principal
+(`apps/web/app/lib/plugins.server.ts`) and reads node specs through `useNodes()`. `EngineRpc` has
+`pluginCatalog` and `pluginUsage`, and deep health a `plugin_<id>` check each. See
+[Plugins](plugins.md) for the contract, installing and removing.
 
 ## Connectors
 

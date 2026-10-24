@@ -1,7 +1,8 @@
-import { BASE_CURRENCY, nodeSpec, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
+import { BASE_CURRENCY, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Empty, Section } from '~/components/page';
 import { count, duration, money } from '~/lib/format';
 import type { Performance as Figures } from '~/lib/metrics.server';
+import { useNodes } from '~/lib/nodes';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const base = (n: number) => money(n, BASE_CURRENCY);
@@ -13,6 +14,7 @@ const MIN_FOR_P95 = 20;
 
 /** The trailing-window figures: how orders finish, what they earn and refund, and where time goes. */
 export function Performance({ p }: { p: Figures }) {
+  const nodes = useNodes();
   const revenue = p.revenue.reduce((a, d) => a + d.total, 0);
   const peak = p.revenue.reduce((a, d) => (d.total > a.total ? d : a), { day: '', total: 0 });
   const earning = p.revenue.filter((d) => d.total > 0).length;
@@ -112,7 +114,7 @@ export function Performance({ p }: { p: Figures }) {
                 {slowest.map((n) => (
                   <tr key={n.type}>
                     <td className="py-0.5 pr-2" title={n.type}>
-                      {nodeSpec(n.type)?.label ?? n.type}
+                      {nodes.spec(n.type)?.label ?? n.type}
                       <span className="block text-muted-foreground text-xs tabular">
                         {count(n.n)} {n.n === 1 ? 'run' : 'runs'}
                       </span>

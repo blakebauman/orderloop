@@ -7,6 +7,7 @@
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
+import type { PluginManifest, PluginUsage } from './plugins';
 import type {
   FlowGraph,
   FlowVersion,
@@ -219,4 +220,8 @@ export interface EngineRpc {
    * checkout is off. The engine builds it because it holds the signing key.
    */
   ucpProfile(origin: string): Promise<Record<string, unknown> | null>;
+  /** The installed plugins' manifests: their node types, nav entries and public paths. */
+  pluginCatalog(): Promise<PluginManifest[]>;
+  /** The published flows and running orders that use a plugin's nodes (`pnpm plugin:check`). */
+  pluginUsage(id: string): Promise<PluginUsage>;
 }

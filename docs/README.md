@@ -19,6 +19,7 @@ matter to someone with the source or a Cloudflare account (file paths, bindings,
 | [Planner](planner.md) | Readiness, skips, joins and loops in `packages/core/src/graph.ts` |
 | [OrderLoop Workflow](workflow.md) | How the Workflow interprets a flow: steps, waits, rollback, continue-as-new |
 | [OrderAgent](order-agent.md) | The per-order Durable Object: state, reports, waits, the socket |
+| [Plugins](plugins.md) | Optional features as their own Workers: the manifest and `PluginRpc` contract, writing, installing and removing one |
 | [Data model](data-model.md) | D1 tables, R2 keys and the catalog's stores |
 | [Testing](testing.md) | The test suites, what each covers, and the recorded runs on the docs home page |
 
