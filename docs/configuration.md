@@ -35,7 +35,7 @@ The catalog Worker has two variables and no secrets (`apps/catalog/wrangler.json
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
+| `DATA_JURISDICTION` | empty | Jurisdiction of the catalog's Durable Objects (`CatalogShard`, `CatalogMeta`, `CatalogFeeds`, `ListingIndexer`, `SearchShard`): `eu` or `fedramp`, or empty for none; any other value throws on first use (`apps/catalog/src/config.ts`). The registry's `jurisdiction` sets it per deployment, and the catalog's R2 bucket takes the same one (`scripts/fleet.ts`). Local dev and tests leave it empty. Set it before the first product: a different value gives different object ids, so existing products are unreachable. See [Data residency](data-model.md#data-residency) |
 | `FEED_CHUNK` | `25000` | Products one `FeedImport` split step reads before handing off to the next (a string; `25000` when unset or not a number, `FEED_CHUNK` in core). Lower it only in tests, where `apps/catalog/vitest.config.ts` sets `300` so a small feed spans several steps |
 
 ## Compatibility flags
@@ -108,6 +108,7 @@ created through the API and stored in D1; they are not configuration.
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite-backed, migration `v2`), one, named `feeds` |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite-backed, migration `v3`), one per channel and category, named `<channel>:<category>` |
+| `SEARCH` | catalog | Durable Object `SearchShard` (SQLite-backed, migration `v4`), 16 shards named `search-<n>` |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, and the catalog Worker consumes them (`max_batch_size` 100, `max_batch_timeout` 2 seconds, `max_retries` 10, dead-letter queue `orderloop-catalog-changes-dlq`) |
 | `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`) and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
@@ -115,6 +116,7 @@ created through the API and stored in D1; they are not configuration.
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
 | `PUBLISHED` | catalog-edge | The same R2 bucket, `orderloop-catalog`, read |
 | `CARDS` | catalog-edge | The same KV namespace, read |
+| `CATALOG` | catalog-edge | Service binding to `orderloop-catalog`, entrypoint `SearchApi` (a customer's is `orderloop-catalog-<id>`, rendered at deploy) |
 | `ANALYTICS` | catalog-edge | Analytics Engine dataset `orderloop_catalog_edge` (a customer's is `orderloop_catalog_edge_<id>`) |
 | Queue consumer | catalog-edge | `orderloop-catalog-purge` (`max_batch_size` 100, `max_batch_timeout` 12 seconds, `max_concurrency` 1, `max_retries` 10, dead-letter queue `orderloop-catalog-purge-dlq`) |
 | Workers Caching | catalog-edge | `cache: { enabled: true, cross_version_cache: true }`, and `exports`: the default (gateway) entrypoint has the cache off, `Delivery` has it on |
@@ -135,8 +137,8 @@ URLs: only the web app's service binding reaches it, plus Email Routing rules th
 (see [Email intake](deploy.md#email-intake)). The docs Worker (`apps/docs/wrangler.jsonc`)
 serves `docs.orderloop.app`, and likewise sets `workers_dev` and `preview_urls` to `false`.
 
-The catalog Worker has no routes, no `workers_dev` URL and no preview URLs, and nothing binds to it
-yet; it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
+The catalog Worker has no routes, no `workers_dev` URL and no preview URLs, and only catalog-edge
+binds to it (`SearchApi`); it answers `GET /health` with `{ ok: true }` and `404` otherwise. CI doesn't smoke-test it.
 
 The catalog-edge Worker serves `catalog.orderloop.app` as a custom domain (a customer's is the
 registry's `catalogDomain`, default `catalog.<domain>`, rendered at deploy), with `workers_dev` and

@@ -405,6 +405,9 @@ export function renderCatalogEdge(base: Config, d: Deployment): Config {
   const n = names(d);
   config.name = n.catalogEdge;
   config.routes = [{ pattern: d.catalogDomain, custom_domain: true }];
+  config.services = config.services.map((s: Config) =>
+    s.binding === 'CATALOG' ? { ...s, service: n.catalog } : s,
+  );
   config.r2_buckets = config.r2_buckets.map((b: Config) => ({
     ...b,
     bucket_name: n.catalogR2,

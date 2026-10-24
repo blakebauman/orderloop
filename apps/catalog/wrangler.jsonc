@@ -19,13 +19,16 @@
       // One object: every feed's progress.
       { "name": "FEEDS", "class_name": "CatalogFeeds" },
       // One per channel and category: who is listed there, and its listing index.
-      { "name": "LISTINGS", "class_name": "ListingIndexer" }
+      { "name": "LISTINGS", "class_name": "ListingIndexer" },
+      // Keyword search, 16 shards by key (core's searchShard).
+      { "name": "SEARCH", "class_name": "SearchShard" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["CatalogShard", "CatalogMeta"] },
     { "tag": "v2", "new_sqlite_classes": ["CatalogFeeds"] },
-    { "tag": "v3", "new_sqlite_classes": ["ListingIndexer"] }
+    { "tag": "v3", "new_sqlite_classes": ["ListingIndexer"] },
+    { "tag": "v4", "new_sqlite_classes": ["SearchShard"] }
   ],
   "workflows": [
     {

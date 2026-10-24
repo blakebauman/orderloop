@@ -293,9 +293,10 @@ seals a new secret and moves the old, still sealed, to `previous_secret` with `p
 `orderloop-catalog-edge` (`apps/catalog-edge`) the read side. The pure model lives in
 `@orderloop/core/product`; the catalog Worker adds storage and publishing. It has no routes, no
 `workers_dev` and no preview URLs: it answers `GET /health` and `404` otherwise, and its callers
-(the web app, later) are meant to reach it through a service binding. Nothing binds to it yet, so
-no published page or API writes to it. `catalog-edge` shares only its R2 bucket, KV namespace and
-purge queue with it (see [Catalog edge](#catalog-edge)), so the read path never touches a Durable Object.
+(the web app, later) are meant to reach it through a service binding. The web app doesn't bind to
+it yet, so no published page or API writes to it. `catalog-edge` shares its R2 bucket, KV namespace
+and purge queue with it and binds its `SearchApi` entrypoint for keyword search (see
+[Catalog edge](#catalog-edge)); every other read path never touches a Durable Object.
 
 `CatalogApi` (`apps/catalog/src/api.ts`) is a `WorkerEntrypoint` implementing `ProductCatalogRpc`
 (`packages/core/src/product/api.ts`). It never touches storage itself:
@@ -347,8 +348,10 @@ recorded only after every write succeeded, so a failed pass republishes in full.
 same product twice writes the same bytes. `publishKeys` also returns a `ListingChange` per product
 and channel it touched: `{ channel, key, at, entry, left }`, where `entry` is what the product lists
 as now (`null` when it no longer lists in the channel) and `left` the categories it was published in
-before, which the `published` row's JSON now keeps beside `uid` and `aliases`. See
-[Listing indexes](#listing-indexes).
+before, which the `published` row's JSON now keeps beside `uid` and `aliases`. `search` is what
+keyword search indexes, one `SearchEntry` (`title`, `brand`, `skus`, `body`) per locale, or `null` when
+the product no longer lists in the channel. See [Listing indexes](#listing-indexes) and
+[Keyword search](#keyword-search).
 
 Publishing also writes the product's `uid` entry to KV (`u:f1:<key>`, `paths.uid`) the first time
 the product publishes in any channel (a uid never changes), which is how `catalog-edge` finds cards
@@ -393,6 +396,40 @@ parts:
 Measured in workerd (a measurement, not a guarantee): 50,000 members apply in about 0.8 seconds and
 build in about 0.11 seconds into a 1.2 MB index.
 
+### Keyword search
+
+Search is fed by the same `ListingChange`s as the listing indexes and answered from the catalog's
+own Durable Objects (`apps/catalog/src/search.ts`; query handling in
+`packages/core/src/product/search.ts`, zod-free, exported as `@orderloop/core/product/search`).
+
+- **Queries.** `normalizeQuery` applies NFKC, lowercases, collapses whitespace and cuts to `QUERY_MAX`
+  (100) characters; the result is the cache key. `queryTerms` takes runs of letters and digits, at
+  most `QUERY_TERMS` (10). `ftsQuery` quotes every term (all required) and also matches the last as
+  a prefix (`"cott"*`) when it has 2 or more characters, so user text never reaches FTS5 syntax:
+  operators, column filters and quotes are just characters. A query with no term has no
+  expression (`null`). `SEARCH_DEPTH` (1,000) is how many results a search can page through.
+- **What goes in.** `renderForChannel` builds one `SearchEntry` per channel and locale: title, brand,
+  SKUs and a `body` of the description and searchable attributes (variants' too), capped at
+  `SEARCH_BODY_MAX` (4,000) characters so a change message stays small.
+- **`SearchShard`** is a Durable Object, 16 of them (`SEARCH`, SQLite, `search-<n>`, `n` from
+  `searchShard(key)`, frozen like `productShard`), reached through `searcher()` in `config.ts`
+  with the deployment's jurisdiction. Each holds one FTS5 table per channel and locale
+  (`fts_<channel>__<locale>`, created on first use) with columns `title`, `brand`, `skus`, `body`
+  and `uid` (`UNINDEXED`), tokenized with `unicode61 remove_diacritics 2` ("creme" finds "crème")
+  and `prefix = '2 3'`. `seen` keeps the latest `at` per key and channel (an older change is
+  skipped; a removal is a tombstone pruned after 24 hours) and `rows` which FTS rows a product
+  owns, so a change deletes them and inserts the new ones in one transaction. Results rank by BM25
+  weighted title 10, SKUs 8, brand 3, body 1 (lower is better). `search()` returns that shard's
+  best `k` and how many match.
+- **Routing changes.** The queue consumer runs `applyChanges` and `applySearch` together on each
+  batch of `orderloop-catalog-changes*` messages; `applySearch` sends each shard its items in one
+  call. A failed batch retries whole, and both halves are idempotent by `at`. Products published
+  before search existed enter it on `reindex`.
+- **`SearchApi`** is a `WorkerEntrypoint` for `catalog-edge`: `search(channel, locale, q, limit,
+  offset)` normalizes the query, asks all 16 shards for their best `min(offset + limit,
+  SEARCH_DEPTH)` in parallel, merges by score (ties by uid) and answers `{ total, uids }`. A page is
+  one round of 16 small queries.
+
 **`CatalogMeta`** is one Durable Object (`meta`) holding product types (every version), channels
 and categories, with a `rev` counter that moves on every type or channel change. A type's version
 may only add (`typeChangeIssues`), and a new type starts at version 1. A channel's `defaultLocale`
@@ -434,8 +471,8 @@ message never applies a row twice.
 at most 100 `errors` (`FEED_ERRORS`, by row). Rejected rows come from validation (the Workflow) or
 from a shard (`already used by <key>`).
 
-Both Durable Object namespaces are reached only through `apps/catalog/src/config.ts` (`meta`,
-`shard`, `shardFor`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
+The Durable Object namespaces are reached only through `apps/catalog/src/config.ts` (`meta`,
+`shard`, `shardFor`, `feeds`, `indexer`, `searcher`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
 any other value throws). See [Data residency](data-model.md#data-residency).
 
 ## Catalog edge
@@ -470,15 +507,18 @@ deployment), with no `workers_dev` or preview URLs. It reads what the catalog pu
 | `products?keys=a,b` | `{ "products": [card or null, …] }`, in the order asked, for at most `BATCH_MAX` (100) distinct keys. Key to uid through KV `u:f1:<key>` (one bulk `get`), then cards `c:f1:<channel>:<locale>:<uid>` (a second) |
 | `categories` | The channel's category tree for that locale |
 | `categories/<code>/products` | One page of a category: `{ total, next, sorts, products, facets, ranges }`, filtered, sorted and faceted from the listing index, `products` being the cards in order. Query: `f.<attr>=a,b` (any of the values; attributes AND together), `r.<attr>=lo..hi` (either end may be empty), `sort` (`newest`, the default, or `<attr>_asc` / `<attr>_desc` for a sort the index has), `cursor` (`next` from the last page), `limit` (default 24, at most 100). At most 20 filters and 50 values a filter |
+| `search?q=<words>` | One page of keyword search: `{ total, next, products }`, `products` being the cards in match order. Query: `q` (normalized by `normalizeQuery`; `400` without a word), `cursor` (an offset, `0` to `SEARCH_DEPTH - 1`, so `400` from 1,000; `next` is `null` once the last page or the depth is reached), `limit` (default 24, at most 100) |
 
 R2 is asked with `onlyIf` set to the request headers, so a revalidation whose `If-None-Match` still
 matches is a `304` with no body read. Responses carry the object's `etag` and `last-modified`
 and, for documents and category trees, `Cache-Control: public, max-age=60, stale-while-revalidate=86400,
 stale-if-error=604800` (a minute fresh, a day stale while revalidating, a week if R2 fails). A
 missing product, SKU, slug or category tree is `404` with `{ "error": … }` and `public, max-age=30`.
-Batches and listing pages carry the same fresh `Cache-Control`. Cache tags: `p:<key>` and `ch:<channel>` on a
+Batches, listing pages and searches carry the same fresh `Cache-Control`. Cache tags: `p:<key>` and `ch:<channel>` on a
 document (a SKU or slug miss only `ch:<channel>`), `cats` and `ch:<channel>` on a category tree,
-`ch:<channel>` and one `p:<key>` per key on a batch, `cat:<code>` and `ch:<channel>` on a listing page.
+`ch:<channel>` and one `p:<key>` per key on a batch, `cat:<code>` and `ch:<channel>` on a listing page, `ch:<channel>` on a search page.
+
+**Search.** The gateway's canonical URL for `search` keeps the normalized `q` and drops `cursor=0` and the default `limit`. `Delivery.search` calls `env.CATALOG` (a service binding to the catalog's `SearchApi` entrypoint) for the page's uids, and in parallel, on the first page only, looks for an exact SKU: when the normalized query is one code-like word (`CODE`) it reads the SKU alias pointer in R2 for the query upper-cased and then as typed, and the uid in KV, and puts that product first (and removes it from its later place; `total` counts it once more when full-text search didn't match it). It then reads the cards in one bulk KV `get` (a missing card is skipped). The response carries the fresh `Cache-Control` and the tag `ch:<channel>`, so a channel's searches go in one purge. When a search shard fails, `SearchApi` leaves its matches out instead of failing the search (and logs the shard); the response then has `"partial": true` and is cached only 30 s, so the full answer replaces it soon. Search needs the catalog Worker to exist and be reachable; the other routes don't.
 
 **Listing pages.** The gateway's canonical URL for a listing sorts filters by attribute and values
 within each, joins them with `,`, and omits `sort=newest`, `cursor=0` and the default `limit`, so
@@ -503,7 +543,7 @@ messages go to the dead-letter queue. `purge` is a no-op where there is no Worke
 development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent
 writes queue a purge.
 
-Bundle: about 24 KiB, because it imports only `@orderloop/core/product/paths` and `@orderloop/core/product/listing` (the zod-free index decoder), never zod or the model.
+Bundle: about 27 KiB, because it imports only `@orderloop/core/product/paths`, `@orderloop/core/product/listing` (the zod-free index decoder) and `@orderloop/core/product/search` (the zod-free query helpers), never zod or the model.
 
 ## Bindings
 
@@ -524,6 +564,7 @@ Bundle: about 24 KiB, because it imports only `@orderloop/core/product/paths` an
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite, migration tag `v3`), one per channel and category |
+| `SEARCH` | catalog | Durable Object `SearchShard` (SQLite, migration tag `v4`), 16 of them named `search-<n>` |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes` (dead-letter queue `orderloop-catalog-changes-dlq`); producer and consumer are the catalog Worker |
 | `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes |
@@ -531,6 +572,7 @@ Bundle: about 24 KiB, because it imports only `@orderloop/core/product/paths` an
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries; created by `provision.sh` |
 | `PUBLISHED` | catalog-edge | R2 `orderloop-catalog`, read |
 | `CARDS` | catalog-edge | The same KV namespace, read |
+| `CATALOG` | catalog-edge | Service `orderloop-catalog`, entrypoint `SearchApi` (keyword search) |
 | `ANALYTICS` | catalog-edge | Analytics Engine dataset `orderloop_catalog_edge` |
 | (queue consumer) | catalog-edge | `orderloop-catalog-purge`, dead-letter queue `orderloop-catalog-purge-dlq` |
 

@@ -92,6 +92,10 @@ test("catalog-edge serves catalog.<domain> from the deployment's bucket, cards a
   assert.equal(c.queues.consumers[0].dead_letter_queue, 'orderloop-catalog-purge-dlq-acme');
   assert.equal(c.queues.consumers[0].max_concurrency, 1);
   assert.equal(c.analytics_engine_datasets[0].dataset, 'orderloop_catalog_edge_acme');
+  // Search goes to this deployment's own catalog.
+  assert.deepEqual(c.services, [
+    { binding: 'CATALOG', service: 'orderloop-catalog-acme', entrypoint: 'SearchApi' },
+  ]);
   // The catalog sends to the same purge queue.
   const producers = renderCatalog(base('catalog'), acme).queues.producers;
   assert.ok(producers.some((p: { queue: string }) => p.queue === 'orderloop-catalog-purge-acme'));

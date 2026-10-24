@@ -11,6 +11,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { ListingIndex } from '@orderloop/core/product/listing';
 import { CODE, DOC_FORMAT, paths, tags } from '@orderloop/core/product/paths';
+import { SEARCH_DEPTH } from '@orderloop/core/product/search';
 import { parse, type Route } from './routes';
 
 /** Fresh a minute; served stale for a day while revalidating, or a week if R2 fails. */
@@ -46,6 +47,17 @@ function keep(id: string, h: Held) {
     heldBytes -= v.bytes;
   }
 }
+
+/** The catalog's SearchApi entrypoint, as this Worker calls it. */
+export type CatalogSearch = {
+  search(
+    channel: string,
+    locale: string,
+    q: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ total: number; uids: number[]; partial?: true }>;
+};
 
 type CachePurge = {
   purge(o: { tags: string[] }): Promise<{ success: boolean; errors: unknown[] }>;
@@ -85,6 +97,8 @@ export class Delivery extends WorkerEntrypoint<Env> {
         return this.batch(route);
       case 'listing':
         return this.listing(route);
+      case 'search':
+        return this.search(route);
       case 'categories': {
         const object = await this.env.PUBLISHED.get(
           paths.categories(DOC_FORMAT, route.channel, route.locale),
@@ -243,6 +257,49 @@ export class Delivery extends WorkerEntrypoint<Env> {
       `{"total":${r.total},"next":${r.next ?? 'null'},"sorts":${JSON.stringify(['newest', ...index.sorts])},` +
       `"products":[${products.join(',')}],"facets":${JSON.stringify(facets)},"ranges":${JSON.stringify(ranges)}}`;
     return json(body, 200, { 'cache-control': FRESH, 'cache-tag': cacheTags.join(',') });
+  }
+
+  /**
+   * Keyword search through the catalog's search shards. On the first page, a query that is one
+   * code-like word and some product's exact SKU puts that product first.
+   */
+  private async search(route: Extract<Route, { kind: 'search' }>): Promise<Response> {
+    const catalog = this.env.CATALOG as unknown as CatalogSearch;
+    const exact = async (): Promise<number | null> => {
+      if (route.cursor || !CODE.test(route.q)) return null;
+      for (const sku of new Set([route.q.toUpperCase(), route.q])) {
+        const pointer = await this.env.PUBLISHED.get(
+          paths.alias(DOC_FORMAT, route.channel, `sku:${sku}`),
+        );
+        if (!pointer) continue;
+        const { key } = (await pointer.json()) as { key: string };
+        const uid = await this.env.CARDS.get(paths.uid(DOC_FORMAT, key));
+        if (uid) return Number(uid);
+      }
+      return null;
+    };
+    const [found, sku] = await Promise.all([
+      catalog.search(route.channel, route.locale, route.q, route.limit, route.cursor),
+      exact(),
+    ]);
+    const uids =
+      sku === null
+        ? found.uids
+        : [sku, ...found.uids.filter((u) => u !== sku)].slice(0, route.limit);
+    const keys = uids.map((uid) => paths.card(DOC_FORMAT, route.channel, route.locale, uid));
+    const cards = keys.length ? await this.env.CARDS.get(keys) : new Map<string, string | null>();
+    const products = keys.map((k) => cards.get(k)).filter((c): c is string => !!c);
+    // An exact-SKU product full-text search didn't match counts too.
+    const total = found.total + (sku !== null && !found.uids.includes(sku) ? 1 : 0);
+    const end = route.cursor + route.limit;
+    const next = end < Math.min(total, SEARCH_DEPTH) ? end : null;
+    const partial = found.partial ? ',"partial":true' : '';
+    const body = `{"total":${total},"next":${next ?? 'null'},"products":[${products.join(',')}]${partial}}`;
+    // A partial answer (a shard failed) is kept only briefly, so the full one replaces it soon.
+    return json(body, 200, {
+      'cache-control': found.partial ? MISSING : FRESH,
+      'cache-tag': tags.channel(route.channel),
+    });
   }
 
   /** Purges cached responses by tag. Workers Caching scopes a purge to the entrypoint calling it. */

@@ -69,6 +69,9 @@ export type IndexEntry = {
   createdAt: number;
 };
 
+/** Characters of description and searchable attributes a search entry keeps. */
+export const SEARCH_BODY_MAX = 4_000;
+
 /** What a search shard indexes per product, channel and locale. */
 export type SearchEntry = {
   key: string;
@@ -328,7 +331,10 @@ export function renderForChannel(
       pickLocale(product.description, locale, fallback) ?? '',
       ...searchableText(product.attributes, c.product, locale, fallback),
       ...variants.flatMap((v) => searchableText(v.attributes, c.variant, locale, fallback)),
-    ].join(' ');
+    ]
+      .join(' ')
+      // Enough to rank on; keeps a change message small.
+      .slice(0, SEARCH_BODY_MAX);
     return {
       channel: channel.code,
       locale,

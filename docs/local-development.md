@@ -94,14 +94,16 @@ After changing a `wrangler.jsonc`, regenerate that app's binding types with
 `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types`,
 `pnpm --filter @orderloop/catalog types` or `pnpm --filter @orderloop/catalog-edge types`.
 
-`pnpm web:dev` doesn't start the catalog Worker, since nothing calls it yet. Run it on its own with
+`pnpm web:dev` doesn't start the catalog Worker, since the web app doesn't call it yet. Run it on its own with
 `pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
 Durable Objects (including the changes queue and the listing indexers; a test runs an indexer's alarm itself instead of waiting out the 15 second debounce).
 
 `pnpm web:dev` doesn't start catalog-edge either. Run it with `pnpm --filter @orderloop/catalog-edge dev`
 (port 8790). It reads R2 and KV through `wrangler dev`'s local storage, which the catalog Worker
 (port 8789) doesn't share by default, so a local catalog-edge serves what its own storage holds
-(tests write it directly). There is no Workers Caching locally: every request runs `Delivery`, and
+(tests write it directly). Search calls the catalog through its service binding, so locally it
+needs the catalog Worker running too, and a `search` request fails without it (the tests stub the
+catalog Worker). There is no Workers Caching locally: every request runs `Delivery`, and
 `purge` does nothing. Its tests run in `pnpm test`.
 
 ## Next
