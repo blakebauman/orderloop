@@ -6,8 +6,9 @@
 
 import { z } from 'zod';
 import { fingerprintOf, type StartOrderOnceInput } from './api';
+import { orderInputSchema } from './order-schemas';
 import { DEFAULT_TEMPLATE } from './templates';
-import { ORDER_CHANNELS, type OrderChannel, type OrderModel, orderInputSchema } from './types';
+import { ORDER_CHANNELS, type OrderChannel, type OrderModel } from './types';
 
 const shipAddressSchema = z.object({
   name: z.string().max(120).optional(),
