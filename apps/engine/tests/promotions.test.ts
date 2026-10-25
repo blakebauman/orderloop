@@ -100,6 +100,8 @@ describe('commerce.discount', () => {
     expect(await redemptions('SAVE10')).toEqual([]);
   });
 
+  // The refusals come in the order the codes were given, so their order shows nothing about which
+  // codes exist.
   it('refuses a code that is unknown, expired or used up, and leaves the order as it was', async () => {
     await addPromotion({ code: 'OLD', validTo: now - 1 });
     await addPromotion({ code: 'ONCE', maxRedemptions: 1 });
@@ -109,7 +111,7 @@ describe('commerce.discount', () => {
     expect(second.order?.subtotal).toBe(200);
     expect(
       (second.output as { refused: { reason: string }[] }).refused.map((r) => r.reason),
-    ).toEqual(["NOPE isn't a promotion.", 'OLD has expired.', 'ONCE has been used up.']);
+    ).toEqual(['ONCE has been used up.', 'OLD has expired.', "NOPE isn't a promotion."]);
     expect(await redemptions('ONCE')).toHaveLength(1);
   });
 

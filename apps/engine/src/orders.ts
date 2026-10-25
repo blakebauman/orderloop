@@ -17,6 +17,20 @@ import { loadFlowVersion } from './flows';
 import { orderAgent } from './namespaces';
 import type { OrderLoopParams } from './workflow';
 
+/**
+ * An order whose meta came from a caller (the binding: the web app's pages, the REST API, signed
+ * and channel webhooks; and A2A's place_order): `meta.ucp`, `meta.cart` and `meta.plugin` are the
+ * engine's own marks, set only when a UCP checkout, a cart or a plugin starts an order inside the
+ * engine, so whatever a caller sent under them is dropped. A forged `meta.ucp` would point the
+ * order's webhooks at a platform.
+ */
+export function fromOutside<T extends StartOrderInput>(req: T): T {
+  const meta = req.input.meta;
+  if (!meta || !('ucp' in meta || 'cart' in meta || 'plugin' in meta)) return req;
+  const { ucp: _ucp, cart: _cart, plugin: _plugin, ...rest } = meta;
+  return { ...req, input: { ...req.input, meta: rest } };
+}
+
 /** Creates the order row, initialises its OrderAgent and starts generation 1 of its Workflow. */
 export async function startOrder(env: Env, req: StartOrderInput): Promise<StartOrderResult> {
   // Without a key there is nothing to replay, so there is never a mismatch.

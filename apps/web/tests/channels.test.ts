@@ -4,6 +4,7 @@ import shopify from '../../../packages/core/tests/fixtures/shopify-order.json';
 
 const env = {
   SHOPIFY_WEBHOOK_SECRET: 'shpss_test' as string | undefined,
+  SHOPIFY_SHOPS: 'acme.myshopify.com' as string | undefined,
   EDI_PARTNERS: JSON.stringify({ NORTHWIND: 'cus_northwind' }),
 };
 const startOrderOnce = vi.fn();
@@ -34,7 +35,10 @@ async function hmac(secret: string, body: string) {
   return btoa(String.fromCharCode(...mac));
 }
 
-async function fromShopify(body: unknown, opts: { topic?: string; secret?: string } = {}) {
+async function fromShopify(
+  body: unknown,
+  opts: { topic?: string; secret?: string; shop?: string } = {},
+) {
   const raw = JSON.stringify(body);
   return handleShopifyOrder(
     new Request('https://app.test/api/v1/channels/shopify/orders', {
@@ -42,6 +46,7 @@ async function fromShopify(body: unknown, opts: { topic?: string; secret?: strin
       headers: {
         'x-shopify-hmac-sha256': await hmac(opts.secret ?? 'shpss_test', raw),
         'x-shopify-topic': opts.topic ?? 'orders/create',
+        'x-shopify-shop-domain': opts.shop ?? 'Acme.myshopify.com',
       },
       body: raw,
     }),
@@ -52,6 +57,7 @@ describe('Shopify orders', () => {
   beforeEach(() => {
     startOrderOnce.mockReset();
     env.SHOPIFY_WEBHOOK_SECRET = 'shpss_test';
+    env.SHOPIFY_SHOPS = 'acme.myshopify.com';
   });
 
   it('starts the mapped order for the matching customer, once', async () => {
@@ -90,6 +96,14 @@ describe('Shopify orders', () => {
     });
     expect(noSku.status).toBe(400);
     env.SHOPIFY_WEBHOOK_SECRET = undefined;
+    expect((await fromShopify(shopify)).status).toBe(503);
+    expect(startOrderOnce).not.toHaveBeenCalled();
+  });
+
+  it('takes orders only from the stores listed, and none without a list', async () => {
+    // The app's secret signs for every store it's installed on: another one is refused.
+    expect((await fromShopify(shopify, { shop: 'rival.myshopify.com' })).status).toBe(403);
+    env.SHOPIFY_SHOPS = undefined;
     expect((await fromShopify(shopify)).status).toBe(503);
     expect(startOrderOnce).not.toHaveBeenCalled();
   });

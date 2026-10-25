@@ -53,6 +53,7 @@ import {
   taxRegionsSchema,
   toBase,
   truthy,
+  unknownPromotion,
 } from '@orderloop/core';
 import * as ai from './ai';
 import * as billing from './billing';
@@ -219,11 +220,15 @@ export const EXECUTORS: Record<string, Exec> = {
     if (!codes.length)
       return { output: { applied: [], refused: [] }, summary: 'No promotion codes' };
     const found = await cx.promotionsByCode(env, codes);
-    const refused: { code: string; reason: string }[] = codes
-      .filter((c) => !found.some((p) => p.code === c))
-      .map((code) => ({ code, reason: `${code} isn't a promotion.` }));
+    // In the order the codes were given, so where a refusal sits says nothing about which exist.
+    const refused: { code: string; reason: string }[] = [];
     const usable: Promotion[] = [];
-    for (const p of found) {
+    for (const code of codes) {
+      const p = found.find((f) => f.code === code);
+      if (!p) {
+        refused.push({ code, reason: unknownPromotion(code) });
+        continue;
+      }
       const redeemed = await cx.redemptionsOf(env, p.id, ctx.order.id, ctx.order.customerId);
       const why = promotionProblem(p, {
         now: ctx.now,

@@ -477,6 +477,41 @@ describe('signed events', () => {
     expect(engine.sendEvent).toHaveBeenCalledTimes(2);
   });
 
+  it('treats a respelled copy of a delivered event as the same delivery', async () => {
+    const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+    const signature = await sign(raw);
+    engine.sendEvent.mockResolvedValue({ delivered: true, nodeId: 'pay' });
+    expect((await send(raw, signature)).status).toBe(200);
+    // The same signature with its hex upper-cased, or with another v1 in front, still verifies:
+    // it must still be the same receipt.
+    const hex = /v1=([0-9a-f]+)/.exec(signature)![1]!;
+    for (const copy of [
+      signature.replace(hex, hex.toUpperCase()),
+      signature.replace(`v1=${hex}`, `v1=00,v1=${hex}`),
+    ])
+      expect(await (await send(raw, copy)).json()).toEqual({ delivered: true, duplicate: true });
+    expect(engine.sendEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a copy signed with only the old secret, during a rotation, as the same delivery', async () => {
+    keys.int_pay!.previousSecret = 'whsec_old';
+    keys.int_pay!.previousExpiresAt = Date.now() + 86_400_000;
+    try {
+      const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
+      const t = Math.floor(Date.now() / 1000);
+      engine.sendEvent.mockResolvedValue({ delivered: true, nodeId: 'pay' });
+      // Signed under both secrets, as a sender does while it rolls them.
+      const both = await signWebhook(['whsec_test', 'whsec_old'], raw, t, 'int_pay');
+      expect((await send(raw, both)).status).toBe(200);
+      const oldOnly = await signWebhook('whsec_old', raw, t, 'int_pay');
+      expect(await (await send(raw, oldOnly)).json()).toEqual({ delivered: true, duplicate: true });
+      expect(engine.sendEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      keys.int_pay!.previousSecret = null;
+      keys.int_pay!.previousExpiresAt = null;
+    }
+  });
+
   it('refuses a key that names no integration, an unknown one, or the wrong secret', async () => {
     const raw = JSON.stringify({ orderId: 'ord_x', event: 'payment.received' });
     expect((await send(raw, await signWebhook('whsec_test', raw))).status).toBe(401);

@@ -18,6 +18,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       'content-length': String(a.size),
       'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`,
       'content-security-policy': "default-src 'none'; sandbox",
+      'x-content-type-options': 'nosniff',
       'cache-control': 'private, no-store',
     },
   });

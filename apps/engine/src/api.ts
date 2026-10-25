@@ -36,7 +36,7 @@ import {
 } from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
 import { a2aAgent, cartAgent, orderAgent } from './namespaces';
-import { startOrder, startOrderOnce } from './orders';
+import { fromOutside, startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins, pinnedManifest } from './plugin-host';
 import * as installs from './plugin-installs';
@@ -66,11 +66,11 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   }
 
   startOrder(input: StartOrderInput) {
-    return startOrder(this.env, input);
+    return startOrder(this.env, fromOutside(input));
   }
 
   startOrderOnce(input: StartOrderOnceInput) {
-    return startOrderOnce(this.env, input);
+    return startOrderOnce(this.env, fromOutside(input));
   }
 
   async sendEvent(orderId: string, event: string, payload?: Record<string, unknown>) {
