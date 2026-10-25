@@ -36,7 +36,6 @@ catalog:
   ai: 7.0.139
   '@ai-sdk/react': 4.0.142
   '@ai-sdk/provider': 4.0.27
-  workers-ai-provider: 4.0.0
   streamdown: 2.7.0
 
   # Build toolchain

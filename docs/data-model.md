@@ -476,6 +476,9 @@ Not covered by the redaction:
   and until they're deleted. The engine sends the setting with every call (`collectLog`, from
   `AI_GATEWAY_LOGS`), so it holds whatever the gateway's own default is; logs kept before it was
   turned off stay until deleted in the dashboard.
+  The assistant's calls never keep a payload even with logs on: they send
+  `cf-aig-collect-log-payload: false`, so their entries keep the model, tokens, cost and a hashed
+  principal but not the prompt or the tool results (customer names and order details) in them.
 - **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines

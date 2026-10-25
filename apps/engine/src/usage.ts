@@ -61,7 +61,7 @@ export async function finishTurn(
   logAiCall(
     {
       source: used.source,
-      model: model ? String(env.ASSISTANT_MODEL) : null,
+      model: model ? (used.model ?? String(env.ASSISTANT_MODEL)) : null,
       prompt: promptId('assistant'),
       ...(model ? {} : { fallback: String(env.AI_MODE) === 'mock' ? 'mock' : 'model unavailable' }),
     },

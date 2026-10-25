@@ -1094,8 +1094,21 @@ directly, as do `create_cart` and `change_cart` (a cart orders nothing until it 
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. `draft_plugin` (admins, with `ASSISTANT_PLUGINS` on) drafts a
 business-rule plugin and stages it pending, for an admin to review and approve on the Plugins page
-([Plugins](plugins.md#assistant-drafted-plugins)). The model is `workers-ai-provider` over `ASSISTANT_MODEL`, with a
-deterministic fallback in `assistant/model.ts`. See [The assistant](https://docs.orderloop.app/guides/assistant/).
+([Plugins](plugins.md#assistant-drafted-plugins)). The model (`assistantModel` in `assistant/model.ts`) is `createAI` from
+`agents/models/ai-sdk` over `ASSISTANT_MODEL`, with `ASSISTANT_FALLBACK_MODEL`
+(`@cf/zai-org/glm-4.7-flash`) as its `fallback` (tried when the first fails before any output), and
+`withFallback` putting the deterministic heuristic model behind both: the heuristic answers when
+both fail or nothing useful arrives within 20 seconds, and `used.source` and `used.model` say who
+answered (the `ai_call` log names the model). Through AI Gateway (`assistantGateway`) a turn's
+calls share one `eventId`, send the registry's `aiGatewayLogs` as `collectLog`, carry `metadata` `{ prompt, surface, principal }` (`principal` is a
+truncated SHA-256 of the person's id), retry up to 3 attempts (exponential backoff), bound each
+attempt but the gateway's last to 20 seconds (`requestTimeoutMs`), and send
+`cf-aig-collect-log-payload: false`, so the log keeps tokens, cost and metadata but not the
+prompt and tool results. `sessionAffinity` (a SHA-256 of the person and the conversation: the
+panel's agent, or an A2A `contextId`) keeps a conversation on one Workers AI replica for its
+prefix cache. With `AI_GATEWAY_ID` empty the gateway id passed is `""`, not undefined: `createAI`
+would otherwise use the account's `default` gateway, and the AI binding calls Workers AI directly
+only for an empty id. See [The assistant](https://docs.orderloop.app/guides/assistant/).
 
 The `AssistantAgent` instance is named after the person's user id, which the web app sets from the
 session whatever the browser asks for. Open local development

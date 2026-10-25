@@ -274,7 +274,11 @@ export class OrderLoopExecutor implements AgentExecutor {
     const started = Date.now();
     const proposed: { tool: AssistantTool; input: Record<string, unknown> }[] = [];
     const result = await generateText({
-      model: assistantModel(this.env, { kind: 'workspace' }, used),
+      model: await assistantModel(this.env, { kind: 'workspace' }, used, {
+        surface: 'a2a',
+        principalId: p.id,
+        conversation: ids.contextId,
+      }),
       system: systemPrompt(p),
       messages: [...this.earlier(ids), { role: 'user', content: prompt }],
       tools: this.tools(p),

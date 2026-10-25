@@ -19,7 +19,6 @@ updates:
           - ai
           - "@ai-sdk/*"
           - "@cloudflare/ai-chat"
-          - workers-ai-provider
           - streamdown
       # Minor and patch bumps land as one weekly PR. Majors stay one PR each so a breaking
       # change can be reviewed (and reverted) on its own.

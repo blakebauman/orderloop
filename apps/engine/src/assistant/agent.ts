@@ -169,7 +169,12 @@ export class AssistantAgent extends AIChatAgent<Env> {
     const used: ModelSource = { source: 'model' };
     const started = Date.now();
     const result = streamText({
-      model: assistantModel(this.env, context, used),
+      // One conversation per person: the agent is named for them.
+      model: await assistantModel(this.env, context, used, {
+        surface: 'panel',
+        principalId: p.id,
+        conversation: this.name,
+      }),
       system: systemPrompt(p, context),
       messages: pruneMessages({
         messages: await convertToModelMessages(this.messages),
