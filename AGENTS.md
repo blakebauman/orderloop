@@ -19,6 +19,7 @@ pnpm --filter @orderloop/web types      # after changing apps/web/wrangler.jsonc
 pnpm --filter @orderloop/catalog types  # after changing apps/catalog/wrangler.jsonc
 pnpm --filter @orderloop/catalog-edge types  # after changing apps/catalog-edge/wrangler.jsonc
 pnpm plugin:check <deployment> <plugin>      # before removing a plugin (needs ORDERLOOP_API_TOKEN)
+pnpm catalog:bench <deployment> [products]   # time a deployed catalog end to end, then delete (needs ORDERLOOP_API_TOKEN)
 pnpm docs:dev / docs:build              # Starlight docs in apps/docs (build includes a link check)
 pnpm sync:theme                         # regenerate the docs theme from packages/design tokens
 ```
