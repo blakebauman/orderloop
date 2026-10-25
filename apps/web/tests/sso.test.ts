@@ -155,7 +155,11 @@ describe('the OpenID Connect flow', () => {
   }
 
   /** Starts a flow, then comes back the way the provider would redirect the browser. */
-  async function roundTrip(tamper: (q: URLSearchParams) => void = () => {}, reauth = false) {
+  async function roundTrip(
+    tamper: (q: URLSearchParams) => void = () => {},
+    reauth = false,
+    forge: (flow: Record<string, unknown>) => void = () => {},
+  ) {
     const c = ssoConfig()!;
     let flowNonce = '';
     provider(() => flowNonce);
@@ -164,8 +168,11 @@ describe('the OpenID Connect flow', () => {
     flowNonce = auth.searchParams.get('nonce')!;
     const q = new URLSearchParams({ code: 'code-1', state: auth.searchParams.get('state')! });
     tamper(q);
+    const [name, value] = start.cookie.split(';')[0]!.split(/=(.*)/s);
+    const flow = JSON.parse(atob(value!));
+    forge(flow);
     const back = new Request(`https://app.test/login/sso/callback?${q}`, {
-      headers: { cookie: start.cookie.split(';')[0]! },
+      headers: { cookie: `${name}=${btoa(JSON.stringify(flow))}` },
     });
     return { auth, result: verifyCallback(back, c) };
   }
@@ -215,6 +222,20 @@ describe('the OpenID Connect flow', () => {
     await expect((await roundTrip(undefined, true)).result).rejects.toThrow(/sign them in again/);
     claims = {};
     await expect((await roundTrip(undefined, true)).result).rejects.toThrow(/sign them in again/);
+  });
+
+  it('takes no word from the flow cookie for how fresh a step-up sign-in must be', async () => {
+    claims = { auth_time: Math.floor(Date.now() / 1000) - 30 * 60 };
+    const earlier = (f: Record<string, unknown>) => {
+      f.reauth = { at: 0 };
+    };
+    // A step-up whose start was moved back, and an ordinary sign-in made into one.
+    await expect((await roundTrip(undefined, true, earlier)).result).rejects.toThrow(
+      /sign them in again/,
+    );
+    await expect((await roundTrip(undefined, false, earlier)).result).rejects.toThrow(
+      /sign them in again/,
+    );
   });
 
   it('keeps an unverified email from matching anyone', async () => {

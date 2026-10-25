@@ -11,7 +11,8 @@
  *
  * A step-up (`stepUp`) for someone who has only single sign-on starts the same flow with `reauth`:
  * the request asks the provider to sign them in again (`prompt=login`, `max_age=0`), and the
- * callback takes its answer only if the ID token's `auth_time` is after the flow began, so a
+ * callback takes its answer only if the ID token's `auth_time` is after the flow began and within
+ * the flow's own lifetime of now (the server's clock, since the flow cookie isn't signed), so a
  * provider that answers from its own session fails closed.
  */
 
@@ -227,9 +228,11 @@ export async function verifyCallback(
   if (typeof claims.sub !== 'string' || !claims.sub) throw new SsoError('no subject');
   let reauthAt: number | null = null;
   if (flow.reauth) {
-    // The same minute of clock skew the token's own times get.
+    // The same minute of clock skew the token's own times get. The cookie's `at` is only the
+    // browser's word, so the server's own bound is what holds: no older than a flow can live.
     const at = typeof claims.auth_time === 'number' ? claims.auth_time * 1000 : 0;
-    if (at < flow.reauth.at - 60_000) throw new SsoError('provider did not sign them in again');
+    const since = Math.max(flow.reauth.at, Date.now() - FLOW_MS) - 60_000;
+    if (at < since) throw new SsoError('provider did not sign them in again');
     reauthAt = Date.now();
   }
   // An email the provider says it hasn't verified can't match or create anyone. Entra ID leaves
