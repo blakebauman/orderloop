@@ -281,7 +281,7 @@ function OrderView() {
   ];
 
   return (
-    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className="flex flex-col lg:h-[calc(100dvh-var(--shell-h))]">
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
         {/* A real basis, so the totals and actions wrap below the title on a phone instead of
             squeezing it to a column. */}
