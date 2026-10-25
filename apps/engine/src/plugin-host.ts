@@ -86,7 +86,11 @@ export function boundPlugins(env: Env): string[] {
 /** A runtime install that is active: its pin, and the buyer-details grant its admin approved. */
 type Active = { sha: string; personalData: boolean; publisher: string };
 
-/** How long an isolate trusts its read of the active runtime installs. */
+/**
+ * How long an isolate trusts its read of the active runtime installs, for listing them. Calling
+ * one checks its row first (`stillActive`), so turning it off stops it on the next call in every
+ * isolate, not this one alone.
+ */
 const INSTALLS_TTL_MS = 15_000;
 let installsCache: { at: number; rows: Map<string, Active> } | null = null;
 
@@ -273,8 +277,13 @@ export async function pluginStub(
 ): Promise<PluginStub | null> {
   const bound = (env as unknown as Vars)[pluginBinding(id)];
   if (typeof (bound as Fetcher | undefined)?.fetch === 'function') return bound as PluginStub;
-  const sha = (await bundles(env))[id]?.sha;
-  if (!sha) return null;
+  const pin = (await bundles(env))[id];
+  if (!pin) return null;
+  const { sha } = pin;
+  if (pin.source === 'installed' && !(await stillActive(env, id, sha))) {
+    dropInstallsCache();
+    return null;
+  }
   const bundle = await verifiedBundle(env, id, sha);
   const keys = await sandboxKeys(env, id);
   const caps = capabilities();
@@ -303,6 +312,16 @@ export async function pluginStub(
   return worker.getEntrypoint(undefined, {
     limits: limitsFor(kind, bundle.manifest),
   }) as unknown as PluginStub;
+}
+
+/** Whether a runtime install is still the active version: its row, read now (not the cache). */
+async function stillActive(env: Env, id: string, sha: string): Promise<boolean> {
+  const row = await createDb(env.DB)
+    .select({ sha: installedPluginRows.sha })
+    .from(installedPluginRows)
+    .where(and(eq(installedPluginRows.id, id), eq(installedPluginRows.status, 'active')))
+    .get();
+  return row?.sha === sha;
 }
 
 /** The page-signing keys a sandboxed plugin verifies with, as a Worker plugin's secrets hold them. */
