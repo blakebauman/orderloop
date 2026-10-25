@@ -1,9 +1,10 @@
 /**
  * The plugin's admin page (`pageRole: admin`): the partners that may punch out, how to set one up
- * in their procurement system, and their secrets, each shown once when made or rotated. Pages run no
- * script: forms post back here and each answer is a whole page.
+ * in their procurement system, and their secrets, each shown once when made or rotated. Each page is
+ * a view the app draws in its own shell: forms post back here and each answer is the next view.
  */
 
+import { type PluginView, viewResponse } from '@orderloop/plugin-sdk';
 import {
   addPartner,
   listPartners,
@@ -16,23 +17,6 @@ import {
 } from './partners';
 
 const BASE = '/plugins/punchout/';
-const h = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
-const STYLE = `body{font:14px/1.5 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}
-table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
-label{display:grid;gap:.2rem;margin:.4rem 0}input,select{padding:.3rem;font:inherit}
-.secret{font-family:monospace;padding:.6rem;border:1px solid #c80;background:#fff8e6}
-form.inline{display:inline}code{font-size:13px}`;
-
-function page(body: string, status = 200): Response {
-  return new Response(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Punchout</title><style>${STYLE}</style></head><body><h1>Punchout</h1>${body}</body></html>`,
-    {
-      status,
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-    },
-  );
-}
 
 const hosts = (raw: string) =>
   raw
@@ -72,43 +56,152 @@ function partnerFrom(f: FormData): PartnerInput | string {
   };
 }
 
-const secretBox = (what: string, secret: string) =>
-  `<p class="secret">${h(what)}: <strong>${h(secret)}</strong><br>Copy it now; it isn't shown again.</p>`;
+/** What the page says above the partners: a secret to copy (shown once), or why a form failed. */
+type Notice = { secret?: { label: string; value: string }; error?: string };
 
-function list(partners: Partner[], origin: string, notice = ''): Response {
-  const rows = partners
-    .map(
-      (
-        p,
-      ) => `<tr><td><strong>${h(p.name)}</strong><br><small>${p.protocol === 'cxml' ? `From ${h(p.fromDomain)} / ${h(p.identity)}` : `USERNAME ${h(p.identity)}`}</small></td>
-<td>${p.protocol.toUpperCase()}</td><td><code>${h(p.flowId)}</code>${p.customerId ? `<br><small>${h(p.customerId)}</small>` : ''}</td>
-<td>${p.returnHosts.map(h).join('<br>')}</td><td>${p.status}</td>
-<td><form class="inline" method="post" action="${BASE}partners/${h(p.id)}/rotate"><button>Rotate secret</button></form>
-<form class="inline" method="post" action="${BASE}partners/${h(p.id)}/${p.status === 'active' ? 'disable' : 'enable'}"><button>${p.status === 'active' ? 'Disable' : 'Enable'}</button></form></td></tr>`,
-    )
-    .join('');
-  return page(`${notice}
-<h2>Partners</h2>
-${partners.length ? `<table><tr><th>Partner</th><th>Protocol</th><th>Flow</th><th>Returns to</th><th>Status</th><th></th></tr>${rows}</table>` : '<p>No partners yet.</p>'}
-<h2>Setting up a buyer's system</h2>
-<ul><li>cXML setup URL: <code>${h(origin)}cxml/setup</code> (PunchOutSetupRequest), and order URL <code>${h(origin)}cxml/order</code> (OrderRequest). The buyer's From credential and the Sender SharedSecret identify them.</li>
-<li>OCI URL: <code>${h(origin)}oci/setup</code> with <code>USERNAME</code>, <code>PASSWORD</code> (the secret) and <code>HOOK_URL</code>, opened with GET.</li></ul>
-<h2>Add a partner</h2>
-<form method="post" action="${BASE}partners">
-<label>Name <input name="name" required maxlength="120"></label>
-<label>Protocol <select name="protocol">${PROTOCOLS.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}</select></label>
-<label>From domain (cXML, e.g. NetworkID) <input name="fromDomain"></label>
-<label>Identity (cXML From identity, or OCI USERNAME) <input name="identity" required></label>
-<label>Our credential domain and identity in returned carts <input name="supplierDomain" placeholder="NetworkID"> <input name="supplierIdentity" placeholder="orderloop"></label>
-<label>Customer id <input name="customerId" placeholder="cus_…"></label>
-<label>Flow id (priced, and run for its orders) <input name="flowId" required placeholder="tpl-b2b-order"></label>
-<label>Commerce model of the flow <input name="model" value="b2b"></label>
-<label>Return hosts (comma separated) <input name="returnHosts" required placeholder="service.ariba.com"></label>
-<label>Origins that may frame the catalog (optional) <input name="frameOrigins" placeholder="https://service.ariba.com"></label>
-<label>Session minutes <input name="sessionMinutes" type="number" value="120" min="5" max="1440"></label>
-<button>Add partner</button></form>`);
+/** The page, as a view the app draws in its own shell (`viewResponse`). */
+function list(partners: Partner[], origin: string, notice: Notice = {}): Response {
+  const status = (p: Partner) => (p.status === 'active' ? 'Active' : 'Disabled');
+  const view: PluginView = {
+    title: 'Punchout',
+    description:
+      'Procurement systems (Ariba, Coupa, SAP and others) that may open a cart here for their buyers and send the purchase orders.',
+    blocks: [
+      ...(notice.error
+        ? [{ type: 'alert' as const, tone: 'error' as const, text: notice.error }]
+        : []),
+      ...(notice.secret
+        ? [
+            {
+              type: 'alert' as const,
+              tone: 'warning' as const,
+              title: 'Copy it now',
+              text: 'This secret isn’t shown again. Give it to the customer’s procurement admin as their SharedSecret (cXML) or PASSWORD (OCI).',
+            },
+            { type: 'code' as const, label: notice.secret.label, text: notice.secret.value },
+          ]
+        : []),
+      {
+        type: 'section',
+        title: 'Partners',
+        blocks: [
+          {
+            type: 'table',
+            columns: [
+              { key: 'partner', label: 'Partner' },
+              { key: 'protocol', label: 'Protocol' },
+              { key: 'flow', label: 'Flow' },
+              { key: 'returns', label: 'Returns to' },
+              { key: 'status', label: 'Status' },
+            ],
+            rows: partners.map((p) => ({
+              cells: {
+                partner: {
+                  text: `${p.name} · ${p.protocol === 'cxml' ? `${p.fromDomain} / ${p.identity}` : `USERNAME ${p.identity}`}`,
+                },
+                protocol: p.protocol.toUpperCase(),
+                flow: {
+                  text: p.customerId ? `${p.flowId} · ${p.customerId}` : p.flowId,
+                  mono: true,
+                },
+                returns: p.returnHosts.join(', '),
+                status: { text: status(p), tone: p.status === 'active' ? 'ok' : 'muted' },
+              },
+              actions: [
+                {
+                  type: 'form' as const,
+                  action: `partners/${p.id}/rotate`,
+                  fields: [],
+                  submit: 'Rotate secret',
+                  confirm: `Rotate ${p.name}'s secret? The old one stops working at once.`,
+                },
+                {
+                  type: 'form' as const,
+                  action: `partners/${p.id}/${p.status === 'active' ? 'disable' : 'enable'}`,
+                  fields: [],
+                  submit: p.status === 'active' ? 'Disable' : 'Enable',
+                },
+              ],
+            })),
+            empty: 'No partners yet.',
+          },
+        ],
+      },
+      {
+        type: 'section',
+        title: 'Setting up a buyer’s system',
+        blocks: [
+          {
+            type: 'list',
+            items: [
+              `cXML setup URL: ${origin}cxml/setup (PunchOutSetupRequest)`,
+              `cXML order URL: ${origin}cxml/order (OrderRequest: new, update and delete)`,
+              `OCI URL: ${origin}oci/setup with USERNAME, PASSWORD (the secret) and HOOK_URL, by GET or POST`,
+              'A cXML buyer is found by its From credential and proves itself with the Sender’s SharedSecret.',
+            ],
+          },
+        ],
+      },
+      {
+        type: 'section',
+        title: 'Add a partner',
+        blocks: [
+          {
+            type: 'form',
+            action: 'partners',
+            submit: 'Add partner',
+            fields: [
+              { name: 'name', label: 'Name', required: true },
+              {
+                name: 'protocol',
+                label: 'Protocol',
+                kind: 'select',
+                options: PROTOCOLS.map((p) => ({ value: p, label: p.toUpperCase() })),
+              },
+              { name: 'fromDomain', label: 'From domain (cXML)', placeholder: 'NetworkID' },
+              {
+                name: 'identity',
+                label: 'Identity (cXML From identity, or OCI USERNAME)',
+                required: true,
+              },
+              {
+                name: 'supplierDomain',
+                label: 'Our credential domain in returned carts',
+                placeholder: 'NetworkID',
+              },
+              {
+                name: 'supplierIdentity',
+                label: 'Our credential identity in returned carts',
+                placeholder: 'orderloop',
+              },
+              { name: 'customerId', label: 'Customer id', placeholder: 'cus_…' },
+              {
+                name: 'flowId',
+                label: 'Flow id (prices its carts, runs its orders)',
+                required: true,
+                placeholder: 'tpl-b2b-order',
+              },
+              { name: 'model', label: 'Commerce model of the flow', value: 'b2b' },
+              {
+                name: 'returnHosts',
+                label: 'Return hosts (comma separated)',
+                required: true,
+                placeholder: 'service.ariba.com',
+              },
+              {
+                name: 'frameOrigins',
+                label: 'Origins that may frame the catalog (optional)',
+                placeholder: 'https://service.ariba.com',
+              },
+              { name: 'sessionMinutes', label: 'Session minutes', kind: 'number', value: 120 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  return viewResponse(view, notice.error ? { status: 400 } : {});
 }
-
 export async function adminPages(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   // The app's address isn't forwarded to plugins; the page names the paths on it, under the
@@ -121,17 +214,16 @@ export async function adminPages(request: Request, env: Env): Promise<Response> 
   if (request.method !== 'POST') return new Response('Not found', { status: 404 });
   if (path === `${BASE}partners`) {
     const input = partnerFrom(await request.formData());
-    if (typeof input === 'string')
-      return list(await listPartners(env), origin, `<p role="alert">${h(input)}</p>`);
+    if (typeof input === 'string') return list(await listPartners(env), origin, { error: input });
     try {
       const { secret } = await addPartner(env, input);
-      return list(await listPartners(env), origin, secretBox(`${input.name}'s secret`, secret));
+      return list(await listPartners(env), origin, {
+        secret: { label: `${input.name}'s secret`, value: secret },
+      });
     } catch {
-      return list(
-        await listPartners(env),
-        origin,
-        '<p role="alert">A partner with that protocol, domain and identity already exists.</p>',
-      );
+      return list(await listPartners(env), origin, {
+        error: 'A partner with that protocol, domain and identity already exists.',
+      });
     }
   }
   const m = /^\/plugins\/punchout\/partners\/(ptn_[a-z0-9]+)\/(rotate|disable|enable)$/.exec(path);
@@ -139,7 +231,11 @@ export async function adminPages(request: Request, env: Env): Promise<Response> 
   const [, id, action] = m;
   if (action === 'rotate') {
     const secret = await rotateSecret(env, id!);
-    return list(await listPartners(env), origin, secret ? secretBox('New secret', secret) : '');
+    return list(
+      await listPartners(env),
+      origin,
+      secret ? { secret: { label: 'New secret', value: secret } } : {},
+    );
   }
   await setStatus(env, id!, action === 'disable' ? 'disabled' : 'active');
   return list(await listPartners(env), origin);

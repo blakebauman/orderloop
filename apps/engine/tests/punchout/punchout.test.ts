@@ -66,8 +66,10 @@ async function addPartner() {
     },
     true,
   );
+  type View = { blocks: { type: string; text?: string }[] };
+  const secretOf = (v: View) => v.blocks.find((b) => b.type === 'code')?.text;
   const page = await res.text();
-  let secret = /<strong>([A-Za-z0-9_-]{20,})<\/strong>/.exec(page)?.[1];
+  let secret = secretOf(JSON.parse(page) as View);
   // Added by an earlier test (the plugin's storage lasts the file): rotate its secret instead.
   if (!secret) {
     const id = /partners\/(ptn_[a-z0-9]+)\/rotate/.exec(page)?.[1];
@@ -76,7 +78,7 @@ async function addPartner() {
       { method: 'POST' },
       true,
     );
-    secret = /<strong>([A-Za-z0-9_-]{20,})<\/strong>/.exec(await rotated.text())?.[1];
+    secret = secretOf((await rotated.json()) as View);
   }
   if (!secret) throw new Error('no secret');
   return secret;

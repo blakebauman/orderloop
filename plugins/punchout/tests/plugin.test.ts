@@ -1,8 +1,11 @@
 import { env } from 'cloudflare:workers';
 import {
+  checkPluginView,
   type ExternalCartInput,
+  PLUGIN_VIEW_TYPE,
   type PluginCart,
   type PluginStartOrder,
+  type PluginView,
   PRINCIPAL_HEADER,
   signPrincipal,
 } from '@orderloop/core';
@@ -91,6 +94,10 @@ async function admin(path: string, form?: Record<string, string>) {
   );
 }
 
+/** The secret a view shows once, in its `code` block. */
+const secretIn = (view: PluginView) =>
+  view.blocks.find((b): b is Extract<typeof b, { type: 'code' }> => b.type === 'code')?.text;
+
 /** Adds a partner through the admin page and reads its secret off the page. */
 async function partner(over: Record<string, string> = {}) {
   const res = await admin('/plugins/punchout/partners', {
@@ -104,9 +111,11 @@ async function partner(over: Record<string, string> = {}) {
     frameOrigins: 'https://buyer.example',
     ...over,
   });
-  const html = await res.text();
-  const secret = /<strong>([A-Za-z0-9_-]{20,})<\/strong>/.exec(html)?.[1];
-  if (!secret) throw new Error(`no secret on the page: ${html.slice(0, 400)}`);
+  expect(res.headers.get('content-type')).toBe(PLUGIN_VIEW_TYPE);
+  const view = (await res.json()) as PluginView;
+  expect(checkPluginView(JSON.stringify(view)).ok).toBe(true);
+  const secret = secretIn(view);
+  if (!secret) throw new Error(`no secret on the page: ${JSON.stringify(view).slice(0, 400)}`);
   return secret;
 }
 
@@ -491,6 +500,7 @@ describe('the admin page', () => {
     const rotated = await (await admin(`/plugins/punchout/partners/${id}/rotate`, {})).text();
     expect(rotated).toContain('New secret');
     expect(rotated).not.toContain(first);
+    expect(secretIn(JSON.parse(rotated))).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     // The old secret no longer opens a session.
     const res = await post('/plugins/punchout/cxml/setup', setupXml.replace('SECRET', first));
     expect(await status(res)).toBe('401');
@@ -498,7 +508,7 @@ describe('the admin page', () => {
 
   it('names the setup URLs under the deployment’s alias when it has one', async () => {
     expect(await (await admin('/plugins/punchout/')).text()).toContain(
-      'https://&#60;your OrderLoop address&#62;/plugins/punchout/cxml/setup',
+      'https://<your OrderLoop address>/plugins/punchout/cxml/setup',
     );
     const path = '/plugins/punchout/';
     const headers = new Headers({
@@ -512,7 +522,7 @@ describe('the admin page', () => {
     const page = await (
       await plugin.fetch(new Request(`https://plugin${path}`, { headers }))
     ).text();
-    expect(page).toContain('https://&#60;your OrderLoop address&#62;/punchout/cxml/setup');
+    expect(page).toContain('https://<your OrderLoop address>/punchout/cxml/setup');
     expect(page).toContain('/punchout/oci/setup');
   });
 
@@ -525,6 +535,7 @@ describe('the admin page', () => {
       flowId: 'f',
       returnHosts: '',
     });
+    expect(res.status).toBe(400);
     expect(await res.text()).toContain('List the host names');
   });
 });
