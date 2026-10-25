@@ -234,7 +234,7 @@ export default function Commerce() {
         {/* On a phone the sections run long: the links stay under the top bar, on one scrolling line. */}
         <nav
           aria-label="On this page"
-          className="sticky top-[var(--shell-h)] z-10 -mx-4 border-b bg-background px-4 text-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 xl:col-span-2"
+          className="sticky top-[var(--shell-h)] z-10 -mx-4 min-w-0 border-b bg-background px-4 text-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 xl:col-span-2"
         >
           <ul className="flex gap-x-5 gap-y-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
             {[
