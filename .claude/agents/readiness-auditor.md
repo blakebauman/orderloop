@@ -85,6 +85,13 @@ and the code or account disagree, the code and account are right. Report the gap
   manual dashboard or API change, since nothing in the repo manages them yet; say so. Never
   recommend a manual production deploy, a z-suffixed route (`/health`, not `/healthz`), or a
   resource shared across customers.
+- **Cloudflare-native.** Order Loop is a Cloudflare-native product, so every remediation uses a
+  Cloudflare service. Examples: Notifications, Workers Logs and Traces, Tail Workers, Logpush
+  to R2, Health Checks, Access, Turnstile, WAF, R2 bucket locks and versioning, or a cron or
+  Workflow that exports to R2. Don't recommend a third-party monitor, error tracker, backup
+  service, CDN or cloud. Where Cloudflare has no equivalent, say so and leave the choice to the
+  owner. The upstreams the product integrates with (Stripe, Shopify, carriers, identity
+  providers) are dependencies to harden, not things to replace.
 - **App trust boundaries** (principal header, UCP envelopes, OAuth resources, webhook
   signatures, prompt injection) belong to the `security-reviewer` agent. Raise them here only
   where platform configuration undermines them.
@@ -149,15 +156,19 @@ and the code or account disagree, the code and account are right. Report the gap
     - Has rollback, including a sandboxed plugin's pinned bundle, been exercised?
     - Should canary and general use gradual deployments (version percentages)?
     - Recovery when a migration applied but the deploy failed.
-    - The stated acceptable downtime for a Cloudflare incident.
+    - Being Cloudflare-native means there is no failover to another provider. Is the
+      acceptable downtime for a Cloudflare incident stated, and is the plan to wait and then
+      verify written down?
     - Runbook coverage in `docs/operations.md`.
 11. **Observability and alerting.**
     - Logs and traces sampling per Worker, retention, and Logpush.
-    - Error tracking.
+    - Error tracking with Cloudflare tools: Workers Logs and Traces queries, a Tail Worker, or
+      Logpush to R2. Do exceptions reach any of them with enough context (order id, step key)?
     - Notification policies (`/alerting/v3/policies`) for Worker errors and CPU, Workflow
       failures, DLQ depth, D1/R2/KV usage, certificates, AI Gateway spend, and Email Routing.
       Each needs a real on-call destination.
-    - An external monitor on `/health/deep`.
+    - Something other than CI that watches `/health/deep`: Cloudflare Health Checks
+      (tier-gated by zone plan) or a scheduled Worker probe that alerts through Notifications.
 12. **Cost and quotas.**
     - Usage vs limits for requests, CPU, DO duration and storage, D1 rows and size (one
       database per deployment), Workflow steps, queues, R2 class A/B, Workers AI, and AI
@@ -196,7 +207,7 @@ and the code or account disagree, the code and account are right. Report the gap
     - **Custom Domains and certificates**: domain 3.
     - **Zone services**: WAF, DDoS, Bot Fight Mode or Turnstile, Tiered Cache, Logpush,
       Notifications. What's on, what the plan allows, and what's absent.
-    - **Absent services worth naming.** Only where they close a specific finding: Access in
+    - **Cloudflare services not in use.** Name one only where it closes a specific finding: Access in
       front of an admin or preview surface, Turnstile on sign-in, Logpush to durable storage,
       R2 bucket locks for the audit archive. Never as a shopping list.
 
