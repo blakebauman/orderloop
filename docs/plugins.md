@@ -449,6 +449,15 @@ cancelled), so a change the core refuses leaves the PO's order running; a claim 
 is deleted, and one that stopped part way is finished by its own resend. A PO whose latest version
 is a `delete` stays cancelled: a later `new` or `update` of it is `409`.
 
+To check a deployment's punchout end to end, `pnpm punchout:smoke <deployment id>` (or a local
+`http://localhost:5173`) talks to it as a buyer's system would (`scripts/punchout-smoke.ts`): a
+wrong secret refused, a cXML setup whose start link opens the buyer's cart once, then a PO sent,
+resent, updated and deleted, and an update after the delete refused. It takes a partner's secret
+and identity, a return URL on one of its hosts and a SKU from `PUNCHOUT_*` variables, and prints
+order ids but never the secret or the start token. Add a cXML partner for it whose customer and
+flow may have orders started and cancelled (each run leaves two cancelled orders), and disable it
+afterwards. Sending the cart back needs a browser.
+
 When an external cart's buyer sends it back (`CartAgent.transferAs`; only the buyer, since the fields are posted from the browser that asked), the core
 holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (`checkCartReturn`:
 string fields only, at most 2,000 and 1 MiB) and keeps it, marks the cart `returned`, and posts the
