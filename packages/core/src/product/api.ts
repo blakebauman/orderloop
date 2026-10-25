@@ -35,7 +35,14 @@ export type WriteOptions = {
 
 export const FEED_FORMATS = ['csv', 'ndjson'] as const;
 export type FeedFormat = (typeof FEED_FORMATS)[number];
-export const FEED_STATES = ['queued', 'splitting', 'applying', 'done', 'failed'] as const;
+export const FEED_STATES = [
+  'queued',
+  'splitting',
+  'applying',
+  'done',
+  'failed',
+  'cancelled',
+] as const;
 export type FeedState = (typeof FEED_STATES)[number];
 
 /** One message on the purge queue: cache tags catalog-edge purges (rationed, ~5 calls a minute). */
@@ -67,6 +74,8 @@ export type FeedStatus = {
   errors: { row: number; key?: string; message: string }[];
   /** Why the feed failed as a whole, when `state` is `failed`. */
   failure?: string;
+  /** Who cancelled it, when `state` is `cancelled`. */
+  cancelledBy?: string;
 };
 
 /** Admin writes answer with what was stored, or why nothing was. */
@@ -115,6 +124,11 @@ export interface ProductCatalogRpc {
     meta: { name: string; format: FeedFormat; by: string },
   ): Promise<FeedStatus>;
   feedStatus(id: string): Promise<FeedStatus | null>;
+  /**
+   * Stops a feed that hasn't finished: it splits no more of its file, and parts already sent to
+   * the shards still apply. A finished feed is returned as it is; null when there's no such feed.
+   */
+  cancelFeed(id: string, by: string): Promise<FeedStatus | null>;
   /** Most recent first. */
   listFeeds(limit?: number): Promise<FeedStatus[]>;
   /**

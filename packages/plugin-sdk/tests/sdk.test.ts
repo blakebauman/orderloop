@@ -1,4 +1,10 @@
-import { type PluginExecRequest, PRINCIPAL_HEADER, signPrincipal } from '@orderloop/core';
+import {
+  checkPluginView,
+  PLUGIN_VIEW_TYPE,
+  type PluginExecRequest,
+  PRINCIPAL_HEADER,
+  signPrincipal,
+} from '@orderloop/core';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('cloudflare:workers', () => ({
@@ -12,7 +18,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-const { checkDefinition, definePlugin } = await import('../src/index');
+const { checkDefinition, definePlugin, viewResponse } = await import('../src/index');
 const { pluginContract } = await import('../src/contract');
 
 const KEY = 'sdk-test-key';
@@ -409,5 +415,24 @@ describe('secret() and pluginDb(), whichever way a plugin runs', () => {
     const d1 = { prepare: () => 'd1' };
     expect(pluginDb({ DB: d1 })).toBe(d1);
     expect(() => pluginDb({})).toThrow(/no database/);
+  });
+});
+
+describe('viewResponse', () => {
+  it('answers with a view the app can draw, not cached unless the plugin says so', async () => {
+    const res = viewResponse(
+      { title: 'Hi', blocks: [{ type: 'text', text: 'Hello' }] },
+      { status: 400, headers: { 'x-a': '1' } },
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toBe(PLUGIN_VIEW_TYPE);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('x-a')).toBe('1');
+    expect(checkPluginView(await res.text())).toMatchObject({ ok: true, view: { title: 'Hi' } });
+    const cached = viewResponse(
+      { title: 'x', blocks: [] },
+      { headers: { 'cache-control': 'max-age=60' } },
+    );
+    expect(cached.headers.get('cache-control')).toBe('max-age=60');
   });
 });

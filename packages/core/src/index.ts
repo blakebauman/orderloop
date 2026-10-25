@@ -24,6 +24,7 @@ export * from './mcp-skills';
 export * from './money';
 export * from './payments';
 export * from './plugin-host';
+export * from './plugin-ui';
 export * from './plugins';
 export * from './policy';
 export * from './pricing';

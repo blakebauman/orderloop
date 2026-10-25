@@ -3,12 +3,16 @@
  * chunk it splits, the parts consumer records each part a shard applied, and both are idempotent
  * (by chunk number and part id), so a retried step or a redelivered message never counts twice.
  * A feed is done when its split has finished and every part it produced has been applied.
+ * Done, failed and cancelled are final: nothing afterwards changes a feed's state.
  */
 import { DurableObject } from 'cloudflare:workers';
 import { FEED_ERRORS, type FeedFormat, type FeedStatus } from '@orderloop/core/product';
 
 export type FeedError = FeedStatus['errors'][number];
 export type PartCounts = { created: number; updated: number; unchanged: number; rejected: number };
+
+const ended = (s: FeedStatus) =>
+  s.state === 'done' || s.state === 'failed' || s.state === 'cancelled';
 
 export class CatalogFeeds extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -101,7 +105,7 @@ export class CatalogFeeds extends DurableObject<Env> {
   /** The split has read the whole file: from now on the feed finishes when its parts do. */
   splitDone(id: string): FeedStatus | null {
     const s = this.read(id);
-    if (!s || s.state === 'failed' || s.state === 'done') return s;
+    if (!s || ended(s)) return s;
     s.state = 'applying';
     this.write(s);
     return s;
@@ -135,7 +139,7 @@ export class CatalogFeeds extends DurableObject<Env> {
 
   finish(id: string): FeedStatus | null {
     const s = this.read(id);
-    if (!s || s.state === 'failed') return s;
+    if (!s || ended(s)) return s;
     s.state = 'done';
     s.finishedAt ??= Date.now();
     this.write(s);
@@ -144,9 +148,19 @@ export class CatalogFeeds extends DurableObject<Env> {
 
   fail(id: string, failure: string): FeedStatus | null {
     const s = this.read(id);
-    if (!s || s.state === 'done') return s;
+    if (!s || ended(s)) return s;
     s.state = 'failed';
     s.failure = failure.slice(0, 1_000);
+    s.finishedAt = Date.now();
+    this.write(s);
+    return s;
+  }
+
+  cancel(id: string, by: string): FeedStatus | null {
+    const s = this.read(id);
+    if (!s || ended(s)) return s;
+    s.state = 'cancelled';
+    s.cancelledBy = by;
     s.finishedAt = Date.now();
     this.write(s);
     return s;

@@ -94,6 +94,7 @@ suite('audit vocabulary', () => {
       'ucp',
       'order',
       'approval',
+      'cart',
       'flow',
       'webhook',
       'stock',

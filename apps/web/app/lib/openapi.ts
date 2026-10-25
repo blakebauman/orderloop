@@ -5,6 +5,8 @@
 
 import {
   BASE_CURRENCY,
+  CART_STATUSES,
+  cartOpSchema,
   inboundOrderSchema,
   ORDER_CHANNELS,
   ORDER_MODELS,
@@ -24,12 +26,14 @@ import {
   catalogDeleteInput,
   catalogProductsInput,
   catalogTypeInput,
+  createCartInput,
   dataSubjectInput,
   decisionInput,
   eventSchema,
   integrationInput,
   orderEventInput,
   platformInput,
+  submitCartInput,
   subscriptionInput,
 } from './api-schemas';
 
@@ -54,6 +58,73 @@ const errors = {
   ),
 };
 const orderId = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+const cartId = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+const cart = (description: string) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        properties: { cart: { $ref: '#/components/schemas/Cart' } },
+        required: ['cart'],
+      },
+    },
+  },
+});
+
+/** A staff cart as GET /api/v1/carts/{id} answers it (`CartView`). */
+function cartSchema() {
+  const amount = { type: 'number' };
+  return {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      title: { type: 'string' },
+      status: { type: 'string', enum: [...CART_STATUSES] },
+      customerId: { type: ['string', 'null'] },
+      flowId: { type: 'string', description: 'The flow that prices it and runs its order' },
+      lines: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Name the line in set_qty and remove' },
+            sku: { type: 'string' },
+            qty: { type: 'integer' },
+            title: { type: 'string', description: 'Set by the quote' },
+            unitPrice: { ...amount, description: 'Set by the quote' },
+          },
+          required: ['id', 'sku', 'qty'],
+        },
+      },
+      promoCodes: { type: 'array', items: { type: 'string' } },
+      quote: {
+        type: ['object', 'null'],
+        description:
+          "What the cart costs, worked out by its flow's pricing nodes: `currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`",
+      },
+      quoteCurrent: {
+        type: 'boolean',
+        description: 'Whether `quote` prices the cart as it is now',
+      },
+      issues: {
+        type: 'array',
+        description: 'What the quote found: `{ kind: error|warning|info, code, content }`',
+        items: { type: 'object' },
+      },
+      notReady: {
+        type: ['string', 'null'],
+        description: 'Why it cannot be submitted yet; null when it can',
+      },
+      orderId: { type: ['string', 'null'], description: 'The order submitting it started' },
+      createdBy: { type: 'string' },
+      createdAt: { type: 'integer', description: 'Epoch ms' },
+      updatedAt: { type: 'integer', description: 'Epoch ms' },
+      version: { type: 'integer', description: 'Bumped on every change' },
+    },
+    required: ['id', 'title', 'status', 'flowId', 'lines', 'quote', 'quoteCurrent', 'version'],
+  };
+}
 
 /** An order as the engine holds it: its input plus the totals the pricing nodes compute. */
 function orderSchema() {
@@ -98,7 +169,7 @@ export function openApiDocument(serverUrl: string) {
       title: 'OrderLoop API',
       version: '1',
       description:
-        'Start orders on a published flow, resume them with events and approvals, and subscribe to signed order events.',
+        'Start orders on a published flow, resume them with events and approvals, build carts that become orders, and subscribe to signed order events.',
     },
     servers: [{ url: serverUrl }],
     security: [{ bearer: [] }],
@@ -205,6 +276,121 @@ export function openApiDocument(serverUrl: string) {
           responses: {
             '200': ok('Cancelled'),
             '409': ok('The order has already finished', '#/components/schemas/Error'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/carts': {
+        get: {
+          summary: 'List staff carts, most recently changed first',
+          parameters: [
+            { name: 'status', in: 'query', schema: { type: 'string', enum: [...CART_STATUSES] } },
+            {
+              name: 'limit',
+              in: 'query',
+              schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+            },
+          ],
+          responses: {
+            '200': ok(
+              '{ carts: [{ id, title, status, flowId, customerId, orderId, createdBy, createdAt, updatedAt }] }',
+            ),
+            ...errors,
+          },
+        },
+        post: {
+          summary: 'Open a cart (operator)',
+          description:
+            'The flow must be published and price orders (a Price lines step); it prices the cart as lines are added, and runs its order once submitted. The cart records the caller as who opened it.',
+          requestBody: body(createCartInput),
+          responses: {
+            '201': cart('Opened'),
+            '422': ok(
+              'The flow is not published or does not price orders, or no such customer',
+              '#/components/schemas/Error',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/carts/{id}': {
+        get: {
+          summary: 'A cart: its lines, quote and problems',
+          parameters: [cartId],
+          responses: {
+            '200': {
+              ...cart('The cart'),
+              headers: {
+                ETag: {
+                  description:
+                    'The cart’s `version`, quoted: send it as If-Match to hold a submit to it',
+                  schema: { type: 'string' },
+                },
+              },
+            },
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/carts/{id}/ops': {
+        post: {
+          summary: 'Change a cart, one op at a time (operator)',
+          description:
+            "Applied as the caller, as if they made the change on the cart's page: `add` (adds to a line with that SKU), `set_qty` (0 removes the line), `remove`, `clear`, `lock`, `unlock`, `promo_add`, `promo_remove`, `rename`. Lines and codes change only while the cart is open. The response has the cart priced again.",
+          parameters: [cartId],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': { schema: { type: 'object', ...schema(cartOpSchema) } },
+            },
+          },
+          responses: {
+            '200': cart('Applied'),
+            '409': ok(
+              'The cart refused it: locked, ended, a line that is gone, a code already applied…',
+              '#/components/schemas/Error',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/carts/{id}/submit': {
+        post: {
+          summary: 'Submit a cart as an order of its flow (operator)',
+          description:
+            'Only a cart with lines whose quote is current and found no errors. The order is started once, at the quoted lines, by the caller; the cart ends as `submitted` with its `orderId`.',
+          parameters: [
+            cartId,
+            {
+              name: 'If-Match',
+              in: 'header',
+              schema: { type: 'string' },
+              description:
+                'The ETag of the cart you read (its `version`, quoted): the submit goes ahead only if the cart is still at that version. The same as `version` in the body.',
+            },
+          ],
+          requestBody: {
+            required: false,
+            content: { 'application/json': { schema: schema(submitCartInput) } },
+          },
+          responses: {
+            '201': ok('{ orderId, cartId }'),
+            '409': ok('Not ready (see `notReady`), or already ended', '#/components/schemas/Error'),
+            '412': ok(
+              'The cart changed since the version given; read it again',
+              '#/components/schemas/Error',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/carts/{id}/cancel': {
+        post: {
+          summary: 'Cancel a cart (operator)',
+          parameters: [cartId],
+          responses: {
+            '200': cart('Canceled'),
+            '409': ok('The cart has already ended', '#/components/schemas/Error'),
             ...errors,
           },
         },
@@ -526,6 +712,15 @@ export function openApiDocument(serverUrl: string) {
           responses: { '200': ok('{ feed }'), ...errors },
         },
       },
+      '/api/v1/catalog/feeds/{id}/cancel': {
+        post: {
+          summary: 'Cancel a feed (operator)',
+          description:
+            'Stops a feed that is queued, splitting or applying: no more of its file is read. Parts already handed to the catalog still apply, so some products may have been written. Answers 409 when the feed has already finished.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ feed }'), ...errors },
+        },
+      },
       '/api/v1/catalog/reindex': {
         post: {
           summary: 'Republish every product (admin)',
@@ -740,6 +935,7 @@ export function openApiDocument(serverUrl: string) {
       schemas: {
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
         Order: orderSchema(),
+        Cart: cartSchema(),
         StartOrderResult: {
           type: 'object',
           properties: { orderId: { type: 'string' }, replayed: { type: 'boolean' } },

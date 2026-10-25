@@ -1,4 +1,4 @@
-import { introspectWorkflow } from 'cloudflare:test';
+import { introspectWorkflow, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   type Attention,
@@ -11,9 +11,10 @@ import {
 import { approvals, auditEvents, createDb, sessions, users } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { readContext } from '../src/assistant/agent';
+import { type AssistantAgent, readContext } from '../src/assistant/agent';
 import { previewAction, Refused, runAction } from '../src/assistant/data';
 import { describeResult, heuristicStep } from '../src/assistant/model';
+import { runTool } from '../src/assistant/tools';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
@@ -181,6 +182,35 @@ describe('assistant heuristics (no model)', () => {
     );
   });
 
+  it('reads carts, and keeps a cart’s own words out of links', () => {
+    const carts = new Set([...all, 'list_carts', 'get_cart', 'submit_cart']);
+    expect(heuristicStep('Which carts are open?', ws, carts)).toEqual({
+      tool: 'list_carts',
+      input: { status: 'open' },
+    });
+    expect(heuristicStep('Submit cart_k3x9q2', ws, carts)).toEqual({
+      tool: 'submit_cart',
+      input: { cartId: 'cart_k3x9q2' },
+    });
+    expect(heuristicStep('What is in cart_k3x9q2?', ws, carts)).toEqual({
+      tool: 'get_cart',
+      input: { cartId: 'cart_k3x9q2' },
+    });
+    const line = describeResult('get_cart', {
+      id: 'cart_k3x9q2',
+      href: '/carts/cart_k3x9q2',
+      title: 'Q4 [click](https://evil.example)',
+      status: 'open',
+      lines: [{ lineId: 'l1', sku: 'WID-100', qty: 2 }],
+      priced: true,
+      total: '$43.00',
+      notReady: null,
+    });
+    expect(line).toBe(
+      '[cart_k3x9q2](/carts/cart_k3x9q2) Q4 clickhttps://evil.example is **open**: 1 line, $43.00.',
+    );
+  });
+
   it('treats a malformed page context as the workspace', () => {
     expect(readContext({ kind: 'order' })).toEqual({ kind: 'workspace' });
     expect(readContext({ kind: 'flow', id: 'f1', label: 'F', graph: { nodes: 'x' } })).toEqual({
@@ -192,6 +222,106 @@ describe('assistant heuristics (no model)', () => {
 });
 
 describe('assistant actions', () => {
+  it('submits a cart only once it is ready, as the person, through the assistant', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = strip(await who('operator', 'ops@example.com'));
+    const viewer = strip(await who('viewer', 'vic@example.com'));
+    const cart = (await runTool(
+      env,
+      op,
+      'create_cart',
+      { title: 'Q4', flowId: 'tpl-b2b-order' },
+      {
+        via: 'assistant',
+      },
+    )) as { id: string };
+    expect((await previewAction(env, op, 'submit_cart', { cartId: cart.id })).blocked).toBe(
+      'Add at least one line.',
+    );
+    await runTool(
+      env,
+      op,
+      'change_cart',
+      { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty: 1 }] },
+      {
+        via: 'assistant',
+      },
+    );
+    expect((await previewAction(env, viewer, 'submit_cart', { cartId: cart.id })).blocked).toBe(
+      'This needs the Operator role.',
+    );
+    await expect(
+      runTool(
+        env,
+        viewer,
+        'change_cart',
+        { cartId: cart.id, ops: [{ op: 'clear' }] },
+        {
+          via: 'assistant',
+        },
+      ),
+    ).rejects.toBeInstanceOf(Refused);
+    const preview = await previewAction(env, op, 'submit_cart', { cartId: cart.id });
+    expect(preview.blocked).toBeUndefined();
+    expect(preview.consequences[0]).toMatch(/^1 line · \$/);
+    expect(preview.bound).toEqual({ cartVersion: expect.any(Number) });
+
+    // Changed after the person saw it: their confirm doesn't submit what they never saw.
+    await runTool(
+      env,
+      op,
+      'change_cart',
+      { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty: 40 }] },
+      { via: 'MCP' },
+    );
+    await expect(
+      runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', {
+        bound: preview.bound!,
+      }),
+    ).rejects.toThrow('The cart changed since you confirmed; preview it again.');
+    // Nor does a confirm held to nothing.
+    await expect(
+      runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', { bound: null }),
+    ).rejects.toBeInstanceOf(Refused);
+    const still = (await runTool(
+      env,
+      op,
+      'get_cart',
+      { cartId: cart.id },
+      { via: 'assistant' },
+    )) as { status: string; orderId: string | null };
+    expect(still).toMatchObject({ status: 'open', orderId: null });
+    const changes = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'cart.changed'), eq(auditEvents.target, cart.id)));
+    expect(changes.map((e) => JSON.parse(e.detail!))).toEqual([
+      { op: 'add', via: 'assistant', tool: 'change_cart' },
+      { op: 'add', via: 'mcp', tool: 'change_cart' },
+    ]);
+
+    const seen = await previewAction(env, op, 'submit_cart', { cartId: cart.id });
+    const done = (await runAction(env, op, 'submit_cart', { cartId: cart.id }, 'assistant', {
+      bound: seen.bound!,
+    })) as { orderId: string };
+    const logged = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'order.started'), eq(auditEvents.target, done.orderId)))
+      .get();
+    expect(JSON.parse(logged!.detail!)).toMatchObject({ cartId: cart.id, via: 'assistant' });
+    const created = await db()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'cart.created'), eq(auditEvents.target, cart.id)))
+      .get();
+    expect(created).toMatchObject({ actor: 'ops@example.com' });
+  });
+
   it('previews a decision against live data and refuses roles that cannot make it', async () => {
     const orderId = await waitingOrder();
     const viewer = strip(await who('viewer', 'vic@example.com'));
@@ -315,6 +445,73 @@ describe('assistant socket', () => {
       close: () => ws.close(),
     };
   };
+
+  it('holds a confirm card to what its first look showed, wherever it is shown again', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = await who('operator', 'panel@example.com');
+    const p = strip(op);
+    const cart = (await runTool(
+      env,
+      p,
+      'create_cart',
+      { title: 'Panel', flowId: 'tpl-b2b-order' },
+      {
+        via: 'assistant',
+      },
+    )) as { id: string };
+    const add = (qty: number) =>
+      runTool(
+        env,
+        p,
+        'change_cart',
+        { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty }] },
+        {
+          via: 'assistant',
+        },
+      );
+    await add(1);
+    const input = { cartId: cart.id };
+    const panel = await socket(op.id, op);
+    const shown = (callId: string, i: unknown = input) =>
+      runInDurableObject(env.ASSISTANT_AGENT.getByName(op.id), (agent: AssistantAgent) =>
+        agent.shown(callId, 'submit_cart', i),
+      );
+
+    // The card in one tab, at this version; what it holds isn't sent to the page.
+    const first = await panel.call('preview', ['submit_cart', input, 'call_1']);
+    expect(first.result).toMatchObject({ title: expect.stringMatching(/^Submit/) });
+    expect(first.result).not.toHaveProperty('bound');
+    expect((first.result as { blocked?: string }).blocked).toBeUndefined();
+    // The cart changes; the same card shown again (another tab, a remount) is blocked…
+    await add(5);
+    const again = await panel.call('preview', ['submit_cart', input, 'call_1']);
+    expect((again.result as { blocked?: string }).blocked).toMatch(/changed since the card/);
+    // …and confirming the first tab's card submits nothing.
+    await expect(
+      runAction(env, p, 'submit_cart', input, 'assistant', await shown('call_1')),
+    ).rejects.toThrow('The cart changed since you confirmed; preview it again.');
+    const open = (await runTool(env, p, 'get_cart', input, { via: 'assistant' })) as {
+      status: string;
+    };
+    expect(open.status).toBe('open');
+
+    // A new card holds the cart as it is now, once, and only for the input it showed.
+    await panel.call('preview', ['submit_cart', input, 'call_2']);
+    expect(await shown('call_2', { cartId: 'cart_other' })).toEqual({ bound: null });
+    await panel.call('preview', ['submit_cart', input, 'call_3']);
+    const held = await shown('call_3');
+    expect(held).toEqual({ bound: { cartVersion: expect.any(Number) } });
+    expect(await shown('call_3')).toEqual({ bound: null });
+    const done = (await runAction(env, p, 'submit_cart', input, 'assistant', held)) as {
+      orderId: string;
+    };
+    expect(done.orderId).toMatch(/^ord_/);
+    panel.close();
+  });
 
   it('opens only for its own person, and stops when their sign-in ends', async () => {
     const orderId = await waitingOrder();

@@ -212,6 +212,17 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     return feeds(this.env).get(id);
   }
 
+  async cancelFeed(id: string, by: string): Promise<FeedStatus | null> {
+    const status = await feeds(this.env).cancel(id, by);
+    if (status?.state === 'cancelled')
+      try {
+        await (await this.env.FEED_IMPORT.get(id)).terminate();
+      } catch {
+        // No instance (it never started) or it has already stopped: the state is what counts.
+      }
+    return status;
+  }
+
   async listFeeds(limit = 20): Promise<FeedStatus[]> {
     return feeds(this.env).list(Math.min(Math.max(1, limit), 100));
   }

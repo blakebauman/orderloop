@@ -16,6 +16,7 @@
  *   POST /api/v1/catalog/categories/delete       { codes }; 409 while one has children or products
  *   POST /api/v1/catalog/feeds?format=csv|ndjson&name=…   the file as the body; 202 and its status
  *   GET  /api/v1/catalog/feeds                   recent feeds;  GET …/feeds/:id  one feed
+ *   POST /api/v1/catalog/feeds/:id/cancel        stops a feed; 409 once it has finished
  *   POST /api/v1/catalog/reindex                 republish everything (admin)
  */
 import { atLeast, type Principal, type Role } from '@orderloop/core';
@@ -221,6 +222,20 @@ export async function handleCatalog(
       if (blocked) return blocked;
       const feed = await c.feedStatus(id);
       return feed ? json({ feed }) : json({ error: 'Not found' }, 404);
+    }
+    if (post && id && sub === 'cancel') {
+      const blocked = need('operator');
+      if (blocked) return blocked;
+      const feed = await c.cancelFeed(id, by);
+      if (!feed) return json({ error: 'Not found' }, 404);
+      if (feed.state !== 'cancelled')
+        return json({ error: `The feed has already finished (${feed.state})`, feed }, 409);
+      await audit(request, 'catalog.feed_cancelled', {
+        actor: caller,
+        target: id,
+        detail: { via: 'api' },
+      });
+      return json({ feed });
     }
     if (post && !id) {
       const blocked = need('operator');

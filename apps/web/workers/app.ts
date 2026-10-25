@@ -1,13 +1,16 @@
 import {
   AGENT_CARD_PATH,
   agentCard,
+  checkPluginView,
   isLegacyA2AVersion,
   legacyAgentCard,
+  PLUGIN_VIEW_MAX_BYTES,
+  PLUGIN_VIEW_TYPE,
   runHealthChecks,
   UCP_PATH,
   UCP_PROFILE_PATH,
 } from '@orderloop/core';
-import { createRequestHandler } from 'react-router';
+import { createRequestHandler, RouterContextProvider } from 'react-router';
 import {
   handleApi,
   handleShopifyOrder,
@@ -31,7 +34,8 @@ import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
-import { pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
+import { pluginPageContext } from '../app/lib/plugin-view';
+import { isPluginPublicPath, pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
 import { setGuestHeader, setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
@@ -65,6 +69,105 @@ const requestHandler = createRequestHandler(
   () => import('virtual:react-router/server-build'),
   import.meta.env.MODE,
 );
+
+/**
+ * A plugin page. What the plugin answers goes back as it is, unless it is a view
+ * (`PLUGIN_VIEW_TYPE`) and a browser asked for a page (a navigation or a form post): then it is
+ * checked and rendered in the app shell (routes/plugin-page.tsx), as a GET of the same address.
+ * The app's routes know only `/plugins/<id>/…`, so a view asked for under an alias (`aliasOf`, the
+ * address the browser used) sends the browser there instead; a view's own links and forms already
+ * point there.
+ */
+async function pluginPage(request: Request, aliasOf?: URL): Promise<Response> {
+  const res = await pluginFetch(request);
+  const type = res.headers.get('content-type') ?? '';
+  const page =
+    request.method === 'GET'
+      ? (request.headers.get('accept') ?? '').includes('text/html')
+      : request.method === 'POST' && isDocumentPost(request);
+  if (!type.startsWith(PLUGIN_VIEW_TYPE) || !page) return res;
+  const url = new URL(request.url);
+  if (aliasOf) {
+    await res.body?.cancel();
+    return new Response(null, {
+      status: 303,
+      headers: { location: `${url.pathname}${url.search}`, 'cache-control': 'no-store' },
+    });
+  }
+  const id = pluginPathId(url.pathname)!;
+  const text = await viewText(res);
+  const checked =
+    text === null ? { ok: false as const, error: 'The page is too large' } : checkPluginView(text);
+  const context = new RouterContextProvider();
+  context.set(pluginPageContext, {
+    pluginId: id,
+    base: `/plugins/${id}/`,
+    view: checked.ok ? checked.view : null,
+    error: checked.ok ? null : checked.error,
+    status: res.status,
+  });
+  const headers = new Headers(request.headers);
+  headers.delete('content-type');
+  headers.delete('content-length');
+  const rendered = await requestHandler(new Request(url, { method: 'GET', headers }), context);
+  if (!rendered.headers.has('cache-control'))
+    rendered.headers.set('cache-control', 'private, no-store');
+  return rendered;
+}
+
+/**
+ * A form a browser posted as a navigation: `sec-fetch-dest: document`, or, from a browser that
+ * doesn't send it, one asking for HTML. A machine's post (no fetch metadata, no HTML) isn't one.
+ */
+const isDocumentPost = (request: Request) => {
+  const dest = request.headers.get('sec-fetch-dest');
+  return dest ? dest === 'document' : (request.headers.get('accept') ?? '').includes('text/html');
+};
+
+/** React Router's single-fetch answer for "load this address as a whole document". */
+function reloadAsDocument(url: URL): Response {
+  const to = new URL(url);
+  to.pathname = to.pathname.replace(/\/_\.data$/, '/').replace(/\.data$/, '');
+  to.searchParams.delete('_routes');
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'X-Remix-Redirect': `${to.pathname}${to.search}`,
+      'X-Remix-Status': '302',
+      'X-Remix-Reload-Document': 'true',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+/** A view's text, or null once it is over `PLUGIN_VIEW_MAX_BYTES` (declared or streamed). */
+async function viewText(res: Response): Promise<string | null> {
+  if (Number(res.headers.get('content-length') ?? 0) > PLUGIN_VIEW_MAX_BYTES) {
+    await res.body?.cancel();
+    return null;
+  }
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > PLUGIN_VIEW_MAX_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -138,7 +241,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // A browser's state-changing requests and the order page's socket must come from this origin;
   // bearer-token calls carry no ambient cookie, so they're exempt.
   const bearer = /^Bearer\s/i.test(request.headers.get('authorization') ?? '');
-  if (!bearer && crossOrigin(request, url.origin))
+  // A plugin's public path is exempt too: it is forwarded without the cookie or any sign-in, so
+  // there is nothing ambient to forge (a buyer's procurement system posts it from its own site).
+  if (!bearer && crossOrigin(request, url.origin) && !(await isPluginPublicPath(url.pathname)))
     return Response.json({ error: 'Cross-site request refused' }, { status: 403 });
 
   // The API description is public, like any published spec.
@@ -224,14 +329,20 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
 
   // Installed plugins' pages, on their own Workers (app/lib/plugins.server.ts).
-  if (pluginPathId(url.pathname)) return pluginFetch(request);
+  if (pluginPathId(url.pathname)) {
+    // React Router asks for a route's data at `<path>.data` (`_.data` for `…/`) when it navigates
+    // without a document load (Back to a view, say). The plugin never answers that, since its body
+    // would become the page's loader data unchecked: the client reloads the page as a document.
+    if (url.pathname.endsWith('.data')) return reloadAsDocument(url);
+    return pluginPage(request);
+  }
   // A plugin's alias (`/punchout/…`), answered exactly as its `/plugins/<id>/…` path is. It is
   // checked last, so no path the app serves itself can be one.
   const aliased = unalias(url.pathname);
   if (aliased) {
     const to = new URL(request.url);
     to.pathname = aliased;
-    return pluginFetch(new Request(to, request));
+    return pluginPage(new Request(to, request), url);
   }
 
   // Order documents (invoices, POs, inbound POs) from R2.

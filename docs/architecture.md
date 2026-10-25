@@ -159,8 +159,8 @@ is logged and answered with a generic tool error, so database or provider messag
 client. `assess_order` and `propose_flow_change` send one progress notification when the request
 has a progress token.
 
-An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
-`run_stock_review`) never runs on the first call, because a client may not ask its person. When
+An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `submit_cart`,
+`publish_flow`, `run_stock_review`) never runs on the first call, because a client may not ask its person. When
 the request is 2026-07-28 and its envelope's client capabilities declare form elicitation
 (`canElicit` in `mcp.ts`), the first call returns `inputRequired` with a `confirm` elicitation
 built from `previewAction`, and the `cfm_…` code from `issueConfirmation` as `requestState`.
@@ -180,7 +180,24 @@ card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmati
 the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 `CONFIRMATION_TTL_MS` (5 minutes). Anything else is a tool error. The sweep calls
 `pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
-the call, as with REST); A2A chat has its own `{ confirm }`. See
+the call, as with REST, `confirmed: 'direct'`); A2A chat has its own `{ confirm }`.
+
+A preview can also carry `bound`: what the person is shown that can change before they confirm
+(for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that
+showed the preview keeps it and strips it from what it sends: MCP in the code's `bound` column
+(`issueConfirmation`, handed back by `redeemConfirmation`), the assistant panel in the
+`AssistantAgent`'s storage per tool call (the card passes its `toolCallId` to `preview()`; the
+first look writes it with the input's digest, a later look that sees another version or input
+marks it stale and returns the card blocked, the confirmed `execute` uses it up through `shown`,
+and declined cards' entries and day-old ones are pruned), A2A chat with the task's pending action. `runAction` passes it on as `confirmed`, and
+`runSubmit` hands `cartVersion` to `CartAgent.submitAs`, which refuses a cart whose version moved
+on (`CART_CHANGED_SINCE_CONFIRM`); a submit with no bound, other than a typed A2A skill, is refused
+too. A typed A2A `submit_cart` (`'direct'`) is held only to the `cartVersion` its input names, and
+REST `POST /api/v1/carts/:id/submit` to a body `version` or `If-Match` (the ETag `GET` serves),
+answering `412` when the cart moved on; both reach `CartAgent.submitAs` through
+`EngineRpc.submitCart(cartId, actor, version)` or `runSubmit`. A2A skill tags come from
+`isWriteTool` (an action or one of `WRITES_WITHOUT_CONFIRM` in `packages/core/src/assistant.ts`,
+which `mcp.ts` also reads for `readOnlyHint`). See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
 Skills: `createServer` attaches the role's `SkillCatalog`
@@ -351,6 +368,7 @@ and purge queue with it and binds its `SearchApi` entrypoint for keyword search 
 | `deleteChannel(code, by)` | `CatalogMeta.deleteChannel` first (the channel leaves the config, so no shard publishes to it again, and its category trees are deleted from R2; `<code>: unknown channel` when absent), then every shard runs `forgetChannel(code, 500)` until it answers 0: it deletes the channel's documents, alias pointers and `CARDS` entries for the `published` rows, sends `ListingChange`s with `entry: null`, `left` the categories and `search: null` (so the indexers and search shards drop them), and clears the rows. Last it sweeps the R2 prefixes `idx/f1/<code>/` and `docs/f1/<code>/`. Answers `{ ok, code, unpublished }`. Products keep their listing data, so re-adding the channel and a `reindex` republishes it |
 | `deleteCategories(codes, by)` | Refuses with `<code>: N products are filed in it` (counted over the shards by `countUsing({ category })`), or when `CatalogMeta.deleteCategories` does (`unknown category`; `<parent>: still the parent of <child>` for a child outside the set). Otherwise deletes them, republishes the tree in every channel and deletes every segment of their `idx/` listing in every channel. Answers `{ ok, deleted }` |
 | `startFeed(body, { name, format, by })` | Streams the file into R2 (`feeds/<id>/source.<format>`, `storeStream` in `upload.ts`: one `put` up to 10 MiB, else a multipart upload in 10 MiB parts, so memory holds one part; a body that sends nothing for `UPLOAD_IDLE_MS` (30 s) is cancelled, its multipart upload aborted and `UploadStalled` thrown, rather than hanging until the runtime cancels the request), then records the feed in `CatalogFeeds` as `queued` and starts the `FeedImport` Workflow with the feed id as its instance id, both under `ctx.waitUntil` so a caller that disconnects after the upload can't leave a queued feed with no Workflow (and a Workflow that fails to start marks the feed `failed`), and returns the `FeedStatus`. A `format` other than `csv` or `ndjson` throws `RangeError`. See [Feed import](#feed-import) |
+| `cancelFeed(id, by)` | `CatalogFeeds.cancel` moves a `queued`, `splitting` or `applying` feed to `cancelled` (with `cancelledBy` and `finishedAt`), then terminates its `FeedImport` instance, ignoring an instance that never started or has stopped. Returns the `FeedStatus` (unchanged for a finished feed), `null` for an unknown id |
 | `feedStatus(id)`, `listFeeds(limit)` | A feed's `FeedStatus` (`null` for an unknown id), or the most recent feeds first (20 by default, between 1 and 100) |
 | `reindex(by)` | Calls `republishAll` on all 64 shards, which queue every product not already waiting in their `outbox` for the publisher (so repeating it queues nothing twice), and answers `{ queued }`, the number of products on the shards. It waits for no publishing: each shard's alarm does that |
 
@@ -481,6 +499,7 @@ doesn't hold. Roles: reads `viewer`, writes `operator`, `reindex` `admin` (`atLe
 
 A refused delete is `404 { error: 'Not found', issues }` when the catalog answers `notFound: true` (nothing by that code), else `409 { error: '<The type|The channel|A category> is in use', issues }`. `deleteChannel` takes the channel's content down even when the channel is already gone from `CatalogMeta`, so a delete cut short finishes on a retry; it answers `notFound` only when the channel is unknown and nothing was left to take down.
 | `POST feeds?format=&name=` | `startFeed` | `format` is `csv` or `ndjson` (`FEED_FORMATS`), else `400`. The request body is passed to the catalog as a stream, so a feed of any size never sits in the Worker; `name` defaults to `feed.<format>` and is cut at 200 characters. `202 { feed }`; `catalog.feed_started` (target the feed id), written after the response so it is kept even if the caller disconnects. `408` when the catalog gave up on a body that stopped arriving (`upload stalled`; nothing was stored) |
+| `POST feeds/:id/cancel` | `cancelFeed` | `operator`; `{ feed }`, `404` when unknown, `409 { error, feed }` when the feed had already finished (`done` or `failed`); `catalog.feed_cancelled` (target the feed id) |
 | `GET feeds`, `GET feeds/:id` | `listFeeds(limit)`, `feedStatus` | `limit` defaults to 20 |
 | `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
 
@@ -641,6 +660,7 @@ into shard batches in steps that each read a bounded slice of the file:
 2. `split <n>` reads up to `FEED_CHUNK` products (25,000; the `FEED_CHUNK` variable) from the byte offset the last chunk ended at, always a product boundary, with a ranged R2 read. It validates each product against the catalog's types (`validateProduct`), groups the valid ones by `productShard`, writes one part per shard to R2 (`feeds/<id>/parts/<chunk>-<shard>.ndjson`) and sends one `FEED_PARTS` queue message per part (in sends of 100). It returns the offset and row to resume from, so a feed of any size is many short steps; the step retries up to 3 times (10 seconds, exponential).
 3. `record <n>` adds the chunk's rows, parts, rejected rows and error samples to `CatalogFeeds` (by chunk number, so a replay counts once).
 4. After the last chunk, `split done` moves the feed to `applying`. A `check <n>` step then compares parts applied with parts produced; until they match the Workflow waits for an `applied` event (`applied <n>`, up to a minute, then looks again). `finish` marks the feed `done`. Any error marks it `failed` (`fail`, with the message as `failure`) and rethrows.
+5. A cancelled feed (`cancelFeed`) normally has its instance terminated. If that fails, the Workflow returns at its next `record <n>` or `check <n>`, both of which read the feed's state. Parts already queued still apply.
 
 `CsvRecord` and `NdjsonRecord` carry `end`, the byte offset past each record, which is what makes the
 offsets a resumable cursor; the parsers therefore require UTF-8 and fail on invalid bytes, and they
@@ -660,7 +680,8 @@ Part ids are deterministic and the shard batch id is the part id, so a retried s
 message never applies a row twice.
 
 **`CatalogFeeds`** is one Durable Object (`feeds`) holding every feed's `FeedStatus`: `queued`,
-`splitting`, `applying`, `done` or `failed`, with `rows`, `parts`, `partsDone`, the four counts and
+`splitting`, `applying`, `done`, `failed` or `cancelled` (the last three final: `splitDone`, `finish`,
+`fail` and `cancel` leave them as they are), with `rows`, `parts`, `partsDone`, the four counts and
 at most 100 `errors` (`FEED_ERRORS`, by row). Rejected rows come from validation (the Workflow) or
 from a shard (`already used by <key>`).
 
@@ -977,6 +998,19 @@ the rest is in its SQL, paged by `history`).
   every 30 seconds while anyone has the cart open and closes (`4401`) each socket whose person can
   no longer read it. Chat messages are posted as
   the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
+- **Outside the page.** Staff principals (API tokens, OAuth MCP/A2A callers, the assistant) reach
+  staff carts through `EngineRpc.changeCart`, `submitCart` and `cancelCart`
+  (`apps/engine/src/cart/carts.ts`), which call the agent's `applyAs`, `submitAs` and `cancelAs`
+  with a `StaffCartActor` the caller's server built from the signed principal (`staffCartActor`);
+  they refuse a guest actor, an op that fails `cartOpSchema`, and an external cart (`notFound`, as
+  for an unknown id: it belongs to its buyer's page). Reads are `cartView`: the cart without
+  `external`, chat, files or members. The REST routes (`/api/v1/carts`, `handleCarts` in
+  `apps/web/app/lib/api.server.ts`) check viewer or operator first and audit `cart.created`,
+  `cart.canceled` and, for a submit, `order.started` with the `cartId`. The workspace tools
+  (`apps/engine/src/assistant/carts.ts`) add `list_carts`, `get_cart`, `create_cart` and
+  `change_cart` (no confirm: nothing is ordered) and the `submit_cart` action, which previews and
+  confirms like the order actions. What reaches the model is bounded (`boundText`) and never the
+  chat; the heuristic's links name a cart by its id, not its title.
 
 ### External carts
 
@@ -1025,11 +1059,12 @@ through `EngineRpc`. `onConnect` closes with `4403` unless the proxied principal
 instance name, and keeps the principal. The `@callable()` methods are `attention()`, the data for
 the top of the panel, and `preview(tool, input)`, which resolves an action against live data for
 its confirm card. Tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`. Reads run
-directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
+directly, as do `create_cart` and `change_cart` (a cart orders nothing until it is submitted);
+`decide_approval`, `deliver_event`, `cancel_order`, `submit_cart`, `publish_flow` and
 `run_stock_review` use `needsApproval`, and after the confirm `runAction`
 (`apps/engine/src/assistant/data.ts`) re-checks the role and the state and calls the order's
-`OrderAgent` (`decide`, `deliver`, `cancel`) or the `REPLENISH` Workflow as `<email> via
-assistant`. Every tool re-reads the person's session first (`livePrincipal` in
+`OrderAgent` (`decide`, `deliver`, `cancel`), the cart's `CartAgent` (`submitAs`, through
+`assistant/carts.ts`) or the `REPLENISH` Workflow as `<email> via assistant`. Every tool re-reads the person's session first (`livePrincipal` in
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. `draft_plugin` (admins, with `ASSISTANT_PLUGINS` on) drafts a
 business-rule plugin and stages it pending, for an admin to review and approve on the Plugins page

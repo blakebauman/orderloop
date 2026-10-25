@@ -1,4 +1,4 @@
-import type { Principal } from '@orderloop/core';
+import type { Cart, Principal } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const engine = {
@@ -34,6 +34,11 @@ const engine = {
   uploadPlugin: vi.fn(),
   setPluginEnabled: vi.fn(),
   approvePlugin: vi.fn(),
+  createCart: vi.fn(),
+  cartSnapshot: vi.fn(),
+  changeCart: vi.fn(),
+  submitCart: vi.fn(),
+  cancelCart: vi.fn(),
 };
 
 const receipts = new Set<string>();
@@ -70,6 +75,12 @@ vi.mock('~/lib/auth.server', () => ({
   actor: () => 'ops@example.com',
   forbidden: () => 'Forbidden',
   stepUp: async () => 'step-up needed',
+}));
+const listCarts = vi.fn(async (_f: unknown, _limit: number) => [] as Record<string, unknown>[]);
+vi.mock('~/lib/carts.server', () => ({
+  listCarts,
+  isCartStatus: (v: unknown) =>
+    ['open', 'locked', 'submitted', 'returned', 'canceled'].includes(v as string),
 }));
 const webhooks = { rotateSubscription: vi.fn() };
 vi.mock('~/lib/webhooks.server', () => webhooks);
@@ -202,6 +213,209 @@ describe('order actions over REST', () => {
     const early = await post('orders/ord_x/events', { event: 'payment.received' });
     expect(early.status).toBe(200);
     expect(await early.json()).toEqual({ delivered: false });
+  });
+});
+
+describe('carts over REST', () => {
+  const viewer: Principal = { ...operator, id: 'tok_3', role: 'viewer' };
+  const get = (path: string, as = operator) =>
+    handleApi(new Request(`https://app.test/api/v1/${path}`), as);
+  const cart = (patch: Partial<Cart> = {}): Cart => ({
+    id: 'cart_1',
+    title: 'Q4 restock',
+    status: 'open',
+    customerId: 'cus_northwind',
+    flowId: 'tpl-b2b-order',
+    external: null,
+    lines: [{ id: 'l1', sku: 'WID-100', qty: 2 }],
+    promoCodes: [],
+    quote: null,
+    quotedVersion: 2,
+    issues: [],
+    orderId: null,
+    createdBy: 'tok_1',
+    createdAt: 1,
+    updatedAt: 2,
+    version: 2,
+    ...patch,
+  });
+  beforeEach(() => {
+    for (const fn of Object.values(engine)) fn.mockReset();
+    audit.mockReset();
+  });
+
+  it('lets a viewer list and read, without the chat or an external cart', async () => {
+    listCarts.mockResolvedValueOnce([
+      { ...cart(), pluginId: null, sessionRef: null, buyerId: null, lines: undefined },
+    ]);
+    const listed = await get('carts?status=open&limit=5', viewer);
+    expect(listed.status).toBe(200);
+    expect(listCarts).toHaveBeenLastCalledWith({ status: 'open' }, 5);
+    const [row] = ((await listed.json()) as { carts: Record<string, unknown>[] }).carts;
+    expect(row).toMatchObject({ id: 'cart_1', status: 'open' });
+    expect(row).not.toHaveProperty('buyerId');
+    expect((await get('carts?status=lost', viewer)).status).toBe(400);
+
+    engine.cartSnapshot.mockResolvedValueOnce({
+      cart: cart(),
+      members: [],
+      chat: [{ body: 'hi' }],
+    });
+    const read = await get('carts/cart_1', viewer);
+    const body = (await read.json()) as { cart: Record<string, unknown> };
+    expect(body.cart).toMatchObject({
+      id: 'cart_1',
+      quoteCurrent: false,
+      notReady: 'The cart could not be priced.',
+    });
+    expect(JSON.stringify(body)).not.toContain('hi');
+    engine.cartSnapshot.mockResolvedValueOnce({ cart: cart({ external: {} as Cart['external'] }) });
+    expect((await get('carts/cart_1', viewer)).status).toBe(404);
+    engine.cartSnapshot.mockResolvedValueOnce(null);
+    expect((await get('carts/cart_x', viewer)).status).toBe(404);
+  });
+
+  it('refuses a viewer every change before it reaches the engine', async () => {
+    for (const [path, b] of [
+      ['carts', { title: 'x', flowId: 'tpl-b2b-order' }],
+      ['carts/cart_1/ops', { op: 'clear' }],
+      ['carts/cart_1/submit', {}],
+      ['carts/cart_1/cancel', {}],
+    ] as const)
+      expect((await post(path, b, viewer)).status, path).toBe(403);
+    expect(engine.createCart).not.toHaveBeenCalled();
+    expect(engine.changeCart).not.toHaveBeenCalled();
+    expect(engine.submitCart).not.toHaveBeenCalled();
+  });
+
+  it('opens a cart as the caller, whatever the body says, and audits it', async () => {
+    expect((await post('carts', { flowId: 'tpl-b2b-order' })).status).toBe(400);
+    engine.createCart.mockResolvedValueOnce({ ok: false, error: 'No such customer.' });
+    const refused = await post('carts', {
+      title: 'x',
+      flowId: 'tpl-b2b-order',
+      customerId: 'cus_x',
+    });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ error: 'No such customer.' });
+
+    engine.createCart.mockResolvedValueOnce({ ok: true, id: 'cart_1' });
+    engine.cartSnapshot.mockResolvedValueOnce({ cart: cart() });
+    const made = await post('carts', {
+      title: ' Q4 ',
+      flowId: 'tpl-b2b-order',
+      createdBy: 'usr_ceo',
+    });
+    expect(made.status).toBe(201);
+    expect(engine.createCart).toHaveBeenLastCalledWith({
+      title: 'Q4',
+      flowId: 'tpl-b2b-order',
+      createdBy: 'tok_1',
+    });
+    expect(audit).toHaveBeenCalledWith(expect.anything(), 'cart.created', {
+      actor: operator,
+      target: 'cart_1',
+      detail: { flowId: 'tpl-b2b-order', via: 'api' },
+    });
+  });
+
+  it('applies a validated op as the caller, and shapes refusals', async () => {
+    expect((await post('carts/cart_1/ops', { op: 'add', sku: 'WID-100', qty: 0 })).status).toBe(
+      400,
+    );
+    expect((await post('carts/cart_1/ops', { op: 'explode' })).status).toBe(400);
+    expect(engine.changeCart).not.toHaveBeenCalled();
+
+    engine.changeCart.mockResolvedValueOnce({ ok: true, cart: { id: 'cart_1' } });
+    const ok = await post('carts/cart_1/ops', { op: 'add', sku: ' WID-100 ', qty: 3 });
+    expect(ok.status).toBe(200);
+    expect(engine.changeCart).toHaveBeenLastCalledWith(
+      'cart_1',
+      { op: 'add', sku: 'WID-100', qty: 3 },
+      { kind: 'staff', id: 'tok_1', name: 'ci', role: 'operator' },
+    );
+    expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.changed', {
+      actor: operator,
+      target: 'cart_1',
+      detail: { op: 'add', via: 'api' },
+    });
+    audit.mockClear();
+    engine.changeCart.mockResolvedValueOnce({ ok: false, error: 'The cart is locked.' });
+    const locked = await post('carts/cart_1/ops', { op: 'clear' });
+    expect(locked.status).toBe(409);
+    expect(await locked.json()).toEqual({ error: 'The cart is locked.' });
+    engine.changeCart.mockResolvedValueOnce({ ok: false, error: 'No such cart.', notFound: true });
+    expect((await post('carts/cart_x/ops', { op: 'clear' })).status).toBe(404);
+    // Only a change that went in is recorded.
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it('holds a submit to the version the caller read, by ETag or body', async () => {
+    engine.cartSnapshot.mockResolvedValueOnce({ cart: cart({ version: 7 }) });
+    const read = await get('carts/cart_1');
+    expect(read.headers.get('etag')).toBe('"7"');
+    const submit = (headers: Record<string, string>, b: unknown = {}) =>
+      handleApi(
+        new Request('https://app.test/api/v1/carts/cart_1/submit', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: JSON.stringify(b),
+        }),
+        operator,
+      );
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_1' });
+    expect((await submit({ 'if-match': '"7"' })).status).toBe(201);
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), 7);
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_2' });
+    await submit({}, { version: 8 });
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), 8);
+    // Optional: without either, the engine isn't asked to hold it.
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_3' });
+    await submit({});
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), undefined);
+
+    engine.submitCart.mockResolvedValueOnce({
+      ok: false,
+      error: 'The cart changed since you confirmed; preview it again.',
+    });
+    const moved = await submit({ 'if-match': 'W/"7"' });
+    expect(moved.status).toBe(412);
+    expect(await moved.json()).toEqual({
+      error: 'The cart has changed since version 7; read it again',
+    });
+    engine.submitCart.mockClear();
+    expect((await submit({ 'if-match': '"seven"' })).status).toBe(400);
+    expect((await submit({ 'if-match': '"7"' }, { version: 8 })).status).toBe(400);
+    expect((await submit({}, { version: 0 })).status).toBe(400);
+    expect(engine.submitCart).not.toHaveBeenCalled();
+  });
+
+  it('submits once, recording the order it started, and cancels', async () => {
+    engine.submitCart.mockResolvedValueOnce({ ok: false, error: 'Add at least one line.' });
+    expect((await post('carts/cart_1/submit', {})).status).toBe(409);
+    expect(audit).not.toHaveBeenCalled();
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_9' });
+    const done = await post('carts/cart_1/submit', {});
+    expect(done.status).toBe(201);
+    expect(await done.json()).toEqual({ orderId: 'ord_9', cartId: 'cart_1' });
+    expect(audit).toHaveBeenCalledWith(expect.anything(), 'order.started', {
+      actor: operator,
+      target: 'ord_9',
+      detail: { cartId: 'cart_1', via: 'api' },
+    });
+
+    engine.cancelCart.mockResolvedValueOnce({ ok: false, error: 'The cart is submitted.' });
+    expect((await post('carts/cart_1/cancel', {})).status).toBe(409);
+    engine.cancelCart.mockResolvedValueOnce({
+      ok: true,
+      cart: { id: 'cart_2', status: 'canceled' },
+    });
+    expect((await post('carts/cart_2/cancel', {})).status).toBe(200);
+    expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.canceled', {
+      actor: operator,
+      target: 'cart_2',
+      detail: { via: 'api' },
+    });
   });
 });
 

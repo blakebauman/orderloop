@@ -39,6 +39,8 @@ export default [
       route('audit', 'routes/audit.tsx'),
       // Installed plugins (admin). Their own pages are under /plugins/<id>/, forwarded by workers/app.ts.
       route('plugins', 'routes/plugins.tsx'),
+      // A plugin's page drawn by the app, from the view it answered with (workers/app.ts).
+      route('plugins/:pluginId/*', 'routes/plugin-page.tsx'),
       route('account', 'routes/account.tsx'),
     ]),
   ]),

@@ -49,6 +49,7 @@ import { assess, resolveImages } from '../clef';
 import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
+import { previewSubmit, runSubmit } from './carts';
 
 export class Refused extends Error {}
 
@@ -60,11 +61,22 @@ export function requireRole(p: Principal, tool: AssistantTool) {
 /** Where a tool call came from: the workspace assistant, an MCP client or an A2A agent. */
 export type Channel = 'assistant' | 'MCP' | 'A2A';
 
+/**
+ * How a confirmed action reached `runAction`: with what the person's confirm was held to (the
+ * preview's `bound`, kept server-side by the channel that showed it), or `direct` for a call the
+ * caller composed without a preview (a typed A2A skill).
+ */
+export type Confirmed = { bound: Record<string, unknown> | null } | 'direct';
+
 /** How the audit trail names an act taken for someone through a channel. */
 export const via = (p: Principal, channel: Channel) => `${p.email ?? p.name} via ${channel}`;
 
 /** How the audit log names each channel. */
-const AUDIT_CHANNEL: Record<Channel, AuditVia> = { assistant: 'assistant', MCP: 'mcp', A2A: 'a2a' };
+export const AUDIT_CHANNEL: Record<Channel, AuditVia> = {
+  assistant: 'assistant',
+  MCP: 'mcp',
+  A2A: 'a2a',
+};
 
 export function money(n: number | null | undefined, currency = BASE_CURRENCY) {
   if (n === null || n === undefined) return '';
@@ -443,6 +455,7 @@ export type ActionInput = {
   };
   deliver_event: { orderId: string; event: string };
   cancel_order: { orderId: string; reason: string };
+  submit_cart: { cartId: string; cartVersion?: number };
   publish_flow: { flowId: string };
   run_stock_review: Record<string, never>;
 };
@@ -550,6 +563,8 @@ export async function previewAction<T extends ActionTool>(
               : undefined),
         };
       }
+      case 'submit_cart':
+        return await previewSubmit(env, p, input as ActionInput['submit_cart']);
       case 'publish_flow': {
         const i = input as ActionInput['publish_flow'];
         const { row, flow } = await loadFlow(env, i.flowId);
@@ -613,6 +628,7 @@ export async function runAction<T extends ActionTool>(
   tool: T,
   input: ActionInput[T],
   channel: Channel = 'assistant',
+  confirmed?: Confirmed,
 ) {
   requireRole(p, tool);
   const preview = await previewAction(env, p, tool, input);
@@ -660,6 +676,8 @@ export async function runAction<T extends ActionTool>(
       });
       return { done: preview.title, href: preview.href };
     }
+    case 'submit_cart':
+      return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);

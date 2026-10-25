@@ -11,6 +11,7 @@ import {
 } from '@orderloop/core';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SqlPushStore } from '../src/a2a/push';
+import { changeCart, createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { startOrder } from '../src/orders';
@@ -260,6 +261,57 @@ describe('A2A', () => {
       return s.waits.some((w) => w.kind === 'approval') ? false : s;
     }, 'the decision');
     expect(JSON.stringify(await state(orderId))).toContain('chat@example.com via A2A');
+  });
+
+  it('holds a cart submit proposed in chat to the cart it showed', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = person('operator', 'cart-chat@example.com');
+    const actor = { kind: 'staff' as const, id: op.id, name: op.name, role: op.role };
+    const made = await createCart(env, {
+      title: 'Chat cart',
+      flowId: 'tpl-b2b-order',
+      createdBy: op.id,
+    });
+    if (!made.ok) throw new Error(made.error);
+    await changeCart(env, made.id, { op: 'add', sku: 'WID-100', qty: 1 }, actor);
+
+    const proposed = await send(op, [{ text: `submit ${made.id}` }]);
+    expect(proposed.status.state).toBe('TASK_STATE_INPUT_REQUIRED');
+    expect(proposed.artifacts[0].parts[0].data).toMatchObject({ tool: 'submit_cart' });
+    expect(proposed.artifacts[0].parts[0].data.preview).not.toHaveProperty('bound');
+    // Someone changes the cart before the caller confirms.
+    await changeCart(env, made.id, { op: 'add', sku: 'WID-100', qty: 50 }, actor);
+    const stale = await send(op, [{ data: { confirm: true } }], {
+      taskId: proposed.id,
+      contextId: proposed.contextId,
+    });
+    expect(stale.status.state).toBe('TASK_STATE_REJECTED');
+    expect(statusText(stale)).toContain('changed since you confirmed');
+    const cart = await env.DB.prepare('SELECT status, order_id FROM carts WHERE id = ?')
+      .bind(made.id)
+      .first<{ status: string; order_id: string | null }>();
+    expect(cart).toEqual({ status: 'open', order_id: null });
+
+    // A typed skill holds the submit to the version its caller read, if it names one.
+    const renamed = await changeCart(env, made.id, { op: 'rename', title: 'Chat cart 2' }, actor);
+    if (!renamed.ok) throw new Error(renamed.error);
+    const version = renamed.cart.version;
+    const typedStale = await send(op, [
+      { data: { skill: 'submit_cart', input: { cartId: made.id, cartVersion: version - 1 } } },
+    ]);
+    expect(typedStale.status.state).toBe('TASK_STATE_REJECTED');
+    expect(statusText(typedStale)).toContain(`changed since version ${version - 1}`);
+
+    const again = await send(op, [{ text: `submit ${made.id}` }]);
+    const done = await send(op, [{ data: { confirm: true } }], {
+      taskId: again.id,
+      contextId: again.contextId,
+    });
+    expect(done.status.state).toBe('TASK_STATE_COMPLETED');
   });
 
   it('streams status updates over SSE', async () => {

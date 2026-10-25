@@ -6,7 +6,7 @@
  * an `ol_live_` API token), checks Origin, and forwards here over the service binding with the
  * principal header, as it does for the agent sockets. This layer trusts that header, like the rest
  * of EngineApi. Each request is answered by a fresh server listing only the tools the caller's
- * role can use. An action (decide, deliver, cancel, publish, stock review) runs only on a second
+ * role can use. An action (decide, deliver, cancel, submit a cart, publish, stock review) runs only on a second
  * call carrying the one-time code the first call returned with its preview (confirmations.ts).
  */
 
@@ -25,6 +25,7 @@ import {
   type AssistantTool,
   atLeast,
   boundText,
+  isWriteTool,
   mcpSkillFiles,
   type Principal,
   type Role,
@@ -38,23 +39,31 @@ import {
   TOOL_OUTPUTS,
   type ToolInput,
 } from './assistant/tools';
-import { issueConfirmation, useConfirmation } from './confirmations';
+import { issueConfirmation, redeemConfirmation, useConfirmation } from './confirmations';
 import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
 
-/** Tools that save something without a confirm (nothing they save runs until someone approves it). */
-const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>(['draft_plugin']);
-
 /** Actions that can't be taken back by calling them again: a client should confirm them. */
-const DESTRUCTIVE = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'publish_flow']);
+const DESTRUCTIVE = new Set<AssistantTool>([
+  'decide_approval',
+  'cancel_order',
+  'submit_cart',
+  'publish_flow',
+]);
 /** Calling these twice with the same input does nothing more the second time. */
-const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order']);
+const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'submit_cart']);
 /**
  * These reach outside OrderLoop: cancelling voids payments and cancels shipments with the
- * carrier, the stock review places supplier reorders, and an assessment may fetch an https image.
+ * carrier, a submitted cart's order runs its flow (payments, shipping), the stock review places
+ * supplier reorders, and an assessment may fetch an https image.
  */
-const OPEN_WORLD = new Set<AssistantTool>(['cancel_order', 'run_stock_review', 'assess_order']);
+const OPEN_WORLD = new Set<AssistantTool>([
+  'cancel_order',
+  'submit_cart',
+  'run_stock_review',
+  'assess_order',
+]);
 
 /** Every tool returns an object (TOOL_OUTPUTS), sent as JSON text and as structured content. */
 const result = (value: Record<string, unknown>) => ({
@@ -131,14 +140,14 @@ async function createServer(p: Principal) {
       // narrows the list within a minute.
       cacheHints: { 'tools/list': { ttlMs: 60_000, cacheScope: 'private' } },
       instructions:
-        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Actions (deciding, delivering an event, cancelling, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
+        'OrderLoop runs each commerce order as a flow graph of steps; people step in at approvals, events and exceptions. Start with needs_attention or find_orders. Orders are named by id (ord_…) or #reference. Carts (cart_…) are built with create_cart and change_cart and become orders with submit_cart. Actions (deciding, delivering an event, cancelling, submitting a cart, publishing, the stock review) take two calls: the first returns a preview and a confirmation code and changes nothing; call again with the code only after the person agrees.',
     },
   );
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {
     const t = ASSISTANT_TOOLS[name];
     if (!atLeast(p.role, t.role)) continue;
     // A draft runs without a confirm, but it writes (a pending plugin), so it isn't read-only.
-    const readOnly = !t.confirm && !WRITES_WITHOUT_CONFIRM.has(name);
+    const readOnly = !isWriteTool(name);
     const action = isActionTool(name);
     server.registerTool(
       name,
@@ -198,19 +207,22 @@ async function createServer(p: Principal) {
                 await useConfirmation(env, p, name, asked, code);
                 return refusal('The person did not confirm. Nothing happened.');
               }
-              if (!(await useConfirmation(env, p, name, asked, code)))
+              const used = await redeemConfirmation(env, p, name, asked, code);
+              if (!used)
                 return refusal(
                   'That confirmation expired or was already used, or the input changed. Call again for a new preview.',
                 );
               return result(
                 (await runTool(env, p, name, input as ToolInput<typeof name>, {
                   via: 'MCP',
+                  confirmed: used,
                 })) as Record<string, unknown>,
               );
             }
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
-            const issued = await issueConfirmation(env, p, name, asked);
+            // Held to what the person is shown (a cart's version), kept here, not in the request.
+            const issued = await issueConfirmation(env, p, name, asked, undefined, preview.bound);
             return inputRequired({
               inputRequests: {
                 confirm: inputRequired.elicit({
@@ -226,21 +238,31 @@ async function createServer(p: Principal) {
           if (!confirmation) {
             const preview = await previewAction(env, p, name, input as never);
             if (preview.blocked) return refusal(preview.blocked);
-            const { code, expiresAt } = await issueConfirmation(env, p, name, input);
+            const { bound, ...shown } = preview;
+            const { code, expiresAt } = await issueConfirmation(
+              env,
+              p,
+              name,
+              input,
+              undefined,
+              bound,
+            );
             return result({
-              preview,
+              preview: shown,
               confirmation: code,
               expiresAt,
               next: 'Nothing has happened yet. Show the person this preview; if they agree, call again with the same input and this confirmation.',
             });
           }
-          if (!(await useConfirmation(env, p, name, input, confirmation)))
+          const used = await redeemConfirmation(env, p, name, input, confirmation);
+          if (!used)
             return refusal(
               'That confirmation is not valid: it expired, was already used, or was for a different action or input. Call without it for a new preview.',
             );
           return result(
             (await runTool(env, p, name, input as ToolInput<typeof name>, {
               via: 'MCP',
+              confirmed: used,
             })) as Record<string, unknown>,
           );
         } catch (err) {

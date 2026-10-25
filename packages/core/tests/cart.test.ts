@@ -11,7 +11,9 @@ import {
   canReadCart,
   canRemoveAttachment,
   cartAttachmentKey,
+  cartOpSchema,
   cartReadyProblem,
+  cartView,
   chatBody,
   finishCart,
   isCartExpired,
@@ -22,6 +24,7 @@ import {
   MAX_LINE_QUANTITY,
   MAX_PROMO_CODES,
   normalizePromoCode,
+  staffCartActor,
 } from '../src';
 
 const cart = (c: Partial<Cart> = {}): Cart => ({
@@ -311,5 +314,46 @@ describe('cart files', () => {
 
   it('files a cart’s files under the cart', () => {
     expect(cartAttachmentKey('cart_1', 'att_1')).toBe('carts/cart_1/att_1');
+  });
+});
+
+describe('carts outside their page', () => {
+  it('takes only well-formed ops, within the bounds the cart applies', () => {
+    expect(cartOpSchema.parse({ op: 'add', sku: ' SKU-1 ', qty: 3 })).toEqual({
+      op: 'add',
+      sku: 'SKU-1',
+      qty: 3,
+    });
+    for (const bad of [
+      { op: 'add', sku: 'SKU-1', qty: 0 },
+      { op: 'add', sku: 'SKU-1', qty: MAX_LINE_QUANTITY + 1 },
+      { op: 'set_qty', lineId: 'li_1', qty: 1.5 },
+      { op: 'remove', lineIds: [] },
+      { op: 'rename', title: '' },
+      { op: 'explode' },
+      { sku: 'SKU-1', qty: 1 },
+    ])
+      expect(cartOpSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    // Unknown keys are dropped, so a body can't smuggle a price onto a line.
+    expect(
+      cartOpSchema.parse({ op: 'add', sku: 'SKU-1', qty: 1, unitPrice: 0 }),
+    ).not.toHaveProperty('unitPrice');
+  });
+
+  it('acts as staff, never a guest, and shows a cart without its external details', () => {
+    expect(staffCartActor({ id: 'tok_1', name: 'ci', role: 'viewer' })).toEqual({
+      kind: 'staff',
+      id: 'tok_1',
+      name: 'ci',
+      role: 'viewer',
+    });
+    const v = cartView(cart({ external, quote, quotedVersion: 1 }));
+    expect(v).not.toHaveProperty('external');
+    expect(v).not.toHaveProperty('quotedVersion');
+    expect(v).toMatchObject({ quoteCurrent: true, notReady: null });
+    expect(cartView(cart({ lines: [] }))).toMatchObject({
+      quoteCurrent: false,
+      notReady: 'Add at least one line.',
+    });
   });
 });

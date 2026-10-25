@@ -17,6 +17,7 @@ import {
   attachmentName,
   attachmentProblem,
   BASE_CURRENCY,
+  CART_CHANGED_SINCE_CONFIRM,
   CART_CHAT_BROADCAST,
   CART_START_TTL_MS,
   type Cart,
@@ -440,11 +441,15 @@ export class CartAgent extends Agent<Env, CartState> {
    */
   async submitAs(
     actor: CartActor,
+    /** The version the person confirmed (a confirmed preview): refused when the cart moved on. */
+    confirmedVersion?: number,
   ): Promise<{ ok: true; orderId: string } | { ok: false; error: string }> {
     if (actor.kind !== 'staff' || !atLeast(actor.role, 'operator'))
       return { ok: false, error: 'This needs the Operator role.' };
     if (this.submitting) return { ok: false, error: 'The cart is being submitted.' };
     const c = this.cart();
+    if (confirmedVersion !== undefined && c.version !== confirmedVersion)
+      return { ok: false, error: CART_CHANGED_SINCE_CONFIRM };
     if (c.external) return { ok: false, error: 'An external cart goes back to its buyer.' };
     const problem = cartReadyProblem(c);
     if (problem) return { ok: false, error: problem };

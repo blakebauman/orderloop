@@ -21,7 +21,7 @@ function body(text: string, chunk = 4096): ReadableStream<Uint8Array> {
 async function finished(id: string): Promise<FeedStatus> {
   for (let i = 0; i < 300; i++) {
     const s = await api.feedStatus(id);
-    if (s && (s.state === 'done' || s.state === 'failed')) return s;
+    if (s && s.state !== 'queued' && s.state !== 'splitting' && s.state !== 'applying') return s;
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`feed ${id} never finished: ${JSON.stringify(await api.feedStatus(id))}`);
@@ -112,6 +112,45 @@ describe('feeds', () => {
       message: expect.stringContaining('already used'),
     });
     expect(json).toEqual({ row: 4, message: 'invalid JSON' });
+  });
+
+  it('cancels a feed that never started, and leaves a finished one as it is', async () => {
+    // A feed whose record exists but whose Workflow never started: nothing would ever move it.
+    const { feeds } = await import('../src/config');
+    const id = `feed_orphan${Date.now().toString(36)}`;
+    await feeds(env).create({ id, name: 'stuck', format: 'csv', by });
+    const s = await api.cancelFeed(id, by);
+    expect(s).toMatchObject({ state: 'cancelled', cancelledBy: by });
+    expect(s?.finishedAt).toBeTypeOf('number');
+    // Final: a late split or finish changes nothing, and a second cancel is a no-op.
+    await feeds(env).splitDone(id);
+    await feeds(env).finish(id);
+    expect((await api.feedStatus(id))?.state).toBe('cancelled');
+    expect((await api.cancelFeed(id, by))?.state).toBe('cancelled');
+    expect(await api.cancelFeed('feed_none', by)).toBeNull();
+
+    const failed = await finished(
+      (await api.startFeed(body('name,price\nx,1'), { name: 'bad', format: 'csv', by })).id,
+    );
+    expect(failed.state).toBe('failed');
+    expect((await api.cancelFeed(failed.id, by))?.state).toBe('failed');
+  });
+
+  it('stops a running feed when it is cancelled', async () => {
+    const prefix = `cxl${Date.now().toString(36)}`;
+    const started = await api.startFeed(body(csv(prefix, 1_000)), {
+      name: 'big.csv',
+      format: 'csv',
+      by,
+    });
+    expect((await api.cancelFeed(started.id, by))?.state).toBe('cancelled');
+    const instance = await env.FEED_IMPORT.get(started.id);
+    const stopped = ['terminated', 'complete', 'errored'];
+    for (let i = 0; i < 100 && !stopped.includes((await instance.status()).status); i++)
+      await scheduler.wait(50);
+    expect(['terminated', 'complete']).toContain((await instance.status()).status);
+    // Nothing reached afterwards moves it: no split or finish overwrote the state.
+    expect((await api.feedStatus(started.id))?.state).toBe('cancelled');
   });
 
   it('fails a feed whose file has no header it can use', async () => {

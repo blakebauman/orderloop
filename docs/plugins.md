@@ -19,7 +19,7 @@ optional:
   checks), picked per node in its Provider field ([Providers](#providers)).
 - **Event subscriptions** to outbound events, delivered over the binding instead of HTTP.
 - **Pages** under `/plugins/<id>/`, served by the plugin and linked from the nav.
-- **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person.
+- **Public paths** under `/plugins/<id>/` that are forwarded without a signed-in person. They skip the web app's cross-site check too (`isPluginPublicPath`): nothing ambient (cookie, sign-in) reaches the plugin on them, so a partner's site may post to them.
 - **Host calls**: with capabilities the deployment grants, it opens external carts for buyers it
   has authenticated and starts orders, through its `ORDERLOOP` binding ([The host API](#the-host-api)).
 
@@ -133,8 +133,9 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
   - `manifest()` throws while a declared secret not marked `optional` is missing or empty in env
     (`missingSecrets`), naming the `PLUGIN_<ID>_<NAME>` to set, so the engine leaves the plugin out
     and deep health fails until it is set.
-    The page runs no script (see [Limits and hardening](#limits-and-hardening)); render HTML whose links and
-    forms come back to `/plugins/<id>/`.
+    The page runs no script (see [Limits and hardening](#limits-and-hardening)). Answer with a
+    view (`viewResponse`, see [Views](#views)) to have the app draw it in its own shell, or render
+    HTML whose links and forms come back to `/plugins/<id>/`.
 - `migrations/`: the plugin's own D1 migrations. As with the core's, they must work with the code
   already deployed: add first, drop or rename later.
 - `package.json` named `@orderloop/plugin-<id>`, depending on `@orderloop/core` and
@@ -149,6 +150,66 @@ branch it lacks, or sets variables, as its `behave` field says, so the engine's 
 it refuses. A real plugin has no use for one.
 
 Then run `pnpm install` to link the new package.
+
+### Views
+
+A page answers with a view (`PluginView`, `packages/core/src/plugin-ui.ts`) instead of HTML, and
+the web app draws it inside the app shell with its own components: the nav, page header, sections,
+tables, forms and alerts every OrderLoop page has, light and dark, without the plugin sending markup
+or styles. `viewResponse(view, init?)` from the SDK sends it as `PLUGIN_VIEW_TYPE`
+(`application/vnd.orderloop.view+json`) with `cache-control: no-store`.
+
+```ts
+return viewResponse({
+  title: 'Partners',
+  blocks: [
+    { type: 'alert', tone: 'error', text: 'That partner already exists.' },
+    {
+      type: 'section',
+      title: 'Partners',
+      blocks: [
+        {
+          type: 'table',
+          columns: [{ key: 'name', label: 'Name' }],
+          rows: [{ cells: { name: 'Northwind' }, actions: [
+            { type: 'form', action: 'partners/ptn_1/rotate', fields: [], submit: 'Rotate secret' },
+          ] }],
+        },
+      ],
+    },
+    { type: 'form', action: 'partners', submit: 'Add', fields: [{ name: 'name', label: 'Name' }] },
+  ],
+}, { status: 400 });
+```
+
+- A view has a `title`, an optional `description` and header `actions` (links), and `blocks`: `text`,
+  `alert`, `stats`, `table` (cells are text, numbers or `{ text, href?, tone?, mono? }`, and each row
+  may carry up to four small `form`s as buttons), `form` (fields `text`, `textarea`, `number`,
+  `email`, `url`, `date`, `password`, `select`, `checkbox` or `hidden`, an optional `confirm` asked
+  before it is sent, and a `danger` tone), `code` and `list`, grouped by `section`s one level deep.
+- Links and form actions are paths on the plugin's own pages, relative to them (`partners`) or
+  absolute under `/plugins/<id>/`. A scheme, `//`, a fragment or a `.`/`..` segment (`%2e` too)
+  fails the check, and a target that resolves anywhere else is drawn as a link to the plugin's
+  first page (`pluginViewHref`).
+- Forms are ordinary form posts to the plugin; whatever it answers is the next page, so a post
+  that should land somewhere else answers with a redirect, as with HTML pages.
+- The web Worker draws a view only for a page request: a GET that accepts `text/html`, or a form
+  post a browser navigated with (`sec-fetch-dest: document`, or HTML in `accept` without fetch
+  metadata). It reads at most `PLUGIN_VIEW_MAX_BYTES`, declared or streamed, and checks it
+  (`checkPluginView`, every field bounded) and renders `routes/plugin-page.tsx` as a GET of the
+  same address, passing the view in React Router's load context (`pluginPageContext`), with the
+  plugin's status. A view that fails the check is drawn as an error naming the first problem,
+  never in part. Any other request (a `fetch`, a non-view answer) gets the plugin's response as it
+  is.
+- A request for route data under `/plugins/<id>/` (a path ending in `.data`, which React Router
+  sends when it navigates without loading a document, as on Back) never reaches the plugin: the
+  Worker answers it with a reload of the page as a document, so a plugin's answer can't become
+  loader data without the check. A plugin can't serve a path ending in `.data`.
+- The app's routes know only `/plugins/<id>/…`, so a view asked for under an alias is a `303` to
+  that address; a view's own links and forms already go there. An alias still answers machine
+  requests (and HTML pages) itself.
+- A view page is for signed-in people: the route requires a session, so a public path answers with
+  something other than a view.
 
 ### The contract suite
 
@@ -351,12 +412,20 @@ takes effect at once and a runtime install of the same id never inherits it.
 |---|---|---|
 | `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
+| `cancelOrder({ key, reason })` | `orders:start` | Cancels an order this plugin started, found by the key it started it under (`plugin:<id>:<key>`; another plugin's never matches): `cancelled` (also when it already was, or another cancel of it is under way) or `finished` when it ended some other way, audited as `order.cancelled` by `plugin:<id>` |
 | `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys in any namespace the core starts orders under (`RESERVED_ORDER_KEY_PREFIXES`: `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:`, `replenish:`). A replay answers the same order with `replayed: true`; the same key with a different request is refused |
 
 `plugins/punchout` is the plugin that uses it: cXML and OCI punchout, installed with
 `"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }` (and its `d1Id`, or
 `"runtime": "sandboxed"`). Its partners and their secret hashes are in its own database; see the
-[Punchout guide](https://docs.orderloop.app/guides/punchout/).
+[Punchout guide](https://docs.orderloop.app/guides/punchout/). Each version of a PO it acted on is a
+`purchase_orders` row, numbered per partner and orderID. A change claims the next version (a unique
+`(partner_id, order_ref, version)`) before it acts, so of two changes sent at once only one acts on
+the version before and the other is told to send again (cXML `409`). An `update` starts the changed
+order before it cancels the one it replaces (and withdraws the new one when that can't be
+cancelled), so a change the core refuses leaves the PO's order running; a claim whose action failed
+is deleted, and one that stopped part way is finished by its own resend. A PO whose latest version
+is a `delete` stays cancelled: a later `new` or `update` of it is `409`.
 
 When an external cart's buyer sends it back (`CartAgent.transferAs`; only the buyer, since the fields are posted from the browser that asked), the core
 holds the cart, calls the plugin's `renderReturn({ cart })`, checks the answer (`checkCartReturn`:
@@ -645,7 +714,8 @@ throws when the plugin is gone, since there is nothing to undo it with.
   manifests once in a durable `load-plugins` step so a replay sees the same specs; flows without
   them add no step.
 - A plugin's pages load as whole documents (`reloadDocument`), not as app routes, and it can't
-  import app code.
+  import app code. A view is drawn by the app's own route from data the plugin sent; nothing in it
+  is markup, and its links and forms are plain document requests back to the plugin.
 - What a plugin can reach is bounded on each side. Its Worker holds `PLUGIN_KEY`, the secrets
   named for it ([Secrets](#secrets)) and its own D1 database only (`PLUGIN_CONFIG_KEYS`, above); the key opens only requests signed for that plugin.
   Its pages run no script: the web app's CSP for them is `default-src 'none'`, `script-src 'none'`,

@@ -66,7 +66,20 @@ async function addPartner() {
     },
     true,
   );
-  const secret = /<strong>([A-Za-z0-9_-]{20,})<\/strong>/.exec(await res.text())?.[1];
+  type View = { blocks: { type: string; text?: string }[] };
+  const secretOf = (v: View) => v.blocks.find((b) => b.type === 'code')?.text;
+  const page = await res.text();
+  let secret = secretOf(JSON.parse(page) as View);
+  // Added by an earlier test (the plugin's storage lasts the file): rotate its secret instead.
+  if (!secret) {
+    const id = /partners\/(ptn_[a-z0-9]+)\/rotate/.exec(page)?.[1];
+    const rotated = await plugin(
+      `/plugins/punchout/partners/${id}/rotate`,
+      { method: 'POST' },
+      true,
+    );
+    secret = secretOf((await rotated.json()) as View);
+  }
   if (!secret) throw new Error('no secret');
   return secret;
 }
@@ -152,5 +165,40 @@ describe('punchout, end to end', () => {
       channel: 'edi',
       startedBy: 'plugin:punchout',
     });
+  });
+});
+
+describe('a purchase order changed or cancelled by the buyer', () => {
+  it('cancels the order a delete names, and replaces it on an update', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const secret = await addPartner();
+    const doc = (type: string, payload: string, orderID: string) =>
+      orderXml
+        .replace('SECRET', secret)
+        .replace('type="new"', `type="${type}"`)
+        .replace('payloadID="1729770000.9876@buyer.example"', `payloadID="${payload}"`)
+        .replaceAll('PO-7781', orderID)
+        .replace('CARTID', 'cart_none');
+    const orderId = async (res: Response) =>
+      /<Status code="200" text="OK">(ord_[^<]+)<\/Status>/.exec(await res.text())?.[1];
+    const ref = `PO-${crypto.randomUUID().slice(0, 6)}`;
+    const send = (type: string, payload: string) =>
+      plugin('/plugins/punchout/cxml/order', { method: 'POST', body: doc(type, payload, ref) });
+    const first = await orderId(await send('new', `${ref}-1@b`));
+    const second = await orderId(await send('update', `${ref}-2@b`));
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+    const db = createDb(env.DB);
+    expect((await db.select().from(orders).where(eq(orders.id, first!)).get())?.status).toBe(
+      'cancelled',
+    );
+    expect(await orderId(await send('delete', `${ref}-3@b`))).toBe(second);
+    expect((await db.select().from(orders).where(eq(orders.id, second!)).get())?.status).toBe(
+      'cancelled',
+    );
   });
 });
