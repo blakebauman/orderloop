@@ -63,3 +63,14 @@ export function useVisualViewport(active = true) {
     };
   }, [active]);
 }
+
+/** Running from the Home Screen as its own app, not in a browser tab. */
+export function isStandalone() {
+  if (window.matchMedia('(display-mode: standalone)').matches) return true;
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+/** An iPhone or iPad. iPadOS says it's a Mac; its touch points give it away. */
+export const isIos = () =>
+  /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

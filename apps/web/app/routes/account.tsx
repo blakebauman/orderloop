@@ -15,7 +15,9 @@ import {
 } from 'react-router';
 import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
+import { Confirm } from '~/components/confirm';
 import { CopyButton } from '~/components/copy-button';
+import { InstallHint } from '~/components/install-hint';
 import { PageHeader, Section } from '~/components/page';
 import { Passkeys } from '~/components/passkeys';
 import { audit } from '~/lib/audit.server';
@@ -201,6 +203,7 @@ export default function Account() {
               </Button>
             </div>
           ) : null}
+          {me.passwordChangeDue || me.twoFactorDue ? null : <InstallHint />}
           <Section title={password ? 'Password' : 'Sign-in'}>
             {me.kind === 'user' && !password ? (
               <p className="text-muted-foreground text-sm">
@@ -722,13 +725,17 @@ function Disconnect({
         >
           <input type="hidden" name="intent" value="disconnect-app" />
           <input type="hidden" name="ref" value={id} />
-          <span className="mr-auto text-sm">Disconnect {app}? It loses access now.</span>
-          <Button size="sm" variant="ghost" type="button" onClick={keep} autoFocus>
-            Keep
-          </Button>
-          <Button size="sm" variant="destructive" disabled={end.state !== 'idle'}>
-            Disconnect
-          </Button>
+          <Confirm
+            message={`Disconnect ${app}?`}
+            note="It loses access now."
+            cancelLabel="Keep"
+            onCancel={keep}
+            className="flex-1"
+          >
+            <Button size="sm" variant="destructive" disabled={end.state !== 'idle'}>
+              Disconnect
+            </Button>
+          </Confirm>
         </end.Form>
       ) : null}
     </>

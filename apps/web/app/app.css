@@ -480,6 +480,43 @@
   }
 }
 
+/* Work in progress as a light sweeping across muted text (AI Elements' Shimmer). Still, in plain
+   muted text, where motion is reduced. */
+.ol-shimmer {
+  display: inline-block;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - var(--shimmer-spread, 40px)),
+      var(--background),
+      transparent calc(50% + var(--shimmer-spread, 40px))
+    ),
+    linear-gradient(var(--muted-foreground), var(--muted-foreground));
+  background-size:
+    250% 100%,
+    auto;
+  background-repeat: no-repeat, padding-box;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: ol-shimmer var(--shimmer-duration, 2s) linear infinite;
+}
+@keyframes ol-shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ol-shimmer {
+    animation: none;
+    background: none;
+    color: var(--muted-foreground);
+  }
+}
+
 /* A confirm card arrives with a short rise, so a prepared action is noticed without a modal. */
 @keyframes ol-arrive {
   from {
@@ -537,5 +574,27 @@
   textarea,
   select {
     font-size: 16px;
+  }
+}
+
+/* A page that is slow to arrive: a link-blue rule sweeping under the top bar (shell.tsx), held
+   still where motion is reduced. */
+@keyframes ol-pending {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 250% 0;
+  }
+}
+.ol-pending {
+  animation: ol-pending 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ol-pending {
+    animation: none;
+    translate: 0 0;
+    width: 100%;
+    opacity: 0.6;
   }
 }

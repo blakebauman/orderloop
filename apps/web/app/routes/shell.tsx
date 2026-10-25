@@ -36,6 +36,7 @@ import {
   type ShouldRevalidateFunctionArgs,
   useLoaderData,
   useLocation,
+  useNavigation,
 } from 'react-router';
 import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
@@ -205,7 +206,33 @@ function AssistantToggle() {
   );
 }
 
+/** True once a navigation has taken longer than `after` ms; quick ones never flash a cue. */
+function useSlowNavigation(after = 400) {
+  const loading = useNavigation().state === 'loading';
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setSlow(false);
+      return;
+    }
+    const t = window.setTimeout(() => setSlow(true), after);
+    return () => window.clearTimeout(t);
+  }, [loading, after]);
+  return slow;
+}
+
+/** Under the top bar while a page is slow to arrive; on a phone the old page stays readable. */
+function PendingBar() {
+  const slow = useSlowNavigation();
+  return slow ? (
+    <div className="absolute inset-x-0 -bottom-px h-0.5 overflow-hidden" aria-hidden="true">
+      <div className="ol-pending h-full w-2/5 bg-link" />
+    </div>
+  ) : null;
+}
+
 function ShellFrame() {
+  const slow = useSlowNavigation();
   const { pending, auth, me, nav: showNav, plugins } = useLoaderData<typeof loader>();
   const operator = showNav && atLeast(me.role, 'operator');
   // A plugin's pages are served by its own Worker, so its links load a whole document.
@@ -305,11 +332,13 @@ function ShellFrame() {
             <form id="sign-out" method="post" action="/logout" hidden />
           </div>
         </div>
+        <PendingBar />
       </header>
       <div className="flex min-h-0 flex-1">
         <main
           id="main"
           tabIndex={-1}
+          aria-busy={slow || undefined}
           className="min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0"
         >
           <Outlet />
