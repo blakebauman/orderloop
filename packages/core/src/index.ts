@@ -13,6 +13,7 @@ export * from './credentials';
 export * from './egress';
 export * from './encryption';
 export * from './erasure';
+export * from './extract-catalog';
 export * from './fulfillment';
 export * from './graph';
 export * from './health';

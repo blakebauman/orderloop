@@ -60,6 +60,7 @@ import * as ai from './ai';
 import * as billing from './billing';
 import * as clef from './clef';
 import * as cx from './connectors';
+import { extractCatalog } from './product-index';
 import { provide } from './providers';
 
 export type NodeResult = {
@@ -943,7 +944,8 @@ export const EXECUTORS: Record<string, Exec> = {
     if (!text && ctx.order.documentKey)
       text = (await (await env.DOCS.get(ctx.order.documentKey))?.text()) ?? '';
     if (!text) return { summary: 'No document; using order as given', output: { skipped: true } };
-    const catalog = (await cx.getProducts(env)).map((p) => ({ sku: p.sku, name: p.name }));
+    // The entries this document can mean, not the whole table: that overflows the model's context.
+    const catalog = await extractCatalog(env, text);
     const { value, ...via } = await ai.extractOrder(env, text, catalog, aiCall(i));
     const customer = ctx.order.customerId
       ? undefined

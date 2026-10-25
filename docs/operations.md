@@ -60,6 +60,7 @@ With the suffix, deployment `acme` gets these resource names:
 | Analytics Engine | dataset `orderloop_catalog_edge_acme` (dashes in the suffix become underscores) |
 | Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
 | AI Gateway | `orderloop-acme` (`AI_GATEWAY_ID`) |
+| Vectorize | `orderloop-products-acme` (the engine's `PRODUCT_VECTORS`; none for a demo) |
 | OAuth KV | created on the first deploy, bound to that web Worker |
 
 `node scripts/fleet.ts render <id>` writes `apps/catalog/wrangler.<id>.json`,
@@ -78,6 +79,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
 2. Run `./scripts/provision.sh <id>`, logged in to `wrangler` and `gh`. It creates the D1
    database, the R2 bucket and the catalog's R2 bucket (in the jurisdiction; the Durable Objects get theirs from each Worker's `DATA_JURISDICTION`, rendered at deploy), the catalog's KV namespace (KV has none; its id is written as `catalogKvId`), the AI Gateway (with the `orderloop` gateway's settings:
    120 requests a minute, no cache, authentication on, request logs only when `aiGatewayLogs` is `true`), and the GitHub environment. For a gateway that already exists, it compares the gateway's default log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway. The engine sends the setting on every call either way, so the default matters only for calls made outside it; match it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**), where logs kept so far are deleted too.
+   It creates the product index, Vectorize `orderloop-products<suffix>` (768 dimensions, cosine, fixed at creation), unless the deployment is a demo; a deploy fails while the engine's binding names an index that doesn't exist. The engine's hourly cron fills it.
    For each plugin in the file's `plugins` it creates the D1 database `orderloop-plugin-<plugin><suffix>` and writes its id as `plugins.<plugin>.d1Id` (see [Plugins](plugins.md#installing)).
    It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist) and adds a lifecycle rule `feeds` on the catalog bucket that expires `feeds/` (uploaded feed files and their parts) after 30 days; both are skipped with a message when they already exist.
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.

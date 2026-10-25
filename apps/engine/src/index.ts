@@ -11,6 +11,7 @@ import { routeAgents } from './agent-routes';
 import { retryLabelVoids } from './connectors';
 import { receiveEmail } from './email';
 import { handleMcp, MCP_PATH } from './mcp';
+import { reindexProducts } from './product-index';
 import { sweep } from './retention';
 import { handleUcp } from './ucp/rest';
 
@@ -33,6 +34,9 @@ export { DryRunSecrets } from './plugin-installs';
 export { Replenish } from './replenish';
 export { OrderLoop } from './workflow';
 
+/** The hourly cron in wrangler.jsonc that runs `reindexProducts`. */
+const REINDEX_CRON = '15 * * * *';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -44,9 +48,13 @@ export default {
     return routeAgents(request, env);
   },
 
-  // The daily retention sweep (`triggers.crons` in wrangler.jsonc), and another try at labels a
-  // provider couldn't void.
-  async scheduled(_controller, env) {
+  // `triggers.crons` in wrangler.jsonc: hourly, the product index catches up with `products`;
+  // daily, the retention sweep and another try at labels a provider couldn't void.
+  async scheduled(controller, env) {
+    if (controller.cron === REINDEX_CRON) {
+      await reindexProducts(env);
+      return;
+    }
     console.log('retention sweep', JSON.stringify(await sweep(env)));
     console.log('label voids', JSON.stringify(await retryLabelVoids(env)));
   },

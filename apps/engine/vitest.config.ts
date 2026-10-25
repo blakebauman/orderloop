@@ -125,6 +125,8 @@ export default defineConfig(async () => {
             MIGRATION_DB: 'migration-test',
             DEMO_DB: 'demo-test',
             AUDIT_DB: 'audit-test',
+            // A catalog of thousands of SKUs for extraction, kept from the demo data others use.
+            EXTRACT_DB: 'extract-test',
             // The plugins' own databases, so their tests can read what they wrote.
             ...(plugins.length
               ? { EXAMPLE_DB: 'plugin-example', CARRIER_DB: 'plugin-fixture-carrier' }
