@@ -217,7 +217,7 @@
       --tabbar-h: calc(3.5rem + var(--safe-bottom));
     }
     @media (width < 48rem) and (orientation: landscape) and (max-height: 32rem) {
-      --tabbar-h: calc(2.75rem + var(--safe-bottom));
+      --tabbar-h: calc(2.75rem + 1px + var(--safe-bottom));
     }
   }
   /* Live order pages update themselves; pull-to-refresh and the rubber band only get in the way. */

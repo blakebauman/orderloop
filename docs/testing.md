@@ -5,7 +5,8 @@ What pnpm test runs in each package, how the engine runs real Workflows in worke
 `pnpm test` runs `turbo run test`, which runs `vitest run` in every package that has tests. The
 `test` task has no `dependsOn`, so a failing dependency never silently skips a package's tests.
 CI runs it after lint, type-check and build, then audits production dependencies
-(`.github/workflows/ci.yml`), each step running even when an earlier one failed.
+(`.github/workflows/ci.yml`), each step running even when an earlier one failed. A separate
+`devices` job runs the web app's [device tests](#devices-the-web-app-on-iphone-and-ipad) in WebKit.
 
 | Package | Environment | Config |
 |---|---|---|
@@ -210,7 +211,7 @@ each file themselves (WebCrypto Ed25519), so they can also sign it wrongly, and 
 |---|---|
 | refuses a bundle the deployment can't trust | Off without `PLUGIN_PUBLISHERS`; not a bundle; a test fixture without `PLUGIN_TEST_FIXTURES`; a publisher not listed; another key's signature; a `sha` that isn't the body's; a signed version that isn't the manifest's; a sealed manifest the code doesn't answer (the dry run); an id the registry pins. Nothing is recorded |
 | runs a reviewed, approved install | A pending upload isn't installed (`validateGraph` names it); approve is refused without the buyer-details grant; a secret not declared is refused, and a set one is sealed in `plugin_secrets`; once approved, its status is `source: 'installed'`, an order rates through it with the admin's secret injected at egress (`key 1111`), and the list says the secret is set without its value; with the registry pinning its own `fixture-carrier`, the admin's secret isn't served |
-| upgrades, rolls back, and disables | Uploading a pending bundle again answers with its review; a second approval is refused, and so is an upload of an approved bundle; a rollback is refused once its publisher is no longer listed; approving version 2 supersedes 1; rolling back reverses that; off, it isn't installed; on again, it is |
+| upgrades, rolls back, and disables | Uploading a pending bundle again answers with its review; a second approval is refused, and so is an upload of an approved bundle; a rollback is refused once its publisher is no longer listed; approving version 2 supersedes 1; rolling back reverses that; off, it isn't installed; on again, it is; turned off behind this isolate's cache (its row written directly), its next call doesn't run it (`stillActive`) |
 | reseals its secrets | `resealSecrets` moves `plugin_secrets` to a new `DATA_KEY` |
 | uninstalls only once nothing uses it | Refused while a published flow uses it; then its rows are `uninstalled`, its secrets deleted and its storage wiped |
 | (drafts.test.ts) refuses while off | `draft_plugin` refused without `ASSISTANT_PLUGINS` |
@@ -367,6 +368,29 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 
 `scripts/fleet.test.ts` also covers the registry's `sso`: it sets the web Worker's `OIDC_ISSUER` and `OIDC_CLIENT_ID` (empty without it), and refuses a non-https issuer or a missing client id.
 
+## Devices: the web app on iPhone and iPad
+
+`pnpm --filter @orderloop/web e2e` runs `apps/web/e2e/` with Playwright (`apps/web/playwright.config.ts`)
+in WebKit, as five projects: `iphone` (iPhone 15), `iphone-landscape`, `ipad` (iPad, upright),
+`ipad-landscape` (iPad Pro 11) and `desktop` (Safari). Its web server is the dev server started with
+`ORDERLOOP_E2E=1`, which `apps/web/vite.config.ts` reads to run offline: `remoteBindings: false`, the
+engine on `AI_MODE: 'mock'`, and state under `apps/web/.wrangler/e2e`, migrated and seeded with the
+demo data afresh on each run, so it never touches the database `pnpm web:dev` uses. No Cloudflare
+account is needed. Locally a server already on port 5390 is reused. `e2e/warm.ts` (global setup)
+visits every page once first, since the dev server reloads the browser the first time it bundles a
+page's dependencies; `open()` in `e2e/helpers.ts` waits until app.css has applied and the page has
+hydrated.
+
+Playwright can't emulate safe-area insets or the on-screen keyboard, so the helpers fake them:
+`fakeSafeArea` sets the `--safe-*` variables (why app.css reads the insets through them, never
+`env()` directly), and `installKeyboard` replaces `visualViewport` and `innerHeight` with ones a
+test shrinks to the area above a keyboard.
+
+| File | Covers |
+|---|---|
+| `layout.spec.ts` | No page in the shell scrolls sideways, on every device; on phones the tab bar sits above a 34px home indicator and the top bar below a 47px status bar; More's sheet closes on navigation and the route announcer names the new page; on touch screens the header, tab bar and page buttons take a 44px tap (their box or `hit-area`'s), and every field is 16px so iOS doesn't zoom into it |
+| `screens.spec.ts` | Below lg the flow editor is review-only (no Publish, a read-only name, no Delete node, nothing draggable, never Unsaved) and at lg it edits; below lg an order's graph is a tab of its own, mounted only while shown; on an upright iPhone the assistant's composer stays above the keyboard while it is up (`data-keyboard`), and Return there is a new line |
+
 ## Catalog edge: delivery in workerd
 
 `apps/catalog-edge/tests/edge.test.ts` runs the gateway and `Delivery` against local R2 and KV,
@@ -462,5 +486,6 @@ Both were run with the scratch scripts that preceded this one, from a feed of th
 
 ## What isn't covered
 
-The flow editor canvas and the live order page are not under test; verify UI changes by running
-`pnpm web:dev` and driving a scenario. See [Getting started](local-development.md).
+Beyond what the device tests check (layout, touch and the review-only editor), the flow editor
+canvas and the live order page are not under test; verify UI changes by running `pnpm web:dev` and
+driving a scenario. See [Getting started](local-development.md).

@@ -23,3 +23,7 @@ worker-configuration.d.ts.bak
 # Rendered per deployment by scripts/fleet.ts render <id>
 apps/*/wrangler.*.json
 plugins/*/wrangler.*.json
+
+# Playwright device tests (apps/web/e2e)
+test-results/
+playwright-report/

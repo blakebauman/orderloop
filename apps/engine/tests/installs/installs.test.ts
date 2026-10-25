@@ -14,7 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { resealSecrets } from '../../src/data-key';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import { dropInstallsCache, resolveSecret } from '../../src/plugin-host';
+import { dropInstallsCache, pluginStub, resolveSecret } from '../../src/plugin-host';
 import * as installs from '../../src/plugin-installs';
 import { pluginStatuses, registry } from '../../src/plugins';
 import { edge, node, settled, stampInput } from '../plugin-helpers';
@@ -323,6 +323,15 @@ describe('installing a plugin at runtime', () => {
     await installs.setPluginEnabled(env, 'fixture-carrier', true);
     dropInstallsCache();
     expect(await status()).toMatchObject({ healthy: true });
+
+    // Turned off from another isolate: this one's cache still lists it, but the next call checks
+    // its row and doesn't run it.
+    expect(await pluginStub(env, 'fixture-carrier')).not.toBeNull();
+    const where = eq(installedPlugins.sha, bundles.v1.sha);
+    await db().update(installedPlugins).set({ status: 'disabled' }).where(where);
+    expect(await pluginStub(env, 'fixture-carrier')).toBeNull();
+    await db().update(installedPlugins).set({ status: 'active' }).where(where);
+    expect(await pluginStub(env, 'fixture-carrier')).not.toBeNull();
   });
 
   it('reseals its secrets with the deployment’s key', async () => {

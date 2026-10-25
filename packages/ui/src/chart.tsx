@@ -124,10 +124,16 @@ function ChartLegendContent({
 }) {
   const { config } = useChart();
   if (!payload?.length) return null;
+  // Recharts sorts legend items by key; list them in the config's order, as the tooltip does.
+  const keyOf = (item: (typeof payload)[number]) => String(item.dataKey ?? item.value ?? 'value');
+  const order = Object.keys(config);
+  const items = [...payload].sort((x, y) => order.indexOf(keyOf(x)) - order.indexOf(keyOf(y)));
   return (
-    <div className={cn('flex items-center justify-center gap-4 pt-3', className)}>
-      {payload.map((item) => {
-        const key = String(item.dataKey ?? item.value ?? 'value');
+    <div
+      className={cn('flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-3', className)}
+    >
+      {items.map((item) => {
+        const key = keyOf(item);
         return (
           <div key={key} className="flex items-center gap-1.5">
             <span
