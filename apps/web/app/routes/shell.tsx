@@ -16,6 +16,7 @@ import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
+  ChevronDown,
   Ellipsis,
   LayoutDashboard,
   MessageSquareText,
@@ -23,12 +24,12 @@ import {
   Moon,
   Plus,
   ReceiptText,
+  ShoppingCart,
   Stamp,
   Sun,
   UserRound,
-  Workflow,
 } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   Link,
   NavLink,
@@ -41,6 +42,7 @@ import {
 import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
+import { useShortcutLabel } from '~/lib/device';
 import { db } from '~/lib/env.server';
 import { PluginsProvider } from '~/lib/plugins';
 import { pluginManifests } from '~/lib/plugins.server';
@@ -127,24 +129,43 @@ export function shouldRevalidate({
   return defaultShouldRevalidate;
 }
 
-type NavItem = { to: string; label: string; end?: boolean; badge?: boolean; document?: boolean };
+type NavItem = {
+  to: string;
+  label: string;
+  end?: boolean;
+  badge?: boolean;
+  document?: boolean;
+  /** Starts a group in the top bar, after a hairline. */
+  group?: boolean;
+  /** A reference page: in the top bar's More menu rather than a link of its own. */
+  more?: boolean;
+  /** A plugin's page, under its own heading in More. */
+  plugin?: boolean;
+};
 
+/**
+ * In this order everywhere: the day's work, then building, then reference pages (and plugins'),
+ * which the top bar keeps under More.
+ */
 const NAV: NavItem[] = [
   { to: '/', label: 'Overview', end: true },
   { to: '/orders', label: 'Orders' },
-  { to: '/carts', label: 'Carts' },
   { to: '/approvals', label: 'Approvals', badge: true },
-  { to: '/flows', label: 'Flows' },
-  { to: '/commerce', label: 'Commerce' },
-  { to: '/performance', label: 'Performance' },
+  { to: '/carts', label: 'Carts' },
+  { to: '/flows', label: 'Flows', group: true },
+  { to: '/commerce', label: 'Commerce', more: true },
+  { to: '/performance', label: 'Performance', more: true },
 ];
 
-/** Phones: the pages an operator reaches for most, as tabs; the rest of NAV is under More. */
+/**
+ * Phones are for keeping up and deciding: the day's work as tabs, in NAV's order. Flows (which a
+ * phone only reviews) and the rest are under More.
+ */
 const TABS: { to: string; label: string; icon: typeof Sun; end?: boolean; badge?: boolean }[] = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/orders', label: 'Orders', icon: ReceiptText },
   { to: '/approvals', label: 'Approvals', icon: Stamp, badge: true },
-  { to: '/flows', label: 'Flows', icon: Workflow },
+  { to: '/carts', label: 'Carts', icon: ShoppingCart },
 ];
 
 const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
@@ -153,14 +174,39 @@ const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
   { value: 'system', label: 'Match system', icon: Monitor },
 ];
 
+/** Past two digits a count is 99+, everywhere it's shown. */
+const countLabel = (n: number) => (n > 99 ? '99+' : String(n));
+
+/** Approvals waiting on someone: the bar's one call for attention, filled in `wait`. */
 function PendingCount({ n }: { n: number }) {
   return (
-    <span className="rounded-full bg-wait/15 px-1.5 py-px font-medium text-2xs text-wait tabular">
-      {n}
+    <span className="min-w-4 rounded-full bg-wait px-1.5 text-center font-medium text-2xs text-background leading-4 tabular">
+      {countLabel(n)}
       <span className="sr-only"> pending</span>
     </span>
   );
 }
+
+/**
+ * The shell's colour changes, named so they leave the focus outline alone: `transition-colors`
+ * would fade the outline in from the text colour.
+ */
+const tint = 'transition-[color,background-color,border-color]';
+
+/**
+ * The page a link should read as current: where a navigation is heading (so the tab you chose
+ * marks at once, even when the page is slow), else where you are.
+ */
+function useCurrentPath() {
+  const { pathname } = useLocation();
+  const navigation = useNavigation();
+  return navigation.state === 'loading' && !navigation.formMethod
+    ? navigation.location.pathname
+    : pathname;
+}
+
+const isAt = (path: string, { to, end }: { to: string; end?: boolean }) =>
+  end ? path === to : path === to || path.startsWith(`${to}/`);
 
 export default function Shell() {
   const { plugins } = useLoaderData<typeof loader>();
@@ -173,9 +219,10 @@ export default function Shell() {
   );
 }
 
-/** Opens and closes the assistant, from the top bar or with ⌘J anywhere. */
+/** Opens and closes the assistant, from the top bar or with ⌘J (Ctrl+J) anywhere. */
 function AssistantToggle() {
   const { open, setOpen, focus } = useAssistant();
+  const shortcut = useShortcutLabel('J');
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
@@ -192,9 +239,10 @@ function AssistantToggle() {
       type="button"
       onClick={() => (open ? setOpen(false) : focus())}
       aria-pressed={open}
-      title={open ? 'Close the assistant (⌘J)' : 'Ask the assistant (⌘J)'}
+      title={open ? `Close the assistant (${shortcut})` : `Ask the assistant (${shortcut})`}
       className={cn(
-        'hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui transition-colors md:h-8 md:min-w-0',
+        'hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui md:h-8 md:min-w-0',
+        tint,
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
           : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -202,7 +250,9 @@ function AssistantToggle() {
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
       <span className="sr-only sm:not-sr-only md:max-lg:sr-only">Assistant</span>
-      <kbd className="hidden font-sans text-2xs text-muted-foreground lg:fine:inline">⌘J</kbd>
+      <kbd className="hidden font-sans text-2xs text-muted-foreground xl:fine:inline">
+        {shortcut}
+      </kbd>
     </button>
   );
 }
@@ -232,6 +282,118 @@ function PendingBar() {
   ) : null;
 }
 
+/**
+ * How many of the top bar's links fit beside More. An invisible ruler holds every link at its
+ * natural width (they grow with the reader's text size); the ones that don't fit move into More,
+ * so the row never scrolls and no page is out of reach.
+ */
+function useFittingLinks(count: number) {
+  const box = useRef<HTMLElement>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  const [fits, setFits] = useState(count);
+  useEffect(() => {
+    const room = box.current;
+    const marks = ruler.current;
+    if (!room || !marks) return;
+    const fit = () => {
+      const items = [...marks.children] as HTMLElement[];
+      const more = items.pop();
+      if (!more) return;
+      const gap = Number.parseFloat(getComputedStyle(marks).columnGap) || 0;
+      const space = room.clientWidth - more.offsetWidth - gap;
+      setFits(items.filter((el) => el.offsetLeft + el.offsetWidth <= space).length);
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(room);
+    observer.observe(marks);
+    return () => observer.disconnect();
+  }, []);
+  return { box, ruler, fits: Math.min(fits, count) };
+}
+
+/** A top-bar link's underline tab; its outline sits inside it, clear of the rule below. */
+const navTab = (active: boolean) =>
+  cn(
+    'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui focus-visible:outline-offset-[-2px]',
+    tint,
+    active
+      ? 'border-foreground font-medium text-foreground'
+      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
+  );
+
+/** A link's place in the top bar, with the hairline that starts its group. */
+function NavSlot({ group, children }: { group?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="flex shrink-0">
+      {group ? <span className="mx-1.5 h-4 w-px self-center bg-rule" aria-hidden="true" /> : null}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The top bar's More: links that didn't fit the row, then reference pages, then plugins' pages
+ * under their own heading. Underlined while you're on one of them, and it carries the approvals
+ * count when Approvals is inside it.
+ */
+function NavMore({
+  overflow,
+  reference,
+  plugins,
+  path,
+  pending,
+}: {
+  overflow: NavItem[];
+  reference: NavItem[];
+  plugins: NavItem[];
+  path: string;
+  pending: number;
+}) {
+  const current = [...overflow, ...reference, ...plugins].find((i) => isAt(path, i));
+  const count = overflow.some((i) => i.badge) && pending > 0;
+  const item = ({ to, label, end, badge, document }: NavItem) => (
+    <DropdownMenuItem key={to} asChild>
+      <Link
+        to={to}
+        reloadDocument={document}
+        aria-current={isAt(path, { to, end }) ? 'page' : undefined}
+        className="justify-between aria-[current=page]:font-medium"
+      >
+        {label}
+        {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+      </Link>
+    </DropdownMenuItem>
+  );
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className={cn(navTab(!!current), 'data-[state=open]:text-foreground')}>
+        More
+        <span className="sr-only"> pages{current ? `, on ${current.label}` : ''}</span>
+        {count ? <PendingCount n={pending} /> : null}
+        <ChevronDown className="size-3.5 opacity-60" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        {overflow.map(item)}
+        {overflow.length && reference.length ? <DropdownMenuSeparator /> : null}
+        {reference.map(item)}
+        {plugins.length ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="caption font-medium">From plugins</DropdownMenuLabel>
+            {plugins.map(item)}
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Where a phone starts an order: in thumb reach, on the pages that list orders. */
+const NEW_ORDER_FROM = new Set(['/', '/orders']);
+
+/** Pages about deciding and building, where starting an order steps back from ink to an outline. */
+const QUIET_NEW_ORDER = [{ to: '/approvals' }, { to: '/flows' }];
+
 function ShellFrame() {
   const slow = useSlowNavigation();
   const { pending, auth, me, nav: showNav, plugins } = useLoaderData<typeof loader>();
@@ -242,11 +404,16 @@ function ShellFrame() {
         ...NAV,
         ...plugins
           .filter((p) => atLeast(me.role, p.pageRole))
-          .flatMap((p) => p.nav.map((n) => ({ to: n.path, label: n.label, document: true }))),
+          .flatMap((p) =>
+            p.nav.map((n) => ({ to: n.path, label: n.label, document: true, plugin: true })),
+          ),
       ]
     : [];
-  const theme = useTheme();
-  const ThemeIcon = THEMES.find((t) => t.value === theme.choice)?.icon ?? Sun;
+  const links = nav.filter((n) => !n.more && !n.plugin);
+  const { box, ruler, fits } = useFittingLinks(links.length);
+  const path = useCurrentPath();
+  const phoneNewOrder = operator && NEW_ORDER_FROM.has(path);
+  const quietNewOrder = QUIET_NEW_ORDER.some((p) => isAt(path, p));
   return (
     <div className="flex min-h-dvh flex-col">
       <a
@@ -267,63 +434,77 @@ function ShellFrame() {
             <Mark className="size-5" />
             <span className="hidden sm:inline md:max-lg:hidden">OrderLoop</span>
           </Link>
-          {/* Tablets in portrait run out of width before the links do: the row scrolls, not wraps. */}
-          <nav
-            aria-label="Main"
-            className="-mb-px hidden h-full min-w-0 snap-x items-stretch gap-1 overflow-x-auto [scrollbar-width:none] md:flex md:max-lg:pr-6 md:max-lg:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
-          >
-            {nav.map(({ to, label, end, badge, document }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                reloadDocument={document}
-                className={({ isActive }) =>
-                  cn(
-                    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui transition-colors',
-                    isActive
-                      ? 'border-foreground font-medium text-foreground'
-                      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
-                  )
-                }
+          {showNav ? (
+            <nav
+              ref={box}
+              aria-label="Main"
+              className="relative -mb-px hidden h-full min-w-0 flex-1 items-stretch gap-1 md:flex"
+            >
+              <div
+                ref={ruler}
+                aria-hidden="true"
+                className="pointer-events-none invisible absolute top-0 left-0 flex h-0 w-max gap-1 overflow-hidden"
               >
-                {label}
-                {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-              </NavLink>
-            ))}
-          </nav>
+                {links.map(({ to, label, badge, group }) => (
+                  <NavSlot key={to} group={group}>
+                    <span className={navTab(true)}>
+                      {label}
+                      {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+                    </span>
+                  </NavSlot>
+                ))}
+                <span className={navTab(true)}>
+                  More
+                  <ChevronDown className="size-3.5" />
+                </span>
+              </div>
+              {links.slice(0, fits).map(({ to, label, end, badge, group }) => (
+                <NavSlot key={to} group={group}>
+                  <NavLink to={to} end={end} className={navTab(isAt(path, { to, end }))}>
+                    {label}
+                    {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+                  </NavLink>
+                </NavSlot>
+              ))}
+              <NavMore
+                overflow={links.slice(fits)}
+                reference={nav.filter((n) => n.more)}
+                plugins={nav.filter((n) => n.plugin)}
+                path={path}
+                pending={pending}
+              />
+            </nav>
+          ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
             {showNav ? <AssistantToggle /> : null}
             {operator ? (
               <Link
                 to="/orders/new"
-                className="hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-ui text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
+                title="New order"
+                className={cn(
+                  'hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl px-3 font-medium text-ui md:inline-flex',
+                  tint,
+                  quietNewOrder
+                    ? 'border border-input text-foreground hover:bg-accent'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                )}
               >
                 <Plus className="size-3.5" aria-hidden="true" />
-                <span className="sr-only sm:not-sr-only md:max-lg:sr-only">New order</span>
+                <span className="max-lg:sr-only">New order</span>
               </Link>
             ) : null}
+            {/* Who is signed in, the pages that belong to them and the team, and the theme. */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hit-area hidden size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:grid data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                aria-label={`Theme: ${THEMES.find((t) => t.value === theme.choice)?.label ?? theme.choice}`}
-              >
-                <ThemeIcon className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <ThemeItems value={theme.choice} onChange={theme.setChoice} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Who is signed in, and the pages that belong to them and the team. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
+                aria-label={`${shortWho(me, auth)}, account menu`}
+                title={who(me, auth)}
+                className={cn(
+                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
+                  tint,
+                )}
               >
                 <UserRound className="size-4" aria-hidden="true" />
-                <span className="max-w-32 truncate md:max-lg:sr-only">
-                  {me.kind === 'user' ? me.name : ROLE_LABELS[me.role]}
-                </span>
+                <span className="max-w-32 truncate md:max-lg:sr-only">{shortWho(me, auth)}</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <AccountItems me={me} auth={auth} />
@@ -340,13 +521,26 @@ function ShellFrame() {
           id="main"
           tabIndex={-1}
           aria-busy={slow || undefined}
-          className="min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0"
+          className={cn(
+            'min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0',
+            // Room under the last row for the New order button.
+            phoneNewOrder && 'pb-[calc(var(--tabbar-h)+4.5rem)]',
+          )}
         >
           <Outlet />
         </main>
         {showNav ? <LazyAssistantPanel /> : null}
       </div>
-      <TabBar nav={nav} pending={pending} />
+      {phoneNewOrder ? (
+        <Link
+          to="/orders/new"
+          className="fixed right-[max(1rem,var(--safe-right))] bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 inline-flex h-11 items-center gap-1.5 rounded-4xl bg-primary pr-4.5 pl-4 font-medium text-primary-foreground text-sm shadow-float md:hidden"
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          New order
+        </Link>
+      ) : null}
+      <TabBar nav={nav} pending={pending} path={path} />
     </div>
   );
 }
@@ -355,17 +549,17 @@ function ShellFrame() {
  * Phones: the main pages as tabs along the bottom, in thumb reach and clear of the home indicator,
  * and More for everything else. Wider screens have the links in the top bar instead.
  */
-function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
+function TabBar({ nav, pending, path }: { nav: NavItem[]; pending: number; path: string }) {
   const { pathname } = useLocation();
   const [more, setMore] = useState(false);
   // A link in the sheet closes it by navigating; so does the back button (pathname is the trigger).
   useEffect(() => setMore(false), [pathname]);
   const tabs = nav.length ? TABS : [];
-  const inTab = tabs.some((t) =>
-    t.end ? pathname === t.to : pathname === t.to || pathname.startsWith(`${t.to}/`),
+  const inTab = tabs.some((t) => isAt(path, t));
+  const item = cn(
+    'relative flex flex-col items-center justify-center gap-0.5 text-2xs short:gap-0',
+    tint,
   );
-  const item =
-    'relative flex flex-col items-center justify-center gap-0.5 text-2xs transition-colors short:gap-0';
   const state = (active: boolean) =>
     active
       ? 'font-medium text-foreground before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:bg-foreground'
@@ -382,12 +576,12 @@ function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
         >
           {tabs.map(({ to, label, icon: Icon, end, badge }) => (
             <li key={to} className="contents">
-              <NavLink to={to} end={end} className={({ isActive }) => cn(item, state(isActive))}>
+              <NavLink to={to} end={end} className={cn(item, state(isAt(path, { to, end })))}>
                 <span className="relative">
                   <Icon className="size-5" aria-hidden="true" />
                   {badge && pending > 0 ? (
-                    <span className="absolute -top-1.5 left-3.5 min-w-4 rounded-full bg-wait px-1 text-center font-medium text-[10px] text-background leading-4 tabular">
-                      {pending > 99 ? '99+' : pending}
+                    <span className="absolute -top-1.5 left-3.5 min-w-4 rounded-full bg-wait px-1 text-center font-medium text-2xs text-background leading-4 tabular">
+                      {countLabel(pending)}
                     </span>
                   ) : null}
                 </span>
@@ -423,15 +617,18 @@ function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
   );
 }
 
-/** The More sheet: the pages without a tab, the theme, and the account's pages. */
+/**
+ * The More sheet, grouped as the desktop groups them: the pages without a tab (and plugins'),
+ * then the account and the team's pages, then the theme and signing in or out.
+ */
 function MoreMenu({ nav, pending }: { nav: NavItem[]; pending: number }) {
   const { me, auth } = useLoaderData<typeof loader>();
   const theme = useTheme();
   const admin = atLeast(me.role, 'admin');
   const row =
-    'flex min-h-11 items-center justify-between gap-3 rounded-md px-3 text-[15px] hover:bg-accent aria-[current=page]:font-medium';
-  const links: NavItem[] = [
-    ...nav,
+    'flex min-h-11 items-center justify-between gap-3 rounded-md px-3 text-base hover:bg-accent aria-[current=page]:font-medium';
+  const heading = 'caption px-3 pt-2 pb-1 font-medium';
+  const account: NavItem[] = [
     { to: '/account', label: 'Account' },
     ...(admin
       ? [
@@ -441,22 +638,40 @@ function MoreMenu({ nav, pending }: { nav: NavItem[]; pending: number }) {
         ]
       : []),
   ];
+  const list = (items: NavItem[]) => (
+    <ul>
+      {items.map(({ to, label, end, badge, document }) => (
+        <li key={to}>
+          <NavLink to={to} end={end} reloadDocument={document} className={row}>
+            {label}
+            {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+          </NavLink>
+        </li>
+      ))}
+    </ul>
+  );
+  const pages = nav.filter((n) => !n.plugin);
+  const pluginPages = nav.filter((n) => n.plugin);
   return (
     <>
       <div className="border-b px-4 pt-4 pb-3 pr-14">
-        <SheetTitle className="truncate text-[15px]">{who(me, auth)}</SheetTitle>
+        <SheetTitle className="truncate text-base">{who(me, auth)}</SheetTitle>
         <SheetDescription className="text-xs">{ROLE_LABELS[me.role]}</SheetDescription>
       </div>
-      <ul className="p-2">
-        {links.map(({ to, label, end, badge, document }) => (
-          <li key={to}>
-            <NavLink to={to} end={end} reloadDocument={document} className={row}>
-              {label}
-              {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-            </NavLink>
-          </li>
-        ))}
-      </ul>
+      <div className="p-2">
+        <h2 className={heading}>Pages</h2>
+        {list(pages)}
+        {pluginPages.length ? (
+          <>
+            <h2 className={cn(heading, 'pt-3')}>From plugins</h2>
+            {list(pluginPages)}
+          </>
+        ) : null}
+      </div>
+      <div className="border-t p-2">
+        <h2 className={heading}>Account and team</h2>
+        {list(account)}
+      </div>
       <fieldset className="border-t px-4 pt-3 pb-3">
         <legend className="caption float-left mb-2 w-full font-medium">Theme</legend>
         <Segmented
@@ -518,13 +733,23 @@ function ThemeItems({
 const who = (me: Principal, auth: boolean) =>
   me.kind === 'user' ? (me.email ?? me.name) : auth ? 'Workspace password' : 'Sign-in is off';
 
-/** Who is signed in, their account, the team and its audit log, and signing in or out. */
+/**
+ * The same, short enough for the account button. A person is their name; a session without one is
+ * how it got in, and with sign-in off, the role everyone acts as.
+ */
+const shortWho = (me: Principal, auth: boolean) =>
+  me.kind === 'user' ? me.name : auth ? 'Workspace' : `${ROLE_LABELS[me.role]}, no sign-in`;
+
+/** Who is signed in, their account, the team and its audit log, the theme, and signing in or out. */
 function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
   const admin = atLeast(me.role, 'admin');
+  const theme = useTheme();
   return (
     <>
       <DropdownMenuLabel className="font-normal">
-        <span className="block truncate font-medium text-sm">{who(me, auth)}</span>
+        <span className="block truncate font-medium text-foreground text-sm" title={who(me, auth)}>
+          {who(me, auth)}
+        </span>
         <span className="text-muted-foreground text-xs">{ROLE_LABELS[me.role]}</span>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
@@ -545,6 +770,8 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
         </>
       ) : null}
       <DropdownMenuSeparator />
+      <ThemeItems value={theme.choice} onChange={theme.setChoice} />
+      {auth || admin ? <DropdownMenuSeparator /> : null}
       {auth ? (
         <DropdownMenuItem asChild>
           {/* The form sits outside the menu, which unmounts as it closes. */}
