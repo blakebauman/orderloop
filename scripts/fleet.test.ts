@@ -61,6 +61,9 @@ test('the engine config carries the deployment everywhere a name is account-wide
     renderEngine(base('engine'), { ...acme, aiGatewayLogs: true }).vars.AI_GATEWAY_LOGS,
     'true',
   );
+  assert.deepEqual(c.vectorize, [
+    { binding: 'PRODUCT_VECTORS', index_name: 'orderloop-products-acme' },
+  ]);
   assert.equal(c.workers_dev, false);
 });
 
@@ -227,6 +230,8 @@ test('a demo mocks models, speeds up time and turns on demo sign-in', () => {
   assert.equal(engine.vars.AI_GATEWAY_ID, '');
   assert.equal(engine.vars.TIME_SCALE, '1440');
   assert.equal(engine.vars.SIMULATE_FAILURES, 'true');
+  // No model calls, so no product index to provision or bind.
+  assert.equal(engine.vectorize, undefined);
   assert.equal(renderEngine(base('engine'), acme).vars.SIMULATE_FAILURES, '');
   assert.equal(renderWeb(base('web'), demo).vars.DEMO_MODE, 'true');
   assert.equal(renderWeb(base('web'), acme).vars.DEMO_MODE, '');

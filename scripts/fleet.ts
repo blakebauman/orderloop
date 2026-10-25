@@ -565,6 +565,7 @@ export const names = (d: Deployment) => ({
   d1: `orderloop${d.suffix}`,
   r2: `orderloop-docs${d.suffix}`,
   aiGateway: `orderloop${d.suffix}`,
+  productIndex: `orderloop-products${d.suffix}`,
   catalog: `orderloop-catalog${d.suffix}`,
   catalogR2: `orderloop-catalog${d.suffix}`,
   catalogKv: `orderloop-catalog-cards${d.suffix}`,
@@ -710,6 +711,14 @@ export function renderEngine(base: Config, d: Deployment): Config {
   // Workflow names are unique per account, so each deployment's carry its suffix.
   config.workflows = config.workflows.map((w: Config) => ({ ...w, name: `${w.name}${d.suffix}` }));
   storage(config, d);
+  // The product index ai.extract reads. A demo mocks every model, so it has none (and
+  // scripts/provision.sh creates none).
+  if (d.demo) delete config.vectorize;
+  else
+    config.vectorize = config.vectorize.map((v: Config) => ({
+      ...v,
+      index_name: names(d).productIndex,
+    }));
   const plugins = pluginServices(d);
   if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
   const grants = pluginGrants(d);
@@ -1108,6 +1117,8 @@ function shellNames(id: string | undefined) {
     D1: n.d1,
     R2: n.r2,
     AI_GATEWAY: n.aiGateway,
+    // The product index (Vectorize); empty for a demo, which has none.
+    PRODUCT_INDEX: d.demo ? '' : n.productIndex,
     CATALOG_R2: n.catalogR2,
     CATALOG_KV: n.catalogKv,
     CATALOG_FEED_PARTS: n.catalogFeedParts,

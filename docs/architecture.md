@@ -1162,6 +1162,19 @@ and gateway metadata. Answers go through `clampAnswers`
 (`packages/core/src/assess.ts`). Images are embedded inside the step: R2 keys under
 `orders/<orderId>/` only, `https` URLs, or `data:` URLs.
 
+Extract never sends the whole `products` table: a few hundred SKUs beside a 20,000-character
+document overflow the model's 24k-token context, and the call would fall back to the regexes.
+`extractCatalog` (`apps/engine/src/product-index.ts`) shows a catalog of up to
+`EXTRACT_CANDIDATES` (50) whole; past that it gathers a pool (the document's code-shaped tokens
+looked up by SKU, the 500 names sharing most of its words, counted in one SQL scan, and, with the
+`PRODUCT_VECTORS` index bound, the SKUs closest to each of its lines) and core's
+`rankExtractCandidates` (`packages/core/src/extract-catalog.ts`) keeps every SKU the document
+names, then up to 50 more by name overlap and similarity, within `EXTRACT_CATALOG_TOKENS` (6,000).
+`extractOrder` holds the answer to those candidates. The index is kept by `reindexProducts` on the
+engine's hourly cron, which diffs `products` against `product_vectors` rather than hooking each
+writer of `products` (the catalog, seeds, the demo reset). See
+[Configuration](configuration.md#bindings).
+
 The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_change`) fills missing
 config from catalog defaults, gives edges ids, keeps existing positions and re-runs layout only when
 nodes were added, then returns `validateGraph`'s errors and warnings with the graph. Every model

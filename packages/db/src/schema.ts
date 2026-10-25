@@ -172,6 +172,16 @@ export const products = sqliteTable('products', {
   heightCm: real('height_cm'),
 });
 
+/**
+ * What the product index (Vectorize) holds for each SKU, and the name its embedding was made from:
+ * the engine's reindex (`apps/engine/src/product-index.ts`) diffs it against `products`.
+ */
+export const productVectors = sqliteTable('product_vectors', {
+  sku: text('sku').primaryKey(),
+  name: text('name').notNull(),
+  indexedAt: integer('indexed_at').notNull(),
+});
+
 /** A store that holds its own stock, for pickup, ship-from-store and point of sale. */
 export const locations = sqliteTable('locations', {
   id: text('id').primaryKey(),

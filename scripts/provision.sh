@@ -18,7 +18,7 @@ wrangler() { pnpm --filter @orderloop/engine exec wrangler "$@"; }
 j=()
 [ -n "$JURISDICTION" ] && j=(--jurisdiction "$JURISDICTION")
 
-echo "== $id: D1 $D1, R2 $R2 and $CATALOG_R2, KV $CATALOG_KV, gateway $AI_GATEWAY, https://$DOMAIN, environment $ENVIRONMENT"
+echo "== $id: D1 $D1, R2 $R2 and $CATALOG_R2, KV $CATALOG_KV, gateway $AI_GATEWAY, index ${PRODUCT_INDEX:-none}, https://$DOMAIN, environment $ENVIRONMENT"
 
 wrangler d1 create "$D1" ${j[@]+"${j[@]}"} || echo "D1 database $D1 already exists"
 uuid=$(wrangler d1 info "$D1" --json | jq -er .uuid)
@@ -26,6 +26,17 @@ node scripts/fleet.ts set-d1 "$id" "$uuid"
 echo "Recorded d1Id $uuid in deployments/$id.jsonc"
 
 wrangler r2 bucket create "$R2" ${j[@]+"${j[@]}"} || echo "R2 bucket $R2 already exists"
+
+# The product index ai.extract reads (Vectorize): bge-base-en-v1.5 embeddings, so 768 dimensions
+# and cosine, fixed at creation. A deploy fails if the binding names an index that doesn't exist.
+# The engine's hourly cron fills it. A demo (mock AI) has none.
+if [ -n "$PRODUCT_INDEX" ]; then
+  if wrangler vectorize get "$PRODUCT_INDEX" >/dev/null 2>&1; then
+    echo "Vectorize index $PRODUCT_INDEX already exists"
+  else
+    wrangler vectorize create "$PRODUCT_INDEX" --dimensions 768 --metric cosine
+  fi
+fi
 
 # Each installed plugin's own D1 database (docs/plugins.md), named like its Worker.
 for p in $PLUGINS; do

@@ -18,7 +18,7 @@ database too, to write variant names and prices into `products`, but not the R2 
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, the feed-parts, purge and changes queues and their dead-letter queues, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, Vectorize `orderloop-products`, the feed-parts, purge and changes queues and their dead-letter queues, a 30-day expiry for `feeds/` in `orderloop-catalog`, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm run deploy                                # catalog, then catalog-edge, then engine (web binds to it), then web
 ```
