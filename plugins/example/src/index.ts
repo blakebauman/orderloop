@@ -8,12 +8,13 @@
  *   return too much, take a branch it doesn't have, or set variables. The engine's tests use it to
  *   check what the engine refuses.
  * - It subscribes to `order.completed` and records each delivery id once.
- * - `/plugins/example/` answers with the person the web app signed onto the request, and
- *   `/plugins/example/public/ping` is a public path that answers anyone.
+ * - `/plugins/example/` answers with a view (`viewResponse`) of the person the web app signed onto
+ *   the request, drawn in the app's shell, and `/plugins/example/public/ping` is a public path that
+ *   answers anyone.
  */
 
 import { PLUGIN_RESULT_MAX_BYTES } from '@orderloop/core';
-import { definePlugin, pluginDb, secret } from '@orderloop/plugin-sdk';
+import { definePlugin, pluginDb, secret, viewResponse } from '@orderloop/plugin-sdk';
 import manifest from './manifest';
 
 export default definePlugin<Env>({
@@ -112,8 +113,22 @@ export default definePlugin<Env>({
         return new Response('Unauthorized', { status: 401 });
       return Response.json({ ok: true });
     }
-    return Response.json(
-      { plugin: 'example', principal: principal && { id: principal.id, role: principal.role } },
+    // Every other path is signed in (the SDK refused anyone else), so `principal` is set.
+    return viewResponse(
+      {
+        title: 'Example',
+        description: 'Who the web app signed onto this request.',
+        blocks: [
+          {
+            type: 'stats',
+            items: [
+              { label: 'Signed in as', value: (principal?.name ?? '').slice(0, 80) },
+              { label: 'Role', value: principal?.role ?? '' },
+            ],
+          },
+          { type: 'code', label: 'Principal', text: principal?.id ?? '' },
+        ],
+      },
       // Things the web app must not let through to the browser as they are.
       { headers: { 'set-cookie': 'session=stolen; Path=/', 'x-frame-options': 'ALLOWALL' } },
     );

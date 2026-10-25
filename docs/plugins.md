@@ -147,7 +147,9 @@ The fixture's `example.stamp` inserts a row keyed by `(order_id, step_key)` with
 NOTHING` and its `compensate` deletes it; its `order.completed` handler inserts the delivery id the
 same way. `example.probe` is test-only: it echoes what it is sent, fails, returns too much or a
 branch it lacks, or sets variables, as its `behave` field says, so the engine's tests can check what
-it refuses. A real plugin has no use for one.
+it refuses. A real plugin has no use for one. Its page, `/plugins/example/`, is a view of the
+person the web app signed onto the request (and sends headers the web app must strip, for its
+tests); `/plugins/example/public/ping` is a public path that checks its own bearer token.
 
 Then run `pnpm install` to link the new package.
 
@@ -211,6 +213,12 @@ return viewResponse({
   requests (and HTML pages) itself.
 - A view page is for signed-in people: the route requires a session, so a public path answers with
   something other than a view.
+- The contract suite checks every view a plugin's declared pages answer with `checkPluginView`
+  (see [The contract suite](#the-contract-suite)), so a view the app would refuse fails the
+  plugin's own tests rather than drawing as an error in production. HTML pages stay legal: the
+  web app still passes them through, and a third-party plugin may keep sending them. The plugins
+  in this repo (`example` and `punchout`) answer with views; `fixture-carrier` serves no pages,
+  and an assistant draft's host answers every page request with `404`.
 
 ### The contract suite
 
@@ -230,7 +238,12 @@ second effect; that a run with another step key (`contract#2`) writes again, so 
 order and step key, not the order alone; that, for a `rollback` node,
 compensating twice leaves the effect count it had before `execute`; that delivering the same event
 twice records it once; and that the first nav page answers `401` without a signed-in person, `403`
-to the role below `pageRole`, and neither to `pageRole` itself. `cases` supplies `effects(orderId)`
+to the role below `pageRole`, and neither to `pageRole` itself; and that every page it declares
+(`pagePath`, each nav path and the pages root `/plugins/<id>/`), asked for at `pageRole` as a
+browser asks for a page (`accept: text/html`), answers with a view `checkPluginView` accepts
+whenever it answers `PLUGIN_VIEW_TYPE` (the problem names the path and the first field that
+fails). Any other answer (HTML, a redirect, a `404`) isn't checked, so views aren't required.
+`cases` supplies `effects(orderId)`
 (count the plugin's rows for an order), and, as the manifest needs them, `deliveries(payloadId)`,
 `principalKey` (the plugin's `PLUGIN_KEY`), plus optional `configs` per node type, `noEffects`
 (node types that write nothing, such as `example.probe`), an `order` and a `pagePath`. Run it from the
@@ -637,8 +650,9 @@ replaced by a stock rule. A new request gets an id of its own (`ai-<slug>`, then
   the host's own methods, so nothing a rule adds to a prototype answers in their place. A rule that
   rewrites the globals the host uses only changes what `manifest()` answers, which the pinned
   manifest overrides. The engine serves pages only for a plugin whose pinned manifest has `nav` or
-  `publicPaths` (`pluginFetch`). No SDK and no
-  imports: the bundle is a few KB. The bundle keeps the rule code as `rules`, for the review.
+  `publicPaths` (`pluginFetch`), so a draft has no page, HTML or view, for model text to reach;
+  the engine's tests run `pluginContract` against the host it writes. No SDK and no imports: the
+  bundle is a few KB. The bundle keeps the rule code as `rules`, for the review.
 - refusals (`draftProblem`): no steps or more than 10, a bad step, output or setting name, repeated
   outputs, code over 16 KiB, code without `const rules =`, an escape (`\u`, `\x`) outside a string,
   and code naming what a rule never needs (`import`, `export`, `require`, `eval`, `Function`,

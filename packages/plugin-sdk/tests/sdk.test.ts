@@ -278,6 +278,68 @@ describe('pluginContract', () => {
     ]);
   });
 
+  describe('pages that answer views', () => {
+    /** The good plugin, with pages at its root and `partners` (both in nav) answered by `page`. */
+    const withPages = (page: (path: string) => Response) => {
+      const Plugin = definePlugin<Env>({
+        manifest: {
+          ...manifest,
+          nav: [
+            { label: 'Demo', path: '/plugins/demo/', icon: 'Puzzle' },
+            { label: 'Partners', path: '/plugins/demo/partners', icon: 'Users' },
+          ],
+        },
+        nodes: {
+          stamp: {
+            execute: ({ env, key, req }) => {
+              env.rows.set(key, req.orderId);
+              return { output: { key } };
+            },
+            compensate: ({ env, key }) => (env.rows.delete(key) ? 'Removed' : 'None'),
+          },
+        },
+        events: {
+          'order.completed': (p, env) => {
+            env.seen.add(p.id);
+          },
+        },
+        pages: (request) => page(new URL(request.url).pathname),
+      });
+      const env: Env = { PLUGIN_KEY: KEY, rows: new Map(), seen: new Set() };
+      return pluginContract(new Plugin({} as never, env), cases(env));
+    };
+    const valid = { title: 'Partners', blocks: [{ type: 'text' as const, text: 'None yet.' }] };
+
+    it('fails a page whose view the app would refuse, on any page it declares', async () => {
+      expect(
+        await withPages((path) =>
+          path.endsWith('/partners')
+            ? viewResponse({ ...valid, actions: [{ label: 'Away', href: 'https://evil.test/' }] })
+            : viewResponse(valid),
+        ),
+      ).toEqual([
+        "pages: /plugins/demo/partners answered a view the app can't draw (actions.0.href: A path on the plugin’s pages)",
+      ]);
+      // JSON sent as a view that isn't one (no title) fails the same way.
+      const untitled = () =>
+        new Response(JSON.stringify({ blocks: [] }), {
+          headers: { 'content-type': PLUGIN_VIEW_TYPE },
+        });
+      expect((await withPages(untitled)).join('\n')).toMatch(
+        /\/plugins\/demo\/ answered a view the app can't draw \(title: /,
+      );
+    });
+
+    it('passes a valid view and an HTML page alike', async () => {
+      expect(await withPages(() => viewResponse(valid))).toEqual([]);
+      const html = () =>
+        new Response('<!doctype html><h1>Partners</h1>', {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      expect(await withPages(html)).toEqual([]);
+    });
+  });
+
   it('reports a manifest that does not parse', async () => {
     const { plugin, env } = instance(good());
     const old = { ...plugin, manifest: async () => ({ ...manifest, apiVersion: 0 }) as never };

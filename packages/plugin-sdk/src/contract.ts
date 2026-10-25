@@ -9,14 +9,18 @@
  * no second effect; undoing it twice is harmless and leaves what was there before; delivering the
  * same event twice records it once; a provider's results have its surface's shape, rates, tax
  * and address checks write nothing (they also run while pricing a checkout), and a label created
- * twice for one key is created once and voided twice harmlessly; and a page refuses a request
- * without a signed-in person, or from one below the manifest's `pageRole`.
+ * twice for one key is created once and voided twice harmlessly; a page refuses a request
+ * without a signed-in person, or from one below the manifest's `pageRole`; and every page it
+ * declares that answers with a view answers one the web app can draw (`checkPluginView`), so a bad
+ * view fails the plugin's own tests rather than a page in production. HTML pages stay legal.
  */
 
 import {
+  checkPluginView,
   checkProvideResult,
   type Order,
   type OutboundPayload,
+  PLUGIN_VIEW_TYPE,
   type PluginManifest,
   type PluginRpc,
   PRINCIPAL_HEADER,
@@ -48,7 +52,10 @@ export type ContractCases = {
   deliveries?(payloadId: string): Promise<number>;
   /** The key the plugin verifies page requests with (its `PLUGIN_KEY`); needed when it has pages. */
   principalKey?: string;
-  /** A signed-in page to probe; defaults to the first nav path. */
+  /**
+   * A signed-in page to probe for roles; defaults to the first nav path. Its view, if it answers
+   * one, is checked with the nav paths' and the pages root's.
+   */
   pagePath?: string;
 };
 
@@ -255,14 +262,15 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
     }
   }
 
+  // The principal header is bound to the path it was signed for, so each page signs its own.
+  const signed = async (key: string, role: (typeof ROLES)[number], path: string) => {
+    const p = { kind: 'user' as const, id: 'usr_contract', name: 'Contract', role };
+    return { [PRINCIPAL_HEADER]: await signPrincipal(key, p, path) };
+  };
   const page = cases.pagePath ?? manifest.nav[0]?.path;
   if (page) {
     const get = (headers: Record<string, string> = {}) =>
       stub.fetch(new Request(`https://plugin${page}`, { headers }));
-    const signed = async (key: string, role: (typeof ROLES)[number]) => {
-      const p = { kind: 'user' as const, id: 'usr_contract', name: 'Contract', role };
-      return { [PRINCIPAL_HEADER]: await signPrincipal(key, p, page) };
-    };
     const anonymous = await get();
     if (anonymous.status !== 401)
       problems.push(
@@ -272,13 +280,40 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
     else {
       const below = ROLES[ROLES.indexOf(manifest.pageRole) - 1];
       if (below) {
-        const res = await get(await signed(cases.principalKey, below));
+        const res = await get(await signed(cases.principalKey, below, page));
         if (res.status !== 403)
           problems.push(`pages: ${page} answered ${res.status} to the role ${below}, not 403`);
       }
-      const ok = await get(await signed(cases.principalKey, manifest.pageRole));
+      const ok = await get(await signed(cases.principalKey, manifest.pageRole, page));
       if (ok.status === 401 || ok.status === 403)
         problems.push(`pages: ${page} refused the role ${manifest.pageRole} (${ok.status})`);
+    }
+  }
+
+  // A view is checked where the app checks it, as a browser asks for the page; anything else (HTML,
+  // a redirect, a 404 from a plugin without pages) is the plugin's own business.
+  if (cases.principalKey) {
+    const paths = new Set([
+      ...(cases.pagePath ? [cases.pagePath] : []),
+      ...manifest.nav.map((n) => n.path),
+      `/plugins/${manifest.id}/`,
+    ]);
+    for (const path of paths) {
+      try {
+        const headers = await signed(cases.principalKey, manifest.pageRole, path);
+        const res = await stub.fetch(
+          new Request(`https://plugin${path}`, { headers: { ...headers, accept: 'text/html' } }),
+        );
+        if (!(res.headers.get('content-type') ?? '').startsWith(PLUGIN_VIEW_TYPE)) {
+          await res.body?.cancel();
+          continue;
+        }
+        const view = checkPluginView(await res.text());
+        if (!view.ok)
+          problems.push(`pages: ${path} answered a view the app can't draw (${view.error})`);
+      } catch (err) {
+        problems.push(`pages: ${path}: ${message(err)}`);
+      }
     }
   }
 

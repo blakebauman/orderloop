@@ -2,6 +2,7 @@ import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { type OrderState, type Principal, validateGraph } from '@orderloop/core';
 import { createDb, installedPlugins, publishFlow } from '@orderloop/db';
+import { pluginContract } from '@orderloop/plugin-sdk/contract';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -325,6 +326,15 @@ describe('plugins the assistant drafts', () => {
     // Whatever its code does, it serves no pages.
     const stub = await plugin(env, r.id, 'serve');
     expect((await stub!.fetch(new Request(`https://x/plugins/${r.id}/`))).status).toBe(404);
+    // And the host the engine wrote keeps the plugin contract: rules write nothing, and a signed
+    // request for its pages root gets no view (nor anything else) to check.
+    expect(
+      await pluginContract(stub!, {
+        effects: async () => 0,
+        noEffects: r.nodes.map((n) => n.type),
+        principalKey: 'draft-test-key',
+      }),
+    ).toEqual([]);
   });
 
   it('revises a drafted plugin as its next version', async () => {
