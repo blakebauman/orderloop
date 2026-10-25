@@ -185,7 +185,7 @@ export default function Account() {
             </p>
           ) : null}
           {result && 'ok' in result && result.welcome ? (
-            <div role="status" className="mb-6 rounded-md border bg-card p-4">
+            <div role="status" className="mb-6 card p-4">
               <p className="font-medium">Your password is set. OrderLoop is open.</p>
               <p className="mt-1 text-muted-foreground text-sm">
                 You’re {/^[aeiou]/i.test(ROLE_LABELS[me.role]) ? 'an' : 'a'} {ROLE_LABELS[me.role]}.

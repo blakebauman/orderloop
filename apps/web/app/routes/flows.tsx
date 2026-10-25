@@ -346,7 +346,7 @@ export default function Flows() {
               ))}
             </div>
           ) : (
-            <p className="rounded-md border bg-card px-4 py-8 text-center text-muted-foreground text-sm">
+            <p className="card px-4 py-8 text-center text-muted-foreground text-sm">
               {q
                 ? `No flow matches “${filter.trim()}”.`
                 : archived
@@ -358,7 +358,7 @@ export default function Flows() {
 
         <aside id="new-flow" className="min-w-0 scroll-mt-20">
           {canOperate && !archived ? (
-            <Form method="post" className="space-y-4 rounded-md border bg-card p-4" noValidate>
+            <Form method="post" className="space-y-4 card p-4" noValidate>
               <h2 className="section-title">New flow</h2>
               <Field label="Name" hint={start === 'generate' ? 'Optional' : undefined}>
                 <Input
@@ -459,7 +459,7 @@ export default function Flows() {
               </p>
             </Form>
           ) : !canOperate ? (
-            <p className="rounded-md border bg-card p-4 text-muted-foreground text-sm">
+            <p className="card p-4 text-muted-foreground text-sm">
               Operators create and edit flows.
             </p>
           ) : null}
@@ -484,7 +484,7 @@ function FlowCard({ f, canOperate, error }: { f: Card; canOperate: boolean; erro
   return (
     <li
       aria-labelledby={titleId}
-      className="relative flex min-w-0 flex-col rounded-md border bg-card p-4 transition-colors hover:border-foreground/30"
+      className="relative flex min-w-0 flex-col card p-4 transition-colors hover:border-foreground/30"
     >
       <h4 id={titleId} className="font-medium">
         {/* The whole card opens the flow; the link's name is just the flow's. */}

@@ -183,16 +183,14 @@ export default function Dashboard() {
           <div className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_1fr_4fr]">
             {groups.map((g) => (
               <section key={g.label} aria-label={g.label} className="min-w-0">
-                <h2 className="mb-1.5 text-muted-foreground text-xs">{g.label}</h2>
-                <div
-                  className={`grid ${g.cols} gap-px overflow-hidden rounded-md border bg-[var(--rule)]`}
-                >
+                <h2 className="caption mb-1.5">{g.label}</h2>
+                <div className={`card grid ${g.cols} gap-1 p-1.5`}>
                   {g.rows.map((r) => (
                     <Link
                       key={r.status}
                       to={`/orders?status=${r.status}`}
                       aria-label={`${r.label}: ${r.n} ${r.n === 1 ? 'order' : 'orders'}${r.note ? `, ${r.note}` : ''}`}
-                      className="min-w-0 bg-card px-4 py-2.5 hover:bg-muted"
+                      className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted"
                     >
                       <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
                         <span
@@ -229,7 +227,7 @@ export default function Dashboard() {
                 title={
                   <span className="flex items-center gap-2">
                     Needs a decision
-                    <span className="rounded-sm bg-wait/15 px-1.5 py-px font-medium text-[11px] text-wait tabular">
+                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-[11px] text-wait tabular">
                       {decisions.length + moreDecisions}
                     </span>
                   </span>
@@ -255,7 +253,7 @@ export default function Dashboard() {
                 </ul>
               </Section>
             ) : (
-              <p className="flex items-center gap-2 rounded-md border bg-card px-4 py-2.5 text-muted-foreground text-sm">
+              <p className="flex items-center gap-2 card px-4 py-2.5 text-muted-foreground text-sm">
                 <span aria-hidden="true" className="size-1.5 rounded-full bg-idle" />
                 Nothing is waiting on a decision.
                 <Link
@@ -272,7 +270,7 @@ export default function Dashboard() {
             <NeedsAttention failed={failed} failedTotal={failedTotal} lanes={lanes} />
 
             {canOperate && demo ? (
-              <details className="group rounded-md border bg-card">
+              <details className="group card overflow-hidden">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
                   <span className="section-title">Demo scenarios</span>
                   <ChevronRight

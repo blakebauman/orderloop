@@ -95,7 +95,7 @@ export default function Login() {
   return (
     <main className="grid min-h-dvh content-start justify-items-center gap-4 bg-background px-4 pt-[16vh]">
       {demo && !connecting ? (
-        <Form method="post" className="w-full max-w-sm rounded-md border bg-card p-6">
+        <Form method="post" className="w-full max-w-sm card p-6">
           <input type="hidden" name="intent" value="demo" />
           <h1 className="font-semibold tracking-title text-2xl">OrderLoop demo</h1>
           <p className="mt-1 text-muted-foreground text-sm">
@@ -107,7 +107,7 @@ export default function Login() {
           </Button>
         </Form>
       ) : null}
-      <Form method="post" className="h-fit w-full max-w-sm rounded-md border bg-card p-6">
+      <Form method="post" className="h-fit w-full max-w-sm card p-6">
         {params.get('signed-out') && !error ? (
           <p role="status" className="mb-4 text-muted-foreground text-sm">
             You’ve signed out.

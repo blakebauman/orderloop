@@ -190,7 +190,7 @@ export default function Approvals() {
             ) : null}
             {/* J / K (or arrows) move between open rows; the rows themselves take A / R / Z. */}
             <ul
-              className="divide-y rounded-md border bg-card"
+              className="divide-y card overflow-hidden"
               onKeyDown={(e) => {
                 if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey) return;
                 const k = e.key;
@@ -219,7 +219,7 @@ export default function Approvals() {
             </ul>
           </>
         ) : (
-          <div className="rounded-md border bg-card">
+          <div className="card overflow-hidden">
             <Empty
               action={
                 status !== 'all' ? (

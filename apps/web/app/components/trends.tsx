@@ -7,6 +7,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@orderloop/ui/chart';
+import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { useId, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts';
 import { Empty, Section } from '~/components/page';
@@ -25,15 +26,19 @@ const sum = (days: Day[], k: keyof Omit<Day, 'day'>) => days.reduce((a, d) => a 
 const short = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const dayLabel = (day: unknown) => short.format(new Date(`${day}T00:00:00Z`));
 
-const revenueConfig = { revenue: { label: 'Revenue', color: 'var(--ink)' } } satisfies ChartConfig;
+// Money draws in the preset's neutral ramp; the outcome chart keeps the status colours, so a failure
+// still reads as one.
+const revenueConfig = {
+  revenue: { label: 'Revenue', color: 'var(--chart-5)' },
+} satisfies ChartConfig;
 const outcomeConfig = {
   completed: { label: 'Completed', color: 'var(--ok)' },
   stopped: { label: 'Declined or cancelled', color: 'var(--idle)' },
   failed: { label: 'Failed or rolled back', color: 'var(--bad)' },
 } satisfies ChartConfig;
 const paymentsConfig = {
-  collected: { label: 'Collected', color: 'var(--link)' },
-  refunded: { label: 'Refunded', color: 'var(--undo)' },
+  collected: { label: 'Collected', color: 'var(--chart-5)' },
+  refunded: { label: 'Refunded', color: 'var(--chart-3)' },
 } satisfies ChartConfig;
 
 /** Per-day area charts over the last 7, 30 or 90 days: revenue, how orders ended, and money in and out. */
@@ -47,25 +52,22 @@ export function Trends({ daily }: { daily: Day[] }) {
   return (
     <Section
       title="Trends"
-      flush
       actions={
-        <fieldset className="flex rounded-full bg-muted p-1 text-xs">
-          <legend className="sr-only">Range</legend>
+        <Segmented
+          aria-label="Range"
+          value={String(range)}
+          onValueChange={(v) => setRange(Number(v) as Range)}
+          className="text-xs"
+        >
           {RANGES.map((r) => (
-            <button
-              key={r}
-              type="button"
-              aria-pressed={range === r}
-              onClick={() => setRange(r)}
-              className="rounded-full px-2.5 py-1 text-muted-foreground tabular hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:bg-input/30"
-            >
+            <SegmentedItem key={r} value={String(r)} className="tabular">
               {`${r} days`}
-            </button>
+            </SegmentedItem>
           ))}
-        </fieldset>
+        </Segmented>
       }
     >
-      <div className="grid gap-px bg-[var(--rule)] xl:grid-cols-3">
+      <div className="grid gap-3 xl:grid-cols-3">
         <Panel
           title="Revenue"
           figure={base(revenue)}
@@ -116,8 +118,8 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-w-0 bg-card p-4">
-      <h3 className="text-muted-foreground text-xs">{title}</h3>
+    <div className="tile min-w-0 p-4">
+      <h3 className="caption">{title}</h3>
       <div className="font-semibold text-xl tabular">{figure}</div>
       <p className="sr-only">{summary}</p>
       {children}
@@ -177,6 +179,8 @@ function Chart({
             type={stacked ? 'linear' : 'monotone'}
             stroke={`var(--color-${k})`}
             strokeWidth={1.5}
+            // Two greys alone are hard to tell apart; the lesser money series is dashed.
+            strokeDasharray={k === 'refunded' ? '4 3' : undefined}
             fill={stacked ? `var(--color-${k})` : `url(#${id}-${k})`}
             fillOpacity={stacked ? 0.4 : 1}
             stackId={stacked ? 'a' : undefined}

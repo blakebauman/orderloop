@@ -20,8 +20,8 @@ export function Performance({ p }: { p: Figures }) {
   const earning = p.revenue.filter((d) => d.total > 0).length;
   const slowest = p.nodes.slice(0, 6);
   return (
-    <Section title={`Last ${p.days} days`} flush>
-      <div className="grid gap-px bg-[var(--rule)] md:grid-cols-2 xl:grid-cols-4">
+    <Section title={`Last ${p.days} days`}>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Panel title="Completion by commerce model">
           {p.completion.length ? (
             <ul className="space-y-2">
@@ -138,8 +138,8 @@ export function Performance({ p }: { p: Figures }) {
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-w-0 bg-card p-4">
-      <h3 className="mb-3 text-muted-foreground text-xs">{title}</h3>
+    <div className="tile min-w-0 p-4">
+      <h3 className="caption mb-3">{title}</h3>
       {children}
     </div>
   );

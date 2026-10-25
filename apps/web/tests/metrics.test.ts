@@ -36,7 +36,7 @@ describe('Trends', () => {
       NOW,
     );
     const html = renderToString(createElement(Trends, { daily }));
-    expect(html).toContain('aria-pressed="true"');
+    expect(html).toMatch(/role="radio" aria-checked="true"[^>]*>30 days</);
     expect(html).toContain('30 days');
     expect(html).toContain('3 orders ended in the last 30 days: 3 completed');
     expect(html).not.toContain('No revenue');

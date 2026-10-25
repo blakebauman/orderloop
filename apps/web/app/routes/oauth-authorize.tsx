@@ -175,7 +175,7 @@ export default function OAuthAuthorize() {
   const switchAccount = `/logout?next=${encodeURIComponent(here.pathname + here.search)}`;
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4">
-      <div className="w-full max-w-md rounded-md border bg-card p-6">
+      <div className="w-full max-w-md card p-6">
         <Mark className="size-7" />
         {'error' in d ? (
           <>

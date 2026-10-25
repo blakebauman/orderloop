@@ -49,7 +49,7 @@ export default function Setup() {
   const busy = useNavigation().state === 'submitting';
   return (
     <main className="grid min-h-dvh content-start justify-items-center bg-background px-4 pt-[16vh]">
-      <div className="w-full max-w-sm rounded-md border bg-card p-6">
+      <div className="w-full max-w-sm card p-6">
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">
           {team ? 'Recover admin access' : 'Set up OrderLoop'}

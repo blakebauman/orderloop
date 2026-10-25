@@ -73,10 +73,7 @@ export default function Carts() {
       />
       <Body className="grid gap-4">
         {canOperate ? (
-          <Form
-            method="post"
-            className="flex flex-wrap items-end gap-2 rounded-md border bg-card p-4"
-          >
+          <Form method="post" className="flex flex-wrap items-end gap-2 card p-4">
             <div className="grid gap-1 text-sm">
               <label htmlFor="cart-title" className="caption">
                 Title
@@ -143,7 +140,7 @@ export default function Carts() {
         </nav>
 
         {carts.length ? (
-          <div className="rounded-md border bg-card">
+          <div className="card overflow-hidden">
             <table className="w-full text-sm">
               <thead className="hidden border-b text-left md:table-header-group">
                 <tr>
@@ -187,7 +184,7 @@ export default function Carts() {
             </table>
           </div>
         ) : (
-          <div className="rounded-md border bg-card">
+          <div className="card overflow-hidden">
             <Empty>
               {status ? `No ${STATUS_LABELS[status].toLowerCase()} carts.` : 'No carts yet.'}
             </Empty>
