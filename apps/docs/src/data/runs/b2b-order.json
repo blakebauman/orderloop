@@ -45,6 +45,11 @@
       "summary": "Subtotal $3,286.00 · 3 contract",
       "branches": ["out"]
     },
+    "promo": {
+      "status": "succeeded",
+      "summary": "No promotion codes",
+      "branches": ["out"]
+    },
     "tax": {
       "status": "succeeded",
       "summary": "Tax $271.10 · total $3,557.10",
