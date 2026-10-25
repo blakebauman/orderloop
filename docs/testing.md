@@ -284,7 +284,7 @@ group reads what is sent.
 
 ### Keyword search
 
-`apps/catalog/tests/search.test.ts` calls the catalog's real `SearchApi` through `exports` after `putProducts` and the publish and `CHANGES` queue have run, polling `until` the expected `total` arrives (the queue is asynchronous).
+`apps/catalog/tests/search.test.ts` calls the catalog's real `SearchApi` through `exports` after `putProducts` and the publish and `CHANGES` queue have run, polling `until` the expected `total` arrives (the queue is asynchronous). `table` keeps channels that differ only in punctuation, and channel/locale splits, apart, and leaves plain codes' names unchanged.
 
 | Test | Covers |
 |---|---|

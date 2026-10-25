@@ -45,8 +45,23 @@ export async function applySearch(env: Env, changes: ListingChange[]): Promise<v
   await Promise.all([...byShard].map(([n, items]) => searcher(env, n).apply(items)));
 }
 
+/**
+ * A name part that keeps every code apart: letters and digits as they are, anything else (`-`,
+ * `.`, `_`) as `_` and its two hex digits. `b2b-eu` and `b2b_eu` are `b2b_2deu` and `b2b_5feu`, and
+ * a `_` always starts an escape, so `__` never appears inside one and can join channel and locale.
+ */
+const part = (s: string) =>
+  s.replace(/[^A-Za-z0-9]/g, (c) => `_${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+
 /** An FTS table name for a channel and locale (both already limited to safe characters). */
-const table = (channel: string, locale: string) =>
+export const table = (channel: string, locale: string) => `fts_${part(channel)}__${part(locale)}`;
+
+/**
+ * The name tables had before `part` (every other character as `_`), which ran `b2b-eu` and
+ * `b2b_eu` together. Only codes with such a character differ; search reads it until a reindex
+ * has filled the new one.
+ */
+const legacyTable = (channel: string, locale: string) =>
   `fts_${channel.replace(/[^A-Za-z0-9]/g, '_')}__${locale.replace(/[^A-Za-z0-9]/g, '_')}`;
 
 export class SearchShard extends DurableObject<Env> {
@@ -134,7 +149,8 @@ export class SearchShard extends DurableObject<Env> {
 
   /** This shard's best `k` matches (lower score is better, as bm25 ranks) and how many match. */
   search(channel: string, locale: string, match: string, k: number): SearchHits {
-    const name = table(channel, locale);
+    let name = table(channel, locale);
+    if (!this.exists(name)) name = legacyTable(channel, locale);
     if (!this.exists(name)) return { total: 0, hits: [] };
     const hits = this.sql
       .exec<{ uid: number; score: number }>(
