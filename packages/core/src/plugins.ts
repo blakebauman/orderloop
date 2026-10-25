@@ -69,6 +69,13 @@ const RESERVED_IDS = new Set([
 export const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start', 'orders:cancel'] as const;
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[number];
 
+/** What each capability lets a plugin do, as the Plugins page says it. */
+export const PLUGIN_CAPABILITY_LABELS: Record<PluginCapability, string> = {
+  'carts:external': 'Opens carts for outside buyers',
+  'orders:start': 'Starts orders',
+  'orders:cancel': 'Cancels the orders it started',
+};
+
 export const PLUGIN_RUNTIMES = ['worker', 'sandboxed'] as const;
 export type PluginRuntime = (typeof PLUGIN_RUNTIMES)[number];
 

@@ -39,6 +39,7 @@ The page is admin-only: **Plugins** in the account menu.
    | Outside hosts | The only hosts it may call; it can reach no others |
    | Secrets | Each secret it declares, its description, and whether it is added to requests to one named host (the plugin never sees it) or readable by the plugin |
    | Buyer details | Whether it asks to be sent names, emails and addresses |
+   | Core access | What it may ask OrderLoop itself to do, such as start orders. A plugin installed from a file always shows None |
 
 4. Set its secrets in the review (`Set`). A value is up to 4096 characters, is never shown again
    (the page says only "Set" or "Not set"), and can be replaced. **Approve and install** stays

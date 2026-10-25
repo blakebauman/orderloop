@@ -673,7 +673,9 @@ be version 3. Over MCP, `draft_plugin` is not read-only (it saves a draft). A dr
 (`EngineRpc.pluginCatalog`, a `PluginStatus` with its `id` and `runtime`) it shows whether the plugin
 is answering, refused, or not answering while running its last manifest, with the `error`; its
 contract version, how it runs (as its own Worker, or sandboxed in the engine, with the hosts its
-`egress` allows), whether buyer details are redacted or sent, who may open its pages and its public
+`egress` allows), its core access (the `capabilities` it was granted, in words from
+`PLUGIN_CAPABILITY_LABELS`, or None: a loaded plugin's manifest asks only for what the registry
+grants), whether buyer details are redacted or sent, who may open its pages and its public
 paths, its events, what it `provides` behind built-in nodes, what it `requires`, its secrets (name,
 description and how each reaches the plugin: added to requests to a host, or readable by the plugin;
 never a value), and its nodes with their category, outputs and whether they roll back. For a plugin
