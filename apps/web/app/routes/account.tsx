@@ -17,6 +17,7 @@ import { encode } from 'uqr';
 import { Ago } from '~/components/ago';
 import { Confirm } from '~/components/confirm';
 import { CopyButton } from '~/components/copy-button';
+import { InstallHint } from '~/components/install-hint';
 import { PageHeader, Section } from '~/components/page';
 import { Passkeys } from '~/components/passkeys';
 import { audit } from '~/lib/audit.server';
@@ -202,6 +203,7 @@ export default function Account() {
               </Button>
             </div>
           ) : null}
+          {me.passwordChangeDue || me.twoFactorDue ? null : <InstallHint />}
           <Section title={password ? 'Password' : 'Sign-in'}>
             {me.kind === 'user' && !password ? (
               <p className="text-muted-foreground text-sm">

@@ -539,3 +539,25 @@
     font-size: 16px;
   }
 }
+
+/* A page that is slow to arrive: a link-blue rule sweeping under the top bar (shell.tsx), held
+   still where motion is reduced. */
+@keyframes ol-pending {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 250% 0;
+  }
+}
+.ol-pending {
+  animation: ol-pending 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ol-pending {
+    animation: none;
+    translate: 0 0;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
