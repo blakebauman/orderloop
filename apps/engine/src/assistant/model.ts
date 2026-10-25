@@ -147,6 +147,7 @@ type Step = { tool: AssistantTool; input: Record<string, unknown> } | { text: st
 
 const ORDER_REF = /(?:#|\bord_)([a-z0-9]{4,})\b/i;
 const EVENT = /\b([a-z]+\.[a-z_]+)\b/;
+const CART_REF = /\bcart_[a-z0-9]+\b/i;
 
 function lastUserText(prompt: LanguageModelV4Prompt) {
   for (let i = prompt.length - 1; i >= 0; i--) {
@@ -179,6 +180,12 @@ export function heuristicStep(text: string, context: AssistantContext, tools: Se
           text: 'Your role can’t do that here. Ask an operator, or someone with the right role on the Team page.',
         };
 
+  const cartId = CART_REF.exec(text)?.[0];
+  if (cartId) return pick(/\bsubmit\b/.test(t) ? 'submit_cart' : 'get_cart', { cartId });
+  if (/\bcarts\b/.test(t)) {
+    const status = /\b(open|locked|submitted|canceled)\b/.exec(t)?.[1];
+    return pick('list_carts', status ? { status } : {});
+  }
   if (/\b(approve|reject|decline)\b/.test(t) && orderId)
     return pick('decide_approval', {
       orderId,
@@ -238,6 +245,21 @@ export function heuristicStep(text: string, context: AssistantContext, tools: Se
       context.kind === 'flow' ? '- “Add a risk score after credit check”' : '- “List the flows”',
     ].join('\n'),
   };
+}
+
+/** People's words (a cart's title, a draft's explanation), kept out of a link's markup. */
+const plain = (v: unknown) => String(v ?? '').replace(/[[\]()<>]/g, '');
+
+/** A cart in one line: where it is, how far it got, and what still stops it. */
+function describeCart(o: Record<string, unknown>) {
+  const lines = Array.isArray(o.lines) ? o.lines.length : 0;
+  return [
+    `[${plain(o.id)}](${o.href}) ${plain(o.title)} is **${plain(o.status)}**: ${lines} line${lines === 1 ? '' : 's'}${o.priced && o.total ? `, ${o.total}` : ''}.`,
+    o.orderId ? `It became [${orderRef(String(o.orderId))}](/orders/${o.orderId}).` : '',
+    o.notReady && !o.orderId ? `Not ready to submit: ${plain(o.notReady)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 /** One plain-language line per tool result, with links to what it found. */
@@ -313,6 +335,18 @@ export function describeResult(tool: string, output: unknown): string {
         .map((p) => `- ${p.sku} ${p.name}: ${p.available} available (reorder at ${p.reorderPoint})`)
         .join('\n');
     }
+    case 'list_carts': {
+      const rows = list<{ id: string; href: string; title: string; status: string }>(o.carts);
+      if (!rows.length) return 'No carts match that.';
+      return rows
+        .map((c) => `- [${plain(c.id)}](${c.href}) ${plain(c.title)} · ${plain(c.status)}`)
+        .join('\n');
+    }
+    case 'get_cart':
+    case 'create_cart':
+      return describeCart(o);
+    case 'change_cart':
+      return `Made ${o.applied} change${o.applied === 1 ? '' : 's'}. ${describeCart(o)}`;
     case 'list_flows':
       return list<{ name: string; href: string; publishedVersion: number | null }>(o.flows)
         .map(
@@ -326,8 +360,6 @@ export function describeResult(tool: string, output: unknown): string {
       return `${o.explanation} Review it in the editor before applying.`;
     case 'draft_plugin': {
       const cases = (o.cases ?? {}) as { total?: number; passed?: number };
-      // The model's words, kept out of the link's markup.
-      const plain = (v: unknown) => String(v ?? '').replace(/[[\]()<>]/g, '');
       return `Drafted [${plain(o.name)} version ${plain(o.version)}](${o.href}): ${plain(o.explanation)} ${cases.passed ?? 0} of ${cases.total ?? 0} test cases pass. Nothing runs until an admin reviews and approves it on the Plugins page.`;
     }
     default:

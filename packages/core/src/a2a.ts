@@ -7,7 +7,7 @@
  */
 
 import type { OrderState } from './api';
-import { ASSISTANT_TOOLS, type AssistantTool } from './assistant';
+import { ASSISTANT_TOOLS, type AssistantTool, isWriteTool } from './assistant';
 import { ROLES, type Role } from './roles';
 import type { OrderStatus } from './types';
 
@@ -57,7 +57,7 @@ export const A2A_SKILLS: Record<
           role: t.role,
           name: t.title,
           description: t.description,
-          tags: ['orders', t.confirm ? 'write' : 'read'],
+          tags: ['orders', isWriteTool(name) ? 'write' : 'read'],
           examples: [`{ "skill": "${name}", "input": { … } }`],
         },
       ];

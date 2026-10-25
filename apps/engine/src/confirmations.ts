@@ -4,6 +4,10 @@
  * call returns a preview (`previewAction`, the same one the assistant's confirm card shows) and a
  * one-time code. The action runs when the same caller calls again with the same input and the
  * code, within five minutes. Each code works once.
+ *
+ * A code can also be held to something the input doesn't name (`bound`, from the preview): what
+ * the person saw, such as a cart's version. The action is handed it back and refuses when it no
+ * longer holds, so a cart changed between the preview and the confirm isn't submitted.
  */
 
 import { fingerprintOf, type Principal } from '@orderloop/core';
@@ -21,6 +25,7 @@ export async function issueConfirmation(
   tool: string,
   input: Record<string, unknown>,
   now = Date.now(),
+  bound: Record<string, unknown> | null = null,
 ) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const id = `cfm_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
@@ -34,6 +39,7 @@ export async function issueConfirmation(
       inputDigest: await digest(tool, input),
       createdAt: now,
       expiresAt,
+      bound: bound ? JSON.stringify(bound) : null,
     });
   return { code: id, expiresAt };
 }
@@ -50,6 +56,18 @@ export async function useConfirmation(
   code: string,
   now = Date.now(),
 ) {
+  return (await redeemConfirmation(env, p, tool, input, code, now)) !== null;
+}
+
+/** `useConfirmation`, answering with what the code was held to (`bound`), or null when refused. */
+export async function redeemConfirmation(
+  env: Env,
+  p: Principal,
+  tool: string,
+  input: Record<string, unknown>,
+  code: string,
+  now = Date.now(),
+): Promise<{ bound: Record<string, unknown> | null } | null> {
   const used = await createDb(env.DB)
     .update(actionConfirmations)
     .set({ usedAt: now })
@@ -63,8 +81,10 @@ export async function useConfirmation(
         gt(actionConfirmations.expiresAt, now),
       ),
     )
-    .returning({ id: actionConfirmations.id });
-  return used.length === 1;
+    .returning({ id: actionConfirmations.id, bound: actionConfirmations.bound });
+  if (used.length !== 1) return null;
+  const bound = used[0]!.bound;
+  return { bound: bound ? (JSON.parse(bound) as Record<string, unknown>) : null };
 }
 
 /** Drops codes that expired more than a day ago (the retention sweep). */

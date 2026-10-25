@@ -16,7 +16,12 @@ import { orderAgent } from '../namespaces';
 import { agentStatus } from './parts';
 
 /** An action the assistant proposed in a chat task, waiting for `{ "confirm": true }`. */
-export type PendingAction = { tool: string; input: Record<string, unknown> };
+export type PendingAction = {
+  tool: string;
+  input: Record<string, unknown>;
+  /** What the proposal showed that the confirm is held to (a cart's version), never the caller's. */
+  bound?: Record<string, unknown>;
+};
 
 const TERMINAL = new Set([
   TaskState.TASK_STATE_COMPLETED,

@@ -302,6 +302,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | API access | `api.token_expired`, at most hourly per token, when an expired token is used |
 | Orders | `order.started` (the flow, and the version, test run, scenario, restarted-from order, channel and external id where they apply), `order.cancelled` (the reason), `order.event_delivered` (the event and the node that was waiting) |
 | Approvals | `approval.decided` (the node, the decision and the note) |
+| Carts | `cart.created` (the target is the cart; the detail has its flow), `cart.changed` (one per change, with its `op`), `cart.canceled`. Submitting a cart is the `order.started` of its order, with the `cartId` |
 | Flows | `flow.saved` (a draft saved on purpose: **Save** or ⌘S, a new flow, or a duplicate with the flow it came `from`; not an autosave), `flow.published` (name and version), `flow.archived` and `flow.restored` (a never-published draft set aside or brought back) |
 | Webhooks | `webhook.subscribed` (the subscription's id and events), `webhook.rotated`, `webhook.unsubscribed` |
 | Stock review | `stock.review_run` (the Workflow instance) |
@@ -311,8 +312,8 @@ Each event records when, who acted, what they acted on, details and the address:
 
 ### Business events
 
-The business actions have the target they act on: the order id, the flow id, or the webhook
-subscription. Each detail has `via`, how it came in, shown as "via the app", "via the REST API",
+The business actions have the target they act on: the order id, the cart id, the flow id, or the
+webhook subscription. Each detail has `via`, how it came in, shown as "via the app", "via the REST API",
 "via a signed webhook", "via the assistant", "via MCP" or "via A2A". Assistant, MCP and A2A events
 also record the `tool`. The actor is the person or API token; for a signed
 [inbound webhook](/guides/inbound-orders/) it is the integration (kind `integration`, named
@@ -320,7 +321,9 @@ also record the `tool`. The actor is the person or API token; for a signed
 
 Recorded: starting orders (New order, demo scenarios, test runs, restarts, `POST /api/v1/orders`,
 each purchase order started from an EDI 850, signed webhooks, Shopify, and the assistant's and
-A2A's place order), cancelling, delivering events, deciding approvals, saving and publishing flows,
+A2A's place order, and carts submitted through the REST API, the assistant, MCP or A2A), opening
+and changing carts through the same four and cancelling them through the REST API, cancelling orders,
+delivering events, deciding approvals, saving and publishing flows,
 creating and deleting webhook subscriptions, and running the stock review. Read-only assistant and
 MCP tools are not. Neither are replays (a repeated idempotency key or webhook) nor things that
 didn't happen, such as an event nothing was waiting for. Orders from [email intake](/guides/email-intake/)

@@ -50,13 +50,18 @@ export type AssistantTool =
   | 'get_order'
   | 'assess_order'
   | 'find_products'
+  | 'list_carts'
+  | 'get_cart'
   | 'list_flows'
   | 'get_flow'
   | 'propose_flow_change'
   | 'draft_plugin'
+  | 'create_cart'
+  | 'change_cart'
   | 'decide_approval'
   | 'deliver_event'
   | 'cancel_order'
+  | 'submit_cart'
   | 'publish_flow'
   | 'run_stock_review';
 
@@ -111,6 +116,22 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Find products',
     description: 'Products with stock, reserved and available quantities and reorder points.',
   },
+  list_carts: {
+    role: 'viewer',
+    confirm: false,
+    label: 'Listed carts',
+    title: 'List carts',
+    description:
+      'Carts people are building before they become orders, most recently changed first: title, status, customer and, once submitted, its order.',
+  },
+  get_cart: {
+    role: 'viewer',
+    confirm: false,
+    label: 'Read the cart',
+    title: 'Get a cart',
+    description:
+      'One cart: its lines (with each line’s id) at the prices its flow quoted, promo codes, problems the quote found, and why it can’t be submitted yet.',
+  },
   list_flows: {
     role: 'viewer',
     confirm: false,
@@ -141,6 +162,22 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Draft a plugin of business-rule flow steps from an instruction (e.g. “hold orders over $5,000 shipping outside the US”), with test cases. Nothing runs: an admin reviews it on the Plugins page, runs its cases and approves it there. Give pluginId to revise a drafted plugin.',
   },
+  create_cart: {
+    role: 'operator',
+    confirm: false,
+    label: 'Opened a cart',
+    title: 'Open a cart',
+    description:
+      'Open a cart priced by a published flow that prices orders, for a customer if given. Nothing is ordered until the cart is submitted.',
+  },
+  change_cart: {
+    role: 'operator',
+    confirm: false,
+    label: 'Changed the cart',
+    title: 'Change a cart',
+    description:
+      'Change an open cart, op by op in order: add a SKU, set a line’s quantity (0 removes it), remove lines, clear it, add or remove a promo code, lock, unlock or rename it. The cart’s flow prices it again; nothing is ordered.',
+  },
   decide_approval: {
     role: 'approver',
     confirm: true,
@@ -163,6 +200,14 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Cancel an order and undo what it did (release stock, void payment, cancel shipments).',
   },
+  submit_cart: {
+    role: 'operator',
+    confirm: true,
+    label: 'Submit a cart',
+    title: 'Submit a cart',
+    description:
+      'Submit a priced cart as an order of its flow, with its lines, customer and promo codes. The order is priced again by its flow when it runs, as any order is. The cart ends.',
+  },
   publish_flow: {
     role: 'operator',
     confirm: true,
@@ -183,6 +228,20 @@ export const ASSISTANT_TOOLS: Record<
 export const isAssistantTool = (name: string): name is AssistantTool => name in ASSISTANT_TOOLS;
 
 /**
+ * Tools that save something without a confirm: nothing they save runs until someone approves it
+ * (a plugin draft) or submits it (a cart).
+ */
+export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
+  'draft_plugin',
+  'create_cart',
+  'change_cart',
+];
+
+/** Whether a tool changes anything: an action, or a write that needs no confirm. */
+export const isWriteTool = (name: AssistantTool) =>
+  ASSISTANT_TOOLS[name].confirm || WRITES_WITHOUT_CONFIRM.includes(name);
+
+/**
  * An action resolved against live data, shown before a person confirms it: what it is, what will
  * happen, and, when it can't go ahead, why.
  */
@@ -193,6 +252,12 @@ export type ActionPreview = {
   blocked?: string;
   /** Where to look, e.g. `/orders/ord_…`. */
   href?: string;
+  /**
+   * What confirming this preview is held to besides the input: what the person saw that can
+   * change before they confirm (a cart's `cartVersion`). The server that showed the preview keeps
+   * its own copy and hands it to the action, which refuses when it no longer holds.
+   */
+  bound?: Record<string, unknown>;
 };
 
 /** What `draft_plugin` returns: a pending draft to review on the Plugins page, never running. */

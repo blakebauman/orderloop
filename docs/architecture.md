@@ -159,8 +159,8 @@ is logged and answered with a generic tool error, so database or provider messag
 client. `assess_order` and `propose_flow_change` send one progress notification when the request
 has a progress token.
 
-An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow`,
-`run_stock_review`) never runs on the first call, because a client may not ask its person. When
+An action tool (`isActionTool`: `decide_approval`, `deliver_event`, `cancel_order`, `submit_cart`,
+`publish_flow`, `run_stock_review`) never runs on the first call, because a client may not ask its person. When
 the request is 2026-07-28 and its envelope's client capabilities declare form elicitation
 (`canElicit` in `mcp.ts`), the first call returns `inputRequired` with a `confirm` elicitation
 built from `previewAction`, and the `cfm_…` code from `issueConfirmation` as `requestState`.
@@ -180,7 +180,24 @@ card; a blocked preview is a tool error), a `cfm_…` code from `issueConfirmati
 the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 `CONFIRMATION_TTL_MS` (5 minutes). Anything else is a tool error. The sweep calls
 `pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
-the call, as with REST); A2A chat has its own `{ confirm }`. See
+the call, as with REST, `confirmed: 'direct'`); A2A chat has its own `{ confirm }`.
+
+A preview can also carry `bound`: what the person is shown that can change before they confirm
+(for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that
+showed the preview keeps it and strips it from what it sends: MCP in the code's `bound` column
+(`issueConfirmation`, handed back by `redeemConfirmation`), the assistant panel in the
+`AssistantAgent`'s storage per tool call (the card passes its `toolCallId` to `preview()`; the
+first look writes it with the input's digest, a later look that sees another version or input
+marks it stale and returns the card blocked, the confirmed `execute` uses it up through `shown`,
+and declined cards' entries and day-old ones are pruned), A2A chat with the task's pending action. `runAction` passes it on as `confirmed`, and
+`runSubmit` hands `cartVersion` to `CartAgent.submitAs`, which refuses a cart whose version moved
+on (`CART_CHANGED_SINCE_CONFIRM`); a submit with no bound, other than a typed A2A skill, is refused
+too. A typed A2A `submit_cart` (`'direct'`) is held only to the `cartVersion` its input names, and
+REST `POST /api/v1/carts/:id/submit` to a body `version` or `If-Match` (the ETag `GET` serves),
+answering `412` when the cart moved on; both reach `CartAgent.submitAs` through
+`EngineRpc.submitCart(cartId, actor, version)` or `runSubmit`. A2A skill tags come from
+`isWriteTool` (an action or one of `WRITES_WITHOUT_CONFIRM` in `packages/core/src/assistant.ts`,
+which `mcp.ts` also reads for `readOnlyHint`). See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
 Skills: `createServer` attaches the role's `SkillCatalog`
@@ -977,6 +994,19 @@ the rest is in its SQL, paged by `history`).
   every 30 seconds while anyone has the cart open and closes (`4401`) each socket whose person can
   no longer read it. Chat messages are posted as
   the caller (`say`), changed or deleted only by their author, at most 10 in 10 seconds each.
+- **Outside the page.** Staff principals (API tokens, OAuth MCP/A2A callers, the assistant) reach
+  staff carts through `EngineRpc.changeCart`, `submitCart` and `cancelCart`
+  (`apps/engine/src/cart/carts.ts`), which call the agent's `applyAs`, `submitAs` and `cancelAs`
+  with a `StaffCartActor` the caller's server built from the signed principal (`staffCartActor`);
+  they refuse a guest actor, an op that fails `cartOpSchema`, and an external cart (`notFound`, as
+  for an unknown id: it belongs to its buyer's page). Reads are `cartView`: the cart without
+  `external`, chat, files or members. The REST routes (`/api/v1/carts`, `handleCarts` in
+  `apps/web/app/lib/api.server.ts`) check viewer or operator first and audit `cart.created`,
+  `cart.canceled` and, for a submit, `order.started` with the `cartId`. The workspace tools
+  (`apps/engine/src/assistant/carts.ts`) add `list_carts`, `get_cart`, `create_cart` and
+  `change_cart` (no confirm: nothing is ordered) and the `submit_cart` action, which previews and
+  confirms like the order actions. What reaches the model is bounded (`boundText`) and never the
+  chat; the heuristic's links name a cart by its id, not its title.
 
 ### External carts
 
@@ -1025,11 +1055,12 @@ through `EngineRpc`. `onConnect` closes with `4403` unless the proxied principal
 instance name, and keeps the principal. The `@callable()` methods are `attention()`, the data for
 the top of the panel, and `preview(tool, input)`, which resolves an action against live data for
 its confirm card. Tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`. Reads run
-directly; `decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
+directly, as do `create_cart` and `change_cart` (a cart orders nothing until it is submitted);
+`decide_approval`, `deliver_event`, `cancel_order`, `submit_cart`, `publish_flow` and
 `run_stock_review` use `needsApproval`, and after the confirm `runAction`
 (`apps/engine/src/assistant/data.ts`) re-checks the role and the state and calls the order's
-`OrderAgent` (`decide`, `deliver`, `cancel`) or the `REPLENISH` Workflow as `<email> via
-assistant`. Every tool re-reads the person's session first (`livePrincipal` in
+`OrderAgent` (`decide`, `deliver`, `cancel`), the cart's `CartAgent` (`submitAs`, through
+`assistant/carts.ts`) or the `REPLENISH` Workflow as `<email> via assistant`. Every tool re-reads the person's session first (`livePrincipal` in
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. `draft_plugin` (admins, with `ASSISTANT_PLUGINS` on) drafts a
 business-rule plugin and stages it pending, for an admin to review and approve on the Plugins page

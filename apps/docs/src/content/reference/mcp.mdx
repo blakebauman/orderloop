@@ -9,7 +9,8 @@ import McpTools from '../../components/McpTools.astro';
 OrderLoop serves its workspace tools to [Model Context Protocol](https://modelcontextprotocol.io)
 clients at `https://orderloop.app/mcp`. They are the
 tools of [the assistant](/guides/assistant/), so a client can check what needs attention, find and
-read orders, and, with the right role, decide approvals or cancel orders. Each person is limited to
+read orders and carts, and, with the right role, decide approvals, cancel orders, or build a
+[cart](/guides/carts/) and submit it as an order. Each person is limited to
 what their role allows.
 
 The server is stateless: every request is answered by a fresh server that lists only the tools
@@ -90,14 +91,14 @@ as JSON text and as `structuredContent` that matches the output schema; a field 
 may be added later, so a client should ignore fields it doesn't know. `assess_order` and
 `propose_flow_change` wait on a model: a client that sends a progress token hears when they start.
 A refusal from live data (nothing is waiting on that event, the approval is
-already decided, the order has finished, you started the order and the workspace [separates approvals](/guides/team-and-roles/#approvals)) is returned as a tool error the model can read, not a
+already decided, the order has finished, you started the order and the workspace [separates approvals](/guides/team-and-roles/#approvals), a cart is locked or not priced yet) is returned as a tool error the model can read, not a
 protocol error. Any other failure is a tool error saying something went wrong on OrderLoop's side,
 without the details. A tool the role can't use is not listed, and calling it by name fails as
 unknown. On 2026-07-28 the tool list may be cached by the client for a minute.
 
 ## Actions wait for the person
 
-An action (`decide_approval`, `deliver_event`, `cancel_order`, `publish_flow` and
+An action (`decide_approval`, `deliver_event`, `cancel_order`, `submit_cart`, `publish_flow` and
 `run_stock_review`) never runs on the first call, whatever the client does. How the person
 agrees depends on the client.
 
@@ -140,9 +141,13 @@ The action runs when the same person calls again with the same input plus `confi
 5 minutes. A code works once. A code used by someone else, for another tool or with a different
 input (key order doesn't matter), or one that expired or was used, is refused with a tool error;
 call without it for a new preview. The role and the order's state are checked again when the
-action runs.
+action runs. A `submit_cart` code is also held to the cart as the preview showed it: if anything
+changed the cart in between (a `change_cart`, someone on the cart's page), the confirmed call is
+refused with "The cart changed since you confirmed; preview it again" and nothing is submitted.
+The same holds when the person confirms through an eliciting client.
 
-Reads, `propose_flow_change` and `draft_plugin` do not take a code. Over [A2A](/reference/a2a/), typed skills
+Reads, `propose_flow_change`, `draft_plugin`, `create_cart` and `change_cart` do not take a code:
+a cart is only a draft of an order until `submit_cart`. Over [A2A](/reference/a2a/), typed skills
 (and `place_order`) run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
 
 Annotations also tell a client when to confirm:
@@ -150,13 +155,25 @@ Annotations also tell a client when to confirm:
 | Tools | Hints |
 |---|---|
 | Reads and `propose_flow_change` | `readOnlyHint: true` |
-| `draft_plugin` | saves a pending draft (nothing runs until an admin approves it): not read-only, not destructive, not idempotent |
-| `decide_approval`, `cancel_order`, `publish_flow` | `destructiveHint: true`; the first two are also `idempotentHint: true` |
+| `draft_plugin`, `create_cart`, `change_cart` | save a draft (nothing runs until an admin approves the plugin or someone submits the cart): not read-only, not destructive, not idempotent |
+| `decide_approval`, `cancel_order`, `submit_cart`, `publish_flow` | `destructiveHint: true`; all but `publish_flow` are also `idempotentHint: true` |
 | `deliver_event`, `run_stock_review` | writes, not destructive |
 
-`cancel_order`, `run_stock_review` and `assess_order` set `openWorldHint: true`: cancelling voids
-payments and cancels shipments with the carrier, the stock review places reorders with suppliers,
-and an assessment may fetch an `https` image. The other tools set it to `false`.
+`cancel_order`, `submit_cart`, `run_stock_review` and `assess_order` set `openWorldHint: true`:
+cancelling voids payments and cancels shipments with the carrier, a submitted cart's order runs its
+flow (payments and shipping included), the stock review places reorders with suppliers, and an
+assessment may fetch an `https` image. The other tools set it to `false`.
+
+## Carts
+
+`list_carts` and `get_cart` read the carts your team opens on the Carts page; a cart a customer
+opened from their own purchasing system is not reached here. `get_cart` gives each line's
+`lineId`, which `change_cart` names in `set_qty` and `remove`. `change_cart` takes up to 20 `ops`,
+applied in order as you, each priced again by the cart's flow; it stops at the first one the cart
+refuses (a locked or ended cart, a line that is gone) and says how many went in. A cart's chat and
+files are never served, and its title and line names come back as one short line each.
+`submit_cart` also takes an optional `cartVersion` (the `version` you read), refused when the cart
+has changed since; the confirmation holds it to the cart as previewed either way.
 
 ## Skills
 

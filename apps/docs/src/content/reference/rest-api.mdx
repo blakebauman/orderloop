@@ -1,6 +1,6 @@
 ---
 title: REST API
-description: The /api/v1 routes for flows, orders, events, approvals and webhook subscriptions, with request and response shapes.
+description: The /api/v1 routes for flows, orders, carts, events, approvals and webhook subscriptions, with request and response shapes.
 ---
 
 import Values from '../../components/Values.astro';
@@ -15,13 +15,13 @@ the server accepts. Response bodies are described here.
 Send `Authorization: Bearer ol_live_…`, an API token from the Team page (a signed-in dashboard
 session cookie also works). Each route needs
 a role: reads need `viewer`, approval decisions `approver`, and everything else that changes state
-(starting, cancelling, events) `operator`, and managing webhook subscriptions and integrations, data subject requests and reading audit events `admin`; a token or person without it gets
+(starting, cancelling, events, carts) `operator`, and managing webhook subscriptions and integrations, data subject requests and reading audit events `admin`; a token or person without it gets
 `403`. See [Team and roles](/guides/team-and-roles/). Five routes are exceptions: `GET /api/v1/openapi.json` is public, `POST /api/v1/webhooks/events` and `POST /api/v1/webhooks/orders` are
 authenticated by an HMAC signature instead (see [signed events](#signed-events) and [signed orders](#signed-orders)) with an [integration's](#integrations) key, and so is `POST /api/v1/channels/shopify/orders` (see [Channel adapters](#channel-adapters)); `POST /api/v1/webhooks/stripe` is verified with Stripe's own `Stripe-Signature` (see [Stripe events](/guides/approvals-and-events/#stripe-events)).
 
 Errors are JSON: `{ "error": "…" }`, plus `issues` (one entry per invalid field, with its `path`
 and `message`) on a `400` for an invalid body.
-`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` a caller over its requests a minute (below; see `Retry-After`), `404` an unknown route or order, and `413` a request body over its cap (1 MiB; 5 MiB for EDI and 8 MiB for catalog product writes; a catalog feed has no cap of its own), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
+`401` means a missing, wrong, revoked or expired token (an expired token's `error` says when it expired), `403` a role that can't use the route (or, with a session cookie, a person whose role must use two-factor sign-in and hasn't set it up, or a cookie request from another origin), `429` a caller over its requests a minute (below; see `Retry-After`), `404` an unknown route, order or cart, and `413` a request body over its cap (1 MiB; 5 MiB for EDI and 8 MiB for catalog product writes; a catalog feed has no cap of its own), and `500` an unexpected error, which answers `{ "error": "Internal error" }` without its details.
 
 ### Rate limits
 
@@ -42,6 +42,12 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/orders/:id/events` | `{ event, payload? }` | `{ delivered, nodeId? }` |
 | `POST` | `/api/v1/orders/:id/approvals/:nodeId` | `{ decision, note? }` | `{ ok: true }`, `403 { error }` if the caller started the order and the workspace separates [approvals](/guides/team-and-roles/#approvals) |
 | `POST` | `/api/v1/orders/:id/cancel` | `{ reason? }` | `{ ok: true }` |
+| `GET` | `/api/v1/carts?status=&limit=` | | `{ carts }` |
+| `POST` | `/api/v1/carts` | `{ title, flowId, customerId? }` | `201 { cart }`, or `422 { error }` |
+| `GET` | `/api/v1/carts/:id` | | `{ cart }` |
+| `POST` | `/api/v1/carts/:id/ops` | One cart op, such as `{ op: "add", sku, qty }` | `{ cart }`, or `409 { error }` |
+| `POST` | `/api/v1/carts/:id/submit` | `{ version? }` (or `If-Match`) | `201 { orderId, cartId }`, `409 { error }`, or `412 { error }` when the cart changed since that version |
+| `POST` | `/api/v1/carts/:id/cancel` | | `{ cart }`, or `409 { error }` |
 | `GET` | `/api/v1/audit-events?type=&before=&after=&limit=` | | `{ events }` (admin) |
 | `GET` | `/api/v1/audit-events/verify?after=` | | `{ ok, checked, last, next }` or `{ ok: false, brokenAt, reason }` (admin) |
 | `POST` | `/api/v1/data-subjects/export` | `{ email }` | A JSON file: `{ email, customers, orders, messages, inboundEmails, documents, carts, truncated, teamMember }` (admin) |
@@ -188,6 +194,64 @@ isn't waiting for an approval (already decided, or never reached) is `409`.
 payment authorizations, cancels shipments and staged pickups, restocks shipped stock, voids unpaid Stripe invoices, reverses on-account invoice charges, revokes issued digital codes, cancels seller orders, reverses scheduled payouts and sends `order.cancelled`. `reason` defaults to
 `Cancelled via API`. Cancelling an order that has already finished changes nothing and returns
 `409` `{ error: "The order has already finished" }`; an unknown order is `404`.
+
+## Carts
+
+A [cart](/guides/carts/) is a list of lines your team builds before it becomes an order, priced
+by its flow after every change. These routes reach the carts opened on the Carts page (or here);
+a cart a customer opened from their own purchasing system is not found. Reads need `viewer`;
+opening, changing, submitting and cancelling need `operator`. Each change is made as the caller,
+exactly as if they made it on the cart's page, and anyone with the cart open sees it at once.
+
+- `POST /api/v1/carts` takes `title` (1 to 120 characters), `flowId` (a published flow with a
+  [Price lines](/reference/nodes/#commerce.price) step, which prices the cart and runs its order)
+  and an optional `customerId`, whose contract prices the cart then uses. The caller is recorded as
+  who opened it. A flow that isn't published or doesn't price orders, or an unknown customer, is
+  `422` with the reason.
+- `GET /api/v1/carts` lists carts, most recently changed first, with `id`, `title`, `status` (one
+  of <Values of="cart-statuses" />), `flowId`, `customerId`, `orderId` (once submitted),
+  `createdBy`, `createdAt` and `updatedAt`. Filter with `status`; `limit` is 1 to 200 (default
+  50).
+- `GET /api/v1/carts/:id` returns `{ cart }`: `id`, `title`, `status`, `flowId`, `customerId`,
+  `lines` (`{ id, sku, qty, title?, unitPrice? }`; the quote sets the title and price), `promoCodes`,
+  `quote` (`currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`, or `null` until priced),
+  `quoteCurrent` (whether the quote prices the cart as it is now), `issues` (what pricing found:
+  `{ kind, code, content }`), `notReady` (why it can't be submitted yet, or `null`), `orderId`,
+  `createdBy`, `createdAt`, `updatedAt` and `version`, with the version also as the response's
+  `ETag` (`"7"`). The cart's chat and files stay on its page.
+
+`POST /api/v1/carts/:id/ops` applies one change and answers with the cart priced again:
+
+```http
+POST /api/v1/carts/cart_…/ops
+
+{ "op": "add", "sku": "WID-100", "qty": 10 }
+```
+
+| `op` | Fields | Does |
+|---|---|---|
+| `add` | `sku`, `qty` (1 to 10,000) | Adds a line, or adds to the line with that SKU |
+| `set_qty` | `lineId`, `qty` (0 to 10,000) | Sets a line's quantity; 0 removes it |
+| `remove` | `lineIds` | Removes lines |
+| `clear` | | Removes every line |
+| `promo_add`, `promo_remove` | `code` | Adds or removes a promotion code (up to five) |
+| `lock`, `unlock` | | Stops or allows changes to lines and codes |
+| `rename` | `title` | Renames the cart |
+
+Lines and codes change only while the cart is open. A change the cart refuses (it is locked or
+has ended, the line is gone, the code is already applied, a line would pass 10,000 or the cart
+100 lines) is `409` with the reason; a body that isn't an op is `400`.
+
+`POST /api/v1/carts/:id/submit` starts the cart's order on its flow, at its quoted lines and
+customer, started by the caller, and answers `201 { orderId, cartId }`. It needs lines and a
+current quote with no errors (see `notReady`); otherwise, or once the cart has ended, it is `409`.
+A cart is submitted once: a repeat is `409` and starts nothing. To submit only the cart you read,
+send its version, as `{ "version": 7 }` or the header `If-Match: "7"`: if anyone changed the cart
+since, the submit is `412` and starts nothing, so read it again. Both are optional; naming two
+different versions is `400`. The order is priced again by its flow when it runs, like any order,
+so its total can differ from the cart's quote if prices changed in between. The order is then read and acted
+on through the order routes. `POST /api/v1/carts/:id/cancel` ends a cart that hasn't ended
+(`409` otherwise).
 
 ## Integrations
 

@@ -3,9 +3,14 @@
 import {
   applyLines,
   type Cart,
+  type CartAnswer,
+  type CartOp,
   type CartState,
   type CartStatus,
+  type CartView,
   type CreateCartInput,
+  cartOpSchema,
+  cartView,
   type ExternalCart,
   type ExternalCartInput,
   type ExternalCartOpened,
@@ -15,6 +20,7 @@ import {
   newId,
   type PluginCart,
   quoteNodes,
+  type StaffCartActor,
 } from '@orderloop/core';
 import { carts, createDb, customers } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
@@ -80,6 +86,59 @@ export async function cartSnapshot(env: Env, id: string): Promise<CartState | nu
     .where(eq(carts.id, id))
     .get();
   return row ? cartAgent(env, id).snapshot() : null;
+}
+
+/**
+ * A staff cart, or null for an id no cart has or an external one: the REST API, MCP and the
+ * assistant reach only staff carts, since an external cart belongs to the buyer's page.
+ */
+export async function staffCart(env: Env, id: string): Promise<Cart | null> {
+  const c = (await cartSnapshot(env, id))?.cart;
+  return c && !c.external ? c : null;
+}
+
+const NO_CART = { ok: false as const, error: 'No such cart.', notFound: true as const };
+// The type says staff, but the binding carries whatever its caller sent.
+const NOT_STAFF = { ok: false as const, error: 'Only staff change a cart this way.' };
+
+/** One op as `actor`, then the cart as it is now (priced again when the op changed its lines). */
+export async function changeCart(
+  env: Env,
+  id: string,
+  op: CartOp,
+  actor: StaffCartActor,
+): Promise<CartAnswer<{ cart: CartView }>> {
+  if (actor?.kind !== 'staff') return NOT_STAFF;
+  const parsed = cartOpSchema.safeParse(op);
+  if (!parsed.success) return { ok: false, error: 'That is not a cart change.' };
+  if (!(await staffCart(env, id))) return NO_CART;
+  const r = await cartAgent(env, id).applyAs(actor, parsed.data);
+  if (!r.ok) return r;
+  return { ok: true, cart: cartView((await staffCart(env, id))!) };
+}
+
+/** `confirmedVersion`: the version a confirmed preview showed; a cart changed since is refused. */
+export async function submitCart(
+  env: Env,
+  id: string,
+  actor: StaffCartActor,
+  confirmedVersion?: number,
+): Promise<CartAnswer<{ orderId: string }>> {
+  if (actor?.kind !== 'staff') return NOT_STAFF;
+  if (!(await staffCart(env, id))) return NO_CART;
+  return cartAgent(env, id).submitAs(actor, confirmedVersion);
+}
+
+export async function cancelCart(
+  env: Env,
+  id: string,
+  actor: StaffCartActor,
+): Promise<CartAnswer<{ cart: CartView }>> {
+  if (actor?.kind !== 'staff') return NOT_STAFF;
+  if (!(await staffCart(env, id))) return NO_CART;
+  const r = await cartAgent(env, id).cancelAs(actor);
+  if (!r.ok) return r;
+  return { ok: true, cart: cartView((await staffCart(env, id))!) };
 }
 
 /**

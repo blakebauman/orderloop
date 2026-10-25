@@ -853,6 +853,11 @@ export const actionConfirmations = sqliteTable(
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     usedAt: integer('used_at'),
+    /**
+     * JSON the server held the confirm to besides the input (a cart's version for submit_cart);
+     * the action checks it still holds when it runs.
+     */
+    bound: text('bound'),
   },
   (t) => [index('action_confirmations_expires').on(t.expiresAt)],
 );

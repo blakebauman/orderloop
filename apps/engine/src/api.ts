@@ -7,6 +7,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
   type CartActor,
   type CartAttachment,
+  type CartOp,
   type CopilotRequest,
   type CopilotResult,
   type CreateCartInput,
@@ -17,6 +18,7 @@ import {
   parseMailboxes,
   pluginBinding,
   runHealthChecks,
+  type StaffCartActor,
   type StartOrderInput,
   type StartOrderOnceInput,
   UCP_PATH,
@@ -24,7 +26,14 @@ import {
 import { A2A_PATH, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
-import { cartSnapshot, createCart, redeemCartStart } from './cart/carts';
+import {
+  cancelCart,
+  cartSnapshot,
+  changeCart,
+  createCart,
+  redeemCartStart,
+  submitCart,
+} from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
 import { cartAgent, orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
@@ -207,6 +216,18 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   cartSnapshot(id: string) {
     return cartSnapshot(this.env, id);
+  }
+
+  changeCart(cartId: string, op: CartOp, actor: StaffCartActor) {
+    return changeCart(this.env, cartId, op, actor);
+  }
+
+  submitCart(cartId: string, actor: StaffCartActor, version?: number) {
+    return submitCart(this.env, cartId, actor, version);
+  }
+
+  cancelCart(cartId: string, actor: StaffCartActor) {
+    return cancelCart(this.env, cartId, actor);
   }
 
   redeemCartStart(cartId: string, token: string) {

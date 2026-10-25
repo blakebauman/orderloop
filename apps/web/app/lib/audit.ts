@@ -85,6 +85,7 @@ export const AUDIT_GROUPS = {
   ucp: 'Agentic checkout',
   order: 'Orders',
   approval: 'Approvals',
+  cart: 'Carts',
   flow: 'Flows',
   webhook: 'Webhooks',
   stock: 'Stock review',
