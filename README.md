@@ -1,6 +1,6 @@
 # Order Loop
 
-An agent loop for commerce. Every order is a durable loop that runs from intake to its outcome: B2B, retail and direct-to-consumer, marketplace, subscription, procurement and replenishment orders, from any channel. Each loop is defined as a flow graph you draw in React Flow, and it runs entirely on Cloudflare: Workers, Workflows, Durable Objects (the Agents SDK), Workers AI, D1 and R2.
+An agent loop for the commerce order lifecycle, built on Cloudflare Workers, Workflows and Durable Objects. Every order is a durable loop that runs from intake to its outcome: B2B, retail and direct-to-consumer, marketplace, subscription, procurement and replenishment orders, from any channel. Each loop is defined as a flow graph you draw in React Flow, and it runs entirely on Cloudflare, with the Agents SDK, Workers AI, D1 and R2 alongside.
 
 ## How it works
 
