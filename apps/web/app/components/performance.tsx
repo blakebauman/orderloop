@@ -66,18 +66,7 @@ export function Performance({ p }: { p: Figures }) {
           <div className="text-muted-foreground text-xs">
             from orders completed in the period, in {BASE_CURRENCY}
           </div>
-          {/* Days without revenue stay empty on the baseline rather than drawn as small bars. */}
-          <div className="mt-3 flex h-12 items-end gap-px border-b" aria-hidden="true">
-            {p.revenue.map((d) => (
-              <div
-                key={d.day}
-                title={`${d.day}: ${base(d.total)}`}
-                className="min-w-0 flex-1 rounded-t-sm bg-foreground/70"
-                style={{ height: peak.total && d.total ? `${(d.total / peak.total) * 100}%` : 0 }}
-              />
-            ))}
-          </div>
-          <p className="mt-1 text-muted-foreground text-xs">
+          <p className="mt-2 text-muted-foreground text-xs">
             {earning
               ? `Revenue on ${earning} of ${p.days} days; the most, ${base(peak.total)}, on ${peak.day}.`
               : `No revenue in the last ${p.days} days.`}
