@@ -177,7 +177,9 @@ All settings are listed in [Configuration](configuration.md).
 
 Production deploys from CI: merging to `main` is the release. `.github/workflows/ci.yml` runs lint,
 type-check, build, tests, the fleet tests (`pnpm test:fleet`), the Claude Code toolkit's tests
-(`pnpm test:toolkit`) and `pnpm audit --prod --audit-level high` on every push and pull request. On `main` it then deploys
+(`pnpm test:toolkit`) and `pnpm audit --prod --audit-level high` on every push and pull request, and
+beside them the web app's [device tests](testing.md#devices-the-web-app-on-iphone-and-ipad) (the
+`devices` job, which doesn't gate a deploy). On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
 D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker; a sandboxed plugin's bundle is published and pinned instead), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's,

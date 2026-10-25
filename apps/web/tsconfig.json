@@ -11,6 +11,8 @@
     "app/**/*",
     "workers/**/*",
     "tests/**/*",
+    "e2e/**/*",
+    "playwright.config.ts",
     "worker-configuration.d.ts",
     "vite.config.ts",
     "react-router.config.ts"

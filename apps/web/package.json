@@ -14,7 +14,8 @@
     "db:migrate:remote": "wrangler d1 migrations apply orderloop --remote",
     "test": "vitest run",
     "lint": "biome check .",
-    "check-types": "react-router typegen && tsc --noEmit"
+    "check-types": "react-router typegen && tsc --noEmit",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/react": "catalog:",
@@ -45,6 +46,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.63.1",
     "@orderloop/typescript-config": "workspace:*",
+    "@playwright/test": "1.63.0",
     "@react-router/dev": "^8.4.0",
     "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
