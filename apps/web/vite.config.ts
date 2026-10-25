@@ -1,9 +1,10 @@
 import { createHmac } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import agents from 'agents/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { buildSandboxBundle } from '../../packages/plugin-sdk/src/testing';
 
 /**
@@ -51,6 +52,21 @@ const withPlugins = (services: { binding: string; service: string }[] = []) => [
  */
 const e2e = process.env.ORDERLOOP_E2E === '1';
 
+/**
+ * In a build, Streamdown's `rehype-raw` import resolves to a no-op (`app/lib/rehype-raw-off.ts`),
+ * which keeps parse5 out of the assistant panel. Build only: the dev server pre-bundles Streamdown
+ * without asking this hook, so raw HTML in a reply still parses in dev.
+ */
+const withoutRehypeRaw = (): Plugin => ({
+  name: 'orderloop:without-rehype-raw',
+  enforce: 'pre',
+  apply: 'build',
+  resolveId: (id) =>
+    id === 'rehype-raw'
+      ? fileURLToPath(new URL('./app/lib/rehype-raw-off.ts', import.meta.url))
+      : null,
+});
+
 export default defineConfig(async () => {
   const bundles = await Promise.all(
     devSandboxed.map(async (id) => ({
@@ -71,6 +87,7 @@ export default defineConfig(async () => {
     : {};
   return {
     plugins: [
+      withoutRehypeRaw(),
       // TC39 decorators in the engine's OrderAgent (`@callable()`); Oxc doesn't transform them yet.
       ...agents(),
       cloudflare({
