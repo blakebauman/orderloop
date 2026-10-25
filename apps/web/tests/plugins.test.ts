@@ -95,6 +95,7 @@ const {
   isPluginPublicPath,
   unalias,
   MAX_PLUGIN_BODY,
+  forgetPluginStatuses,
 } = await import('~/lib/plugins.server');
 
 const call = (path: string, init: RequestInit = {}) =>
@@ -154,6 +155,24 @@ describe('plugin pages on the web Worker', () => {
     expect(
       await verifyPrincipal([await pluginKey('web-test-key', 'installed')], header, at),
     ).toBeNull();
+  });
+
+  it('refuses an installed plugin reported without its version, rather than sign with the id’s key', async () => {
+    forgetPluginStatuses();
+    pluginCatalog.mockResolvedValueOnce([
+      {
+        id: 'nosha',
+        runtime: 'sandboxed',
+        source: 'installed',
+        manifest: { ...sandboxedManifest, id: 'nosha' },
+        healthy: true,
+      },
+    ]);
+    const res = await call('/plugins/nosha/', {
+      headers: { cookie: 'session=abc', accept: 'text/html' },
+    });
+    expect(res.status).toBe(502);
+    forgetPluginStatuses();
   });
 
   it('sends a sandboxed plugin’s pages through the engine, under the same rules', async () => {

@@ -136,8 +136,8 @@ export const SURFACE_NEEDS_BUYER: Record<ProviderSurface, boolean> = {
  * HMAC of the deployment's principal key with the plugin's id. The engine and other plugins never
  * accept it, so a plugin can't sign requests to them; scripts/fleet.ts derives the same value for
  * the plugin's secrets. A plugin an admin installed at runtime holds its version's own key
- * (`install`, the bundle's sha): one that leaked stops working once another version runs, the
- * plugin is removed, or another publisher's plugin takes the id.
+ * (`install`, the bundle's sha): one that leaked opens nothing for any other version, so it stops
+ * working once another version runs or the plugin is removed (until that same bundle runs again).
  */
 export async function pluginKey(
   principalKey: string,
@@ -152,6 +152,9 @@ export async function pluginKey(
     false,
     ['sign'],
   );
+  // Anything but a bundle's sha is refused, never read as "no install" (the registry's key).
+  if (install !== undefined && !/^[0-9a-f]{64}$/.test(install))
+    throw new Error(`pluginKey: ${id}'s install must be its bundle's sha`);
   const mac = await crypto.subtle.sign(
     'HMAC',
     key,

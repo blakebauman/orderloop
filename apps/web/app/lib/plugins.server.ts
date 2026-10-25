@@ -121,6 +121,15 @@ const STATUS_TTL_MS = 60_000;
 let cached: { at: number; statuses: PluginStatus[] } | null = null;
 
 /**
+ * Drops this isolate's statuses after a change to what runs (approve, roll back, turn on or off,
+ * uninstall): a runtime install's page key is its version's, so a stale sha would sign with the
+ * key the new version refuses. Other isolates catch up within `STATUS_TTL_MS`, failing closed.
+ */
+export function forgetPluginStatuses() {
+  cached = null;
+}
+
+/**
  * Every plugin binding the engine has and what it runs of each, cached for a minute per isolate.
  * If the engine can't say, the app carries on with what it last knew (or no plugins) rather than
  * failing every page.
@@ -231,6 +240,10 @@ export async function pluginFetch(request: Request): Promise<Response> {
     if (!atLeast(caller.role, manifest.pageRole)) return new Response('Forbidden', { status: 403 });
     const limited = await overBudget('API_LIMIT', `plugin:${id}:${caller.id}`);
     if (limited) return limited;
+    // A runtime install is signed with its version's key; one reported without a version is
+    // refused rather than signed with the id's (a registry plugin's) key.
+    if (status?.source === 'installed' && !status.sha)
+      return new Response('Plugin unavailable', { status: 502 });
     await setPluginPrincipalHeader(
       headers,
       caller,
