@@ -185,7 +185,7 @@ list filtered by `step` (`waiting_at` or `stopped_at`) and `within` (`24h` or `7
 
 | Table | Purpose |
 |---|---|
-| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`, `admin`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`), `external_sub` (unique when set; the OpenID Connect subject of the person's single sign-on identity, set when `decideSso` links them by verified email on their first sign-in or creates them; a person created that way has no `password_hash`), `last_login_at`, `disabled_at`, and for [two-factor sign-in](https://docs.orderloop.app/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32, [encrypted](operations.md#rotating-the-data-key)), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), `scim_external_id` (the provider's id for the person, as SCIM sent it), and `password_change_due` (the password was set by an operator; see [temporary passwords](https://docs.orderloop.app/guides/team-and-roles/#temporary-passwords)), `password_expires_at` (when such a temporary password stops working, 7 days after it was set; cleared when the person chooses their own) |
+| `users` | `email` (unique, lowercased), `name`, `role` (`viewer`, `approver`, `operator`, `admin`), `password_hash` (PBKDF2, `pbkdf2:<iterations>:<salt>:<hash>`, or `pbkdf2p:<pepper id>:<iterations>:<salt>:<hash>` over HMAC-SHA256 of the password with `PASSWORD_PEPPER`, the id naming which pepper made it; an unpeppered one is stored again peppered at the next sign-in), `external_sub` (unique when set; the OpenID Connect subject of the person's single sign-on identity, set when `decideSso` links them by verified email on their first sign-in or creates them; a person created that way has no `password_hash`), `last_login_at`, `disabled_at`, and for [two-factor sign-in](https://docs.orderloop.app/guides/team-and-roles/#two-factor-sign-in) `totp_secret` (base32, [encrypted](operations.md#rotating-the-data-key)), `totp_enabled_at` and `totp_last_step` (the last 30-second step a code was accepted for, so a code works once), `scim_external_id` (the provider's id for the person, as SCIM sent it), and `password_change_due` (the password was set by an operator; see [temporary passwords](https://docs.orderloop.app/guides/team-and-roles/#temporary-passwords)), `password_expires_at` (when such a temporary password stops working, 7 days after it was set; cleared when the person chooses their own) |
 | `scim_groups`, `scim_group_members` | Groups an identity provider pushes over SCIM (`id` `grp_…`, `display_name`, `external_id`, `created_at`, `updated_at`) and their members (`group_id`, `user_id`, primary key together, both cascading on delete; index on `user_id`). Admins map groups to roles in the workspace setting `scim_roles` |
 | `sessions` | One per signed-in browser: `token_hash` (SHA-256 of the `__Host-ol_session` cookie), `user_id`, `expires_at` (30 days), `last_seen_at` (null means `created_at`; updated at most every 5 minutes, and a session idle 7 days has ended), `ip` and `user_agent` (for the Account page), `reauth_at` (when its person last signed in again at the identity provider for a step-up; null until then). Expired sessions are deleted by the [retention sweep](#retention) |
 | `recovery_codes` | One-use two-factor recovery codes: `code_hash` (SHA-256 of the code, lowercased without the dash), `user_id`. A row is deleted when its code is used |
@@ -471,9 +471,11 @@ Not covered by the redaction:
 
 ### To AI Gateway and logs
 
-- **AI Gateway** records every model call. With request logs on (the registry's `aiGatewayLogs`,
-  default `true`) it keeps the prompts and responses, up to 100,000 entries. Turning logs off is
-  set at creation by `provision.sh`; for an existing gateway it is changed in the dashboard.
+- **AI Gateway** records every model call's metadata. Only with request logs on (the registry's
+  `aiGatewayLogs`, default `false`) does it keep the prompts and responses, up to 100,000 entries
+  and until they're deleted. The engine sends the setting with every call (`collectLog`, from
+  `AI_GATEWAY_LOGS`), so it holds whatever the gateway's own default is; logs kept before it was
+  turned off stay until deleted in the dashboard.
 - **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines

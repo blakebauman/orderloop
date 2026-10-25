@@ -40,7 +40,12 @@ const revokeGrant = vi.fn(async () => {});
 const audit = vi.fn(async () => {});
 
 const dropA2aPushes = vi.fn(async () => ({ configs: 0 }));
-vi.mock('~/lib/env.server', () => ({ db: () => fakeDb, engine: () => ({ dropA2aPushes }) }));
+let pepper: string | undefined;
+vi.mock('~/lib/env.server', () => ({
+  passwordPepper: () => pepper,
+  db: () => fakeDb,
+  engine: () => ({ dropA2aPushes }),
+}));
 vi.mock('~/lib/audit.server', () => ({ audit, clientIp: () => '203.0.113.7' }));
 vi.mock('~/lib/oauth.server', () => ({
   oauthApi: () => ({
@@ -171,6 +176,18 @@ describe('the Team page ends what no longer fits', () => {
     expect(password).toBeTruthy();
     expect(touched()).toEqual(['update other', 'sessions', 'passkeys']);
     expect(revokeGrant).toHaveBeenCalledTimes(2);
+  });
+
+  it('peppers the password a reset sets, when the deployment has a pepper', async () => {
+    pepper = 'p'.repeat(64);
+    try {
+      rows = [ann];
+      await resetPassword(request, admin, 'usr_ann');
+      const set = writes.find((w) => w.op === 'update')?.set as { passwordHash?: string };
+      expect(set.passwordHash).toMatch(/^pbkdf2p:/);
+    } finally {
+      pepper = undefined;
+    }
   });
 
   it('a two-factor reset ends sessions, connected apps and passkeys too', async () => {

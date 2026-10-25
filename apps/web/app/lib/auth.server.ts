@@ -41,14 +41,16 @@ import { audit, clientIp } from './audit.server';
 import {
   API_TOKEN_PREFIX,
   hashPassword,
+  needsRehash,
   normalizeEmail,
+  pepperMismatch,
   randomToken,
   sha256Hex,
   verifyPassword,
 } from './credentials';
 import { openSecret } from './data-key.server';
 import { DEMO_USER, isDemo } from './demo.server';
-import { afterResponse, db } from './env.server';
+import { afterResponse, db, passwordPepper } from './env.server';
 import { isLocalHost } from './origin';
 import { ssoOnlyInEffect, twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
@@ -278,7 +280,7 @@ export async function reauthenticate(userId: string, given: string, hash: string
   const key = [throttleKey('reauth', userId)];
   const wait = await waitFor(key);
   if (wait) throw new Throttled(wait);
-  if (await verifyPassword(given, hash)) return true;
+  if (await checkPassword(given, hash)) return true;
   await recordFailure(key);
   return false;
 }
@@ -478,7 +480,7 @@ export async function signInToLink(
     await audit(request, 'auth.sign_in_throttled', { target: user.email });
     throw new Throttled(wait);
   }
-  if (!(await verifyPassword(given, user.passwordHash))) {
+  if (!(await checkPassword(given, user.passwordHash))) {
     await recordFailure(keys);
     await audit(request, 'auth.sign_in_failed', {
       target: user.email,
@@ -516,6 +518,26 @@ export async function signInToLink(
 }
 
 /**
+ * `verifyPassword` with the deployment's pepper. A hash made with another pepper (the secret lost
+ * or changed) can't verify whatever is typed, so that is logged loudly for the operator, while the
+ * person sees only a failed sign-in.
+ */
+async function checkPassword(given: string, hash: string): Promise<boolean> {
+  const pepper = passwordPepper();
+  if (await verifyPassword(given, hash, pepper)) return true;
+  if (await pepperMismatch(hash, pepper))
+    console.error(
+      JSON.stringify({
+        type: 'password_pepper_mismatch',
+        message: pepper
+          ? 'A password hash was made with another PASSWORD_PEPPER: restore the one it was made with'
+          : 'A password hash is peppered but PASSWORD_PEPPER is not set: restore it',
+      }),
+    );
+  return false;
+}
+
+/**
  * Whether the person is on a temporary password that has run out. Only while one is due: a
  * password they chose never expires, even if an older Worker left the column set.
  */
@@ -534,14 +556,28 @@ async function checkCredentials(
     .from(users)
     .where(eq(users.email, normalizeEmail(email)))
     .get();
-  decoy ??= hashPassword(randomToken());
-  const ok = await verifyPassword(given, user?.passwordHash ?? (await decoy));
+  // The decoy is hashed like a real one (peppered when there is a pepper), so timing says nothing.
+  decoy ??= hashPassword(randomToken(), passwordPepper());
+  const ok = await checkPassword(given, user?.passwordHash ?? (await decoy));
   if (!user) return { reason: 'unknown email' };
   if (!user.passwordHash) return { reason: 'no password set' };
   if (await ssoOnlyInEffect()) return { reason: 'SSO only' };
-  if (!ok) return { reason: 'wrong password' };
+  if (!ok)
+    return {
+      reason: (await pepperMismatch(user.passwordHash, passwordPepper()))
+        ? 'password pepper mismatch'
+        : 'wrong password',
+    };
   if (user.disabledAt) return { reason: 'disabled' };
   if (temporaryPasswordExpired(user)) return { reason: 'temporary password expired' };
+  // A hash from before the pepper is stored again with it, now that the password is known.
+  if (needsRehash(user.passwordHash, passwordPepper()))
+    afterResponse(
+      db()
+        .update(users)
+        .set({ passwordHash: await hashPassword(given, passwordPepper()) })
+        .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash))),
+    );
   return {
     twoFactor: !!user.totpEnabledAt,
     principal: {

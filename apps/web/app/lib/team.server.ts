@@ -17,7 +17,7 @@ import {
   normalizeEmail,
   passwordProblem,
 } from './credentials';
-import { db } from './env.server';
+import { db, passwordPepper } from './env.server';
 import { describeAgent, sessionRef } from './sessions';
 import { expiresAtFor, isTokenLifetime } from './tokens';
 
@@ -113,7 +113,7 @@ export async function insertAdmin(
       email,
       name,
       role: 'admin',
-      passwordHash: await hashPassword(input.password),
+      passwordHash: await hashPassword(input.password, passwordPepper()),
       createdAt: Date.now(),
     });
   forgetUserCount();
@@ -147,7 +147,7 @@ export async function addUser(
       email,
       name: input.name.trim() || email.split('@')[0]!,
       role: r,
-      passwordHash: await hashPassword(password),
+      passwordHash: await hashPassword(password, passwordPepper()),
       passwordChangeDue: true,
       passwordExpiresAt: Date.now() + TEMPORARY_PASSWORD_MS,
       createdAt: Date.now(),
@@ -202,7 +202,7 @@ export async function resetPassword(request: Request, by: Principal, id: string)
   await db()
     .update(users)
     .set({
-      passwordHash: await hashPassword(password),
+      passwordHash: await hashPassword(password, passwordPepper()),
       passwordChangeDue: true,
       passwordExpiresAt: Date.now() + TEMPORARY_PASSWORD_MS,
     })
@@ -323,7 +323,7 @@ export async function changeOwnPassword(
   await db()
     .update(users)
     .set({
-      passwordHash: await hashPassword(next),
+      passwordHash: await hashPassword(next, passwordPepper()),
       passwordChangeDue: false,
       passwordExpiresAt: null,
     })

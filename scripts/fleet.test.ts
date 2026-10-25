@@ -56,6 +56,11 @@ test('the engine config carries the deployment everywhere a name is account-wide
     jurisdiction: 'eu',
   });
   assert.equal(c.vars.AI_GATEWAY_ID, 'orderloop-acme');
+  assert.equal(c.vars.AI_GATEWAY_LOGS, 'false');
+  assert.equal(
+    renderEngine(base('engine'), { ...acme, aiGatewayLogs: true }).vars.AI_GATEWAY_LOGS,
+    'true',
+  );
   assert.equal(c.workers_dev, false);
 });
 
@@ -240,8 +245,8 @@ test('workflow AI nodes see personal data only where the registry says send', ()
   const send = toDeployment({ ...acme, aiPersonalData: 'send' });
   assert.equal(renderEngine(base('engine'), send).vars.AI_PERSONAL_DATA, 'send');
   assert.throws(() => toDeployment({ ...acme, aiPersonalData: 'all' }), /aiPersonalData/);
-  assert.equal(toDeployment(acme).aiGatewayLogs, true);
-  assert.equal(toDeployment({ ...acme, aiGatewayLogs: false }).aiGatewayLogs, false);
+  assert.equal(toDeployment(acme).aiGatewayLogs, false);
+  assert.equal(toDeployment({ ...acme, aiGatewayLogs: true }).aiGatewayLogs, true);
 });
 
 test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days", () => {
@@ -711,6 +716,12 @@ test('the reserved path segments cover every top-level path the web app serves',
 test('the deploy refuses a shared key too short to sign with', () => {
   const key = 'a'.repeat(64);
   assert.equal(keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key }), null);
+  // The password pepper too, when it's set.
+  assert.equal(keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key, PASSWORD_PEPPER: key }), null);
+  assert.match(
+    keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key, PASSWORD_PEPPER: 'short' }) ?? '',
+    /^PASSWORD_PEPPER must be at least 32 characters/,
+  );
   assert.match(
     keysProblem({ PRINCIPAL_KEY: 'short', DATA_KEY: key, DATA_KEY_PREVIOUS: 'x'.repeat(31) }) ?? '',
     /^PRINCIPAL_KEY, DATA_KEY_PREVIOUS must be at least 32 characters/,

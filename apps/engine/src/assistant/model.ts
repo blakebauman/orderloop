@@ -19,6 +19,7 @@ import {
   describeAnswers,
 } from '@orderloop/core';
 import { createWorkersAI } from 'workers-ai-provider';
+import { gatewayOptions } from '../ai';
 import { orderRef } from './data';
 
 /** Matches the AI nodes: a slow model must not hold a person hostage either. */
@@ -52,7 +53,7 @@ export function assistantModel(
   }
   const workersai = createWorkersAI({
     binding: env.AI,
-    ...(env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : {}),
+    ...(gatewayOptions(env) ? { gateway: gatewayOptions(env) } : {}),
   });
   const primary = workersai(env.ASSISTANT_MODEL as Parameters<typeof workersai>[0]);
   return withFallback(primary as unknown as LanguageModelV4, fallback, used);

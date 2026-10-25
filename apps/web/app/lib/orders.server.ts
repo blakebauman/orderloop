@@ -180,7 +180,9 @@ export async function overview(now = Date.now()) {
         .where(eq(orders.status, 'waiting'))
         .groupBy(orders.flowId, orders.waitingAt, orders.waitingFor),
       // Where orders ended badly this week, by flow and step, with the latest reason. Grouped in
-      // SQL; the reason is the newest order's, picked by the max-updatedAt row of each group.
+      // SQL; the reason is the newest order's, picked by the max-updatedAt row of each group. The
+      // outer columns are written `orders.…` by hand: drizzle prints them unqualified, which inside
+      // the subquery would mean o2's own and give every group the week's newest reason.
       d
         .select({
           flowId: orders.flowId,
@@ -190,7 +192,7 @@ export async function overview(now = Date.now()) {
           latest: sql<number>`max(${orders.updatedAt})`,
           reason: sql<
             string | null
-          >`(select o2.reason from orders o2 where o2.flow_id = ${orders.flowId} and coalesce(o2.stopped_at, '') = coalesce(${orders.stoppedAt}, '') and o2.status in ('failed', 'rolled_back') and o2.updated_at >= ${weekAgo} order by o2.updated_at desc limit 1)`,
+          >`(select o2.reason from orders o2 where o2.flow_id = orders.flow_id and coalesce(o2.stopped_at, '') = coalesce(orders.stopped_at, '') and o2.status in ('failed', 'rolled_back') and o2.updated_at >= ${weekAgo} order by o2.updated_at desc limit 1)`,
         })
         .from(orders)
         .where(and(stopped, gte(orders.updatedAt, weekAgo)))

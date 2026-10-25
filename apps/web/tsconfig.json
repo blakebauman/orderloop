@@ -11,6 +11,7 @@
     "app/**/*",
     "workers/**/*",
     "tests/**/*",
+    "scripts/**/*.ts",
     "e2e/**/*",
     "playwright.config.ts",
     "worker-configuration.d.ts",
