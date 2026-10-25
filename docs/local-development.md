@@ -67,6 +67,41 @@ Some orders stop at an approval or wait for an event. Decide approvals from the 
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
 [REST API](https://docs.orderloop.app/reference/rest-api/) or a [signed webhook](https://docs.orderloop.app/guides/approvals-and-events/).
 
+## Volume data
+
+The demo scenarios give a handful of orders. To see the overview, the orders list, approvals,
+Carts, Commerce and the Performance page at the size a busy workspace reaches, fill the local
+database with generated history:
+
+```bash
+pnpm db:seed:volume                     # 20,000 orders over 90 days, 2,000 products, 1,500 carts
+pnpm db:seed:volume --orders 50000 --days 30
+pnpm db:seed:volume --only orders       # some of: products, orders, carts
+pnpm db:seed:volume --cleanup           # remove everything it wrote
+```
+
+Run it after `pnpm db:migrate:local`, with or without `pnpm web:dev` running.
+`apps/web/scripts/seed-volume.ts` opens the same local database through wrangler's platform proxy,
+with a config that binds only that database, so it can't reach a deployed workspace. It publishes
+the built-in flows as the app does on first use, spreads the orders over them (using each flow's
+own steps for where an order waits or stopped and why), and writes:
+
+- customers (`cus_bench_…`): 240 people and 20 companies;
+- orders (`ord_bench_…`, channel `bench`): started more on weekdays and in working hours, growing
+  over the window, from a month before it so its first days are already busy. Orders whose end is
+  still to come are open: waiting at an approval (with a pending approval), an event or a timer,
+  some for over a day, or running. The rest completed, failed or rolled back at a step with a
+  reason, were declined at an approval, or were cancelled. Each has the approvals it passed, its
+  payment (a card soon after checkout, a B2B invoice when it completes; some refunded later) and a
+  `node_runs` row per step it ran;
+- products (`BENCH-…`) with store stock, contract prices and volume rules, for Commerce;
+- carts (`cart_bench_…`), most submitted to one of the orders above.
+
+Each run replaces what the previous one wrote; `--seed <n>` (default 1) makes it repeatable
+relative to today. Only the index tables are written, with no OrderAgent or Workflow behind an
+order, so a generated order's page has no graph or timeline, and Commerce's **Outside events**,
+which asks each order's agent what it waits for, lists none of them.
+
 ## Start an order over the API
 
 ```bash
