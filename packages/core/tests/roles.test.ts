@@ -52,6 +52,13 @@ describe('signed principal header', () => {
       ...p,
       session: 'ab12',
     });
+    // A connected app's request names its grant and client.
+    const app = await signPrincipal(key, { ...p, grant: 'g1', client: 'c1' }, '/a2a', now);
+    expect(await verifyPrincipal([key], app, '/a2a', now)).toEqual({
+      ...p,
+      grant: 'g1',
+      client: 'c1',
+    });
   });
 
   it('refuses another key, another path, an expired header and a tampered one', async () => {

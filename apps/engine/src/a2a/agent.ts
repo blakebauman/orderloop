@@ -138,11 +138,10 @@ export class A2AAgent extends DurableObject<Env> {
     return n;
   }
 
-  /** Whether the caller this object belongs to (its name, `<kind>:<id>`) is still active. */
+  /** Whether the caller this object belongs to (its name, `a2aCaller`) is still active. */
   private ownerActive(): Promise<boolean> {
-    const name = this.ctx.id.name ?? '';
-    const at = name.indexOf(':');
-    return stillActive(this.env, name.slice(0, at), name.slice(at + 1));
+    const [kind = '', id = ''] = (this.ctx.id.name ?? '').split(':');
+    return stillActive(this.env, kind, id);
   }
 
   override async fetch(request: Request): Promise<Response> {

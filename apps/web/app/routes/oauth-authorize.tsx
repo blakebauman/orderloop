@@ -51,8 +51,8 @@ const ROLE_SCOPE: Partial<Record<Role, string>> = {
 const grantable = (r: Role) => r in ROLE_SCOPE;
 
 /**
- * A refused request in words a person can act on. The provider's own description stays beside it,
- * small, for whoever builds the app.
+ * A refused request in words a person can act on. Only the error's code is shown beside it, for
+ * whoever builds the app.
  */
 function explain(err: AuthorizationError): string {
   const d = err.description.toLowerCase();
@@ -71,13 +71,14 @@ function explain(err: AuthorizationError): string {
 function refusal(err: unknown) {
   if (err instanceof AuthorizationError && err.redirectTo)
     return new Response(null, { status: 302, headers: { location: err.redirectTo } });
+  // Only the error's code is shown: the provider's own description can carry what the client sent.
   if (err instanceof AuthorizationError)
-    return data({ error: explain(err), detail: err.description || err.code }, { status: 400 });
+    return data({ error: explain(err), detail: err.code }, { status: 400 });
   if (err instanceof CimdFetchError)
     return data(
       {
         error: 'OrderLoop couldn’t check who published this app. Try again later.',
-        detail: err.message,
+        detail: 'client_metadata_unavailable',
       },
       { status: 400 },
     );
@@ -89,6 +90,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   const oauth = oauthApi(request);
   try {
     const authRequest = await oauth.parseAuthRequest(request);
+    // PKCE for every app (RFC 9700 §2.1.1): the provider asks it only of public clients, but a
+    // client that registered with a secret can leak its code just the same.
+    if (!authRequest.codeChallenge)
+      return data(
+        {
+          error: 'This app didn’t send a PKCE challenge, so OrderLoop won’t send it access.',
+          detail: 'invalid_request',
+        },
+        { status: 400 },
+      );
     // First: a failed lookup leaves nothing behind.
     const details = await oauth.describeConsent(authRequest);
     const consent = await oauth.beginConsent(authRequest);

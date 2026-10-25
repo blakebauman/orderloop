@@ -108,7 +108,7 @@ describe('endAccess', () => {
       ['grant_2', 'usr_ann'],
     ]);
     // An A2A app's push configs go with its grant.
-    expect(dropA2aPushes).toHaveBeenCalledWith('user', 'usr_ann');
+    expect(dropA2aPushes).toHaveBeenCalledWith('user', 'usr_ann', ['grant_1', 'grant_2']);
   });
 
   it('revokes every page of connected apps', async () => {

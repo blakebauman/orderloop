@@ -323,7 +323,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |
 | Agentic checkout | `ucp.settings` (the checkout flow, from and to), `ucp.platform_added` (the target is the platform's name; the detail has its `id` and profile URL), `ucp.platform_revoked` |
-| Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected` |
+| Connected apps | `oauth.app_connected` (role and client id), `oauth.app_disconnected`, `oauth.refresh_reused` (an app revoked because an old refresh token was presented again) |
 | API access | `api.token_expired`, at most hourly per token, when an expired token is used |
 | Orders | `order.started` (the flow, and the version, test run, scenario, restarted-from order, channel and external id where they apply), `order.cancelled` (the reason), `order.event_delivered` (the event and the node that was waiting) |
 | Approvals | `approval.decided` (the node, the decision and the note) |

@@ -20,6 +20,7 @@ import { PageHeader, Section } from '~/components/page';
 import { Passkeys } from '~/components/passkeys';
 import { audit } from '~/lib/audit.server';
 import { requireUser, sessionId, Throttled } from '~/lib/auth.server';
+import { engine } from '~/lib/env.server';
 import { oauthApi } from '~/lib/oauth.server';
 import { listPasskeys } from '~/lib/passkeys.server';
 import { usesPassword } from '~/lib/sso.server';
@@ -85,6 +86,8 @@ export async function action({ request }: Route.ActionArgs) {
         const grant = (await oauth.listUserGrants(me.id)).items.find((g) => g.id === str('ref'));
         if (!grant) throw new TeamError('That app is no longer connected.');
         await oauth.revokeGrant(grant.id, me.id);
+        // An A2A app's push configs go with it.
+        await engine().dropA2aPushes('user', me.id, [grant.id]);
         await audit(request, 'oauth.app_disconnected', {
           actor: me,
           target: String(grant.metadata?.app ?? grant.clientId),

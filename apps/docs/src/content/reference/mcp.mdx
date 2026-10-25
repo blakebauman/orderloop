@@ -67,7 +67,10 @@ A client that runs OAuth itself starts from the `401` a request without a token 
 roles an app can be granted). It finds the authorization server from
 `/.well-known/oauth-protected-resource/mcp`. It registers with dynamic client registration at
 `/oauth/register` or with a Client ID Metadata Document (an `https` `client_id`), sends the person
-to `/oauth/authorize` (authorization code with PKCE) and exchanges the code at `/oauth/token`.
+to `/oauth/authorize` (authorization code with PKCE, `S256`, required of every client, including
+one that registered with a secret) and exchanges the code at `/oauth/token`. A refresh token works
+once: each refresh returns a new one. Retrying the old one within a minute (an answer that never
+arrived) still works; presenting it again later revokes the connection, since only a copy would.
 
 A client or directory that discovers servers before connecting can read the
 [Server Card](https://modelcontextprotocol.io/seps/2127-mcp-server-cards) at

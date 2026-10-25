@@ -36,6 +36,9 @@ Send `Authorization: Bearer …` with every request, one of:
   OrderLoop's consent page with their own account, sees that the
   app acts "via A2A", and grants a role no higher than their own. Discovery starts at `/.well-known/oauth-protected-resource/a2a`.
 
+Each connected app is its own caller: its tasks and push configs are its own, even when one person
+connected several apps, and disconnecting it drops its push configs.
+
 Both are the credentials the [REST API](/reference/rest-api/) takes, with the same expiry
 (`401` with the reason). Each caller has 300 requests a
 minute on `/a2a`, separate from its budget on `/mcp`; over it the answer is `429` with
@@ -108,7 +111,9 @@ caller needs no open request and no polling. Register a URL in either of two way
 
 A `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`
 (the same rule as [webhook subscriptions](/guides/outbound-webhooks/)). Anything else, or a sixth
-URL, is refused with an invalid-request error. Notifications reach public addresses only.
+URL, is refused with an invalid-request error. Notifications reach public addresses only, and a
+redirect from your receiver isn't followed: it counts as a failed delivery, so the token and
+credentials go only to the URL you registered.
 
 **Payload.** The body is an A2A 1.0 `StreamResponse` as JSON, with content type
 `application/a2a+json`: a `statusUpdate` (`taskId`, `contextId`, `status`), or the `task`,

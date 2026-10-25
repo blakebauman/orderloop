@@ -24,7 +24,7 @@ import {
   OAuthResourceServer,
 } from '@cloudflare/workers-oauth-provider';
 import { A2A_PATH, type Principal, ROLES, type Role } from '@orderloop/core';
-import { clientIp } from './audit.server';
+import { audit, clientIp } from './audit.server';
 import {
   apiPrincipal,
   type Caller,
@@ -34,6 +34,7 @@ import {
   Throttled,
   TokenExpired,
 } from './auth.server';
+import { sha256Hex } from './credentials';
 import { engine } from './env.server';
 import { setPrincipalHeader } from './principal.server';
 import { overBudget } from './rate-limit';
@@ -78,12 +79,65 @@ function authorizationServer(origin: string) {
     authorizeEndpoint: AUTHORIZE_PATH,
     tokenEndpoint: '/oauth/token',
     clientRegistrationEndpoint: '/oauth/register',
-    // A grant's scope is the role the person granted.
-    scopesSupported: [...ROLES],
+    // A grant's scope is the role the person granted; admin never is.
+    scopesSupported: GRANTABLE_ROLES,
     accessTokenTTL: 3600,
     refreshTokenTTL: 30 * 86_400,
     clientIdMetadataDocumentEnabled: true,
   });
+}
+
+const spentKey = (hash: string) => `ol_spent:${hash}`;
+type Spent = { userId: string; grantId: string; at: number };
+
+/** How long a client may still present the refresh token it just traded, for a lost response. */
+export const REFRESH_GRACE_MS = 60_000;
+
+/**
+ * A refresh token presented again after it was traded for a new one (RFC 9700 §4.14.2). Each
+ * refresh with the current token records it as spent (`ol_spent:<hash>`, kept as long as a grant
+ * lives). The provider still accepts the token before the current one, so a client whose answer
+ * was lost may retry it within `REFRESH_GRACE_MS` of when it was traded (the window doesn't move
+ * on a retry). Any other spent token coming back means a copy is in someone else's hands: the
+ * grant is revoked so neither copy works, and an A2A app's push configs go with it. Holding the
+ * token is the proof here, as the RFC asks, so this runs before the client authenticates. Two
+ * processes sharing one client's credentials and refreshing apart will trip it too. Null for
+ * anything else (including a token traded before this was recorded), which the provider answers
+ * as usual.
+ */
+async function refreshReuse(request: Request): Promise<Response | null> {
+  if (request.method !== 'POST') return null;
+  const body = new URLSearchParams(await request.clone().text());
+  const token = body.get('refresh_token');
+  if (body.get('grant_type') !== 'refresh_token' || !token) return null;
+  const [userId, grantId] = token.split(':');
+  if (!userId || !grantId) return null;
+  const hash = await sha256Hex(token);
+  const grant = await env.OAUTH_KV.get<{
+    refreshTokenId?: string;
+    previousRefreshTokenId?: string;
+  }>(`grant:${userId}:${grantId}`, 'json');
+  if (grant?.refreshTokenId === hash) {
+    // The current token, being traded now: from here on it is spent.
+    const spent: Spent = { userId, grantId, at: Date.now() };
+    await env.OAUTH_KV.put(spentKey(hash), JSON.stringify(spent), {
+      expirationTtl: 30 * 86_400,
+    });
+    return null;
+  }
+  const spent = await env.OAUTH_KV.get<Spent>(spentKey(hash), 'json');
+  if (!spent || spent.userId !== userId || spent.grantId !== grantId) return null;
+  if (grant?.previousRefreshTokenId === hash && Date.now() - spent.at < REFRESH_GRACE_MS)
+    return null;
+  if (grant) {
+    await oauthApi(request).revokeGrant(grantId, userId);
+    await engine().dropA2aPushes('user', userId, [grantId]);
+    await audit(request, 'oauth.refresh_reused', { target: grantId, detail: { userId } });
+  }
+  return Response.json(
+    { error: 'invalid_grant', error_description: 'This refresh token was already used.' },
+    { status: 400, headers: { 'cache-control': 'no-store' } },
+  );
 }
 
 /** Tokens this authorization server issued look like `<user>:<grant>:<secret>`. */
@@ -167,6 +221,10 @@ export async function oauthFetch(
       { error: 'slow_down', error_description: 'Too many requests; try again in a minute.' },
       { status: 429, headers: { 'retry-after': '60' } },
     );
+  if (url.pathname === '/oauth/token') {
+    const reused = await refreshReuse(request);
+    if (reused) return reused;
+  }
   const { as, endpoints } = rolesFor(url.origin);
   const path = url.pathname.startsWith(`${PROTECTED_RESOURCE}/`)
     ? url.pathname.slice(PROTECTED_RESOURCE.length)
@@ -215,11 +273,15 @@ async function forward(
 ): Promise<Response> {
   if (badOrigin(request)) return Response.json({ error: 'Origin refused' }, { status: 403 });
   let caller: Caller | null;
+  // A connected app is named by its grant (an issued token is `<user>:<grant>:<secret>`) and client.
+  let app: { grant: string; client?: string } | null = null;
   if ('principal' in props) caller = props.principal;
   else {
     const grant = scopedGrant(props, auth.scope);
     if (!grant) return insufficientScope(auth, [props.role], 'This token names no role.');
     caller = await grantPrincipal(grant);
+    const grantId = auth.token.split(':')[1];
+    if (grantId) app = { grant: grantId, ...(auth.clientId ? { client: auth.clientId } : {}) };
   }
   if (!caller)
     return Response.json(
@@ -236,6 +298,6 @@ async function forward(
   // The engine trusts the principal header; the client's credential stays here.
   headers.delete('authorization');
   headers.delete('cookie');
-  await setPrincipalHeader(headers, principal satisfies Principal, path);
+  await setPrincipalHeader(headers, { ...(principal satisfies Principal), ...app }, path);
   return engine().fetch(new Request(`https://engine${path}`, new Request(request, { headers })));
 }

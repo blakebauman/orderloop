@@ -70,14 +70,18 @@ export async function endAccess(request: Request, person: Person, what: EndWhat)
   if (what.apps) {
     const oauth = oauthApi(request);
     let cursor: string | undefined;
+    const ids: string[] = [];
     do {
       const page = await oauth.listUserGrants(person.id, { cursor });
-      for (const g of page.items) await oauth.revokeGrant(g.id, person.id);
+      for (const g of page.items) {
+        await oauth.revokeGrant(g.id, person.id);
+        ids.push(g.id);
+      }
       ended.apps += page.items.length;
       cursor = page.cursor;
     } while (cursor);
     // An A2A app's push configs outlive its grant in the engine; they go with it.
-    await engine().dropA2aPushes('user', person.id);
+    await engine().dropA2aPushes('user', person.id, ids);
   }
   if (what.passkeys) ended.passkeys = await clearPasskeys(person.id);
   return ended;
