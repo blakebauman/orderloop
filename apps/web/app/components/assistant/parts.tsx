@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Streamdown } from 'streamdown';
+import { Confirmation, ConfirmationActions } from '~/components/ai-elements/confirmation';
+import { MessageResponse } from '~/components/ai-elements/message';
 import { useAssistant } from '~/lib/assistant';
 
 type Part = ToolUIPart | DynamicToolUIPart;
@@ -42,7 +43,7 @@ type Part = ToolUIPart | DynamicToolUIPart;
 export function Prose({ text, streaming }: { text: string; streaming?: boolean }) {
   const navigate = useNavigate();
   return (
-    <Streamdown
+    <MessageResponse
       className="ol-prose"
       mode={streaming ? 'streaming' : 'static'}
       isAnimating={streaming}
@@ -71,7 +72,7 @@ export function Prose({ text, streaming }: { text: string; streaming?: boolean }
       }}
     >
       {text}
-    </Streamdown>
+    </MessageResponse>
   );
 }
 
@@ -269,9 +270,11 @@ export function ActionCard({
   const verb = VERB[name]?.(input) ?? 'Confirm';
   const blocked = p?.blocked;
   return (
-    <section
+    <Confirmation
+      approval={part.approval}
+      state={part.state}
       aria-labelledby={titleId}
-      className="ol-confirm my-1 rounded-2xl border border-input bg-card text-sm"
+      className="ol-confirm my-1 overflow-hidden rounded-2xl border border-input bg-card text-sm"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && approvalId && !sent) {
           e.stopPropagation();
@@ -320,33 +323,35 @@ export function ActionCard({
             Nothing is sent until you confirm.
           </p>
         )}
-        <Button
-          ref={safe}
-          size="sm"
-          variant="ghost"
-          disabled={!approvalId || sent}
-          onClick={() => {
-            setSent(true);
-            respond(approvalId!, false);
-          }}
-        >
-          {blocked ? 'Dismiss' : 'Not now'}
-        </Button>
-        {blocked ? null : (
+        <ConfirmationActions>
           <Button
+            ref={safe}
             size="sm"
-            variant={DESTRUCTIVE(name, input) ? 'destructive' : 'default'}
-            disabled={!approvalId || !p || sent}
+            variant="ghost"
+            disabled={!approvalId || sent}
             onClick={() => {
               setSent(true);
-              respond(approvalId!, true);
+              respond(approvalId!, false);
             }}
           >
-            {verb}
+            {blocked ? 'Dismiss' : 'Not now'}
           </Button>
-        )}
+          {blocked ? null : (
+            <Button
+              size="sm"
+              variant={DESTRUCTIVE(name, input) ? 'destructive' : 'default'}
+              disabled={!approvalId || !p || sent}
+              onClick={() => {
+                setSent(true);
+                respond(approvalId!, true);
+              }}
+            >
+              {verb}
+            </Button>
+          )}
+        </ConfirmationActions>
       </footer>
-    </section>
+    </Confirmation>
   );
 }
 
