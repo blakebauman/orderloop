@@ -153,6 +153,13 @@ test("orderloop.app's own deployment renders the base configs unchanged", () => 
   assert.deepEqual(renderCatalogEdge(base('catalog-edge'), d), base('catalog-edge'));
   assert.deepEqual(renderEngine(base('engine'), d), base('engine'));
   assert.deepEqual(renderWeb(base('web'), d), base('web'));
+  // Its punchout cancels the POs a buyer calls off: the grant ships in the same engine deploy as
+  // the check, and the pinned bundle whose manifest asks for it.
+  assert.deepEqual(JSON.parse(base('engine').vars.PLUGIN_GRANTS).punchout.capabilities, [
+    'carts:external',
+    'orders:start',
+    'orders:cancel',
+  ]);
 });
 
 test('bad entries are refused', () => {
@@ -460,13 +467,24 @@ test('capabilities are granted by the registry, and bind the host API as the plu
   const d = toDeployment({
     ...raw,
     plugins: {
-      punchout: { d1Id: 'x', capabilities: ['carts:external', 'orders:start'] },
+      punchout: { d1Id: 'x', capabilities: ['carts:external', 'orders:start', 'orders:cancel'] },
       qbd: { d1Id: 'y' },
     },
   });
   assert.equal(
     renderEngine(base('engine'), d).vars.PLUGIN_GRANTS,
-    '{"punchout":{"capabilities":["carts:external","orders:start"]}}',
+    '{"punchout":{"capabilities":["carts:external","orders:start","orders:cancel"]}}',
+  );
+  // Cancelling is its own grant: starting orders doesn't bring it.
+  assert.equal(
+    renderEngine(
+      base('engine'),
+      toDeployment({
+        ...raw,
+        plugins: { punchout: { d1Id: 'x', capabilities: ['orders:start'] } },
+      }),
+    ).vars.PLUGIN_GRANTS,
+    '{"punchout":{"capabilities":["orders:start"]}}',
   );
   const pluginBase = { name: 'x', main: 'src/index.ts', d1_databases: [{ binding: 'DB' }] };
   assert.deepEqual(renderPlugin(pluginBase, d, 'punchout').services, [

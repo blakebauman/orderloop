@@ -45,7 +45,7 @@ export class PluginHost extends WorkerEntrypoint<Env, { id: string }> implements
   }
 
   async cancelOrder(req: { key: string; reason: string }) {
-    const id = await this.#allowed('orders:start');
+    const id = await this.#allowed('orders:cancel');
     if (!id) return { ok: false as const, error: 'This plugin may not cancel orders here.' };
     if (typeof req?.key !== 'string' || !req.key || req.key.length > 200)
       return { ok: false as const, error: 'key is 1 to 200 characters' };
