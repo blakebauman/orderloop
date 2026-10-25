@@ -71,12 +71,20 @@ echo "Recorded catalogKvId $kv in deployments/$id.jsonc"
 # audit rule above.
 wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name feeds ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
 wrangler r2 bucket lifecycle add "$CATALOG_R2" feeds feeds/ --expire-days 30 --force ${j[@]+"${j[@]}"}
+# Dead letters the catalog keeps (dlq/<queue>/<date>/<id>.json) are for inspection and replay
+# (docs/operations.md, "Dead letters"); a month is long enough to act on one. Replaced each run.
+wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name dlq ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$CATALOG_R2" dlq dlq/ --expire-days 30 --force ${j[@]+"${j[@]}"}
 # The queues feed parts, urgent purges and listing changes go through, and their dead-letter queues. A deploy fails if
 # the consumer's queue is missing, so a queue that can't be created or found stops provisioning.
+# Each keeps messages 14 days (the most Queues allows), set on existing queues too, so a consumer
+# that is down over a long weekend loses nothing.
 for q in "$CATALOG_FEED_PARTS" "$CATALOG_FEED_PARTS_DLQ" "$CATALOG_PURGE" "$CATALOG_PURGE_DLQ" \
   "$CATALOG_CHANGES" "$CATALOG_CHANGES_DLQ"; do
   if wrangler queues info "$q" >/dev/null 2>&1; then echo "Queue $q already exists"
   else wrangler queues create "$q"; fi
+  wrangler queues update "$q" --message-retention-period-secs 1209600 >/dev/null
+  echo "Queue $q keeps messages 14 days"
 done
 
 # How long the R2 archive keeps audit events (auditArchiveDays): the rule is replaced on each run,
@@ -87,6 +95,25 @@ if [ -n "$AUDIT_ARCHIVE_DAYS" ]; then
     --force ${j[@]+"${j[@]}"}
   echo "Archived audit events in $R2 expire after $AUDIT_ARCHIVE_DAYS days"
 fi
+
+# Bucket locks on the same bucket: nothing deletes the audit archive before the lifecycle rule
+# above expires it (the same number of days, so the two never disagree; kept indefinitely when
+# auditArchiveDays is unset), nor a pinned sandboxed-plugin bundle, which a rollback reloads.
+# `lock set` replaces the bucket's whole lock configuration in one call, so a re-run changes the
+# audit retention without a moment unlocked; a lock added to this bucket by hand is replaced too.
+if [ -n "$AUDIT_ARCHIVE_DAYS" ]; then
+  audit_lock=$(jq -n --argjson d "$AUDIT_ARCHIVE_DAYS" '{type: "Age", maxAgeSeconds: ($d * 86400)}')
+else
+  audit_lock='{"type":"Indefinite"}'
+fi
+locks=$(mktemp)
+trap 'rm -f "$locks"' EXIT
+jq -n --argjson audit "$audit_lock" '{rules: [
+  {id: "audit-archive", enabled: true, prefix: "audit/", condition: $audit},
+  {id: "plugin-bundles", enabled: true, prefix: "plugins/", condition: {type: "Indefinite"}}
+]}' >"$locks"
+wrangler r2 bucket lock set "$R2" --file "$locks" --force ${j[@]+"${j[@]}"}
+echo "Locked audit/ (${AUDIT_ARCHIVE_DAYS:-indefinitely}${AUDIT_ARCHIVE_DAYS:+ days}) and plugins/ (indefinitely) in $R2"
 
 # The AI Gateway every model call goes through: the same settings as orderloop's own
 # (docs/deploy.md, "Settings for production").

@@ -581,7 +581,9 @@ Four parts:
   product in Tees is listed in Tops too) using the category tree from `CatalogMeta`, cached for 30
   seconds in the isolate, and calls the `ListingIndexer` of each listing segment it enters or leaves
   (the product key's segment, in each category) once per batch. A category that moved reaches its old listings only on a `reindex`. A failed batch retries
-  whole; changes are idempotent.
+  whole, since a listing's one call carries changes from many messages: every message is retried
+  after `backoff(attempts, 5, 900)` seconds (5, 10, 20, … up to 15 minutes, so the ten retries
+  span about 40 minutes before the dead-letter queue); changes are idempotent.
 - **`ListingIndexer`** is a Durable Object per `<channel>:<category>:<segment>` (`LISTINGS`, SQLite) with tables
   `members` (key, uid, `at`, `created_at`, `live`, `sig`), `terms`, `nums` and `settings`. Changes arrive at
   least once and in any order, so a member keeps the change with the latest `at`; a removal is a
@@ -696,12 +698,27 @@ The queue consumer (`queue` in `index.ts`, batches of 10, `max_batch_timeout` 1 
 batch id `<feed>:<part>` and the config `rev` the chunk was validated against, counts the results
 (`created`, `updated`, `unchanged`, `rejected`) and records the part with `CatalogFeeds`; the part
 that completes an `applying` feed wakes the Workflow with `sendEvent`. A failed delivery retries
-after `10 * attempts` seconds; the fifth failed delivery (queue `max_retries` 4) calls `failPart`,
+after `backoff(attempts, 10, 300)` seconds (10, 20, 40, 80); the fifth failed delivery (queue `max_retries` 4) calls `failPart`,
 which records the part's rows as rejected with one error (`part <id> failed: …`) and acks. The queue has a
 dead-letter queue (`orderloop-catalog-feed-parts-dlq`), but `failPart` acks first, so a message
-reaches it only if the handler itself throws (`failPart` failing, say) until the queue gives up.
+reaches it only if the handler itself throws (`failPart` failing, say) until the queue gives up
+(each retry after the consumer's `retry_delay`, 30 seconds).
 Part ids are deterministic and the shard batch id is the part id, so a retried step or a redelivered
 message never applies a row twice.
+
+**Dead letters.** The catalog Worker also consumes the three dead-letter
+queues: its own two and catalog-edge's purge one, which catalog-edge, being read-only, doesn't
+consume itself (`dead-letters.ts`; `isDeadLetterQueue` tells them from their queues by the `-dlq`
+before the suffix, and they are dispatched first since their names start like their queues').
+Nothing is applied: each message is written to the catalog's R2 bucket at
+`dlq/<queue>/<yyyy-mm-dd>/<message id>.json` (`{ queue, id, timestamp, attempts, body }`, the
+date from the message's timestamp, so a redelivery overwrites the same object), then one line
+`{"type":"dlq_message","queue":…,"id":…,"attempts":…}` is logged with `console.error` (Workers
+Observability counts error logs in its Issues, which is what alerts on them; the body stays out of
+the logs) and the message is acknowledged. `attempts` is the delivery count on the dead-letter
+queue, not the original queue's. A write that fails is retried after 30 seconds, doubling up to 15
+minutes; the dead-letter queues have no dead-letter queue of their own. Inspecting and replaying
+them is in [Operations](operations.md#dead-letters).
 
 **`CatalogFeeds`** is one Durable Object (`feeds`) holding every feed's `FeedStatus`: `queued`,
 `splitting`, `applying`, `done`, `failed` or `cancelled` (the last three final: `splitDone`, `finish`,
@@ -798,9 +815,14 @@ Purges are rationed (the Free-plan limits: about 5 calls a minute), so the consu
 a time and waits `PURGE_PACE_MS` (12 seconds, `scheduler.wait`) after each call. A message is never
 dropped for its age: documents stay servable stale for a day (`stale-while-revalidate`), so a missed
 purge would serve the old copy once more. After `PURGE_CALLS` (40) calls, 8 minutes, the batch hands
-its remaining messages back to the queue at once, inside the consumer's 15-minute limit. When a call is refused, the messages it hadn't covered are
-retried with a 30 second delay (those already purged stay acknowledged); after `max_retries` they go
-to the dead-letter queue. `purge` is a no-op where there is no Workers Caching (local
+its remaining messages back to the queue, inside the consumer's 15-minute limit, after 12 seconds,
+doubling with each delivery up to 5 minutes (`backoff`; a hand-back spends one of the queue's
+retries, so a backlog that keeps outrunning the ration spreads out rather than reaching the
+dead-letter queue within minutes). When a call is refused, the messages it hadn't covered are
+retried after 30 seconds, doubling up to 15 minutes (those already purged stay acknowledged); after
+`max_retries` they go to the dead-letter queue, which the catalog consumes and keeps in R2 (see
+**Dead letters** under the feed import above). An invocation that throws is retried after the
+consumer's `retry_delay` (30 seconds). `purge` is a no-op where there is no Workers Caching (local
 development and tests). Freshness otherwise comes from `max-age` and ETag revalidation; only urgent
 writes queue a purge.
 

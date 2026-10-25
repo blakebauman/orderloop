@@ -1,8 +1,9 @@
 /**
  * The product catalog Worker. No public routes: the web app and catalog-edge reach it through the
- * CatalogApi entrypoint over service bindings. Its queue consumer applies feed parts and routes
- * listing changes to their indexers.
+ * CatalogApi entrypoint over service bindings. Its queue consumer applies feed parts, routes
+ * listing changes to their indexers and keeps what the three dead-letter queues receive.
  */
+import { isDeadLetterQueue, keepDeadLetters } from './dead-letters';
 import { applyPart, type FeedPart, failPart } from './feed-import';
 import { applyChanges, changesIn } from './listings';
 import { applyOrders } from './orders';
@@ -20,6 +21,14 @@ export { CatalogShard } from './shard';
 /** Deliveries of a part before its rows count as rejected (the consumer's max_retries + 1). */
 const PART_ATTEMPTS = 5;
 
+/**
+ * Seconds before the next delivery of a message on its `attempts`th failure: `base`, doubling on
+ * each attempt, up to `cap`. A shard or indexer that is down gets room to come back rather than
+ * the whole budget of retries in a few seconds.
+ */
+export const backoff = (attempts: number, base: number, cap: number) =>
+  Math.min(base * 2 ** Math.max(attempts - 1, 0), cap);
+
 export default {
   async fetch(request) {
     if (new URL(request.url).pathname === '/health') return Response.json({ ok: true });
@@ -27,16 +36,27 @@ export default {
   },
 
   async queue(batch, env) {
-    // Queue names carry the deployment's suffix: dispatch on the base name.
+    // Queue names carry the deployment's suffix: dispatch on the base name. The dead-letter
+    // queues' names start like their queues', so they go first.
+    if (isDeadLetterQueue(batch.queue)) {
+      await keepDeadLetters(batch, env.PUBLISHED, (a) => backoff(a, 30, 900));
+      return;
+    }
     if (batch.queue.startsWith('orderloop-catalog-changes')) {
-      // One call per listing for the whole batch; a failure retries the batch (changes are
-      // idempotent by `at`).
-      const changes = batch.messages.flatMap((m) => changesIn(m.body));
-      await Promise.all([
-        applyChanges(env, changes),
-        applySearch(env, changes),
-        applyOrders(env, changes),
-      ]);
+      // One call per listing for the whole batch, so a failure can't be pinned on one message:
+      // every message is retried, backing off (changes are idempotent by `at`).
+      try {
+        const changes = batch.messages.flatMap((m) => changesIn(m.body));
+        await Promise.all([
+          applyChanges(env, changes),
+          applySearch(env, changes),
+          applyOrders(env, changes),
+        ]);
+      } catch (err) {
+        console.error('listing changes failed, retrying the batch:', err);
+        for (const m of batch.messages) m.retry({ delaySeconds: backoff(m.attempts, 5, 900) });
+        return;
+      }
       batch.ackAll();
       return;
     }
@@ -50,7 +70,7 @@ export default {
           if (msg.attempts >= PART_ATTEMPTS) {
             await failPart(env, part, err);
             msg.ack();
-          } else msg.retry({ delaySeconds: 10 * msg.attempts });
+          } else msg.retry({ delaySeconds: backoff(msg.attempts, 10, 300) });
         }
       }),
     );

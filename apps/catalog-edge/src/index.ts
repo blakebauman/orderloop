@@ -32,12 +32,21 @@ export const PURGE_PACE_MS = 12_000;
  */
 export const PURGE_CALLS = 40;
 
+/**
+ * Seconds before a message handed back goes out again: `base`, doubling with each delivery, up to
+ * `cap`. Every hand-back spends one of the queue's retries, so a backlog that keeps outrunning
+ * the purge ration spreads out instead of reaching the dead-letter queue within minutes.
+ */
+export const backoff = (attempts: number, base: number, cap: number) =>
+  Math.min(base * 2 ** Math.max(attempts - 1, 0), cap);
+
 /** `skipped`: nothing was purged (no Workers Caching here), so nothing was rationed either. */
 type Purge = (tags: string[]) => Promise<{ success: boolean; skipped?: true }>;
 
 /**
  * Purges a batch's tags, paced, oldest message first. A refused call retries what it didn't cover
- * once the bucket refills; after PURGE_CALLS calls the rest goes back to the queue at once.
+ * once the bucket refills; after PURGE_CALLS calls the rest goes back to the queue. Both back off
+ * with the message's attempts.
  */
 export async function drain(
   batch: MessageBatch<PurgeMessage>,
@@ -49,7 +58,7 @@ export async function drain(
   let calls = 0;
   while (queue.length) {
     if (calls >= PURGE_CALLS) {
-      for (const m of queue) m.retry({ delaySeconds: 0 });
+      for (const m of queue) m.retry({ delaySeconds: backoff(m.attempts, 12, 300) });
       return;
     }
     // Whole messages, up to PURGE_TAGS tags (one larger than that goes alone, split below).
@@ -69,7 +78,8 @@ export async function drain(
       const r = await purge(chunk);
       if (!r.success) {
         // Rate limited (or refused): try these again once the bucket refills.
-        for (const m of [...take, ...queue]) m.retry({ delaySeconds: 30 });
+        for (const m of [...take, ...queue])
+          m.retry({ delaySeconds: backoff(m.attempts, 30, 900) });
         return;
       }
       calls++;

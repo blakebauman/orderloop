@@ -1,8 +1,8 @@
 import { createExecutionContext, createMessageBatch, getQueueResult } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { DOC_FORMAT, paths } from '@orderloop/core/product/paths';
-import { beforeAll, describe, expect, it } from 'vitest';
-import worker, { drain, PURGE_CALLS, PURGE_PACE_MS } from '../src';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import worker, { backoff, drain, PURGE_CALLS, PURGE_PACE_MS } from '../src';
 import { FRESH, MISSING } from '../src/delivery';
 
 const get = (path: string, init?: RequestInit) =>
@@ -183,7 +183,7 @@ describe('purging', () => {
   const tagsFor = (prefix: string, n: number) =>
     Array.from({ length: n }, (_, i) => `p:${prefix}${i}`);
   const run = async (
-    messages: { id: string; age: number; tags: string[] }[],
+    messages: { id: string; age: number; tags: string[]; attempts?: number }[],
     refuseCall?: number,
   ) => {
     const start = Date.UTC(2026, 9, 1);
@@ -193,10 +193,19 @@ describe('purging', () => {
       messages.map((m) => ({
         id: m.id,
         timestamp: new Date(start - m.age),
-        attempts: 1,
+        attempts: m.attempts ?? 1,
         body: { tags: m.tags },
       })),
     );
+    // The local queue records which messages were retried but not their delay, so note it here.
+    const delays: Record<string, number | undefined> = {};
+    for (const m of batch.messages) {
+      const retry = m.retry.bind(m);
+      vi.spyOn(m, 'retry').mockImplementation((o) => {
+        delays[m.id] = o?.delaySeconds;
+        retry(o);
+      });
+    }
     const calls: string[][] = [];
     await drain(
       batch,
@@ -207,7 +216,7 @@ describe('purging', () => {
       t.wait,
     );
     const ctx = createExecutionContext();
-    return { calls, waits: t.c.waits, result: await getQueueResult(batch, ctx) };
+    return { calls, waits: t.c.waits, delays, result: await getQueueResult(batch, ctx) };
   };
 
   it('packs whole messages into calls of up to 100 tags, one call every 12 seconds', async () => {
@@ -225,7 +234,7 @@ describe('purging', () => {
   });
 
   it('purges an old message too, and hands back what is past the per-batch call cap', async () => {
-    const { calls, result } = await run([
+    const { calls, delays, result } = await run([
       { id: 'old', age: 3_600_000, tags: ['p:old'] },
       ...Array.from({ length: PURGE_CALLS + 5 }, (_, i) => ({
         id: `m${i}`,
@@ -239,10 +248,25 @@ describe('purging', () => {
     expect(result.retryMessages).toHaveLength(6);
     // The old message alone (it and a 100-tag one exceed a call), then 39 of the rest.
     expect(result.explicitAcks).toHaveLength(PURGE_CALLS);
+    // Handed back after one pace interval, not at once.
+    expect(Object.values(delays)).toEqual(Array(6).fill(12));
+  });
+
+  it('backs off a message handed back again, up to five minutes', async () => {
+    const { delays } = await run([
+      ...Array.from({ length: PURGE_CALLS }, (_, i) => ({
+        id: `m${i}`,
+        age: 1000,
+        tags: tagsFor(`m${i}-`, 100),
+      })),
+      { id: 'late', age: 0, tags: ['p:late'], attempts: 4 },
+      { id: 'later', age: 0, tags: ['p:later'], attempts: 9 },
+    ]);
+    expect(delays).toEqual({ late: 96, later: 300 });
   });
 
   it('retries what a refused call left, keeping what was purged acknowledged', async () => {
-    const { calls, result } = await run(
+    const { calls, delays, result } = await run(
       [
         { id: 'a', age: 0, tags: tagsFor('a', 100) },
         { id: 'b', age: 0, tags: tagsFor('b', 100) },
@@ -253,5 +277,13 @@ describe('purging', () => {
     expect(calls).toHaveLength(2);
     expect(result.explicitAcks).toEqual(['a']);
     expect(result.retryMessages.map((m) => m.msgId).sort()).toEqual(['b', 'c']);
+    // Once the ration refills: 30 seconds on a first delivery.
+    expect(delays).toEqual({ b: 30, c: 30 });
+  });
+
+  it('doubles the wait for a refused purge with each delivery, up to 15 minutes', () => {
+    expect([1, 2, 3, 4, 5, 6, 10].map((a) => backoff(a, 30, 900))).toEqual([
+      30, 60, 120, 240, 480, 900, 900,
+    ]);
   });
 });

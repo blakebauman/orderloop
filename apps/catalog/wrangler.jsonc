@@ -57,6 +57,9 @@
         "max_batch_size": 10,
         "max_batch_timeout": 1,
         "max_retries": 4,
+        // The consumer backs off per message (index.ts); this is the delay when an invocation
+        // throws instead, which would otherwise redeliver at once.
+        "retry_delay": 30,
         "dead_letter_queue": "orderloop-catalog-feed-parts-dlq"
       },
       {
@@ -65,7 +68,31 @@
         "max_batch_size": 100,
         "max_batch_timeout": 2,
         "max_retries": 10,
+        "retry_delay": 30,
         "dead_letter_queue": "orderloop-catalog-changes-dlq"
+      },
+      // The dead-letter queues, catalog-edge's purge one too: each message is kept in PUBLISHED
+      // under dlq/ and logged (dead-letters.ts). They have no dead-letter queue of their own.
+      {
+        "queue": "orderloop-catalog-feed-parts-dlq",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "retry_delay": 60
+      },
+      {
+        "queue": "orderloop-catalog-changes-dlq",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "retry_delay": 60
+      },
+      {
+        "queue": "orderloop-catalog-purge-dlq",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "retry_delay": 60
       }
     ]
   },

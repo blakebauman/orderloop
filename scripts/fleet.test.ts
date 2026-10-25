@@ -8,6 +8,7 @@ import {
   loadDeployments,
   matrix,
   missingPluginSecrets,
+  names,
   pluginBinding,
   pluginKey,
   pluginOwnSecrets,
@@ -85,7 +86,13 @@ test('the catalog config has its own name, bucket, card namespace and jurisdicti
   assert.equal(c.queues.consumers[0].dead_letter_queue, 'orderloop-catalog-feed-parts-dlq-acme');
   assert.deepEqual(
     c.queues.consumers.map((q: { queue: string }) => q.queue),
-    ['orderloop-catalog-feed-parts-acme', 'orderloop-catalog-changes-acme'],
+    [
+      'orderloop-catalog-feed-parts-acme',
+      'orderloop-catalog-changes-acme',
+      'orderloop-catalog-feed-parts-dlq-acme',
+      'orderloop-catalog-changes-dlq-acme',
+      'orderloop-catalog-purge-dlq-acme',
+    ],
   );
   assert.ok(
     c.queues.producers.some((p: { queue: string }) => p.queue === 'orderloop-catalog-changes-acme'),
@@ -129,6 +136,26 @@ test("catalog-edge serves catalog.<domain> from the deployment's bucket, cards a
     () => toDeployment({ id: 'beta', ring: 'canary', slot: 5, catalogDomain: 'x' }),
     /catalogDomain/,
   );
+});
+
+test("the catalog consumes every dead-letter queue, its own and catalog-edge's, by the deployment's names", () => {
+  type Consumer = { queue: string; dead_letter_queue?: string; retry_delay?: number };
+  const catalog: Consumer[] = renderCatalog(base('catalog'), acme).queues.consumers;
+  const edge: Consumer[] = renderCatalogEdge(base('catalog-edge'), acme).queues.consumers;
+  const dlqs = [...catalog, ...edge].flatMap((c) => c.dead_letter_queue ?? []);
+  const n = names(acme);
+  assert.deepEqual(
+    dlqs.sort(),
+    [n.catalogChangesDlq, n.catalogFeedPartsDlq, n.catalogPurgeDlq].sort(),
+  );
+  const consumed = new Set(catalog.map((c) => c.queue));
+  for (const q of dlqs) assert.ok(consumed.has(q), `${q} has no consumer`);
+  // A dead-letter queue's consumer has no dead-letter queue of its own.
+  for (const c of catalog.filter((c) => dlqs.includes(c.queue)))
+    assert.equal(c.dead_letter_queue, undefined);
+  // Every consumer delays a retry after a thrown invocation instead of redelivering at once.
+  for (const c of [...catalog, ...edge])
+    assert.ok((c.retry_delay ?? 0) > 0, `${c.queue} retry_delay`);
 });
 
 test('the web config binds its own engine, domain and rate-limit namespaces', () => {
