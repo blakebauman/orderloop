@@ -5,7 +5,9 @@ import { createDb, installedPlugins, publishFlow } from '@orderloop/db';
 import { pluginContract } from '@orderloop/plugin-sdk/contract';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { runJson } from '../../src/ai';
 import {
+  DRAFT_TIMEOUT_MS,
   type DraftAnswer,
   draftManifest,
   draftPlugin,
@@ -158,6 +160,23 @@ describe('plugins the assistant drafts', () => {
     const second = await draftPlugin(answering(answer({ name: 'Same name' })), admin, 'b', via);
     expect([first.id, second.id]).toEqual(['ai-same-name', 'ai-same-name-2']);
     expect(second.version).toBe('1');
+  });
+
+  it('gives the model longer to write a draft than an order step’s call', async () => {
+    // Writing code and cases takes the assistant's model well past an order step's 20 seconds.
+    expect(DRAFT_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+    const slow = {
+      ...env,
+      AI_MODE: 'model',
+      AI: {
+        run: () => new Promise((ok) => setTimeout(() => ok({ response: { ok: true } }), 100)),
+      },
+    } as unknown as Env;
+    const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] };
+    const call = (timeoutMs: number) =>
+      runJson(slow, 'plugin_draft', [], schema, () => ({ ok: false }), { timeoutMs });
+    expect(await call(20)).toMatchObject({ source: 'heuristic', fallback: /timed out after 20ms/ });
+    expect(await call(5_000)).toMatchObject({ source: 'model', value: { ok: true } });
   });
 
   it('runs its cases in the sandbox, and fails a case whose rule throws', async () => {

@@ -1107,7 +1107,7 @@ Extract order is the exception: it sends the inbound document text whole (first 
 
 Every AI node except Assess, and the copilot, go through `runJson` (`apps/engine/src/ai.ts`):
 `response_format: json_schema`, temperature `0.2`, `max_tokens` 2048, a 20-second cap
-(`AI_TIMEOUT_MS`), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
+(`AI_TIMEOUT_MS`; a caller no order waits on may pass a longer `timeoutMs`, as the plugin drafter does), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
 non-conforming answer is treated like an error. On `AI_MODE=mock`, an error, a timeout or an empty
 answer, each node's heuristic runs and the output records `source: "heuristic"`. Every answer
 carries `AiProvenance` (`packages/core/src/provenance.ts`): `source`, `model` (null for the
