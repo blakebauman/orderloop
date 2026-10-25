@@ -286,6 +286,8 @@ export interface EngineRpc {
    * runtime".
    */
   listPluginInstalls(): Promise<PluginInstallView[]>;
+  /** The names of the publishers whose signed files an admin may upload (never their keys). */
+  pluginPublishers(): Promise<string[]>;
   uploadPlugin(bundle: string, by: string): Promise<Refusable<PluginInstallView>>;
   approvePlugin(
     id: string,

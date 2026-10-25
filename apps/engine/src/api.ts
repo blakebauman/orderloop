@@ -177,6 +177,10 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return installs.listPluginInstalls(this.env);
   }
 
+  pluginPublishers() {
+    return Promise.resolve(installs.publisherNames(this.env));
+  }
+
   uploadPlugin(bundle: string, by: string) {
     return installs.refusable(() => installs.uploadPlugin(this.env, bundle, by));
   }
