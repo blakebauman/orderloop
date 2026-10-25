@@ -575,7 +575,14 @@ export type ProvideRequest = {
       surface: 'shipping.rates';
       op: 'quote';
       order: Order | RedactedOrder;
-      input: { itemCount: number; country?: string; subtotal: number; currency: string };
+      input: {
+        itemCount: number;
+        /** Total billable kg, when the node's basis weighs units (`weight` or `dim_weight`). */
+        billableKg?: number;
+        country?: string;
+        subtotal: number;
+        currency: string;
+      };
     }
   | {
       surface: 'shipping.labels';

@@ -247,7 +247,7 @@ export const NODE_SPECS = [
           domesticCountries: ['US'],
           freeThreshold: 500,
         },
-        hint: 'services (base + perItem × units, in the base currency), liveCarriers, intlMultiplier, domesticCountries, freeThreshold',
+        hint: 'services (base + perItem × units + perKg × billable kg, in the base currency), basis (units, weight or dim_weight), dimDivisor, defaultKg, liveCarriers, intlMultiplier, domesticCountries, freeThreshold',
       },
       {
         key: 'select',

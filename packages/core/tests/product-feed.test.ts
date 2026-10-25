@@ -139,6 +139,27 @@ describe('CSV products', () => {
     ]);
   });
 
+  it('reads shipping weight and size per variant row, size all or nothing', async () => {
+    const rows = await read(
+      [
+        'key,type,title:en,sku,weightKg,lengthCm,widthCm,heightCm,attr.size,attr.color',
+        'tee,apparel,Tee,TEE-S,0.25,30,20,2,S,red',
+        'tee,,,TEE-M,0.3,,,,M,red',
+        'cap,apparel,Cap,CAP-1,,20,,10,S,red',
+      ].join('\n'),
+    );
+    expect(rows[0]?.product?.variants).toEqual([
+      {
+        sku: 'TEE-S',
+        weightKg: 0.25,
+        dimensionsCm: { length: 30, width: 20, height: 2 },
+        attributes: { size: 'S', color: 'red' },
+      },
+      { sku: 'TEE-M', weightKg: 0.3, attributes: { size: 'M', color: 'red' } },
+    ]);
+    expect(rows[1]).toMatchObject({ error: 'lengthCm, widthCm and heightCm go together' });
+  });
+
   it('reports a bad row against its product and keeps going', async () => {
     const rows = await read(
       [

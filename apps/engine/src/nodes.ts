@@ -14,6 +14,7 @@ import {
   assessBranch,
   assessQuestionsSchema,
   BASE_CURRENCY,
+  billableKg,
   checkAddress,
   choosePromotions,
   computeTotals,
@@ -286,7 +287,8 @@ export const EXECUTORS: Record<string, Exec> = {
     if (!rates.success)
       throw new NonRetryableError(`Invalid shipping rates: ${rates.error.issues[0]?.message}`);
     const method = ctx.order.fulfillment?.method ?? 'ship';
-    const units = method === 'ship' ? await cx.physicalUnits(env, ctx.order) : 0;
+    const lines = method === 'ship' ? await cx.physicalLines(env, ctx.order) : [];
+    const units = lines.reduce((n, l) => n + l.qty, 0);
     if (!units) {
       const t = computeTotals({ ...ctx.order, shipping: 0 });
       return {
@@ -301,7 +303,18 @@ export const EXECUTORS: Record<string, Exec> = {
     }
     const fx = ctx.order.fxRate;
     const country = shipToCountry(ctx.order);
-    const req = { itemCount: units, country, subtotal: toBase(ctx.order.subtotal, fx) };
+    // Weighed only when the basis asks; a unit whose product has no weight or size counts
+    // `defaultKg`, and the output says how many did.
+    const weighed = billableKg(rates.data, lines);
+    const req = {
+      itemCount: units,
+      ...(weighed ? { billableKg: weighed.kg } : {}),
+      country,
+      subtotal: toBase(ctx.order.subtotal, fx),
+    };
+    const weight = weighed
+      ? { basis: rates.data.basis, billableKg: weighed.kg, estimatedUnits: weighed.estimated }
+      : {};
     const by = providerOf(config);
     const { options, source, providerError } = await cx.quoteShipping(
       env,
@@ -340,6 +353,7 @@ export const EXECUTORS: Record<string, Exec> = {
         output: {
           country: country ?? null,
           units,
+          ...weight,
           source,
           options: offered,
           wanted: wanted ?? null,
@@ -354,6 +368,7 @@ export const EXECUTORS: Record<string, Exec> = {
       output: {
         country: country ?? null,
         units,
+        ...weight,
         source,
         option: chosen,
         options: offered,
