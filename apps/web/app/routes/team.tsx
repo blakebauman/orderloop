@@ -15,6 +15,7 @@ import {
   useNavigation,
 } from 'react-router';
 import { Ago } from '~/components/ago';
+import { Confirm } from '~/components/confirm';
 import { CopyButton } from '~/components/copy-button';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
@@ -535,30 +536,25 @@ export default function Team() {
                                 <input type="hidden" name="intent" value={asking.intent} />
                                 <input type="hidden" name="id" value={p.id} />
                                 <input type="hidden" name="who" value={p.name} />
-                                <span className="mr-auto text-sm">
-                                  {QUESTIONS[asking.intent](p.name)}
-                                </span>
-                                {asking.intent === 'disable' ||
-                                (asking.intent === 'enable' && p.role === 'viewer') ? null : (
-                                  <StepUpField method={stepUp} next="/team" />
-                                )}
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  type="button"
-                                  onClick={keep}
-                                  autoFocus
+                                <Confirm
+                                  message={QUESTIONS[asking.intent](p.name)}
+                                  cancelLabel="Keep"
+                                  onCancel={keep}
+                                  className="flex-1"
                                 >
-                                  Keep
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  type="submit"
-                                  disabled={busy}
-                                >
-                                  {ACTIONS[asking.intent]}
-                                </Button>
+                                  {asking.intent === 'disable' ||
+                                  (asking.intent === 'enable' && p.role === 'viewer') ? null : (
+                                    <StepUpField method={stepUp} next="/team" />
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    type="submit"
+                                    disabled={busy}
+                                  >
+                                    {ACTIONS[asking.intent]}
+                                  </Button>
+                                </Confirm>
                               </fetcher.Form>
                             </td>
                           </tr>
