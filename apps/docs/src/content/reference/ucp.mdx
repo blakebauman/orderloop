@@ -287,7 +287,8 @@ Arguments are `{ meta, id?, checkout? }`:
 
 - `meta["ucp-agent"].profile` is required on every call and must be the platform's registered
   profile.
-- `meta["idempotency-key"]` is required for `complete_checkout` and `cancel_checkout`.
+- `meta["idempotency-key"]` is required for `complete_checkout` and `cancel_checkout`, 16 to 255
+  characters as over REST.
 - `id` is the checkout (or, for `get_order`, the order); `checkout` is the same body REST takes.
 
 A business outcome is a result whose `structuredContent` is the UCP body, as on REST. A protocol

@@ -41,7 +41,9 @@ and before **Calculate tax** so tax is worked out on the discounted prices. For 
 applies is used, each on the prices the one before left.
 
 A code that doesn't apply (unknown, paused, expired, for another customer, below its minimum,
-covering nothing in the order, or used up) is left out, and the step's result on the order page says why. A
+covering nothing in the order, or used up) is left out, and the step's result on the order page says why.
+A code reserved for another customer is described exactly like one that doesn't exist, so a buyer
+can't discover codes meant for someone else. A
 [cart](/guides/carts/) is priced by its flow's steps, Apply promotions included, so a cart's
 total is what its order charges.
 

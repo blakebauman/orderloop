@@ -65,6 +65,9 @@ export async function syncUcpOrder(
 
   const found = await orderEntity(env, orderId, negotiation.capabilities, u.origin);
   if (!found) return { sent: false, retry: false, reason: 'no such order' };
+  // Only to the platform whose checkout placed it, whatever the order's meta says.
+  if (found.session.ownerId !== u.platformId)
+    return { sent: false, retry: false, reason: 'not this platform’s order' };
   const body = JSON.stringify(found.entity);
   const digest = await contentDigest(body);
   if (digest === lastDigest) return { sent: false, digest, retry: false, reason: 'unchanged' };

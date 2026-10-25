@@ -89,7 +89,9 @@ To test without a mail server, call `receiveEmail` from a test with a fake
 - **Shopify** ([Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#shopify)): put the
   Shopify app's client secret on the web Worker with
   `pnpm --filter @orderloop/web exec wrangler secret put SHOPIFY_WEBHOOK_SECRET` (for local dev,
-  `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`). Until it is set the route answers `503`. The
+  `SHOPIFY_WEBHOOK_SECRET` in `apps/web/.dev.vars`), and the stores that may send orders as
+  `SHOPIFY_SHOPS` (comma-separated `*.myshopify.com` domains, the same way). Until both are set the
+  route answers `503`; a store not listed gets `403`. The
   integrator creates the `orders/create` webhook in Shopify, pointing at
   `https://orderloop.app/api/v1/channels/shopify/orders`.
 - **EDI X12 850** ([Channel adapters](https://docs.orderloop.app/guides/channel-adapters/#edi-x12-850)):

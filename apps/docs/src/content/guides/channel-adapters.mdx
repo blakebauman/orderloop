@@ -21,12 +21,15 @@ never starts a second order.
 
 1. In your Shopify app, create an `orders/create` webhook with the format JSON, pointing at
    `https://orderloop.app/api/v1/channels/shopify/orders`.
-2. Give the app's client secret (the key Shopify signs webhooks with) to your OrderLoop
-   administrator, who adds it to the workspace. Until they do, the route answers `503`.
+2. Give the app's client secret (the key Shopify signs webhooks with) and your store's
+   `*.myshopify.com` domain to your OrderLoop administrator, who adds both to the workspace. Until
+   they do, the route answers `503`.
 
 Shopify can't send a bearer token, so the route needs none. It verifies `X-Shopify-Hmac-Sha256`,
 the base64 HMAC-SHA256 of the raw body keyed with the client secret, compared in constant time.
 Topics other than `orders/create` are acknowledged and ignored so Shopify stops retrying them.
+One client secret signs for every store the app is installed on, so an order from a store that
+isn't listed for the workspace (`X-Shopify-Shop-Domain`) is refused with `403`.
 
 ### Field mapping
 

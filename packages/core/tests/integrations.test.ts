@@ -70,7 +70,7 @@ describe('rotation', () => {
     const body = '{"orderId":"ord_1"}';
     const header = await signWebhook('old', body, 1_000_000, 'int_1');
     const opts = { nowSec: 1_000_010 };
-    expect(await verifyWebhook(['new', 'old'], body, header, opts)).toEqual({ ok: true });
+    expect(await verifyWebhook(['new', 'old'], body, header, opts)).toMatchObject({ ok: true });
     expect(await verifyWebhook(['new'], body, header, opts)).toMatchObject({ ok: false });
   });
 });

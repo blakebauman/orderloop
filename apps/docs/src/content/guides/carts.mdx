@@ -29,7 +29,8 @@ way an order on that flow is priced. Until the new price is in, the cart shows *
 - A cart holds at most 100 lines, and a line at most 10,000 units.
 - **Promotion codes** go in the box under the price (up to five a cart). They change the price
   only if the cart's flow has an Apply promotions step; a code that doesn't apply, or a flow
-  without that step, is shown under the price, and the cart can still be submitted.
+  without that step, is shown under the price, and the cart can still be submitted. A cart takes
+  at most ten codes tried in an hour, by anyone, so codes can't be guessed through it.
 - A SKU the store doesn't sell, or a line that is short of stock, shows its problem under the line.
   A policy the cart breaks (an order minimum, say) shows under the price.
 
@@ -37,7 +38,9 @@ way an order on that flow is priced. Until the new price is in, the cart shows *
 
 Attach spec sheets, quote requests or photos under **Files**: PDF, PNG, JPEG or WebP images, CSV
 or text, and Excel or Word files, up to 10 MB each and 20 a cart. Operators and the cart's buyer
-can add files while the cart is open; everyone who can see the cart can download them. Whoever
+can add files while the cart is open; everyone who can see the cart can download them. An
+external cart's buyer can download them while the cart is open or returned to their system, not
+once it is submitted, cancelled or expired. Whoever
 added a file, or an operator, can remove it, which deletes it.
 
 ## How long a cart's conversation is kept

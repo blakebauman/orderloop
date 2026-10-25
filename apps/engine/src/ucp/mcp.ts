@@ -11,6 +11,7 @@
  */
 
 import { type PlatformCaller, ucpCheckoutInput } from '@orderloop/core';
+import { idempotencyKeyProblem, readCappedText } from '../body';
 import {
   cancelCheckout,
   completeCheckout,
@@ -153,8 +154,8 @@ export async function handleUcpMcp(
 ): Promise<Response> {
   if (request.method !== 'POST')
     return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });
-  const text = await request.text();
-  if (text.length > MAX_BODY) return rpcError(null, -32600, 'Request too large', undefined, 413);
+  const text = await readCappedText(request, MAX_BODY);
+  if (text === null) return rpcError(null, -32600, 'Request too large', undefined, 413);
   let rpc: Rpc;
   try {
     rpc = JSON.parse(text) as Rpc;
@@ -233,6 +234,12 @@ async function callTool(env: Env, caller: PlatformCaller, rpc: Rpc): Promise<Res
             body: { code: 'idempotency_key_required', content: 'Send meta["idempotency-key"].' },
           })
         : op();
+    const problem = idempotencyKeyProblem(key);
+    if (problem)
+      return Promise.resolve<UcpResult>({
+        status: 400,
+        body: { code: 'invalid_idempotency_key', content: problem },
+      });
     const { meta: _meta, ...payload } = args;
     return once(env, caller.id, key, name, JSON.stringify(payload), op);
   };

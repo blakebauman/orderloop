@@ -15,7 +15,13 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import { egressRefusal, knownManifests, limitsFor, pluginStub } from '../../src/plugin-host';
+import {
+  egressRefusal,
+  isPrivateAddress,
+  knownManifests,
+  limitsFor,
+  pluginStub,
+} from '../../src/plugin-host';
 import { manifests, pluginStatuses } from '../../src/plugins';
 import { edge, node, probeFlow, settled, stampFlow, stampInput } from '../plugin-helpers';
 
@@ -355,5 +361,24 @@ describe('the sandbox’s rules', () => {
     ])
       expect(egressRefusal(m, new URL(url)), url).not.toBeNull();
     expect(egressRefusal(m, new URL('https://api.carrier.test/rates'))).toBeNull();
+  });
+
+  it('counts addresses that wrap or document another as private', () => {
+    for (const host of [
+      '[64:ff9b::a00:1]', // NAT64 of 10.0.0.1
+      '[64:ff9b:1::1]',
+      '[2002:a00:1::1]', // 6to4 of 10.0.0.1
+      '[2001:db8::1]',
+      '198.51.100.7',
+      '203.0.113.9',
+      '192.0.2.1',
+      '192.88.99.1', // the 6to4 relay
+      '[2001::1]', // Teredo
+      '[2001:0:4136:e378::1]',
+      '[::10.0.0.1]', // IPv4-compatible, written ::a00:1
+    ])
+      expect(isPrivateAddress(new URL(`https://${host}/`).hostname), host).toBe(true);
+    for (const host of ['[2606:4700::1111]', '1.1.1.1', '198.51.101.1'])
+      expect(isPrivateAddress(new URL(`https://${host}/`).hostname), host).toBe(false);
   });
 });

@@ -57,7 +57,7 @@ describe('webhook secrets at rest', () => {
     });
     expect(headers[0]!.match(/v1=/g)).toHaveLength(2);
     for (const s of ['whsec_new', 'whsec_old'])
-      expect(await verifyWebhook(s, bodies[0]!, headers[0]!)).toEqual({ ok: true });
+      expect(await verifyWebhook(s, bodies[0]!, headers[0]!)).toMatchObject({ ok: true });
   });
 
   it('signs with the new secret alone once the rotation is over', async () => {

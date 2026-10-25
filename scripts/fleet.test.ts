@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
 import {
+  keysProblem,
   loadDeployments,
   matrix,
   missingPluginSecrets,
@@ -690,4 +691,13 @@ test('the reserved path segments cover every top-level path the web app serves',
   for (const s of ['ucp', 'scim', 'mcp', 'a2a', 'oauth']) segments.add(s); // via *_PATH constants
   const missing = [...segments].filter((s) => !RESERVED_PATH_SEGMENTS.has(s));
   assert.deepEqual(missing, []);
+});
+
+test('the deploy refuses a shared key too short to sign with', () => {
+  const key = 'a'.repeat(64);
+  assert.equal(keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key }), null);
+  assert.match(
+    keysProblem({ PRINCIPAL_KEY: 'short', DATA_KEY: key, DATA_KEY_PREVIOUS: 'x'.repeat(31) }) ?? '',
+    /^PRINCIPAL_KEY, DATA_KEY_PREVIOUS must be at least 32 characters/,
+  );
 });

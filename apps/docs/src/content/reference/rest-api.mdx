@@ -327,8 +327,9 @@ signature or unknown or revoked integration, `403` the integration may not start
 `X-Shopify-Hmac-Sha256` header (base64 HMAC-SHA256 of the raw body with your Shopify app's
 client secret, which your administrator adds to the workspace) rather than a token. Statuses: `201 { orderId, flowId }` started, `200 { orderId, replayed: true }`
 replay, `200 { ignored: true, topic }` for any other `X-Shopify-Topic`, `400` not JSON, unmappable
-(a line item without a SKU) or invalid, or an unsupported currency, `401` bad signature, `409` flow not published,
-`422` same order with different contents, `503` the workspace hasn't enabled Shopify.
+(a line item without a SKU) or invalid, or an unsupported currency, `401` bad signature, `403` a store not
+connected to the workspace, `409` flow not published, `422` same order with different contents, `503` the
+workspace hasn't enabled Shopify.
 
 `POST /api/v1/channels/edi/850` takes a raw X12 interchange and needs the `operator` role. The
 sender (`ISA06`) must be in the workspace's EDI partner list. It answers `200 { sender, results }` with one

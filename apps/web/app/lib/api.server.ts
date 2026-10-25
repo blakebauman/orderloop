@@ -120,6 +120,7 @@ import { actor, forbidden } from './auth.server';
 import { BodyTooLarge, MAX_EDI_BYTES, readText, tooLarge } from './body';
 import { isCartStatus, listCarts } from './carts.server';
 import { handleCatalog } from './catalog-api.server';
+import { sha256Hex } from './credentials';
 import { decodeCursor, encodeCursor } from './cursor';
 import { db, engine } from './env.server';
 import { ensureSeeded, listFlows } from './flows.server';
@@ -768,7 +769,10 @@ async function readSigned(
   const limited = await overBudget('WEBHOOK_LIMIT', integration.id);
   if (limited) return { refused: limited };
   await touchIntegration(integration.id);
-  return { raw, signature: /v1=([0-9a-f]+)/i.exec(header ?? '')?.[1] ?? '', integration };
+  // What was signed, not how the header spelled it or which secret matched: a copy with its hex in
+  // another case, another `v1=` beside it, or only the old secret's signature during a rotation
+  // still verifies, and must hit the same replay receipt.
+  return { raw, signature: await sha256Hex(`${check.t}.${raw}`), integration };
 }
 
 /**
@@ -921,9 +925,28 @@ async function startInbound(
  * Shopify's orders/create webhook, signed with the app's client secret. Other topics are
  * acknowledged and ignored so Shopify stops retrying them.
  */
+/** The stores in `SHOPIFY_SHOPS`, as hosts: lower-cased, any `https://` or trailing `/` dropped. */
+export const shopifyShops = (raw: string | undefined) =>
+  new Set(
+    (raw ?? '')
+      .split(/[\s,]+/)
+      .map((s) =>
+        s
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\//, '')
+          .replace(/\/+$/, ''),
+      )
+      .filter(Boolean),
+  );
+
 export async function handleShopifyOrder(request: Request): Promise<Response> {
-  const secret = (env as { SHOPIFY_WEBHOOK_SECRET?: string }).SHOPIFY_WEBHOOK_SECRET;
-  if (!secret) return json({ error: 'Shopify is not configured' }, 503);
+  const e = env as { SHOPIFY_WEBHOOK_SECRET?: string; SHOPIFY_SHOPS?: string };
+  const secret = e.SHOPIFY_WEBHOOK_SECRET;
+  // One app secret signs for every store the app is installed on, so the stores that may send
+  // orders are listed too (`SHOPIFY_SHOPS`, comma-separated *.myshopify.com domains).
+  const shops = shopifyShops(e.SHOPIFY_SHOPS);
+  if (!secret || !shops.size) return json({ error: 'Shopify is not configured' }, 503);
   let raw: string;
   try {
     raw = await readText(request);
@@ -933,6 +956,10 @@ export async function handleShopifyOrder(request: Request): Promise<Response> {
   }
   if (!(await verifyShopifyHmac(secret, raw, request.headers.get('x-shopify-hmac-sha256'))))
     return json({ error: 'Bad signature' }, 401);
+  // The domain header isn't signed, but only a store the app is installed on can get Shopify to
+  // sign for it, and this one must be ours.
+  if (!shops.has((request.headers.get('x-shopify-shop-domain') ?? '').toLowerCase()))
+    return json({ error: 'This store isn’t connected here' }, 403);
   // Shopify signs with one app secret, so the shop is the sender.
   const limited = await overBudget(
     'WEBHOOK_LIMIT',

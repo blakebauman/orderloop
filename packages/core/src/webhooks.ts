@@ -100,7 +100,14 @@ function headerParts(header: string): Map<string, string[]> {
 export const signatureKeyId = (header: string | null): string | undefined =>
   header ? headerParts(header).get('k')?.[0] || undefined : undefined;
 
-export type VerifyResult = { ok: true } | { ok: false; reason: string };
+/**
+ * `signature` is the one that matched, as this side computed it (lower-case hex), and `t` the
+ * signed timestamp. A replay check keys on `t` and the body, never on the signature: during a
+ * rotation one delivery can be signed under two secrets, and either copy verifies.
+ */
+export type VerifyResult =
+  | { ok: true; signature: string; t: number }
+  | { ok: false; reason: string };
 
 /**
  * Checks a signature against `secret`, or against each of several (a key being rotated). The header
@@ -126,7 +133,7 @@ export async function verifyWebhook(
     // Every candidate is compared, so the time taken doesn't say which one matched.
     let match = false;
     for (const v of given) match = constantTimeEqual(expected, v) || match;
-    if (match) return { ok: true };
+    if (match) return { ok: true, signature: expected, t };
   }
   return { ok: false, reason: 'Signature mismatch' };
 }

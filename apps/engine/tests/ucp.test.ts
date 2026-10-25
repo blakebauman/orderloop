@@ -330,6 +330,31 @@ describe('UCP over MCP', () => {
     ]);
   });
 
+  it('holds an MCP idempotency key to REST’s length, and refuses an oversized request', async () => {
+    const created = await rpc('tools/call', {
+      name: 'create_checkout',
+      arguments: { meta: meta(), checkout: monitorCheckout },
+    });
+    const id = created.body.result.structuredContent.id as string;
+    const short = await rpc('tools/call', {
+      name: 'cancel_checkout',
+      arguments: { meta: { ...meta(), 'idempotency-key': 'short' }, id },
+    });
+    expect(JSON.stringify(short.body)).toContain('invalid_idempotency_key');
+    const big = await worker.fetch(
+      new Request('https://engine/ucp/mcp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          [PRINCIPAL_HEADER]: await signPlatform(principalKey, alpha, '/ucp/mcp'),
+        },
+        body: 'x'.repeat(257 * 1024),
+      }),
+      env,
+    );
+    expect(big.status).toBe(413);
+  });
+
   it('creates and reads a checkout, the UCP body in structuredContent', async () => {
     const created = await rpc('tools/call', {
       name: 'create_checkout',
