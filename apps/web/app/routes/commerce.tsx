@@ -229,8 +229,14 @@ export default function Commerce() {
             </p>
           ) : null}
         </Form>
-        <nav aria-label="On this page" className="mb-4 text-sm">
-          <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
+      </div>
+      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
+        {/* On a phone the sections run long: the links stay under the top bar, on one scrolling line. */}
+        <nav
+          aria-label="On this page"
+          className="sticky top-[var(--shell-h)] z-10 -mx-4 border-b bg-background px-4 text-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 xl:col-span-2"
+        >
+          <ul className="flex gap-x-5 gap-y-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
             {[
               ['#outside-events', 'Outside events'],
               ['#records', 'Records'],
@@ -242,15 +248,13 @@ export default function Commerce() {
               ['#sellers', 'Marketplace sellers'],
             ].map(([href, label]) => (
               <li key={href}>
-                <a href={href} className="inline-block py-1 text-link hover:underline">
+                <a href={href} className="inline-block py-2.5 text-link hover:underline sm:py-1">
                   {label}
                 </a>
               </li>
             ))}
           </ul>
         </nav>
-      </div>
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
         <Section
           id="outside-events"
           title="Outside events"
