@@ -65,6 +65,18 @@ export function unalias(pathname: string): string | null {
   return null;
 }
 
+/**
+ * Whether `pathname` (or the plugin path its alias stands for) is one of an installed plugin's
+ * `publicPaths`: forwarded with no sign-in and no cookie, so the cross-site check doesn't apply.
+ */
+export async function isPluginPublicPath(pathname: string): Promise<boolean> {
+  const path = pluginPathId(pathname) ? pathname : unalias(pathname);
+  const id = path ? pluginPathId(path) : null;
+  if (!id || !path) return false;
+  const status = (await pluginStatuses()).find((s) => s.id === id);
+  return !!status?.manifest?.publicPaths.includes(path);
+}
+
 /** The largest request body forwarded to a plugin. */
 export const MAX_PLUGIN_BODY = 10 * 1024 * 1024;
 

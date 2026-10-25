@@ -31,7 +31,7 @@ import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
 import { crossOrigin } from '../app/lib/origin';
-import { pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
+import { isPluginPublicPath, pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
 import { setGuestHeader, setPrincipalHeader } from '../app/lib/principal.server';
 import { overBudget } from '../app/lib/rate-limit';
 import { SCIM_PATH } from '../app/lib/scim';
@@ -138,7 +138,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // A browser's state-changing requests and the order page's socket must come from this origin;
   // bearer-token calls carry no ambient cookie, so they're exempt.
   const bearer = /^Bearer\s/i.test(request.headers.get('authorization') ?? '');
-  if (!bearer && crossOrigin(request, url.origin))
+  // A plugin's public path is exempt too: it is forwarded without the cookie or any sign-in, so
+  // there is nothing ambient to forge (a buyer's procurement system posts it from its own site).
+  if (!bearer && crossOrigin(request, url.origin) && !(await isPluginPublicPath(url.pathname)))
     return Response.json({ error: 'Cross-site request refused' }, { status: 403 });
 
   // The API description is public, like any published spec.

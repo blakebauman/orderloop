@@ -204,6 +204,57 @@ describe('the plugin host API', () => {
     ).toMatchObject({ ok: false });
   });
 
+  it('cancels only an order it started, by its key, once', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const key = `po-${crypto.randomUUID()}`;
+    const started = await hostFor('example').startOrder({
+      key,
+      flowId: 'tpl-b2b-order',
+      input: { model: 'b2b', customerId: 'cus_northwind', lines: [{ sku: 'WID-100', qty: 1 }] },
+    });
+    if (!started.ok) throw new Error(started.error);
+    expect(await hostFor('fixture-carrier').cancelOrder({ key, reason: 'x' })).toMatchObject({
+      ok: false,
+    });
+    expect(await hostFor('example').cancelOrder({ key: 'never', reason: 'x' })).toEqual({
+      ok: false,
+      error: 'No order was started under that key.',
+    });
+    const first = await hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' });
+    expect(first).toMatchObject({ ok: true, orderId: started.orderId });
+    expect(['cancelled', 'finished']).toContain((first as { outcome: string }).outcome);
+    if ((first as { outcome: string }).outcome === 'cancelled')
+      expect(await hostFor('example').cancelOrder({ key, reason: 'again' })).toEqual({
+        ok: true,
+        orderId: started.orderId,
+        outcome: 'cancelled',
+      });
+  });
+
+  it('answers cancelled to a cancel that arrives while another is under way', async () => {
+    const key = `po-${crypto.randomUUID()}`;
+    const started = await hostFor('example').startOrder({
+      key,
+      flowId: 'tpl-b2b-order',
+      input: { model: 'b2b', customerId: 'cus_northwind', lines: [{ sku: 'WID-100', qty: 1 }] },
+    });
+    if (!started.ok) throw new Error(started.error);
+    // Both read the order live; the agent refuses the second while the first is cancelling it.
+    const both = await Promise.all([
+      hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' }),
+      hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' }),
+    ]);
+    expect(both).toEqual([
+      { ok: true, orderId: started.orderId, outcome: 'cancelled' },
+      { ok: true, orderId: started.orderId, outcome: 'cancelled' },
+    ]);
+    expect((await api().snapshot(started.orderId))?.status).toBe('cancelled');
+  });
+
   it('keeps the core’s meta keys to the core, and refuses a currency with no rate', async () => {
     introspector = await introspectWorkflow(env.ORDER_LOOP);
     await introspector.modifyAll(async (m) => {

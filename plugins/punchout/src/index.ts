@@ -15,7 +15,7 @@
  */
 
 import type { PluginCart } from '@orderloop/core';
-import { definePlugin, host } from '@orderloop/plugin-sdk';
+import { definePlugin, host, pluginDb } from '@orderloop/plugin-sdk';
 import {
   CxmlError,
   orderMessage,
@@ -131,8 +131,94 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
   const partner = await findPartner(env, 'cxml', po.from);
   if (!partner || !(await secretMatches(partner, po.sharedSecret)))
     return refuse(401, 'Unknown buyer or wrong shared secret');
-  if (po.type !== 'new') return refuse(406, `Order type “${po.type}” is not supported`);
+  if (!['new', 'update', 'delete'].includes(po.type))
+    return refuse(406, `Order type “${po.type}” is not supported`);
   if (!po.payloadId) return refuse(400, 'The order has no payloadID');
+  const key = `cxml:${partner.id}:${po.payloadId}`.slice(0, 200);
+  const db = pluginDb(env);
+  type Version = {
+    key: string;
+    order_ref: string;
+    version: number;
+    type: string;
+    order_id: string | null;
+  };
+  const busy = () => refuse(409, `Order ${po.orderId} is being changed; send it again shortly`);
+  // A document sent again: answer as the first time, change nothing. One whose first try never
+  // finished (its claim has no order yet) is acted on again: every call below is keyed, so
+  // repeating it repeats nothing.
+  let mine = await db
+    .prepare('SELECT key, order_ref, version, type, order_id FROM purchase_orders WHERE key = ?')
+    .bind(key)
+    .first<Version>();
+  if (mine?.order_id) return xml(statusResponse(HOST, 200, 'OK', mine.order_id));
+  if (mine && (mine.order_ref !== po.orderId || mine.type !== po.type))
+    return refuse(409, `payloadID ${po.payloadId} was already sent for another change`);
+  if (!mine) {
+    // The latest version of this orderID, which an update or delete changes.
+    const latest = await db
+      .prepare(
+        'SELECT key, order_ref, version, type, order_id FROM purchase_orders WHERE partner_id = ? AND order_ref = ? ORDER BY version DESC LIMIT 1',
+      )
+      .bind(partner.id, po.orderId)
+      .first<Version>();
+    if (latest && !latest.order_id) return busy();
+    // A cancelled PO stays cancelled: a delete sent again answers it, anything else is refused.
+    if (latest?.type === 'delete')
+      return po.type === 'delete'
+        ? xml(statusResponse(HOST, 200, 'OK', latest.order_id ?? ''))
+        : refuse(409, `Order ${po.orderId} was cancelled`);
+    // A `new` for an order already started (sent again under a new payloadID): that order.
+    if (po.type === 'new' && latest)
+      return xml(statusResponse(HOST, 200, 'OK', latest.order_id ?? ''));
+    if (po.type !== 'new' && !latest)
+      return refuse(404, `No order ${po.orderId} to ${po.type === 'delete' ? 'cancel' : 'update'}`);
+    // Claim the next version before acting on it: of two changes sent at once, only the one whose
+    // insert lands acts on the version before; the other is told to send it again.
+    const version = (latest?.version ?? 0) + 1;
+    const claimed = await db
+      .prepare(
+        'INSERT INTO purchase_orders (key, partner_id, order_ref, version, type, order_id, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?) ON CONFLICT DO NOTHING',
+      )
+      .bind(key, partner.id, po.orderId, version, po.type, Date.now())
+      .run();
+    if (!claimed.meta.changes) return busy();
+    mine = { key, order_ref: po.orderId, version, type: po.type, order_id: null };
+  }
+  const before =
+    mine.version > 1
+      ? await db
+          .prepare(
+            'SELECT key, order_ref, version, type, order_id FROM purchase_orders WHERE partner_id = ? AND order_ref = ? AND version = ?',
+          )
+          .bind(partner.id, po.orderId, mine.version - 1)
+          .first<Version>()
+      : null;
+  const done = (orderId: string) =>
+    db.prepare('UPDATE purchase_orders SET order_id = ? WHERE key = ?').bind(orderId, key).run();
+  // Gives the version back when acting on it failed, so the PO stays at the version before.
+  const release = () =>
+    db.prepare('DELETE FROM purchase_orders WHERE key = ? AND order_id IS NULL').bind(key).run();
+  const verb = po.type === 'delete' ? 'cancelled' : 'changed';
+  const cancelBefore = async () => {
+    if (!before?.order_id) return { ok: false as const, error: `No order ${po.orderId} to change` };
+    return host(env).cancelOrder({
+      key: before.key,
+      reason: `Purchase order ${po.orderId} ${verb} by the buyer`,
+    });
+  };
+  const ended = () => refuse(409, `Order ${po.orderId} can't be ${verb}: it has already ended`);
+
+  if (po.type === 'delete') {
+    const cancelled = await cancelBefore();
+    if (!cancelled.ok || cancelled.outcome === 'finished') {
+      await release();
+      return cancelled.ok ? ended() : refuse(500, cancelled.error);
+    }
+    await done(cancelled.orderId);
+    return xml(statusResponse(HOST, 200, 'OK', cancelled.orderId));
+  }
+
   // Which carts the PO came from, by the SupplierPartAuxiliaryID each returned line carried.
   const carts = [
     ...new Set(po.items.map((i) => i.aux?.split(':')[0]).filter((c) => c?.startsWith('cart_'))),
@@ -146,7 +232,7 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
         }
       : undefined;
   const started = await host(env).startOrder({
-    key: `cxml:${partner.id}:${po.payloadId}`.slice(0, 200),
+    key,
     flowId: partner.flowId,
     input: {
       model: partner.model as 'b2b',
@@ -163,17 +249,39 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
       ...(contact ? { contact } : {}),
       meta: {
         ...(po.shipTo ? { shipTo: po.shipTo } : {}),
-        punchout: { partnerId: partner.id, orderId: po.orderId, carts },
+        punchout: {
+          partnerId: partner.id,
+          orderId: po.orderId,
+          carts,
+          ...(po.type === 'update' && before?.order_id ? { replaces: before.order_id } : {}),
+        },
       },
     },
   });
-  if (!started.ok) return refuse(400, started.error);
+  // The changed order starts before the one it replaces is cancelled, so a change the core refuses
+  // (an unknown SKU, a currency with no rate) leaves the PO's order running.
+  if (!started.ok) {
+    await release();
+    return refuse(400, started.error);
+  }
+  if (po.type === 'update') {
+    const cancelled = await cancelBefore();
+    if (!cancelled.ok || cancelled.outcome === 'finished') {
+      // The order it replaces can't be cancelled, so neither runs twice: withdraw the new one.
+      await host(env).cancelOrder({
+        key,
+        reason: `Purchase order ${po.orderId} could not be changed`,
+      });
+      await release();
+      return cancelled.ok ? ended() : refuse(500, cancelled.error);
+    }
+  }
+  await done(started.orderId);
   return xml(statusResponse(HOST, 200, 'OK', started.orderId));
 }
 
 async function ociSetup(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const setup = parseOciSetup(url.searchParams);
   const page = (status: number, body: string, head = '') =>
     new Response(
       `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">${head}<title>Punchout</title></head><body>${body}</body></html>`,
@@ -182,6 +290,18 @@ async function ociSetup(request: Request, env: Env): Promise<Response> {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       },
     );
+  // SAP opens the catalog with GET or a form POST; either way the same fields.
+  const params = new URLSearchParams(url.searchParams);
+  if (request.method === 'POST') {
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return page(400, '<p>The setup POST must be a form.</p>');
+    }
+    for (const [k, v] of form) if (typeof v === 'string') params.set(k, v);
+  }
+  const setup = parseOciSetup(params);
   if (!setup) return page(400, '<p>USERNAME, PASSWORD and HOOK_URL are required.</p>');
   const partner = await findPartner(env, 'oci', [{ domain: '', identity: setup.username }]);
   if (!partner || !(await secretMatches(partner, setup.password)))
@@ -269,7 +389,10 @@ export default definePlugin<Env>({
       return cxmlSetup(request, env);
     if (path === '/plugins/punchout/cxml/order' && request.method === 'POST')
       return cxmlOrder(request, env);
-    if (path === '/plugins/punchout/oci/setup' && request.method === 'GET')
+    if (
+      path === '/plugins/punchout/oci/setup' &&
+      (request.method === 'GET' || request.method === 'POST')
+    )
       return ociSetup(request, env);
     if (!principal) return new Response('Not found', { status: 404 });
     return adminPages(request, env);

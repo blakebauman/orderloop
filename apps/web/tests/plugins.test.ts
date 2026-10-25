@@ -83,6 +83,7 @@ vi.mock('~/lib/rate-limit', () => ({ overBudget }));
 const {
   pluginFetch: forward,
   pluginPathId,
+  isPluginPublicPath,
   unalias,
   MAX_PLUGIN_BODY,
 } = await import('~/lib/plugins.server');
@@ -265,5 +266,21 @@ describe('plugin aliases', () => {
     expect((await call(unalias('/ex/public/ping')!)).status).toBe(200);
     expect(new URL(sent().url).pathname).toBe('/plugins/example/public/ping');
     expect(sent().headers.get('x-orderloop-alias')).toBe('/ex/');
+  });
+});
+
+describe('the cross-site check and plugin public paths', () => {
+  afterEach(() => {
+    delete env.PLUGIN_ALIASES;
+  });
+
+  it('exempts only an installed plugin’s public paths, also under its alias', async () => {
+    expect(await isPluginPublicPath('/plugins/example/public/ping')).toBe(true);
+    expect(await isPluginPublicPath('/plugins/example/')).toBe(false);
+    expect(await isPluginPublicPath('/plugins/nope/public/ping')).toBe(false);
+    expect(await isPluginPublicPath('/api/v1/orders')).toBe(false);
+    env.PLUGIN_ALIASES = JSON.stringify({ '/ex/': 'example' });
+    expect(await isPluginPublicPath('/ex/public/ping')).toBe(true);
+    expect(await isPluginPublicPath('/ex/')).toBe(false);
   });
 });
