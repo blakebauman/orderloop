@@ -259,7 +259,6 @@ export class CartAgent extends Agent<Env, CartState> {
     return { messages: theirs, files: files.length };
   }
 
-  /** What the buyer of this external cart put on it, for a data subject export. */
   /** Writes this cart's index row again (the buyer a row from before migration 0050 lacks). */
   async reindex(): Promise<boolean> {
     if (!this.state.cart) return false;
@@ -267,6 +266,7 @@ export class CartAgent extends Agent<Env, CartState> {
     return true;
   }
 
+  /** What the buyer of this external cart put on it, for a data subject export. */
   async subjectExport() {
     const c = this.state.cart;
     if (!c?.external) return null;

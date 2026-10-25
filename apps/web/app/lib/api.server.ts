@@ -60,7 +60,6 @@ import {
   allowsEvent,
   allowsOrder,
   atLeast,
-  fingerprintOf,
   flowForOrder,
   type InboundOrder,
   inboundFingerprint,
@@ -79,7 +78,7 @@ import {
   shopifyToInbound,
   signatureKeyId,
   startOrderSchema,
-  subjectEmail,
+  subjectTarget,
   toStartRequest,
   ucpSettingsSchema,
   verificationSecrets,
@@ -481,7 +480,7 @@ async function handleDataSubjects(
   const parsed = dataSubjectInput.safeParse(await body());
   if (!parsed.success)
     return json({ error: 'Send { "email": "…" }', issues: parsed.error.issues }, 400);
-  const target = `subject:${(await fingerprintOf(subjectEmail(parsed.data.email))).slice(0, 16)}`;
+  const target = await subjectTarget(parsed.data.email);
   if (verb === 'export') {
     const data = await engine().exportDataSubject(parsed.data.email);
     await audit(request, 'personal_data.exported', {

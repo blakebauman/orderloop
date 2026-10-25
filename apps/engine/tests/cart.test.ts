@@ -171,28 +171,8 @@ describe('pricing a cart', () => {
 
 describe('promotion codes on a cart', () => {
   it('takes a code off the price when the cart’s flow applies promotions, and refuses an unknown one', async () => {
-    // The B2B flow with Apply promotions between pricing and tax.
-    const base = b2bOrderFlow();
-    const flow = {
-      ...base,
-      id: 'test-cart-promos',
-      nodes: [
-        ...base.nodes,
-        {
-          id: 'promo',
-          type: 'commerce.discount',
-          label: 'Promotions',
-          config: {},
-          position: { x: 0, y: 0 },
-        },
-      ],
-      edges: [
-        ...base.edges.map((e) =>
-          e.source === 'price' && e.target === 'tax' ? { ...e, target: 'promo' } : e,
-        ),
-        { id: 'e-promo-tax', source: 'promo', target: 'tax' },
-      ],
-    };
+    // The built-in B2B flow, which applies promotions between pricing and tax.
+    const flow = { ...b2bOrderFlow(), id: 'test-cart-promos' };
     await publishFlow(db(), flow);
     await db()
       .insert(promotions)

@@ -6,7 +6,7 @@
  * The audit log is kept as it is, under its own retention.
  */
 
-import type { OrderState } from './api';
+import { fingerprintOf, type OrderState } from './api';
 import { maskPersonalText, scrubPersonal } from './redact';
 
 /** What an erased value reads as. */
@@ -14,6 +14,10 @@ export const ERASED = '[erased]';
 
 /** A subject's email as matched: trimmed and lower-cased. */
 export const subjectEmail = (email: string) => email.trim().toLowerCase();
+
+/** The audit log's name for a data subject: a hash of their address, so the log doesn't keep it. */
+export const subjectTarget = async (email: string) =>
+  `subject:${(await fingerprintOf(subjectEmail(email))).slice(0, 16)}`;
 
 /** The address an erased customer keeps, since every customer needs one. */
 export const erasedCustomerEmail = (customerId: string) => `erased-${customerId}@erased.invalid`;
