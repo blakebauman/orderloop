@@ -1,7 +1,7 @@
 import type { Principal } from '@orderloop/core';
 import { authFailures, sessions, users } from '@orderloop/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { hashPassword } from '../app/lib/credentials';
+import { hashPassword, verifyPassword } from '../app/lib/credentials';
 import { fromBase32, newTotpSecret, totpCode, totpStep } from '../app/lib/totp';
 
 vi.mock('cloudflare:workers', () => ({ env: {} }));
@@ -47,25 +47,33 @@ const insert = () => ({
     },
   }),
 });
+/** The deployment's pepper, and the hashes sign-in stored again. */
+let pepper: string | undefined;
+const rehashed: string[] = [];
 const update = () => ({
-  set: (v: { totpLastStep: number; reauthAt?: number }) => ({
-    where: () => ({
-      // recordReauth: the session's step-up time.
-      // biome-ignore lint/suspicious/noThenProperty: drizzle's queries are awaited directly
-      then: (ok: (r: unknown) => unknown) => {
-        if (session && v.reauthAt) session.reauthAt = v.reauthAt;
-        return ok(undefined);
-      },
-      run: async () => {
-        const won = user.totpLastStep === null || v.totpLastStep > user.totpLastStep;
-        if (won) user.totpLastStep = v.totpLastStep;
-        return { meta: { changes: won ? 1 : 0 } };
-      },
-    }),
+  set: (v: { totpLastStep: number; reauthAt?: number; passwordHash?: string }) => {
+    if (v.passwordHash) rehashed.push(v.passwordHash);
+    return setResult(v);
+  },
+});
+const setResult = (v: { totpLastStep: number; reauthAt?: number }) => ({
+  where: () => ({
+    // recordReauth: the session's step-up time.
+    // biome-ignore lint/suspicious/noThenProperty: drizzle's queries are awaited directly
+    then: (ok: (r: unknown) => unknown) => {
+      if (session && v.reauthAt) session.reauthAt = v.reauthAt;
+      return ok(undefined);
+    },
+    run: async () => {
+      const won = user.totpLastStep === null || v.totpLastStep > user.totpLastStep;
+      if (won) user.totpLastStep = v.totpLastStep;
+      return { meta: { changes: won ? 1 : 0 } };
+    },
   }),
 });
 const del = () => ({ where: async () => {} });
 vi.mock('~/lib/env.server', () => ({
+  passwordPepper: () => pepper,
   db: () => ({ select, insert, update, delete: del }),
   afterResponse: () => {},
 }));
@@ -233,5 +241,42 @@ describe('password sign-in', () => {
     // From a place one of their sessions was seen at, they still get in.
     session = { createdAt: Date.now(), reauthAt: null };
     expect(await sign('right horse')).toMatchObject({ twoFactor: false });
+  });
+
+  it('stores a password hashed before the pepper again with it, once it is known', async () => {
+    rehashed.length = 0;
+    pepper = 'p'.repeat(64);
+    try {
+      await ann({ passwordChangeDue: false, passwordExpiresAt: null });
+      expect(await sign('right horse')).toMatchObject({ twoFactor: false });
+      expect(rehashed).toHaveLength(1);
+      expect(rehashed[0]).toMatch(/^pbkdf2p:/);
+      expect(await verifyPassword('right horse', rehashed[0]!, pepper)).toBe(true);
+    } finally {
+      pepper = undefined;
+    }
+  });
+
+  it('tells the operator, not the person, when the pepper a hash was made with is gone', async () => {
+    const { audit } = await import('~/lib/audit.server');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    pepper = 'q'.repeat(64);
+    try {
+      await ann({
+        passwordHash: await hashPassword('right horse', 'p'.repeat(64)),
+        passwordChangeDue: false,
+        passwordExpiresAt: null,
+      });
+      vi.mocked(audit).mockClear();
+      expect(await sign('right horse')).toBeNull();
+      expect(vi.mocked(audit)).toHaveBeenCalledWith(request, 'auth.sign_in_failed', {
+        target: 'ann@acme.com',
+        detail: { reason: 'password pepper mismatch' },
+      });
+      expect(logged.mock.calls.flat().join()).toMatch(/password_pepper_mismatch/);
+    } finally {
+      pepper = undefined;
+      logged.mockRestore();
+    }
   });
 });

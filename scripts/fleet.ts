@@ -70,6 +70,7 @@ const SECRETS = {
     'SETUP_TOKEN',
     'SHOPIFY_WEBHOOK_SECRET',
     'SHOPIFY_SHOPS',
+    'PASSWORD_PEPPER',
     'STRIPE_WEBHOOK_SECRET',
     'OIDC_CLIENT_SECRET',
   ],
@@ -94,7 +95,13 @@ const SECRETS = {
 const REQUIRED_SECRETS = ['PRINCIPAL_KEY', 'DATA_KEY'] as const;
 
 /** The shared keys, and the ones before them during a rotation: each at least this long. */
-const KEYS = ['PRINCIPAL_KEY', 'PRINCIPAL_KEY_PREVIOUS', 'DATA_KEY', 'DATA_KEY_PREVIOUS'] as const;
+const KEYS = [
+  'PRINCIPAL_KEY',
+  'PRINCIPAL_KEY_PREVIOUS',
+  'DATA_KEY',
+  'DATA_KEY_PREVIOUS',
+  'PASSWORD_PEPPER',
+] as const;
 export const MIN_KEY_LENGTH = 32;
 
 /**
