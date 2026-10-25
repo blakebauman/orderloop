@@ -92,7 +92,7 @@ afterEach(async () => {
 
 describe('plugins the assistant drafts', () => {
   it('refuses to draft while the deployment doesn’t allow it', async () => {
-    const off = { ...env, ASSISTANT_PLUGINS: '' } as Env;
+    const off = { ...env, ASSISTANT_PLUGINS: '' } as unknown as Env;
     expect(await refusal(draftPlugin(off, admin, 'hold orders over $5,000', via))).toMatch(
       /doesn’t let the assistant draft plugins/,
     );
@@ -265,7 +265,7 @@ describe('plugins the assistant drafts', () => {
     expect(view!.cases?.map((c) => c.pass)).toEqual([true, true]);
 
     // The deployment stops allowing drafts: nothing drafted starts running.
-    const off = { ...env, ASSISTANT_PLUGINS: '' } as Env;
+    const off = { ...env, ASSISTANT_PLUGINS: '' } as unknown as Env;
     await expect(
       installs.approvePlugin(off, r.id, r.sha, { personalData: false }, admin.id),
     ).rejects.toThrow(/drafted by the assistant, which this deployment no longer allows/);
