@@ -170,8 +170,10 @@ you come back you are signed in, with the same session as a password gives you, 
 page you were heading to. The first time, OrderLoop matches you to the person with the same email
 (only if the provider says the address is verified; a provider that leaves out the claim, such as
 Entra ID, doesn't count) and links your provider identity to them, so later sign-ins match the
-identity itself. An email already linked to a different identity is refused. Disabled people are
-refused. If the attempt can't finish, the sign-in page says so with one of three messages: it didn't
+identity itself. If that person signs in here with a password, you enter it once (and your
+two-factor code, if you use one) before the identity is linked, even when the workspace is single
+sign-on only: the provider vouching for an email doesn't hand over an account that has a password.
+An email already linked to a different identity is refused. Disabled people are refused. If the attempt can't finish, the sign-in page says so with one of three messages: it didn't
 finish (try again, then tell an admin), you aren't on the team, or your account is disabled. The
 audit log has the reason.
 
@@ -219,7 +221,11 @@ the **Endpoint** (your address followed by `/scim/v2`) and make the token to giv
 - **People.** `userName` is the email. Someone added this way is a **Viewer** with no password, so
   they [sign in with single sign-on](#single-sign-on): connect it first. The first time they do,
   they are matched to their provisioned entry by email. An email already on the team is refused
-  with a `409` (`uniqueness`). Changes to a name, email or the provider's id for them are kept.
+  with a `409` (`uniqueness`). Changes to a name, email or the provider's id for them are kept,
+  except a new email for someone who hasn't linked single sign-on yet and either signs in with a
+  password or has a role their provisioned groups don't give them: that is refused with a `400`
+  (`mutability`) until they have signed in with single sign-on once, since the first single sign-on
+  matches people by email.
 - **Deactivating.** Setting `active` to `false`, or deleting the person at the provider, disables
   them here and ends their access at once: their sessions, the [connected apps](#connected-apps)
   they authorised and the [API tokens](#api-tokens) they made are all revoked. A delete also takes
@@ -292,7 +298,7 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on; `confirmed: password` when they gave their password first), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
 | Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.user_updated` (a new name or email), `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled` (when SCIM or an admin ends access: how many sessions, apps and tokens), `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to), `team.scim_roles` (from and to, which groups give which role) |
 | SCIM provisioning | `scim.token_created` (notes when it replaced an old one), `scim.token_revoked` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |

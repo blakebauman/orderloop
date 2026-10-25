@@ -123,7 +123,8 @@ export class ScimBadRequest extends Error {
       | 'invalidFilter'
       | 'invalidValue'
       | 'invalidSyntax'
-      | 'noTarget' = 'invalidValue',
+      | 'noTarget'
+      | 'mutability' = 'invalidValue',
   ) {
     super(message);
   }

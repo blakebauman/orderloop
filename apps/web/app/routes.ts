@@ -7,6 +7,7 @@ export default [
   // Single sign-on with the workspace's identity provider (lib/sso.server.ts).
   route('login/sso', 'routes/login-sso.ts'),
   route('login/sso/callback', 'routes/login-sso-callback.ts'),
+  route('login/sso/link', 'routes/login-sso-link.tsx'),
   route('logout', 'routes/logout.ts'),
   // A new deployment's first admin, from its one-time setup code (lib/setup.server.ts).
   route('setup', 'routes/setup.tsx'),

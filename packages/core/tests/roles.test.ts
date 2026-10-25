@@ -5,16 +5,19 @@ import {
   ownOrderRefusal,
   PRINCIPAL_TTL_MS,
   type Principal,
+  SSO_LINK_TTL_MS,
   signCartGuest,
   signCartGuestSession,
   signPlatform,
   signPrincipal,
   signSsoFlow,
+  signSsoLink,
   verifyCartGuest,
   verifyCartGuestSession,
   verifyPlatform,
   verifyPrincipal,
   verifySsoFlow,
+  verifySsoLink,
 } from '../src/roles';
 
 describe('roles', () => {
@@ -167,6 +170,29 @@ describe('cart guest envelopes', () => {
     expect(await verifyCartGuest([key], cookie, path, now)).toBeNull();
     const header = await signCartGuest(key, g, path, now);
     expect(await verifyCartGuestSession([key], header, 'cart_1', now)).toBeNull();
+  });
+});
+
+describe('pending single sign-on links', () => {
+  const key = 'k';
+  const now = 1_000_000;
+  const link = { userId: 'usr_1', sub: 'idp|ann' };
+
+  it('keeps a link for ten minutes, under its own envelope only', async () => {
+    const cookie = await signSsoLink(key, link, now);
+    expect(await verifySsoLink([key], cookie, now)).toEqual(link);
+    expect(await verifySsoLink(['other', key], cookie, now)).toEqual(link);
+    expect(await verifySsoLink([key], cookie, now + SSO_LINK_TTL_MS + 1)).toBeNull();
+    expect(await verifySsoLink(['other'], cookie, now)).toBeNull();
+    expect(await verifyPrincipal([key], cookie, 'sso-link', now)).toBeNull();
+    expect(await verifyCartGuestSession([key], cookie, 'sso-link', now)).toBeNull();
+    const staff = await signPrincipal(
+      key,
+      { kind: 'user', id: 'usr_1', name: 'A', role: 'admin' },
+      'sso-link',
+      now,
+    );
+    expect(await verifySsoLink([key], staff, now)).toBeNull();
   });
 });
 

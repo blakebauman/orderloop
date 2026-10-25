@@ -8,7 +8,9 @@
  * short-lived `__Host-ol_sso` cookie, sealed with `PRINCIPAL_KEY` (`signSsoFlow`) so the browser
  * can't change it or bring it back after it expires; `/login/sso/callback` checks the state, swaps the code for
  * an ID token, verifies it against the provider's keys and starts the same session a password
- * would (`startSession`). Who the identity signs in as is `decideSso` (`sso.ts`).
+ * would (`startSession`). Who the identity signs in as is `decideSso` (`sso.ts`). Linking an
+ * identity to someone who has a password waits for that password (and their two-factor code) at
+ * `/login/sso/link`: the provider vouching for an email doesn't hand over an account on its own.
  *
  * A step-up (`stepUp`) for someone who has only single sign-on starts the same flow with `reauth`:
  * the request asks the provider to sign them in again (`prompt=login`, `max_age=0`), and the
@@ -17,12 +19,21 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { newId, type Principal, type Role, signSsoFlow, verifySsoFlow } from '@orderloop/core';
+import {
+  newId,
+  type Principal,
+  type Role,
+  SSO_LINK_TTL_MS,
+  signSsoFlow,
+  signSsoLink,
+  verifySsoFlow,
+  verifySsoLink,
+} from '@orderloop/core';
 import { users } from '@orderloop/db';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { audit } from './audit.server';
-import { cookie, forgetUserCount, startSession } from './auth.server';
+import { type Caller, cookie, forgetUserCount, startSession } from './auth.server';
 import { normalizeEmail, randomToken } from './credentials';
 import { db } from './env.server';
 import { principalKey } from './principal.server';
@@ -35,6 +46,8 @@ const FETCH_MS = 10_000;
 const DISCOVERY_MS = 60 * 60_000;
 
 export const CALLBACK_PATH = '/login/sso/callback';
+export const LINK_PATH = '/login/sso/link';
+const LINK_COOKIE = '__Host-ol_sso_link';
 
 export type SsoConfig = { issuer: string; clientId: string; clientSecret: string };
 
@@ -247,8 +260,15 @@ export async function verifyCallback(
   };
 }
 
-/** Signs in whoever the identity is (linking or adding them as `decideSso` says): the cookie. */
-export async function signInWithSso(request: Request, identity: SsoIdentity): Promise<string> {
+/**
+ * Signs in whoever the identity is (linking or adding them as `decideSso` says): the session
+ * cookie. Or, when the link is to someone with a password, the cookie that keeps it waiting for
+ * that password (`LINK_PATH`).
+ */
+export async function signInWithSso(
+  request: Request,
+  identity: SsoIdentity,
+): Promise<{ session: string } | { confirmLink: string }> {
   const select = {
     id: users.id,
     email: users.email,
@@ -256,6 +276,7 @@ export async function signInWithSso(request: Request, identity: SsoIdentity): Pr
     role: users.role,
     externalSub: users.externalSub,
     disabledAt: users.disabledAt,
+    passwordHash: users.passwordHash,
   };
   const bySub = await db()
     .select(select)
@@ -293,6 +314,8 @@ export async function signInWithSso(request: Request, identity: SsoIdentity): Pr
     });
   } else {
     const row = (decision.kind === 'existing' ? bySub : byEmail)!;
+    if (decision.kind === 'link' && row.passwordHash)
+      return { confirmLink: await linkCookie({ userId: row.id, sub: identity.sub }) };
     if (decision.kind === 'link') {
       await db().update(users).set({ externalSub: identity.sub }).where(eq(users.id, row.id));
       await audit(request, 'auth.sso_linked', {
@@ -309,7 +332,81 @@ export async function signInWithSso(request: Request, identity: SsoIdentity): Pr
     person = { kind: 'user', id: row.id, email: row.email, name: row.name, role: row.role as Role };
   }
   await audit(request, 'auth.sign_in', { actor: person, detail: { method: 'sso' } });
-  return startSession(request, person.id);
+  return { session: await startSession(request, person.id) };
+}
+
+// ── Linking someone with a password ──
+
+async function linkCookie(link: { userId: string; sub: string }) {
+  const value = await signSsoLink(principalKey(), link);
+  // Lax: it is set at the end of the provider's cross-site redirect and read on the next page.
+  return `${LINK_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SSO_LINK_TTL_MS / 1000}`;
+}
+
+export const clearLinkCookie = `${LINK_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+/**
+ * The link this browser is waiting to confirm, and the person it is for, or null: none, expired,
+ * or the person was disabled, lost their password or was linked meanwhile.
+ */
+export async function pendingSsoLink(request: Request) {
+  const link = await verifySsoLink(
+    [principalKey(), (env as { PRINCIPAL_KEY_PREVIOUS?: string }).PRINCIPAL_KEY_PREVIOUS],
+    cookie(request, LINK_COOKIE),
+  );
+  if (!link) return null;
+  const user = await db()
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      passwordHash: users.passwordHash,
+      totpEnabledAt: users.totpEnabledAt,
+      externalSub: users.externalSub,
+      disabledAt: users.disabledAt,
+    })
+    .from(users)
+    .where(eq(users.id, link.userId))
+    .get();
+  if (!user?.passwordHash || user.disabledAt || user.externalSub) return null;
+  return { sub: link.sub, user: { ...user, passwordHash: user.passwordHash } };
+}
+
+/**
+ * Links the waiting identity once its person has signed in with their password (and code). False
+ * when the signed-in person isn't the one the link is for, or the identity went to someone else.
+ */
+export async function finishSsoLink(
+  request: Request,
+  caller: Pick<Caller, 'kind' | 'id' | 'name' | 'email' | 'role'>,
+): Promise<boolean> {
+  const pending = await pendingSsoLink(request);
+  if (!pending || pending.user.id !== caller.id) return false;
+  const taken = await db()
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.externalSub, pending.sub))
+    .get();
+  if (taken) return false;
+  let linked: { id: string }[];
+  try {
+    linked = await db()
+      .update(users)
+      .set({ externalSub: pending.sub })
+      .where(and(eq(users.id, caller.id), isNull(users.externalSub)))
+      .returning({ id: users.id });
+  } catch {
+    // Someone else took the subject between the check and the write (its unique index).
+    return false;
+  }
+  if (!linked.length) return false;
+  await audit(request, 'auth.sso_linked', {
+    actor: caller,
+    target: pending.user.email,
+    detail: { confirmed: 'password' },
+  });
+  return true;
 }
 
 /** Whether this person has signed in with single sign-on at least once (and so is linked). */
