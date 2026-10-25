@@ -27,9 +27,45 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
 import { getToolName, isToolUIPart, type UIMessage } from 'ai';
-import { ArrowUp, ChevronDown, Info, MoreHorizontal, Square, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Copy,
+  Info,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  X,
+} from 'lucide-react';
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
+import {
+  ConversationContent,
+  Conversation as ConversationLog,
+  ConversationScrollButton,
+} from '~/components/ai-elements/conversation';
+import {
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  Message as MessageFrame,
+} from '~/components/ai-elements/message';
+import {
+  PromptInput,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '~/components/ai-elements/prompt-input';
+import {
+  Queue,
+  QueueItem,
+  QueueItemAction,
+  QueueItemActions,
+  QueueList,
+} from '~/components/ai-elements/queue';
+import { Shimmer } from '~/components/ai-elements/shimmer';
+import { Suggestion, Suggestions } from '~/components/ai-elements/suggestion';
 import { contextLabel, useAssistant } from '~/lib/assistant';
 import { coarse, useMedia, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
@@ -89,12 +125,7 @@ function PanelFrame({ busy }: { busy?: boolean }) {
     <div className="flex h-full flex-col">
       <PanelHeader />
       <div className="flex-1 px-4 py-6 text-muted-foreground text-sm">
-        {busy ? (
-          <>
-            Opening your conversation
-            <span aria-hidden="true" className="ol-dots" />
-          </>
-        ) : null}
+        {busy ? <Shimmer>Opening your conversation</Shimmer> : null}
       </div>
     </div>
   );
@@ -186,7 +217,17 @@ function Conversation() {
     agent,
     body: () => ({ context: readPage.current() }),
   });
-  const { messages, sendMessage, status, stop, addToolApprovalResponse, clearHistory } = chat;
+  const {
+    messages,
+    sendMessage,
+    regenerate,
+    status,
+    stop,
+    error,
+    clearError,
+    addToolApprovalResponse,
+    clearHistory,
+  } = chat;
   const busy = chat.isStreaming || chat.isRecovering || status === 'submitted';
 
   // ── Attention: always shown, refreshed while the panel is open and after each turn.
@@ -248,15 +289,16 @@ function Conversation() {
     if (t) send(t);
   }, [a.pendingAsk, a.takeAsk, send]);
 
-  // ── Scroll: follow new content while the reader is at the bottom.
-  const scroller = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
   const last = messages.at(-1);
-  const lastLength = last ? JSON.stringify(last.parts).length : 0;
-  useEffect(() => {
-    const el = scroller.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [messages.length, lastLength, held.length]);
+  const lastAssistant = messages.findLastIndex((m) => m.role === 'assistant');
+  // Editing a sent message replaces it, and drops what came after, with the new text.
+  const edit = useCallback(
+    (messageId: string, text: string) => {
+      const t = text.trim();
+      if (t && !busy) void sendMessage({ text: t, messageId });
+    },
+    [busy, sendMessage],
+  );
 
   const thinking =
     status === 'submitted' || (busy && last?.role === 'user') || (busy && last?.parts.length === 0);
@@ -271,47 +313,55 @@ function Conversation() {
           <span aria-hidden="true" className="ol-dots" />
         </p>
       ) : null}
-      <div
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-        className="ol-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4"
-      >
-        {messages.length === 0 ? (
-          <FirstRun onAsk={send} />
-        ) : (
-          <ol className="space-y-5" aria-live="polite" aria-relevant="additions">
-            {messages.map((m, i) => (
-              <li key={m.id}>
-                {m.role === 'user' ? (
-                  <UserMessage m={m} />
-                ) : (
-                  <AssistantMessage
-                    m={m}
-                    streaming={busy && i === messages.length - 1}
-                    preview={preview}
-                    respond={respond}
-                  />
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-        {thinking ? (
-          <p
-            className="mt-4 flex items-center gap-2 text-[13px] text-muted-foreground"
-            role="status"
-          >
-            <span
-              aria-hidden="true"
-              className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
+      <ConversationLog className="ol-scroll min-h-0">
+        <ConversationContent>
+          {messages.length === 0 ? (
+            <FirstRun onAsk={send} />
+          ) : (
+            <ol className="space-y-3" aria-live="polite" aria-relevant="additions">
+              {messages.map((m, i) => (
+                <li key={m.id}>
+                  {m.role === 'user' ? (
+                    <UserMessage m={m} busy={busy} onEdit={edit} />
+                  ) : (
+                    <AssistantMessage
+                      m={m}
+                      streaming={busy && i === messages.length - 1}
+                      preview={preview}
+                      respond={respond}
+                      // Only the latest reply can be asked again, and not while one is running.
+                      onRegenerate={
+                        i === lastAssistant && i === messages.length - 1 && !busy
+                          ? () => void regenerate()
+                          : undefined
+                      }
+                    />
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          {thinking ? (
+            <div role="status" className="flex items-center gap-2 text-[13px]">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
+              <Shimmer as="span">
+                {chat.isRecovering ? 'Picking up where it left off' : 'Working on it'}
+              </Shimmer>
+            </div>
+          ) : null}
+          {error && !busy ? (
+            <TurnError
+              message={error.message}
+              onRetry={() => {
+                clearError();
+                void regenerate();
+              }}
+              onDismiss={clearError}
             />
-            {chat.isRecovering ? 'Picking up where it left off' : 'Working on it'}
-          </p>
-        ) : null}
-      </div>
+          ) : null}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </ConversationLog>
       {held.length ? (
         <HeldMessages
           held={held}
@@ -324,12 +374,95 @@ function Conversation() {
   );
 }
 
-function UserMessage({ m }: { m: Message }) {
-  const text = m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
+const textOf = (m: Message) =>
+  m.parts
+    .map((p) => (p.type === 'text' ? p.text : ''))
+    .join('')
+    .trim();
+
+/** Copies the text, then says so for a moment. */
+function CopyAction({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const t = window.setTimeout(() => setDone(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [done]);
   return (
-    <div className="ml-auto w-fit max-w-[88%] whitespace-pre-wrap rounded-md bg-secondary px-3 py-2 text-[13.5px] leading-normal">
-      {text}
-    </div>
+    <MessageAction
+      label={done ? 'Copied' : 'Copy'}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => setDone(true));
+      }}
+    >
+      {done ? <Check /> : <Copy />}
+    </MessageAction>
+  );
+}
+
+function UserMessage({
+  m,
+  busy,
+  onEdit,
+}: {
+  m: Message;
+  busy: boolean;
+  onEdit: (messageId: string, text: string) => void;
+}) {
+  const text = textOf(m);
+  const [draft, setDraft] = useState<string | null>(null);
+  if (draft !== null) {
+    const changed = draft.trim() && draft.trim() !== text;
+    return (
+      <MessageFrame from="user" className="max-w-full">
+        <PromptInput
+          aria-label="Edit your message"
+          onSubmit={() => {
+            if (!changed) return;
+            onEdit(m.id, draft);
+            setDraft(null);
+          }}
+        >
+          <PromptInputTextarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                setDraft(null);
+              }
+            }}
+            sendOnEnter={(e) => !coarse() || e.metaKey || e.ctrlKey}
+            aria-label="Edited message"
+          />
+          <PromptInputFooter className="justify-end">
+            <Button type="button" size="xs" variant="ghost" onClick={() => setDraft(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="xs" disabled={!changed || busy}>
+              Send again
+            </Button>
+          </PromptInputFooter>
+        </PromptInput>
+        <p className="text-muted-foreground text-xs">
+          Sending again replaces this message and the replies after it.
+        </p>
+      </MessageFrame>
+    );
+  }
+  // The actions sit beside the bubble, so a question costs no extra line.
+  return (
+    <MessageFrame from="user" className="flex-row-reverse items-center gap-1">
+      <MessageContent>{text}</MessageContent>
+      <MessageActions>
+        <CopyAction text={text} />
+        <MessageAction label="Edit" disabled={busy} onClick={() => setDraft(text)}>
+          <Pencil />
+        </MessageAction>
+      </MessageActions>
+    </MessageFrame>
   );
 }
 
@@ -344,37 +477,84 @@ function AssistantMessage({
   streaming,
   preview,
   respond,
+  onRegenerate,
 }: {
   m: Message;
   streaming: boolean;
   preview: Previewer;
   respond: (approvalId: string, approved: boolean) => void;
+  onRegenerate?: () => void;
 }) {
   const parts = m.parts;
   const lastText = parts.findLastIndex((p) => p.type === 'text');
+  const text = textOf(m);
   return (
-    <div className="space-y-2">
-      {parts.map((p, i) => {
-        if (p.type === 'text')
-          return p.text.trim() ? (
-            <Prose key={i} text={p.text} streaming={streaming && i === lastText} />
-          ) : null;
-        if (isToolUIPart(p)) {
-          const name = getToolName(p);
-          if (ACTION.has(name))
-            return <ActionCard key={p.toolCallId} part={p} preview={preview} respond={respond} />;
-          if (name === 'propose_flow_change') return <ProposalCard key={p.toolCallId} part={p} />;
-          if (name === 'draft_plugin') return <PluginDraftCard key={p.toolCallId} part={p} />;
-          if (isAssistantTool(name)) return <ReadRow key={p.toolCallId} part={p} />;
-        }
-        return null;
-      })}
-      {m.metadata?.source === 'heuristic' && !streaming ? (
-        <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-          <Info className="size-3" aria-hidden="true" />
-          Answered without the language model, from fixed rules.
-        </p>
+    <MessageFrame from="assistant">
+      <MessageContent className="space-y-2">
+        {parts.map((p, i) => {
+          if (p.type === 'text')
+            return p.text.trim() ? (
+              <Prose key={i} text={p.text} streaming={streaming && i === lastText} />
+            ) : null;
+          if (isToolUIPart(p)) {
+            const name = getToolName(p);
+            if (ACTION.has(name))
+              return <ActionCard key={p.toolCallId} part={p} preview={preview} respond={respond} />;
+            if (name === 'propose_flow_change') return <ProposalCard key={p.toolCallId} part={p} />;
+            if (name === 'draft_plugin') return <PluginDraftCard key={p.toolCallId} part={p} />;
+            if (isAssistantTool(name)) return <ReadRow key={p.toolCallId} part={p} />;
+          }
+          return null;
+        })}
+        {m.metadata?.source === 'heuristic' && !streaming ? (
+          <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <Info className="size-3" aria-hidden="true" />
+            Answered without the language model, from fixed rules.
+          </p>
+        ) : null}
+      </MessageContent>
+      {!streaming && (text || onRegenerate) ? (
+        <MessageActions>
+          {text ? <CopyAction text={text} /> : null}
+          {onRegenerate ? (
+            <MessageAction label="Answer again" onClick={onRegenerate}>
+              <RotateCcw />
+            </MessageAction>
+          ) : null}
+        </MessageActions>
       ) : null}
+    </MessageFrame>
+  );
+}
+
+/** A turn that failed: what went wrong, in a sentence, with the way to try again. */
+function TurnError({
+  message,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div role="alert" className="flex items-start gap-2 rounded-2xl bg-bad/10 px-3 py-2 text-sm">
+      <CircleAlert className="mt-0.5 size-4 shrink-0 text-bad" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-bad">The assistant couldn’t finish that reply.</p>
+        <p className="break-words text-muted-foreground text-xs">{message}</p>
+      </div>
+      <Button size="xs" variant="outline" onClick={onRetry}>
+        Try again
+      </Button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="hit-area grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+        aria-label="Dismiss"
+      >
+        <X className="size-3.5" />
+      </button>
     </div>
   );
 }
@@ -534,19 +714,11 @@ function FirstRun({ onAsk }: { onAsk: (text: string) => void }) {
           you before anything that can’t be undone: decisions, cancellations, events and publishing.
         </p>
       </div>
-      <ul className="space-y-1.5">
+      <Suggestions>
         {ideas.map((t) => (
-          <li key={t}>
-            <button
-              type="button"
-              onClick={() => onAsk(t)}
-              className="w-full rounded-md border border-input px-3 py-1.5 text-left text-[13px] hover:bg-muted/60"
-            >
-              {t}
-            </button>
-          </li>
+          <Suggestion key={t} suggestion={t} onClick={onAsk} />
         ))}
-      </ul>
+      </Suggestions>
     </div>
   );
 }
@@ -563,29 +735,26 @@ function HeldMessages({
   onRemove: (i: number) => void;
 }) {
   return (
-    <div className="border-t bg-muted/40 px-3 py-2">
-      <p className="caption mb-1">Sends when this reply finishes</p>
-      <ul className="space-y-1">
+    <Queue className="mx-3 mt-2">
+      <p className="caption px-1">Sends when this reply finishes</p>
+      <QueueList>
         {held.map((t, i) => (
-          <li key={i} className="flex items-center gap-1.5">
+          <QueueItem key={i}>
             <input
               value={t}
               onChange={(e) => onChange(i, e.target.value)}
               aria-label="Queued message"
-              className="h-7 min-w-0 flex-1 rounded-3xl border border-transparent bg-input/50 px-3 text-[13px] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+              className="h-7 min-w-0 flex-1 rounded-xl bg-transparent px-2 text-[13px] focus-visible:bg-background focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
             />
-            <button
-              type="button"
-              onClick={() => onRemove(i)}
-              className="hit-area grid size-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Remove queued message"
-            >
-              <X className="size-3.5" />
-            </button>
-          </li>
+            <QueueItemActions>
+              <QueueItemAction label="Remove queued message" onClick={() => onRemove(i)}>
+                <X className="size-3.5" />
+              </QueueItemAction>
+            </QueueItemActions>
+          </QueueItem>
         ))}
-      </ul>
-    </div>
+      </QueueList>
+    </Queue>
   );
 }
 
@@ -604,65 +773,37 @@ function Composer({
   useEffect(() => {
     if (focusToken) box.current?.focus();
   }, [focusToken]);
-  const submit = () => {
-    if (!text.trim()) return;
-    onSend(text);
-    setText('');
-  };
   return (
-    <form
-      className="shrink-0 border-t p-3 in-data-keyboard:pb-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-    >
-      <div className="flex items-end gap-2 rounded-md border border-input bg-background px-2.5 py-2 focus-within:border-link">
-        <textarea
+    <div className="shrink-0 p-3 in-data-keyboard:pb-2">
+      <PromptInput
+        onSubmit={() => {
+          if (!text.trim()) return;
+          onSend(text);
+          setText('');
+        }}
+      >
+        <PromptInputTextarea
           ref={box}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
-            // On a touch screen Return is a new line and the button sends; ⌘/Ctrl+Enter always sends.
-            if (coarse() && !e.metaKey && !e.ctrlKey) return;
-            e.preventDefault();
-            submit();
-          }}
-          rows={1}
+          // On a touch screen Return is a new line and the button sends; ⌘/Ctrl+Enter always sends.
+          sendOnEnter={(e) => !coarse() || e.metaKey || e.ctrlKey}
           placeholder={
             busy ? 'Write the next message; it sends when this reply ends' : 'Ask the assistant'
           }
           aria-label="Message the assistant"
-          className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-[13.5px] leading-6 outline-none [field-sizing:content] placeholder:text-muted-foreground"
         />
-        {busy ? (
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="outline"
-            className="touch:size-8"
-            onClick={onStop}
-            aria-label="Stop the reply"
-            title="Stop"
-          >
-            <Square className="fill-current" />
-          </Button>
-        ) : null}
-        <Button
-          type="submit"
-          size="icon-xs"
-          className="touch:size-8"
-          disabled={!text.trim()}
-          aria-label="Send"
-          title="Send (Enter)"
-        >
-          <ArrowUp />
-        </Button>
-      </div>
-      <p className="mt-1.5 hidden text-muted-foreground text-xs fine:block">
+        <PromptInputFooter className="justify-end gap-1.5 pt-0">
+          {/* While a reply runs, stop sits beside send, which queues the next message. */}
+          {busy ? (
+            <PromptInputSubmit status="streaming" onStop={onStop} className="touch:size-9" />
+          ) : null}
+          <PromptInputSubmit disabled={!text.trim()} className="touch:size-9" />
+        </PromptInputFooter>
+      </PromptInput>
+      <p className="mt-1.5 hidden px-1 text-muted-foreground text-xs fine:block">
         Enter sends · Shift+Enter for a new line · ⌘J opens and closes
       </p>
-    </form>
+    </div>
   );
 }

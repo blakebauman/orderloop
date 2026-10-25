@@ -480,6 +480,43 @@
   }
 }
 
+/* Work in progress as a light sweeping across muted text (AI Elements' Shimmer). Still, in plain
+   muted text, where motion is reduced. */
+.ol-shimmer {
+  display: inline-block;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - var(--shimmer-spread, 40px)),
+      var(--background),
+      transparent calc(50% + var(--shimmer-spread, 40px))
+    ),
+    linear-gradient(var(--muted-foreground), var(--muted-foreground));
+  background-size:
+    250% 100%,
+    auto;
+  background-repeat: no-repeat, padding-box;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: ol-shimmer var(--shimmer-duration, 2s) linear infinite;
+}
+@keyframes ol-shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ol-shimmer {
+    animation: none;
+    background: none;
+    color: var(--muted-foreground);
+  }
+}
+
 /* A confirm card arrives with a short rise, so a prepared action is noticed without a modal. */
 @keyframes ol-arrive {
   from {
