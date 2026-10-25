@@ -54,8 +54,10 @@ request, a stock review, two subscriptions (one with a failing card), a marketpl
 buy online and pick up in store, a ship-from-store order with an e-book, a shipment split between the warehouse and a store, a till sale with a gift card,
 a retail order that is returned and one priced in euros. Start one and the
 order page opens: the flow graph colours each node as it runs, waits and finishes, and the timeline
-records every step. Below the queues, the dashboard's **Last 30 days** section shows, in USD, completion rate
-by model, revenue per day, refund rate and the slowest steps by p95 duration.
+records every step. The overview shows where open orders are waiting in each flow and what ended
+badly this week; the **Performance** page shows, in USD over 7, 30 or 90 days, revenue, orders ended
+and money collected per day, completion rate by model, refund rate and the slowest steps by p95
+duration.
 
 Waits are compressed in development. `pnpm web:dev` sets the engine's `TIME_SCALE` to `1440`
 (`apps/web/vite.config.ts`; deployed, it is `1`), which divides every wait and timeout, so a day

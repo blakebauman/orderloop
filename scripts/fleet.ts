@@ -219,6 +219,7 @@ export const RESERVED_PATH_SEGMENTS = new Set([
   'mcp',
   'oauth',
   'orders',
+  'performance',
   'plugins',
   'promotions',
   'scim',

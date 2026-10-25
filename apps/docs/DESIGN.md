@@ -10,7 +10,7 @@ colors:
   card-dark: "oklch(0.205 0 0)"
   muted: "oklch(0.97 0 0)"
   muted-dark: "oklch(0.269 0 0)"
-  muted-foreground: "oklch(0.556 0 0)"
+  muted-foreground: "oklch(0.54 0 0)"
   muted-foreground-dark: "oklch(0.708 0 0)"
   rule: "oklch(0.922 0 0)"
   rule-dark: "oklch(1 0 0 / 10%)"
