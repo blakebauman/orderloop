@@ -1,10 +1,26 @@
+import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import type { FeedStatus } from '@orderloop/core/product';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { storeStream, UploadStalled } from '../src/upload';
 import { api, by, doc, product, settle, setup } from './helpers';
 
 beforeAll(setup);
+
+// A feed that can't be read fails its `read header` step, which Workflows retry with growing
+// delays (about 30s in all) before the `fail` step records it. Tests that expect that failure
+// call `failFast()`: retries still happen, without the waits.
+let introspector: Awaited<ReturnType<typeof introspectWorkflow>> | undefined;
+async function failFast() {
+  introspector = await introspectWorkflow(env.FEED_IMPORT);
+  await introspector.modifyAll(async (m) => {
+    await m.disableRetryDelays();
+  });
+}
+afterEach(async () => {
+  await introspector?.dispose();
+  introspector = undefined;
+});
 
 function body(text: string, chunk = 4096): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text);
@@ -42,26 +58,31 @@ function csv(prefix: string, n: number, bad: number[] = []) {
 
 describe('feeds', () => {
   it('imports a CSV feed across several steps, reporting rejected rows by number', async () => {
+    // 650 products with FEED_CHUNK 300 is three split steps. What costs time is parts, not rows
+    // (every chunk sends a part to nearly all 64 shards, each a queue message and a shard call),
+    // and the file is imported twice: 1,000 products was 500 parts, which a busy CI runner took
+    // past the 60s limit.
+    const N = 650;
     const prefix = `csv${Date.now().toString(36)}`;
-    const started = await api.startFeed(body(csv(prefix, 1_000, [10, 700])), {
+    const started = await api.startFeed(body(csv(prefix, N, [10, 500])), {
       name: 'supplier.csv',
       format: 'csv',
       by,
     });
     expect(started).toMatchObject({ state: 'queued', format: 'csv', name: 'supplier.csv' });
     const s = await finished(started.id);
-    expect(s).toMatchObject({ state: 'done', rows: 1_000, created: 998, rejected: 2, updated: 0 });
+    expect(s).toMatchObject({ state: 'done', rows: N, created: N - 2, rejected: 2, updated: 0 });
     expect(s.parts).toBe(s.partsDone);
     // Product 10 starts on row 22 (a header, then two rows per product).
     expect(s.errors.map((e) => [e.row, e.key])).toEqual([
       [22, `${prefix}-10`],
-      [1402, `${prefix}-700`],
+      [1002, `${prefix}-500`],
     ]);
     expect(s.errors[0]?.message).toContain('attributes.material');
 
-    expect(await api.getProduct(`${prefix}-999`)).toMatchObject({
-      title: { en: 'Tee, no. 999', fr: 'T-shirt 999' },
-      variants: [{ sku: `${prefix}-999-S` }, { sku: `${prefix}-999-M` }],
+    expect(await api.getProduct(`${prefix}-${N - 1}`)).toMatchObject({
+      title: { en: `Tee, no. ${N - 1}`, fr: `T-shirt ${N - 1}` },
+      variants: [{ sku: `${prefix}-${N - 1}-S` }, { sku: `${prefix}-${N - 1}-M` }],
     });
     await settle();
     expect(await doc(`${prefix}-0`)).toMatchObject({ title: 'Tee, no. 0' });
@@ -69,7 +90,7 @@ describe('feeds', () => {
     // The same file again changes nothing.
     const again = await finished(
       (
-        await api.startFeed(body(csv(prefix, 1_000, [10, 700])), {
+        await api.startFeed(body(csv(prefix, N, [10, 500])), {
           name: 'again',
           format: 'csv',
           by,
@@ -80,7 +101,7 @@ describe('feeds', () => {
       state: 'done',
       created: 0,
       updated: 0,
-      unchanged: 998,
+      unchanged: N - 2,
       rejected: 2,
     });
     expect((await api.listFeeds(2)).map((f) => f.id)).toEqual([again.id, started.id]);
@@ -129,6 +150,7 @@ describe('feeds', () => {
     expect((await api.cancelFeed(id, by))?.state).toBe('cancelled');
     expect(await api.cancelFeed('feed_none', by)).toBeNull();
 
+    await failFast();
     const failed = await finished(
       (await api.startFeed(body('name,price\nx,1'), { name: 'bad', format: 'csv', by })).id,
     );
@@ -154,6 +176,7 @@ describe('feeds', () => {
   });
 
   it('fails a feed whose file has no header it can use', async () => {
+    await failFast();
     const s = await finished(
       (await api.startFeed(body('name,price\nx,1'), { name: 'bad', format: 'csv', by })).id,
     );

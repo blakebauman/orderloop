@@ -24,8 +24,21 @@ export default async function warm(config: FullConfig) {
   }
   // The pieces that load on demand: an order's graph and the assistant.
   await attempt(async (p) => {
-    await p.goto(`${base}/orders/scenarios`, { waitUntil: 'networkidle' });
-    await p.getByRole('button', { name: /^Run / }).first().click();
+    const res = await p.goto(`${base}/orders/scenarios`, { waitUntil: 'networkidle' });
+    try {
+      await p.getByRole('button', { name: /^Run / }).first().click();
+    } catch (err) {
+      // CI once failed here on all four tries with only "waiting for getByRole(...)": say what
+      // page this was (a 404, a redirect to login or an error boundary all look the same).
+      const text = await p
+        .locator('body')
+        .innerText({ timeout: 2_000 })
+        .catch(() => '(no body)');
+      throw new Error(
+        `no Run button at ${p.url()} (HTTP ${res?.status()}): ${text.replace(/\s+/g, ' ').slice(0, 300)}`,
+        { cause: err },
+      );
+    }
     await p.waitForURL(/\/orders\/ord_/, { timeout: 30_000 });
     await p.getByRole('tab', { name: 'Graph' }).click();
     await p.locator('.react-flow').waitFor({ timeout: 20_000 });
