@@ -28,7 +28,7 @@ import {
   stepUp,
   stepUpMethod,
 } from '~/lib/auth.server';
-import { SCIM_PATH } from '~/lib/scim';
+import { SCIM_PATH, SCIM_TOKEN_MS } from '~/lib/scim';
 import {
   createScimToken,
   revokeScimToken,
@@ -179,7 +179,7 @@ export async function action({ request }: Route.ActionArgs) {
         if (!ssoConfig()) throw new TeamError('Single sign-on isn’t set up for this workspace.');
         const jit = str('jit');
         const next: SsoSettings = {
-          jitRole: isRole(jit) ? jit : null,
+          jitRole: isRole(jit) && jit !== 'admin' ? jit : null,
           domains: parseDomains(str('domains')),
           ssoOnly: str('only') === 'on',
         };
@@ -615,7 +615,7 @@ export default function Team() {
 
           {sso ? <SsoForm {...sso} stepUp={stepUp} /> : null}
 
-          <ScimSection {...scim} stepUp={stepUp} fetcher={fetcher} />
+          <ScimSection {...scim} stepUp={stepUp} fetcher={fetcher} now={now} />
 
           <ApprovalSeparationForm separated={separated} />
 
@@ -832,7 +832,10 @@ function ScimSection({
   groups,
   stepUp,
   fetcher,
+  now,
 }: {
+  /** The loader's clock, so the server and the browser agree on whether the token expired. */
+  now: number;
   stepUp: StepUpMethod | null;
   endpoint: string;
   token: { updatedAt: number; updatedBy: string } | null;
@@ -871,7 +874,10 @@ function ScimSection({
         <span className="text-sm">
           {token ? (
             <>
-              Token made <Ago ms={token.updatedAt} /> by {token.updatedBy}.
+              Token made <Ago ms={token.updatedAt} /> by {token.updatedBy}.{' '}
+              {now - token.updatedAt >= SCIM_TOKEN_MS
+                ? 'It has expired: provisioning is off until you replace it.'
+                : 'It works for a year; replace it before then.'}
             </>
           ) : (
             'No token: provisioning is off.'
@@ -994,7 +1000,7 @@ function SsoForm({
             className="h-8"
           >
             <NativeSelectOption value="off">Is refused</NativeSelectOption>
-            {ROLES.map((r) => (
+            {ROLES.filter((r) => r !== 'admin').map((r) => (
               <NativeSelectOption key={r} value={r}>
                 Joins as {ROLE_LABELS[r]}
               </NativeSelectOption>

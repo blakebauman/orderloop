@@ -31,7 +31,8 @@ export function readSsoSettings(raw: string | null | undefined): SsoSettings {
   try {
     const v = JSON.parse(raw) as Partial<Record<keyof SsoSettings, unknown>>;
     return {
-      jitRole: isRole(v.jitRole) ? v.jitRole : null,
+      // Never admin: an identity no one here has seen joins as at most an operator.
+      jitRole: isRole(v.jitRole) && v.jitRole !== 'admin' ? v.jitRole : null,
       domains: Array.isArray(v.domains) ? parseDomains(v.domains.join(',')) : [],
       ssoOnly: v.ssoOnly === true,
     };

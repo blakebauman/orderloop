@@ -83,8 +83,10 @@ Passwords must be 10 to 256 characters, not a common password and not contain th
 They are stored only as salted PBKDF2-SHA256 hashes.
 
 A session is a `__Host-ol_session` cookie holding a random token, of which only a hash is stored.
-It ends 30 days after sign-in, or after 7 days without use, whichever comes first. Pages and the order page's
-live connection both count as use, recorded at most every 5 minutes. Signing out deletes the
+It ends 30 days after sign-in, or after 7 days without use (12 hours for an admin), whichever comes first. Pages and what you do on the
+order page's live connection count as use, recorded at most every 5 minutes; the connection's own
+checks in the background and the assistant panel's refresh of what's waiting don't, so a page left
+open still lets the session end. Signing out deletes the
 session.
 
 ### Temporary passwords
@@ -93,7 +95,8 @@ A password an admin sets (a new person's, or a reset) is temporary. Signing in w
 but until the person chooses their own on the **Account** page, every other page sends them there,
 and the REST API, MCP, A2A, the order page's live connection and order documents answer `403`.
 Choosing a new password ends it, and the Team page marks people still on one with
-"temporary password".
+"temporary password". A temporary password stops working 7 days after it was set; an admin resets
+it again if it went unused.
 
 ### Your sessions
 
@@ -166,7 +169,7 @@ Failed sign-ins are counted in 15-minute windows, and an attempt over a limit is
 |---|---|---|
 | Email and address together | 5 | Guessing one person's password from one place |
 | Address | 30 | One place trying many accounts |
-| Email | 50 | Many places trying one account; high, so nobody can easily lock a person out |
+| Email | 50 | Many places trying one account. It doesn't hold back a place the person has signed in from before, so nobody can lock them out by failing at their address |
 | Person, at the code step | 5 | Guessing two-factor codes after a correct password |
 | Address, at the setup page | 10 | Guessing the setup code (`429`) |
 | Person, on the Account page | 5 | Guessing the current password from a signed-in browser left open: changing the password, turning off two-factor sign-in, new recovery codes (`429`) |
@@ -186,7 +189,7 @@ Once it is, the sign-in page has **Sign in with single sign-on**. It sends you t
 you come back you are signed in, with the same session as a password gives you, and taken to the
 page you were heading to. The first time, OrderLoop matches you to the person with the same email
 (only if the provider says the address is verified; a provider that leaves out the claim, such as
-Entra ID, doesn't count) and links your provider identity to them, so later sign-ins match the
+Entra ID, counts only when whoever runs your deployment says its addresses can be trusted) and links your provider identity to them, so later sign-ins match the
 identity itself. If that person signs in here with a password, you enter it once (and your
 two-factor code, if you use one) before the identity is linked, even when the workspace is single
 sign-on only: the provider vouching for an email doesn't hand over an account that has a password.
@@ -196,7 +199,8 @@ audit log has the reason.
 
 Under **Single sign-on** on the Team page, admins choose:
 
-- **Someone not on the team:** **Is refused** (the default) or **Joins as** a role. With a role,
+- **Someone not on the team:** **Is refused** (the default) or **Joins as** a role, at most
+  Operator: nobody new joins as an admin. With a role,
   anyone the provider signs in whose email domain is listed is added with that role on their first
   sign-in, with no password.
 - **From these email domains:** the domains allowed to join, separated by commas or spaces. A role
@@ -228,7 +232,8 @@ the **Endpoint** (your address followed by `/scim/v2`) and make the token to giv
 - **The token.** **Make a token** shows a value starting `ol_scim_` once; copy it into the
   provider's provisioning settings as a bearer token. Only a hash is kept, so a lost token can't be
   shown again: **Replace token** makes a new one and the old one stops working at once, and
-  **Revoke** stops provisioning until you make another. With no token, every request is refused
+  **Revoke** stops provisioning until you make another. A token works for a year after it was
+  made; replace it before then. With no token, or an expired one, every request is refused
   (`401`). Requests are limited in rate, like the rest of the API.
 - **What the provider can do.** Create, list, look up, update and delete people (**Users**) and
   groups (**Groups**), by the standard SCIM operations (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`).

@@ -49,16 +49,28 @@ export const CALLBACK_PATH = '/login/sso/callback';
 export const LINK_PATH = '/login/sso/link';
 const LINK_COOKIE = '__Host-ol_sso_link';
 
-export type SsoConfig = { issuer: string; clientId: string; clientSecret: string };
+export type SsoConfig = {
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  /** A token without `email_verified` vouches for its email (Entra ID). */
+  trustEmail: boolean;
+};
 
 /** The deployment's identity provider, or null when SSO isn't set up. */
 export function ssoConfig(): SsoConfig | null {
-  const e = env as { OIDC_ISSUER?: string; OIDC_CLIENT_ID?: string; OIDC_CLIENT_SECRET?: string };
+  const e = env as {
+    OIDC_ISSUER?: string;
+    OIDC_CLIENT_ID?: string;
+    OIDC_CLIENT_SECRET?: string;
+    OIDC_TRUST_EMAIL?: string;
+  };
   if (!e.OIDC_ISSUER || !e.OIDC_CLIENT_ID || !e.OIDC_CLIENT_SECRET) return null;
   return {
     issuer: e.OIDC_ISSUER.replace(/\/+$/, ''),
     clientId: e.OIDC_CLIENT_ID,
     clientSecret: e.OIDC_CLIENT_SECRET,
+    trustEmail: e.OIDC_TRUST_EMAIL === 'true',
   };
 }
 
@@ -232,6 +244,8 @@ export async function verifyCallback(
       issuer: m.issuer,
       audience: c.clientId,
       clockTolerance: 60,
+      // A token with no expiry, issue time or subject isn't one to sign anyone in with.
+      requiredClaims: ['exp', 'iat', 'sub'],
     }));
   } catch (err) {
     throw new SsoError(`ID token: ${err instanceof Error ? err.message : 'invalid'}`);
@@ -246,12 +260,16 @@ export async function verifyCallback(
     if (at < since) throw new SsoError('provider did not sign them in again');
     reauthAt = Date.now();
   }
-  // An email the provider says it hasn't verified can't match or create anyone. Entra ID leaves
-  // the claim out; its addresses belong to the tenant.
-  const email =
-    typeof claims.email === 'string' && claims.email_verified !== false
-      ? normalizeEmail(claims.email)
-      : null;
+  // Only an email the provider says it verified matches or creates anyone. A provider that leaves
+  // the claim out (Entra ID: its addresses belong to the tenant) is trusted only when the
+  // deployment says so (`OIDC_TRUST_EMAIL`, the registry's `sso.trustEmail`).
+  // Entra can say whether the domain of `email` is verified (`xms_edov`, an optional claim): a
+  // `false` there is believed even when the deployment trusts the provider's addresses.
+  const verified =
+    claims.email_verified === true ||
+    claims.email_verified === 'true' ||
+    (claims.email_verified === undefined && c.trustEmail && claims.xms_edov !== false);
+  const email = typeof claims.email === 'string' && verified ? normalizeEmail(claims.email) : null;
   const name = typeof claims.name === 'string' ? claims.name.trim().slice(0, 100) : null;
   return {
     identity: { sub: claims.sub.slice(0, 255), email: email || null, name },
@@ -363,6 +381,8 @@ export async function pendingSsoLink(request: Request) {
       role: users.role,
       passwordHash: users.passwordHash,
       totpEnabledAt: users.totpEnabledAt,
+      passwordChangeDue: users.passwordChangeDue,
+      passwordExpiresAt: users.passwordExpiresAt,
       externalSub: users.externalSub,
       disabledAt: users.disabledAt,
     })
