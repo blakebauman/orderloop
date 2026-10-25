@@ -14,6 +14,9 @@ import { EXECUTORS } from '../src/nodes';
 import { EMBEDDING_MODEL, extractCatalog, reindexProducts } from '../src/product-index';
 import { signedActor } from './principal';
 
+/** The deployment's request-log setting, which every gateway call sends as `collectLog`. */
+const LOGS = String(env.AI_GATEWAY_LOGS) === 'true';
+
 /**
  * What `ai.extract` shows the model: the whole catalog while it is small, and for a catalog of
  * thousands, the SKUs the document names, the names it shares words with and (with the product
@@ -178,7 +181,7 @@ describe(`ai.extract on ${BULK.toLocaleString('en-US')} SKUs`, () => {
     const r = await extract(e, 'We need something to move water out of the basement, x1');
     const embedding = sent.find((s) => s.model === EMBEDDING_MODEL)!;
     expect(embedding.input).toMatchObject({ pooling: 'cls' });
-    expect(embedding.options).toEqual({ gateway: { id: 'gw-test', collectLog: false } });
+    expect(embedding.options).toEqual({ gateway: { id: 'gw-test', collectLog: LOGS } });
     expect(queried).toHaveLength((embedding.input.text as string[]).length);
     const { catalog } = promptCatalog(sent);
     expect(catalog[0]!.sku).toBe('PMP-900');
@@ -246,7 +249,7 @@ describe('reindexProducts', () => {
     expect(sent.every((s) => (s.input.text as string[]).length <= 100)).toBe(true);
     expect(sent[0]!.input.pooling).toBe('cls');
     expect((sent[0]!.input.text as string[])[0]).toBe(`${sku(0)} Steel bracket 0`);
-    expect(sent[0]!.options).toEqual({ gateway: { id: 'gw-test', collectLog: false } });
+    expect(sent[0]!.options).toEqual({ gateway: { id: 'gw-test', collectLog: LOGS } });
 
     // Nothing changed: nothing written. A run repeats harmlessly.
     upserted.length = 0;

@@ -5,6 +5,9 @@ import { runJson } from '../src/ai';
 import { assess } from '../src/clef';
 import { EXECUTORS, type ExecInput } from '../src/nodes';
 
+/** The deployment's request-log setting, which every gateway call sends as `collectLog`. */
+const LOGS = String(env.AI_GATEWAY_LOGS) === 'true';
+
 /**
  * What happens when the model fails inside an order step: the step retries while it has attempts
  * left, the last attempt answers with the heuristic, and the risk and router nodes treat a
@@ -109,7 +112,7 @@ describe('model calls in an order step', () => {
     const m = model(() => ({ response: { ok: true } }), { AI_GATEWAY_ID: 'gw' });
     await ask(m.env, { orderId: 'ord_1' });
     expect(m.calls[0]!.options).toEqual({
-      gateway: { id: 'gw', collectLog: false, metadata: { prompt: 'risk@1', orderId: 'ord_1' } },
+      gateway: { id: 'gw', collectLog: LOGS, metadata: { prompt: 'risk@1', orderId: 'ord_1' } },
     });
     const a = model(() => ({ answers: {} }), { AI_GATEWAY_ID: 'gw' });
     await assess(a.env, { state: {}, questions: {} }, { orderId: 'ord_2' });
