@@ -60,4 +60,13 @@ describe('overview', () => {
       expect(cols, s).toEqual([...new Set(cols)]);
     }
   });
+
+  it("ties each step's latest reason to its own flow and step", async () => {
+    statements.length = 0;
+    await overview();
+    const sub = statements.find((s) => s.includes('select o2.reason'));
+    // Unqualified, "flow_id" inside the subquery would be o2's own, matching every row.
+    expect(sub).toContain('o2.flow_id = orders.flow_id');
+    expect(sub).toContain("coalesce(orders.stopped_at, '')");
+  });
 });

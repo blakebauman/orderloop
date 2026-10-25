@@ -66,6 +66,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 pnpm install
 pnpm db:migrate:local
 pnpm db:seed:local      # demo customers, catalog, stores and rates (migrations seed none)
+pnpm db:seed:volume     # optional: 20,000 generated orders, products and carts (docs/local-development.md)
 pnpm web:dev            # web + engine in one Vite session (engine runs as an auxiliary Worker)
 pnpm test               # core planner tests, engine Workflow e2e (workerd), web tests
 pnpm lint && pnpm check-types

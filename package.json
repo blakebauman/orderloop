@@ -19,6 +19,7 @@
     "sync:theme": "pnpm --filter @orderloop/design sync:theme",
     "db:migrate:local": "pnpm --filter @orderloop/web db:migrate:local",
     "db:seed:local": "pnpm --filter @orderloop/web db:seed:local",
+    "db:seed:volume": "pnpm --filter @orderloop/web db:seed:volume --",
     "deploy": "pnpm --filter @orderloop/catalog run deploy && pnpm --filter @orderloop/catalog-edge run deploy && pnpm --filter @orderloop/engine run deploy && pnpm --filter @orderloop/web run deploy",
     "test:fleet": "node --test scripts/*.test.ts",
     "test:toolkit": ".claude/scripts/toolkit-check.sh && .claude/hooks/tests/docs-hooks.test.sh && .claude/hooks/tests/guard-hooks.test.sh",
