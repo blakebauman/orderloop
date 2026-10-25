@@ -471,9 +471,11 @@ Not covered by the redaction:
 
 ### To AI Gateway and logs
 
-- **AI Gateway** records every model call. With request logs on (the registry's `aiGatewayLogs`,
-  default `true`) it keeps the prompts and responses, up to 100,000 entries. Turning logs off is
-  set at creation by `provision.sh`; for an existing gateway it is changed in the dashboard.
+- **AI Gateway** records every model call's metadata. Only with request logs on (the registry's
+  `aiGatewayLogs`, default `false`) does it keep the prompts and responses, up to 100,000 entries
+  and until they're deleted. The engine sends the setting with every call (`collectLog`, from
+  `AI_GATEWAY_LOGS`), so it holds whatever the gateway's own default is; logs kept before it was
+  turned off stay until deleted in the dashboard.
 - **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines

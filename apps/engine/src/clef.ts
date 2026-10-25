@@ -16,7 +16,7 @@ import {
   promptId,
   safeFetch,
 } from '@orderloop/core';
-import { logAiCall, withTimeout } from './ai';
+import { gatewayOptions, logAiCall, withTimeout } from './ai';
 
 /** Clef's limits: 4 images, 4 MiB each, 8 MiB decoded in all. */
 export const MAX_IMAGES = 4;
@@ -195,7 +195,7 @@ export async function assess(
           questions: input.questions,
           ...(input.images?.length ? { images: input.images } : {}),
         } as never,
-        env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined,
+        gatewayOptions(env) ? { gateway: gatewayOptions(env) } : undefined,
       ),
       AI_TIMEOUT_MS,
     )) as { answers?: unknown; usage?: Assessment['usage']; result?: Assessment };

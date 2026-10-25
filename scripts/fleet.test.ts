@@ -56,6 +56,11 @@ test('the engine config carries the deployment everywhere a name is account-wide
     jurisdiction: 'eu',
   });
   assert.equal(c.vars.AI_GATEWAY_ID, 'orderloop-acme');
+  assert.equal(c.vars.AI_GATEWAY_LOGS, 'false');
+  assert.equal(
+    renderEngine(base('engine'), { ...acme, aiGatewayLogs: true }).vars.AI_GATEWAY_LOGS,
+    'true',
+  );
   assert.equal(c.workers_dev, false);
 });
 
@@ -240,8 +245,8 @@ test('workflow AI nodes see personal data only where the registry says send', ()
   const send = toDeployment({ ...acme, aiPersonalData: 'send' });
   assert.equal(renderEngine(base('engine'), send).vars.AI_PERSONAL_DATA, 'send');
   assert.throws(() => toDeployment({ ...acme, aiPersonalData: 'all' }), /aiPersonalData/);
-  assert.equal(toDeployment(acme).aiGatewayLogs, true);
-  assert.equal(toDeployment({ ...acme, aiGatewayLogs: false }).aiGatewayLogs, false);
+  assert.equal(toDeployment(acme).aiGatewayLogs, false);
+  assert.equal(toDeployment({ ...acme, aiGatewayLogs: true }).aiGatewayLogs, true);
 });
 
 test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days", () => {
