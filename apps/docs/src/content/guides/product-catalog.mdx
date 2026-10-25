@@ -238,8 +238,8 @@ channel is in the base currency (`USD`): each active variant with a price in tha
 product's, becomes a product with the variant's SKU, a list price in dollars, and a name made of the
 product title and the variant's option labels, such as `Everyday tee (M)`, and the variant's shipping
 weight and size when it has them. A SKU that already exists keeps its stock, cost and other settings
-and gets the new name and price (and weight and size, if the variant has them: a variant without them
-leaves the product's as they were); a new one starts with no
+and gets the new name, price, weight and size (a variant without a weight or size clears the
+product's, so shipping rated by weight stops using it); a new one starts with no
 stock and zero cost, which stay managed in Order Loop.
 
 A change applies only if it is newer than the last one the catalog wrote for that SKU. A product that

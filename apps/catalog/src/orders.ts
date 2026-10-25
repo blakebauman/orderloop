@@ -1,10 +1,9 @@
 /**
- * The catalog's half of Order Loop's `products` table (D1): one row per variant SKU, whose name
- * and list price the catalog keeps current, and its shipping weight and size when the variant has
- * them (a variant without them leaves the row's as they are, so a change sent before they existed
- * clears nothing). Stock, reservations, cost, reorder settings, seller and
- * kind stay Order Loop's own, so the engine's pricing, reservations and replenishment read exactly
- * what they always did.
+ * The catalog's half of Order Loop's `products` table (D1): one row per variant SKU, whose name,
+ * list price and shipping weight and size the catalog keeps current (a variant without a weight or
+ * size clears the row's, so `dim_weight` shipping never bills a size the catalog no longer has).
+ * Stock, reservations, cost, reorder settings, seller and kind stay Order Loop's own, so the
+ * engine's pricing, reservations and replenishment read exactly what they always did.
  *
  * Only one channel feeds it: ORDERS_CHANNEL (default `web`), in BASE_CURRENCY, which is what an
  * order's list prices are in. A variant without a price there isn't written. A product that stops
@@ -15,15 +14,18 @@ import { BASE_CURRENCY, fromMinor } from '@orderloop/core';
 import { type Channel, type Product, type ProductType, pickLocale } from '@orderloop/core/product';
 import type { ListingChange } from './listings';
 
-/** One variant as an order line sees it, with its per-unit shipping weight (kg) and size (cm). */
+/**
+ * One variant as an order line sees it, with its per-unit shipping weight (kg) and size (cm): null
+ * when the variant has none, so removing them in the catalog clears them here too.
+ */
 export type OrderLine = {
   sku: string;
   name: string;
   price: number;
-  weightKg?: number;
-  lengthCm?: number;
-  widthCm?: number;
-  heightCm?: number;
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
 };
 
 /** The variants of `product` an order can name, priced in BASE_CURRENCY for `channel`. */
@@ -56,14 +58,10 @@ export function orderLines(product: Product, type: ProductType, channel: Channel
       sku: v.sku,
       name: options.length ? `${title} (${options.join(', ')})` : title,
       price: fromMinor(price.amount, BASE_CURRENCY),
-      ...(v.weightKg !== undefined ? { weightKg: v.weightKg } : {}),
-      ...(v.dimensionsCm
-        ? {
-            lengthCm: v.dimensionsCm.length,
-            widthCm: v.dimensionsCm.width,
-            heightCm: v.dimensionsCm.height,
-          }
-        : {}),
+      weightKg: v.weightKg ?? null,
+      lengthCm: v.dimensionsCm?.length ?? null,
+      widthCm: v.dimensionsCm?.width ?? null,
+      heightCm: v.dimensionsCm?.height ?? null,
     });
   }
   return out;
@@ -73,11 +71,8 @@ const UPSERT = `INSERT INTO products
     (sku, name, price, cost, catalog_at, weight_kg, length_cm, width_cm, height_cm)
   VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
   ON CONFLICT (sku) DO UPDATE SET name = excluded.name, price = excluded.price,
-    catalog_at = excluded.catalog_at,
-    weight_kg = coalesce(excluded.weight_kg, products.weight_kg),
-    length_cm = coalesce(excluded.length_cm, products.length_cm),
-    width_cm = coalesce(excluded.width_cm, products.width_cm),
-    height_cm = coalesce(excluded.height_cm, products.height_cm)
+    catalog_at = excluded.catalog_at, weight_kg = excluded.weight_kg,
+    length_cm = excluded.length_cm, width_cm = excluded.width_cm, height_cm = excluded.height_cm
   WHERE products.catalog_at IS NULL OR products.catalog_at < excluded.catalog_at`;
 
 /** Writes the order lines a batch of changes carries, newest change per SKU winning. */
@@ -89,6 +84,9 @@ export async function applyOrders(env: Env, changes: ListingChange[]): Promise<v
       if (!seen || seen.at < c.at) latest.set(line.sku, { line, at: c.at });
     }
   if (!latest.size) return;
+  // A line from a catalog that predates explicit nulls omits the fields only when the variant has
+  // none (since dimensions shipped), so absent clears too; one older still is older than every row
+  // that has them, and `catalog_at` drops it.
   const statements = [...latest.values()].map(({ line, at }) =>
     env.DB.prepare(UPSERT).bind(
       line.sku,
