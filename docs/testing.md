@@ -419,6 +419,45 @@ deploy's smoke test requests only `/health`, which the gateway answers without t
 
 CI runs it in the verify job.
 
+## Catalog benchmark
+
+`scripts/catalog-bench.ts` (`pnpm catalog:bench <deployment> [products]`) measures a deployed catalog
+end to end through its REST API and public catalog, with an operator's or admin's token in
+`ORDERLOOP_API_TOKEN`. It is run by hand, after a deploy that changes publishing, listings or search,
+never in CI. It:
+
+1. saves its own channel `bench` (one locale, `en`), type `bench-apparel` (`material`, `color`, and
+   `size` as the variant axis) and categories (`bench-shop` with five leaves), so it never touches a
+   storefront's catalog;
+2. streams a generated CSV feed of N products (50,000 by default, two variants each, keys
+   `bench-0000000` up, seeded so every run sends the same feed) as it generates it;
+3. polls the feed and the root listing's `total` every 5 seconds (each poll a different page size,
+   so it isn't a cached copy) until the import is done and every product is listed;
+4. samples catalog-edge latencies five times each, as cache misses (page sizes no one asked for) and
+   hits: the root listing, a filtered and sorted page and its next page, a leaf listing, search and a
+   product document;
+5. prints a JSON report (`uploadSeconds`, `importSeconds`, `publishedSeconds`, `productsPerSecond`,
+   and `p50` and `max` per request), then deletes the products five calls of 500 a second (the API's
+   rate limit), waits for the listing to be empty and checks that none of 100 sampled products is
+   still served.
+
+`--keep` leaves the products in place, and `--cleanup` only deletes them, after a run that was
+stopped. A run refuses to start while `bench-shop` still lists products. `publishedSeconds` is from
+the start of the upload to the listing showing every product, so it includes the import and the
+listing's rebuild delay (`debounceMs`) and is an upper bound on publishing alone.
+`scripts/catalog-bench.test.ts` (in `pnpm test:fleet`) checks the generated feed: its header, two
+variant rows a product, unique keys, categories and attribute values its type declares, and that it
+is the same every run.
+
+What it measured on `orderloop` (production), each run with the products deleted afterwards:
+
+| Date | Products | Import | Every product listed | Change |
+|---|---|---|---|---|
+| 2026-10-24 | 1,000,000 | about 8,000 a second | about 370 a second average | #166 (all of a publisher's writes at once) |
+| 2026-10-25 | 250,000 | 177 s (about 1,400 a second) | 341 s from the upload (about 730 a second) | #184 (up to four publish passes in flight per shard) |
+
+Both were run with the scratch scripts that preceded this one, from a feed of the same shape.
+
 ## What isn't covered
 
 The flow editor canvas and the live order page are not under test; verify UI changes by running
