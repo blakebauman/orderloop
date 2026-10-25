@@ -109,7 +109,10 @@ The Commerce page's **Records** section shows what orders have done outside the 
 money (payments, invoices and seller payouts), shipments, stock holds, seller orders, messages sent
 and documents. Each row names its order and, for connector writes, the step that wrote it
 (`capture#1`): a retried step finds that same record rather than writing another. The search box at
-the top of the page finds an order, customer, SKU or seller across every section.
+the top of the page finds an order, customer, SKU or seller across every section. Long lists
+(inventory, each store's stock, each pricing source, customers and sellers) show a page at a time,
+with **Previous** and **Next** under them; each keeps its own page, so paging one leaves the others
+where they are.
 - **REST API**, with an API token of the `operator` role:
 
   ```bash

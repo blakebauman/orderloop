@@ -22,11 +22,12 @@ import {
 import { Ago, WaitingAt } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
+import { type CommercePage, commercePage } from '~/lib/commerce.server';
+import { type Paged, pageHref, pricesKey, shown, storeKey } from '~/lib/commerce-pages';
 import { engine } from '~/lib/env.server';
 import { eventAction, eventWaiting } from '~/lib/events';
 import { count, humanize, money, orderRef, plural } from '~/lib/format';
 import {
-  commerceData,
   customerNames,
   publishedFlows,
   recentInboundEmails,
@@ -45,9 +46,10 @@ const CHECKED = 20;
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
+  const params = new URL(request.url).searchParams;
+  const q = params.get('q')?.trim() ?? '';
   const [office, waiting, emails, configured, flows, records] = await Promise.all([
-    commerceData(),
+    commercePage(params),
     waitingOrders(),
     recentInboundEmails(),
     // The engine owns INTAKE_MAILBOXES; ask it rather than assume the defaults.
@@ -89,7 +91,15 @@ export async function loader({ request }: Route.LoaderArgs) {
         };
       }),
   );
-  return { ...office, events, partial: waiting.length > CHECKED, emails, mailboxes, records, q };
+  return {
+    ...office,
+    events,
+    partial: waiting.length > CHECKED,
+    emails,
+    mailboxes,
+    records,
+    q,
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -119,16 +129,16 @@ export function shouldRevalidate({
 }
 
 type EventItem = Awaited<ReturnType<typeof loader>>['events'][number];
-type Office = Awaited<ReturnType<typeof commerceData>>;
+type Office = CommercePage;
 
 const eventKey = (e: Pick<EventItem, 'orderId' | 'nodeId'>) => `${e.orderId}-${e.nodeId}`;
 
 export default function Commerce() {
   const {
-    products: allProducts,
-    customers: allCustomers,
-    sellers: allSellers,
-    stores: allStores,
+    inventory,
+    customers,
+    sellers,
+    stores,
     pricing,
     events: allEvents,
     partial,
@@ -137,30 +147,16 @@ export default function Commerce() {
     records,
     q,
   } = useLoaderData<typeof loader>();
-  // One search narrows every section; records are searched on the server, the rest here.
-  const term = q.toLowerCase();
-  const has = (...s: (string | null | undefined)[]) =>
-    !term || s.some((x) => x?.toLowerCase().includes(term.replace(/^#/, '')));
-  const events = allEvents.filter((e) => has(e.title, e.customer, e.orderId));
-  const products = allProducts.filter((p) => has(p.name, p.sku));
-  const customers = allCustomers.filter((c) => has(c.name, c.id));
-  const sellers = allSellers.filter((s) => has(s.name, s.email, s.id));
-  const stores = allStores.map((l) => ({
-    ...l,
-    stock: l.stock.filter((s) =>
-      has(s.sku, allProducts.find((p) => p.sku === s.sku)?.name, l.name),
-    ),
-  }));
-  // What each store holds of each SKU, so the warehouse figure isn't read as the whole picture.
-  const inStores = new Map<string, number>();
-  for (const l of allStores)
-    for (const s of l.stock) inStores.set(s.sku, (inStores.get(s.sku) ?? 0) + s.stock - s.reserved);
+  // One search narrows every section: the lists and records on the server, outside events here.
+  const term = q.toLowerCase().replace(/^#/, '');
+  const events = allEvents.filter(
+    (e) => !term || [e.title, e.customer, e.orderId].some((x) => x?.toLowerCase().includes(term)),
+  );
   const review = useActionData<typeof action>();
   const nav = useNavigation();
   const canOperate = useCan('operator');
   const [recorded, setRecorded] = useState<ReadonlySet<string>>(new Set());
   const open = events.filter((e) => !recorded.has(eventKey(e))).length;
-  const productName = new Map(allProducts.map((p) => [p.sku, p.name]));
   // The stock review is the only form on this page that navigates.
   const reviewing = nav.state === 'submitting';
   return (
@@ -375,7 +371,12 @@ export default function Commerce() {
             </Empty>
           )}
         </Section>
-        <Section id="stock" title="Inventory" flush>
+        <Section
+          id="stock"
+          title="Inventory"
+          actions={<Total list={inventory} noun="item" />}
+          flush
+        >
           <p className="border-b px-4 py-2 text-muted-foreground text-xs">
             Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from
             the store. Reserved stock is held by running orders.
@@ -402,7 +403,7 @@ export default function Commerce() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {products.map((p) => {
+                {inventory.rows.map((p) => {
                   const available = p.stock - p.reserved;
                   // The stock review reorders anything at or below its reorder point.
                   const level = available <= 0 ? 'Out' : available <= p.reorderPoint ? 'Low' : null;
@@ -437,9 +438,9 @@ export default function Commerce() {
                                 <span className="sr-only"> stock</span>
                               </span>
                             ) : null}
-                            {level === 'Out' && inStores.get(p.sku) ? (
+                            {level === 'Out' && p.inStores > 0 ? (
                               <span className="block font-normal text-muted-foreground text-xs">
-                                {count(inStores.get(p.sku) ?? 0)} in stores
+                                {count(p.inStores)} in stores
                               </span>
                             ) : null}
                           </td>
@@ -463,7 +464,7 @@ export default function Commerce() {
                     </tr>
                   );
                 })}
-                {q && !products.length ? (
+                {q && !inventory.total ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-3 text-muted-foreground text-xs">
                       Nothing here matches “{q}”.
@@ -473,6 +474,7 @@ export default function Commerce() {
               </tbody>
             </table>
           </div>
+          <Pager list={inventory} listKey="inventory" hash="stock" label="Inventory" />
         </Section>
         <Section id="stores" title="Stores" flush>
           <div className="overflow-x-auto">
@@ -505,11 +507,11 @@ export default function Commerce() {
                       </span>
                     </th>
                   </tr>
-                  {l.stock.length ? (
-                    l.stock.map((s) => (
+                  {l.stock.total ? (
+                    l.stock.rows.map((s) => (
                       <tr key={s.sku}>
                         <td className="py-1 pr-2 pl-8">
-                          {productName.get(s.sku) ?? s.sku}
+                          {s.name ?? s.sku}
                           <a
                             href={`#sku-${s.sku}`}
                             className="ml-1.5 font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
@@ -541,13 +543,31 @@ export default function Commerce() {
                       </td>
                     </tr>
                   )}
+                  {l.stock.total > l.stock.size ? (
+                    <tr>
+                      <td colSpan={4} className="p-0">
+                        <Pager
+                          list={l.stock}
+                          listKey={storeKey(l.id)}
+                          hash="stores"
+                          label={`${l.name} stock`}
+                          inset
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               ))}
             </table>
           </div>
         </Section>
-        <Pricing pricing={pricing} customers={customers} productName={productName} />
-        <Section id="customers" title="Customers" flush>
+        <Pricing pricing={pricing} />
+        <Section
+          id="customers"
+          title="Customers"
+          actions={<Total list={customers} noun="customer" />}
+          flush
+        >
           <div className="overflow-x-auto">
             <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
@@ -567,7 +587,7 @@ export default function Commerce() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {customers.map((c) => {
+                {customers.rows.map((c) => {
                   const over = !!c.creditLimit && c.balance > c.creditLimit;
                   // Close enough that one more order could tip it over.
                   const near = !over && !!c.creditLimit && c.balance >= c.creditLimit * 0.9;
@@ -611,7 +631,7 @@ export default function Commerce() {
                     </tr>
                   );
                 })}
-                {q && !customers.length ? (
+                {q && !customers.total ? (
                   <tr>
                     <td colSpan={4} className="px-4 py-3 text-muted-foreground text-xs">
                       Nothing here matches “{q}”.
@@ -621,8 +641,14 @@ export default function Commerce() {
               </tbody>
             </table>
           </div>
+          <Pager list={customers} listKey="customers" hash="customers" label="Customers" />
         </Section>
-        <Section id="sellers" title="Marketplace sellers" flush>
+        <Section
+          id="sellers"
+          title="Marketplace sellers"
+          actions={<Total list={sellers} noun="seller" />}
+          flush
+        >
           <div className="overflow-x-auto">
             <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
@@ -639,7 +665,7 @@ export default function Commerce() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {sellers.map((s) => (
+                {sellers.rows.map((s) => (
                   <tr key={s.id}>
                     <td className="px-4 py-1.5">
                       <Link
@@ -660,7 +686,7 @@ export default function Commerce() {
                     </td>
                   </tr>
                 ))}
-                {q && !sellers.length ? (
+                {q && !sellers.total ? (
                   <tr>
                     <td colSpan={3} className="px-4 py-3 text-muted-foreground text-xs">
                       Nothing here matches “{q}”.
@@ -670,6 +696,7 @@ export default function Commerce() {
               </tbody>
             </table>
           </div>
+          <Pager list={sellers} listKey="sellers" hash="sellers" label="Sellers" />
         </Section>
       </div>
     </>
@@ -994,42 +1021,28 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
 }
 
 /** The pricing chain, in the order `commerce.price` runs it, with each source's entries. */
-function Pricing({
-  pricing,
-  customers,
-  productName,
-}: Pick<Office, 'pricing' | 'customers'> & { productName: Map<string, string> }) {
-  const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? id;
-  const item = (sku: string | null) =>
-    sku ? (productName.has(sku) ? `${productName.get(sku)} (${sku})` : sku) : null;
-  const entries = (id: string) =>
-    id === 'contract'
-      ? pricing.contracts.map((c) => ({
-          key: `${c.customerId}-${c.sku}`,
-          name: `${customerName(c.customerId)}`,
-          scope: item(c.sku) ?? '',
-          price: money(c.price),
-        }))
-      : pricing.rules
-          .filter((r) => r.sourceId === id)
-          .map((r) => ({
-            key: r.id,
-            name: r.name,
-            scope: [
-              item(r.sku),
-              r.customerTier ? `${humanize(r.customerTier)} tier` : null,
-              r.customerId ? customerName(r.customerId) : null,
-              r.minQty ? `${count(r.minQty)}+` : null,
-            ]
-              .filter(Boolean)
-              .join(' · '),
-            price: r.price != null ? money(r.price) : `${r.discountPct}% off list`,
-          }));
+function Pricing({ pricing }: Pick<Office, 'pricing'>) {
+  const item = (sku: string | null, name: string | null) =>
+    sku ? (name ? `${name} (${sku})` : sku) : null;
+  const entries = (rows: Office['pricing']['sources'][number]['entries']['rows']) =>
+    rows.map((r) => ({
+      key: r.key,
+      name: r.name,
+      scope: [
+        item(r.sku, r.productName),
+        r.customerTier ? `${humanize(r.customerTier)} tier` : null,
+        r.customerName,
+        r.minQty ? `${count(r.minQty)}+` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      price: r.price != null ? money(r.price) : `${r.discountPct}% off list`,
+    }));
   return (
     <Section id="pricing" title="Pricing" className="xl:col-span-2" flush>
       <ol className="divide-y">
         {pricing.sources.map((s, i) => {
-          const rows = entries(s.id);
+          const rows = entries(s.entries.rows);
           return (
             <li key={s.id}>
               <div className="flex flex-wrap items-baseline gap-x-3 px-4 pt-2.5 pb-1">
@@ -1051,7 +1064,7 @@ function Pricing({
                 <table
                   className={`mb-2 w-full table-fixed text-sm ${s.active ? '' : 'text-muted-foreground'}`}
                 >
-                  <caption className="sr-only">{s.label} prices</caption>
+                  <caption className="sr-only">{s.label}</caption>
                   <thead className="sr-only">
                     <tr>
                       <th scope="col">Applies as</th>
@@ -1078,6 +1091,13 @@ function Pricing({
               ) : (
                 <p className="pb-2 pl-4 text-muted-foreground text-xs sm:pl-10">No entries.</p>
               )}
+              <Pager
+                list={s.entries}
+                listKey={pricesKey(s.id)}
+                hash="pricing"
+                label={s.label}
+                inset
+              />
             </li>
           );
         })}
@@ -1109,5 +1129,67 @@ function Pricing({
         </span>
       </p>
     </Section>
+  );
+}
+
+/** A section's count, in its header: "2,000 items". */
+function Total({ list, noun }: { list: Paged<unknown>; noun: string }) {
+  return list.total > list.size ? (
+    <span className="text-muted-foreground text-xs tabular">
+      {count(list.total)} {noun}s
+    </span>
+  ) : null;
+}
+
+/**
+ * Where a list is ("26–50 of 2,000") and the pages either side, for a list longer than a page.
+ * Links keep the search and every other list's page, and come back to the section.
+ */
+function Pager({
+  list,
+  listKey,
+  hash,
+  label,
+  inset = false,
+}: {
+  list: Paged<unknown>;
+  listKey: string;
+  hash: string;
+  label: string;
+  inset?: boolean;
+}) {
+  const [params] = useSearchParams();
+  if (list.total <= list.size) return null;
+  const { first, last } = shown(list);
+  const step = (page: number, text: string) =>
+    page >= 1 && (page - 1) * list.size < list.total ? (
+      <Link
+        to={pageHref(params, listKey, page, hash)}
+        className="hit-area text-link hover:underline"
+        aria-label={`${text} page of ${label.toLowerCase()}`}
+      >
+        {text}
+      </Link>
+    ) : (
+      <span className="text-muted-foreground" aria-hidden="true">
+        {text}
+      </span>
+    );
+  return (
+    <nav
+      aria-label={`${label} pages`}
+      className={cn(
+        'flex items-center gap-4 py-2 pr-4 text-xs',
+        inset ? 'pl-8 sm:pl-10' : 'border-t pl-4',
+      )}
+    >
+      <span className="text-muted-foreground tabular">
+        {count(first)}–{count(last)} of {count(list.total)}
+      </span>
+      <span className="ml-auto flex gap-4">
+        {step(list.page - 1, 'Previous')}
+        {step(list.page + 1, 'Next')}
+      </span>
+    </nav>
   );
 }
