@@ -604,7 +604,9 @@ upload (`POST /api/v1/plugins`) and turn one off (`POST /api/v1/plugins/{id}/dis
 approve.
 
 **Running.** The engine merges the active rows into its pins (`bundles`, cached 15 seconds per
-isolate, dropped by an install call in the same isolate) after `PLUGIN_BUNDLES`, so a runtime
+isolate for listing, dropped by an install call in the same isolate) after `PLUGIN_BUNDLES`, and
+`pluginStub` reads an installed plugin's row before each call (`stillActive`: still `active` with
+that sha), so a version turned off, rolled back or uninstalled anywhere stops on its next call, so a runtime
 install runs exactly as a registry one: the bundle hashed against its pin, its sealed manifest
 enforced. Its status has `source: 'installed'`.
 
@@ -619,7 +621,7 @@ read as not installed); roll back to any `superseded` version (`rollbackPlugin`;
 in `DOCS`); uninstall (`uninstallPlugin`), refused while `pluginUsage` lists a published flow, a
 running order or a label not yet voided, which then wipes its storage, marks its rows `uninstalled`
 (kept, for the record) and deletes its secrets; the wipe goes first, so a failure can be retried.
-Other isolates may still run it for their cache's 15 seconds. A rollback runs the older code
+A call already running when it is turned off finishes. A rollback runs the older code
 against the storage as the newer version's migrations left it (migrations only go forward). Every action, and every refusal, is in the audit
 log (`plugin.*`).
 
