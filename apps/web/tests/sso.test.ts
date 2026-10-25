@@ -16,8 +16,34 @@ const env: Record<string, string> = {
   PRINCIPAL_KEY: 'test-principal-key-0123456789abcdef',
 };
 
+/** What the next `select … get()` reads, in order, and what `update` wrote. */
+const rows: unknown[] = [];
+const writes: Record<string, unknown>[] = [];
+let failNextWrite = false;
+const fakeDb = {
+  select: () => {
+    const q = { from: () => q, where: () => q, get: async () => rows.shift() };
+    return q;
+  },
+  update: () => ({
+    set: (v: Record<string, unknown>) => ({
+      where: () => {
+        writes.push(v);
+        const fail = failNextWrite;
+        failNextWrite = false;
+        return Object.assign(Promise.resolve(), {
+          returning: async () => {
+            if (fail) throw new Error('UNIQUE constraint failed: users.external_sub');
+            return [{ id: 'usr_1' }];
+          },
+        });
+      },
+    }),
+  }),
+};
+
 vi.mock('cloudflare:workers', () => ({ env }));
-vi.mock('~/lib/env.server', () => ({ db: () => ({}) }));
+vi.mock('~/lib/env.server', () => ({ db: () => fakeDb }));
 vi.mock('~/lib/audit.server', () => ({ audit: vi.fn() }));
 vi.mock('~/lib/settings.server', () => ({ ssoSettings: async () => DEFAULT_SSO }));
 vi.mock('~/lib/auth.server', () => ({
@@ -28,10 +54,18 @@ vi.mock('~/lib/auth.server', () => ({
       .find((c) => c.startsWith(`${name}=`))
       ?.slice(name.length + 1),
   forgetUserCount: vi.fn(),
-  startSession: vi.fn(),
+  startSession: vi.fn(async () => '__Host-ol_session=new'),
 }));
 
-const { SsoError, ssoConfig, startSso, verifyCallback } = await import('~/lib/sso.server');
+const {
+  finishSsoLink,
+  pendingSsoLink,
+  SsoError,
+  signInWithSso,
+  ssoConfig,
+  startSso,
+  verifyCallback,
+} = await import('~/lib/sso.server');
 
 describe('SSO settings', () => {
   it('reads domains from an admin’s text, dropping junk and repeats', () => {
@@ -94,6 +128,70 @@ describe('decideSso', () => {
     expect(
       decideSso({ ...id, email: 'eve@acme.com.evil.test' }, undefined, undefined, open),
     ).toEqual({ kind: 'refuse', reason: 'domain not allowed' });
+  });
+});
+
+describe('linking an identity to someone with a password', () => {
+  const identity = { sub: 'idp|ann', email: 'ann@acme.com', name: 'Ann' };
+  const ann = {
+    id: 'usr_1',
+    email: 'ann@acme.com',
+    name: 'Ann',
+    role: 'admin',
+    externalSub: null,
+    disabledAt: null,
+  };
+  const request = (cookie?: string) =>
+    new Request('https://app.test/login/sso/link', cookie ? { headers: { cookie } } : {});
+
+  afterEach(() => {
+    rows.length = 0;
+    writes.length = 0;
+  });
+
+  it('links someone without a password at once', async () => {
+    rows.push(undefined, { ...ann, passwordHash: null });
+    expect(await signInWithSso(request(), identity)).toEqual({ session: '__Host-ol_session=new' });
+    expect(writes).toEqual([{ externalSub: 'idp|ann' }]);
+  });
+
+  it('waits for the password of someone who has one, and links only them', async () => {
+    rows.push(undefined, { ...ann, passwordHash: 'pbkdf2$…' });
+    const outcome = await signInWithSso(request(), identity);
+    expect(writes).toEqual([]);
+    if (!('confirmLink' in outcome)) throw new Error('expected a pending link');
+    expect(outcome.confirmLink).toMatch(
+      /^__Host-ol_sso_link=sl1\..*; HttpOnly; Secure; SameSite=Lax; Max-Age=600$/,
+    );
+    const cookie = outcome.confirmLink.split(';')[0]!;
+
+    const user = { ...ann, passwordHash: 'pbkdf2$…', totpEnabledAt: null };
+    rows.push(user);
+    expect(await pendingSsoLink(request(cookie))).toMatchObject({ sub: 'idp|ann', user });
+    // Gone once the person was linked another way, or lost their password.
+    rows.push({ ...user, externalSub: 'idp|other' });
+    expect(await pendingSsoLink(request(cookie))).toBeNull();
+    rows.push({ ...user, passwordHash: null });
+    expect(await pendingSsoLink(request(cookie))).toBeNull();
+    rows.push({ ...user, disabledAt: 5 });
+    expect(await pendingSsoLink(request(cookie))).toBeNull();
+    expect(await pendingSsoLink(request('__Host-ol_sso_link=sl1.forged.sig'))).toBeNull();
+
+    // Signed in as someone else: nothing is linked.
+    rows.push(user);
+    const bob = { kind: 'user' as const, id: 'usr_2', name: 'Bob', role: 'admin' as const };
+    expect(await finishSsoLink(request(cookie), bob)).toBe(false);
+    // Signed in as Ann, with her password: linked, unless the identity went to someone else.
+    rows.push(user, { id: 'usr_3' });
+    const caller = { kind: 'user' as const, id: 'usr_1', name: 'Ann', role: 'admin' as const };
+    expect(await finishSsoLink(request(cookie), caller)).toBe(false);
+    // Taken between the check and the write: the unique index refuses it, and so does the link.
+    rows.push(user, undefined);
+    failNextWrite = true;
+    expect(await finishSsoLink(request(cookie), caller)).toBe(false);
+    rows.push(user, undefined);
+    expect(await finishSsoLink(request(cookie), caller)).toBe(true);
+    expect(writes).toEqual([{ externalSub: 'idp|ann' }, { externalSub: 'idp|ann' }]);
   });
 });
 

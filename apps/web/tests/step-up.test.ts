@@ -76,7 +76,9 @@ vi.mock('~/lib/settings.server', () => ({
   twoFactorRequirement: async () => 'off',
 }));
 
-const { recordReauth, stepUp, stepUpMethod } = await import('~/lib/auth.server');
+const { recordReauth, signInToLink, stepUp, stepUpMethod, Throttled } = await import(
+  '~/lib/auth.server'
+);
 
 const admin: Principal = { kind: 'user', id: 'usr_1', name: 'Ann', role: 'admin' };
 const request = new Request('https://app.test/plugins', {
@@ -155,5 +157,34 @@ describe('stepUp', () => {
     const token: Principal = { kind: 'token', id: 'tok_1', name: 'ci', role: 'admin' };
     expect(await stepUpMethod(token)).toBeNull();
     expect(await stepUp(request, token, { password: 'x' })).toMatch(/person signed in/);
+  });
+});
+
+describe('signInToLink', () => {
+  const ann = async (totpEnabledAt: number | null = null) => ({
+    id: 'usr_1',
+    email: 'ann@acme.com',
+    passwordHash: await hashPassword('right horse'),
+    totpEnabledAt,
+  });
+
+  it('takes the password even while the workspace is SSO-only, then the code when they have one', async () => {
+    ssoOnly = true;
+    expect(await signInToLink(request, await ann(), 'wrong')).toBeNull();
+    const signedIn = await signInToLink(request, await ann(), 'right horse');
+    if (!signedIn || signedIn.twoFactor) throw new Error('expected a sign-in without a code');
+    // The session waits until the caller has linked the identity.
+    expect(await signedIn.signIn()).toMatch(/^__Host-ol_session=/);
+    expect(await signInToLink(request, await ann(1), 'right horse')).toMatchObject({
+      twoFactor: true,
+      cookie: expect.not.stringMatching(/^__Host-ol_session=/),
+    });
+  });
+
+  it('counts wrong passwords against the same limits as signing in', async () => {
+    for (let i = 0; i < 5; i++) expect(await signInToLink(request, await ann(), 'nope')).toBeNull();
+    await expect(signInToLink(request, await ann(), 'right horse')).rejects.toBeInstanceOf(
+      Throttled,
+    );
   });
 });

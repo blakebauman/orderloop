@@ -12,8 +12,21 @@ import {
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { Menu, MessageSquareText, Monitor, Moon, Plus, Sun, UserRound } from 'lucide-react';
+import {
+  Ellipsis,
+  LayoutDashboard,
+  MessageSquareText,
+  Monitor,
+  Moon,
+  Plus,
+  ReceiptText,
+  Stamp,
+  Sun,
+  UserRound,
+  Workflow,
+} from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   Link,
@@ -21,6 +34,7 @@ import {
   Outlet,
   type ShouldRevalidateFunctionArgs,
   useLoaderData,
+  useLocation,
 } from 'react-router';
 import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
@@ -122,6 +136,14 @@ const NAV: NavItem[] = [
   { to: '/commerce', label: 'Commerce' },
 ];
 
+/** Phones: the pages an operator reaches for most, as tabs; the rest of NAV is under More. */
+const TABS: { to: string; label: string; icon: typeof Sun; end?: boolean; badge?: boolean }[] = [
+  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/orders', label: 'Orders', icon: ReceiptText },
+  { to: '/approvals', label: 'Approvals', icon: Stamp, badge: true },
+  { to: '/flows', label: 'Flows', icon: Workflow },
+];
+
 const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Light', icon: Sun },
   { value: 'dark', label: 'Dark', icon: Moon },
@@ -176,7 +198,7 @@ function AssistantToggle() {
       )}
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
-      <span className="sr-only sm:not-sr-only">Assistant</span>
+      <span className="sr-only sm:not-sr-only md:max-lg:sr-only">Assistant</span>
       <kbd className="hidden font-sans text-[11px] text-muted-foreground lg:inline">⌘J</kbd>
     </button>
   );
@@ -204,18 +226,23 @@ function ShellFrame() {
       >
         Skip to content
       </a>
-      {/* 3rem tall with its rule: full-height pages and the assistant subtract exactly 3rem. */}
-      <header className="sticky top-0 z-40 border-b bg-background">
-        <div className="flex h-[calc(3rem-1px)] items-center gap-3 px-4 sm:gap-6 sm:px-5">
+      {/* 3rem tall with its rule, under the status bar's inset: full-height pages and the assistant
+          subtract --shell-h (app.css). */}
+      <header className="sticky top-0 z-40 border-b bg-background pt-safe-0">
+        <div className="flex h-[calc(3rem-1px)] items-center gap-3 px-safe-4 sm:gap-6 sm:px-safe-5">
           <Link
             to="/"
             className="-mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-[16px]"
             aria-label="OrderLoop overview"
           >
             <Mark className="size-5" />
-            <span className="hidden sm:inline">OrderLoop</span>
+            <span className="hidden sm:inline md:max-lg:hidden">OrderLoop</span>
           </Link>
-          <nav aria-label="Main" className="-mb-px hidden h-full items-stretch gap-1 md:flex">
+          {/* Tablets in portrait run out of width before the links do: the row scrolls, not wraps. */}
+          <nav
+            aria-label="Main"
+            className="-mb-px hidden h-full min-w-0 snap-x items-stretch gap-1 overflow-x-auto [scrollbar-width:none] md:flex md:max-lg:pr-6 md:max-lg:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
+          >
             {nav.map(({ to, label, end, badge, document }) => (
               <NavLink
                 key={to}
@@ -224,7 +251,7 @@ function ShellFrame() {
                 reloadDocument={document}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors',
+                    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors',
                     isActive
                       ? 'border-foreground font-medium text-foreground'
                       : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
@@ -236,21 +263,7 @@ function ShellFrame() {
               </NavLink>
             ))}
           </nav>
-          {/* On phones the approvals queue stays one tap away; everything else is in the menu. */}
-          {pending > 0 ? (
-            <NavLink
-              to="/approvals"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-1.5 text-[13px] md:hidden',
-                  isActive ? 'font-medium text-foreground' : 'text-muted-foreground',
-                )
-              }
-            >
-              Approvals <PendingCount n={pending} />
-            </NavLink>
-          ) : null}
-          <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
             {showNav ? <AssistantToggle /> : null}
             {operator ? (
               <Link
@@ -258,7 +271,7 @@ function ShellFrame() {
                 className="inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
               >
                 <Plus className="size-3.5" aria-hidden="true" />
-                <span className="sr-only sm:not-sr-only">New order</span>
+                <span className="sr-only sm:not-sr-only md:max-lg:sr-only">New order</span>
               </Link>
             ) : null}
             <DropdownMenu>
@@ -279,7 +292,7 @@ function ShellFrame() {
                 aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
               >
                 <UserRound className="size-4" aria-hidden="true" />
-                <span className="max-w-32 truncate">
+                <span className="max-w-32 truncate md:max-lg:sr-only">
                   {me.kind === 'user' ? me.name : ROLE_LABELS[me.role]}
                 </span>
               </DropdownMenuTrigger>
@@ -287,43 +300,161 @@ function ShellFrame() {
                 <AccountItems me={me} auth={auth} />
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="grid size-10 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                aria-label="Menu"
-              >
-                <Menu className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                {nav.map(({ to, label, end, badge, document }) => (
-                  <DropdownMenuItem key={to} asChild>
-                    <NavLink
-                      to={to}
-                      end={end}
-                      reloadDocument={document}
-                      className="justify-between aria-[current=page]:font-medium"
-                    >
-                      {label}
-                      {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-                    </NavLink>
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <ThemeItems value={theme.choice} onChange={theme.setChoice} />
-                <DropdownMenuSeparator />
-                <AccountItems me={me} auth={auth} />
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 outline-none">
+        <main
+          id="main"
+          tabIndex={-1}
+          className="min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0"
+        >
           <Outlet />
         </main>
         {showNav ? <LazyAssistantPanel /> : null}
       </div>
+      <TabBar nav={nav} pending={pending} />
     </div>
+  );
+}
+
+/**
+ * Phones: the main pages as tabs along the bottom, in thumb reach and clear of the home indicator,
+ * and More for everything else. Wider screens have the links in the top bar instead.
+ */
+function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
+  const { pathname } = useLocation();
+  const [more, setMore] = useState(false);
+  // A link in the sheet closes it by navigating; so does the back button (pathname is the trigger).
+  useEffect(() => setMore(false), [pathname]);
+  const tabs = nav.length ? TABS : [];
+  const inTab = tabs.some((t) =>
+    t.end ? pathname === t.to : pathname === t.to || pathname.startsWith(`${t.to}/`),
+  );
+  const item =
+    'relative flex flex-col items-center justify-center gap-0.5 text-[11px] transition-colors short:gap-0';
+  const state = (active: boolean) =>
+    active
+      ? 'font-medium text-foreground before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:bg-foreground'
+      : 'text-muted-foreground';
+  return (
+    <>
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t bg-background px-safe-0 pb-[var(--safe-bottom)] md:hidden"
+      >
+        <ul
+          className="grid h-full"
+          style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}
+        >
+          {tabs.map(({ to, label, icon: Icon, end, badge }) => (
+            <li key={to} className="contents">
+              <NavLink to={to} end={end} className={({ isActive }) => cn(item, state(isActive))}>
+                <span className="relative">
+                  <Icon className="size-5" aria-hidden="true" />
+                  {badge && pending > 0 ? (
+                    <span className="absolute -top-1.5 left-3.5 min-w-4 rounded-sm bg-wait px-1 text-center font-medium text-[10px] text-background leading-4 tabular">
+                      {pending > 99 ? '99+' : pending}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="short:sr-only">
+                  {label}
+                  {badge && pending > 0 ? (
+                    <span className="sr-only">, {pending} pending</span>
+                  ) : null}
+                </span>
+              </NavLink>
+            </li>
+          ))}
+          <li className="contents">
+            <button
+              type="button"
+              onClick={() => setMore(true)}
+              aria-haspopup="dialog"
+              aria-expanded={more}
+              className={cn(item, state(more || !inTab))}
+            >
+              <Ellipsis className="size-5" aria-hidden="true" />
+              <span className="short:sr-only">More</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+      <Sheet open={more} onOpenChange={setMore}>
+        <SheetContent side="bottom" className="gap-0 md:hidden">
+          <MoreMenu nav={nav.filter((n) => !TABS.some((t) => t.to === n.to))} pending={pending} />
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+/** The More sheet: the pages without a tab, the theme, and the account's pages. */
+function MoreMenu({ nav, pending }: { nav: NavItem[]; pending: number }) {
+  const { me, auth } = useLoaderData<typeof loader>();
+  const theme = useTheme();
+  const admin = atLeast(me.role, 'admin');
+  const row =
+    'flex min-h-11 items-center justify-between gap-3 rounded-md px-3 text-[15px] hover:bg-accent aria-[current=page]:font-medium';
+  const links: NavItem[] = [
+    ...nav,
+    { to: '/account', label: 'Account' },
+    ...(admin
+      ? [
+          { to: '/team', label: 'Team and roles' },
+          { to: '/audit', label: 'Audit log' },
+          { to: '/plugins', label: 'Plugins' },
+        ]
+      : []),
+  ];
+  return (
+    <>
+      <div className="border-b px-4 pt-4 pb-3 pr-14">
+        <SheetTitle className="truncate text-[15px]">{who(me, auth)}</SheetTitle>
+        <SheetDescription className="text-xs">{ROLE_LABELS[me.role]}</SheetDescription>
+      </div>
+      <ul className="p-2">
+        {links.map(({ to, label, end, badge, document }) => (
+          <li key={to}>
+            <NavLink to={to} end={end} reloadDocument={document} className={row}>
+              {label}
+              {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+      <fieldset className="border-t px-4 pt-3 pb-3">
+        <legend className="caption float-left mb-2 w-full font-medium">Theme</legend>
+        <div className="clear-left grid grid-cols-3 gap-1 rounded-md border p-0.5">
+          {THEMES.map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={theme.choice === value}
+              onClick={() => theme.setChoice(value)}
+              className="flex min-h-10 items-center justify-center gap-1.5 rounded-sm text-[13px] text-muted-foreground aria-pressed:bg-accent aria-pressed:font-medium aria-pressed:text-foreground"
+            >
+              <Icon className="size-3.5" aria-hidden="true" />
+              {value === 'system' ? 'System' : label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      {auth || admin ? (
+        <div className="border-t p-2">
+          {auth ? (
+            <a href="/logout" className={row}>
+              Sign out
+            </a>
+          ) : (
+            <Link to="/team" className={row}>
+              Set up sign-in
+            </Link>
+          )}
+        </div>
+      ) : null}
+    </>
   );
 }
 
