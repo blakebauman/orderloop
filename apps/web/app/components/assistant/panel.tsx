@@ -13,6 +13,16 @@ import {
   isAssistantTool,
   ROLE_LABELS,
 } from '@orderloop/core';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
 import {
   DropdownMenu,
@@ -135,6 +145,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
   const { setOpen, page, scope, setScope } = useAssistant();
   const onPage = page.kind !== 'workspace';
   const current = scope === 'workspace' || !onPage ? 'Everything' : contextLabel(page);
+  const [clearing, setClearing] = useState(false);
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <h2 className="font-semibold text-[15px] tracking-title">Assistant</h2>
@@ -173,7 +184,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
               <MoreHorizontal className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem disabled={!canClear} onSelect={onClear}>
+              <DropdownMenuItem disabled={!canClear} onSelect={() => setClearing(true)}>
                 Start a new conversation
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -198,6 +209,25 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
         >
           <X className="size-4" />
         </button>
+        {onClear ? (
+          <AlertDialog open={clearing} onOpenChange={setClearing}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Start a new conversation?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This conversation is deleted; it was only yours. Actions you confirmed stay done
+                  and stay in the audit log.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep it</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={onClear}>
+                  Start over
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
       </div>
     </header>
   );
@@ -291,6 +321,9 @@ function Conversation() {
 
   const last = messages.at(-1);
   const lastAssistant = messages.findLastIndex((m) => m.role === 'assistant');
+  // Editing or answering again rewrites what came after; never across a prepared action, which
+  // may already have happened.
+  const lastAction = messages.findLastIndex(hasAction);
   // Editing a sent message replaces it, and drops what came after, with the new text.
   const edit = useCallback(
     (messageId: string, text: string) => {
@@ -322,7 +355,7 @@ function Conversation() {
               {messages.map((m, i) => (
                 <li key={m.id}>
                   {m.role === 'user' ? (
-                    <UserMessage m={m} busy={busy} onEdit={edit} />
+                    <UserMessage m={m} busy={busy} onEdit={i > lastAction ? edit : undefined} />
                   ) : (
                     <AssistantMessage
                       m={m}
@@ -331,7 +364,10 @@ function Conversation() {
                       respond={respond}
                       // Only the latest reply can be asked again, and not while one is running.
                       onRegenerate={
-                        i === lastAssistant && i === messages.length - 1 && !busy
+                        i === lastAssistant &&
+                        i === messages.length - 1 &&
+                        i !== lastAction &&
+                        !busy
                           ? () => void regenerate()
                           : undefined
                       }
@@ -407,7 +443,7 @@ function UserMessage({
 }: {
   m: Message;
   busy: boolean;
-  onEdit: (messageId: string, text: string) => void;
+  onEdit?: (messageId: string, text: string) => void;
 }) {
   const text = textOf(m);
   const [draft, setDraft] = useState<string | null>(null);
@@ -419,7 +455,7 @@ function UserMessage({
           aria-label="Edit your message"
           onSubmit={() => {
             if (!changed) return;
-            onEdit(m.id, draft);
+            onEdit?.(m.id, draft);
             setDraft(null);
           }}
         >
@@ -458,9 +494,11 @@ function UserMessage({
       <MessageContent>{text}</MessageContent>
       <MessageActions>
         <CopyAction text={text} />
-        <MessageAction label="Edit" disabled={busy} onClick={() => setDraft(text)}>
-          <Pencil />
-        </MessageAction>
+        {onEdit ? (
+          <MessageAction label="Edit" disabled={busy} onClick={() => setDraft(text)}>
+            <Pencil />
+          </MessageAction>
+        ) : null}
       </MessageActions>
     </MessageFrame>
   );
@@ -471,6 +509,10 @@ const ACTION = new Set(
     .filter(([, t]) => t.confirm)
     .map(([name]) => name),
 );
+
+/** Whether a message prepared an action (a tool that waits for a person to confirm it). */
+const hasAction = (m: Message) =>
+  m.parts.some((p) => isToolUIPart(p) && ACTION.has(getToolName(p)));
 
 function AssistantMessage({
   m,
@@ -593,9 +635,11 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
       >
         <span className="font-medium text-foreground">Needs attention</span>
         {approvals ? <span className="text-wait">{plural(approvals, 'approval')}</span> : null}
-        {/* The same words as the overview: these counts cover failed and rolled-back orders, and
-            orders waiting on an outside event. */}
-        {failedN ? <span className="text-bad">{failedN} failed or rolled back</span> : null}
+        {/* The overview's words, with the window: the overview counts every such order, this line
+            only the last 3 days (`attention` in the engine), so it says so. */}
+        {failedN ? (
+          <span className="text-bad">{failedN} failed or rolled back in 3 days</span>
+        ) : null}
         {stalled ? (
           <span className="text-muted-foreground">{stalled} waiting on events</span>
         ) : null}
