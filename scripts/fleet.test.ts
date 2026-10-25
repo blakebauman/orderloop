@@ -171,6 +171,30 @@ test("orderloop.app's own deployment renders the base configs unchanged", () => 
   ]);
 });
 
+// A deployment's Durable Objects take their classes and migrations from the base config alone:
+// scripts/do-migrations.test.ts guards those, and a render that touched them would skip the guard.
+test('rendering never changes Durable Object bindings or migrations', () => {
+  const demo = toDeployment({ ...acme, id: 'acme-demo', demo: true });
+  for (const d of [...loadDeployments().filter((x) => x.d1Id && x.catalogKvId), acme, demo]) {
+    for (const [app, render] of [
+      ['engine', renderEngine],
+      ['catalog', renderCatalog],
+    ] as const) {
+      const c = render(base(app), d);
+      assert.deepEqual(c.migrations, base(app).migrations, `${d.id}: ${app} migrations`);
+      assert.deepEqual(c.durable_objects, base(app).durable_objects, `${d.id}: ${app} bindings`);
+    }
+    for (const [app, render] of [
+      ['web', renderWeb],
+      ['catalog-edge', renderCatalogEdge],
+    ] as const) {
+      const c = render(base(app), d);
+      assert.equal(c.migrations, undefined, `${d.id}: ${app} migrations`);
+      assert.equal(c.durable_objects, undefined, `${d.id}: ${app} bindings`);
+    }
+  }
+});
+
 test('bad entries are refused', () => {
   assert.throws(() => toDeployment({ id: 'Acme', ring: 'canary', slot: 2, d1Id: 'x' }), /id must/);
   assert.throws(() => toDeployment({ id: 'acme', ring: 'beta', slot: 2, d1Id: 'x' }), /ring/);

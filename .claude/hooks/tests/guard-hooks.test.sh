@@ -21,11 +21,23 @@ ASK='"permissionDecision":"ask"'
 
 # A throwaway repo on a feature branch, with origin/main holding one applied migration.
 repo="$TMPDIR/repo"
-mkdir -p "$repo/packages/db/migrations" "$repo/plugins/acme/migrations"
+mkdir -p "$repo/packages/db/migrations" "$repo/plugins/acme/migrations" "$repo/apps/engine"
 git -C "$repo" init -q -b main
 git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 echo 'CREATE TABLE a (id TEXT);' >"$repo/packages/db/migrations/0001_init.sql"
 echo 'CREATE TABLE p (id TEXT);' >"$repo/plugins/acme/migrations/0001_init.sql"
+# And an engine config whose two Durable Object migrations are applied.
+cat >"$repo/apps/engine/wrangler.jsonc" <<'JSONC'
+{
+  "name": "orderloop-engine",
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["OrderAgent"] },
+    // The assistant.
+    { "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] }
+  ],
+  "vars": { "A": "1" }
+}
+JSONC
 git -C "$repo" add -A && git -C "$repo" -c user.email=t@t -c user.name=t commit -q -m applied
 git -C "$repo" update-ref refs/remotes/origin/main HEAD
 git -C "$repo" checkout -q -b feat/x
@@ -70,6 +82,34 @@ check "an applied plugin migration is denied" "$DENY" "$(edit_in "$repo/plugins/
 check "a new migration is allowed" "" "$(write_in "$repo/packages/db/migrations/0002_next.sql" 'ALTER TABLE a ADD COLUMN b TEXT;')"
 check "the vendored UCP schemas are denied" "$DENY" "$(edit_in "$root/packages/core/tests/fixtures/ucp/schemas/x.json")"
 check "the routing golden test asks" "$ASK" "$(edit_in "$root/packages/core/tests/product-routing.test.ts")"
+check "the frozen Durable Object migrations ask" "$ASK" "$(edit_in "$root/scripts/do-migrations.test.ts")"
+# Durable Object migrations: an Edit is applied to the file before comparing with origin/main.
+wr="$repo/apps/engine/wrangler.jsonc"
+replace_in() { jq -cn --arg f "$1" --arg o "$2" --arg n "$3" '{session_id:"g",tool_input:{file_path:$f,old_string:$o,new_string:$n}}' | "$hooks/guard-invariants.sh"; }
+v2='{ "tag": "v2", "new_sqlite_classes": ["AssistantAgent"] }'
+check "appending a Durable Object migration is allowed" "" "$(replace_in "$wr" "$v2" "$v2,
+    { \"tag\": \"v3\", \"new_sqlite_classes\": [\"A2AAgent\"] }")"
+check "an unrelated edit to wrangler.jsonc is allowed" "" "$(replace_in "$wr" '"A": "1"' '"A": "2"')"
+check "reformatting an applied migration is allowed" "" "$(replace_in "$wr" "$v2" '{"tag":"v2","new_sqlite_classes":["AssistantAgent"]}')"
+check "changing an applied migration asks" "$ASK" "$(replace_in "$wr" '["OrderAgent"]' '["OrderAgent", "Other"]')"
+check "renaming an applied tag asks" "$ASK" "$(replace_in "$wr" '"tag": "v1"' '"tag": "v0"')"
+check "removing an applied migration asks" "$ASK" "$(replace_in "$wr" ",
+    // The assistant.
+    $v2" '')"
+check "inserting before an applied migration asks" "$ASK" "$(replace_in "$wr" '"migrations": [' '"migrations": [
+    { "tag": "v0", "new_sqlite_classes": ["First"] },')"
+check "a deleted class asks" "$ASK" "$(replace_in "$wr" "$v2" "$v2,
+    { \"tag\": \"v3\", \"deleted_classes\": [\"AssistantAgent\"] }")"
+check "a renamed class asks" "$ASK" "$(replace_in "$wr" "$v2" "$v2,
+    { \"tag\": \"v3\", \"renamed_classes\": [{ \"from\": \"AssistantAgent\", \"to\": \"Assistant\" }] }")"
+check "a Write without the applied migrations asks" "$ASK" "$(write_in "$wr" '{ "name": "orderloop-engine", "migrations": [] }')"
+mkdir -p "$repo/apps/new"
+check "a new app's migrations are allowed" "" "$(write_in "$repo/apps/new/wrangler.jsonc" '{ "migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["A"] }
+] }')"
+check "a new app's deleted class asks" "$ASK" "$(write_in "$repo/apps/new/wrangler.jsonc" '{ "migrations": [
+  { "tag": "v1", "deleted_classes": ["A"] }
+] }')"
 check "a /healthz route is denied" "$DENY" "$(edit_in "$root/apps/web/app/routes.ts" "route('/healthz', 'routes/health.ts')")"
 check "a /readyz route in a new file is denied" "$DENY" "$(write_in "$root/apps/engine/src/new.ts" "if (url.pathname === '/readyz') {}")"
 check "a MultiEdit adding /livez is denied" "$DENY" "$(jq -cn --arg f "$root/apps/web/app/x.ts" '{tool_input:{file_path:$f,edits:[{new_string:"ok"},{new_string:"fetch(\"/livez\")"}]}}' | "$hooks/guard-invariants.sh")"
