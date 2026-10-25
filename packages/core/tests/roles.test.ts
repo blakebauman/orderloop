@@ -9,10 +9,12 @@ import {
   signCartGuestSession,
   signPlatform,
   signPrincipal,
+  signSsoFlow,
   verifyCartGuest,
   verifyCartGuestSession,
   verifyPlatform,
   verifyPrincipal,
+  verifySsoFlow,
 } from '../src/roles';
 
 describe('roles', () => {
@@ -165,5 +167,32 @@ describe('cart guest envelopes', () => {
     expect(await verifyCartGuest([key], cookie, path, now)).toBeNull();
     const header = await signCartGuest(key, g, path, now);
     expect(await verifyCartGuestSession([key], header, 'cart_1', now)).toBeNull();
+  });
+});
+
+describe('the single sign-on flow cookie', () => {
+  const key = 'k'.repeat(32);
+  const now = 1_700_000_000_000;
+  const flow = { state: 's', nonce: 'n', verifier: 'v', next: '/', reauth: { at: now } };
+
+  it('reads back only what it sealed, with this key, until it expires', async () => {
+    const cookie = await signSsoFlow(key, flow, now + 600_000);
+    expect(await verifySsoFlow([key], cookie, now)).toEqual(flow);
+    expect(await verifySsoFlow(['other'.repeat(8), key], cookie, now)).toEqual(flow);
+    expect(await verifySsoFlow(['other'.repeat(8)], cookie, now)).toBeNull();
+    expect(await verifySsoFlow([key], cookie, now + 600_001)).toBeNull();
+    // An edited payload, and another envelope signed with the same key.
+    const [v, , sig] = cookie.split('.');
+    const forged = btoa(
+      JSON.stringify({ flow: { ...flow, reauth: { at: 0 } }, path: 'sso', exp: now + 600_000 }),
+    );
+    expect(await verifySsoFlow([key], `${v}.${forged}.${sig}`, now)).toBeNull();
+    const staff = await signPrincipal(
+      key,
+      { kind: 'user', id: 'u', name: 'A', role: 'admin' },
+      'sso',
+      now,
+    );
+    expect(await verifySsoFlow([key], staff, now)).toBeNull();
   });
 });

@@ -5,19 +5,19 @@
  * The provider is set per deployment: `OIDC_ISSUER` and `OIDC_CLIENT_ID` (vars, from the
  * registry's `sso`) and the `OIDC_CLIENT_SECRET` secret. Admins choose the rest on the Team page
  * (`ssoSettings`). `/login/sso` starts a sign-in and keeps its state, nonce and code verifier in a
- * short-lived `__Host-ol_sso` cookie; `/login/sso/callback` checks the state, swaps the code for
+ * short-lived `__Host-ol_sso` cookie, sealed with `PRINCIPAL_KEY` (`signSsoFlow`) so the browser
+ * can't change it or bring it back after it expires; `/login/sso/callback` checks the state, swaps the code for
  * an ID token, verifies it against the provider's keys and starts the same session a password
  * would (`startSession`). Who the identity signs in as is `decideSso` (`sso.ts`).
  *
  * A step-up (`stepUp`) for someone who has only single sign-on starts the same flow with `reauth`:
  * the request asks the provider to sign them in again (`prompt=login`, `max_age=0`), and the
  * callback takes its answer only if the ID token's `auth_time` is after the flow began and within
- * the flow's own lifetime of now (the server's clock, since the flow cookie isn't signed), so a
- * provider that answers from its own session fails closed.
+ * the flow's own lifetime of now, so a provider that answers from its own session fails closed.
  */
 
 import { env } from 'cloudflare:workers';
-import { newId, type Principal, type Role } from '@orderloop/core';
+import { newId, type Principal, type Role, signSsoFlow, verifySsoFlow } from '@orderloop/core';
 import { users } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -25,6 +25,7 @@ import { audit } from './audit.server';
 import { cookie, forgetUserCount, startSession } from './auth.server';
 import { normalizeEmail, randomToken } from './credentials';
 import { db } from './env.server';
+import { principalKey } from './principal.server';
 import { ssoOnlyInEffect, ssoSettings } from './settings.server';
 import { decideSso, type SsoIdentity } from './sso';
 
@@ -137,7 +138,7 @@ export async function startSso(request: Request, c: SsoConfig, next: string, rea
     code_challenge_method: 'S256',
     ...(reauth ? { prompt: 'login', max_age: '0' } : {}),
   }).toString();
-  const value = btoa(JSON.stringify(flow));
+  const value = await signSsoFlow(principalKey(), flow, Date.now() + FLOW_MS);
   return {
     location: url.href,
     // Lax: the provider's redirect back is a top-level GET, which carries it.
@@ -149,21 +150,19 @@ export const clearSsoCookie = `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=La
 
 // ── Finishing ──
 
-function readFlow(request: Request): Flow | null {
-  const raw = cookie(request, COOKIE);
-  if (!raw) return null;
-  try {
-    const f = JSON.parse(atob(raw)) as Partial<Flow>;
-    return typeof f.state === 'string' &&
-      typeof f.nonce === 'string' &&
-      typeof f.verifier === 'string' &&
-      typeof f.next === 'string' &&
-      (f.reauth === undefined || typeof f.reauth?.at === 'number')
-      ? (f as Flow)
-      : null;
-  } catch {
-    return null;
-  }
+async function readFlow(request: Request): Promise<Flow | null> {
+  const f = (await verifySsoFlow(
+    [principalKey(), (env as { PRINCIPAL_KEY_PREVIOUS?: string }).PRINCIPAL_KEY_PREVIOUS],
+    cookie(request, COOKIE),
+  )) as Partial<Flow> | null;
+  if (!f) return null;
+  return typeof f.state === 'string' &&
+    typeof f.nonce === 'string' &&
+    typeof f.verifier === 'string' &&
+    typeof f.next === 'string' &&
+    (f.reauth === undefined || typeof f.reauth?.at === 'number')
+    ? (f as Flow)
+    : null;
 }
 
 /**
@@ -177,7 +176,7 @@ export async function verifyCallback(
   c: SsoConfig,
 ): Promise<{ identity: SsoIdentity; next: string; reauthAt: number | null }> {
   const url = new URL(request.url);
-  const flow = readFlow(request);
+  const flow = await readFlow(request);
   if (!flow) throw new SsoError('no sign-in in progress (expired or another browser)');
   const error = url.searchParams.get('error');
   if (error) throw new SsoError(`provider answered ${error.slice(0, 60)}`);
@@ -228,8 +227,7 @@ export async function verifyCallback(
   if (typeof claims.sub !== 'string' || !claims.sub) throw new SsoError('no subject');
   let reauthAt: number | null = null;
   if (flow.reauth) {
-    // The same minute of clock skew the token's own times get. The cookie's `at` is only the
-    // browser's word, so the server's own bound is what holds: no older than a flow can live.
+    // The same minute of clock skew the token's own times get, and never older than a flow lives.
     const at = typeof claims.auth_time === 'number' ? claims.auth_time * 1000 : 0;
     const since = Math.max(flow.reauth.at, Date.now() - FLOW_MS) - 60_000;
     if (at < since) throw new SsoError('provider did not sign them in again');

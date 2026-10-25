@@ -13,6 +13,7 @@ const env: Record<string, string> = {
   OIDC_ISSUER: 'https://idp.test',
   OIDC_CLIENT_ID: 'client-1',
   OIDC_CLIENT_SECRET: 's3cret',
+  PRINCIPAL_KEY: 'test-principal-key-0123456789abcdef',
 };
 
 vi.mock('cloudflare:workers', () => ({ env }));
@@ -168,11 +169,18 @@ describe('the OpenID Connect flow', () => {
     flowNonce = auth.searchParams.get('nonce')!;
     const q = new URLSearchParams({ code: 'code-1', state: auth.searchParams.get('state')! });
     tamper(q);
+    // A forger can read the sealed flow and edit it, but not sign the result.
     const [name, value] = start.cookie.split(';')[0]!.split(/=(.*)/s);
-    const flow = JSON.parse(atob(value!));
-    forge(flow);
+    const [version, payload, sig] = value!.split('.');
+    const sealed = JSON.parse(atob(payload!.replace(/-/g, '+').replace(/_/g, '/')));
+    const before = JSON.stringify(sealed);
+    forge(sealed.flow);
+    const edited =
+      JSON.stringify(sealed) === before
+        ? value
+        : `${version}.${btoa(JSON.stringify(sealed)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.${sig}`;
     const back = new Request(`https://app.test/login/sso/callback?${q}`, {
-      headers: { cookie: `${name}=${btoa(JSON.stringify(flow))}` },
+      headers: { cookie: `${name}=${edited}` },
     });
     return { auth, result: verifyCallback(back, c) };
   }
@@ -224,18 +232,24 @@ describe('the OpenID Connect flow', () => {
     await expect((await roundTrip(undefined, true)).result).rejects.toThrow(/sign them in again/);
   });
 
-  it('takes no word from the flow cookie for how fresh a step-up sign-in must be', async () => {
+  it('refuses a flow cookie the browser edited, or brought back after it expired', async () => {
     claims = { auth_time: Math.floor(Date.now() / 1000) - 30 * 60 };
     const earlier = (f: Record<string, unknown>) => {
       f.reauth = { at: 0 };
     };
     // A step-up whose start was moved back, and an ordinary sign-in made into one.
     await expect((await roundTrip(undefined, true, earlier)).result).rejects.toThrow(
-      /sign them in again/,
+      /no sign-in in progress/,
     );
     await expect((await roundTrip(undefined, false, earlier)).result).rejects.toThrow(
-      /sign them in again/,
+      /no sign-in in progress/,
     );
+    claims = {};
+    const { result } = await roundTrip(undefined, false, () => {
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+    });
+    await expect(result).rejects.toThrow(/no sign-in in progress/);
+    vi.restoreAllMocks();
   });
 
   it('keeps an unverified email from matching anyone', async () => {
