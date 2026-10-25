@@ -339,6 +339,17 @@
   }
 }
 
+/* A control floating over a scrolling page (a phone's New order): the card's lift, a step deeper so
+   rows pass under it. In dark the primary is light on a dark page and needs no lift. */
+@utility shadow-float {
+  box-shadow:
+    0 6px 12px -2px rgb(0 0 0 / 0.14),
+    0 3px 6px -3px rgb(0 0 0 / 0.1);
+  [data-theme="dark"] & {
+    box-shadow: none;
+  }
+}
+
 /* A tile inside a card: a muted, rounded step rather than a ruled cell. */
 @utility tile {
   border-radius: var(--radius-2xl);

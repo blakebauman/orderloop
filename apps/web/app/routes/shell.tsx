@@ -16,6 +16,7 @@ import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
+  ChevronDown,
   Ellipsis,
   LayoutDashboard,
   MessageSquareText,
@@ -28,7 +29,7 @@ import {
   UserRound,
   Workflow,
 } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   Link,
   NavLink,
@@ -127,16 +128,30 @@ export function shouldRevalidate({
   return defaultShouldRevalidate;
 }
 
-type NavItem = { to: string; label: string; end?: boolean; badge?: boolean; document?: boolean };
+type NavItem = {
+  to: string;
+  label: string;
+  end?: boolean;
+  badge?: boolean;
+  document?: boolean;
+  /** Starts a group in the top bar, after a hairline. */
+  group?: boolean;
+  /** In the top bar's More menu rather than a link of its own. */
+  more?: boolean;
+};
 
+/**
+ * In this order everywhere: the day's work, then building, then reference pages (and plugins'),
+ * which the top bar keeps under More so its row fits an iPad on its side.
+ */
 const NAV: NavItem[] = [
   { to: '/', label: 'Overview', end: true },
   { to: '/orders', label: 'Orders' },
-  { to: '/carts', label: 'Carts' },
   { to: '/approvals', label: 'Approvals', badge: true },
-  { to: '/flows', label: 'Flows' },
-  { to: '/commerce', label: 'Commerce' },
-  { to: '/performance', label: 'Performance' },
+  { to: '/carts', label: 'Carts' },
+  { to: '/flows', label: 'Flows', group: true },
+  { to: '/commerce', label: 'Commerce', more: true },
+  { to: '/performance', label: 'Performance', more: true },
 ];
 
 /** Phones: the pages an operator reaches for most, as tabs; the rest of NAV is under More. */
@@ -232,6 +247,64 @@ function PendingBar() {
   ) : null;
 }
 
+/** True while a row is wider than its box, so it can fade at the edge to say it scrolls. */
+function useOverflows<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOverflows(el.scrollWidth > el.clientWidth + 1);
+    // The links grow with the reader's text size, so watch them as well as the row.
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, overflows] as const;
+}
+
+/** A top-bar link's underline tab; the outline sits inside it, since the row clips what's outside. */
+const navTab = (active: boolean) =>
+  cn(
+    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui transition-colors focus-visible:outline-offset-[-2px]',
+    active
+      ? 'border-foreground font-medium text-foreground'
+      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
+  );
+
+/** The top bar's reference pages; underlined, like a link, while you're on one of them. */
+function NavMore({ items }: { items: NavItem[] }) {
+  const { pathname } = useLocation();
+  const current = items.find((i) => pathname === i.to || pathname.startsWith(`${i.to}/`));
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className={cn(navTab(!!current), 'data-[state=open]:text-foreground')}>
+        More
+        <span className="sr-only"> pages{current ? `, on ${current.label}` : ''}</span>
+        <ChevronDown className="size-3.5 opacity-60" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        {items.map(({ to, label, document }) => (
+          <DropdownMenuItem key={to} asChild>
+            <Link
+              to={to}
+              reloadDocument={document}
+              aria-current={to === current?.to ? 'page' : undefined}
+              className="aria-[current=page]:font-medium"
+            >
+              {label}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Where a phone starts an order: in thumb reach, on the pages that list orders. */
+const NEW_ORDER_FROM = new Set(['/', '/orders']);
+
 function ShellFrame() {
   const slow = useSlowNavigation();
   const { pending, auth, me, nav: showNav, plugins } = useLoaderData<typeof loader>();
@@ -242,11 +315,14 @@ function ShellFrame() {
         ...NAV,
         ...plugins
           .filter((p) => atLeast(me.role, p.pageRole))
-          .flatMap((p) => p.nav.map((n) => ({ to: n.path, label: n.label, document: true }))),
+          .flatMap((p) =>
+            p.nav.map((n) => ({ to: n.path, label: n.label, document: true, more: true })),
+          ),
       ]
     : [];
-  const theme = useTheme();
-  const ThemeIcon = THEMES.find((t) => t.value === theme.choice)?.icon ?? Sun;
+  const [navRef, navOverflows] = useOverflows<HTMLElement>();
+  const { pathname } = useLocation();
+  const phoneNewOrder = operator && NEW_ORDER_FROM.has(pathname);
   return (
     <div className="flex min-h-dvh flex-col">
       <a
@@ -267,63 +343,51 @@ function ShellFrame() {
             <Mark className="size-5" />
             <span className="hidden sm:inline md:max-lg:hidden">OrderLoop</span>
           </Link>
-          {/* Tablets in portrait run out of width before the links do: the row scrolls, not wraps. */}
+          {/* The row fits from an iPad upright up; at a large text size it scrolls instead of
+              wrapping, and fades at the edge while it does. */}
           <nav
+            ref={navRef}
             aria-label="Main"
-            className="-mb-px hidden h-full min-w-0 snap-x items-stretch gap-1 overflow-x-auto [scrollbar-width:none] md:flex md:max-lg:pr-6 md:max-lg:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
+            data-overflow={navOverflows || undefined}
+            className="-mb-px hidden h-full min-w-0 snap-x items-stretch gap-1 overflow-x-auto [scrollbar-width:none] md:flex data-[overflow]:pr-6 data-[overflow]:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
           >
-            {nav.map(({ to, label, end, badge, document }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                reloadDocument={document}
-                className={({ isActive }) =>
-                  cn(
-                    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui transition-colors',
-                    isActive
-                      ? 'border-foreground font-medium text-foreground'
-                      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
-                  )
-                }
-              >
-                {label}
-                {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-              </NavLink>
-            ))}
+            {nav
+              .filter((n) => !n.more)
+              .map(({ to, label, end, badge, document, group }) => (
+                <div key={to} className="flex">
+                  {group ? (
+                    <span className="mx-1.5 h-4 w-px self-center bg-rule" aria-hidden="true" />
+                  ) : null}
+                  <NavLink
+                    to={to}
+                    end={end}
+                    reloadDocument={document}
+                    className={({ isActive }) => navTab(isActive)}
+                  >
+                    {label}
+                    {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+                  </NavLink>
+                </div>
+              ))}
+            {nav.some((n) => n.more) ? <NavMore items={nav.filter((n) => n.more)} /> : null}
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
             {showNav ? <AssistantToggle /> : null}
             {operator ? (
               <Link
                 to="/orders/new"
-                className="hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-ui text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
+                className="hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-ui text-primary-foreground transition-colors hover:bg-primary/90 md:inline-flex"
               >
                 <Plus className="size-3.5" aria-hidden="true" />
-                <span className="sr-only sm:not-sr-only md:max-lg:sr-only">New order</span>
+                <span className="max-lg:sr-only">New order</span>
               </Link>
             ) : null}
+            {/* Who is signed in, the pages that belong to them and the team, and the theme. */}
             <DropdownMenu>
-              <DropdownMenuTrigger
-                className="hit-area hidden size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:grid data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                aria-label={`Theme: ${THEMES.find((t) => t.value === theme.choice)?.label ?? theme.choice}`}
-              >
-                <ThemeIcon className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <ThemeItems value={theme.choice} onChange={theme.setChoice} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Who is signed in, and the pages that belong to them and the team. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
-              >
+              <DropdownMenuTrigger className="hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground">
                 <UserRound className="size-4" aria-hidden="true" />
-                <span className="max-w-32 truncate md:max-lg:sr-only">
-                  {me.kind === 'user' ? me.name : ROLE_LABELS[me.role]}
-                </span>
+                <span className="max-w-32 truncate md:max-lg:sr-only">{shortWho(me, auth)}</span>
+                <span className="sr-only">, {ROLE_LABELS[me.role]}: account menu</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <AccountItems me={me} auth={auth} />
@@ -340,12 +404,25 @@ function ShellFrame() {
           id="main"
           tabIndex={-1}
           aria-busy={slow || undefined}
-          className="min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0"
+          className={cn(
+            'min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0',
+            // Room under the last row for the New order button.
+            phoneNewOrder && 'pb-[calc(var(--tabbar-h)+4.5rem)]',
+          )}
         >
           <Outlet />
         </main>
         {showNav ? <LazyAssistantPanel /> : null}
       </div>
+      {phoneNewOrder ? (
+        <Link
+          to="/orders/new"
+          className="fixed right-[max(1rem,var(--safe-right))] bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 inline-flex h-11 items-center gap-1.5 rounded-4xl bg-primary pr-4.5 pl-4 font-medium text-primary-foreground text-sm shadow-float md:hidden"
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          New order
+        </Link>
+      ) : null}
       <TabBar nav={nav} pending={pending} />
     </div>
   );
@@ -518,13 +595,20 @@ function ThemeItems({
 const who = (me: Principal, auth: boolean) =>
   me.kind === 'user' ? (me.email ?? me.name) : auth ? 'Workspace password' : 'Sign-in is off';
 
-/** Who is signed in, their account, the team and its audit log, and signing in or out. */
+/** The same, short enough for the account button: always who, never their role. */
+const shortWho = (me: Principal, auth: boolean) =>
+  me.kind === 'user' ? me.name : auth ? 'Workspace' : 'Sign-in off';
+
+/** Who is signed in, their account, the team and its audit log, the theme, and signing in or out. */
 function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
   const admin = atLeast(me.role, 'admin');
+  const theme = useTheme();
   return (
     <>
       <DropdownMenuLabel className="font-normal">
-        <span className="block truncate font-medium text-sm">{who(me, auth)}</span>
+        <span className="block truncate font-medium text-sm" title={who(me, auth)}>
+          {who(me, auth)}
+        </span>
         <span className="text-muted-foreground text-xs">{ROLE_LABELS[me.role]}</span>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
@@ -545,6 +629,8 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
         </>
       ) : null}
       <DropdownMenuSeparator />
+      <ThemeItems value={theme.choice} onChange={theme.setChoice} />
+      {auth || admin ? <DropdownMenuSeparator /> : null}
       {auth ? (
         <DropdownMenuItem asChild>
           {/* The form sits outside the menu, which unmounts as it closes. */}

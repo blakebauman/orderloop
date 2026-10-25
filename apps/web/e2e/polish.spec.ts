@@ -23,7 +23,7 @@ test('"/" goes to search, but not while a menu is open over the page', async ({ 
   await open(page, '/orders');
   // An open menu hides the page from the accessibility tree, so find the field by name.
   const search = page.locator('input[name="q"]');
-  await page.getByRole('button', { name: /^Theme:/ }).click();
+  await page.getByRole('button', { name: /account menu$/ }).click();
   await expect(page.getByRole('menu')).toBeVisible();
   await page.keyboard.press('/');
   await expect(search).not.toBeFocused();

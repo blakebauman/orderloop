@@ -175,9 +175,9 @@ Tailwind's default breakpoints, read as devices:
 
 | Width | Typically | What changes |
 |---|---|---|
-| below `sm` (640px) | iPhone upright | Top bar shows icons only |
+| below `sm` (640px) | iPhone upright | Top bar shows the mark and Assistant as icons |
 | below `md` (768px) | phones, either way up | Bottom tab bar; tables stack into cards; the Commerce jump links stick under the top bar |
-| `md` to `lg` (768–1023px) | iPad upright | Links in the top bar, scrolling sideways with a fade at the edge; Assistant, New order and the account name are icons |
+| `md` to `lg` (768–1023px) | iPad upright | Links in the top bar; Assistant, New order and the account name are icons |
 | `lg` and up (1024px) | iPad on its side, desktop | The full flow editor; the order page's graph beside its panels; the assistant as a column |
 
 Size and hint by what is pointing, not by width: `touch:` is a coarse pointer (a finger), `fine:` a
@@ -187,7 +187,17 @@ under 32rem tall, under 64rem wide).
 ## The shell
 
 - **Top bar:** 3rem plus the status bar's inset (`--shell-h`), sticky, with a rule under it. The
-  wordmark, the main links from md, then Assistant, New order, theme and account.
+  wordmark, the main links from md, then Assistant, New order (from md) and account. The links
+  are the day's work (Overview, Orders, Approvals, Carts), a hairline, then Flows, then **More**
+  for reference pages (Commerce, Performance) and every plugin's pages, underlined while you're
+  on one (its label stays More, so the row's width never changes). The row fits from 768px; if a large text size makes it
+  overflow, it scrolls and fades at the edge only then. Focus outlines on the links sit inside
+  them, since the row clips. The account menu holds who is signed in, their and the team's
+  pages, the theme and signing out; its button always names who (a person's name, Workspace or
+  Sign-in off), never their role.
+- **One order everywhere:** the top bar, the tab bar and More list pages in `NAV`'s order.
+- **New order on a phone:** a floating pill (`shadow-float`) above the tab bar on the right, on
+  the overview and the orders list only; main pads its foot so the last row clears it.
 - **Tab bar (below md):** Overview, Orders, Approvals (with its count), Flows, and More: the pages
   an operator reaches for, in thumb reach. 3.5rem plus the home indicator (`--tabbar-h`); in
   `short:` 2.75rem with the labels for screen readers only. More is a bottom sheet with the other
@@ -246,6 +256,7 @@ ring alone separates a card.
 ### Shadow Vocabulary
 - **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
+- **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
 
 ### Named Rules
 **The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
