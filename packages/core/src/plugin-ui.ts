@@ -91,7 +91,7 @@ const form = z.object({
   fields: z.array(field).max(50),
   submit: text(80),
   tone: z.enum(['default', 'danger']).default('default'),
-  /** Asked before the form is sent (a browser confirm). */
+  /** Asked before the form is sent, in a confirm dialog. */
   confirm: text(300).optional(),
 });
 

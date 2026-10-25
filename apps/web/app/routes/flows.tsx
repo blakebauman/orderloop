@@ -16,6 +16,7 @@ import {
   NativeSelectOptGroup,
   NativeSelectOption,
 } from '@orderloop/ui/native-select';
+import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
 import { Plus } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -395,24 +396,19 @@ export default function Flows() {
               </Field>
               <fieldset aria-describedby={hintId}>
                 <legend className="caption mb-1.5">Start from</legend>
-                <div className="grid grid-cols-3 gap-1 rounded-full bg-muted p-1 text-[13px]">
+                <Segmented
+                  name="start"
+                  aria-label="Start from"
+                  value={start}
+                  onValueChange={(v) => setStart(v as typeof start)}
+                  className="grid w-full"
+                >
                   {STARTS.map((o) => (
-                    <label
-                      key={o.id}
-                      className="cursor-pointer rounded-full px-2 py-1 text-center text-muted-foreground has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm dark:has-[:checked]:bg-input/30 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
-                    >
-                      <input
-                        type="radio"
-                        name="start"
-                        value={o.id}
-                        checked={start === o.id}
-                        onChange={() => setStart(o.id)}
-                        className="sr-only"
-                      />
+                    <SegmentedItem key={o.id} value={o.id}>
                       {o.label}
-                    </label>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
                 <p id={hintId} className="mt-1.5 text-muted-foreground text-xs" aria-live="polite">
                   {hint}
                 </p>

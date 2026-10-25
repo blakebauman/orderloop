@@ -13,6 +13,7 @@ import {
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useMemo, useRef, useState } from 'react';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
@@ -277,29 +278,16 @@ export default function NewOrder() {
 
           <fieldset className="space-y-3 p-5">
             <legend className="section-title float-left mb-3 w-full">Buyer</legend>
-            <div className="clear-left grid grid-cols-2 gap-1 rounded-full bg-muted p-1 text-[13px] sm:w-80">
-              {(
-                [
-                  ['account', 'Customer account'],
-                  ['guest', 'Guest'],
-                ] as const
-              ).map(([value, label]) => (
-                <label
-                  key={value}
-                  className="cursor-pointer rounded-full px-2 py-1 text-center text-muted-foreground has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm dark:has-[:checked]:bg-input/30 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
-                >
-                  <input
-                    type="radio"
-                    name="buyer"
-                    value={value}
-                    checked={buyer === value}
-                    onChange={() => setBuyer(value)}
-                    className="sr-only"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
+            <Segmented
+              name="buyer"
+              aria-label="Buyer"
+              value={buyer}
+              onValueChange={(v) => setBuyer(v as typeof buyer)}
+              className="clear-left grid w-full sm:w-80"
+            >
+              <SegmentedItem value="account">Customer account</SegmentedItem>
+              <SegmentedItem value="guest">Guest</SegmentedItem>
+            </Segmented>
             {buyer === 'account' ? (
               <div>
                 <Field label="Customer">
