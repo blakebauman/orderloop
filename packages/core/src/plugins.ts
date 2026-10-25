@@ -135,9 +135,15 @@ export const SURFACE_NEEDS_BUYER: Record<ProviderSurface, boolean> = {
  * The key the web app signs a plugin's page requests with, and the only one the plugin holds: an
  * HMAC of the deployment's principal key with the plugin's id. The engine and other plugins never
  * accept it, so a plugin can't sign requests to them; scripts/fleet.ts derives the same value for
- * the plugin's secrets.
+ * the plugin's secrets. A plugin an admin installed at runtime holds its version's own key
+ * (`install`, the bundle's sha): one that leaked opens nothing for any other version, so it stops
+ * working once another version runs or the plugin is removed (until that same bundle runs again).
  */
-export async function pluginKey(principalKey: string, id: string): Promise<string> {
+export async function pluginKey(
+  principalKey: string,
+  id: string,
+  install?: string,
+): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
@@ -146,7 +152,14 @@ export async function pluginKey(principalKey: string, id: string): Promise<strin
     false,
     ['sign'],
   );
-  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(`orderloop-plugin:${id}`));
+  // Anything but a bundle's sha is refused, never read as "no install" (the registry's key).
+  if (install !== undefined && !/^[0-9a-f]{64}$/.test(install))
+    throw new Error(`pluginKey: ${id}'s install must be its bundle's sha`);
+  const mac = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    enc.encode(install ? `orderloop-plugin:${id}@${install}` : `orderloop-plugin:${id}`),
+  );
   return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -791,6 +804,8 @@ export type PluginStatus = {
   runtime: PluginRuntime;
   /** Pinned by the deployment's registry (CI), or installed by an admin at runtime. */
   source: PluginSource;
+  /** The running version's bundle, for a plugin installed at runtime: its page key is that version's. */
+  sha?: string;
   manifest: PluginManifest | null;
   healthy: boolean;
   error?: string;

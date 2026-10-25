@@ -19,6 +19,8 @@ const stepUp = vi.fn(async (_r: Request, _by: Principal, given: { password?: str
 vi.mock('~/lib/env.server', () => ({ engine: () => engine }));
 vi.mock('~/lib/audit.server', () => ({ audit }));
 vi.mock('~/lib/auth.server', () => ({ stepUp }));
+const forgetPluginStatuses = vi.fn();
+vi.mock('~/lib/plugins.server', () => ({ forgetPluginStatuses }));
 
 const { pluginAction } = await import('~/lib/plugin-installs.server');
 
@@ -70,6 +72,14 @@ describe('the Plugins page’s install actions', () => {
     // Turning one on still asks, which a token can't answer.
     await pluginAction(request, token, form({ intent: 'enable', id: 'acme-carrier' }));
     expect(stepUp).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets the cached plugin statuses once a different version runs', async () => {
+    forgetPluginStatuses.mockClear();
+    engine.setPluginEnabled.mockResolvedValueOnce({ ok: true, value: { id: 'acme-carrier' } });
+    const token = { kind: 'token' as const, id: 'tok_1', name: 'ops', role: 'admin' as const };
+    await pluginAction(request, token, form({ intent: 'disable', id: 'acme-carrier' }));
+    expect(forgetPluginStatuses).toHaveBeenCalledTimes(1);
   });
 
   it('approves after a step-up, with the grant the admin ticked', async () => {

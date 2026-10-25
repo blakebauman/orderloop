@@ -19,6 +19,7 @@ import type { AuditAction } from './audit';
 import { audit } from './audit.server';
 import { stepUp } from './auth.server';
 import { engine } from './env.server';
+import { forgetPluginStatuses } from './plugins.server';
 
 /** A Plugins page form: the bundle, and room for the other fields of a multipart body. */
 export const PLUGIN_FORM_MAX_BYTES = PLUGIN_BUNDLE_MAX_BYTES + 64 * 1024;
@@ -70,6 +71,19 @@ const short = (sha: string) => sha.slice(0, 12);
 
 /** Runs one Plugins page intent for an admin `by`. `f` is the form, its bundle a file or text. */
 export async function pluginAction(
+  request: Request,
+  by: Principal & AuditActor,
+  f: FormData,
+): Promise<PluginActionResult> {
+  const r = await act(request, by, f);
+  if (r.ok && CHANGES_WHAT_RUNS.has(String(f.get('intent')))) forgetPluginStatuses();
+  return r;
+}
+
+/** The intents after which a different version (or none) runs. */
+const CHANGES_WHAT_RUNS = new Set(['approve', 'rollback', 'enable', 'disable', 'uninstall']);
+
+async function act(
   request: Request,
   by: Principal & AuditActor,
   f: FormData,

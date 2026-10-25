@@ -37,9 +37,11 @@ export async function setPluginPrincipalHeader(
   p: Principal,
   path: string,
   id: string,
+  /** A runtime install's bundle sha: its key is that version's (`pluginKey`). */
+  install?: string,
 ) {
   const { kind, id: who, name, role, email } = p;
-  const key = await pluginKey(principalKey(), id);
+  const key = await pluginKey(principalKey(), id, install);
   headers.set(
     PRINCIPAL_HEADER,
     await signPrincipal(key, { kind, id: who, name, role, ...(email ? { email } : {}) }, path),

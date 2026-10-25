@@ -58,6 +58,15 @@ const pluginCatalog = vi.fn(
       manifest: sandboxedManifest,
       healthy: true,
     },
+    // An admin installed this one: its pages are signed with its version's key.
+    {
+      id: 'installed',
+      runtime: 'sandboxed',
+      source: 'installed',
+      sha: 'c'.repeat(64),
+      manifest: { ...sandboxedManifest, id: 'installed' },
+      healthy: true,
+    },
   ],
 );
 // The engine serves a sandboxed plugin's pages (EngineRpc.pluginFetch).
@@ -86,6 +95,7 @@ const {
   isPluginPublicPath,
   unalias,
   MAX_PLUGIN_BODY,
+  forgetPluginStatuses,
 } = await import('~/lib/plugins.server');
 
 const call = (path: string, init: RequestInit = {}) =>
@@ -125,6 +135,44 @@ describe('plugin pages on the web Worker', () => {
     expect(p).not.toHaveProperty('session');
     expect(await verifyPrincipal(['web-test-key'], header, '/plugins/example/')).toBeNull();
     expect(overBudget).toHaveBeenCalledWith('API_LIMIT', 'plugin:example:usr_1');
+  });
+
+  it('signs an installed plugin’s pages with its version’s key, not the id’s', async () => {
+    const res = await call('/plugins/installed/', {
+      headers: { cookie: 'session=abc', accept: 'text/html' },
+    });
+    expect(res.status).toBe(200);
+    const [, req] = enginePluginFetch.mock.calls.at(-1)!;
+    const header = req.headers.get(PRINCIPAL_HEADER);
+    const at = '/plugins/installed/';
+    expect(
+      await verifyPrincipal(
+        [await pluginKey('web-test-key', 'installed', 'c'.repeat(64))],
+        header,
+        at,
+      ),
+    ).toMatchObject({ id: 'usr_1' });
+    expect(
+      await verifyPrincipal([await pluginKey('web-test-key', 'installed')], header, at),
+    ).toBeNull();
+  });
+
+  it('refuses an installed plugin reported without its version, rather than sign with the id’s key', async () => {
+    forgetPluginStatuses();
+    pluginCatalog.mockResolvedValueOnce([
+      {
+        id: 'nosha',
+        runtime: 'sandboxed',
+        source: 'installed',
+        manifest: { ...sandboxedManifest, id: 'nosha' },
+        healthy: true,
+      },
+    ]);
+    const res = await call('/plugins/nosha/', {
+      headers: { cookie: 'session=abc', accept: 'text/html' },
+    });
+    expect(res.status).toBe(502);
+    forgetPluginStatuses();
   });
 
   it('sends a sandboxed plugin’s pages through the engine, under the same rules', async () => {

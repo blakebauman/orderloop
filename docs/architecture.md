@@ -876,7 +876,7 @@ returns a plugin's `PLUGIN_<ID>` binding when it has one; otherwise it loads the
 by `plugin:<id>@<sha>`, so a plugin behind either runtime is called the same way (`PluginRpc`) and
 `installedPlugins` lists both. The Dynamic Worker has no bindings: its env is `STORAGE`
 (`PluginDb`, over the `PluginStorage` Durable Object for its id), `SECRETS` (`PluginSecrets`) and its
-own `PLUGIN_KEY`; its `globalOutbound` is `PluginEgress` (https only, its manifest's `egress`, and
+own `PLUGIN_KEY` (for a runtime install, its version's: `pluginKey(…, id, sha)`, which the web app signs with from `PluginStatus.sha`); its `globalOutbound` is `PluginEgress` (https only, its manifest's `egress`, and
 header injection for the secrets declared `inject`) and its tail is `PluginTail` (logs to the
 engine's, exceptions to `plugin_errors`). Each call is capped by `limitsFor`. Because only the
 engine can load it, a sandboxed plugin's pages go web app → `EngineRpc.pluginFetch` → plugin, with

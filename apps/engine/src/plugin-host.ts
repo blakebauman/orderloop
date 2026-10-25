@@ -286,7 +286,7 @@ export async function pluginStub(
     return null;
   }
   const bundle = await verifiedBundle(env, id, sha);
-  const keys = await sandboxKeys(env, id);
+  const keys = await sandboxKeys(env, id, pin.source === 'installed' ? sha : undefined);
   const caps = capabilities();
   const worker = env.LOADER.get(`plugin:${id}@${sha}`, async () => {
     return {
@@ -326,13 +326,13 @@ async function stillActive(env: Env, id: string, sha: string): Promise<boolean> 
 }
 
 /** The page-signing keys a sandboxed plugin verifies with, as a Worker plugin's secrets hold them. */
-async function sandboxKeys(env: Env, id: string) {
+async function sandboxKeys(env: Env, id: string, install?: string) {
   const e = env as unknown as Vars;
   const current = typeof e.PRINCIPAL_KEY === 'string' ? e.PRINCIPAL_KEY : '';
   const previous = typeof e.PRINCIPAL_KEY_PREVIOUS === 'string' ? e.PRINCIPAL_KEY_PREVIOUS : '';
   return {
-    ...(current ? { PLUGIN_KEY: await pluginKey(current, id) } : {}),
-    ...(previous ? { PLUGIN_KEY_PREVIOUS: await pluginKey(previous, id) } : {}),
+    ...(current ? { PLUGIN_KEY: await pluginKey(current, id, install) } : {}),
+    ...(previous ? { PLUGIN_KEY_PREVIOUS: await pluginKey(previous, id, install) } : {}),
   };
 }
 
