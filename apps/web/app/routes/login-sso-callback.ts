@@ -1,6 +1,6 @@
 import { redirect } from 'react-router';
 import { audit } from '~/lib/audit.server';
-import { principal } from '~/lib/auth.server';
+import { principal, recordReauth } from '~/lib/auth.server';
 import {
   clearSsoCookie,
   LINK_PATH,
@@ -17,9 +17,22 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!c) throw redirect('/login');
   const headers = new Headers({ 'set-cookie': clearSsoCookie });
   try {
-    const { identity, next } = await verifyCallback(request, c);
-    // Already signed in here (another tab finished first): keep that session.
-    if (await principal(request)) return redirect(next, { headers });
+    const { identity, next, reauthAt } = await verifyCallback(request, c);
+    const me = await principal(request);
+    if (me) {
+      // A step-up: it counts on this session only if the provider vouched for the same person.
+      if (reauthAt !== null) {
+        if (await recordReauth(request, me, identity.sub, reauthAt))
+          await audit(request, 'auth.reauthenticated', { actor: me, detail: { method: 'sso' } });
+        else
+          await audit(request, 'auth.sign_in_failed', {
+            actor: me,
+            detail: { reason: 'step-up by another identity', method: 'sso' },
+          });
+      }
+      // Otherwise another tab finished first: keep that session.
+      return redirect(next, { headers });
+    }
     const outcome = await signInWithSso(request, identity);
     if ('confirmLink' in outcome) {
       headers.append('set-cookie', outcome.confirmLink);

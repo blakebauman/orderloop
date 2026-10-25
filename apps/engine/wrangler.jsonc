@@ -130,7 +130,7 @@
     // What the deployment grants its plugins beyond the defaults (buyer details, capabilities), as
     // JSON by plugin id. scripts/fleet.ts renders it from the registry's plugins; this is
     // orderloop.app's (deployments/orderloop.jsonc). It matters only for an installed plugin.
-    "PLUGIN_GRANTS": "{\"punchout\":{\"capabilities\":[\"carts:external\",\"orders:start\"]}}",
+    "PLUGIN_GRANTS": "{\"punchout\":{\"capabilities\":[\"carts:external\",\"orders:start\",\"orders:cancel\"]}}",
     // Where Durable Objects (orders, assistants, A2A tasks) live: "eu" or "fedramp", from the
     // registry's jurisdiction, like D1 and R2. Empty: anywhere. Set before the first order only.
     "DATA_JURISDICTION": "",

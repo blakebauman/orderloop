@@ -5,11 +5,17 @@
  * The provider is set per deployment: `OIDC_ISSUER` and `OIDC_CLIENT_ID` (vars, from the
  * registry's `sso`) and the `OIDC_CLIENT_SECRET` secret. Admins choose the rest on the Team page
  * (`ssoSettings`). `/login/sso` starts a sign-in and keeps its state, nonce and code verifier in a
- * short-lived `__Host-ol_sso` cookie; `/login/sso/callback` checks the state, swaps the code for
+ * short-lived `__Host-ol_sso` cookie, sealed with `PRINCIPAL_KEY` (`signSsoFlow`) so the browser
+ * can't change it or bring it back after it expires; `/login/sso/callback` checks the state, swaps the code for
  * an ID token, verifies it against the provider's keys and starts the same session a password
  * would (`startSession`). Who the identity signs in as is `decideSso` (`sso.ts`). Linking an
  * identity to someone who has a password waits for that password (and their two-factor code) at
  * `/login/sso/link`: the provider vouching for an email doesn't hand over an account on its own.
+ *
+ * A step-up (`stepUp`) for someone who has only single sign-on starts the same flow with `reauth`:
+ * the request asks the provider to sign them in again (`prompt=login`, `max_age=0`), and the
+ * callback takes its answer only if the ID token's `auth_time` is after the flow began and within
+ * the flow's own lifetime of now, so a provider that answers from its own session fails closed.
  */
 
 import { env } from 'cloudflare:workers';
@@ -18,7 +24,9 @@ import {
   type Principal,
   type Role,
   SSO_LINK_TTL_MS,
+  signSsoFlow,
   signSsoLink,
+  verifySsoFlow,
   verifySsoLink,
 } from '@orderloop/core';
 import { users } from '@orderloop/db';
@@ -105,7 +113,14 @@ function keySet(uri: string) {
 
 // ── Starting ──
 
-type Flow = { state: string; nonce: string; verifier: string; next: string };
+type Flow = {
+  state: string;
+  nonce: string;
+  verifier: string;
+  next: string;
+  /** A step-up: the provider was asked to sign them in again, from `at`. */
+  reauth?: { at: number };
+};
 
 const b64url = (bytes: ArrayBuffer) =>
   btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -113,10 +128,14 @@ const b64url = (bytes: ArrayBuffer) =>
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
-/** The provider's sign-in URL for this request, and the cookie that ties its answer to it. */
-export async function startSso(request: Request, c: SsoConfig, next: string) {
+/**
+ * The provider's sign-in URL for this request, and the cookie that ties its answer to it. With
+ * `reauth`, it asks the provider to sign them in again, whatever session it already has.
+ */
+export async function startSso(request: Request, c: SsoConfig, next: string, reauth = false) {
   const m = await metadata(c);
   const flow: Flow = { state: randomToken(), nonce: randomToken(), verifier: randomToken(), next };
+  if (reauth) flow.reauth = { at: Date.now() };
   const challenge = b64url(
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(flow.verifier)),
   );
@@ -130,8 +149,9 @@ export async function startSso(request: Request, c: SsoConfig, next: string) {
     nonce: flow.nonce,
     code_challenge: challenge,
     code_challenge_method: 'S256',
+    ...(reauth ? { prompt: 'login', max_age: '0' } : {}),
   }).toString();
-  const value = btoa(JSON.stringify(flow));
+  const value = await signSsoFlow(principalKey(), flow, Date.now() + FLOW_MS);
   return {
     location: url.href,
     // Lax: the provider's redirect back is a top-level GET, which carries it.
@@ -143,33 +163,33 @@ export const clearSsoCookie = `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=La
 
 // ── Finishing ──
 
-function readFlow(request: Request): Flow | null {
-  const raw = cookie(request, COOKIE);
-  if (!raw) return null;
-  try {
-    const f = JSON.parse(atob(raw)) as Partial<Flow>;
-    return typeof f.state === 'string' &&
-      typeof f.nonce === 'string' &&
-      typeof f.verifier === 'string' &&
-      typeof f.next === 'string'
-      ? (f as Flow)
-      : null;
-  } catch {
-    return null;
-  }
+async function readFlow(request: Request): Promise<Flow | null> {
+  const f = (await verifySsoFlow(
+    [principalKey(), (env as { PRINCIPAL_KEY_PREVIOUS?: string }).PRINCIPAL_KEY_PREVIOUS],
+    cookie(request, COOKIE),
+  )) as Partial<Flow> | null;
+  if (!f) return null;
+  return typeof f.state === 'string' &&
+    typeof f.nonce === 'string' &&
+    typeof f.verifier === 'string' &&
+    typeof f.next === 'string' &&
+    (f.reauth === undefined || typeof f.reauth?.at === 'number')
+    ? (f as Flow)
+    : null;
 }
 
 /**
  * Checks the provider's answer and returns who it vouches for, and where they were going: the
  * state matches this browser's flow, the code swaps for an ID token, and the token is signed by
- * the provider, for this client, with this flow's nonce and not expired.
+ * the provider, for this client, with this flow's nonce and not expired. For a step-up, they
+ * must also have signed in at the provider after the flow began (`auth_time`); `reauthAt` is when.
  */
 export async function verifyCallback(
   request: Request,
   c: SsoConfig,
-): Promise<{ identity: SsoIdentity; next: string }> {
+): Promise<{ identity: SsoIdentity; next: string; reauthAt: number | null }> {
   const url = new URL(request.url);
-  const flow = readFlow(request);
+  const flow = await readFlow(request);
   if (!flow) throw new SsoError('no sign-in in progress (expired or another browser)');
   const error = url.searchParams.get('error');
   if (error) throw new SsoError(`provider answered ${error.slice(0, 60)}`);
@@ -218,6 +238,14 @@ export async function verifyCallback(
   }
   if (claims.nonce !== flow.nonce) throw new SsoError('nonce mismatch');
   if (typeof claims.sub !== 'string' || !claims.sub) throw new SsoError('no subject');
+  let reauthAt: number | null = null;
+  if (flow.reauth) {
+    // The same minute of clock skew the token's own times get, and never older than a flow lives.
+    const at = typeof claims.auth_time === 'number' ? claims.auth_time * 1000 : 0;
+    const since = Math.max(flow.reauth.at, Date.now() - FLOW_MS) - 60_000;
+    if (at < since) throw new SsoError('provider did not sign them in again');
+    reauthAt = Date.now();
+  }
   // An email the provider says it hasn't verified can't match or create anyone. Entra ID leaves
   // the claim out; its addresses belong to the tenant.
   const email =
@@ -228,6 +256,7 @@ export async function verifyCallback(
   return {
     identity: { sub: claims.sub.slice(0, 255), email: email || null, name },
     next: flow.next,
+    reauthAt,
   };
 }
 

@@ -286,8 +286,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   const cart = url.pathname.startsWith('/agents/cart-agent/');
   const assistant = url.pathname.startsWith('/agents/assistant-agent/');
   if (order || cart || assistant) {
-    const caller = await principal(request);
-    // An external cart's buyer, on their own cart's socket only, with no staff sign-in.
+    // The buyer's page asks to be the guest (`as=guest`) even if the browser also has a staff
+    // sign-in (staff trying a punchout, or local dev, where everyone is an admin): the guest can
+    // do less, and only what the buyer may, such as send the cart back.
+    const asGuest = cart && url.searchParams.get('as') === 'guest';
+    const caller = asGuest ? null : await principal(request);
+    // An external cart's buyer, on their own cart's socket only.
     if (!caller && cart) {
       // The raw segment: a cart id has nothing to decode, and cartGuest refuses anything else
       // (decoding a malformed escape would throw before the refusal).

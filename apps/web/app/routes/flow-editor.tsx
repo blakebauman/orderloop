@@ -40,6 +40,7 @@ import { Inspector } from '~/components/inspector';
 import { Palette } from '~/components/palette';
 import { useAssistant, usePageContext } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
+import { useMedia, WIDE } from '~/lib/device';
 import { getFlow } from '~/lib/flows.server';
 import { useNodes } from '~/lib/nodes';
 import { useCan } from '~/lib/use-me';
@@ -66,6 +67,9 @@ type ActionResult = {
 
 export default function FlowEditor() {
   const canOperate = useCan('operator');
+  // Narrower screens get a review-only view: nothing there can change the flow, since its Save
+  // and Publish live in the full editor.
+  const wide = useMedia(WIDE);
   const loaded = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [flow, setFlowState] = useState<Flow>(loaded.flow);
@@ -194,6 +198,8 @@ export default function FlowEditor() {
   // ⌘S saves, ⌘Z / ⇧⌘Z undo and redo graph edits (text fields keep their own undo), Escape deselects.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelected(null);
+      if (!wide) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === 's') {
         e.preventDefault();
@@ -209,11 +215,10 @@ export default function FlowEditor() {
         e.preventDefault();
         redo();
       }
-      if (e.key === 'Escape') setSelected(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [submit, undo, redo]);
+  }, [submit, undo, redo, wide]);
 
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -276,12 +281,14 @@ export default function FlowEditor() {
             <Input
               value={flow.name}
               onChange={(e) => setFlow({ ...flow, name: e.target.value })}
+              readOnly={!wide}
               className="h-8 w-full border-transparent bg-transparent px-1 font-semibold tracking-title text-lg hover:border-input sm:w-64"
               aria-label="Flow name"
             />
             <NativeSelect
               value={flow.model}
               onChange={(e) => setFlow({ ...flow, model: e.target.value as OrderModel })}
+              disabled={!wide}
               className="h-8 text-sm"
               aria-label="Commerce model"
             >
@@ -310,6 +317,7 @@ export default function FlowEditor() {
                   <DropdownMenuCheckboxItem
                     key={c}
                     checked={flow.channels.includes(c)}
+                    disabled={!wide}
                     // Stay open so several channels can be set in one go.
                     onSelect={(e) => e.preventDefault()}
                     onCheckedChange={(on) =>
@@ -519,6 +527,7 @@ export default function FlowEditor() {
           <div className="ml-auto flex gap-2">
             <Button
               size="sm"
+              disabled={!wide}
               onClick={() => {
                 setGraph(proposal.graph);
                 setProposal(null);
@@ -548,7 +557,7 @@ export default function FlowEditor() {
         <div className="h-[60vh] min-h-[360px] p-3 lg:h-auto">
           <FlowCanvas
             graph={proposal ? proposal.graph : flow}
-            editable={!proposal}
+            editable={wide && !proposal}
             issues={proposal ? undefined : nodeIssues}
             selectedId={selected}
             onSelect={setSelected}
@@ -564,19 +573,23 @@ export default function FlowEditor() {
         >
           {node ? (
             <div className="space-y-6">
-              <Inspector node={node} onChange={updateNode} />
-              <Connections node={node} graph={flow} onChange={setGraph} />
-              {/* The one destructive action, last and apart from the settings above it. */}
-              <div className="border-t pt-4">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-bad hover:text-bad"
-                  onClick={() => deleteNode(node.id)}
-                >
-                  <Trash2 /> Delete node
-                </Button>
-              </div>
+              <Inspector node={node} onChange={wide ? updateNode : undefined} />
+              {wide ? (
+                <>
+                  <Connections node={node} graph={flow} onChange={setGraph} />
+                  {/* The one destructive action, last and apart from the settings above it. */}
+                  <div className="border-t pt-4">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-bad hover:text-bad"
+                      onClick={() => deleteNode(node.id)}
+                    >
+                      <Trash2 /> Delete node
+                    </Button>
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : (
             <div className="space-y-5">
@@ -585,6 +598,7 @@ export default function FlowEditor() {
                 <textarea
                   value={flow.description}
                   onChange={(e) => setFlow({ ...flow, description: e.target.value })}
+                  readOnly={!wide}
                   rows={4}
                   className="w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
                 />

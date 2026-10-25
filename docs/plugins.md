@@ -75,7 +75,7 @@ The manifest (`pluginManifestSchema`) has:
 | `personalData` | `redact` (default) or `send`: whether `execute` and event delivery carry who the buyer is. `send` takes effect only with the deployment's grant (below) |
 | `egress` | Hosts a sandboxed plugin may reach (a name, or `*.` and one), at most 20 ([Runtimes](#runtimes)) |
 | `limits` | `{ cpuMs?, subRequests? }` per call for a sandboxed plugin, within `PLUGIN_LIMIT_CAPS` |
-| `capabilities` | What it asks the core to do through `ORDERLOOP` (`PLUGIN_CAPABILITIES`: `carts:external`, `orders:start`), each at most once; each takes effect only with the deployment's grant ([The host API](#the-host-api)) |
+| `capabilities` | What it asks the core to do through `ORDERLOOP` (`PLUGIN_CAPABILITIES`: `carts:external`, `orders:start`, `orders:cancel`), each at most once; each takes effect only with the deployment's grant ([The host API](#the-host-api)) |
 | `provides` | Surfaces from `PROVIDER_SURFACES` (`shipping.rates`, `shipping.labels`, `tax`, `address`) the plugin can do behind built-in nodes. All but `shipping.rates` need `personalData: 'send'` (`SURFACE_NEEDS_BUYER`) ([Providers](#providers)) |
 | `secrets` | Up to 20 `{ name, description?, optional?, inject?, expose? }` (`inject: { host, header, format }`, a host in `egress`: added by the egress gateway, never seen by a sandboxed plugin; `expose`: readable by a sandboxed plugin's code; not both): env names the plugin reads (`PLUGIN_SECRET_NAME_RE`, upper case; not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS` or `DB`), set per deployment ([Secrets](#secrets)) |
 
@@ -332,9 +332,16 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
    Grant it only after reviewing what the plugin does with buyer details.
    **Granting capabilities**: a plugin whose manifest lists `capabilities` is refused (`It asks to
    <capabilities>, which this deployment does not grant`) unless its entry lists them:
-   `"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }`. They go into
+   `"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start", "orders:cancel"] } }`. They go into
    `PLUGIN_GRANTS` beside `personalData`, and give a Worker plugin its `ORDERLOOP` binding
-   ([The host API](#the-host-api)). A runtime install never gets a capability.
+   ([The host API](#the-host-api)). A runtime install never gets a capability. `orders:cancel` is
+   granted apart from `orders:start`, so a plugin trusted to place orders can't also call them off
+   unless the deployment says so. Since a manifest asking for an ungranted capability refuses the
+   whole plugin, a plugin that adds one ships with its grant: a sandboxed plugin's pinned bundle
+   (and so its manifest), `PLUGIN_GRANTS` and the check are all in the same engine version, so the
+   deploy (and a rollback) moves them together. A `worker` plugin deploys just before the engine,
+   so until the engine with the grant is out it runs on its last good manifest (or, in an isolate
+   without one, is refused).
 2. Run `./scripts/provision.sh <deployment>`. For each `worker` plugin it creates the D1 database
    `orderloop-plugin-<id><suffix>` and records its id with `fleet.ts set-plugin-d1`, as `plugins.<id>.d1Id`.
    A deployment with a plugin lacking `d1Id` fails `fleet.ts matrix` (CI's plan) unless it is held.
@@ -412,11 +419,11 @@ takes effect at once and a runtime install of the same id never inherits it.
 |---|---|---|
 | `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
-| `cancelOrder({ key, reason })` | `orders:start` | Cancels an order this plugin started, found by the key it started it under (`plugin:<id>:<key>`; another plugin's never matches): `cancelled` (also when it already was, or another cancel of it is under way) or `finished` when it ended some other way, audited as `order.cancelled` by `plugin:<id>` |
+| `cancelOrder({ key, reason })` | `orders:cancel` | Cancels an order this plugin started, found by the key it started it under (`plugin:<id>:<key>`; another plugin's never matches): `cancelled` (also when it already was, or another cancel of it is under way) or `finished` when it ended some other way, audited as `order.cancelled` by `plugin:<id>` |
 | `startOrder({ key, flowId, input })` | `orders:start` | Starts an order once per key, under the idempotency key `plugin:<id>:<key>` (`pluginOrderKey`), `startedBy` `plugin:<id>` and `meta.plugin` set by the host (and `meta.ucp` and `meta.cart` dropped: the core's to set); the input is checked by `startOrderSchema` and its currency must have an exchange rate, as on the REST API; a new order is audited as `order.started` by `plugin:<id>`. The REST API refuses Idempotency-Keys in any namespace the core starts orders under (`RESERVED_ORDER_KEY_PREFIXES`: `cart:`, `ucp:`, `plugin:`, `order:`, `email:`, `a2a:`, `replenish:`). A replay answers the same order with `replayed: true`; the same key with a different request is refused |
 
 `plugins/punchout` is the plugin that uses it: cXML and OCI punchout, installed with
-`"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start"] } }` (and its `d1Id`, or
+`"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start", "orders:cancel"] } }` (and its `d1Id`, or
 `"runtime": "sandboxed"`). Its partners and their secret hashes are in its own database; see the
 [Punchout guide](https://docs.orderloop.app/guides/punchout/). Each version of a PO it acted on is a
 `purchase_orders` row, numbered per partner and orderID. A change claims the next version (a unique
@@ -564,7 +571,10 @@ stored on the row (`personal_data_granted`) and is the plugin's grant, as `PLUGI
 registry plugin. The version that ran before is `superseded`. Approving, rolling back, turning on,
 uninstalling, and setting a secret of a plugin that runs each need a **step-up** (`stepUp`, `apps/web/app/lib/auth.server.ts`): a current
 two-factor code from someone with two-factor sign-in, otherwise their password, otherwise (single
-sign-on only) a sign-in within the last ten minutes; wrong answers are throttled. Each state change
+sign-on only) signing in again at the identity provider on this session within the last ten minutes
+(`/login/sso?reauth=1` sends `prompt=login` and `max_age=0`, the callback needs the ID token's
+`auth_time` after the flow began and the identity linked to them, and `recordReauth` stamps
+`sessions.reauth_at`; a new session alone doesn't count); wrong answers are throttled. Each state change
 guards on the status it read (`activate`, `setPluginEnabled`), so two admins acting at once get
 `changed while you were looking` rather than two running versions, and the unique index
 `installed_plugins_running` (one `active` or `disabled` row per id) is the backstop. A version whose

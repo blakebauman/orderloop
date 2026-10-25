@@ -112,6 +112,23 @@ describe('an external cart’s buyer on its socket', () => {
       null,
     );
   });
+
+  it('forwards the buyer’s page as the guest when it asks, even with a staff sign-in', async () => {
+    const staff: Principal = { kind: 'user', id: 'usr_1', name: 'Sam', role: 'admin' };
+    principal.mockResolvedValue(staff);
+    const res = await socket('/agents/cart-agent/cart_1?as=guest', { cookie: await guestCookie() });
+    expect(res.status).toBe(200);
+    const header = engineFetch.mock.calls[0]![0].headers.get(PRINCIPAL_HEADER);
+    expect(await verifyCartGuest([env.PRINCIPAL_KEY], header, '/agents/cart-agent/cart_1')).toEqual(
+      guest,
+    );
+    expect(await verifyPrincipal([env.PRINCIPAL_KEY], header, '/agents/cart-agent/cart_1')).toBe(
+      null,
+    );
+    // Asking to be the guest without the buyer's cookie is refused, never answered as staff.
+    expect((await socket('/agents/cart-agent/cart_1?as=guest')).status).toBe(401);
+    expect(engineFetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 /** What a loader threw, as React Router sees a `data()` refusal. */

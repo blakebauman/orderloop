@@ -61,6 +61,8 @@ export function CartView({
   const agent = useAgent<CartState>({
     agent: 'cart-agent',
     name: cart.id,
+    // The buyer connects as the guest of this cart, whatever else this browser is signed in as.
+    ...(guest ? { query: { as: 'guest' } } : {}),
     onStateUpdate: (s) => setState(s),
   });
 

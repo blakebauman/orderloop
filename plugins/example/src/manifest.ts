@@ -63,8 +63,9 @@ export default {
   events: ['order.completed'],
   nav: [{ label: 'Example', path: '/plugins/example/', icon: 'Puzzle' }],
   publicPaths: ['/plugins/example/public/ping'],
-  // Opens external carts and starts orders through ORDERLOOP (granted in the engine's tests).
-  capabilities: ['carts:external', 'orders:start'],
+  // Opens external carts, and starts and cancels orders, through ORDERLOOP (granted in the engine's
+  // tests).
+  capabilities: ['carts:external', 'orders:start', 'orders:cancel'],
   secrets: [
     {
       name: 'PING_TOKEN',

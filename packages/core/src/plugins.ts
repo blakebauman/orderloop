@@ -60,11 +60,13 @@ const RESERVED_IDS = new Set([
  */
 /**
  * What a plugin may ask the core to do through its host binding (`ORDERLOOP`, `PluginHostRpc`):
- * open external carts for buyers it has authenticated (`carts:external`), and start orders
- * (`orders:start`). A manifest declares them; each takes effect only with the deployment's grant
- * (`plugins.<id>.capabilities` in its registry), as buyer details do.
+ * open external carts for buyers it has authenticated (`carts:external`), start orders
+ * (`orders:start`), and cancel the orders it started (`orders:cancel`, apart from starting so a
+ * plugin that only places orders can't also call them off). A manifest declares them; each takes
+ * effect only with the deployment's grant (`plugins.<id>.capabilities` in its registry), as buyer
+ * details do.
  */
-export const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start'] as const;
+export const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start', 'orders:cancel'] as const;
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[number];
 
 export const PLUGIN_RUNTIMES = ['worker', 'sandboxed'] as const;
