@@ -25,6 +25,7 @@ follow Claude Code's [subagents](https://code.claude.com/docs/en/sub-agents) and
 | Find out why CI is red | `/ci-triage`, or the `devops` agent |
 | Change CI, the fleet or provisioning | `devops` agent |
 | Check the repo's instructions still match reality | `dx-reviewer` agent |
+| Audit a deployment's production readiness on Cloudflare | `readiness-auditor` agent |
 | Keep the docs true | `docs-sync` agent or skill, `/docs-page`, `/docs-audit` |
 
 ## Subagents (`agents/`)
@@ -37,6 +38,7 @@ follow Claude Code's [subagents](https://code.claude.com/docs/en/sub-agents) and
 | `security-reviewer` | Read, Grep, Glob, Bash | `security-model` | Findings per trust boundary with attacker, scenario and fix. **Read-only** |
 | `devops` | Read, Grep, Glob, Edit, Write, Bash | `infra-change`, `ci-triage` | Workflows, the fleet registry, `fleet.ts`, `provision.sh`, `wrangler.jsonc`, rollout order, CI triage. Never deploys |
 | `dx-reviewer` | Read, Grep, Glob, Bash | none | Instructions vs reality: README, CLAUDE.md, AGENTS.md, `docs/`, scripts, this toolkit. **Read-only** |
+| `readiness-auditor` | Read, Grep, Glob, Bash, Cloudflare API MCP (GET only) | `infra-change` | Template and live-account audit: DNS, TLS, edge, config, DOs and Workflows, durability, rollback, alerting, cost. **Read-only** |
 | `docs-sync` | Bash, Read, Grep, Glob, Edit, Write | `docs-sync`, `docs-page` | Mapping a change to doc pages, verifying claims against the source, rebuilding |
 
 The reviewers can't edit, so their findings don't depend on a fix they made. Give them the base
