@@ -637,10 +637,15 @@ export default function FlowEditor() {
                 </ul>
               </div>
               <div className="max-w-[65ch] space-y-2 text-muted-foreground text-sm leading-relaxed">
-                <p>
+                <p className="touch:hidden">
                   Drag nodes from the palette, connect an output dot to an input, and press Delete
                   to remove a selection. From the keyboard: Enter on a palette item adds it after
                   the selected node, and a node’s Connections list wires its outputs.
+                </p>
+                <p className="hidden touch:block">
+                  Tap a palette item to add it after the selected step. Drag from an output dot to
+                  an input to connect, or use a step’s Connections list; Delete node is at the foot
+                  of its settings.
                 </p>
                 <p>
                   Branches are the labelled outputs on each node. To repeat steps, use a{' '}

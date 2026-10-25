@@ -25,7 +25,10 @@ export type FlowNodeData = {
 
 export type FlowRfNode = Node<FlowNodeData, 'flow'>;
 
-const handleClass = '!size-2 !rounded-[2px] !border !border-[var(--node)] !bg-[var(--edge)]';
+// A finger needs more than an 8px dot to start a connection: on touch the dot grows a little and
+// carries an invisible 32px target around it.
+const handleClass =
+  "!size-2 !rounded-[2px] !border !border-[var(--node)] !bg-[var(--edge)] touch:!size-3 touch:after:absolute touch:after:-inset-2.5 touch:after:content-['']";
 
 const CATEGORY_NAME: Record<NodeCategory, string> = {
   trigger: 'Trigger',
