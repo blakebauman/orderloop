@@ -7,6 +7,7 @@ import {
   toBase,
 } from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
@@ -159,25 +160,17 @@ export default function Approvals() {
         title="Approvals"
         subtitle="Decisions people owe running orders, most urgent first. A decision resumes the order where it stopped."
         actions={
-          <fieldset className="flex rounded-full bg-muted p-1 text-[13px]">
-            <legend className="sr-only">Show approvals</legend>
+          <Segmented
+            aria-label="Show approvals"
+            value={status}
+            onValueChange={(s) => setParams({ status: s })}
+          >
             {FILTERS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                aria-pressed={status === s}
-                onClick={() => setParams({ status: s })}
-                className={cn(
-                  'min-h-7 rounded-full px-3 py-1',
-                  status === s
-                    ? 'bg-background font-medium text-foreground shadow-sm dark:bg-input/30'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
+              <SegmentedItem key={s} value={s}>
                 {outcomeLabel(s)}
-              </button>
+              </SegmentedItem>
             ))}
-          </fieldset>
+          </Segmented>
         }
       />
       <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">

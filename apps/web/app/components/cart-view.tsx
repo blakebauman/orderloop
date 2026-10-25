@@ -19,6 +19,17 @@ import {
   isQuoteCurrent,
   MAX_CHAT_BODY,
 } from '@orderloop/core';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { Textarea } from '@orderloop/ui/textarea';
@@ -157,17 +168,25 @@ export function CartView({
               >
                 {cart.status === 'locked' ? 'Unlock' : 'Lock'}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  if (window.confirm('Cancel this cart? It can’t be reopened.'))
-                    void call('cancel');
-                }}
-              >
-                Cancel cart
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={busy}>
+                    Cancel cart
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancel this cart?</AlertDialogTitle>
+                    <AlertDialogDescription>It can’t be reopened.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep the cart</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={() => void call('cancel')}>
+                      Cancel cart
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button
                 size="sm"
                 disabled={busy || !!ready || !!cart.external}

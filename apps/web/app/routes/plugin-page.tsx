@@ -13,12 +13,22 @@ import {
   pluginViewHref,
 } from '@orderloop/core';
 import { Alert, AlertDescription, AlertTitle } from '@orderloop/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Textarea } from '@orderloop/ui/textarea';
-import { useId } from 'react';
+import { useId, useRef, useState } from 'react';
 import { data, useLoaderData } from 'react-router';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
@@ -251,15 +261,45 @@ function FormBlock({
 }) {
   const id = useId();
   const visible = form.fields.filter((f) => f.kind !== 'hidden');
+  const ref = useRef<HTMLFormElement>(null);
+  // Set once the person confirms, so the resubmit goes through.
+  const confirmed = useRef(false);
+  const [asking, setAsking] = useState(false);
+  const tone = form.tone === 'danger' ? 'destructive' : 'default';
   return (
     <form
+      ref={ref}
       method="post"
       action={href(form.action)}
       className={inline ? 'inline' : 'grid max-w-xl gap-3 rounded-md border bg-card p-4'}
       onSubmit={(e) => {
-        if (form.confirm && !window.confirm(form.confirm)) e.preventDefault();
+        if (!form.confirm || confirmed.current) return;
+        e.preventDefault();
+        setAsking(true);
       }}
     >
+      {form.confirm ? (
+        <AlertDialog open={asking} onOpenChange={setAsking}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{form.submit}?</AlertDialogTitle>
+              <AlertDialogDescription>{form.confirm}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Go back</AlertDialogCancel>
+              <AlertDialogAction
+                variant={tone}
+                onClick={() => {
+                  confirmed.current = true;
+                  ref.current?.requestSubmit();
+                }}
+              >
+                {form.submit}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
       {form.fields
         .filter((f) => f.kind === 'hidden')
         .map((f) => (
@@ -328,7 +368,7 @@ function FormBlock({
         <Button
           type="submit"
           size="sm"
-          variant={form.tone === 'danger' ? 'destructive' : inline ? 'ghost' : 'default'}
+          variant={tone === 'destructive' ? tone : inline ? 'ghost' : 'default'}
         >
           {form.submit}
         </Button>

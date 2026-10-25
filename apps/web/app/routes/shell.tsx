@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
@@ -428,20 +429,19 @@ function MoreMenu({ nav, pending }: { nav: NavItem[]; pending: number }) {
       </ul>
       <fieldset className="border-t px-4 pt-3 pb-3">
         <legend className="caption float-left mb-2 w-full font-medium">Theme</legend>
-        <div className="clear-left grid grid-cols-3 gap-1 rounded-md border p-0.5">
+        <Segmented
+          aria-label="Theme"
+          value={theme.choice}
+          onValueChange={(v) => theme.setChoice(v as typeof theme.choice)}
+          className="clear-left grid w-full"
+        >
           {THEMES.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={theme.choice === value}
-              onClick={() => theme.setChoice(value)}
-              className="flex min-h-10 items-center justify-center gap-1.5 rounded-sm text-[13px] text-muted-foreground aria-pressed:bg-accent aria-pressed:font-medium aria-pressed:text-foreground"
-            >
-              <Icon className="size-3.5" aria-hidden="true" />
+            <SegmentedItem key={value} value={value} className="min-h-10">
+              <Icon aria-hidden="true" />
               {value === 'system' ? 'System' : label}
-            </button>
+            </SegmentedItem>
           ))}
-        </div>
+        </Segmented>
       </fieldset>
       {auth || admin ? (
         <div className="border-t p-2">
