@@ -1,8 +1,10 @@
 import { adminSecretsStore, introspectWorkflow } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import {
+  checkPluginView,
   type OrderInput,
   type OrderState,
+  PLUGIN_VIEW_TYPE,
   PRINCIPAL_HEADER,
   pluginKey,
   signPrincipal,
@@ -174,7 +176,11 @@ describe('a sandboxed plugin', () => {
     );
     const res = await page({ [PRINCIPAL_HEADER]: header });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ plugin: 'example', principal: { id: 'usr_1' } });
+    expect(res.headers.get('content-type')).toBe(PLUGIN_VIEW_TYPE);
+    expect(checkPluginView(await res.text())).toMatchObject({
+      ok: true,
+      view: { title: 'Example', blocks: [{ type: 'stats' }, { type: 'code', text: 'usr_1' }] },
+    });
     expect(
       (await api().pluginFetch('nope', new Request('https://plugin/plugins/nope/'))).status,
     ).toBe(404);
