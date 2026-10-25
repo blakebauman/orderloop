@@ -384,6 +384,26 @@ describe('cancel', () => {
       ok: false,
       reason: 'not_waiting',
     });
+    // Only an approver the web app signed for this order decides: not a forged actor, one signed
+    // for another order or for a cart, a viewer, or an actor object.
+    const viewer = signedActor(
+      { kind: 'staff', id: 'usr_v', name: 'v', role: 'viewer' },
+      `decide:${orderId}`,
+    );
+    for (const actor of [
+      'a1.forged.sig',
+      await apiActor('ord_other'),
+      await signedActor(
+        { kind: 'staff', id: 'tok_api', name: 'api', role: 'admin' },
+        `cart:${orderId}`,
+      ),
+      await viewer,
+      { kind: 'staff', id: 'tok_api', name: 'api', role: 'admin' } as never,
+    ])
+      expect(await api.decide(orderId, 'mgr', 'approved', actor)).toMatchObject({
+        ok: false,
+        reason: 'forbidden',
+      });
     expect(await api.cancel(orderId, 'Changed our mind')).toEqual({ ok: true });
     expect(await api.cancel(orderId, 'Again')).toEqual({ ok: false, reason: 'finished' });
     expect(await api.intakeMailboxes()).toMatchObject({ orders: 'tpl-b2b-order' });

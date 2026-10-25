@@ -454,6 +454,14 @@ describe('staff carts over EngineApi (the REST API)', () => {
       await api().changeCart(id, { op: 'clear' }, await signedActor(ada, 'cart:cart_other')),
     ).toEqual(refused);
     expect(await api().cancelCart(id, JSON.stringify(ada))).toEqual(refused);
+    expect(await api().submitCart(id, ada as never)).toEqual(refused);
+    expect(
+      await api().attachToCart(
+        id,
+        { id: 'att_x', name: 'x.pdf', type: 'application/pdf', size: 1, key: `carts/${id}/att_x` },
+        await signedActor(ada, 'cart:cart_other'),
+      ),
+    ).toEqual(refused);
   });
 
   it('applies an op as the caller and answers with the cart priced again', async () => {

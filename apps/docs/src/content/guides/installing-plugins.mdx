@@ -85,9 +85,10 @@ what runs on every order. The page asks for the first of these that applies to y
    you to sign in again, even if you are already signed in there, and brings you back. The action
    then works for ten minutes.
 
-Wrong answers count against a limit and are throttled. Turning a plugin back on, and replacing a
-secret of a plugin that is installed, need the check too. Uploading, setting the secrets of a
-plugin under review and turning a plugin off need only your admin session.
+Wrong answers count against a limit and are throttled. Turning a plugin off or back on, and
+replacing a secret of a plugin that is installed, need the check too. Uploading and setting the
+secrets of a plugin under review need only your admin session. An admin API token can still turn
+a plugin off over the REST API, so automation can switch off one that misbehaves.
 
 ## After it is installed
 

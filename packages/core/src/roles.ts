@@ -348,10 +348,11 @@ export async function verifySsoLink(
 }
 
 /**
- * Who is acting on a call over the engine's binding (`EngineRpc.decide`, the cart methods): a
- * staff member (their principal id, the name the record shows, their role) or an external cart's
- * buyer. The web app signs it (`a1`) for that one call, the engine believes nothing else, so
- * whatever else ever holds the binding can't act as anyone.
+ * Who is acting on an approval or a cart over the engine's binding (`EngineRpc.decide`,
+ * `changeCart`, `submitCart`, `cancelCart`, `attachToCart`): a staff member (their principal id,
+ * the name the record shows, their role) or an external cart's buyer. The web app signs it (`a1`)
+ * for that one call and the engine believes nothing else for those calls. The binding's other
+ * methods (plugin installs, data subjects) still trust their caller: only the web app holds it.
  */
 export type RpcActor =
   | { kind: 'staff'; id: string; name: string; role: Role }
@@ -379,6 +380,8 @@ export async function verifyRpcActor(
   call: string,
   now = Date.now(),
 ): Promise<RpcActor | null> {
+  // Anything but the string a1 envelope (an actor object from an older web app) is refused.
+  if (typeof signed !== 'string') return null;
   const body = await unseal(secrets, ACTOR_VERSION, signed, call, now);
   const a = body?.a as Partial<{ kind: string; id: string; name: string; role: Role }> | undefined;
   if (!a || typeof a.id !== 'string' || typeof a.name !== 'string') return null;

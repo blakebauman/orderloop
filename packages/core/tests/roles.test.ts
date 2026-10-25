@@ -198,6 +198,17 @@ describe('signed actors on binding calls', () => {
     expect(await verifyPrincipal([key], a, 'decide:ord_1', now)).toBeNull();
     const p = await signPrincipal(key, { ...ann, kind: 'user' }, 'decide:ord_1', now);
     expect(await verifyRpcActor([key], p, 'decide:ord_1', now)).toBeNull();
+    // Nor a cart guest's cookie or socket header, signed for the same `cart:<id>` path.
+    const g = { cartId: 'c', id: 'guest:b', name: 'Bea' };
+    expect(
+      await verifyRpcActor([key], await signCartGuestSession(key, g, now + 60_000), 'cart:c', now),
+    ).toBeNull();
+    expect(
+      await verifyRpcActor([key], await signCartGuest(key, g, 'cart:c', now), 'cart:c', now),
+    ).toBeNull();
+    expect(await verifyRpcActor([key], ann as never, 'decide:ord_1', now)).toBeNull();
+    // The previous key during a rotation.
+    expect(await verifyRpcActor(['new', key], a, 'decide:ord_1', now)).toEqual(ann);
     const guest = { kind: 'guest' as const, id: 'guest:b', name: 'Bea' };
     expect(
       await verifyRpcActor([key], await signRpcActor(key, guest, 'cart:c', now), 'cart:c', now),

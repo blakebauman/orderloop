@@ -61,6 +61,17 @@ describe('the Plugins page’s install actions', () => {
     });
   });
 
+  it('lets an admin API token turn a plugin off without a step-up, and nothing more', async () => {
+    const token = { kind: 'token' as const, id: 'tok_1', name: 'ops', role: 'admin' as const };
+    engine.setPluginEnabled.mockResolvedValueOnce({ ok: true, value: { id: 'acme-carrier' } });
+    const off = await pluginAction(request, token, form({ intent: 'disable', id: 'acme-carrier' }));
+    expect(off).toMatchObject({ ok: true });
+    expect(stepUp).not.toHaveBeenCalled();
+    // Turning one on still asks, which a token can't answer.
+    await pluginAction(request, token, form({ intent: 'enable', id: 'acme-carrier' }));
+    expect(stepUp).toHaveBeenCalledTimes(1);
+  });
+
   it('approves after a step-up, with the grant the admin ticked', async () => {
     engine.approvePlugin.mockResolvedValueOnce({
       ok: true,

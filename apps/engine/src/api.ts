@@ -5,6 +5,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
+  atLeast,
   type CartAttachment,
   type CartOp,
   type CopilotRequest,
@@ -95,6 +96,12 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     const actor = await rpcActor(this.env, signed, `decide:${orderId}`);
     if (actor?.kind !== 'staff')
       return { ok: false as const, reason: 'forbidden' as const, error: UNSIGNED.error };
+    if (!atLeast(actor.role, 'approver'))
+      return {
+        ok: false as const,
+        reason: 'forbidden' as const,
+        error: 'This needs the Approver role.',
+      };
     const { name: by, id: deciderId } = actor;
     const s = await this.snapshot(orderId);
     if (!s) return { ok: false as const, reason: 'not_found' as const };
