@@ -1,6 +1,7 @@
 import {
   ASSISTANT_PUBLISHER,
   CATEGORY_LABELS,
+  PLUGIN_CAPABILITY_LABELS,
   type PluginCaseResult,
   type PluginInstallView,
   type PluginManifest,
@@ -601,6 +602,18 @@ function ManifestDetails({
               Reaches {m.egress.length ? m.egress.join(', ') : 'no outside hosts'}
             </span>
           ) : null}
+        </dd>
+        <dt className="text-muted-foreground">Core access</dt>
+        <dd>
+          {/* A loaded plugin's manifest asks only for what the registry grants: one asking for
+              more is refused as a whole, and a runtime install can't ask at all. */}
+          {m.capabilities.length
+            ? m.capabilities.map((c) => (
+                <span key={c} className="block">
+                  {PLUGIN_CAPABILITY_LABELS[c]}
+                </span>
+              ))
+            : 'None'}
         </dd>
         <dt className="text-muted-foreground">Buyer details</dt>
         <dd>{m.personalData === 'send' ? 'Sent to the plugin' : 'Redacted'}</dd>
