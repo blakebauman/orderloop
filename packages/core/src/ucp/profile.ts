@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { egressProblem } from '../egress';
 import { UCP_VERSION } from './errors';
 import { isInnerList, parseDictionary } from './structured';
 
@@ -222,11 +223,9 @@ export function parsePlatformProfile(doc: unknown): PlatformProfile | { problem:
     }
   const hook = caps.get(ORDER_CAPABILITY)?.config?.webhook_url;
   let webhookUrl: string | null = null;
-  if (typeof hook === 'string')
-    try {
-      const u = new URL(hook);
-      if (u.protocol === 'https:' || u.hostname === 'localhost') webhookUrl = u.href;
-    } catch {}
+  // Kept only where a delivery may go (the egress policy, with localhost for local development).
+  if (typeof hook === 'string' && egressProblem(hook, { loopback: true }) === null)
+    webhookUrl = new URL(hook).href;
   const keys = Array.isArray((doc as { keys?: unknown }).keys)
     ? ((doc as { keys: unknown[] }).keys.filter(
         (k) =>

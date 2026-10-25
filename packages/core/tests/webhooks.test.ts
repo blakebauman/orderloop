@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { constantTimeEqual, signWebhook, verifyStripeSignature, verifyWebhook } from '../src';
+import {
+  constantTimeEqual,
+  isWebhookUrl,
+  signWebhook,
+  verifyStripeSignature,
+  verifyWebhook,
+} from '../src';
 
 const secret = 'whsec_test';
 const body = JSON.stringify({
@@ -114,5 +120,20 @@ describe('Stripe-Signature', () => {
     expect(
       await verifyStripeSignature(stripeSecret, event, header, { nowSec: t + 301 }),
     ).toMatchObject({ ok: false, reason: 'Signature timestamp outside tolerance' });
+  });
+});
+
+describe('where a webhook may go', () => {
+  it('is where a delivery may reach, so a bad URL is refused when it is registered', () => {
+    expect(isWebhookUrl('https://hooks.example.com/orderloop')).toBe(true);
+    expect(isWebhookUrl('http://localhost:8787/hook')).toBe(true);
+    for (const url of [
+      'http://hooks.example.com/',
+      'https://203.0.113.5/',
+      'https://erp.internal/',
+      'https://x.nip.io/',
+      'https://localhost./',
+    ])
+      expect(isWebhookUrl(url), url).toBe(false);
   });
 });

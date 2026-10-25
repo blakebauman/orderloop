@@ -49,6 +49,16 @@ The catalog Worker has five variables and no secrets (`apps/catalog/wrangler.jso
 makes the engine's outbound `fetch` (outbound webhooks, [A2A push
 notifications](https://docs.orderloop.app/reference/a2a/#push-notifications) and live shipping carriers' quote
 requests, whose URLs callers or flow authors supply) reach public addresses only, not private or loopback ones.
+On top of that platform rule, every server-side fetch of such a URL (those, UCP order webhooks,
+images for a model step, and the web Worker's single sign-on discovery, token and key requests)
+goes through `safeFetch` (`packages/core/src/egress.ts`): https only, no credentials in the URL,
+no IP literals, internal names (`localhost`, `.internal`, `.local`, `.lan`, `home.arpa`, single
+labels) or wildcard-DNS services (`nip.io`, `sslip.io`), no redirects (a model step's images may
+follow three for a plain GET, each checked again), a timeout, and a byte cap on what is read.
+Single sign-on discovery may follow two redirects; the token request follows none. A host ending
+in a dot is refused. Outbound webhooks, A2A push and UCP order webhooks still allow plain http to
+`localhost` for local development, and webhook subscriptions, A2A push configs and a UCP profile's
+webhook are checked against the same policy when they're registered.
 
 ## Engine secrets
 

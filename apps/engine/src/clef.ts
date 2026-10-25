@@ -14,6 +14,7 @@ import {
   type AssessQuestions,
   clampAnswers,
   promptId,
+  safeFetch,
 } from '@orderloop/core';
 import { logAiCall, withTimeout } from './ai';
 
@@ -72,7 +73,14 @@ async function loadImage(
     return { type: mime(m[1]), bytes: Buffer.from(m[2]!, 'base64') };
   }
   if (/^https:\/\//i.test(ref)) {
-    const res = await fetch(ref, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    // Behind the egress policy, a few redirects allowed (images often sit behind a CDN's), each
+    // checked again; nothing credentialed is sent.
+    let res: Response;
+    try {
+      res = await safeFetch(ref, { timeoutMs: FETCH_TIMEOUT_MS, redirects: 3 });
+    } catch (err) {
+      return `${short}: ${err instanceof Error ? err.message : 'unreachable'}`;
+    }
     if (!res.ok || !res.body) return `${short}: HTTP ${res.status}`;
     const type = mime(res.headers.get('content-type'));
     if (!IMAGE_TYPES.has(type)) {

@@ -14,6 +14,7 @@ import {
   type OutboundEvent,
   type OutboundPayload,
   SIGNATURE_HEADER,
+  safeFetch,
   secretContext,
   signWebhook,
   subscribedTo,
@@ -148,7 +149,9 @@ async function send(env: Env, sub: Subscription, id: string, event: string, body
   try {
     // Inside the try: a secret no key opens fails this delivery, not the step.
     const secrets = await signingSecrets(env, sub);
-    const res = await fetch(sub.url, {
+    // Behind the egress policy: no redirect takes a signed delivery anywhere else. A subscription
+    // may point at a receiver on this machine in local development (`isWebhookUrl`).
+    const res = await safeFetch(sub.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -157,7 +160,8 @@ async function send(env: Env, sub: Subscription, id: string, event: string, body
         [DELIVERY_HEADER]: id,
       },
       body,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      loopback: true,
+      timeoutMs: TIMEOUT_MS,
     });
     // Drain so the connection is released.
     await res.body?.cancel();

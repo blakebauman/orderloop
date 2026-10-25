@@ -30,6 +30,7 @@ import {
   isLegacyA2AVersion,
   isWebhookUrl,
   SecretUnreadable,
+  safeFetch,
   sealedWithCurrent,
   WEBHOOK_URL_RULE,
 } from '@orderloop/core';
@@ -330,18 +331,17 @@ export class PushSender implements PushNotificationSender {
     let error: string | null = null;
     try {
       const headers = await openSecret(this.env, row.headers, outboxContext(row.id));
-      const res = await fetch(row.url, {
+      // The caller's token and credentials go to the URL they registered, never where it points:
+      // the egress policy refuses a redirect (`isWebhookUrl` allows a local receiver in dev).
+      const res = await safeFetch(row.url, {
         method: 'POST',
         headers: JSON.parse(headers) as Record<string, string>,
         body: row.body,
-        // The caller's token and credentials go to the URL they registered, never where it points.
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        loopback: true,
+        timeoutMs: TIMEOUT_MS,
       });
       await res.body?.cancel();
-      if (res.status >= 300 && res.status < 400)
-        error = `HTTP ${res.status} (redirects aren't followed)`;
-      else if (!res.ok) error = `HTTP ${res.status}`;
+      if (!res.ok) error = `HTTP ${res.status}`;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
