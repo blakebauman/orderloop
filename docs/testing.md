@@ -380,7 +380,10 @@ demo data afresh on each run, so it never touches the database `pnpm web:dev` us
 account is needed. Locally a server already on port 5390 is reused. `e2e/warm.ts` (global setup)
 visits every page once first, since the dev server reloads the browser the first time it bundles a
 page's dependencies; `open()` in `e2e/helpers.ts` waits until app.css has applied and the page has
-hydrated.
+hydrated. If the dev server's Workers runtime crashes (it restarts itself), `open()` waits for the server
+to answer again and loads the page once more. On CI the suite runs one test at a time with two
+retries, and a failing run keeps its traces as the `device-test-traces` artifact (open one with
+`pnpm --filter @orderloop/web exec playwright show-trace <trace.zip>`).
 
 Playwright can't emulate safe-area insets or the on-screen keyboard, so the helpers fake them:
 `fakeSafeArea` sets the `--safe-*` variables (why app.css reads the insets through them, never

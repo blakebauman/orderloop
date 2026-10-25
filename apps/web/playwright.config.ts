@@ -14,7 +14,10 @@ export default defineConfig({
   globalSetup: './e2e/warm.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // On CI, one test at a time and two retries: the runner is small, and the dev server's Workers
+  // runtime (with the orders the tests start still running in it) has crashed under two at once.
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,

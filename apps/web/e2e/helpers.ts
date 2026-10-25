@@ -12,13 +12,41 @@ export const isNarrow = (info: TestInfo) =>
  * script) and the page hydrated, so a tap reaches React.
  */
 export async function open(page: Page, path: string) {
-  await page.goto(path, { waitUntil: 'networkidle' });
+  for (let tries = 0; ; tries++) {
+    const res = await page.goto(path, { waitUntil: 'networkidle' }).catch((err: Error) => err);
+    // The dev server's Workers runtime restarts if it crashes; meanwhile a request fails outright
+    // or comes back 5xx. Wait for it to answer again and load the page once more.
+    const down =
+      res instanceof Error
+        ? /connect|terminated|ECONNREFUSED|ERR_/i.test(res.message)
+        : (res?.status() ?? 200) >= 500;
+    if (!down) {
+      if (res instanceof Error) throw res;
+      break;
+    }
+    if (tries === 1)
+      throw res instanceof Error ? res : new Error(`${path} answered ${res?.status()}`);
+    await serverUp(page);
+  }
   await page.waitForFunction(
     () =>
       getComputedStyle(document.body).overscrollBehaviorY === 'none' &&
       // React Router marks the document once hydration is done.
       Boolean((window as unknown as { __reactRouterDataRouter?: object }).__reactRouterDataRouter),
   );
+}
+
+/** Waits (up to 30s) until the dev server serves the overview again. */
+async function serverUp(page: Page) {
+  const until = Date.now() + 30_000;
+  while (Date.now() < until) {
+    const ok = await page.request
+      .get('/', { timeout: 5_000 })
+      .then((r) => r.ok())
+      .catch(() => false);
+    if (ok) return;
+    await page.waitForTimeout(1_000);
+  }
 }
 
 /** Every page in the shell, and the seeded flow the editor tests open. */
