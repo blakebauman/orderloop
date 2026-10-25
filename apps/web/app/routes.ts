@@ -35,6 +35,8 @@ export default [
       route('flows/:flowId', 'routes/flow-editor.tsx'),
       route('approvals', 'routes/approvals.tsx'),
       route('commerce', 'routes/commerce.tsx'),
+      // Revenue, endings, payments and step timings over 7, 30 or 90 days (lib/metrics.server.ts).
+      route('performance', 'routes/performance.tsx'),
       route('promotions', 'routes/promotions.tsx'),
       route('team', 'routes/team.tsx'),
       route('audit', 'routes/audit.tsx'),

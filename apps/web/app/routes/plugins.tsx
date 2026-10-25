@@ -457,7 +457,7 @@ function InstallControls({
         <Form method="post" className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="intent" value={on ? 'disable' : 'enable'} />
           <input type="hidden" name="id" value={current.id} />
-          {on ? null : <StepUpField method={stepUp} next="/plugins" />}
+          <StepUpField method={stepUp} next="/plugins" />
           <Button type="submit" size="sm" variant="outline">
             {on ? 'Turn off' : 'Turn on'}
           </Button>

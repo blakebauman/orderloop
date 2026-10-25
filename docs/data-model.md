@@ -156,25 +156,30 @@ writes embeds its step key.
 |---|---|
 | `node_runs` | One row per finished node run, primary key `(order_id, generation, node_id, run)`: `node_type`, `model`, `status` (`succeeded` or `failed`), `started_at`, `ended_at`, `duration_ms`. Written by the OrderAgent (see [Node timing](order-agent.md#node-timing)) and indexed by `(node_type, ended_at)` and `ended_at`; rows older than 180 days are deleted by the [retention sweep](#retention) |
 
-The dashboard's **Last 30 days** section (`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at
-request time: completion rate by model from `orders` (completed over finished, by
-`created_at`), p50 and p95 duration per node type from `node_runs` (nearest rank, with window
-functions), revenue per day from completed `orders`, and refund rate from `payments` (succeeded
-`refund` over succeeded `capture` and `charge`). Money is converted to USD at each order's
+The **Performance** page (`apps/web/app/routes/performance.tsx`, data from `performance` in
+`apps/web/app/lib/metrics.server.ts`) aggregates in D1 at request time over one window of 7, 30
+or 90 whole UTC days ending today (`?days=`, `toRange`, 30 by default; `windowStart`), so every
+figure on it counts the same orders and payments. **Day by day** (`apps/web/app/components/trends.tsx`)
+charts `daily` (`fillDays`, one row per UTC day so empty days still show): revenue from completed
+`orders`; orders ended per day by `updated_at`, stacked as completed, declined or cancelled, and
+failed or rolled back; and money collected and refunded from succeeded `payments` by
+`created_at`. **Over the period** (`apps/web/app/components/performance.tsx`) shows completion
+rate by model (completed over ended in the window), refund rate from `totals` (the sums of the
+daily series, so a figure can't disagree with its chart) and p50 and p95 duration per node type from
+`node_runs` (nearest rank, with window functions). Money is converted to USD at each order's
 `fx_rate`. The page shows counts instead of a completion rate below five ended orders per model,
-and a step's 95th percentile only from 20 runs (`apps/web/app/components/performance.tsx`).
+and a step's 95th percentile only from 20 runs. The charts use `@orderloop/ui/chart` (shadcn's
+Chart over Recharts), colored with the existing Ledger tokens.
 
-Above it, **Trends** (`apps/web/app/components/trends.tsx`) charts `daily`, a 90-day series from
-the same request (`fillDays`, one row per UTC day so empty days still show), over 7, 30 or 90 days:
-revenue from completed `orders`; orders ended per day by `updated_at`, stacked as completed,
-declined or cancelled, and failed or rolled back; and money collected and refunded from succeeded
-`payments` by `created_at`. The charts use `@orderloop/ui/chart` (shadcn's Chart over Recharts),
-colored with the existing Ledger tokens.
-
-The overview's **Needs attention** (`overview` in `apps/web/app/lib/orders.server.ts`, one D1 batch with the overview's other counts) reads
-the orders index: the newest failed and rolled-back orders with `stopped_at` and `reason`, and the
-open waits grouped in SQL by `waiting_at`, `waiting_on` and `waiting_for` with the oldest
-`waiting_since`; `lanes` in `apps/web/app/lib/attention.ts` groups them by who they wait on.
+The overview (`overview` in `apps/web/app/lib/orders.server.ts`, one D1 batch) reads the orders
+index: open counts by status; orders that ended in the last 24 hours by status, with the completed
+total and how many were declined; open waits grouped by `flow_id`, `waiting_at` and
+`waiting_for` with the oldest `waiting_since`; and the last 7 days' failed and rolled-back orders
+grouped by `flow_id` and `stopped_at`, with the latest `reason`. `waitTrails` and `stoppedSteps`
+(`apps/web/app/lib/where.ts`) lay those along each flow's steps, ordered as the flow's published
+version draws them (`flowSteps` in `apps/web/app/lib/flows.server.ts`). Its links open the orders
+list filtered by `step` (`waiting_at` or `stopped_at`) and `within` (`24h` or `7d` of
+`updated_at`).
 
 ## People and tokens
 

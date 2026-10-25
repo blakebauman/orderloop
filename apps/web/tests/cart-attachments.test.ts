@@ -5,6 +5,7 @@ import {
   type CartState,
   type Principal,
   signCartGuestSession,
+  verifyRpcActor,
 } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -94,7 +95,13 @@ describe('adding a file to a cart', () => {
     expect(cartId).toBe('cart_1');
     expect(a).toMatchObject({ name: 'widget spec.pdf', type: 'application/pdf', size: 13 });
     expect(a.key).toBe(`carts/cart_1/${a.id}`);
-    expect(actor).toEqual({ kind: 'staff', id: 'usr_1', name: 'Ada', role: 'operator' });
+    // Signed for this cart: the engine believes nothing else.
+    expect(await verifyRpcActor([env.PRINCIPAL_KEY], actor, 'cart:cart_1')).toEqual({
+      kind: 'staff',
+      id: 'usr_1',
+      name: 'Ada',
+      role: 'operator',
+    });
     expect([...objects.keys()]).toEqual([a.key]);
   });
 
@@ -124,11 +131,9 @@ describe('adding a file to a cart', () => {
     cartSnapshot.mockResolvedValue(state({ external: {} as Cart['external'] }));
     attachToCart.mockResolvedValue({ ok: true });
     expect(await post(pdf(), { cookie: await guestCookie() })).toEqual({ ok: true });
-    expect(attachToCart.mock.calls[0]![2]).toEqual({
-      kind: 'guest',
-      id: 'guest:b1',
-      name: 'Pat Buyer',
-    });
+    expect(
+      await verifyRpcActor([env.PRINCIPAL_KEY], attachToCart.mock.calls[0]![2], 'cart:cart_1'),
+    ).toEqual({ kind: 'guest', id: 'guest:b1', name: 'Pat Buyer' });
   });
 });
 

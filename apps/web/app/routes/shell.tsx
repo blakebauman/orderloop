@@ -136,6 +136,7 @@ const NAV: NavItem[] = [
   { to: '/approvals', label: 'Approvals', badge: true },
   { to: '/flows', label: 'Flows' },
   { to: '/commerce', label: 'Commerce' },
+  { to: '/performance', label: 'Performance' },
 ];
 
 /** Phones: the pages an operator reaches for most, as tabs; the rest of NAV is under More. */

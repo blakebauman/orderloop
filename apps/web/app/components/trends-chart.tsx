@@ -65,14 +65,16 @@ export default function Chart({
           }
         />
         {/* Stacked bands are counts: straight segments, so no curve swings past a day's value,
-            and solid tints, so each band reads against the one under it. */}
-        {keys.map((k) => (
+            and solid tints, so each band reads against the one under it. Only the base band has an
+            outline: a band's stroke runs along the stack's top, so on the top band (failed) it
+            would draw a red line every day, failures or not. */}
+        {keys.map((k, i) => (
           <Area
             key={k}
             dataKey={k}
             type={stacked ? 'linear' : 'monotone'}
             stroke={`var(--color-${k})`}
-            strokeWidth={1.5}
+            strokeWidth={stacked && i > 0 ? 0 : 1.5}
             // Two greys alone are hard to tell apart; the lesser money series is dashed.
             strokeDasharray={k === 'refunded' ? '4 3' : undefined}
             fill={stacked ? `var(--color-${k})` : `url(#${id}-${k})`}
