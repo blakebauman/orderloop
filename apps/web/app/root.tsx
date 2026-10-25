@@ -42,7 +42,7 @@ export const meta: Route.MetaFunction = () => [
 ];
 
 /** Browser chrome colour per theme: `--paper` from app.css, in hex (the manifest needs hex too). */
-const THEME_COLOR = { light: '#f9f5ee', dark: '#12161d' } as const;
+const THEME_COLOR = { light: '#ffffff', dark: '#0a0a0a' } as const;
 
 /**
  * Resolves the stored theme choice ("light" by default, "dark", or "system") to `data-theme` before
