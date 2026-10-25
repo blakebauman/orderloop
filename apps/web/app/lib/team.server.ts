@@ -3,9 +3,17 @@
  * once to show the operator, and stored only as a hash.
  */
 
-import { isRole, newId, type Principal, type Role, SESSION_IDLE_MS } from '@orderloop/core';
+import {
+  atLeast,
+  isRole,
+  newId,
+  type Principal,
+  type Role,
+  SESSION_IDLE_MS,
+} from '@orderloop/core';
 import { apiTokens, sessions, startsWith, users } from '@orderloop/db';
 import { and, count, desc, eq, gt, isNull, ne } from 'drizzle-orm';
+import { endAccess, endedDetail } from './access.server';
 import { audit } from './audit.server';
 import { actor, forgetUserCount, reauthenticate } from './auth.server';
 import {
@@ -160,10 +168,14 @@ export async function setRole(request: Request, by: Principal, id: string, next:
   const user = await target(id);
   if (user.role === r) return;
   await db().update(users).set({ role: r }).where(eq(users.id, id));
+  // Connected apps follow the role on their own (`grantPrincipal`); tokens carry theirs.
+  const ended = atLeast(r, user.role as Role)
+    ? null
+    : await endAccess(request, { id, email: user.email }, { tokens: { above: r } });
   await audit(request, 'team.role_changed', {
     actor: by,
     target: user.email,
-    detail: { from: user.role, to: r },
+    detail: { from: user.role, to: r, ...(ended ? endedDetail(ended) : {}) },
   });
 }
 
@@ -177,7 +189,10 @@ async function target(id: string) {
   return user;
 }
 
-/** Sets a new one-time password and signs the person out everywhere. */
+/**
+ * Sets a new one-time password and ends what the old one could have reached: sessions, connected
+ * apps and passkeys (adding one needs only the password).
+ */
 export async function resetPassword(request: Request, by: Principal, id: string) {
   const user = await target(id);
   const password = generatePassword();
@@ -185,8 +200,16 @@ export async function resetPassword(request: Request, by: Principal, id: string)
     .update(users)
     .set({ passwordHash: await hashPassword(password), passwordChangeDue: true })
     .where(eq(users.id, id));
-  await db().delete(sessions).where(eq(sessions.userId, id));
-  await audit(request, 'team.password_reset', { actor: by, target: user.email });
+  const ended = await endAccess(
+    request,
+    { id, email: user.email },
+    { sessions: true, apps: true, passkeys: true },
+  );
+  await audit(request, 'team.password_reset', {
+    actor: by,
+    target: user.email,
+    detail: endedDetail(ended),
+  });
   return { email: user.email, password };
 }
 
@@ -198,10 +221,18 @@ export async function setDisabled(request: Request, by: Principal, id: string, d
     .update(users)
     .set({ disabledAt: disabled ? Date.now() : null })
     .where(eq(users.id, id));
-  if (disabled) await db().delete(sessions).where(eq(sessions.userId, id));
+  // Enabling again brings back none of it: they sign in afresh, and apps and tokens are made anew.
+  const ended = disabled
+    ? await endAccess(
+        request,
+        { id, email: user.email },
+        { sessions: true, apps: true, tokens: true },
+      )
+    : null;
   await audit(request, disabled ? 'team.user_disabled' : 'team.user_enabled', {
     actor: by,
     target: user.email,
+    ...(ended ? { detail: endedDetail(ended) } : {}),
   });
 }
 
@@ -217,18 +248,34 @@ export async function createToken(
   if (!name) throw new TeamError('Name the token after what will use it, e.g. “ERP sync”.');
   const t = await newApiToken();
   const r = role(input.role);
+  const id = newId('tok');
   await db()
     .insert(apiTokens)
     .values({
-      id: newId('tok'),
+      id,
       name,
       prefix: t.prefix,
       tokenHash: t.hash,
       role: r,
       createdBy: actor(by),
+      createdById: by.kind === 'user' ? by.id : null,
       createdAt: Date.now(),
       expiresAt,
     });
+  // A disable or demotion that landed while this request was on its way ran before this row
+  // existed: check again now that it does (making tokens is an admin's), and take it back if not.
+  const maker =
+    by.kind === 'user'
+      ? await db()
+          .select({ role: users.role, disabledAt: users.disabledAt })
+          .from(users)
+          .where(eq(users.id, by.id))
+          .get()
+      : undefined;
+  if (by.kind === 'user' && (!maker || maker.disabledAt || maker.role !== 'admin')) {
+    await db().update(apiTokens).set({ revokedAt: Date.now() }).where(eq(apiTokens.id, id));
+    throw new TeamError('Your access changed while the token was being made; it was not created.');
+  }
   await audit(request, 'token.created', {
     actor: by,
     target: name,
@@ -252,7 +299,7 @@ export async function revokeToken(request: Request, by: Principal, id: string) {
   });
 }
 
-/** A signed-in person changes their own password. */
+/** A signed-in person changes their own password: how many connected apps that disconnected. */
 export async function changeOwnPassword(
   request: Request,
   by: Principal,
@@ -270,7 +317,14 @@ export async function changeOwnPassword(
     .update(users)
     .set({ passwordHash: await hashPassword(next), passwordChangeDue: false })
     .where(eq(users.id, by.id));
-  await audit(request, 'auth.password_changed', { actor: by, target: user.email });
+  // In case the old password leaked: apps connected with it go (the route ends other sessions).
+  const ended = await endAccess(request, user, { apps: true });
+  await audit(request, 'auth.password_changed', {
+    actor: by,
+    target: user.email,
+    ...(ended.apps ? { detail: { apps: ended.apps } } : {}),
+  });
+  return ended.apps;
 }
 
 /** The signed-in person's live sessions, newest activity first; `current` marks this browser. */

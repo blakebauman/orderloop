@@ -9,6 +9,7 @@ import {
   PRINCIPAL_HEADER,
   type Principal,
 } from '@orderloop/core';
+import { createDb, users } from '@orderloop/db';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SqlPushStore } from '../src/a2a/push';
 import { changeCart, createCart } from '../src/cart/carts';
@@ -433,6 +434,67 @@ describe('A2A push notifications', () => {
       .filter((u) => u && (u.taskId ?? u.id) === placed.id)
       .map((u) => `${u.status?.state} ${JSON.stringify(u.status?.message?.parts ?? [])}`);
     expect(lines.filter((l, i) => i > 0 && l === lines[i - 1])).toEqual([]);
+  });
+
+  it('stops pushing once the caller is disabled', async () => {
+    const received = receiver();
+    await fastWorkflows();
+    const op = person('operator', 'leaver@example.com');
+    const placed = (
+      await call(op, 'SendMessage', {
+        ...message([
+          { data: { skill: 'place_order', input: { flowId: 'tpl-b2b-order', input: b2b } } },
+        ]),
+        configuration: { taskPushNotificationConfig: { url: 'https://hooks.example/leaver' } },
+      })
+    ).result!.task as Json;
+    const orderId = placed.artifacts[0].parts[0].data.orderId as string;
+    await until(
+      async () => states(received, placed.id).includes('TASK_STATE_INPUT_REQUIRED'),
+      'the push for the approval',
+    );
+    await createDb(env.DB).insert(users).values({
+      id: op.id,
+      email: op.email!,
+      name: op.name,
+      role: 'operator',
+      createdAt: 0,
+      disabledAt: Date.now(),
+    });
+
+    const before = received.length;
+    const wait = (await state(orderId)).waits.find((w) => w.kind === 'approval')!;
+    await env.ORDER_AGENT.getByName(orderId).decide(wait.nodeId, 'approved', 'someone@example.com');
+    await until(
+      async () => !(await state(orderId)).waits.some((w) => w.nodeId === wait.nodeId),
+      'the approval to be decided',
+    );
+    await runDurableObjectAlarm(env.A2A_AGENT.getByName(`user:${op.id}`));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(received.slice(before)).toEqual([]);
+  });
+
+  it('forgets every push config when the caller’s apps are disconnected', async () => {
+    receiver(Number.POSITIVE_INFINITY);
+    const viewer = person('viewer', 'gone@example.com');
+    const t = await call(viewer, 'SendMessage', {
+      ...message([{ data: { skill: 'list_flows' } }]),
+      configuration: { taskPushNotificationConfig: { url: 'https://hooks.example/gone' } },
+    });
+    const taskId = (t.result!.task as Json).id as string;
+    const { EngineApi } = await import('../src/api');
+    const api = new EngineApi({ waitUntil: () => {} } as never, env);
+    expect(await api.dropA2aPushes('user', viewer.id)).toEqual({ configs: 1 });
+    const listed = await call(viewer, 'ListTaskPushNotificationConfigs', { taskId });
+    expect(listed.result?.configs ?? []).toHaveLength(0);
+    const queued = await runInDurableObject(
+      env.A2A_AGENT.getByName(`user:${viewer.id}`),
+      async (_i, state) =>
+        state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM push_outbox WHERE status = 'pending'")
+          .one().n,
+    );
+    expect(queued).toBe(0);
   });
 
   it('manages push configs with the config methods, and refuses unsafe URLs', async () => {

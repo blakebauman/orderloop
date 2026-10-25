@@ -41,7 +41,7 @@ vi.mock('~/lib/auth.server', () => ({
     c.passwordChangeDue ? 'Password change due' : c.twoFactorDue ? 'Two-factor due' : null,
 }));
 
-const { isOAuthPath, oauthApi, oauthFetch } = await import('~/lib/oauth.server');
+const { isOAuthPath, oauthApi, oauthFetch, scopedGrant } = await import('~/lib/oauth.server');
 const { mcpDiscovery } = await import('~/lib/mcp-discovery');
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as never;
@@ -201,7 +201,7 @@ describe('MCP and A2A on the web Worker', () => {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-    const grant = async (path: string) => {
+    const grant = async (path: string, role: 'viewer' | 'operator' = 'viewer') => {
       const { redirectTo } = await oauth.completeAuthorization({
         request: {
           responseType: 'code',
@@ -216,7 +216,7 @@ describe('MCP and A2A on the web Worker', () => {
         userId: 'usr_1',
         metadata: {},
         scope: ['viewer'],
-        props: { kind: 'user', id: 'usr_1', role: 'viewer' },
+        props: { kind: 'user', id: 'usr_1', role },
       });
       const code = new URL(redirectTo).searchParams.get('code')!;
       const res = await oauthFetch(
@@ -247,6 +247,22 @@ describe('MCP and A2A on the web Worker', () => {
     expect((await post('/a2a', { authorization: `Bearer ${a2aToken}` })).status).toBe(200);
     expect((await post('/mcp', { authorization: `Bearer ${a2aToken}` })).status).toBe(401);
     expect(apiPrincipal).not.toHaveBeenCalled();
+
+    // A token whose scope is narrower than its grant acts with the scope's role.
+    grantPrincipal.mockClear();
+    const narrow = await grant('/mcp', 'operator');
+    expect((await post('/mcp', { authorization: `Bearer ${narrow}` })).status).toBe(200);
+    expect(grantPrincipal).toHaveBeenCalledWith({ kind: 'user', id: 'usr_1', role: 'viewer' });
+  });
+
+  it('gives a token the lowest role its scope names, never more than the grant', () => {
+    const g = { kind: 'user' as const, id: 'usr_1', role: 'operator' as const };
+    expect(scopedGrant(g, ['operator'])).toEqual(g);
+    expect(scopedGrant(g, ['viewer'])).toEqual({ ...g, role: 'viewer' });
+    expect(scopedGrant(g, ['approver', 'operator'])).toEqual({ ...g, role: 'approver' });
+    expect(scopedGrant({ ...g, role: 'viewer' }, ['operator'])).toEqual({ ...g, role: 'viewer' });
+    expect(scopedGrant(g, [])).toBeNull();
+    expect(scopedGrant(g, ['admin:everything'])).toBeNull();
   });
 });
 
