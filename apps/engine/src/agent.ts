@@ -522,7 +522,8 @@ export class OrderAgent extends Agent<Env, State> {
     let open = 0;
     for (const c of this.getConnections<ConnectionState>()) {
       const stored = c.state?.principal ?? null;
-      const p = stored ? await livePrincipal(this.env, stored) : null;
+      // A check no one made: it doesn't keep the session from going idle.
+      const p = stored ? await livePrincipal(this.env, stored, { touch: false }) : null;
       if (!p || !atLeast(p.role, 'viewer')) c.close(4401, 'Session ended');
       else open++;
     }

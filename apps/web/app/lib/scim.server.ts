@@ -41,6 +41,7 @@ import {
   SCIM_ERROR,
   SCIM_GROUP,
   SCIM_PATH,
+  SCIM_TOKEN_MS,
   SCIM_USER,
   ScimBadRequest,
   type ScimGroupRow,
@@ -485,16 +486,20 @@ function resourceTypes(base: string) {
 
 // ── The token ──
 
-/** Whether SCIM is on (a token exists), and the request carries it. */
-export async function scimAuthorized(request: Request): Promise<boolean> {
+/** Whether SCIM is on (a token exists, not past `SCIM_TOKEN_MS`), and the request carries it. */
+export async function scimAuthorized(request: Request, now = Date.now()): Promise<boolean> {
   const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer?.startsWith(SCIM_TOKEN_PREFIX)) return false;
   const row = await db()
-    .select({ value: workspaceSettings.value })
+    .select({ value: workspaceSettings.value, updatedAt: workspaceSettings.updatedAt })
     .from(workspaceSettings)
     .where(eq(workspaceSettings.key, TOKEN_KEY))
     .get();
-  return !!row && (await secretEqual(await sha256Hex(bearer), row.value));
+  return (
+    !!row &&
+    now - row.updatedAt < SCIM_TOKEN_MS &&
+    (await secretEqual(await sha256Hex(bearer), row.value))
+  );
 }
 
 export async function scimTokenSet(): Promise<{ updatedAt: number; updatedBy: string } | null> {

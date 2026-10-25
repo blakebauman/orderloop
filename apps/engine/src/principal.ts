@@ -15,6 +15,7 @@ import {
   type ProxiedPrincipal,
   SESSION_IDLE_MS,
   SESSION_TOUCH_MS,
+  sessionIdleMs,
   verifyCartGuest,
   verifyPrincipal,
 } from '@orderloop/core';
@@ -46,7 +47,15 @@ export function forwardedGuest(env: Env, request: Request): Promise<CartGuest | 
  * a socket counts as activity, so it keeps the session from going idle. An API token's is null
  * once it is revoked or expired, and open local dev's once anyone has an account.
  */
-export async function livePrincipal(env: Env, p: ProxiedPrincipal): Promise<Principal | null> {
+export async function livePrincipal(
+  env: Env,
+  p: ProxiedPrincipal,
+  /**
+   * `touch: false` for a check the person didn't make (a socket re-check, a panel's poll): it
+   * reads the session without counting as use, so a page left open still goes idle.
+   */
+  { touch = true }: { touch?: boolean } = {},
+): Promise<Principal | null> {
   const { session, ...principal } = p;
   const db = createDb(env.DB);
   const now = Date.now();
@@ -84,7 +93,9 @@ export async function livePrincipal(env: Env, p: ProxiedPrincipal): Promise<Prin
     )
     .get();
   if (!row || !isRole(row.role)) return null;
-  if (now - row.seen > SESSION_TOUCH_MS)
+  // An admin's session goes idle sooner than the query's limit for everyone.
+  if (now - row.seen > sessionIdleMs(row.role)) return null;
+  if (touch && now - row.seen > SESSION_TOUCH_MS)
     await db.update(sessions).set({ lastSeenAt: now }).where(eq(sessions.tokenHash, session));
   const { seen: _seen, ...person } = row;
   return { kind: 'user', ...person, role: row.role };

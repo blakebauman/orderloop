@@ -30,6 +30,7 @@ const select = () => {
       table = t;
       return q;
     },
+    innerJoin: () => q,
     where: () => q,
     get: async () => (table === users ? user : table === sessions ? session : undefined),
     // biome-ignore lint/suspicious/noThenProperty: drizzle's queries are awaited directly
@@ -76,7 +77,7 @@ vi.mock('~/lib/settings.server', () => ({
   twoFactorRequirement: async () => 'off',
 }));
 
-const { recordReauth, signInToLink, stepUp, stepUpMethod, Throttled } = await import(
+const { recordReauth, signIn, signInToLink, stepUp, stepUpMethod, Throttled } = await import(
   '~/lib/auth.server'
 );
 
@@ -161,11 +162,20 @@ describe('stepUp', () => {
 });
 
 describe('signInToLink', () => {
-  const ann = async (totpEnabledAt: number | null = null) => ({
+  const ann = async (
+    totpEnabledAt: number | null = null,
+    passwordExpiresAt: number | null = null,
+  ) => ({
     id: 'usr_1',
     email: 'ann@acme.com',
     passwordHash: await hashPassword('right horse'),
     totpEnabledAt,
+    passwordChangeDue: passwordExpiresAt !== null,
+    passwordExpiresAt,
+  });
+
+  it('links nothing with a temporary password that has run out', async () => {
+    expect(await signInToLink(request, await ann(null, Date.now() - 1), 'right horse')).toBeNull();
   });
 
   it('takes the password even while the workspace is SSO-only, then the code when they have one', async () => {
@@ -186,5 +196,42 @@ describe('signInToLink', () => {
     await expect(signInToLink(request, await ann(), 'right horse')).rejects.toBeInstanceOf(
       Throttled,
     );
+  });
+});
+
+describe('password sign-in', () => {
+  const sign = (password: string) => signIn(request, 'ann@acme.com', password);
+  const ann = async (over: Record<string, unknown> = {}) => {
+    user = {
+      ...user,
+      passwordHash: await hashPassword('right horse'),
+      ...over,
+    } as typeof user;
+    Object.assign(user, { email: 'ann@acme.com', name: 'Ann', role: 'viewer', disabledAt: null });
+  };
+
+  it('refuses a temporary password once it has expired', async () => {
+    await ann({ passwordChangeDue: true, passwordExpiresAt: Date.now() - 1 });
+    expect(await sign('right horse')).toBeNull();
+    // A password they chose never runs out, whatever an older Worker left in the column.
+    await ann({ passwordChangeDue: false, passwordExpiresAt: Date.now() - 1 });
+    expect(await sign('right horse')).toMatchObject({ twoFactor: false });
+    await ann({ passwordChangeDue: true, passwordExpiresAt: Date.now() + 60_000 });
+    expect(await sign('right horse')).toMatchObject({ twoFactor: false });
+  });
+
+  it('keeps the account’s owner signing in from a known place while others fail at it', async () => {
+    await ann({ passwordExpiresAt: null });
+    // Many places got the account's password wrong: its own count is full.
+    failures.set('email:ann@acme.com', {
+      key: 'email:ann@acme.com',
+      count: 50,
+      windowStart: Date.now(),
+    });
+    session = undefined;
+    await expect(sign('right horse')).rejects.toBeInstanceOf(Throttled);
+    // From a place one of their sessions was seen at, they still get in.
+    session = { createdAt: Date.now(), reauthAt: null };
+    expect(await sign('right horse')).toMatchObject({ twoFactor: false });
   });
 });

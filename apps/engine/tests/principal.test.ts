@@ -1,6 +1,12 @@
 import { env } from 'cloudflare:workers';
-import { PRINCIPAL_HEADER, type Principal, signPrincipal } from '@orderloop/core';
-import { apiTokens, createDb, users } from '@orderloop/db';
+import {
+  PRINCIPAL_HEADER,
+  type Principal,
+  SESSION_IDLE_ADMIN_MS,
+  signPrincipal,
+} from '@orderloop/core';
+import { apiTokens, createDb, sessions, users } from '@orderloop/db';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import worker from '../src/index';
 import { livePrincipal } from '../src/principal';
@@ -81,5 +87,56 @@ describe('livePrincipal', () => {
       createdAt: Date.now(),
     });
     expect(await livePrincipal(env, open)).toBeNull();
+  });
+
+  it('ends an admin’s idle session sooner than anyone else’s', async () => {
+    const seen = Date.now() - SESSION_IDLE_ADMIN_MS - 60_000;
+    for (const role of ['admin', 'operator'] as const) {
+      const id = `usr_idle_${role}`;
+      await db
+        .insert(users)
+        .values({ id, email: `${role}@idle.example`, name: role, role, createdAt: 0 })
+        .onConflictDoNothing();
+      await db
+        .insert(sessions)
+        .values({
+          tokenHash: `sess_${id}`,
+          userId: id,
+          createdAt: seen,
+          lastSeenAt: seen,
+          expiresAt: Date.now() + 86_400_000,
+        })
+        .onConflictDoNothing();
+    }
+    const p = (role: 'admin' | 'operator') => ({
+      kind: 'user' as const,
+      id: `usr_idle_${role}`,
+      name: role,
+      role,
+      session: `sess_usr_idle_${role}`,
+    });
+    expect(await livePrincipal(env, p('admin'))).toBeNull();
+    // A check no one made (a socket re-check, a panel's poll) reads without counting as use.
+    const before = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.tokenHash, 'sess_usr_idle_operator'))
+      .get();
+    expect(await livePrincipal(env, p('operator'), { touch: false })).toMatchObject({
+      role: 'operator',
+    });
+    const after = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.tokenHash, 'sess_usr_idle_operator'))
+      .get();
+    expect(after!.lastSeenAt).toBe(before!.lastSeenAt);
+    expect(await livePrincipal(env, p('operator'))).toMatchObject({ role: 'operator' });
+    const touched = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.tokenHash, 'sess_usr_idle_operator'))
+      .get();
+    expect(touched!.lastSeenAt).toBeGreaterThan(before!.lastSeenAt!);
   });
 });

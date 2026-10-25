@@ -311,3 +311,9 @@ export function readRoleMap(raw: string | null | undefined): Record<string, Role
  */
 export const roleFromGroups = (groupIds: string[], map: Record<string, Role>): Role =>
   highestRole(groupIds.flatMap((g) => (map[g] ? [map[g]] : []))) ?? 'viewer';
+
+/**
+ * How long a SCIM token works after it is made. It sits in the identity provider's settings for
+ * as long as provisioning runs, so it is replaced on the Team page at least this often.
+ */
+export const SCIM_TOKEN_MS = 365 * 86_400_000;
