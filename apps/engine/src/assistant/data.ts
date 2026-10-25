@@ -274,11 +274,15 @@ export async function assessOrder(
 ) {
   const { id, s } = await loadOrder(env, ref);
   const { images, notes } = await resolveImages(env, imageRefs, id);
-  const { value, ...via } = await assess(env, {
-    state: { ...modelView(env, { order: s.order!, vars: s.vars }), status: s.status },
-    questions,
-    images,
-  });
+  const { value, ...via } = await assess(
+    env,
+    {
+      state: { ...modelView(env, { order: s.order!, vars: s.vars }), status: s.status },
+      questions,
+      images,
+    },
+    { orderId: id },
+  );
   return { id, ref: orderRef(id), answers: value.answers, images: images.length, notes, ...via };
 }
 

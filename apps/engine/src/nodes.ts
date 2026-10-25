@@ -9,6 +9,7 @@
 
 import { NonRetryableError } from 'cloudflare:workflows';
 import {
+  type AiProvenance,
   type AppliedPromotion,
   applyPromotion,
   assessBranch,
@@ -84,9 +85,26 @@ export type ExecInput = {
    * quote never redeems a promotion.
    */
   dryRun?: boolean;
+  /**
+   * The step has attempts left: a failed model call throws so the step retries, rather than
+   * answering with the heuristic. Unset on the last attempt and outside a step.
+   */
+  retriesLeft?: boolean;
 };
 
 type Exec = (i: ExecInput) => Promise<NodeResult>;
+
+/** How an AI node calls the model from its step (see `AiCall`). */
+const aiCall = ({ ctx, retriesLeft }: ExecInput): ai.AiCall => ({
+  retry: !!retriesLeft,
+  orderId: ctx.order.id,
+});
+
+/**
+ * The model didn't answer, outside mock mode. A risk score or route the heuristic made up must not
+ * pass an order a model would have stopped, so those nodes fail closed on it.
+ */
+const unchecked = (via: AiProvenance) => via.source === 'heuristic' && via.fallback !== 'mock';
 
 const str = (v: unknown, fb = '') => (typeof v === 'string' ? v : fb);
 const num = (v: unknown, fb: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fb);
@@ -919,13 +937,14 @@ export const EXECUTORS: Record<string, Exec> = {
   },
 
   // ── AI ─────────────────────────────────────────────────────────────────────
-  'ai.extract': async ({ env, ctx }) => {
+  'ai.extract': async (i) => {
+    const { env, ctx } = i;
     let text = ctx.order.documentText ?? '';
     if (!text && ctx.order.documentKey)
       text = (await (await env.DOCS.get(ctx.order.documentKey))?.text()) ?? '';
     if (!text) return { summary: 'No document; using order as given', output: { skipped: true } };
     const catalog = (await cx.getProducts(env)).map((p) => ({ sku: p.sku, name: p.name }));
-    const { value, ...via } = await ai.extractOrder(env, text, catalog);
+    const { value, ...via } = await ai.extractOrder(env, text, catalog, aiCall(i));
     const customer = ctx.order.customerId
       ? undefined
       : value.customerName
@@ -949,9 +968,10 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'ai.classify': async ({ env, ctx, config }) => {
+  'ai.classify': async (i) => {
+    const { env, ctx, config } = i;
     const labels = stringList(config.labels, ['other']);
-    const { value, ...via } = await ai.classify(env, ctx.order, labels);
+    const { value, ...via } = await ai.classify(env, ctx.order, labels, aiCall(i));
     return {
       vars: { [str(config.into, 'category')]: value.label },
       output: { ...value, ...via },
@@ -959,10 +979,22 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'ai.risk_score': async ({ env, ctx, config }) => {
+  'ai.risk_score': async (i) => {
+    const { env, ctx, config } = i;
     const customer = await cx.getCustomer(env, ctx.order.customerId);
-    const { value, ...via } = await ai.riskScore(env, ctx.order, customer);
-    const high = value.score >= num(config.threshold, 70);
+    const { value, ...via } = await ai.riskScore(env, ctx.order, customer, aiCall(i));
+    const threshold = num(config.threshold, 70);
+    if (unchecked(via)) {
+      // Scored at least at the threshold, so a condition on `risk` downstream agrees with the branch.
+      const risk = Math.max(value.score, threshold);
+      return {
+        branches: ['high'],
+        vars: { risk },
+        output: { ...value, ...via, unchecked: true },
+        summary: 'Risk not checked: the model was unavailable, so treated as high',
+      };
+    }
+    const high = value.score >= threshold;
     return {
       branches: [high ? 'high' : 'low'],
       vars: { risk: value.score },
@@ -971,9 +1003,10 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'ai.forecast': async ({ env, ctx, config }) => {
+  'ai.forecast': async (i) => {
+    const { env, ctx, config } = i;
     const stock = await cx.getProducts(env);
-    const { value, ...via } = await ai.forecast(env, stock, num(config.horizonDays, 30));
+    const { value, ...via } = await ai.forecast(env, stock, num(config.horizonDays, 30), aiCall(i));
     const bySku = new Map(stock.map((p) => [p.sku, p]));
     const lines = value.lines.map((l) => ({
       sku: l.sku,
@@ -991,12 +1024,13 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'ai.summarize': async ({ env, ctx, config }) => {
-    const { value, ...via } = await ai.summarize(env, {
-      order: ctx.order,
-      vars: ctx.vars,
-      completed: ctx.nodes,
-    });
+  'ai.summarize': async (i) => {
+    const { env, ctx, config } = i;
+    const { value, ...via } = await ai.summarize(
+      env,
+      { order: ctx.order, vars: ctx.vars, completed: ctx.nodes },
+      aiCall(i),
+    );
     return {
       vars: { [str(config.into, 'summary')]: value.summary },
       output: { ...value, ...via },
@@ -1004,7 +1038,8 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'ai.router': async ({ env, ctx, config }) => {
+  'ai.router': async (i) => {
+    const { env, ctx, config } = i;
     const routes = stringList(config.routes, ['auto_approve', 'needs_approval']);
     const customer = await cx.getCustomer(env, ctx.order.customerId);
     const { value, ...via } = await ai.route(
@@ -1017,11 +1052,26 @@ export const EXECUTORS: Record<string, Exec> = {
         vars: ctx.vars,
         completed: ctx.nodes,
       },
+      aiCall(i),
     );
+    if (unchecked(via)) {
+      // A person looks at it if the flow has that route; otherwise the heuristic's choice stands.
+      const route = routes.includes('needs_approval') ? 'needs_approval' : value.route;
+      const reason =
+        route === value.route
+          ? value.reason
+          : 'The model was unavailable, so this order goes to approval.';
+      return {
+        branches: [route],
+        output: { route, reason, ...via, unchecked: true },
+        summary: `→ ${route} (model unavailable)`,
+      };
+    }
     return { branches: [value.route], output: { ...value, ...via }, summary: `→ ${value.route}` };
   },
 
-  'ai.assess': async ({ env, ctx, config }) => {
+  'ai.assess': async (i) => {
+    const { env, ctx, config } = i;
     const parsed = assessQuestionsSchema.safeParse(config.questions);
     if (!parsed.success) throw new NonRetryableError('Assess: the questions are not valid');
     const questions = parsed.data;
@@ -1041,7 +1091,7 @@ export const EXECUTORS: Record<string, Exec> = {
       imageRefs(config.images, ctx),
       ctx.order.id,
     );
-    const { value, ...via } = await clef.assess(env, { state, questions, images });
+    const { value, ...via } = await clef.assess(env, { state, questions, images }, aiCall(i));
     const branchOn = str(config.branchOn).trim();
     const branch = assessBranch(value.answers[branchOn], num(config.minConfidence, 0));
     return {
