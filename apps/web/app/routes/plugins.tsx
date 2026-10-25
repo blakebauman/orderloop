@@ -210,9 +210,14 @@ function StepUpField({ method }: { method: StepUpMethod | null }) {
         <Input name="password" type="password" autoComplete="current-password" required />
       </Field>
     );
+  // A plain link: the provider's sign-in is a top-level GET, and it brings them back here.
   return (
     <p className="text-muted-foreground text-xs">
-      You signed in with single sign-on: this works within ten minutes of signing in.
+      You sign in with single sign-on:{' '}
+      <a href="/login/sso?reauth=1&next=%2Fplugins" className="text-link hover:underline">
+        confirm it’s you
+      </a>
+      , then do this within ten minutes.
     </p>
   );
 }

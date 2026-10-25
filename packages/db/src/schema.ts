@@ -646,6 +646,8 @@ export const sessions = sqliteTable(
     lastSeenAt: integer('last_seen_at'),
     ip: text('ip'),
     userAgent: text('user_agent'),
+    /** Last sign-in again at the identity provider for a step-up (`auth_time` checked), or null. */
+    reauthAt: integer('reauth_at'),
   },
   (t) => [index('sessions_user').on(t.userId), index('sessions_expires').on(t.expiresAt)],
 );

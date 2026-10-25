@@ -236,6 +236,34 @@ export async function verifyCartGuestSession(
   return { cartId: g.cartId, id: g.id, name: g.name };
 }
 
+const SSO_FLOW_VERSION = 'sf1';
+
+/**
+ * The cookie that carries a single sign-on in progress (its state, nonce, code verifier, where it
+ * goes next, and whether it's a step-up) from the start to the provider's callback: its own
+ * envelope (`sf1`), which the web app alone sets and reads, so the browser can't change it or use
+ * it past `expiresAt`.
+ */
+export function signSsoFlow(
+  secret: string,
+  flow: Record<string, unknown>,
+  expiresAt: number,
+): Promise<string> {
+  return seal(secret, SSO_FLOW_VERSION, { flow, path: 'sso', exp: expiresAt });
+}
+
+/** The flow `signSsoFlow` sealed, or null when it's forged, from another key, or expired. */
+export async function verifySsoFlow(
+  secrets: readonly (string | undefined)[],
+  value: string | null | undefined,
+  now = Date.now(),
+): Promise<Record<string, unknown> | null> {
+  const flow = (await unseal(secrets, SSO_FLOW_VERSION, value, 'sso', now))?.flow;
+  return flow && typeof flow === 'object' && !Array.isArray(flow)
+    ? (flow as Record<string, unknown>)
+    : null;
+}
+
 /** The cart guest a forwarded request is from, or null (see `verifyPrincipal`). */
 export async function verifyCartGuest(
   secrets: readonly (string | undefined)[],

@@ -584,11 +584,14 @@ export async function verifySecondFactor(request: Request, code: string): Promis
   return [await startSession(request, pending.id), clearChallengeCookie];
 }
 
-/** How recent a single sign-on must be to count as a step-up, for someone with no password. */
+/** How recent signing in again at the identity provider must be to count as a step-up. */
 const SSO_STEP_UP_MS = 10 * 60_000;
 
-/** What a step-up asks this person for: a two-factor code, their password, or a recent sign-in. */
-export type StepUpMethod = 'code' | 'password' | 'recent-sign-in';
+/**
+ * What a step-up asks this person for: a two-factor code, their password, or (single sign-on
+ * only) to sign in again at the identity provider.
+ */
+export type StepUpMethod = 'code' | 'password' | 'sso';
 
 async function stepUpUser(by: Principal) {
   if (by.kind !== 'user') return null;
@@ -599,7 +602,7 @@ async function stepUpUser(by: Principal) {
       ? 'code'
       : (await passwordInUse(user.passwordHash))
         ? 'password'
-        : 'recent-sign-in';
+        : 'sso';
   return { user, method };
 }
 
@@ -610,8 +613,9 @@ export async function stepUpMethod(by: Principal): Promise<StepUpMethod | null> 
 /**
  * A step-up before a sensitive admin action (installing a plugin, rolling one back, removing it):
  * a fresh two-factor code from someone who has two-factor sign-in, else their password, else (a
- * single sign-on account with neither) a sign-in within the last ten minutes. Wrong answers are
- * throttled per person. Returns null when it passes, or what to tell them.
+ * single sign-on account with neither) signing in again at the identity provider on this session
+ * within the last ten minutes (`recordReauth`). Wrong answers are throttled per person. Returns
+ * null when it passes, or what to tell them.
  */
 export async function stepUp(
   request: Request,
@@ -649,8 +653,34 @@ export async function stepUp(
   const session = sid
     ? await db().select().from(sessions).where(eq(sessions.tokenHash, sid)).get()
     : undefined;
-  if (session && Date.now() - session.createdAt < SSO_STEP_UP_MS) return null;
-  return 'Sign in again, then try within ten minutes.';
+  if (session?.reauthAt && Date.now() - session.reauthAt < SSO_STEP_UP_MS) return null;
+  return 'Confirm with single sign-on, then try within ten minutes.';
+}
+
+/**
+ * Records on this session that its person just signed in again at the identity provider (a
+ * step-up's `reauth` flow), when the identity is the one linked to them. Returns whether it did.
+ */
+export async function recordReauth(
+  request: Request,
+  by: Principal,
+  sub: string,
+  at: number,
+): Promise<boolean> {
+  if (by.kind !== 'user') return false;
+  const sid = await sessionId(request);
+  if (!sid) return false;
+  const user = await db()
+    .select({ externalSub: users.externalSub })
+    .from(users)
+    .where(eq(users.id, by.id))
+    .get();
+  if (!user?.externalSub || user.externalSub !== sub) return false;
+  await db()
+    .update(sessions)
+    .set({ reauthAt: at })
+    .where(and(eq(sessions.tokenHash, sid), eq(sessions.userId, by.id)));
+  return true;
 }
 
 /** Accepts a code once: the step it matched must be later than the last one used. */

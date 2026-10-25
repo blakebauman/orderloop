@@ -571,7 +571,10 @@ stored on the row (`personal_data_granted`) and is the plugin's grant, as `PLUGI
 registry plugin. The version that ran before is `superseded`. Approving, rolling back, turning on,
 uninstalling, and setting a secret of a plugin that runs each need a **step-up** (`stepUp`, `apps/web/app/lib/auth.server.ts`): a current
 two-factor code from someone with two-factor sign-in, otherwise their password, otherwise (single
-sign-on only) a sign-in within the last ten minutes; wrong answers are throttled. Each state change
+sign-on only) signing in again at the identity provider on this session within the last ten minutes
+(`/login/sso?reauth=1` sends `prompt=login` and `max_age=0`, the callback needs the ID token's
+`auth_time` after the flow began and the identity linked to them, and `recordReauth` stamps
+`sessions.reauth_at`; a new session alone doesn't count); wrong answers are throttled. Each state change
 guards on the status it read (`activate`, `setPluginEnabled`), so two admins acting at once get
 `changed while you were looking` rather than two running versions, and the unique index
 `installed_plugins_running` (one `active` or `disabled` row per id) is the backstop. A version whose
