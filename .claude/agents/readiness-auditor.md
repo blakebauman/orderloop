@@ -1,6 +1,6 @@
 ---
 name: readiness-auditor
-description: Read-only production readiness and hardening audit of an Order Loop deployment on Cloudflare. Covers account and access, DNS, TLS, edge security, the rendered Worker configs, Durable Objects and Workflows, queues, caching, per-store data durability (RPO/RTO), deploy and rollback, alerting and cost. It checks the fleet template (apps' wrangler.jsonc, fleet.ts, provision.sh, CI) and the live account. Delegate before onboarding a customer, before moving a deployment to a later ring, or for a periodic posture review. Never changes anything; returns a findings table with evidence.
+description: Read-only production readiness and hardening audit of an Order Loop deployment on Cloudflare. Covers account and access, DNS, TLS, edge security, the rendered Worker configs, Durable Objects and Workflows, Workers AI and AI Gateway, Email Routing and every other Cloudflare service in use, queues, caching, per-store data durability (RPO/RTO), deploy and rollback, alerting and cost. It checks the fleet template (apps' wrangler.jsonc, fleet.ts, provision.sh, CI) and the live account. Delegate before onboarding a customer, before moving a deployment to a later ring, or for a periodic posture review. Never changes anything; returns a findings table with evidence.
 tools: Read, Grep, Glob, Bash, mcp__plugin_cloudflare_cloudflare-api__search, mcp__plugin_cloudflare_cloudflare-api__execute, mcp__plugin_cloudflare_cloudflare-api__docs
 model: inherit
 color: yellow
@@ -164,6 +164,41 @@ and the code or account disagree, the code and account are right. Report the gap
       Gateway.
     - `ASSISTANT_DAILY_TOKENS`, and the purge budget.
     - Waste: orphaned scripts and buckets, unused bindings, and old catalog index blobs.
+13. **Every Cloudflare service in use.** First build the inventory from the rendered configs,
+    `git grep` of `apps/ packages/ plugins/ scripts/`, and the account. The list below is the
+    floor, not the ceiling: a service you find that isn't listed still gets a review on the
+    same lines (configuration, limits, data handling, failure mode, alerting).
+    - **Workers AI** (`AI` binding; models in the engine's `AI_MODEL`, `ASSISTANT_MODEL` and
+      `ASSESS_MODEL`). Are the model ids current, or deprecated? What does each caller do when
+      the model errors or times out (`AI_MODE`, Workflow step retries), and is every model call
+      inside a `step.do`? Neuron usage vs budget, and `ASSISTANT_DAILY_TOKENS`.
+    - **AI Gateway** (`AI_GATEWAY_ID`; `/ai-gateway/gateways/<id>`). Check authentication, rate
+      limiting, caching (it must be off or keyed safely for order-specific prompts), and the
+      log settings: `collect_logs`, retention (`log_management`), `zdr`, Logpush and DLP or
+      guardrails. Are prompts or responses containing buyer details kept in gateway logs
+      despite `AI_PERSONAL_DATA=redact`, and does that retention fit `PERSONAL_DATA_RETENTION_DAYS`
+      and each customer's contract? Check spend alerts and that each deployment has its own
+      gateway.
+    - **Email Routing and sending.** Routing enabled, rules or catch-all pointing to the engine
+      only for `INTAKE_MAILBOXES`, `INTAKE_REQUIRE_AUTH` and `INTAKE_ALLOWLIST`, reply path
+      (`message.reply`) and DKIM alignment, and how a bounce or failure surfaces.
+    - **Durable Objects, Workflows, Queues, D1, R2, KV**: domains 6–9.
+    - **Worker Loader** (sandboxed plugins). No bindings passed to loaded code, per-call limits,
+      egress through the engine's gateway only, and pinned bundle integrity.
+    - **Secrets Store** (`secrets_store_secrets` from `fleet.ts`). One store per deployment
+      (never shared), access scoped, and CI token permission.
+    - **Rate Limiting bindings**: domain 4.
+    - **Workers Caching and the Cache API** (catalog-edge): domain 8.
+    - **Analytics Engine** (`orderloop_catalog_edge`). What is written (no personal data), and
+      the retention and query limits.
+    - **Smart Placement**: fit, per Worker.
+    - **Workers Observability** (logs, traces, source maps): domain 11.
+    - **Custom Domains and certificates**: domain 3.
+    - **Zone services**: WAF, DDoS, Bot Fight Mode or Turnstile, Tiered Cache, Logpush,
+      Notifications. What's on, what the plan allows, and what's absent.
+    - **Absent services worth naming.** Only where they close a specific finding: Access in
+      front of an admin or preview surface, Turnstile on sign-in, Logpush to durable storage,
+      R2 bucket locks for the audit archive. Never as a shopping list.
 
 ## Output
 
@@ -178,6 +213,9 @@ and the code or account disagree, the code and account are right. Report the gap
 5. **Data durability statement.** One paragraph per store.
 6. **Unverifiable items and questions for the owner**, each naming the permission or input that
    would settle it.
+
+Domain 13's inventory comes first in the findings, as a short table: service, where it is
+bound, and whether it's in use, unused or orphaned.
 
 Write in plain language with no feature marketing. Outage, data-loss and breach risks come
 before cosmetic deviations.
