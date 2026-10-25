@@ -5,7 +5,8 @@
  * - **Auth:** a dedicated bearer token (`ol_scim_…`). An admin makes it on the Team page and sees
  *   it once; only its SHA-256 is kept, in `workspace_settings` (`scim_token`).
  * - **People:** `userName` is the email. A person SCIM adds has no password and signs in with
- *   single sign-on. `active: false` or DELETE disables them and ends their access at once:
+ *   single sign-on. SCIM can't change the email of someone unlinked who has a password, or a role
+ *   its groups don't give them (`emailLocked`): SSO links an unlinked person by email. `active: false` or DELETE disables them and ends their access at once:
  *   sessions, connected apps (OAuth grants) and the API tokens they created. The last active
  *   admin is never disabled or demoted this way (409), so a sync can't lock the team out.
  * - **Groups → roles:** admins map groups to roles (`scim_roles`). Whenever a person's groups or
@@ -14,7 +15,7 @@
  * The protocol runs against `ScimStore`, so tests can drive it in memory; `d1Store` is the real one.
  */
 
-import { newId, type Principal, type Role } from '@orderloop/core';
+import { atLeast, newId, type Principal, type Role } from '@orderloop/core';
 import {
   apiTokens,
   scimGroupMembers,
@@ -75,6 +76,8 @@ export interface ScimStore {
     id: string,
     set: { email?: string; name?: string; scimExternalId?: string | null },
   ): Promise<void>;
+  /** Whether the person has a password, and whether single sign-on is linked to them. */
+  signsInWith(id: string): Promise<{ password: boolean; linked: boolean }>;
   role(id: string): Promise<Role>;
   setRole(id: string, role: Role): Promise<void>;
   /** Active admins other than `exceptId`. */
@@ -276,6 +279,12 @@ class People {
       const taken = await this.store.personByEmail(c.email);
       if (taken && taken.id !== p.id)
         throw new Conflict(`${c.email} is already on the team`, 'uniqueness');
+      const why = await this.emailLocked(p.id);
+      if (why)
+        throw new ScimBadRequest(
+          `${p.email} ${why} and hasn't linked single sign-on, so provisioning can't change their email`,
+          'mutability',
+        );
       set.email = c.email;
     }
     if (c.name && c.name !== p.name) set.name = c.name;
@@ -321,6 +330,21 @@ class People {
       scimExternalId: set.scimExternalId !== undefined ? set.scimExternalId : p.scimExternalId,
       disabledAt,
     };
+  }
+
+  /**
+   * Why SCIM may not give this person a new email, or null. Single sign-on links an unlinked
+   * person by email, so a new address hands their account to whoever the provider gives it: refused
+   * for someone with a password, or with a role SCIM's own groups wouldn't give them.
+   */
+  private async emailLocked(id: string): Promise<string | null> {
+    const how = await this.store.signsInWith(id);
+    if (how.linked) return null;
+    if (how.password) return 'signs in with a password';
+    const groupRole = roleFromGroups(await this.store.groupsOf(id), await this.store.roleMap());
+    return atLeast(groupRole, await this.store.role(id))
+      ? null
+      : 'has a role set outside provisioning';
   }
 
   /** Sets a person's role from their groups. The last active admin keeps theirs. */
@@ -614,6 +638,14 @@ export function d1Store(request: Request): ScimStore {
     },
     async updatePerson(id, set) {
       await db().update(users).set(set).where(eq(users.id, id));
+    },
+    async signsInWith(id) {
+      const r = await db()
+        .select({ hash: users.passwordHash, sub: users.externalSub })
+        .from(users)
+        .where(eq(users.id, id))
+        .get();
+      return { password: !!r?.hash, linked: !!r?.sub };
     },
     async role(id) {
       const r = await db().select({ role: users.role }).from(users).where(eq(users.id, id)).get();

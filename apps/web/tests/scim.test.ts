@@ -111,6 +111,9 @@ function memoryStore() {
   const members = new Map<string, Set<string>>();
   const map: Record<string, Role> = {};
   const revoked: string[] = [];
+  /** People with a password, and people single sign-on is linked to. */
+  const passwords = new Set<string>();
+  const linked = new Set<string>();
   const match = (f: Filter | null, p: ScimPerson) =>
     !f ||
     (f.attr === 'userName' && p.email === f.value.toLowerCase()) ||
@@ -129,6 +132,7 @@ function memoryStore() {
     async updatePerson(id, set) {
       Object.assign(people.get(id)!, set);
     },
+    signsInWith: async (id) => ({ password: passwords.has(id), linked: linked.has(id) }),
     role: async (id) => people.get(id)?.role ?? 'viewer',
     async setRole(id, role) {
       people.get(id)!.role = role;
@@ -175,7 +179,7 @@ function memoryStore() {
     groupsOf: async (userId) => [...members].filter(([, m]) => m.has(userId)).map(([g]) => g),
     roleMap: async () => map,
   };
-  return { store, people, map, revoked };
+  return { store, people, map, revoked, passwords, linked };
 }
 
 describe('the SCIM protocol', () => {
@@ -195,6 +199,7 @@ describe('the SCIM protocol', () => {
       scimExternalId: null,
       createdAt: 0,
     });
+    mem.passwords.add('usr_admin');
   });
 
   const call = async (method: string, path: string, body?: unknown) => {
@@ -262,6 +267,57 @@ describe('the SCIM protocol', () => {
     expect((await call('DELETE', `/Users/${ann.id}`)).status).toBe(204);
     expect(mem.people.get(ann.id)?.disabledAt).toBe(1_000);
     expect((await call('GET', `/Groups/${g.id}`)).body.members).toEqual([]);
+  });
+
+  it('never changes the email of someone who signs in with a password and has not linked SSO', async () => {
+    // SSO links an unlinked person by email, so a new address would hand over their account.
+    const res = await call('PATCH', '/Users/usr_admin', {
+      Operations: [{ op: 'replace', path: 'userName', value: 'someone@else.example' }],
+    });
+    expect(res).toMatchObject({ status: 400, body: { scimType: 'mutability' } });
+    expect(mem.people.get('usr_admin')?.email).toBe('boss@example.com');
+    expect(record).not.toHaveBeenCalledWith('team.user_updated', expect.anything());
+
+    // Their name may still follow the provider, and once they've linked SSO, so may their email.
+    const renamed = await call('PATCH', '/Users/usr_admin', {
+      Operations: [{ op: 'replace', path: 'displayName', value: 'The Boss' }],
+    });
+    expect(renamed.status).toBe(200);
+    expect(
+      (await call('PUT', '/Users/usr_admin', { userName: 'someone@else.example' })).status,
+    ).toBe(400);
+    mem.linked.add('usr_admin');
+    const moved = await call('PATCH', '/Users/usr_admin', {
+      Operations: [{ op: 'replace', path: 'userName', value: 'boss@new.example' }],
+    });
+    expect(moved.body.userName).toBe('boss@new.example');
+  });
+
+  it('never changes the email of someone unlinked whose role SCIM’s groups don’t give', async () => {
+    const { body: ann } = await call('POST', '/Users', { userName: 'ann@example.com' });
+    const rename = (to: string) =>
+      call('PATCH', `/Users/${ann.id}`, {
+        Operations: [{ op: 'replace', path: 'userName', value: to }],
+      });
+    // A viewer, as provisioned: the provider may move their address.
+    expect((await rename('ann@new.example')).status).toBe(200);
+    // Promoted on the Team page before they ever signed in: no longer.
+    mem.people.get(ann.id)!.role = 'admin';
+    expect(await rename('eve@evil.example')).toMatchObject({
+      status: 400,
+      body: { scimType: 'mutability' },
+    });
+    // The same role from a mapped group is SCIM's to give, so the address may follow it.
+    mem.map.g_admins = 'admin';
+    await mem.store.addGroup({
+      id: 'g_admins',
+      displayName: 'Admins',
+      externalId: null,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await mem.store.addMembers('g_admins', [ann.id]);
+    expect((await rename('ann@newer.example')).status).toBe(200);
   });
 
   it('never deactivates the last active admin', async () => {

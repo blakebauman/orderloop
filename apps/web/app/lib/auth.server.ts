@@ -417,6 +417,55 @@ export async function signIn(
   return { cookie: await startSession(request, r.principal.id), twoFactor: false };
 }
 
+/**
+ * `signIn` for someone single sign-on has already identified, whose account has a password: the
+ * identity provider vouched for their email, but before that links the account (`sso.server.ts`)
+ * they give its password, then their code if they use two-factor sign-in. The same throttles
+ * apply. SSO-only doesn't refuse it: the password here adds to the provider's word, never
+ * replaces it. Without two-factor sign-in, the session waits on `signIn`, so the caller links
+ * first and signs in only once that worked.
+ */
+export async function signInToLink(
+  request: Request,
+  user: { id: string; email: string; passwordHash: string; totpEnabledAt: number | null },
+  given: string,
+): Promise<
+  { twoFactor: true; cookie: string } | { twoFactor: false; signIn: () => Promise<string> } | null
+> {
+  const keys = signInKeys(user.email, clientIp(request));
+  const wait = await waitFor(keys);
+  if (wait) {
+    await audit(request, 'auth.sign_in_throttled', { target: user.email });
+    throw new Throttled(wait);
+  }
+  if (!(await verifyPassword(given, user.passwordHash))) {
+    await recordFailure(keys);
+    await audit(request, 'auth.sign_in_failed', {
+      target: user.email,
+      detail: { reason: 'wrong password', method: 'sso' },
+    });
+    return null;
+  }
+  await db().delete(authFailures).where(eq(authFailures.key, keys[0]!));
+  if (user.totpEnabledAt) return { cookie: await startChallenge(user.id), twoFactor: true };
+  return {
+    twoFactor: false,
+    signIn: async () => {
+      const row = await db()
+        .select({ email: users.email, name: users.name, role: users.role })
+        .from(users)
+        .where(eq(users.id, user.id))
+        .get();
+      if (row)
+        await audit(request, 'auth.sign_in', {
+          actor: { kind: 'user', id: user.id, ...row, role: row.role as Role },
+          detail: { method: 'sso-link' },
+        });
+      return startSession(request, user.id);
+    },
+  };
+}
+
 async function checkCredentials(
   email: string,
   given: string,

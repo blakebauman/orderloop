@@ -3,6 +3,7 @@ import { audit } from '~/lib/audit.server';
 import { principal } from '~/lib/auth.server';
 import {
   clearSsoCookie,
+  LINK_PATH,
   SsoError,
   signInWithSso,
   ssoConfig,
@@ -19,7 +20,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     const { identity, next } = await verifyCallback(request, c);
     // Already signed in here (another tab finished first): keep that session.
     if (await principal(request)) return redirect(next, { headers });
-    headers.append('set-cookie', await signInWithSso(request, identity));
+    const outcome = await signInWithSso(request, identity);
+    if ('confirmLink' in outcome) {
+      headers.append('set-cookie', outcome.confirmLink);
+      return redirect(`${LINK_PATH}?next=${encodeURIComponent(next)}`, { headers });
+    }
+    headers.append('set-cookie', outcome.session);
     return redirect(next, { headers });
   } catch (err) {
     if (!(err instanceof SsoError)) throw err;

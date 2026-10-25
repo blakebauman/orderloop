@@ -281,6 +281,35 @@ export async function verifyPlatform(
 }
 
 /**
+ * A single sign-on identity waiting to be linked to a person who signs in with a password. The
+ * provider vouched for `sub` with that person's email, but an email alone doesn't hand over an
+ * account that has a password: the person confirms it (and their two-factor code) first. Held in
+ * a short-lived cookie in the web app, never sent to the engine, as its own envelope (`sl1`).
+ */
+export type SsoLink = { userId: string; sub: string };
+
+const SSO_LINK_VERSION = 'sl1';
+const SSO_LINK_PATH = 'sso-link';
+
+/** How long a pending link waits for the password: as long as a sign-in challenge. */
+export const SSO_LINK_TTL_MS = 10 * 60_000;
+
+export function signSsoLink(secret: string, l: SsoLink, now = Date.now()): Promise<string> {
+  return seal(secret, SSO_LINK_VERSION, { l, path: SSO_LINK_PATH, exp: now + SSO_LINK_TTL_MS });
+}
+
+export async function verifySsoLink(
+  secrets: readonly (string | undefined)[],
+  value: string | null | undefined,
+  now = Date.now(),
+): Promise<SsoLink | null> {
+  const body = await unseal(secrets, SSO_LINK_VERSION, value, SSO_LINK_PATH, now);
+  const l = body?.l as Partial<SsoLink> | undefined;
+  if (!l || typeof l.userId !== 'string' || typeof l.sub !== 'string') return null;
+  return { userId: l.userId, sub: l.sub };
+}
+
+/**
  * The workspace setting (`workspace_settings`) that keeps whoever started an order from deciding
  * its approvals: `on` or `off` (the default).
  */
