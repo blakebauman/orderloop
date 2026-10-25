@@ -635,9 +635,11 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
       >
         <span className="font-medium text-foreground">Needs attention</span>
         {approvals ? <span className="text-wait">{plural(approvals, 'approval')}</span> : null}
-        {/* The same words as the overview: these counts cover failed and rolled-back orders, and
-            orders waiting on an outside event. */}
-        {failedN ? <span className="text-bad">{failedN} failed or rolled back</span> : null}
+        {/* The overview's words, with the window: the overview counts every such order, this line
+            only the last 3 days (`attention` in the engine), so it says so. */}
+        {failedN ? (
+          <span className="text-bad">{failedN} failed or rolled back in 3 days</span>
+        ) : null}
         {stalled ? (
           <span className="text-muted-foreground">{stalled} waiting on events</span>
         ) : null}
