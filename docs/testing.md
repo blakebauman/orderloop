@@ -391,6 +391,7 @@ test shrinks to the area above a keyboard.
 |---|---|
 | `layout.spec.ts` | No page in the shell scrolls sideways, on every device; on phones the tab bar sits above a 34px home indicator and the top bar below a 47px status bar; More's sheet closes on navigation and the route announcer names the new page; on touch screens the header, tab bar and page buttons take a 44px tap (their box or `hit-area`'s), and every field is 16px so iOS doesn't zoom into it |
 | `screens.spec.ts` | Below lg the flow editor is review-only (no Publish, a read-only name, no Delete node, nothing draggable, never Unsaved) and at lg it edits; below lg an order's graph is a tab of its own, mounted only while shown; on an upright iPhone the assistant's composer stays above the keyboard while it is up (`data-keyboard`), and Return there is a new line |
+| `polish.spec.ts` | At lg, leaving the flow editor with unsaved edits asks in place (`Confirm`): Stay has focus and Escape keeps the edits; on the desktop, "/" focuses Orders' search but not while a menu is open (`pageShortcut`); Account offers the Home Screen on an iPhone or iPad (not on the desktop) and stops once dismissed |
 
 ## Catalog edge: delivery in workerd
 
