@@ -35,6 +35,7 @@ import {
   waitingForLabel,
 } from '~/lib/format';
 import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
+import { pageShortcut } from '~/lib/shortcuts';
 import type { Route } from './+types/orders';
 
 export const meta = () => [{ title: 'Orders · OrderLoop' }];
@@ -120,9 +121,7 @@ export default function Orders() {
   // "/" jumps to search from anywhere on the page that isn't already taking text.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.key !== '/' || !pageShortcut(e)) return;
       e.preventDefault();
       search.current?.focus();
     };

@@ -21,6 +21,7 @@ import { engine } from '~/lib/env.server';
 import { humanize, money, orderRef, outcomeLabel } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
 import { approvalSeparation } from '~/lib/settings.server';
+import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/approvals';
 
@@ -127,8 +128,7 @@ export default function Approvals() {
   // J or K from anywhere on the page (outside fields) starts the keyboard path at the first row.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key !== 'j' && e.key !== 'k') return;
+      if ((e.key !== 'j' && e.key !== 'k') || !pageShortcut(e)) return;
       const el = document.activeElement;
       // Clicking the page focuses <main> (it takes focus for the skip link); that counts as the page.
       if (el && el !== document.body && el.tagName !== 'MAIN' && !el.closest('header, nav')) return;

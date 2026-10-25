@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { data, Link, useBlocker, useFetcher, useLoaderData, useNavigate } from 'react-router';
+import { Confirm } from '~/components/confirm';
 import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
@@ -456,48 +457,35 @@ export default function FlowEditor() {
       </header>
 
       {blocker.state === 'blocked' ? (
-        <div
-          role="alertdialog"
-          aria-label="Unsaved changes"
-          className="flex flex-wrap items-center gap-3 border-b bg-wait/10 px-5 py-2 text-sm"
+        <Confirm
+          message="This flow has unsaved changes. Leave without saving them?"
+          cancelLabel="Stay"
+          onCancel={() => blocker.reset?.()}
+          className="border-b bg-wait/10 px-5 py-2"
         >
-          <span className="flex-1">This flow has unsaved changes. Leave without saving them?</span>
-          <Button size="sm" variant="ghost" onClick={() => blocker.reset?.()} autoFocus>
-            Stay
-          </Button>
           <Button size="sm" variant="outline" onClick={() => blocker.proceed?.()}>
             Leave without saving
           </Button>
-        </div>
+        </Confirm>
       ) : null}
 
+      {/* Focus lands on the safe choice; publishing takes a deliberate tap, click or Tab. */}
       {confirm ? (
-        <div
-          role="alertdialog"
-          aria-label="Publish this flow"
-          className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-5 py-2.5 text-sm"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setConfirm(null);
-          }}
+        <Confirm
+          message={
+            confirm === 'test'
+              ? `A test run publishes v${(published ?? 0) + 1} first.`
+              : `Publish v${(published ?? 0) + 1}?`
+          }
+          note={`${
+            publishedGraph
+              ? `${changes.summary} since v${published}. `
+              : 'This is the first version. '
+          }New ${ORDER_MODEL_LABELS[flow.model]} orders will run it; orders already running keep their version.`}
+          cancelLabel="Not yet"
+          onCancel={() => setConfirm(null)}
+          className="border-b bg-muted/60 px-5 py-2.5"
         >
-          <p className="min-w-0 flex-1">
-            <span className="font-medium">
-              {confirm === 'test'
-                ? `A test run publishes v${(published ?? 0) + 1} first.`
-                : `Publish v${(published ?? 0) + 1}?`}
-            </span>{' '}
-            <span className="text-muted-foreground">
-              {publishedGraph
-                ? `${changes.summary} since v${published}. `
-                : 'This is the first version. '}
-              New {ORDER_MODEL_LABELS[flow.model]} orders will run it; orders already running keep
-              their version.
-            </span>
-          </p>
-          {/* Focus lands on the safe choice; publishing takes a deliberate click or Tab. */}
-          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)} autoFocus>
-            Not yet
-          </Button>
           <Button
             size="sm"
             onClick={() => {
@@ -509,7 +497,7 @@ export default function FlowEditor() {
               ? `Publish v${(published ?? 0) + 1} and test`
               : `Publish v${(published ?? 0) + 1}`}
           </Button>
-        </div>
+        </Confirm>
       ) : null}
 
       <p className="border-b bg-muted/50 px-4 py-2 text-muted-foreground text-sm lg:hidden">

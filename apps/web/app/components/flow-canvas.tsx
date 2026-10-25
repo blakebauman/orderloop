@@ -37,6 +37,7 @@ import { Crosshair, LayoutGrid, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMedia } from '~/lib/device';
 import { statusColor } from '~/lib/format';
+import { pageShortcut } from '~/lib/shortcuts';
 import { useTheme } from '~/lib/theme';
 import { FlowNodeView, type FlowRfNode } from './flow-node';
 
@@ -341,11 +342,9 @@ function Inner({
   // F toggles the expanded view, Escape leaves it. Ignored while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === 'f' || e.key === 'F') setExpanded((v) => !v);
-      else if (e.key === 'Escape') setExpanded(false);
+      if (e.key === 'f' || e.key === 'F') {
+        if (pageShortcut(e)) setExpanded((v) => !v);
+      } else if (e.key === 'Escape') setExpanded(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
