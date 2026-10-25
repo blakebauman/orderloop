@@ -33,6 +33,7 @@ import {
   integrationInput,
   orderEventInput,
   platformInput,
+  submitCartInput,
   subscriptionInput,
 } from './api-schemas';
 
@@ -316,7 +317,19 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: 'A cart: its lines, quote and problems',
           parameters: [cartId],
-          responses: { '200': cart('The cart'), ...errors },
+          responses: {
+            '200': {
+              ...cart('The cart'),
+              headers: {
+                ETag: {
+                  description:
+                    'The cart’s `version`, quoted: send it as If-Match to hold a submit to it',
+                  schema: { type: 'string' },
+                },
+              },
+            },
+            ...errors,
+          },
         },
       },
       '/api/v1/carts/{id}/ops': {
@@ -346,10 +359,27 @@ export function openApiDocument(serverUrl: string) {
           summary: 'Submit a cart as an order of its flow (operator)',
           description:
             'Only a cart with lines whose quote is current and found no errors. The order is started once, at the quoted lines, by the caller; the cart ends as `submitted` with its `orderId`.',
-          parameters: [cartId],
+          parameters: [
+            cartId,
+            {
+              name: 'If-Match',
+              in: 'header',
+              schema: { type: 'string' },
+              description:
+                'The ETag of the cart you read (its `version`, quoted): the submit goes ahead only if the cart is still at that version. The same as `version` in the body.',
+            },
+          ],
+          requestBody: {
+            required: false,
+            content: { 'application/json': { schema: schema(submitCartInput) } },
+          },
           responses: {
             '201': ok('{ orderId, cartId }'),
             '409': ok('Not ready (see `notReady`), or already ended', '#/components/schemas/Error'),
+            '412': ok(
+              'The cart changed since the version given; read it again',
+              '#/components/schemas/Error',
+            ),
             ...errors,
           },
         },

@@ -25,6 +25,7 @@ import {
   type AssistantTool,
   atLeast,
   boundText,
+  isWriteTool,
   mcpSkillFiles,
   type Principal,
   type Role,
@@ -42,16 +43,6 @@ import { issueConfirmation, redeemConfirmation, useConfirmation } from './confir
 import { forwardedPrincipal } from './principal';
 
 export const MCP_PATH = '/mcp';
-
-/**
- * Tools that save something without a confirm: nothing they save runs until someone approves it
- * (a plugin draft) or submits it (a cart).
- */
-const WRITES_WITHOUT_CONFIRM = new Set<AssistantTool>([
-  'draft_plugin',
-  'create_cart',
-  'change_cart',
-]);
 
 /** Actions that can't be taken back by calling them again: a client should confirm them. */
 const DESTRUCTIVE = new Set<AssistantTool>([
@@ -156,7 +147,7 @@ async function createServer(p: Principal) {
     const t = ASSISTANT_TOOLS[name];
     if (!atLeast(p.role, t.role)) continue;
     // A draft runs without a confirm, but it writes (a pending plugin), so it isn't read-only.
-    const readOnly = !t.confirm && !WRITES_WITHOUT_CONFIRM.has(name);
+    const readOnly = !isWriteTool(name);
     const action = isActionTool(name);
     server.registerTool(
       name,

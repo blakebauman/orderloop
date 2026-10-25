@@ -16,7 +16,8 @@
  *   POST /api/v1/carts                          { title, flowId, customerId? }  (422 a flow that doesn't price)
  *   GET  /api/v1/carts/:id                      lines, quote and problems (no chat or files)
  *   POST /api/v1/carts/:id/ops                  one CartOp, applied as the caller  (409 refused)
- *   POST /api/v1/carts/:id/submit               starts its order  (409 not ready or ended)
+ *   POST /api/v1/carts/:id/submit               { version? } or If-Match: "<version>"; starts its order
+ *                                               (409 not ready or ended, 412 changed since that version)
  *   POST /api/v1/carts/:id/cancel               (409 ended)
  *
  *   GET    /api/v1/audit-events                 ?type=…&before=<ms>&limit=  newest first; ?after=<seq> oldest first (admin)
@@ -67,6 +68,7 @@ import {
   allowsEvent,
   allowsOrder,
   atLeast,
+  CART_CHANGED_SINCE_CONFIRM,
   type CartAnswer,
   cartOpSchema,
   cartView,
@@ -109,6 +111,7 @@ import {
   integrationInput,
   orderEventInput,
   platformInput,
+  submitCartInput,
   subscriptionInput,
 } from './api-schemas';
 import { isAuditGroup } from './audit';
@@ -433,6 +436,15 @@ function failure(err: unknown): Response {
   return json({ error: 'Internal error' }, 500);
 }
 
+/** The version an If-Match header holds a submit to (`"4"`, `W/"4"` or `4`); `*` is any. */
+function ifMatchVersion(header: string | null): number | undefined | 'invalid' {
+  const h = header?.trim();
+  if (!h || h === '*') return undefined;
+  const m = /^(?:W\/)?"?(\d{1,15})"?$/.exec(h);
+  const v = m ? Number(m[1]) : Number.NaN;
+  return Number.isSafeInteger(v) && v > 0 ? v : 'invalid';
+}
+
 /** The most carts one GET /api/v1/carts returns. */
 const MAX_CARTS = 200;
 
@@ -494,7 +506,9 @@ async function handleCarts(
 
   if (parts.length === 2 && request.method === 'GET') {
     const c = (await engine().cartSnapshot(id))?.cart;
-    return c && !c.external ? json({ cart: cartView(c) }) : json({ error: 'Not found' }, 404);
+    if (!c || c.external) return json({ error: 'Not found' }, 404);
+    // The version as an ETag, so a submit can be held to it with If-Match.
+    return Response.json({ cart: cartView(c) }, { headers: { etag: `"${c.version}"` } });
   }
   if (parts.length !== 3 || request.method !== 'POST') return json({ error: 'Not found' }, 404);
   const denied = need('operator');
@@ -514,7 +528,17 @@ async function handleCarts(
     return json({ cart: r.cart });
   }
   if (verb === 'submit') {
-    const r = await engine().submitCart(id, actor);
+    const b = submitCartInput.safeParse(await body());
+    if (!b.success) return json({ error: 'Invalid submit', issues: b.error.issues }, 400);
+    const match = ifMatchVersion(request.headers.get('if-match'));
+    if (match === 'invalid')
+      return json({ error: 'If-Match must be the cart’s ETag, its version in quotes' }, 400);
+    if (match !== undefined && b.data.version !== undefined && match !== b.data.version)
+      return json({ error: 'If-Match and version name different versions' }, 400);
+    const version = match ?? b.data.version;
+    const r = await engine().submitCart(id, actor, version);
+    if (!r.ok && r.error === CART_CHANGED_SINCE_CONFIRM)
+      return json({ error: `The cart has changed since version ${version}; read it again` }, 412);
     if (!r.ok) return refused(r);
     await audit(request, 'order.started', {
       actor: caller,

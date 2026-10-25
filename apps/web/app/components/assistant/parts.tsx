@@ -175,7 +175,8 @@ export function ReadRow({ part }: { part: Part }) {
 
 // ── Actions that wait for a person ─────────────────────────────────────────
 
-export type Previewer = (tool: string, input: unknown) => Promise<ActionPreview>;
+/** `callId` is the tool call the card is for: the engine holds the confirm to what this card showed. */
+export type Previewer = (tool: string, input: unknown, callId: string) => Promise<ActionPreview>;
 
 const DESTRUCTIVE = (name: string, input: Record<string, unknown>) =>
   name === 'cancel_order' || (name === 'decide_approval' && input.decision === 'rejected');
@@ -215,13 +216,13 @@ export function ActionCard({
   useEffect(() => {
     if (!asking) return;
     let live = true;
-    preview(name, input)
+    preview(name, input, part.toolCallId)
       .then((r) => live && setP(r))
       .catch((e: unknown) => live && setLoadError(e instanceof Error ? e.message : String(e)));
     return () => {
       live = false;
     };
-  }, [asking, name, inputKey, preview]);
+  }, [asking, name, inputKey, preview, part.toolCallId]);
 
   useEffect(() => {
     if (asking && p && !p.blocked) safe.current?.focus({ preventScroll: true });

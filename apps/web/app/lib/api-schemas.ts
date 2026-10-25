@@ -37,6 +37,9 @@ export const decisionInput = z.object({
 
 export const cancelInput = z.object({ reason: z.string().max(500).optional() });
 
+/** Holds a submit to the cart version the caller read (`version` in GET /carts/:id, its ETag). */
+export const submitCartInput = z.object({ version: z.number().int().positive().optional() });
+
 /** A staff cart: who opens it is the caller, never the body. */
 export const createCartInput = z.object({
   title: z.string().trim().min(1).max(MAX_CART_TITLE),

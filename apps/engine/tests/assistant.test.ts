@@ -1,4 +1,4 @@
-import { introspectWorkflow } from 'cloudflare:test';
+import { introspectWorkflow, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   type Attention,
@@ -11,7 +11,7 @@ import {
 import { approvals, auditEvents, createDb, sessions, users } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { readContext } from '../src/assistant/agent';
+import { type AssistantAgent, readContext } from '../src/assistant/agent';
 import { previewAction, Refused, runAction } from '../src/assistant/data';
 import { describeResult, heuristicStep } from '../src/assistant/model';
 import { runTool } from '../src/assistant/tools';
@@ -445,6 +445,73 @@ describe('assistant socket', () => {
       close: () => ws.close(),
     };
   };
+
+  it('holds a confirm card to what its first look showed, wherever it is shown again', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = await who('operator', 'panel@example.com');
+    const p = strip(op);
+    const cart = (await runTool(
+      env,
+      p,
+      'create_cart',
+      { title: 'Panel', flowId: 'tpl-b2b-order' },
+      {
+        via: 'assistant',
+      },
+    )) as { id: string };
+    const add = (qty: number) =>
+      runTool(
+        env,
+        p,
+        'change_cart',
+        { cartId: cart.id, ops: [{ op: 'add', sku: 'WID-100', qty }] },
+        {
+          via: 'assistant',
+        },
+      );
+    await add(1);
+    const input = { cartId: cart.id };
+    const panel = await socket(op.id, op);
+    const shown = (callId: string, i: unknown = input) =>
+      runInDurableObject(env.ASSISTANT_AGENT.getByName(op.id), (agent: AssistantAgent) =>
+        agent.shown(callId, 'submit_cart', i),
+      );
+
+    // The card in one tab, at this version; what it holds isn't sent to the page.
+    const first = await panel.call('preview', ['submit_cart', input, 'call_1']);
+    expect(first.result).toMatchObject({ title: expect.stringMatching(/^Submit/) });
+    expect(first.result).not.toHaveProperty('bound');
+    expect((first.result as { blocked?: string }).blocked).toBeUndefined();
+    // The cart changes; the same card shown again (another tab, a remount) is blocked…
+    await add(5);
+    const again = await panel.call('preview', ['submit_cart', input, 'call_1']);
+    expect((again.result as { blocked?: string }).blocked).toMatch(/changed since the card/);
+    // …and confirming the first tab's card submits nothing.
+    await expect(
+      runAction(env, p, 'submit_cart', input, 'assistant', await shown('call_1')),
+    ).rejects.toThrow('The cart changed since you confirmed; preview it again.');
+    const open = (await runTool(env, p, 'get_cart', input, { via: 'assistant' })) as {
+      status: string;
+    };
+    expect(open.status).toBe('open');
+
+    // A new card holds the cart as it is now, once, and only for the input it showed.
+    await panel.call('preview', ['submit_cart', input, 'call_2']);
+    expect(await shown('call_2', { cartId: 'cart_other' })).toEqual({ bound: null });
+    await panel.call('preview', ['submit_cart', input, 'call_3']);
+    const held = await shown('call_3');
+    expect(held).toEqual({ bound: { cartVersion: expect.any(Number) } });
+    expect(await shown('call_3')).toEqual({ bound: null });
+    const done = (await runAction(env, p, 'submit_cart', input, 'assistant', held)) as {
+      orderId: string;
+    };
+    expect(done.orderId).toMatch(/^ord_/);
+    panel.close();
+  });
 
   it('opens only for its own person, and stops when their sign-in ends', async () => {
     const orderId = await waitingOrder();

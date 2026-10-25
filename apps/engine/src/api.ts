@@ -222,8 +222,8 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return changeCart(this.env, cartId, op, actor);
   }
 
-  submitCart(cartId: string, actor: StaffCartActor) {
-    return submitCart(this.env, cartId, actor);
+  submitCart(cartId: string, actor: StaffCartActor, version?: number) {
+    return submitCart(this.env, cartId, actor, version);
   }
 
   cancelCart(cartId: string, actor: StaffCartActor) {

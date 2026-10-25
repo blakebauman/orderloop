@@ -296,6 +296,16 @@ describe('A2A', () => {
       .first<{ status: string; order_id: string | null }>();
     expect(cart).toEqual({ status: 'open', order_id: null });
 
+    // A typed skill holds the submit to the version its caller read, if it names one.
+    const renamed = await changeCart(env, made.id, { op: 'rename', title: 'Chat cart 2' }, actor);
+    if (!renamed.ok) throw new Error(renamed.error);
+    const version = renamed.cart.version;
+    const typedStale = await send(op, [
+      { data: { skill: 'submit_cart', input: { cartId: made.id, cartVersion: version - 1 } } },
+    ]);
+    expect(typedStale.status.state).toBe('TASK_STATE_REJECTED');
+    expect(statusText(typedStale)).toContain(`changed since version ${version - 1}`);
+
     const again = await send(op, [{ text: `submit ${made.id}` }]);
     const done = await send(op, [{ data: { confirm: true } }], {
       taskId: again.id,

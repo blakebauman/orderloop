@@ -74,33 +74,75 @@ export class AssistantAgent extends AIChatAgent<Env> {
   }
 
   /**
-   * An action resolved against live data, for its confirm card. What the card shows that can
-   * change before the person confirms (`bound`: a cart's version) is kept here, per tool and
-   * input, and the confirmed action is held to it; the panel never sends it back.
+   * An action resolved against live data, for its confirm card (`callId`: the tool call the card
+   * is for). What the card shows that can change before the person confirms (`bound`: a cart's
+   * version) is kept here for that call, from the first look, and the confirmed call is held to
+   * it; the panel never sends it back. A later look at the same card (another tab, a remount)
+   * that sees something else blocks the card everywhere: it no longer says what will happen.
    */
   @callable()
-  async preview(name: string, input: unknown) {
+  async preview(name: string, input: unknown, callId?: unknown) {
     const p = await this.caller();
     if (!ACTION_TOOLS.includes(name as ActionTool)) throw new Error(`Not an action: ${name}`);
-    const preview = await previewAction(
+    const { bound = null, ...shown } = await previewAction(
       this.env,
       p,
       name as ActionTool,
       input as ActionInput[ActionTool],
     );
-    const key = await shownKey(name, input);
-    if (preview.bound) await this.ctx.storage.put(key, preview.bound);
-    else await this.ctx.storage.delete(key);
-    const { bound: _bound, ...shown } = preview;
+    // Without a call id nothing is held, and a confirm that needs a hold is refused.
+    if (typeof callId !== 'string' || !callId || callId.length > 200) return shown;
+    await this.pruneShown();
+    const key = shownKey(callId);
+    const digest = await fingerprintOf({ name, input: input ?? {} });
+    const held = await this.ctx.storage.get<Shown>(key);
+    if (!held) {
+      await this.ctx.storage.put(key, { digest, bound, at: Date.now() } satisfies Shown);
+      return shown;
+    }
+    if (
+      held.stale ||
+      held.digest !== digest ||
+      JSON.stringify(held.bound) !== JSON.stringify(bound)
+    ) {
+      await this.ctx.storage.put(key, { ...held, stale: true } satisfies Shown);
+      return { ...shown, blocked: shown.blocked ?? SHOWN_CHANGED };
+    }
     return shown;
   }
 
-  /** What the card for this action showed, once: a confirm uses it up. */
-  private async shown(name: string, input: unknown): Promise<Confirmed> {
-    const key = await shownKey(name, input);
-    const bound = (await this.ctx.storage.get<Record<string, unknown>>(key)) ?? null;
+  /**
+   * What the card for this call showed, used up: the confirmed action is held to it. A card never
+   * shown, shown for another input, or shown differently since holds to nothing, which an action
+   * that needs a hold (a cart submit) refuses.
+   */
+  async shown(callId: string, name: string, input: unknown): Promise<Confirmed> {
+    const key = shownKey(callId);
+    const held = await this.ctx.storage.get<Shown>(key);
     await this.ctx.storage.delete(key);
-    return { bound };
+    const digest = await fingerprintOf({ name, input: input ?? {} });
+    return { bound: held && !held.stale && held.digest === digest ? held.bound : null };
+  }
+
+  /** Drops what declined cards held, and anything held for over a day. */
+  private async pruneShown() {
+    const declined = this.messages.flatMap((m) =>
+      m.parts.flatMap((part) => {
+        const t = part as {
+          toolCallId?: string;
+          state?: string;
+          approval?: { approved?: boolean };
+        };
+        return t.toolCallId && (t.state === 'output-denied' || t.approval?.approved === false)
+          ? [shownKey(t.toolCallId)]
+          : [];
+      }),
+    );
+    const old = [...(await this.ctx.storage.list<Shown>({ prefix: 'shown:' }))]
+      .filter(([, v]) => Date.now() - (v.at ?? 0) > 86_400_000)
+      .map(([k]) => k);
+    const gone = [...new Set([...declined, ...old])];
+    if (gone.length) await this.ctx.storage.delete(gone);
   }
 
   override async onChatMessage(
@@ -160,11 +202,11 @@ export class AssistantAgent extends AIChatAgent<Env> {
             description: confirm ? `${description} The person confirms first.` : description,
             inputSchema: TOOL_INPUTS[name] as z.ZodObject,
             ...(confirm ? { needsApproval: true } : {}),
-            execute: async (input: ToolInput<typeof name>) =>
+            execute: async (input: ToolInput<typeof name>, { toolCallId }) =>
               runTool(this.env, await this.caller(), name, input, {
                 via: 'assistant',
                 context,
-                ...(confirm ? { confirmed: await this.shown(name, input) } : {}),
+                ...(confirm ? { confirmed: await this.shown(toolCallId, name, input) } : {}),
               }),
           }),
         ];
@@ -173,9 +215,19 @@ export class AssistantAgent extends AIChatAgent<Env> {
   }
 }
 
-/** Where a confirm card's `bound` is kept: per tool and input, whatever the key order. */
-const shownKey = async (name: string, input: unknown) =>
-  `shown:${await fingerprintOf({ name, input: input ?? {} })}`;
+/** What a confirm card's first look showed, kept per tool call. */
+type Shown = {
+  /** The tool and input it was shown for (`fingerprintOf`). */
+  digest: string;
+  bound: Record<string, unknown> | null;
+  at: number;
+  /** A later look saw something else: the card no longer holds. */
+  stale?: true;
+};
+
+const shownKey = (callId: string) => `shown:${callId}`;
+
+const SHOWN_CHANGED = 'This changed since the card was first shown. Ask again for a new card.';
 
 /** The page the person is on, as the panel sent it; anything malformed counts as the workspace. */
 export function readContext(raw: unknown): AssistantContext {

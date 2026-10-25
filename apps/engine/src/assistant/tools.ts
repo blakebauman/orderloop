@@ -113,7 +113,15 @@ export const TOOL_INPUTS = {
   }),
   deliver_event: z.object({ orderId, event: z.string() }),
   cancel_order: z.object({ orderId, reason: z.string() }),
-  submit_cart: z.object({ cartId }),
+  submit_cart: z.object({
+    cartId,
+    cartVersion: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('The cart version you read (get_cart); refused if the cart has changed since'),
+  }),
   publish_flow: z.object({ flowId: z.string() }),
   run_stock_review: z.object({}),
 } satisfies Record<AssistantTool, z.ZodObject>;

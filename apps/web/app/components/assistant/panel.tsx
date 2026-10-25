@@ -33,7 +33,7 @@ import { Link } from 'react-router';
 import { contextLabel, useAssistant } from '~/lib/assistant';
 import { orderRef, plural } from '~/lib/format';
 import { useMe } from '~/lib/use-me';
-import { ActionCard, PluginDraftCard, ProposalCard, Prose, ReadRow } from './parts';
+import { ActionCard, PluginDraftCard, type Previewer, ProposalCard, Prose, ReadRow } from './parts';
 
 /**
  * The docked panel. On wide screens it takes a column beside the page (the page narrows; nothing is
@@ -208,8 +208,8 @@ function Conversation() {
   }, [busy, refresh]);
 
   const preview = useCallback(
-    (tool: string, input: unknown) =>
-      agent.call('preview', [tool, input]) as Promise<ActionPreview>,
+    (tool: string, input: unknown, callId: string) =>
+      agent.call('preview', [tool, input, callId]) as Promise<ActionPreview>,
     [agent],
   );
   const respond = useCallback(
@@ -341,7 +341,7 @@ function AssistantMessage({
 }: {
   m: Message;
   streaming: boolean;
-  preview: (tool: string, input: unknown) => Promise<ActionPreview>;
+  preview: Previewer;
   respond: (approvalId: string, approved: boolean) => void;
 }) {
   const parts = m.parts;

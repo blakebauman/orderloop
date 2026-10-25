@@ -317,8 +317,15 @@ export interface EngineRpc {
     op: CartOp,
     actor: StaffCartActor,
   ): Promise<CartAnswer<{ cart: CartView }>>;
-  /** Submits a priced staff cart as an order of its flow, once (`CartAgent.submitAs`). */
-  submitCart(cartId: string, actor: StaffCartActor): Promise<CartAnswer<{ orderId: string }>>;
+  /**
+   * Submits a priced staff cart as an order of its flow, once (`CartAgent.submitAs`). With
+   * `version`, only if the cart is still at that version (`CART_CHANGED_SINCE_CONFIRM` otherwise).
+   */
+  submitCart(
+    cartId: string,
+    actor: StaffCartActor,
+    version?: number,
+  ): Promise<CartAnswer<{ orderId: string }>>;
   /** Cancels a staff cart that hasn't ended (`CartAgent.cancelAs`). */
   cancelCart(cartId: string, actor: StaffCartActor): Promise<CartAnswer<{ cart: CartView }>>;
   /**

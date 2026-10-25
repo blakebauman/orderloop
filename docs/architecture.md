@@ -186,11 +186,18 @@ A preview can also carry `bound`: what the person is shown that can change befor
 (for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that
 showed the preview keeps it and strips it from what it sends: MCP in the code's `bound` column
 (`issueConfirmation`, handed back by `redeemConfirmation`), the assistant panel in the
-`AssistantAgent`'s storage per tool and input (`preview()` writes it, the confirmed `execute` uses
-it up), A2A chat with the task's pending action. `runAction` passes it on as `confirmed`, and
+`AssistantAgent`'s storage per tool call (the card passes its `toolCallId` to `preview()`; the
+first look writes it with the input's digest, a later look that sees another version or input
+marks it stale and returns the card blocked, the confirmed `execute` uses it up through `shown`,
+and declined cards' entries and day-old ones are pruned), A2A chat with the task's pending action. `runAction` passes it on as `confirmed`, and
 `runSubmit` hands `cartVersion` to `CartAgent.submitAs`, which refuses a cart whose version moved
 on (`CART_CHANGED_SINCE_CONFIRM`); a submit with no bound, other than a typed A2A skill, is refused
-too. See
+too. A typed A2A `submit_cart` (`'direct'`) is held only to the `cartVersion` its input names, and
+REST `POST /api/v1/carts/:id/submit` to a body `version` or `If-Match` (the ETag `GET` serves),
+answering `412` when the cart moved on; both reach `CartAgent.submitAs` through
+`EngineRpc.submitCart(cartId, actor, version)` or `runSubmit`. A2A skill tags come from
+`isWriteTool` (an action or one of `WRITES_WITHOUT_CONFIRM` in `packages/core/src/assistant.ts`,
+which `mcp.ts` also reads for `readOnlyHint`). See
 [MCP server](https://docs.orderloop.app/reference/mcp/).
 
 Skills: `createServer` attaches the role's `SkillCatalog`

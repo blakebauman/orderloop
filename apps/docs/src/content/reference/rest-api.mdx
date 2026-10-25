@@ -46,7 +46,7 @@ deployment can have different budgets; ask your OrderLoop contact if an integrat
 | `POST` | `/api/v1/carts` | `{ title, flowId, customerId? }` | `201 { cart }`, or `422 { error }` |
 | `GET` | `/api/v1/carts/:id` | | `{ cart }` |
 | `POST` | `/api/v1/carts/:id/ops` | One cart op, such as `{ op: "add", sku, qty }` | `{ cart }`, or `409 { error }` |
-| `POST` | `/api/v1/carts/:id/submit` | | `201 { orderId, cartId }`, or `409 { error }` |
+| `POST` | `/api/v1/carts/:id/submit` | `{ version? }` (or `If-Match`) | `201 { orderId, cartId }`, `409 { error }`, or `412 { error }` when the cart changed since that version |
 | `POST` | `/api/v1/carts/:id/cancel` | | `{ cart }`, or `409 { error }` |
 | `GET` | `/api/v1/audit-events?type=&before=&after=&limit=` | | `{ events }` (admin) |
 | `GET` | `/api/v1/audit-events/verify?after=` | | `{ ok, checked, last, next }` or `{ ok: false, brokenAt, reason }` (admin) |
@@ -217,7 +217,8 @@ exactly as if they made it on the cart's page, and anyone with the cart open see
   `quote` (`currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`, or `null` until priced),
   `quoteCurrent` (whether the quote prices the cart as it is now), `issues` (what pricing found:
   `{ kind, code, content }`), `notReady` (why it can't be submitted yet, or `null`), `orderId`,
-  `createdBy`, `createdAt`, `updatedAt` and `version`. The cart's chat and files stay on its page.
+  `createdBy`, `createdAt`, `updatedAt` and `version`, with the version also as the response's
+  `ETag` (`"7"`). The cart's chat and files stay on its page.
 
 `POST /api/v1/carts/:id/ops` applies one change and answers with the cart priced again:
 
@@ -244,7 +245,11 @@ has ended, the line is gone, the code is already applied, a line would pass 10,0
 `POST /api/v1/carts/:id/submit` starts the cart's order on its flow, at its quoted lines and
 customer, started by the caller, and answers `201 { orderId, cartId }`. It needs lines and a
 current quote with no errors (see `notReady`); otherwise, or once the cart has ended, it is `409`.
-A cart is submitted once: a repeat is `409` and starts nothing. The order is then read and acted
+A cart is submitted once: a repeat is `409` and starts nothing. To submit only the cart you read,
+send its version, as `{ "version": 7 }` or the header `If-Match: "7"`: if anyone changed the cart
+since, the submit is `412` and starts nothing, so read it again. Both are optional; naming two
+different versions is `400`. The order is priced again by its flow when it runs, like any order,
+so its total can differ from the cart's quote if prices changed in between. The order is then read and acted
 on through the order routes. `POST /api/v1/carts/:id/cancel` ends a cart that hasn't ended
 (`409` otherwise).
 

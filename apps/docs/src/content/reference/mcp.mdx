@@ -172,6 +172,8 @@ opened from their own purchasing system is not reached here. `get_cart` gives ea
 applied in order as you, each priced again by the cart's flow; it stops at the first one the cart
 refuses (a locked or ended cart, a line that is gone) and says how many went in. A cart's chat and
 files are never served, and its title and line names come back as one short line each.
+`submit_cart` also takes an optional `cartVersion` (the `version` you read), refused when the cart
+has changed since; the confirmation holds it to the cart as previewed either way.
 
 ## Skills
 

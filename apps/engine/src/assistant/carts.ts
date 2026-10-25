@@ -168,13 +168,17 @@ export async function changeCart(
   return { ...(await getCart(env, c.id)), applied };
 }
 
+/** A cart that moved on from the version a caller says it read. */
+const movedOn = (v: number) => `The cart has changed since version ${v}; read it again.`;
+
 export async function previewSubmit(
   env: Env,
   p: Principal,
-  cartId: string,
+  input: { cartId: string; cartVersion?: number },
 ): Promise<ActionPreview> {
   const min = ASSISTANT_TOOLS.submit_cart.role;
-  const c = await loadCart(env, cartId);
+  const c = await loadCart(env, input.cartId);
+  const read = input.cartVersion;
   const q = c.quote;
   const customer = said(await customerName(env, c.customerId), 80);
   return {
@@ -182,13 +186,16 @@ export async function previewSubmit(
     href: `/carts/${c.id}`,
     consequences: [
       `${c.lines.length} line${c.lines.length === 1 ? '' : 's'}${q && isQuoteCurrent(c) ? ` · ${money(q.total, q.currency)}` : ''}`,
-      `Starts an order of ${said(await flowName(env, c.flowId), 80) ?? c.flowId}${customer ? ` for ${customer}` : ''}, at the prices quoted`,
+      `Starts an order of ${said(await flowName(env, c.flowId), 80) ?? c.flowId}${customer ? ` for ${customer}` : ''} with these lines`,
+      'The order’s flow prices it again when it runs, so its total can differ from this quote',
       ...(c.promoCodes.length ? [`With ${c.promoCodes.join(', ')}`] : []),
       'The cart ends: no one can change it afterwards',
     ],
-    blocked: atLeast(p.role, min)
-      ? said(cartReadyProblem(c) ?? undefined, 200)
-      : `This needs the ${ROLE_LABELS[min]} role.`,
+    blocked: !atLeast(p.role, min)
+      ? `This needs the ${ROLE_LABELS[min]} role.`
+      : read !== undefined && read !== c.version
+        ? movedOn(read)
+        : said(cartReadyProblem(c) ?? undefined, 200),
     // What the person sees is this version of the cart; confirming it submits only this version.
     bound: { cartVersion: c.version },
   };
@@ -197,22 +204,28 @@ export async function previewSubmit(
 /**
  * Submits the cart. `confirmed` is what the person's confirm was held to (the preview's `bound`,
  * kept by the server that showed it), or `direct` for a call its caller composed itself (a typed
- * A2A skill), which has no preview. Without either, nothing is submitted.
+ * A2A skill), which has no preview and is held only to the `cartVersion` it names, if any.
+ * Without either, nothing is submitted.
  */
 export async function runSubmit(
   env: Env,
   p: Principal,
-  cartId: string,
+  input: { cartId: string; cartVersion?: number },
   channel: Channel,
   confirmed?: Confirmed,
 ) {
-  const c = await loadCart(env, cartId);
-  const held = confirmed === 'direct' ? undefined : confirmed?.bound?.cartVersion;
+  const c = await loadCart(env, input.cartId);
+  const held = confirmed === 'direct' ? input.cartVersion : confirmed?.bound?.cartVersion;
   if (confirmed !== 'direct' && typeof held !== 'number')
     throw new Refused(CART_CHANGED_SINCE_CONFIRM);
   const version = typeof held === 'number' ? held : undefined;
   const r = await submitCart(env, c.id, staffCartActor(p), version);
-  if (!r.ok) throw new Refused(r.error);
+  if (!r.ok)
+    throw new Refused(
+      confirmed === 'direct' && r.error === CART_CHANGED_SINCE_CONFIRM && version !== undefined
+        ? movedOn(version)
+        : r.error,
+    );
   await recordAudit(env, 'order.started', {
     actor: p,
     target: r.orderId,

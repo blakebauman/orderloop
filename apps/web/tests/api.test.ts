@@ -350,6 +350,46 @@ describe('carts over REST', () => {
     expect(audit).not.toHaveBeenCalled();
   });
 
+  it('holds a submit to the version the caller read, by ETag or body', async () => {
+    engine.cartSnapshot.mockResolvedValueOnce({ cart: cart({ version: 7 }) });
+    const read = await get('carts/cart_1');
+    expect(read.headers.get('etag')).toBe('"7"');
+    const submit = (headers: Record<string, string>, b: unknown = {}) =>
+      handleApi(
+        new Request('https://app.test/api/v1/carts/cart_1/submit', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: JSON.stringify(b),
+        }),
+        operator,
+      );
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_1' });
+    expect((await submit({ 'if-match': '"7"' })).status).toBe(201);
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), 7);
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_2' });
+    await submit({}, { version: 8 });
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), 8);
+    // Optional: without either, the engine isn't asked to hold it.
+    engine.submitCart.mockResolvedValueOnce({ ok: true, orderId: 'ord_3' });
+    await submit({});
+    expect(engine.submitCart).toHaveBeenLastCalledWith('cart_1', expect.anything(), undefined);
+
+    engine.submitCart.mockResolvedValueOnce({
+      ok: false,
+      error: 'The cart changed since you confirmed; preview it again.',
+    });
+    const moved = await submit({ 'if-match': 'W/"7"' });
+    expect(moved.status).toBe(412);
+    expect(await moved.json()).toEqual({
+      error: 'The cart has changed since version 7; read it again',
+    });
+    engine.submitCart.mockClear();
+    expect((await submit({ 'if-match': '"seven"' })).status).toBe(400);
+    expect((await submit({ 'if-match': '"7"' }, { version: 8 })).status).toBe(400);
+    expect((await submit({}, { version: 0 })).status).toBe(400);
+    expect(engine.submitCart).not.toHaveBeenCalled();
+  });
+
   it('submits once, recording the order it started, and cancels', async () => {
     engine.submitCart.mockResolvedValueOnce({ ok: false, error: 'Add at least one line.' });
     expect((await post('carts/cart_1/submit', {})).status).toBe(409);

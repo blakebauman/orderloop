@@ -47,6 +47,10 @@ describe('A2A', () => {
     for (const [name, t] of Object.entries(ASSISTANT_TOOLS))
       expect(A2A_SKILLS[name as keyof typeof A2A_SKILLS].role).toBe(t.role);
     expect(A2A_SKILLS.place_order.role).toBe('operator');
+    // A write is tagged one whether or not it waits for a confirm.
+    for (const name of ['create_cart', 'change_cart', 'draft_plugin', 'submit_cart'] as const)
+      expect(A2A_SKILLS[name].tags, name).toContain('write');
+    expect(A2A_SKILLS.get_cart.tags).toContain('read');
   });
 
   it('points the card at this origin', () => {

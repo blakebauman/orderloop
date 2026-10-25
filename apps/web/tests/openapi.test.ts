@@ -45,7 +45,13 @@ describe('OpenAPI document', () => {
     // Who opened it is the caller, never the body.
     expect(create.properties).not.toHaveProperty('createdBy');
     expect(json.components.schemas.Cart.properties).not.toHaveProperty('external');
-    expect(Object.keys(json.paths['/api/v1/carts/{id}/submit'].post.responses)).toContain('409');
+    const submit = json.paths['/api/v1/carts/{id}/submit'].post;
+    expect(Object.keys(submit.responses)).toEqual(expect.arrayContaining(['409', '412']));
+    expect(submit.parameters.map((x: { name: string }) => x.name)).toContain('If-Match');
+    expect(submit.requestBody.required).toBe(false);
+    expect(submit.requestBody.content['application/json'].schema.properties.version.type).toBe(
+      'integer',
+    );
   });
 
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {

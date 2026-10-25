@@ -206,7 +206,7 @@ export const ASSISTANT_TOOLS: Record<
     label: 'Submit a cart',
     title: 'Submit a cart',
     description:
-      'Submit a priced cart as an order of its flow, at the prices it was quoted. The cart ends, and the order runs.',
+      'Submit a priced cart as an order of its flow, with its lines, customer and promo codes. The order is priced again by its flow when it runs, as any order is. The cart ends.',
   },
   publish_flow: {
     role: 'operator',
@@ -226,6 +226,20 @@ export const ASSISTANT_TOOLS: Record<
 };
 
 export const isAssistantTool = (name: string): name is AssistantTool => name in ASSISTANT_TOOLS;
+
+/**
+ * Tools that save something without a confirm: nothing they save runs until someone approves it
+ * (a plugin draft) or submits it (a cart).
+ */
+export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
+  'draft_plugin',
+  'create_cart',
+  'change_cart',
+];
+
+/** Whether a tool changes anything: an action, or a write that needs no confirm. */
+export const isWriteTool = (name: AssistantTool) =>
+  ASSISTANT_TOOLS[name].confirm || WRITES_WITHOUT_CONFIRM.includes(name);
 
 /**
  * An action resolved against live data, shown before a person confirms it: what it is, what will

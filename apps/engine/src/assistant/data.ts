@@ -455,7 +455,7 @@ export type ActionInput = {
   };
   deliver_event: { orderId: string; event: string };
   cancel_order: { orderId: string; reason: string };
-  submit_cart: { cartId: string };
+  submit_cart: { cartId: string; cartVersion?: number };
   publish_flow: { flowId: string };
   run_stock_review: Record<string, never>;
 };
@@ -564,7 +564,7 @@ export async function previewAction<T extends ActionTool>(
         };
       }
       case 'submit_cart':
-        return await previewSubmit(env, p, (input as ActionInput['submit_cart']).cartId);
+        return await previewSubmit(env, p, input as ActionInput['submit_cart']);
       case 'publish_flow': {
         const i = input as ActionInput['publish_flow'];
         const { row, flow } = await loadFlow(env, i.flowId);
@@ -677,7 +677,7 @@ export async function runAction<T extends ActionTool>(
       return { done: preview.title, href: preview.href };
     }
     case 'submit_cart':
-      return runSubmit(env, p, (input as ActionInput['submit_cart']).cartId, channel, confirmed);
+      return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);

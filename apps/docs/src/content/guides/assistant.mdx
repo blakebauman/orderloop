@@ -63,8 +63,8 @@ sent until you press the confirm button, and declining leaves everything as it w
 
 The card is not the model's summary. It is resolved against live data when it appears, and states
 the consequence: for a decision, the order, its total and which step it goes on to; for a cancel,
-the effects it will undo and the reason; for a cart, its lines, total, flow and customer, and
-that the cart ends; for a publish, what changed since the live version and
+the effects it will undo and the reason; for a cart, its lines, total, flow and customer, that its
+flow prices the order again when it runs, and that the cart ends; for a publish, what changed since the live version and
 that unsaved editor changes are not included; for the stock review, which SKUs are at or below
 their reorder point. When the action can't go ahead (already decided, nothing waiting for that
 event, the order has finished, you started the order and the workspace separates approvals, the cart isn't priced or has a problem, the draft has errors, nothing to publish, or your role is too low)
@@ -72,8 +72,9 @@ the card says why and offers no confirm.
 
 Confirming runs the action as you, after the engine re-checks your role and the order or flow
 again. The state can have changed since the card appeared, in which case the action is refused with
-the reason. A cart is held to the card exactly: if it changed at all after the card appeared, the
-submit is refused and nothing is ordered; ask again for a new card. An approval decided here has no 5-second undo window, because the confirm is the
+the reason. A cart is held to the card exactly: if it changed at all after the card first appeared, the
+submit is refused and nothing is ordered, and the same card opened again (in another tab, say)
+says so instead of offering a confirm; ask again for a new card. An approval decided here has no 5-second undo window, because the confirm is the
 check. The audit trail names the actor as `<email> via assistant`: that string is the approval's
 `by`, or ends the cancel reason. A confirmed action is also an [audit log](/guides/team-and-roles/#audit-log) event (`via` the assistant, with the `tool`); read-only tools are not logged.
 
