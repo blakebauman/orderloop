@@ -25,12 +25,14 @@ import {
   type CartReturnRequest,
   type OutboundEvent,
   type OutboundPayload,
+  PLUGIN_VIEW_TYPE,
   type PluginCompensateRequest,
   type PluginExecRequest,
   type PluginExecResult,
   type PluginHostRpc,
   type PluginManifest,
   type PluginRpc,
+  type PluginView,
   PRINCIPAL_HEADER,
   PROVIDE_RESULT_SCHEMAS,
   type ProvideRequest,
@@ -72,6 +74,20 @@ export function host(env: PluginEnv): PluginHostRpc {
     throw new Error('ORDERLOOP is not bound: this deployment gives the plugin no host API');
   return env.ORDERLOOP;
 }
+
+/**
+ * A page drawn by the app: answer a page request with a view (`PluginView`) and the web app renders
+ * it in its own shell and components, light and dark, instead of the plugin sending HTML. Links and
+ * form actions are paths on the plugin's own pages, relative to them.
+ */
+export function viewResponse(view: PluginView, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set('content-type', PLUGIN_VIEW_TYPE);
+  if (!headers.has('cache-control')) headers.set('cache-control', 'no-store');
+  return new Response(JSON.stringify(view), { ...init, headers });
+}
+
+export type { PluginView } from '@orderloop/core';
 
 /** A manifest as written: defaults may be left out. */
 export type ManifestInput = z.input<typeof pluginManifestSchema>;
