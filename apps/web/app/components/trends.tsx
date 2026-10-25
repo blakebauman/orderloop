@@ -1,15 +1,7 @@
 import { BASE_CURRENCY } from '@orderloop/core';
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@orderloop/ui/chart';
+import type { ChartConfig } from '@orderloop/ui/chart';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
-import { useId, useState } from 'react';
-import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts';
+import { lazy, Suspense, useState } from 'react';
 import { Empty, Section } from '~/components/page';
 import { count, money } from '~/lib/format';
 import type { Performance } from '~/lib/metrics.server';
@@ -22,9 +14,13 @@ type Range = (typeof RANGES)[number];
 const base = (n: number) => money(n, BASE_CURRENCY);
 const sum = (days: Day[], k: keyof Omit<Day, 'day'>) => days.reduce((a, d) => a + d[k], 0);
 
-// Days are UTC dates; label them in UTC so the server and the browser agree.
-const short = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-const dayLabel = (day: unknown) => short.format(new Date(`${day}T00:00:00Z`));
+// Recharts arrives after the rest of the overview; until then each chart holds its height.
+const LazyChart = lazy(() => import('./trends-chart'));
+const Chart = (props: React.ComponentProps<typeof LazyChart>) => (
+  <Suspense fallback={<div className="mt-3 h-44" aria-hidden="true" />}>
+    <LazyChart {...props} />
+  </Suspense>
+);
 
 // Money draws in the preset's neutral ramp; the outcome chart keeps the status colours, so a failure
 // still reads as one.
@@ -124,71 +120,5 @@ function Panel({
       <p className="sr-only">{summary}</p>
       {children}
     </div>
-  );
-}
-
-/** One area per series in `config`, filled with a fade to the baseline. */
-function Chart({
-  days,
-  config,
-  format,
-  stacked = false,
-}: {
-  days: Day[];
-  config: ChartConfig;
-  format: (n: number) => string;
-  stacked?: boolean;
-}) {
-  const id = useId().replace(/:/g, '');
-  const keys = Object.keys(config);
-  return (
-    <ChartContainer config={config} className="mt-3 aspect-auto h-44 w-full" aria-hidden="true">
-      <AreaChart data={days} margin={{ left: 4, right: 4, top: 4 }} accessibilityLayer={false}>
-        <defs>
-          {keys.map((k) => (
-            <linearGradient key={k} id={`${id}-${k}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={`var(--color-${k})`} stopOpacity={0.35} />
-              <stop offset="95%" stopColor={`var(--color-${k})`} stopOpacity={0.03} />
-            </linearGradient>
-          ))}
-        </defs>
-        <CartesianGrid vertical={false} stroke="var(--rule)" />
-        <XAxis
-          dataKey="day"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={32}
-          tickFormatter={dayLabel}
-        />
-        <ChartTooltip
-          cursor={false}
-          content={
-            <ChartTooltipContent
-              labelFormatter={(l) => dayLabel(l)}
-              valueFormatter={(v) => format(v)}
-            />
-          }
-        />
-        {/* Stacked bands are counts: straight segments, so no curve swings past a day's value,
-            and solid tints, so each band reads against the one under it. */}
-        {keys.map((k) => (
-          <Area
-            key={k}
-            dataKey={k}
-            type={stacked ? 'linear' : 'monotone'}
-            stroke={`var(--color-${k})`}
-            strokeWidth={1.5}
-            // Two greys alone are hard to tell apart; the lesser money series is dashed.
-            strokeDasharray={k === 'refunded' ? '4 3' : undefined}
-            fill={stacked ? `var(--color-${k})` : `url(#${id}-${k})`}
-            fillOpacity={stacked ? 0.4 : 1}
-            stackId={stacked ? 'a' : undefined}
-            isAnimationActive={false}
-          />
-        ))}
-        <ChartLegend content={<ChartLegendContent />} />
-      </AreaChart>
-    </ChartContainer>
   );
 }
