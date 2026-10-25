@@ -44,6 +44,13 @@ const withPlugins = (services: { binding: string; service: string }[] = []) => [
   ...pluginServices,
 ];
 
+/**
+ * The device tests (`pnpm --filter @orderloop/web e2e`) run the dev server offline: no remote
+ * bindings, mock AI, and a database of their own under .wrangler/e2e so they never touch the one
+ * `pnpm web:dev` uses.
+ */
+const e2e = process.env.ORDERLOOP_E2E === '1';
+
 export default defineConfig(async () => {
   const bundles = await Promise.all(
     devSandboxed.map(async (id) => ({
@@ -70,6 +77,7 @@ export default defineConfig(async () => {
         viteEnvironment: { name: 'ssr' },
         // A fleet deploy builds against its rendered config (`scripts/fleet.ts render <id>`).
         configPath: process.env.ORDERLOOP_WRANGLER_CONFIG,
+        ...(e2e ? { remoteBindings: false, persistState: { path: '.wrangler/e2e' } } : {}),
         ...(devPlugins.length ? { config: (c) => ({ services: withPlugins(c.services) }) } : {}),
         // In dev, run the engine Worker in the same session so the ENGINE service binding, its
         // OrderAgent Durable Objects and Workflows all work locally. It deploys on its own. Dev
@@ -89,6 +97,7 @@ export default defineConfig(async () => {
                 PRINCIPAL_KEY: DEV_PRINCIPAL_KEY,
                 DATA_KEY: DEV_DATA_KEY,
                 SIMULATE_FAILURES: 'true',
+                ...(e2e ? { AI_MODE: 'mock' } : {}),
                 ...sandboxVars,
                 ...publisherVars,
               },
