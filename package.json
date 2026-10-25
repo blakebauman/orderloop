@@ -2,7 +2,7 @@
   "name": "orderloop",
   "version": "0.1.0",
   "private": true,
-  "description": "Order Loop \u2014 an agent loop for the full order lifecycle (purchase requests, B2B orders, reorders, subscriptions), built entirely on Cloudflare. Turborepo + Biome.",
+  "description": "Order Loop \u2014 an agent loop for the commerce order lifecycle, built on Cloudflare Workers, Workflows and Durable Objects. Turborepo + Biome.",
   "type": "module",
   "scripts": {
     "build": "turbo run build",
