@@ -77,6 +77,22 @@ const isMigrations = (v: unknown): v is { name: string; sql: string }[] =>
 
 const db = (env: Env) => createDb(env.DB);
 
+/**
+ * Refuses a manifest that declares capabilities (`PLUGIN_CAPABILITIES`): only the registry grants
+ * one (`plugins.<id>.capabilities`), so a runtime install could never use it and would be refused
+ * as a whole at load. Checked on the manifest as the bundle has it, before it is parsed or stored,
+ * so a capability this engine doesn't know is named too, and an engine rolled back to older code
+ * never meets one it can't parse in a stored manifest.
+ */
+function refuseCapabilities(id: string, manifest: unknown) {
+  const declared = (manifest as { capabilities?: unknown } | null)?.capabilities;
+  if (!Array.isArray(declared) || !declared.length) return;
+  const names = boundText(declared.map(String).join(', '), 200) ?? 'some';
+  throw new InstallRefused(
+    `${id} asks for capabilities (${names}), which only a plugin this deployment's registry installs can be granted: it can't be installed at runtime`,
+  );
+}
+
 /** The publishers this deployment trusts, by name; empty when runtime installs are off. */
 function publishers(env: Env): Record<string, string> {
   const raw = (env as unknown as { PLUGIN_PUBLISHERS?: string }).PLUGIN_PUBLISHERS;
@@ -188,7 +204,7 @@ async function dryRun(env: Env, id: string, sha: string, code: string, sealed: P
 /**
  * Checks a signed bundle and stores it `pending`: who signed it (a listed publisher, and a valid
  * signature over its id, version and hash), that the body is what was signed, that its manifest
- * is for that id and version, that the deployment doesn't pin or bind that id itself, that an
+ * is for that id and version and declares no capabilities, that the deployment doesn't pin or bind that id itself, that an
  * upgrade comes from the publisher already installed, and that it loads and answers with its
  * sealed manifest.
  */
@@ -222,8 +238,10 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
   let manifest: PluginManifest;
   try {
     bundle = JSON.parse(file.body);
+    refuseCapabilities(file.id, bundle.manifest);
     manifest = parseManifest(bundle.manifest);
   } catch (err) {
+    if (err instanceof InstallRefused) throw err;
     throw new InstallRefused(err instanceof Error ? err.message : 'The bundle is malformed');
   }
   if (manifest.id !== file.id || manifest.version !== file.version)
@@ -235,8 +253,8 @@ export async function uploadPlugin(env: Env, text: string, by: string): Promise<
 
 /**
  * Stores a checked bundle `pending`, for an admin to review: an upload's (signed), or a draft the
- * assistant wrote for `request`, with its cases' results. Refused for an id the registry installs,
- * a test fixture, malformed migrations, another publisher's id, a version already uploaded, or
+ * assistant wrote for `request`, with its cases' results. Refused for a manifest that declares
+ * capabilities, an id the registry installs, a test fixture, malformed migrations, another publisher's id, a version already uploaded, or
  * code that doesn't answer with its sealed manifest.
  */
 export async function stageBundle(
@@ -253,6 +271,7 @@ export async function stageBundle(
 ): Promise<PluginInstallView> {
   const { sha, body, bundle, manifest } = staged;
   const file = { id: manifest.id, version: manifest.version, sha, publisher };
+  refuseCapabilities(file.id, manifest);
   if (!isMigrations(bundle.migrations))
     throw new InstallRefused('The bundle’s migrations are malformed');
   if (
@@ -394,6 +413,8 @@ export async function approvePlugin(
   const { row } = await find(env, id, sha);
   if (row.status !== 'pending') throw new InstallRefused(`${id} ${row.version} is ${row.status}`);
   const v = await view(env, row);
+  // Stored before uploads were checked for them: it would never load, so it never runs.
+  refuseCapabilities(id, v.manifest);
   const missing = v.manifest.secrets
     .filter((s) => !s.optional && !v.secrets.find((x) => x.name === s.name)?.set)
     .map((s) => s.name);

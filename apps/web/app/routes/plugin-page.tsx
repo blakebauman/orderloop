@@ -50,6 +50,17 @@ const TONE: Record<string, string> = {
   bad: 'text-bad',
 };
 
+/** An alert's tone, as the app's Alert draws it: `info` is a plain note. */
+const ALERT: Record<
+  Extract<PluginViewBlock, { type: 'alert' }>['tone'],
+  'default' | 'success' | 'warning' | 'destructive'
+> = {
+  info: 'default',
+  success: 'success',
+  warning: 'warning',
+  error: 'destructive',
+};
+
 export default function PluginPage() {
   const { view, error, base, pluginId } = useLoaderData<typeof loader>();
   if (!view)
@@ -111,7 +122,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       return <p className={cn('max-w-[75ch] text-sm', TONE[b.tone])}>{b.text}</p>;
     case 'alert':
       return (
-        <Alert variant={b.tone === 'error' ? 'destructive' : 'default'}>
+        <Alert variant={ALERT[b.tone]}>
           {b.title ? <AlertTitle>{b.title}</AlertTitle> : null}
           <AlertDescription>{b.text}</AlertDescription>
         </Alert>
