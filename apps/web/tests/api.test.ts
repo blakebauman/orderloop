@@ -1,4 +1,5 @@
 import type { Cart, Principal } from '@orderloop/core';
+import { DEV_PRINCIPAL_KEY, verifyRpcActor } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const engine = {
@@ -64,6 +65,8 @@ vi.mock('drizzle-orm', async (actual) => ({
   lt: () => ({}),
 }));
 const env: Record<string, unknown> = {};
+/** The actor a binding call carries, as the engine reads it (local dev's key in tests). */
+const actorOf = (signed: string, call: string) => verifyRpcActor([DEV_PRINCIPAL_KEY], signed, call);
 
 vi.mock('cloudflare:workers', () => ({ env }));
 vi.mock('~/lib/env.server', () => ({ engine: () => engine, db: () => fakeDb }));
@@ -200,10 +203,16 @@ describe('order actions over REST', () => {
       'ord_1',
       'mgr',
       'approved',
-      'ops@example.com',
-      'tok_1',
+      expect.any(String),
       undefined,
     );
+    // Who decides travels signed for this one call: the engine believes nothing else.
+    expect(await actorOf(engine.decide.mock.calls.at(-1)![3], 'decide:ord_1')).toEqual({
+      kind: 'staff',
+      id: 'tok_1',
+      name: 'ops@example.com',
+      role: 'operator',
+    });
   });
 
   it('answers 404 for an event to an unknown order', async () => {
@@ -332,8 +341,14 @@ describe('carts over REST', () => {
     expect(engine.changeCart).toHaveBeenLastCalledWith(
       'cart_1',
       { op: 'add', sku: 'WID-100', qty: 3 },
-      { kind: 'staff', id: 'tok_1', name: 'ci', role: 'operator' },
+      expect.any(String),
     );
+    expect(await actorOf(engine.changeCart.mock.calls.at(-1)![2], 'cart:cart_1')).toEqual({
+      kind: 'staff',
+      id: 'tok_1',
+      name: 'ci',
+      role: 'operator',
+    });
     expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.changed', {
       actor: operator,
       target: 'cart_1',

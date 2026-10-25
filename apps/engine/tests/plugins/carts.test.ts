@@ -19,6 +19,7 @@ import { PluginHost } from '../../src/plugin-api';
 import { pluginStatuses } from '../../src/plugins';
 import { indexCartBuyers } from '../../src/retention';
 import { eraseDataSubject, exportDataSubject } from '../../src/subjects';
+import { signedActor } from '../principal';
 
 const testEnv = env as Env & { EXAMPLE_DB: D1Database; TEST_EXAMPLE_MIGRATIONS: D1Migration[] };
 const db = () => createDb(env.DB);
@@ -471,7 +472,7 @@ describe('a punchout buyer’s data subject request', () => {
         size: 4,
         key: `carts/${c.cartId}/att_b1`,
       },
-      { kind: 'guest', id: guest.id, name: guest.name },
+      await signedActor({ kind: 'guest', id: guest.id, name: guest.name }, `cart:${c.cartId}`),
     );
     const staffer = { kind: 'staff' as const, id: 'usr_ops', name: 'Ops', role: 'admin' as const };
     await cartAgent(c.cartId).applyAs(staffer, { op: 'add', sku: 'WID-100', qty: 1 });

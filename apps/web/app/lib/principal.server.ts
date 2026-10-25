@@ -6,8 +6,11 @@ import {
   type Principal,
   type ProxiedPrincipal,
   pluginKey,
+  type RpcActor,
+  type SignedActor,
   signCartGuest,
   signPrincipal,
+  signRpcActor,
 } from '@orderloop/core';
 
 /**
@@ -44,6 +47,22 @@ export async function setPluginPrincipalHeader(
     await signPrincipal(key, { kind, id: who, name, role, ...(email ? { email } : {}) }, path),
   );
 }
+
+/**
+ * Who is acting on an `EngineRpc` call, signed for that one call (`decide:<orderId>`,
+ * `cart:<cartId>`): the engine takes it from nothing else.
+ */
+export function signedActor(actor: RpcActor, call: string): Promise<SignedActor> {
+  return signRpcActor(principalKey(), actor, call);
+}
+
+/** A person or token as the staff actor on an approval: the record names them as `by`. */
+export const decider = (p: Pick<Principal, 'id' | 'role'>, by: string): RpcActor => ({
+  kind: 'staff',
+  id: p.id,
+  name: by,
+  role: p.role,
+});
 
 export function principalKey() {
   const key =

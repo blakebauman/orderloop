@@ -17,6 +17,7 @@ import {
 import { principal, setupDue } from './auth.server';
 import { cartGuest } from './cart-guest.server';
 import { docs, engine } from './env.server';
+import { signedActor } from './principal.server';
 
 /** Who is asking about `cartId`: signed-in staff, else the buyer this cart admitted, else null. */
 export async function cartActor(request: Request, cartId: string): Promise<CartActor | null> {
@@ -52,7 +53,7 @@ export async function uploadAttachment(
   const added = await engine().attachToCart(
     cartId,
     { id, name, type: file.type, size: file.size, key },
-    actor,
+    await signedActor(actor, `cart:${cartId}`),
   );
   if (!added.ok) {
     await docs().delete(key);

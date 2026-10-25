@@ -13,11 +13,13 @@ import {
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
+  type RpcActor,
   SESSION_IDLE_MS,
   SESSION_TOUCH_MS,
   sessionIdleMs,
   verifyCartGuest,
   verifyPrincipal,
+  verifyRpcActor,
 } from '@orderloop/core';
 import { apiTokens, createDb, sessions, users } from '@orderloop/db';
 import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
@@ -30,6 +32,11 @@ export function forwardedPrincipal(env: Env, request: Request): Promise<ProxiedP
     request.headers.get(PRINCIPAL_HEADER),
     new URL(request.url).pathname,
   );
+}
+
+/** Who the web app signed a binding call for (`signRpcActor`), or null. */
+export function rpcActor(env: Env, signed: string, call: string): Promise<RpcActor | null> {
+  return verifyRpcActor([env.PRINCIPAL_KEY, env.PRINCIPAL_KEY_PREVIOUS], signed, call);
 }
 
 /** The external cart's buyer the web app signed onto this request, or null (see `verifyCartGuest`). */

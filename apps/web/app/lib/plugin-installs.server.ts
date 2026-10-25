@@ -50,6 +50,14 @@ const STEPPED_UP: ReadonlySet<PluginIntent> = new Set([
   'enable',
 ]);
 
+/**
+ * Turning a plugin off stops every flow that uses it, so a person on the Plugins page proves it's
+ * them too. An admin API token may still do it (it can't answer a step-up), so automation can
+ * switch off a plugin that misbehaves.
+ */
+const steppedUp = (intent: PluginIntent, by: Principal) =>
+  STEPPED_UP.has(intent) || (intent === 'disable' && by.kind === 'user');
+
 const running = async (id: string) =>
   (await engine().listPluginInstalls()).some(
     (i) => i.id === id && (i.status === 'active' || i.status === 'disabled'),
@@ -96,7 +104,7 @@ async function act(
     });
     return { ok: false as const, error };
   };
-  if (STEPPED_UP.has(intent) || (intent === 'secret' && (await running(id)))) {
+  if (steppedUp(intent, by) || (intent === 'secret' && (await running(id)))) {
     const failed = await stepUp(request, by, { code: str('code'), password: str('password') });
     if (failed) return refused(failed);
   }

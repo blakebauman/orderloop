@@ -86,6 +86,33 @@ export async function listFlows({ archived = false } = {}) {
   });
 }
 
+/**
+ * Each flow's name and its steps' labels in the order a reader meets them: left to right, then top
+ * to bottom, as the editor lays a flow out. From the published version, or the draft if there is
+ * none. For placing the overview's waits and failures along their flow; display only.
+ */
+export async function flowSteps(): Promise<{ id: string; name: string; steps: string[] }[]> {
+  const rows = await db()
+    .select({
+      id: flows.id,
+      name: flows.name,
+      graphJson: flows.graphJson,
+      publishedJson: flowVersions.flowJson,
+    })
+    .from(flows)
+    .leftJoin(
+      flowVersions,
+      and(eq(flowVersions.flowId, flows.id), eq(flowVersions.version, flows.publishedVersion)),
+    );
+  return rows.map((r) => {
+    const g = JSON.parse(r.publishedJson ?? r.graphJson) as FlowGraph;
+    const steps = [...g.nodes]
+      .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y)
+      .map((n) => n.label);
+    return { id: r.id, name: r.name, steps };
+  });
+}
+
 /** `ORDER_ROUTES`: inbound `model:channel` (or `model:*`) to flow id. */
 export const orderRoutes = () => parseOrderRoutes((env as { ORDER_ROUTES?: string }).ORDER_ROUTES);
 

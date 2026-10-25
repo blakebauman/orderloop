@@ -1,0 +1,63 @@
+import { createDb } from '@orderloop/db';
+import { describe, expect, it, vi } from 'vitest';
+
+/** A D1 binding that records each statement's SQL and finds nothing. */
+const statements: string[] = [];
+const d1 = {
+  prepare: (query: string) => {
+    statements.push(query);
+    const stmt = {
+      bind: () => stmt,
+      all: async () => ({ results: [], success: true, meta: {} }),
+      raw: async () => [],
+      first: async () => null,
+      run: async () => ({ results: [], success: true, meta: {} }),
+    };
+    return stmt;
+  },
+  batch: async (stmts: unknown[]) => stmts.map(() => ({ results: [], success: true, meta: {} })),
+} as unknown as D1Database;
+
+vi.mock('cloudflare:workers', () => ({ env: {} }));
+vi.mock('~/lib/env.server', () => ({ db: () => createDb(d1) }));
+
+const { overview } = await import('../app/lib/orders.server');
+
+/** The names a select's result columns come back under: its alias, or the column's own name. */
+function resultColumns(query: string): string[] {
+  const list = query.slice('select '.length, query.indexOf(' from "'));
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === '(') depth++;
+    else if (list[i] === ')') depth--;
+    else if (list[i] === ',' && depth === 0) {
+      parts.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(list.slice(start));
+  // SQLite names a column by its alias, a column reference by the column, anything else by its text.
+  return parts.map((p) => {
+    const part = p.trim();
+    return (
+      part.match(/ as "([^"]+)"$/)?.[1] ?? part.match(/^(?:"[^"]+"\.)?"([^"]+)"$/)?.[1] ?? part
+    );
+  });
+}
+
+describe('overview', () => {
+  // D1's batch returns each row as an object keyed by column name, which drizzle reads back by
+  // position: a repeated name drops a column and shifts every one after it.
+  it('never selects two result columns with the same name in its batch', async () => {
+    statements.length = 0;
+    await overview();
+    const selects = statements.filter((s) => s.startsWith('select '));
+    expect(selects.length).toBeGreaterThan(5);
+    for (const s of selects) {
+      const cols = resultColumns(s);
+      expect(cols, s).toEqual([...new Set(cols)]);
+    }
+  });
+});

@@ -4,15 +4,7 @@
  * `EngineRpc` rather than importing engine source.
  */
 
-import type {
-  CartActor,
-  CartAttachment,
-  CartOp,
-  CartState,
-  CartView,
-  CreateCartInput,
-  StaffCartActor,
-} from './cart';
+import type { CartAttachment, CartOp, CartState, CartView, CreateCartInput } from './cart';
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
@@ -23,7 +15,7 @@ import type {
   PluginStatus,
   PluginUsage,
 } from './plugins';
-import type { CartGuest } from './roles';
+import type { CartGuest, SignedActor } from './roles';
 import type {
   FlowGraph,
   FlowVersion,
@@ -230,16 +222,19 @@ export interface EngineRpc {
   ): Promise<{ delivered: boolean; nodeId?: string; notFound?: true }>;
   /** A verified payment provider event (Stripe): settles invoices and resumes the order. */
   paymentEvent(event: PaymentEvent): Promise<PaymentEventResult>;
-  /** `by` is who the record names; `deciderId` the principal, checked against the order's starter. */
+  /**
+   * `actor` is signed for `decide:<orderId>` (`signRpcActor`): its name is who the record names,
+   * its id the principal checked against the order's starter.
+   */
   decide(
     orderId: string,
     nodeId: string,
     decision: 'approved' | 'rejected',
-    by: string,
-    deciderId: string,
+    actor: SignedActor,
     note?: string,
   ): Promise<
-    { ok: true } | { ok: false; reason: 'not_found' | 'not_waiting' | 'own_order'; error?: string }
+    | { ok: true }
+    | { ok: false; reason: 'not_found' | 'not_waiting' | 'own_order' | 'forbidden'; error?: string }
   >;
   /** `finished` when the order had already ended, so there was nothing to cancel. */
   cancel(
@@ -317,7 +312,8 @@ export interface EngineRpc {
   changeCart(
     cartId: string,
     op: CartOp,
-    actor: StaffCartActor,
+    /** A staff actor signed for `cart:<cartId>`. */
+    actor: SignedActor,
   ): Promise<CartAnswer<{ cart: CartView }>>;
   /**
    * Submits a priced staff cart as an order of its flow, once (`CartAgent.submitAs`). With
@@ -325,11 +321,11 @@ export interface EngineRpc {
    */
   submitCart(
     cartId: string,
-    actor: StaffCartActor,
+    actor: SignedActor,
     version?: number,
   ): Promise<CartAnswer<{ orderId: string }>>;
   /** Cancels a staff cart that hasn't ended (`CartAgent.cancelAs`). */
-  cancelCart(cartId: string, actor: StaffCartActor): Promise<CartAnswer<{ cart: CartView }>>;
+  cancelCart(cartId: string, actor: SignedActor): Promise<CartAnswer<{ cart: CartView }>>;
   /**
    * Saves an assistant draft's test cases (as an admin edited them) and runs them on its bundle in
    * the sandbox. Approving it needs every case passing.
@@ -355,7 +351,8 @@ export interface EngineRpc {
   attachToCart(
     cartId: string,
     attachment: Omit<CartAttachment, 'by' | 'at'>,
-    actor: CartActor,
+    /** Staff or the cart's buyer, signed for `cart:<cartId>`. */
+    actor: SignedActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
   /**
    * Forgets every A2A push config a person (or token) registered, and what is still queued for

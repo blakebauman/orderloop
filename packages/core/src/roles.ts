@@ -348,6 +348,50 @@ export async function verifySsoLink(
 }
 
 /**
+ * Who is acting on an approval or a cart over the engine's binding (`EngineRpc.decide`,
+ * `changeCart`, `submitCart`, `cancelCart`, `attachToCart`): a staff member (their principal id,
+ * the name the record shows, their role) or an external cart's buyer. The web app signs it (`a1`)
+ * for that one call and the engine believes nothing else for those calls. The binding's other
+ * methods (plugin installs, data subjects) still trust their caller: only the web app holds it.
+ */
+export type RpcActor =
+  | { kind: 'staff'; id: string; name: string; role: Role }
+  | { kind: 'guest'; id: string; name: string };
+
+/** An `RpcActor` signed for one call (`signRpcActor`), as `EngineRpc` takes it. */
+export type SignedActor = string;
+
+const ACTOR_VERSION = 'a1';
+
+/** `call` names the call and what it acts on, e.g. `decide:<orderId>` or `cart:<cartId>`. */
+export function signRpcActor(
+  secret: string,
+  actor: RpcActor,
+  call: string,
+  now = Date.now(),
+): Promise<SignedActor> {
+  return seal(secret, ACTOR_VERSION, { a: actor, path: call, exp: now + PRINCIPAL_TTL_MS });
+}
+
+/** The actor a call was signed for, or null (see `verifyPrincipal`). */
+export async function verifyRpcActor(
+  secrets: readonly (string | undefined)[],
+  signed: string | null | undefined,
+  call: string,
+  now = Date.now(),
+): Promise<RpcActor | null> {
+  // Anything but the string a1 envelope (an actor object from an older web app) is refused.
+  if (typeof signed !== 'string') return null;
+  const body = await unseal(secrets, ACTOR_VERSION, signed, call, now);
+  const a = body?.a as Partial<{ kind: string; id: string; name: string; role: Role }> | undefined;
+  if (!a || typeof a.id !== 'string' || typeof a.name !== 'string') return null;
+  if (a.kind === 'staff' && isRole(a.role))
+    return { kind: 'staff', id: a.id, name: a.name, role: a.role };
+  if (a.kind === 'guest') return { kind: 'guest', id: a.id, name: a.name };
+  return null;
+}
+
+/**
  * The workspace setting (`workspace_settings`) that keeps whoever started an order from deciding
  * its approvals: `on` or `off` (the default).
  */

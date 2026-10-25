@@ -26,11 +26,16 @@ linked from that panel and from **New order**, lists them by order type with the
 simulates, and **Edit first** opens one in the New order form (without its simulated failure).
 
 Without the demo data the panel is hidden; start an order from **New order** instead. Either way (operators only), the order page opens. The flow graph colours each node as it runs,
-waits and finishes, and the timeline records every step. The overview keeps itself current while it's open. Beside **Needs a decision**, **Needs attention**
-lists orders that failed or rolled back, with where and why they stopped, and every open wait by
-who it is on (people, the outside world, a timer), with the oldest. Below them, the **Last 30 days**
-section shows, in USD, completion by model (as counts until a model has five ended orders), revenue
-per day, refund rate, and the slowest steps, waits included, with how many runs each has.
+waits and finishes, and the timeline records every step. The overview keeps itself current while it's open. Its top line counts the orders open now and
+those that ended in the last 24 hours, by outcome. Below **Needs a decision**, **Where orders are
+waiting** lays each flow's open waits along its steps, with how many wait at each, for how long
+and on whom (a person, the outside world, a timer). **Ended badly this week** lists the steps where
+orders failed or rolled back, with the latest reason. Every figure opens the matching orders.
+
+The **Performance** page shows, in USD, how the business did over the last 7, 30 or 90 days:
+revenue, orders ended and money collected and refunded day by day, then completion by model (as
+counts until a model has five ended orders), refund rate, and the slowest steps, waits included,
+with how many runs each has.
 
 Some orders stop at an approval or wait for an event. Decide approvals from the order page or the
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the

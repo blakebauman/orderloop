@@ -5,7 +5,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
-  type CartActor,
+  atLeast,
   type CartAttachment,
   type CartOp,
   type CopilotRequest,
@@ -18,7 +18,7 @@ import {
   parseMailboxes,
   pluginBinding,
   runHealthChecks,
-  type StaffCartActor,
+  type SignedActor,
   type StartOrderInput,
   type StartOrderOnceInput,
   UCP_PATH,
@@ -41,10 +41,14 @@ import { handleStripeEvent } from './payment-events';
 import { installedPlugins, pinnedManifest } from './plugin-host';
 import * as installs from './plugin-installs';
 import { manifests, plugin, pluginStatuses, pluginUsage } from './plugins';
+import { rpcActor } from './principal';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
 import { ucpProfile } from './ucp/config';
 import { handleUcp } from './ucp/rest';
+
+/** A binding call without an actor the web app signed for it. */
+const UNSIGNED = { ok: false as const, error: 'This call must name who is acting.' };
 
 export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   /**
@@ -86,10 +90,19 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     orderId: string,
     nodeId: string,
     decision: 'approved' | 'rejected',
-    by: string,
-    deciderId: string,
+    signed: SignedActor,
     note?: string,
   ) {
+    const actor = await rpcActor(this.env, signed, `decide:${orderId}`);
+    if (actor?.kind !== 'staff')
+      return { ok: false as const, reason: 'forbidden' as const, error: UNSIGNED.error };
+    if (!atLeast(actor.role, 'approver'))
+      return {
+        ok: false as const,
+        reason: 'forbidden' as const,
+        error: 'This needs the Approver role.',
+      };
+    const { name: by, id: deciderId } = actor;
     const s = await this.snapshot(orderId);
     if (!s) return { ok: false as const, reason: 'not_found' as const };
     if (!s.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
@@ -232,16 +245,24 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return cartSnapshot(this.env, id);
   }
 
-  changeCart(cartId: string, op: CartOp, actor: StaffCartActor) {
-    return changeCart(this.env, cartId, op, actor);
+  async changeCart(cartId: string, op: CartOp, signed: SignedActor) {
+    const actor = await this.cartActor(cartId, signed);
+    return actor?.kind === 'staff' ? changeCart(this.env, cartId, op, actor) : UNSIGNED;
   }
 
-  submitCart(cartId: string, actor: StaffCartActor, version?: number) {
-    return submitCart(this.env, cartId, actor, version);
+  async submitCart(cartId: string, signed: SignedActor, version?: number) {
+    const actor = await this.cartActor(cartId, signed);
+    return actor?.kind === 'staff' ? submitCart(this.env, cartId, actor, version) : UNSIGNED;
   }
 
-  cancelCart(cartId: string, actor: StaffCartActor) {
-    return cancelCart(this.env, cartId, actor);
+  async cancelCart(cartId: string, signed: SignedActor) {
+    const actor = await this.cartActor(cartId, signed);
+    return actor?.kind === 'staff' ? cancelCart(this.env, cartId, actor) : UNSIGNED;
+  }
+
+  /** Who the web app signed this cart call for: never a caller's own say. */
+  private cartActor(cartId: string, signed: SignedActor) {
+    return rpcActor(this.env, signed, `cart:${cartId}`);
   }
 
   redeemCartStart(cartId: string, token: string) {
@@ -251,8 +272,10 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async attachToCart(
     cartId: string,
     attachment: Omit<CartAttachment, 'by' | 'at'>,
-    actor: CartActor,
+    signed: SignedActor,
   ) {
+    const actor = await this.cartActor(cartId, signed);
+    if (!actor) return UNSIGNED;
     if (!(await cartSnapshot(this.env, cartId)))
       return { ok: false as const, error: 'No such cart.' };
     return cartAgent(this.env, cartId).attachAs(actor, attachment);
