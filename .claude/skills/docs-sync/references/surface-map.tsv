@@ -119,3 +119,4 @@
 ^apps/engine/src/(assistant/plugin-draft|plugin-cases)\.ts$	guides/assistant guides/installing-plugins reference/mcp guides/team-and-roles docs/plugins.md	prose
 ^(packages/core/src/promotions|apps/web/app/(lib/promotions\.server|routes/promotions))\.tsx?$	guides/promotions docs/data-model.md	prose
 ^plugins/punchout/(src/.*|migrations/.*)$	guides/punchout docs/plugins.md docs/testing.md	prose
+^(apps/engine/src/product-index|apps/web/app/lib/product-index\.server)\.ts$	guides/ai guides/team-and-roles docs/architecture.md docs/operations.md docs/configuration.md	prose

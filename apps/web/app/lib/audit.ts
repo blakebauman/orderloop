@@ -71,6 +71,7 @@ export const AUDIT_ACTIONS = {
   'plugin.cases_run': 'Ran a drafted plugin’s test cases',
   'personal_data.exported': "Exported a person's data",
   'personal_data.erased': 'Erased a person from orders and accounts',
+  'catalog.products_indexed': 'Updated the product index',
   ...BUSINESS_AUDIT_ACTIONS,
 } as const;
 
@@ -152,6 +153,14 @@ export function describe(e: AuditEvent): string {
     if (d.personalData === true) parts.push('buyer details granted');
     if (typeof d.cases === 'string') parts.push(`${d.cases} cases pass`);
     if (typeof d.error === 'string') parts.push(d.error);
+  }
+  if (e.action === 'catalog.products_indexed') {
+    if (d.status === 'done')
+      parts.push(
+        `${d.indexed} added or renamed, ${d.removed} removed${d.more ? ', more waiting' : ''}`,
+      );
+    else if (d.status === 'busy') parts.push('skipped, another run was going');
+    else if (d.status === 'no_index') parts.push('skipped, no index');
   }
   if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))
     parts.push(`via ${AUDIT_VIA[d.via as AuditVia]}`);

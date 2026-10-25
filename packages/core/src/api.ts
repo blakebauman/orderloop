@@ -254,6 +254,12 @@ export interface EngineRpc {
   eraseDataSubject(email: string): Promise<ErasureResult>;
   /** Runs the stock review now (normally a daily cron on the Replenish Workflow). */
   runReplenish(): Promise<{ instanceId: string }>;
+  /**
+   * Brings the product index (what `ai.extract` matches by meaning) up to date with `products`
+   * now, as the hourly cron does: one run, so `more` says whether SKUs are left for the next.
+   * `actor` is an admin signed for `reindex-products`; anyone else is refused.
+   */
+  reindexProducts(actor: SignedActor): Promise<Refusable<ProductReindex>>;
   /** Deep health: the engine's own D1 and R2 bindings answer. */
   health(): Promise<HealthReport>;
   /**
@@ -372,6 +378,17 @@ export interface EngineRpc {
  * staff cart has.
  */
 export type CartAnswer<T> = ({ ok: true } & T) | { ok: false; error: string; notFound?: true };
+
+/**
+ * One product index run: `done` with what it embedded (`indexed`), the SKUs whose vectors it
+ * deleted (`removed`) and whether more were waiting than a run takes (`more`); `no_index` on a
+ * deployment without one (a demo, local dev, mock AI), where extraction matches by words alone; or
+ * `busy` while another run (the hourly cron's, another admin's) holds the lease.
+ */
+export type ProductReindex =
+  | { status: 'done'; indexed: number; removed: number; more: boolean }
+  | { status: 'no_index' }
+  | { status: 'busy' };
 
 /** What an engine call returns when it may be refused: its value, or why not (to show as it is). */
 export type Refusable<T> = { ok: true; value: T } | { ok: false; error: string };

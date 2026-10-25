@@ -11,7 +11,9 @@
  * changes, seeds, the demo reset), so rather than hook each one, `reindexProducts` diffs
  * `products` against `product_vectors` (what the index holds) on the hourly cron: new and renamed
  * SKUs are embedded and upserted, SKUs that are gone are deleted. Every write is keyed by SKU, so
- * a run cut short repeats harmlessly. Until a SKU is indexed it is still found by its words.
+ * a run cut short repeats harmlessly. Until a SKU is indexed it is still found by its words. An
+ * admin can run it now too (`EngineRpc.reindexProducts`, the Commerce page); a run holds a lease
+ * (`product_index_lease`), so the cron and that never overlap.
  *
  * The binding is optional: without it (tests, local dev, a demo, a deployment not yet
  * provisioned), or in mock AI mode, extraction ranks by words alone and the reindex does nothing.
@@ -22,6 +24,7 @@ import {
   documentSkus,
   documentTerms,
   EXTRACT_CANDIDATES,
+  type ProductReindex,
   rankExtractCandidates,
   type SemanticMatch,
 } from '@orderloop/core';
@@ -147,14 +150,57 @@ export async function extractCatalog(env: Env, text: string) {
 }
 
 /**
+ * How long a run's lease lasts: a cron invocation's whole wall time, so a run that is still going
+ * keeps it, and one that died frees it by the next hour's.
+ */
+const LEASE_MS = 15 * 60_000;
+
+/**
+ * Takes the reindex lease for `holder`, or answers false while another run's is unexpired. One
+ * statement, so two runs starting together can't both take it.
+ */
+async function takeLease(env: Env, holder: string, now: number) {
+  const row = await env.DB.prepare(
+    `INSERT INTO product_index_lease (id, holder, expires_at) VALUES (1, ?1, ?2)
+     ON CONFLICT(id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
+     WHERE product_index_lease.expires_at <= ?3
+     RETURNING holder`,
+  )
+    .bind(holder, now + LEASE_MS, now)
+    .first<{ holder: string }>();
+  return row?.holder === holder;
+}
+
+/**
  * Brings the index up to date with `products`, at most `max` SKUs embedded a run: new and renamed
  * ones are upserted (id = SKU), and the vectors of SKUs no longer in `products` deleted. The
  * vector is written before `product_vectors` records it, so a run that stops between the two
  * writes it again next time. `more` says there was more to embed than one run takes.
+ *
+ * Only one run at a time (`busy` otherwise): two would each embed the same SKUs against the
+ * gateway's rate limit, and a run that read a name before a rename could write its vector after
+ * one that read it after, leaving the old name's vector recorded as the new one's.
  */
-export async function reindexProducts(env: Env, max = REINDEX_PER_RUN) {
+export async function reindexProducts(env: Env, max = REINDEX_PER_RUN): Promise<ProductReindex> {
   const index = productIndex(env);
-  if (!index) return { skipped: true as const };
+  if (!index) return { status: 'no_index' };
+  const holder = crypto.randomUUID();
+  if (!(await takeLease(env, holder, Date.now()))) {
+    log({ op: 'reindex', busy: true });
+    return { status: 'busy' };
+  }
+  try {
+    const result = await reindex(env, index, max);
+    log({ op: 'reindex', ...result });
+    return { status: 'done', ...result };
+  } finally {
+    await env.DB.prepare('DELETE FROM product_index_lease WHERE id = 1 AND holder = ?')
+      .bind(holder)
+      .run();
+  }
+}
+
+async function reindex(env: Env, index: VectorizeIndex, max: number) {
   // A Vectorize id is at most 64 bytes; a longer SKU is left to the word search.
   const changed = (
     await env.DB.prepare(
@@ -203,7 +249,5 @@ export async function reindexProducts(env: Env, max = REINDEX_PER_RUN) {
     await index.deleteByIds(batch);
     await db(env).delete(productVectors).where(inArray(productVectors.sku, batch));
   }
-  const result = { indexed: changed.length, removed: gone.length, more: changed.length === max };
-  log({ op: 'reindex', ...result });
-  return result;
+  return { indexed: changed.length, removed: gone.length, more: changed.length === max };
 }

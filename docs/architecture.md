@@ -60,12 +60,13 @@ inbound mail ── Email Routing ──email()───────────
 | `exportDataSubject(email)` | Everything held about the person with that email (`subjects.ts`): customer accounts, up to 500 orders with their agent state, messages, intake log rows, documents; see [Personal data](data-model.md#personal-data) |
 | `eraseDataSubject(email)` | Erases that person (100 orders a call, `done` says whether to call again) or returns `{ ok: false, reason: 'active_orders', orders }`. Calls each order's `OrderAgent.erasePersonalData` |
 | `runReplenish()` | Creates a `Replenish` instance now |
+| `reindexProducts(actor)` | Runs the product index's reindex now (`reindexProducts` in `product-index.ts`, what the hourly cron runs), for an admin's **Update product index** on the Commerce page. `actor` is a staff `RpcActor` signed for `reindex-products`; anyone else, or a role below Admin, is refused as `{ ok: false, error }`. Answers `{ ok: true, value }` with `{ status: 'done', indexed, removed, more }`, `{ status: 'no_index' }` (no `PRODUCT_VECTORS`, or mock AI) or `{ status: 'busy' }` (another run holds `product_index_lease`). The web app audits it as `catalog.products_indexed` |
 | `pluginCatalog()` | A `PluginStatus` per installed [plugin](plugins.md) (a `PLUGIN_*` binding or a pinned bundle): its `id`, `runtime`, the manifest the deployment runs, `healthy` and `error` (cached about 60 seconds per isolate) |
 | `pluginUsage(id)` | The published flows and running orders that use a plugin's nodes or name it as a provider, and the labels it couldn't void (`GET /api/v1/plugins/:id/usage`) |
 | `pluginFetch(id, request)` | A sandboxed plugin's page: the web app builds the request and the engine, the only Worker that can load the plugin, forwards it to the plugin; `404` for a plugin that isn't installed sandboxed |
 
 `EngineApi` (`apps/engine/src/api.ts`) implements it as a `WorkerEntrypoint`. Every method except
-`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject`, `ucpProfile`, `runReplenish`, `pluginCatalog`, `pluginUsage` and `pluginFetch` forwards to the order's agent via
+`startOrder`, `startOrderOnce`, `copilot`, `intakeMailboxes`, `exportDataSubject`, `eraseDataSubject`, `ucpProfile`, `runReplenish`, `reindexProducts`, `pluginCatalog`, `pluginUsage` and `pluginFetch` forwards to the order's agent via
 `orderAgent(env, orderId)` (`apps/engine/src/namespaces.ts`). `EngineApi` trusts its caller: authorization happens in the web
 app before the call. The forwarded requests (sockets, `/mcp`, `/a2a`, `/ucp/*`) carry a principal the engine believes only when it is signed with `PRINCIPAL_KEY` for that path and unexpired (`forwardedPrincipal`). The web app types its `ENGINE` binding with `EngineRpc` and never imports
 engine source.
@@ -1172,7 +1173,10 @@ looked up by SKU, the 500 names sharing most of its words, counted in one SQL sc
 names, then up to 50 more by name overlap and similarity, within `EXTRACT_CATALOG_TOKENS` (6,000).
 `extractOrder` holds the answer to those candidates. The index is kept by `reindexProducts` on the
 engine's hourly cron, which diffs `products` against `product_vectors` rather than hooking each
-writer of `products` (the catalog, seeds, the demo reset). See
+writer of `products` (the catalog, seeds, the demo reset). An admin runs it on demand through
+`EngineRpc.reindexProducts`; a run holds `product_index_lease`, so two never overlap (they would
+spend the gateway's rate limit twice, and one that read a name before a rename could write its
+vector after one that read it after). See
 [Configuration](configuration.md#bindings).
 
 The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_change`) fills missing
