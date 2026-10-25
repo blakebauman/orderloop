@@ -53,6 +53,7 @@ export const AUDIT_ACTIONS = {
   'api.token_expired': 'API refused: expired token',
   'oauth.app_connected': 'Connected an app over MCP',
   'oauth.app_disconnected': 'Disconnected an app',
+  'oauth.refresh_reused': 'Revoked an app: its old refresh token was used again',
   'integration.created': 'Created an integration key',
   'integration.rotated': 'Rotated an integration key',
   'integration.revoked': 'Revoked an integration key',

@@ -39,7 +39,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   let app: string | null = null;
   if (next.startsWith('/oauth/authorize')) {
     const clientId = new URL(next, request.url).searchParams.get('client_id');
-    if (clientId) app = (await oauthApi(request).lookupClient(clientId))?.clientName ?? null;
+    // A registered client's own name only: a URL client id would be fetched (a Client ID Metadata
+    // Document), and this page is open to anyone. The consent page looks it up after sign-in.
+    if (clientId && !/^https?:/i.test(clientId))
+      app =
+        (
+          await oauthApi(request)
+            .lookupClient(clientId)
+            .catch(() => null)
+        )?.clientName ?? null;
   }
   return { app, demo: isDemo(), sso: !!ssoConfig(), ssoOnly: await ssoOnlyInEffect() };
 }

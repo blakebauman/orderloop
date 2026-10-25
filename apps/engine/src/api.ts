@@ -23,7 +23,7 @@ import {
   type StartOrderOnceInput,
   UCP_PATH,
 } from '@orderloop/core';
-import { A2A_PATH, handleA2A } from './a2a/route';
+import { A2A_PATH, a2aCaller, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
 import {
@@ -128,8 +128,14 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     return copilot(this.env, req);
   }
 
-  async dropA2aPushes(kind: 'user' | 'token', id: string) {
-    return { configs: await a2aAgent(this.env, `${kind}:${id}`).dropPushes() };
+  async dropA2aPushes(kind: 'user' | 'token', id: string, grants: readonly string[] = []) {
+    let configs = 0;
+    for (const name of [
+      a2aCaller({ kind, id }),
+      ...grants.map((grant) => a2aCaller({ kind, id, grant })),
+    ])
+      configs += await a2aAgent(this.env, name).dropPushes();
+    return { configs };
   }
 
   async runReplenish() {

@@ -334,10 +334,14 @@ export class PushSender implements PushNotificationSender {
         method: 'POST',
         headers: JSON.parse(headers) as Record<string, string>,
         body: row.body,
+        // The caller's token and credentials go to the URL they registered, never where it points.
+        redirect: 'manual',
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       await res.body?.cancel();
-      if (!res.ok) error = `HTTP ${res.status}`;
+      if (res.status >= 300 && res.status < 400)
+        error = `HTTP ${res.status} (redirects aren't followed)`;
+      else if (!res.ok) error = `HTTP ${res.status}`;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }

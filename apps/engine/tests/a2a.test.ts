@@ -10,7 +10,7 @@ import {
   type Principal,
 } from '@orderloop/core';
 import { createDb, users } from '@orderloop/db';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { SqlPushStore } from '../src/a2a/push';
 import { changeCart, createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
@@ -169,6 +169,40 @@ describe('A2A', () => {
     expect(theirs.error).toBeDefined();
     const back = await call(person('viewer', 'own@example.com'), 'GetTask', { id: mine.id });
     expect(back.result?.id).toBe(mine.id);
+  });
+
+  it('keeps two apps one person connected apart, push credentials included', async () => {
+    // Receivers that never answer, so configs stay put.
+    const fetching = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response('nope', { status: 500 }));
+    onTestFinished(() => fetching.mockRestore());
+    const me = person('viewer', 'two-apps@example.com');
+    const appA = { ...me, grant: 'grant_a', client: 'client_a' };
+    const appB = { ...me, grant: 'grant_b', client: 'client_b' };
+    const t = await call(appA, 'SendMessage', {
+      ...message([{ data: { skill: 'list_flows' } }]),
+      configuration: {
+        taskPushNotificationConfig: {
+          url: 'https://hooks.example/a',
+          authentication: { scheme: 'Bearer', credentials: 'secret-a' },
+        },
+      },
+    });
+    const taskId = (t.result!.task as Json).id as string;
+    // The other app can't see the task, its push config, or its credentials.
+    expect((await call(appB, 'GetTask', { id: taskId })).error).toBeDefined();
+    const theirs = await call(appB, 'ListTaskPushNotificationConfigs', { taskId });
+    expect(JSON.stringify(theirs)).not.toContain('secret-a');
+    expect((await call(appA, 'GetTask', { id: taskId })).result?.id).toBe(taskId);
+
+    // Disconnecting app A drops its push configs, and only its.
+    const { EngineApi } = await import('../src/api');
+    const api = new EngineApi({ waitUntil: () => {} } as never, env);
+    expect(await api.dropA2aPushes('user', me.id, ['grant_a'])).toEqual({ configs: 1 });
+    expect(
+      (await call(appA, 'ListTaskPushNotificationConfigs', { taskId })).result?.configs ?? [],
+    ).toHaveLength(0);
   });
 
   it('places an order once per message id and follows it to its approval', async () => {
@@ -575,6 +609,43 @@ describe('A2A push notifications', () => {
         ),
       'the outbox to empty',
     );
+  });
+
+  it('doesn’t follow a receiver’s redirect, so the credentials stay with its own URL', async () => {
+    const seen: { url: string; redirect?: string }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      seen.push({ url: String(url), redirect: init?.redirect });
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://elsewhere.example/' },
+      });
+    });
+    const viewer = person('viewer', 'redirect@example.com');
+    await call(viewer, 'SendMessage', {
+      ...message([{ data: { skill: 'list_flows' } }]),
+      configuration: {
+        taskPushNotificationConfig: {
+          url: 'https://hooks.example/moved',
+          authentication: { scheme: 'Bearer', credentials: 'abc' },
+        },
+      },
+    });
+    const stub = env.A2A_AGENT.getByName(`user:${viewer.id}`);
+    await until(
+      async () =>
+        runInDurableObject(stub, async (_i, state) => {
+          const rows = state.storage.sql
+            .exec<{ last_error: string | null }>(
+              'SELECT last_error FROM push_outbox WHERE attempts > 0',
+            )
+            .toArray();
+          return rows.length > 0 && rows.every((r) => r.last_error?.includes('302'));
+        }),
+      'a refused redirect',
+    );
+    expect(
+      seen.every((s) => s.url === 'https://hooks.example/moved' && s.redirect === 'manual'),
+    ).toBe(true);
   });
 
   it('drops what is still queued when a config is deleted', async () => {

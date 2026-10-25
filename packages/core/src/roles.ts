@@ -56,9 +56,11 @@ export const PRINCIPAL_HEADER = 'x-orderloop-principal';
 /**
  * What the proxy header carries: the principal plus, for a signed-in person, their session's id
  * (the SHA-256 the `sessions` table is keyed by), so the agent can check the session is still live.
- * The session id never reaches the browser.
+ * The session id never reaches the browser. A connected app's request (an OAuth grant, at `/mcp`
+ * or `/a2a`) also names the grant and the client it was issued to, so two apps one person
+ * connected are told apart: in the audit trail, and as separate A2A callers.
  */
-export type ProxiedPrincipal = Principal & { session?: string };
+export type ProxiedPrincipal = Principal & { session?: string; grant?: string; client?: string };
 
 /** How long a signed header is good for. A socket is checked once, when it connects. */
 export const PRINCIPAL_TTL_MS = 60_000;
@@ -171,6 +173,8 @@ export async function verifyPrincipal(
     ...(typeof p.email === 'string' ? { email: p.email } : {}),
     role: p.role,
     ...(typeof p.session === 'string' ? { session: p.session } : {}),
+    ...(typeof p.grant === 'string' ? { grant: p.grant } : {}),
+    ...(typeof p.client === 'string' ? { client: p.client } : {}),
   };
 }
 

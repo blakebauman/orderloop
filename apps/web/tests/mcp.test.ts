@@ -31,7 +31,10 @@ const grantPrincipal = vi.fn();
 const engineFetch = vi.fn(async (_r: Request) => Response.json({ ok: true }));
 
 vi.mock('cloudflare:workers', () => ({ env, WorkerEntrypoint: class {} }));
-vi.mock('~/lib/env.server', () => ({ engine: () => ({ fetch: engineFetch }) }));
+const dropA2aPushes = vi.fn(async () => ({ configs: 0 }));
+vi.mock('~/lib/env.server', () => ({ engine: () => ({ fetch: engineFetch, dropA2aPushes }) }));
+const audit = vi.fn(async () => {});
+vi.mock('~/lib/audit.server', () => ({ audit, clientIp: () => '203.0.113.7' }));
 vi.mock('~/lib/auth.server', () => ({
   apiPrincipal,
   grantPrincipal,
@@ -41,7 +44,9 @@ vi.mock('~/lib/auth.server', () => ({
     c.passwordChangeDue ? 'Password change due' : c.twoFactorDue ? 'Two-factor due' : null,
 }));
 
-const { isOAuthPath, oauthApi, oauthFetch, scopedGrant } = await import('~/lib/oauth.server');
+const { isOAuthPath, oauthApi, oauthFetch, REFRESH_GRACE_MS, scopedGrant } = await import(
+  '~/lib/oauth.server'
+);
 const { mcpDiscovery } = await import('~/lib/mcp-discovery');
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as never;
@@ -58,6 +63,9 @@ const post = (path: string, headers: Record<string, string> = {}) =>
 const mcp = (headers: Record<string, string> = {}) => post('/mcp', headers);
 
 const token: Principal = { kind: 'token', id: 'tok_1', name: 'token:claude', role: 'viewer' };
+
+const lastRefreshFrom = async (res: Response) =>
+  ((await res.json()) as { refresh_token: string }).refresh_token;
 
 describe('MCP and A2A on the web Worker', () => {
   beforeEach(() => {
@@ -234,8 +242,11 @@ describe('MCP and A2A on the web Worker', () => {
         env as never,
         ctx,
       );
-      return ((await res.json()) as { access_token: string }).access_token;
+      const tokens = (await res.json()) as { access_token: string; refresh_token: string };
+      lastRefresh = tokens.refresh_token;
+      return tokens.access_token;
     };
+    let lastRefresh = '';
     const person = { ...token, kind: 'user' as const, id: 'usr_1' };
     grantPrincipal.mockResolvedValue(person);
 
@@ -253,6 +264,87 @@ describe('MCP and A2A on the web Worker', () => {
     const narrow = await grant('/mcp', 'operator');
     expect((await post('/mcp', { authorization: `Bearer ${narrow}` })).status).toBe(200);
     expect(grantPrincipal).toHaveBeenCalledWith({ kind: 'user', id: 'usr_1', role: 'viewer' });
+
+    // The engine hears which app is calling: its grant and client, signed into the principal.
+    const sent = engineFetch.mock.calls.at(-1)![0] as Request;
+    const forwarded = await verifyPrincipal(
+      [env.PRINCIPAL_KEY],
+      sent.headers.get(PRINCIPAL_HEADER),
+      '/mcp',
+    );
+    expect(forwarded).toMatchObject({ grant: narrow.split(':')[1], client: client.clientId });
+
+    // A refresh token traded for a new one may be retried briefly (a lost response); any spent
+    // token presented after that revokes the grant, so no copy works.
+    const refresh = (token: string) =>
+      oauthFetch(
+        new Request('https://app.test/oauth/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: token,
+            client_id: client.clientId,
+          }),
+        }),
+        env as never,
+        ctx,
+      );
+    const at = (ms: number) => vi.setSystemTime(start + ms);
+    const start = Date.now();
+    vi.useFakeTimers({ now: start, toFake: ['Date'] });
+    try {
+      // Retried within the grace (the client never saw the answer): still accepted, and the
+      // retry doesn't move the window.
+      const t1 = lastRefresh;
+      const t2 = await lastRefreshFrom(await refresh(t1));
+      at(40_000);
+      const t2b = await lastRefreshFrom(await refresh(t1));
+      at(REFRESH_GRACE_MS + 1_000);
+      const late = await refresh(t1);
+      expect(late.status).toBe(400);
+      expect(await late.json()).toMatchObject({ error: 'invalid_grant' });
+      expect(audit).toHaveBeenCalledWith(
+        expect.anything(),
+        'oauth.refresh_reused',
+        expect.anything(),
+      );
+      // The grant is gone: no token works, and an A2A app's push configs went with it.
+      expect((await refresh(t2b)).status).toBe(400);
+      expect(dropA2aPushes).toHaveBeenCalledWith('user', 'usr_1', [t1.split(':')[1]]);
+      expect(t2).not.toBe(t2b);
+
+      // Two rotations back is caught too: a thief who refreshed twice doesn't hide the copy.
+      audit.mockClear();
+      at(0);
+      await grant('/mcp', 'operator');
+      const u1 = lastRefresh;
+      const u2 = await lastRefreshFrom(await refresh(u1));
+      const u3 = await lastRefreshFrom(await refresh(u2));
+      expect((await refresh(u1)).status).toBe(400);
+      expect(audit).toHaveBeenCalledWith(
+        expect.anything(),
+        'oauth.refresh_reused',
+        expect.anything(),
+      );
+      expect((await refresh(u3)).status).toBe(400);
+
+      // A token traded before spent tokens were recorded is left to the provider, never revoked.
+      audit.mockClear();
+      await grant('/mcp', 'operator');
+      const v1 = lastRefresh;
+      await lastRefreshFrom(await refresh(v1));
+      for (const k of [...kv.keys()]) if (k.startsWith('ol_spent:')) kv.delete(k);
+      at(10 * REFRESH_GRACE_MS);
+      expect((await refresh(v1)).status).toBe(200);
+      expect(audit).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'oauth.refresh_reused',
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('gives a token the lowest role its scope names, never more than the grant', () => {

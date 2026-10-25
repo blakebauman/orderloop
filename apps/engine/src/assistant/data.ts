@@ -634,7 +634,14 @@ export async function runAction<T extends ActionTool>(
   const preview = await previewAction(env, p, tool, input);
   if (preview.blocked) throw new Refused(preview.blocked);
   const by = via(p, channel);
-  const trail = { via: AUDIT_CHANNEL[channel], tool };
+  // A connected app's grant and client, so the audit trail tells two apps one person connected apart.
+  const app = p as { grant?: string; client?: string };
+  const trail = {
+    via: AUDIT_CHANNEL[channel],
+    tool,
+    ...(app.grant ? { grant: app.grant } : {}),
+    ...(app.client ? { client: app.client } : {}),
+  };
   switch (tool) {
     case 'decide_approval': {
       const i = input as ActionInput['decide_approval'];

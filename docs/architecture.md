@@ -138,7 +138,7 @@ before A2A) and one `OAuthResourceServer` per endpoint, which publishes
 role but admin, which the provider also names as `scope` in the `401` challenge; the consent page
 offers the same set) and accepts only tokens issued for it. The
 authorization server does dynamic client registration, Client ID Metadata Documents, tokens of
-1 hour (access) and 30 days (refresh), and keeps grants in KV `OAUTH_KV`. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
+1 hour (access) and 30 days (refresh), and keeps grants in KV `OAUTH_KV`. Only roles below admin are in `scopes_supported`. The consent page refuses a request without a PKCE `code_challenge` from any client (the provider requires it only of public ones). The provider rotates refresh tokens and still accepts the one before the current one. `refreshReuse`, before the provider sees a `refresh_token` grant, records the current token as spent when it is traded (`ol_spent:<sha256>`, 30 days, with when) and revokes the grant (audited `oauth.refresh_reused`, and the app's A2A push configs dropped) when any spent token comes back, except the previous one within `REFRESH_GRACE_MS` (a minute) of when it was traded, which a retry doesn't extend. A token traded before this was recorded is left to the provider. Two processes sharing one client's credentials and refreshing apart trip it too. `forward` adds the grant id (from the token) and client id to the signed principal (`grant`, `client`), and MCP and A2A actions put both in their audit detail. A2A push deliveries use `redirect: 'manual'` and count a 3xx as a failure. `/login` names a waiting app only for a registered client id, never fetching a URL one. The consent page is `routes/oauth-authorize.tsx`; the grant's `props` are
 the approver and the role they chose. A bearer that is not an issued
 token (one not shaped `<user>:<grant>:<secret>`) is checked as an `ol_live_` token by
 `apiPrincipal`, with its expiry (anything else is `401`), on either endpoint.
@@ -222,7 +222,7 @@ webhook subscriptions.
 `/a2a` is the same tools, plus `place_order` and `chat`, for Agent2Agent clients. `forward` is the
 same function as for MCP, aimed at `/a2a`. The engine's `fetch` and `EngineApi.fetch` hand it to
 `handleA2A` (`apps/engine/src/a2a/route.ts`), which sends it to
-`a2aAgent(env, "<kind>:<id>")` (named after the principal), so each caller has an `A2AAgent` Durable Object
+`a2aAgent(env, a2aCaller(p))`: `<kind>:<id>`, and `:<grant>` for a connected app (the forwarded principal names its OAuth grant and client), so each caller, and each app one person connected, has its own `A2AAgent` Durable Object
 (`agent.ts`, migration `v3`). A 0.3 method name (`message/send`, …) goes to the SDK's
 `LegacyJsonRpcTransportHandler`; otherwise it checks the `A2A-Version` header (absent means 1.0).
 Both run JSON-RPC through the same `@a2a-js/sdk` `DefaultRequestHandler`, with SSE for `SendStreamingMessage` and
@@ -243,7 +243,7 @@ under a key the deployment no longer has is dropped (logged) so the caller regis
 request open take a second path: `SqlTaskStore.follow` calls `OrderAgent.watch(<A2AAgent name>)`,
 the `OrderAgent` schedules `notifyWatchers` when its status or waits change, and that calls
 `A2AAgent.orderChanged(orderId)`, which re-reads each following task and pushes the ones that
-changed. Neither it nor the outbox's retry alarm sends anything once the agent's owner (its name, `<kind>:<id>`) is a disabled person or a revoked or expired token (`stillActive`, `apps/engine/src/principal.ts`; any kind but `user`, `token` or `open` counts as inactive); the alarm then drops what is queued. `EngineRpc.dropA2aPushes(kind, id)` (`A2AAgent.dropPushes`) forgets every push config and pending push of that caller, which the web app calls whenever a person's connected apps are ended. See [A2A endpoint](https://docs.orderloop.app/reference/a2a/#push-notifications).
+changed. Neither it nor the outbox's retry alarm sends anything once the agent's owner (its name, `a2aCaller`) is a disabled person or a revoked or expired token (`stillActive`, `apps/engine/src/principal.ts`; any kind but `user`, `token` or `open` counts as inactive); the alarm then drops what is queued. `EngineRpc.dropA2aPushes(kind, id)` (`A2AAgent.dropPushes`) forgets every push config and pending push of that caller, which the web app calls whenever a person's connected apps are ended. See [A2A endpoint](https://docs.orderloop.app/reference/a2a/#push-notifications).
 
 ## UCP (agentic checkout)
 
