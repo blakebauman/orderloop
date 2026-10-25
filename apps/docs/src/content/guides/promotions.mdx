@@ -33,8 +33,9 @@ column counts the orders that have used it.
 ## In a flow
 
 The built-in Storefront, Omnichannel and B2B order flows already have a **Promotions** step in
-place. A workspace that already had those flows keeps its own versions: publish a new version
-with the step to use codes there. On other flows, add **Apply promotions** after **Price lines**,
+place. A workspace that already had those flows gets a new version of each with the step, which
+replaces edits made to them since; orders already running keep the version they started on. On
+other flows, add **Apply promotions** after **Price lines**,
 and before **Calculate tax** so tax is worked out on the discounted prices. For free shipping, place it after **Shipping rate** too. With
 **Stack codes** off (the default) only the code worth the most applies; on, every code that
 applies is used, each on the prices the one before left.

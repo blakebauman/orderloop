@@ -1,5 +1,12 @@
 import { env } from 'cloudflare:workers';
-import { b2bOrderFlow, type Order, type RunContext, withDefaults } from '@orderloop/core';
+import {
+  b2bOrderFlow,
+  type Order,
+  omnichannelOrderFlow,
+  type RunContext,
+  storefrontOrderFlow,
+  withDefaults,
+} from '@orderloop/core';
 import { createDb, promotionRedemptions, promotions } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -166,17 +173,12 @@ describe('commerce.tax by region', () => {
   });
 });
 
-// The built-in flows don't use the node; it validates where an operator adds it.
+// The built-in flows that take codes run it in their checkout quote, so a quote is discounted too.
 it('is a pricing node the checkout quote runs', async () => {
   const { quoteNodes } = await import('@orderloop/core');
-  const flow = b2bOrderFlow();
-  flow.nodes.push({
-    id: 'promo',
-    type: 'commerce.discount',
-    label: 'Promotions',
-    config: {},
-    position: { x: 0, y: 0 },
-  });
-  flow.edges.push({ id: 'e-promo', source: 'price', target: 'promo' });
-  expect(quoteNodes(flow).map((n) => n.type)).toContain('commerce.discount');
+  for (const flow of [b2bOrderFlow(), storefrontOrderFlow(), omnichannelOrderFlow()])
+    expect([flow.id, quoteNodes(flow).map((n) => n.type)]).toEqual([
+      flow.id,
+      expect.arrayContaining(['commerce.discount']),
+    ]);
 });
