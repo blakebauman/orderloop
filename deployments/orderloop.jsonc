@@ -24,8 +24,5 @@
   // Admins may ask the assistant to draft business-rule plugins (docs/plugins.md, "Assistant-drafted
   // plugins"): logic only, run sandboxed, and live only once an admin approves one with a step-up
   // and every case passes. No publishers yet, so no signed uploads.
-  "pluginInstalls": { "assistant": true },
-  // TEMPORARY (2026-10-25): request logs on to verify the gateway metadata and the assistant's
-  // no-payload header after #266/#267. Turn off again in the follow-up PR and delete the logs.
-  "aiGatewayLogs": true
+  "pluginInstalls": { "assistant": true }
 }

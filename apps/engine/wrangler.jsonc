@@ -95,8 +95,7 @@
     // AI Gateway for every model call: logs, analytics and a rate limit (120 a minute, sliding).
     // Empty calls Workers AI directly; local dev does, so it never shares production's limit.
     "AI_GATEWAY_ID": "orderloop",
-    // TEMPORARY (2026-10-25): "true" to verify gateway metadata; back to "false" in the follow-up.
-    "AI_GATEWAY_LOGS": "true",
+    "AI_GATEWAY_LOGS": "false",
     // "live" calls Workers AI; "mock" uses deterministic heuristics (tests, offline dev).
     "AI_MODE": "live",
     // Divides every wait and timeout. "1" is real time; local dev overrides it to "1440" (a day
