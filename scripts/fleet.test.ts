@@ -606,7 +606,10 @@ test('runtime installs are off unless the registry lists publishers', () => {
   const on = toDeployment({ ...raw, pluginInstalls: { publishers: { acme: key } } });
   assert.equal(renderEngine(base('engine'), on).vars.PLUGIN_PUBLISHERS, `{"acme":"${key}"}`);
   assert.equal(renderEngine(base('engine'), toDeployment(raw)).vars.PLUGIN_PUBLISHERS, undefined);
+  // Not the base config's (orderloop.app's) "on": only a registry that asks for it.
+  assert.equal(base('engine').vars.ASSISTANT_PLUGINS, 'on');
   assert.equal(renderEngine(base('engine'), on).vars.ASSISTANT_PLUGINS, undefined);
+  assert.equal(renderEngine(base('engine'), toDeployment(raw)).vars.ASSISTANT_PLUGINS, undefined);
   const drafts = toDeployment({ ...raw, pluginInstalls: { assistant: true } });
   assert.equal(renderEngine(base('engine'), drafts).vars.ASSISTANT_PLUGINS, 'on');
   assert.equal(renderEngine(base('engine'), drafts).vars.PLUGIN_PUBLISHERS, undefined);

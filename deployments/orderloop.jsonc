@@ -20,5 +20,9 @@
       "runtime": "sandboxed",
       "capabilities": ["carts:external", "orders:start", "orders:cancel"]
     }
-  }
+  },
+  // Admins may ask the assistant to draft business-rule plugins (docs/plugins.md, "Assistant-drafted
+  // plugins"): logic only, run sandboxed, and live only once an admin approves one with a step-up
+  // and every case passes. No publishers yet, so no signed uploads.
+  "pluginInstalls": { "assistant": true }
 }
