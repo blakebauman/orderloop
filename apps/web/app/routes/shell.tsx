@@ -199,7 +199,7 @@ function AssistantToggle() {
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
       <span className="sr-only sm:not-sr-only md:max-lg:sr-only">Assistant</span>
-      <kbd className="hidden font-sans text-[11px] text-muted-foreground lg:inline">⌘J</kbd>
+      <kbd className="hidden font-sans text-[11px] text-muted-foreground lg:fine:inline">⌘J</kbd>
     </button>
   );
 }
