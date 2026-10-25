@@ -8,7 +8,7 @@ export default [
   route('login/sso', 'routes/login-sso.ts'),
   route('login/sso/callback', 'routes/login-sso-callback.ts'),
   route('login/sso/link', 'routes/login-sso-link.tsx'),
-  route('logout', 'routes/logout.ts'),
+  route('logout', 'routes/logout.tsx'),
   // A new deployment's first admin, from its one-time setup code (lib/setup.server.ts).
   route('setup', 'routes/setup.tsx'),
   // The consent page MCP clients send people to (lib/oauth.server.ts).

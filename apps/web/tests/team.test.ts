@@ -51,7 +51,7 @@ vi.mock('~/lib/oauth.server', () => ({
 }));
 
 const { endAccess } = await import('~/lib/access.server');
-const { createToken, resetPassword, setDisabled, setRole, TeamError } = await import(
+const { createToken, needsStepUp, resetPassword, setDisabled, setRole, TeamError } = await import(
   '~/lib/team.server'
 );
 const { resetTwoFactor } = await import('~/lib/two-factor.server');
@@ -200,5 +200,48 @@ describe('the Team page ends what no longer fits', () => {
       await expect(createToken(request, admin, input)).rejects.toBeInstanceOf(TeamError);
       expect(touched()).toEqual(['tokens']);
     }
+  });
+});
+
+describe('which Team page changes ask for a step-up', () => {
+  const form = (fields: Record<string, string>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    return f;
+  };
+
+  it('asks before handing out access, and not for everyday changes', async () => {
+    for (const intent of [
+      'add-token',
+      'scim-token',
+      'reset',
+      'reset-two-factor',
+      'sso-settings',
+      'two-factor-requirement',
+    ])
+      expect(await needsStepUp(intent, form({ intent }))).toBe(true);
+    for (const intent of ['disable', 'revoke', 'scim-revoke', 'approval-separation'])
+      expect(await needsStepUp(intent, form({ intent }))).toBe(false);
+    expect(await needsStepUp('add-user', form({ role: 'operator' }))).toBe(false);
+    expect(await needsStepUp('add-user', form({ role: 'admin' }))).toBe(true);
+  });
+
+  it('asks before making someone an admin, not when they already are one', async () => {
+    rows = [{ role: 'operator' }];
+    expect(await needsStepUp('role', form({ id: 'usr_ann', role: 'admin' }))).toBe(true);
+    rows = [{ role: 'admin' }];
+    expect(await needsStepUp('role', form({ id: 'usr_ann', role: 'admin' }))).toBe(false);
+    expect(await needsStepUp('role', form({ id: 'usr_ann', role: 'viewer' }))).toBe(false);
+  });
+
+  it('asks before a group is mapped to Admin, and before enabling anyone above Viewer', async () => {
+    expect(await needsStepUp('scim-roles', form({ 'role:grp_1': 'admin' }))).toBe(true);
+    expect(
+      await needsStepUp('scim-roles', form({ 'role:grp_1': 'operator', 'role:grp_2': '' })),
+    ).toBe(false);
+    rows = [{ role: 'admin' }];
+    expect(await needsStepUp('enable', form({ id: 'usr_ann' }))).toBe(true);
+    rows = [{ role: 'viewer' }];
+    expect(await needsStepUp('enable', form({ id: 'usr_ann' }))).toBe(false);
   });
 });

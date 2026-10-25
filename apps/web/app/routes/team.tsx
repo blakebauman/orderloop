@@ -18,7 +18,15 @@ import { Ago } from '~/components/ago';
 import { CopyButton } from '~/components/copy-button';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
-import { requireUser, startSession } from '~/lib/auth.server';
+import { StepUpField } from '~/components/step-up-field';
+import { audit } from '~/lib/audit.server';
+import {
+  requireUser,
+  type StepUpMethod,
+  startSession,
+  stepUp,
+  stepUpMethod,
+} from '~/lib/auth.server';
 import { SCIM_PATH } from '~/lib/scim';
 import {
   createScimToken,
@@ -42,6 +50,7 @@ import {
   createFirstAdmin,
   createToken,
   listTeam,
+  needsStepUp,
   resetPassword,
   revokeToken,
   setDisabled,
@@ -63,6 +72,7 @@ export const meta = () => [{ title: 'Team · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
+  const stepUp = await stepUpMethod(me);
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
   const [team, twoFactorRequired, separated, sso, scimToken, scimGroups] = await Promise.all([
     listTeam(),
@@ -90,6 +100,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     me,
     now: Date.now(),
     signInUrl,
+    stepUp,
   };
 }
 
@@ -109,6 +120,17 @@ export async function action({ request }: Route.ActionArgs) {
         password: str('password'),
       });
       return redirect('/team', { headers: { 'set-cookie': await startSession(request, id) } });
+    }
+    if (me.kind === 'user' && (await needsStepUp(str('intent'), f))) {
+      const failed = await stepUp(request, me, { code: str('code'), password: str('password') });
+      if (failed) {
+        await audit(request, 'auth.step_up_failed', {
+          actor: me,
+          target: str('who') || null,
+          detail: { intent: str('intent'), error: failed, ...(str('id') ? { id: str('id') } : {}) },
+        });
+        return data({ error: failed }, { status: 403 });
+      }
     }
     switch (str('intent')) {
       case 'add-user': {
@@ -261,6 +283,35 @@ function RoleGuide() {
   );
 }
 
+/** A person's role, saved from their row; making them an admin asks who you are first. */
+function RoleForm({
+  id,
+  name,
+  role,
+  stepUp,
+  fetcher,
+}: {
+  id: string;
+  name: string;
+  role: Role;
+  stepUp: StepUpMethod | null;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [chosen, setChosen] = useState<Role>(role);
+  return (
+    <fetcher.Form method="post" className="flex flex-wrap items-center gap-1.5">
+      <input type="hidden" name="intent" value="role" />
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="who" value={name} />
+      <RoleSelect value={role} label={`Role for ${name}`} compact onChange={setChosen} />
+      <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+        Save
+      </Button>
+      {chosen === 'admin' && role !== 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
+    </fetcher.Form>
+  );
+}
+
 function RoleSelect({
   name = 'role',
   value,
@@ -294,8 +345,9 @@ function RoleSelect({
 }
 
 export default function Team() {
-  const { people, tokens, me, now, twoFactorRequired, separated, sso, scim, signInUrl } =
+  const { people, tokens, me, now, twoFactorRequired, separated, sso, scim, signInUrl, stepUp } =
     useLoaderData<typeof loader>();
+  const [newRole, setNewRole] = useState<Role>('viewer');
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
@@ -431,19 +483,13 @@ export default function Team() {
                             </div>
                           </td>
                           <td className="block sm:table-cell sm:px-2 sm:py-2">
-                            <fetcher.Form method="post" className="flex items-center gap-1.5">
-                              <input type="hidden" name="intent" value="role" />
-                              <input type="hidden" name="id" value={p.id} />
-                              <input type="hidden" name="who" value={p.name} />
-                              <RoleSelect
-                                value={p.role as Role}
-                                label={`Role for ${p.name}`}
-                                compact
-                              />
-                              <Button size="sm" variant="outline" type="submit" disabled={busy}>
-                                Save
-                              </Button>
-                            </fetcher.Form>
+                            <RoleForm
+                              id={p.id}
+                              name={p.name}
+                              role={p.role as Role}
+                              stepUp={stepUp}
+                              fetcher={fetcher}
+                            />
                           </td>
                           <td className="block text-muted-foreground text-xs sm:table-cell sm:px-2 sm:py-2">
                             <span className="sm:hidden">Last sign-in: </span>
@@ -465,14 +511,9 @@ export default function Team() {
                                 </AskButton>
                               ) : null}
                               {p.id === me.id ? null : p.disabledAt ? (
-                                <fetcher.Form method="post">
-                                  <input type="hidden" name="intent" value="enable" />
-                                  <input type="hidden" name="id" value={p.id} />
-                                  <input type="hidden" name="who" value={p.name} />
-                                  <Button size="sm" variant="ghost" type="submit" disabled={busy}>
-                                    Enable
-                                  </Button>
-                                </fetcher.Form>
+                                <AskButton id={p.id} intent="enable" asking={asking} ask={ask}>
+                                  Enable…
+                                </AskButton>
                               ) : (
                                 <AskButton id={p.id} intent="disable" asking={asking} ask={ask}>
                                   Disable…
@@ -497,6 +538,10 @@ export default function Team() {
                                 <span className="mr-auto text-sm">
                                   {QUESTIONS[asking.intent](p.name)}
                                 </span>
+                                {asking.intent === 'disable' ||
+                                (asking.intent === 'enable' && p.role === 'viewer') ? null : (
+                                  <StepUpField method={stepUp} next="/team" />
+                                )}
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -546,15 +591,21 @@ export default function Team() {
                 <Input name="name" autoComplete="off" />
               </Field>
               <Field label="Role">
-                <RoleSelect />
+                <RoleSelect onChange={setNewRole} />
               </Field>
               <Button type="submit" disabled={busy}>
                 Add person
               </Button>
+              {newRole === 'admin' ? (
+                <div className="sm:col-span-4">
+                  <StepUpField method={stepUp} next="/team" />
+                </div>
+              ) : null}
             </fetcher.Form>
           </Section>
 
           <TwoFactorRequirementForm
+            stepUp={stepUp}
             required={twoFactorRequired}
             missing={
               people.filter(
@@ -566,9 +617,9 @@ export default function Team() {
             }
           />
 
-          {sso ? <SsoForm {...sso} /> : null}
+          {sso ? <SsoForm {...sso} stepUp={stepUp} /> : null}
 
-          <ScimSection {...scim} fetcher={fetcher} />
+          <ScimSection {...scim} stepUp={stepUp} fetcher={fetcher} />
 
           <ApprovalSeparationForm separated={separated} />
 
@@ -638,6 +689,9 @@ export default function Team() {
               <Button type="submit" disabled={busy}>
                 Create token
               </Button>
+              <div className="sm:col-span-4">
+                <StepUpField method={stepUp} next="/team" />
+              </div>
               {/* The role is the boundary: say what this token will be able to do before it exists. */}
               <p
                 className="max-w-[65ch] text-muted-foreground text-xs sm:col-span-4"
@@ -654,18 +708,20 @@ export default function Team() {
   );
 }
 
-type Asked = 'reset' | 'reset-two-factor' | 'disable';
+type Asked = 'reset' | 'reset-two-factor' | 'disable' | 'enable';
 
 const QUESTIONS: Record<Asked, (name: string) => string> = {
   reset: (n) => `Give ${n} a temporary password and sign them out everywhere?`,
   'reset-two-factor': (n) => `Turn off ${n}’s two-factor sign-in so they can set it up again?`,
   disable: (n) => `Disable ${n}? They can’t sign in, and they’re signed out everywhere.`,
+  enable: (n) => `Enable ${n}? They can sign in again with their password or single sign-on.`,
 };
 
 const ACTIONS: Record<Asked, string> = {
   reset: 'Reset password',
   'reset-two-factor': 'Reset two-factor',
   disable: 'Disable',
+  enable: 'Enable',
 };
 
 /** Opens the confirmation for an action that can't be taken back. */
@@ -778,15 +834,29 @@ function ScimSection({
   endpoint,
   token,
   groups,
+  stepUp,
   fetcher,
 }: {
+  stepUp: StepUpMethod | null;
   endpoint: string;
   token: { updatedAt: number; updatedBy: string } | null;
   groups: { id: string; displayName: string; members: number; role: Role | null }[];
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const busy = fetcher.state !== 'idle';
-  const roles = useFetcher();
+  const roles = useFetcher<typeof action>();
+  const rolesError = roles.data && 'error' in roles.data ? roles.data.error : null;
+  // Mapping a group to Admin makes its members admins: that asks who you are first.
+  const [admins, setAdmins] = useState(
+    () => new Set(groups.filter((g) => g.role === 'admin').map((g) => g.id)),
+  );
+  const pick = (id: string, role: string) =>
+    setAdmins((was) => {
+      const next = new Set(was);
+      if (role === 'admin') next.add(id);
+      else next.delete(id);
+      return next;
+    });
   return (
     <Section title="SCIM provisioning">
       <p className="max-w-[65ch] text-muted-foreground text-xs">
@@ -811,8 +881,9 @@ function ScimSection({
             'No token: provisioning is off.'
           )}
         </span>
-        <fetcher.Form method="post">
+        <fetcher.Form method="post" className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="intent" value="scim-token" />
+          <StepUpField method={stepUp} next="/team" />
           <Button size="sm" variant="outline" type="submit" disabled={busy}>
             {token ? 'Replace token' : 'Make a token'}
           </Button>
@@ -847,6 +918,7 @@ function ScimSection({
                   defaultValue={g.role ?? ''}
                   className="h-8"
                   aria-label={`Role for ${g.displayName}`}
+                  onChange={(e) => pick(g.id, e.target.value)}
                 >
                   <NativeSelectOption value="">Gives no role</NativeSelectOption>
                   {ROLES.map((r) => (
@@ -858,6 +930,11 @@ function ScimSection({
               </li>
             ))}
           </ul>
+          {admins.size ? (
+            <div className="mt-2">
+              <StepUpField method={stepUp} next="/team" />
+            </div>
+          ) : null}
           <Button
             size="sm"
             variant="outline"
@@ -867,6 +944,11 @@ function ScimSection({
           >
             Save group roles
           </Button>
+          {rolesError ? (
+            <p role="alert" className="mt-2 text-destructive text-sm">
+              {rolesError}
+            </p>
+          ) : null}
           <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
             Someone in a group that gives a role has the highest role of their groups, or Viewer
             when none of theirs gives one. Their role follows changes to their groups, and the last
@@ -887,12 +969,15 @@ function SsoForm({
   issuer,
   settings,
   linked,
+  stepUp,
 }: {
   issuer: string;
   settings: SsoSettings;
   linked: boolean;
+  stepUp: StepUpMethod | null;
 }) {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
+  const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
   return (
     <Section title="Single sign-on">
       <p className="max-w-[65ch] text-muted-foreground text-xs">
@@ -933,11 +1018,17 @@ function SsoForm({
           <input type="checkbox" name="only" value="on" defaultChecked={settings.ssoOnly} />
           Single sign-on only: turn off passwords and passkeys
         </label>
+        <StepUpField method={stepUp} next="/team" />
         <div>
           <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
             Save
           </Button>
         </div>
+        {error ? (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
+        ) : null}
       </fetcher.Form>
       <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
         With single sign-on only, your identity provider handles two-factor sign-in, and a person
@@ -986,11 +1077,14 @@ function ApprovalSeparationForm({ separated }: { separated: boolean }) {
 function TwoFactorRequirementForm({
   required,
   missing,
+  stepUp,
 }: {
   required: TwoFactorRequirement;
   missing: number;
+  stepUp: StepUpMethod | null;
 }) {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
+  const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
   return (
     <Section title="Two-factor sign-in">
       <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
@@ -1005,10 +1099,16 @@ function TwoFactorRequirementForm({
             </NativeSelectOption>
           ))}
         </NativeSelect>
+        <StepUpField method={stepUp} next="/team" />
         <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
           Save
         </Button>
       </fetcher.Form>
+      {error ? (
+        <p role="alert" className="mt-2 text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
       <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
         People in these roles without two-factor sign-in can only use their Account page until they
         set it up, and can’t turn it off. API tokens aren’t affected.

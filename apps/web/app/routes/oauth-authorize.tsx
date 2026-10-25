@@ -15,8 +15,15 @@ import { Button } from '@orderloop/ui/button';
 import { useState } from 'react';
 import { data, Form, Link, useActionData, useLoaderData, useLocation } from 'react-router';
 import { Mark } from '~/components/mark';
+import { StepUpField } from '~/components/step-up-field';
 import { audit } from '~/lib/audit.server';
-import { type GrantProps, requireUser } from '~/lib/auth.server';
+import {
+  type GrantProps,
+  requireUser,
+  type StepUpMethod,
+  stepUp,
+  stepUpMethod,
+} from '~/lib/auth.server';
 import { channelOf, type GRANTABLE_ROLES, oauthApi } from '~/lib/oauth.server';
 import type { Route } from './+types/oauth-authorize';
 
@@ -93,6 +100,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         roles,
         who: me.email ?? me.name,
         channel: channelOf(authRequest.resource),
+        stepUp: await stepUpMethod(me),
       },
       {
         headers: consent.headers,
@@ -116,6 +124,21 @@ export async function action({ request }: Route.ActionArgs) {
     const role = form.get('role');
     if (!isRole(role) || !grantable(role) || !atLeast(me.role, role))
       return data({ error: 'Choose a role you have yourself.' }, { status: 400 });
+    // An app that can act, not just read, keeps access for weeks: confirm it's the person at the
+    // keyboard first, before the single-use handle is spent.
+    if (me.kind === 'user' && role !== 'viewer') {
+      const failed = await stepUp(request, me, {
+        code: String(form.get('code') ?? ''),
+        password: String(form.get('password') ?? ''),
+      });
+      if (failed) {
+        await audit(request, 'auth.step_up_failed', {
+          actor: me,
+          detail: { intent: 'oauth-consent', role, error: failed },
+        });
+        return data({ error: failed }, { status: 403 });
+      }
+    }
     const approved = await oauth.approveConsent(request, handle, { scope: [role] });
     const client = await oauth.lookupClient(approved.request.clientId);
     const app = client?.clientName || approved.request.clientId;
@@ -169,7 +192,7 @@ export default function OAuthAuthorize() {
             </Link>
           </>
         ) : (
-          <Consent {...d} switchAccount={switchAccount} />
+          <Consent {...d} switchAccount={switchAccount} here={here.pathname + here.search} />
         )}
       </div>
     </main>
@@ -183,6 +206,8 @@ function Consent({
   who,
   channel,
   switchAccount,
+  stepUp,
+  here,
 }: {
   details: ConsentDescription;
   handle: string;
@@ -190,111 +215,126 @@ function Consent({
   who: string;
   channel: string;
   switchAccount: string;
+  stepUp: StepUpMethod | null;
+  here: string;
 }) {
   // React escapes every string below; all of them may come from the client.
   const [sending, setSending] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<Role | undefined>(roles[0]);
   const refused = useActionData<typeof action>();
   const kind = channel === 'A2A' ? 'an agent (A2A)' : 'an AI client (MCP)';
   return (
-    <Form
-      method="post"
-      reloadDocument
-      onSubmit={(e) => {
-        // One decision per page. The buttons stay enabled: a disabled submitter would drop its
-        // `decision` from the form, turning Connect into Cancel.
-        if (sending) e.preventDefault();
-        else
-          setSending((e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') ?? 'approve');
-      }}
-    >
-      <input type="hidden" name="handle" value={handle} />
-      {/* The name is the app's own claim; without a known publisher, say so beside it. */}
-      <h1 className="mt-4 text-balance font-semibold tracking-title text-2xl">
-        Connect {details.clientDomain ? details.clientName : `“${details.clientName}”`} to
-        OrderLoop?
-      </h1>
-      {details.clientDomain ? null : (
-        <span className="mt-1.5 inline-block rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
-          Unverified name
-        </span>
-      )}
-      <p className="mt-2 text-sm">
-        {details.clientDomain ? (
-          <>
-            Published by <strong className="font-medium">{details.clientDomain}</strong>.
-          </>
-        ) : (
-          'This app registered itself; its name is not verified.'
-        )}{' '}
-        It is {kind}. Access will be sent to{' '}
-        <strong className="font-mono font-medium">{details.redirectHost}</strong>.
-      </p>
-      <p className="mt-2 text-muted-foreground text-xs">
-        Not {who}?{' '}
-        <a href={switchAccount} className="text-link hover:underline">
-          Use a different account
-        </a>
-      </p>
-      {details.redirectIsLoopback ? (
-        <p className="mt-3 rounded-md border border-wait/40 bg-wait/10 p-3 text-sm">
-          <span className="font-medium">This sends access to an app on your computer.</span>{' '}
-          Continue only if you just started connecting from it.
+    <>
+      <Form
+        method="post"
+        reloadDocument
+        onSubmit={(e) => {
+          // One decision per page. The buttons stay enabled: a disabled submitter would drop its
+          // `decision` from the form, turning Connect into Cancel.
+          if (sending) e.preventDefault();
+          else
+            setSending(
+              (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') ?? 'approve',
+            );
+        }}
+      >
+        <input type="hidden" name="handle" value={handle} />
+        {/* The name is the app's own claim; without a known publisher, say so beside it. */}
+        <h1 className="mt-4 text-balance font-semibold tracking-title text-2xl">
+          Connect {details.clientDomain ? details.clientName : `“${details.clientName}”`} to
+          OrderLoop?
+        </h1>
+        {details.clientDomain ? null : (
+          <span className="mt-1.5 inline-block rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
+            Unverified name
+          </span>
+        )}
+        <p className="mt-2 text-sm">
+          {details.clientDomain ? (
+            <>
+              Published by <strong className="font-medium">{details.clientDomain}</strong>.
+            </>
+          ) : (
+            'This app registered itself; its name is not verified.'
+          )}{' '}
+          It is {kind}. Access will be sent to{' '}
+          <strong className="font-mono font-medium">{details.redirectHost}</strong>.
         </p>
-      ) : null}
-      <fieldset className="mt-5">
-        <legend className="text-sm">
-          It will act as <span className="font-medium">{who}</span>, with the role
-        </legend>
-        <div className="mt-2 space-y-2">
-          {roles.map((r, i) => (
-            <label
-              key={r}
-              className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary"
-            >
-              <input
-                type="radio"
-                name="role"
-                value={r}
-                defaultChecked={i === 0}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium">{ROLE_LABELS[r]}</span>
-                <span className="block text-muted-foreground text-xs">{ROLE_SCOPE[r]}</span>
-              </span>
-            </label>
-          ))}
+        <p className="mt-2 text-muted-foreground text-xs">
+          Not {who}?{' '}
+          <button type="submit" form="switch-account" className="text-link hover:underline">
+            Use a different account
+          </button>
+        </p>
+        {details.redirectIsLoopback ? (
+          <p className="mt-3 rounded-md border border-wait/40 bg-wait/10 p-3 text-sm">
+            <span className="font-medium">This sends access to an app on your computer.</span>{' '}
+            Continue only if you just started connecting from it.
+          </p>
+        ) : null}
+        <fieldset className="mt-5">
+          <legend className="text-sm">
+            It will act as <span className="font-medium">{who}</span>, with the role
+          </legend>
+          <div className="mt-2 space-y-2">
+            {roles.map((r, i) => (
+              <label
+                key={r}
+                className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary"
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={r}
+                  defaultChecked={i === 0}
+                  onChange={() => setChosen(r)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{ROLE_LABELS[r]}</span>
+                  <span className="block text-muted-foreground text-xs">{ROLE_SCOPE[r]}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <p className="mt-3 text-muted-foreground text-xs">
+          Orders show what it does as “{who} via {channel}”. It keeps access until you disconnect it
+          on your Account page, and never more than your own role: lower your role, and the app’s
+          drops with it.
+        </p>
+        {chosen && chosen !== 'viewer' ? (
+          <div className="mt-3">
+            <StepUpField method={stepUp} next={here} />
+          </div>
+        ) : null}
+        {refused && 'error' in refused ? (
+          <p role="alert" className="mt-3 text-destructive text-sm">
+            {refused.error}
+          </p>
+        ) : null}
+        <div className="mt-5 flex gap-2">
+          <Button
+            type="submit"
+            name="decision"
+            value="approve"
+            aria-disabled={!!sending || undefined}
+          >
+            {sending === 'approve' ? 'Connecting…' : 'Connect'}
+          </Button>
+          <Button
+            type="submit"
+            name="decision"
+            value="deny"
+            variant="outline"
+            aria-disabled={!!sending || undefined}
+          >
+            {sending === 'deny' ? 'Cancelling…' : 'Cancel'}
+          </Button>
         </div>
-      </fieldset>
-      <p className="mt-3 text-muted-foreground text-xs">
-        Orders show what it does as “{who} via {channel}”. It keeps access until you disconnect it
-        on your Account page, and never more than your own role: lower your role, and the app’s
-        drops with it.
-      </p>
-      {refused && 'error' in refused ? (
-        <p role="alert" className="mt-3 text-destructive text-sm">
-          {refused.error}
-        </p>
-      ) : null}
-      <div className="mt-5 flex gap-2">
-        <Button
-          type="submit"
-          name="decision"
-          value="approve"
-          aria-disabled={!!sending || undefined}
-        >
-          {sending === 'approve' ? 'Connecting…' : 'Connect'}
-        </Button>
-        <Button
-          type="submit"
-          name="decision"
-          value="deny"
-          variant="outline"
-          aria-disabled={!!sending || undefined}
-        >
-          {sending === 'deny' ? 'Cancelling…' : 'Cancel'}
-        </Button>
-      </div>
-    </Form>
+      </Form>
+      {/* Signing out is a POST; it comes back here (`next`) to sign in as someone else. */}
+      <form id="switch-account" method="post" action={switchAccount} hidden />
+    </>
   );
 }

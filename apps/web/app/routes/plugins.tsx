@@ -18,6 +18,7 @@ import { Ago } from '~/components/ago';
 import { Field } from '~/components/inspector';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
+import { StepUpField } from '~/components/step-up-field';
 import { requireUser, type StepUpMethod, stepUpMethod } from '~/lib/auth.server';
 import { BodyTooLarge, readText } from '~/lib/body';
 import { db, engine } from '~/lib/env.server';
@@ -189,39 +190,6 @@ function Upload() {
   );
 }
 
-/** What proves it's the admin before a change to what runs: the field their sign-in asks for. */
-function StepUpField({ method }: { method: StepUpMethod | null }) {
-  if (method === 'code')
-    return (
-      <Field label="Code from your authenticator app">
-        <Input
-          name="code"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          pattern="[0-9]{6}"
-          required
-          className="w-32"
-        />
-      </Field>
-    );
-  if (method === 'password')
-    return (
-      <Field label="Your password">
-        <Input name="password" type="password" autoComplete="current-password" required />
-      </Field>
-    );
-  // A plain link: the provider's sign-in is a top-level GET, and it brings them back here.
-  return (
-    <p className="text-muted-foreground text-xs">
-      You sign in with single sign-on:{' '}
-      <a href="/login/sso?reauth=1&next=%2Fplugins" className="text-link hover:underline">
-        confirm it’s you
-      </a>
-      , then do this within ten minutes.
-    </p>
-  );
-}
-
 function SecretForm({
   id,
   name,
@@ -249,7 +217,7 @@ function SecretForm({
           className="w-64"
         />
       </Field>
-      {stepUp !== undefined ? <StepUpField method={stepUp} /> : null}
+      {stepUp !== undefined ? <StepUpField method={stepUp} next="/plugins" /> : null}
       <Button type="submit" size="sm" variant="outline">
         {set ? 'Replace' : 'Set'}
       </Button>
@@ -341,7 +309,7 @@ function Review({
             </span>
           </label>
         ) : null}
-        <StepUpField method={stepUp} />
+        <StepUpField method={stepUp} next="/plugins" />
         <Button
           type="submit"
           disabled={missing.length > 0 || failing || busyWith(nav, 'approve', i.sha)}
@@ -486,7 +454,7 @@ function InstallControls({
         <Form method="post" className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="intent" value={on ? 'disable' : 'enable'} />
           <input type="hidden" name="id" value={current.id} />
-          {on ? null : <StepUpField method={stepUp} />}
+          {on ? null : <StepUpField method={stepUp} next="/plugins" />}
           <Button type="submit" size="sm" variant="outline">
             {on ? 'Turn off' : 'Turn on'}
           </Button>
@@ -506,7 +474,7 @@ function InstallControls({
                   {v.sha.slice(0, 12)} · uploaded <Ago ms={v.uploadedAt} />
                 </span>
               </span>
-              <StepUpField method={stepUp} />
+              <StepUpField method={stepUp} next="/plugins" />
               <Button type="submit" size="sm" variant="outline">
                 Roll back to {v.version}
               </Button>
@@ -517,7 +485,7 @@ function InstallControls({
       <Form method="post" className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="intent" value="uninstall" />
         <input type="hidden" name="id" value={current.id} />
-        <StepUpField method={stepUp} />
+        <StepUpField method={stepUp} next="/plugins" />
         <Button type="submit" size="sm" variant="destructive">
           Uninstall
         </Button>

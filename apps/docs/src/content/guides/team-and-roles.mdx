@@ -47,6 +47,16 @@ in with their password. It is recorded as `team.sso_settings` with the setup cod
 
 Admins manage people and tokens at `/team`:
 
+Changes that hand out access, or lower the bar for it, ask you to confirm it's you first (a
+**step-up**): a current code from your authenticator app if you use two-factor sign-in, else your
+password, else signing in again with single sign-on within the last ten minutes. They are making an
+API token or the SCIM token, adding an admin or making someone one (directly, or by having an
+identity provider group give Admin), enabling someone above Viewer, resetting someone's password or
+two-factor sign-in, and saving the single sign-on or two-factor settings. Disabling and demoting
+people, revoking tokens and the approvals setting don't ask: they take access away rather than
+hand it out. A wrong answer is refused,
+counted against the same limit as other step-ups and audited as `auth.step_up_failed`.
+
 - **Add person:** email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
   privately.
@@ -290,7 +300,8 @@ decide approvals but not start orders. Approval decisions made with a token are 
 ## Connected apps
 
 MCP clients such as Claude connect at `/mcp`, and A2A agents at `/a2a`; each asks you to approve it on a consent page, where
-you sign in (two-factor included) and choose a role. An app acts for the person who connected it. You can grant your own role or a lower one, never a higher one, and never `admin`, so an app is at most an `operator` and can't use the admin-only `draft_plugin` tool. **Account** lists **Connected apps**, each with whether it is an AI client
+you sign in (two-factor included) and choose a role. Granting more than **Viewer** asks for a
+[step-up](#the-team-page) first, since the app keeps access for weeks. An app acts for the person who connected it. You can grant your own role or a lower one, never a higher one, and never `admin`, so an app is at most an `operator` and can't use the admin-only `draft_plugin` tool. **Account** lists **Connected apps**, each with whether it is an AI client
 (MCP) or an agent (A2A), the address its access goes to, its role and when it connected;
 **Disconnect** ends it after a confirmation. Every request from a connected app re-reads you: if you are
 disabled it stops working, and its role is the lower of what you granted and what you have now. What
@@ -306,7 +317,7 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` (and how many connected apps it disconnected), `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on; `confirmed: password` when they gave their password first), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` (and how many connected apps it disconnected), `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on; `confirmed: password` when they gave their password first), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change), `auth.step_up_failed` (a sensitive change refused because the step-up didn't pass, with which change and why). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
 | Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.user_updated` (a new name or email), `team.role_changed` (from and to, and how many tokens a demotion revoked), `team.password_reset` (how many sessions, apps and passkeys it ended), `team.user_disabled` (how many sessions, apps and tokens it ended, whether SCIM or an admin disabled them), `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed, and how many sessions and apps ended), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to), `team.scim_roles` (from and to, which groups give which role) |
 | SCIM provisioning | `scim.token_created` (notes when it replaced an old one), `scim.token_revoked` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
@@ -409,8 +420,12 @@ password reset, being disabled or the session going idle ends it.
 A browser request that changes something (any method but `GET`, `HEAD` and `OPTIONS`), or opens the
 order page's live connection, is refused unless its `Origin` is the app's own; without `Origin`,
 its `Sec-Fetch-Site` must be `same-origin` or `none`. This holds for other `*.orderloop.app`
-subdomains too. The answer is `403 { "error": "Cross-site request refused" }`. Requests with a
-bearer token are exempt, since they carry no cookie, and so are clients that send neither header.
+subdomains too. The answer is `403 { "error": "Cross-site request refused" }`. REST API calls
+(`/api/v1/…`) with a bearer token are exempt, since a token is all they're signed in by, and so
+are clients that send neither header. Elsewhere a bearer header changes nothing.
+
+Signing out is a `POST` too, so no link or image on another site can sign you out. Opening
+`/logout` asks first.
 
 ## Response headers
 

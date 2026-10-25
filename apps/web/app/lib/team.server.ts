@@ -179,6 +179,12 @@ export async function setRole(request: Request, by: Principal, id: string, next:
   });
 }
 
+/** A person's role now, or null when they aren't on the team. */
+async function roleOf(id: string): Promise<Role | null> {
+  const row = await db().select({ role: users.role }).from(users).where(eq(users.id, id)).get();
+  return row && isRole(row.role) ? row.role : null;
+}
+
 async function target(id: string) {
   const user = await db()
     .select({ email: users.email, role: users.role })
@@ -394,4 +400,35 @@ export async function endOtherSessions(
       detail: { count: n },
     });
   return n;
+}
+
+/**
+ * Changes that hand out access or lower the bar for it ask who is at the keyboard first
+ * (`stepUp`): making an API or SCIM token, making someone an admin (directly, or by mapping a
+ * group to Admin), enabling someone above Viewer, resetting someone's password or two-factor
+ * sign-in, and the single sign-on and two-factor settings. Open local dev (no one
+ * signed in) has no one to ask.
+ */
+const STEPPED_UP = new Set([
+  'add-token',
+  'scim-token',
+  'reset',
+  'reset-two-factor',
+  'sso-settings',
+  'two-factor-requirement',
+]);
+
+export async function needsStepUp(intent: string, f: FormData): Promise<boolean> {
+  if (STEPPED_UP.has(intent)) return true;
+  // A group mapped to Admin makes each of its members one at once.
+  if (intent === 'scim-roles')
+    return [...f.entries()].some(([k, v]) => k.startsWith('role:') && v === 'admin');
+  // Enabling someone above Viewer gives back what their old password could do.
+  if (intent === 'enable') {
+    const role = await roleOf(String(f.get('id') ?? ''));
+    return role !== null && role !== 'viewer';
+  }
+  if (f.get('role') !== 'admin') return false;
+  if (intent === 'add-user') return true;
+  return intent === 'role' && (await roleOf(String(f.get('id') ?? ''))) !== 'admin';
 }

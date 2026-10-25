@@ -31,6 +31,7 @@ export const AUDIT_ACTIONS = {
   'auth.recovery_code_used': 'Used a recovery code',
   'auth.sso_linked': 'Linked a sign-in from the identity provider',
   'auth.reauthenticated': 'Confirmed with single sign-on for a step-up',
+  'auth.step_up_failed': 'Sensitive change refused: step-up not confirmed',
   'team.first_admin': 'Created the first admin',
   'team.recovery_admin': 'Recovered admin access with a setup code',
   'team.setup_refused': 'Setup refused: wrong setup code',

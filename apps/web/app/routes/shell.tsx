@@ -300,6 +300,8 @@ function ShellFrame() {
                 <AccountItems me={me} auth={auth} />
               </DropdownMenuContent>
             </DropdownMenu>
+            {/* Signing out is a POST; the account menu's item submits this. */}
+            <form id="sign-out" method="post" action="/logout" hidden />
           </div>
         </div>
       </header>
@@ -444,9 +446,11 @@ function MoreMenu({ nav, pending }: { nav: NavItem[]; pending: number }) {
       {auth || admin ? (
         <div className="border-t p-2">
           {auth ? (
-            <a href="/logout" className={row}>
-              Sign out
-            </a>
+            <form method="post" action="/logout">
+              <button type="submit" className={cn(row, 'w-full text-left')}>
+                Sign out
+              </button>
+            </form>
           ) : (
             <Link to="/team" className={row}>
               Set up sign-in
@@ -513,7 +517,10 @@ function AccountItems({ me, auth }: { me: Principal; auth: boolean }) {
       <DropdownMenuSeparator />
       {auth ? (
         <DropdownMenuItem asChild>
-          <a href="/logout">Sign out</a>
+          {/* The form sits outside the menu, which unmounts as it closes. */}
+          <button type="submit" form="sign-out" className="w-full">
+            Sign out
+          </button>
         </DropdownMenuItem>
       ) : admin ? (
         <DropdownMenuItem asChild>

@@ -97,7 +97,7 @@ engine source.
 | everything else | React Router (UI routes guard themselves with `requireUser(request, role)`). An HTML page without its own `cache-control` gets `private, no-cache` |
 
 Before the API, agent and React Router branches, a browser request that changes state or opens a
-WebSocket without a bearer token must pass `crossOrigin` (`apps/web/app/lib/origin.ts`): its
+WebSocket must pass `crossOrigin` (`apps/web/app/lib/origin.ts`), unless it is a REST call under `/api/v1/` with a bearer token (`bearerApiCall`; with one, `apiPrincipal` never reads the cookie): its
 `Origin`, or failing that `Sec-Fetch-Site`, must show the app's own origin, or it gets `403`. See
 [Cross-site requests](https://docs.orderloop.app/guides/team-and-roles/#cross-site-requests).
 
