@@ -308,6 +308,9 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 It has no storage of its own besides Workers Caching, whose entries are tagged `p:<key>`,
 `ch:<channel>` and `cats`, and `cat:<code>` on listing pages. The cache tags of urgent changes wait on a queue, `orderloop-catalog-purge`
 (`{ tags }` messages, drained by `catalog-edge`; failed messages go to `orderloop-catalog-purge-dlq`).
+Messages that reach any of the catalog's dead-letter queues are kept in the catalog's bucket at
+`dlq/<queue>/<yyyy-mm-dd>/<message id>.json`, which a lifecycle rule `dlq` expires after 30 days
+([Operations](operations.md#dead-letters)).
 
 Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and expire:
 
@@ -513,7 +516,7 @@ Orders and everything in an order's record (payments, invoices, shipments, the s
 
 `audit_events` is not pruned on write. The sweep moves events older than `AUDIT_RETENTION_DAYS` (default 400, at least 90; `auditRetentionDays` in core) to the `DOCS` R2 bucket (`archiveAudit`): one NDJSON object per batch of up to 1,000 events (one event a line, hashes included) at `audit/<yyyy-mm-dd>/<at>-<id>.ndjson`, at most 50,000 events a run, each batch deleted only after its object is written. Events from before the chain go first, by time; sealed events go in `seq` order and stop at the first one still within the retention, so what remains is an unbroken chain. The sweep reports the count as `auditArchived`.
 
-The archive itself is kept unless the deployment's registry sets `auditArchiveDays`: `scripts/provision.sh` then replaces an R2 lifecycle rule named `audit-archive` on the prefix `audit/` that expires objects after that many days (see [Operations](operations.md#the-registry)).
+The archive itself is kept unless the deployment's registry sets `auditArchiveDays`: `scripts/provision.sh` then replaces an R2 lifecycle rule named `audit-archive` on the prefix `audit/` that expires objects after that many days (see [Operations](operations.md#the-registry)). A bucket lock rule of the same name keeps each archived object from being deleted before that age (indefinitely when `auditArchiveDays` is unset), and another, `plugin-bundles`, keeps `plugins/` indefinitely ([Operations](operations.md#bucket-locks)).
 
 ### Personal data on finished orders
 

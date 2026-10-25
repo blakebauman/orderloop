@@ -587,7 +587,9 @@ upgrade signed by another publisher than the installed one; a test fixture's id 
 `fixture-carrier`; the installs tests set `PLUGIN_TEST_FIXTURES`); malformed migrations; a version
 already uploaded (uploading a pending one again answers with its review, so a retry is safe); and a bundle
 whose code, loaded with no network and no capabilities (a dry run), answers with another manifest
-than the one sealed in it. A bundle that passes is stored in `DOCS` at `plugins/<id>/<sha>.json` and
+than the one sealed in it. A bundle that passes is stored in `DOCS` at `plugins/<id>/<sha>.json` (a prefix
+`provision.sh` locks indefinitely, so no bundle a rollback may load can be deleted; see
+[Operations](operations.md#bucket-locks)) and
 recorded `pending` in `installed_plugins`. It doesn't run: its nodes read as not installed. An id's
 first install (or its first since an uninstall) wipes the id's storage first, so it never reads what
 a removed registry plugin or an earlier install of that id left.

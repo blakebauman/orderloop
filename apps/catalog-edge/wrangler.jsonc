@@ -38,6 +38,9 @@
         "max_batch_timeout": 12,
         "max_concurrency": 1,
         "max_retries": 10,
+        // The delay when an invocation throws; the consumer sets its own otherwise (index.ts).
+        "retry_delay": 30,
+        // Consumed by the catalog, which keeps dead letters in R2: this Worker only reads it.
         "dead_letter_queue": "orderloop-catalog-purge-dlq"
       }
     ]

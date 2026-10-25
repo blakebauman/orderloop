@@ -31,7 +31,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `limits` | none | Requests a minute per caller, replacing the base budgets it names: `api` (`/api/v1`, 600), `agents` (each of `/mcp` and `/a2a`, 300), `webhooks` (each integration, 1,200). For example `"limits": { "webhooks": 6000 }` for a customer whose ERP sends in bursts |
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
-| `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset |
+| `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset. It also locks `audit/` for the same number of days, or indefinitely when unset ([Bucket locks](#bucket-locks)) |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `payments` | `mock` | `mock` or `stripe` (anything else is refused; a demo can't be `stripe`). `stripe` takes payments through Stripe with the environment's `STRIPE_SECRET_KEY`, and a deploy without that secret stops before it migrates anything. Rendered into the engine's `PAYMENTS_MODE` |
 | `stripePublishableKey` | none | The Stripe publishable key (`pk_test_…` or `pk_live_…`) of the same account and mode as `STRIPE_SECRET_KEY`; only with `payments` `stripe`, and a deploy whose secret key is in the other mode stops. Agentic checkout gives it to platforms to tokenize cards with. Rendered into the engine's `STRIPE_PUBLISHABLE_KEY` |
@@ -81,8 +81,8 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    120 requests a minute, no cache, authentication on, request logs only when `aiGatewayLogs` is `true`), and the GitHub environment. For a gateway that already exists, it compares the gateway's default log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway. The engine sends the setting on every call either way, so the default matters only for calls made outside it; match it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**), where logs kept so far are deleted too.
    It creates the product index, Vectorize `orderloop-products<suffix>` (768 dimensions, cosine, fixed at creation), unless the deployment is a demo; a deploy fails while the engine's binding names an index that doesn't exist. The engine's hourly cron fills it, up to 3,000 SKUs a run, so a large catalog's first backfill takes several hours. An admin can start a run now, after a big import say, with **Update product index** under Inventory on the Commerce page (`EngineRpc.reindexProducts`); it is the same run, so it also takes at most 3,000. A run holds the lease in `product_index_lease` for up to 15 minutes, so one that overlaps the cron's (or a second click) answers that the index is already being updated and does nothing; a run that dies leaves the lease to lapse.
    For each plugin in the file's `plugins` it creates the D1 database `orderloop-plugin-<plugin><suffix>` and writes its id as `plugins.<plugin>.d1Id` (see [Plugins](plugins.md#installing)).
-   It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist) and adds a lifecycle rule `feeds` on the catalog bucket that expires `feeds/` (uploaded feed files and their parts) after 30 days; both are skipped with a message when they already exist.
-   It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset; re-run it after changing the number.
+   It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist; one that exists is kept) and sets every one of them to keep messages 14 days (`--message-retention-period-secs 1209600`, the most Queues allows), existing ones too. It replaces two lifecycle rules on the catalog bucket: `feeds`, which expires `feeds/` (uploaded feed files and their parts) after 30 days, and `dlq`, which expires `dlq/` ([Dead letters](#dead-letters)) after 30 days.
+   It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset, and the docs bucket's lock rules ([Bucket locks](#bucket-locks)); re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY`, `DATA_KEY` and `PASSWORD_PEPPER` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without the first two. It never replaces a `DATA_KEY` or `PASSWORD_PEPPER` the web Worker already holds: when the environment has lost one, it stops and asks for the deployment's own value, since a new one would leave every secret sealed under the old key, or every password hashed with the old pepper, unreadable. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
@@ -99,7 +99,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    creates their admin account and signs them in; they add their team from there. The code works
    once. Until then the workspace refuses every request but `/setup`.
 
-**Deployments that predate feeds.** Provisioning only runs when you run it, and CI never does. A deployment provisioned before the catalog's feed import needs the queues and the `feeds/` rule too, and one that predates the public catalog API needs the two purge queues before the deploy that carries `catalog-edge`, and one that predates listing indexes needs the two changes queues before the deploy that carries them: run `./scripts/provision.sh <id>` again, before the deploy that carries the feed code (re-running is safe and sets no secrets once the web Worker exists). The script keeps a queue that already exists (`queues info`) and stops if one can neither be found nor created, since a deploy fails without its consumer's queue; it replaces the `feeds` lifecycle rule on each run. Keyword search needs no new resource (its Durable Objects come with the deploy and the `CATALOG` service binding resolves to the deployment's own catalog), but it fills only from changes published after it deploys: run `reindex` once for products already published. Segmented listing indexes are the same: `catalog-edge` reads only the per-segment blobs (`idx/f1/<channel>/<category>/<segment>.bin`), which exist only once listing changes reach each segment's indexer, so after the deploy that carries segmented listings, run `reindex` once per deployment (`POST /api/v1/catalog/reindex` on the web app, an `admin` call; it republishes every product, which forces every listing to rebuild). Until it has run, category listings are empty (`404`) or hold only the products changed since the deploy. The old single-blob indexes are left in R2 unread; deleting the channel sweeps them. The `orderloop` deployment's queues and `feeds` rule were created through the Cloudflare API rather than by `provision.sh` (on 2026-10-23), and so were its purge queues, `orderloop-catalog-purge` and `orderloop-catalog-purge-dlq` (also on 2026-10-23), and its changes queues, `orderloop-catalog-changes` and `orderloop-catalog-changes-dlq` (also on 2026-10-23); re-running the script for it changes nothing.
+**Deployments that predate feeds.** Provisioning only runs when you run it, and CI never does. A deployment provisioned before the catalog's feed import needs the queues and the `feeds/` rule too, and one that predates the public catalog API needs the two purge queues before the deploy that carries `catalog-edge`, and one that predates listing indexes needs the two changes queues before the deploy that carries them: run `./scripts/provision.sh <id>` again, before the deploy that carries the feed code (re-running is safe and sets no secrets once the web Worker exists). The script keeps a queue that already exists (`queues info`) and stops if one can neither be found nor created, since a deploy fails without its consumer's queue; it replaces the `feeds` lifecycle rule on each run. Keyword search needs no new resource (its Durable Objects come with the deploy and the `CATALOG` service binding resolves to the deployment's own catalog), but it fills only from changes published after it deploys: run `reindex` once for products already published. Segmented listing indexes are the same: `catalog-edge` reads only the per-segment blobs (`idx/f1/<channel>/<category>/<segment>.bin`), which exist only once listing changes reach each segment's indexer, so after the deploy that carries segmented listings, run `reindex` once per deployment (`POST /api/v1/catalog/reindex` on the web app, an `admin` call; it republishes every product, which forces every listing to rebuild). Until it has run, category listings are empty (`404`) or hold only the products changed since the deploy. The old single-blob indexes are left in R2 unread; deleting the channel sweeps them. The `orderloop` deployment's queues and `feeds` rule were created through the Cloudflare API rather than by `provision.sh` (on 2026-10-23), and so were its purge queues, `orderloop-catalog-purge` and `orderloop-catalog-purge-dlq` (also on 2026-10-23), and its changes queues, `orderloop-catalog-changes` and `orderloop-catalog-changes-dlq` (also on 2026-10-23); re-running the script for it now only sets the queues' 14-day retention, the `dlq` lifecycle rule and the docs bucket's locks.
 
 A deployment without `d1Id`, `catalogKvId` or a plugin's `d1Id` stops the whole CI plan, so provision a customer before merging their
 file, or merge it with `"hold": true`.
@@ -221,6 +221,69 @@ off, each plugin it signed (the Plugins page names the publisher).
   catch up in one deploy.
 - **Fleet status:** `node scripts/fleet.ts status` calls each deployment's `/health/deep` and
   prints its ring, domain and health.
+
+## Dead letters
+
+A message that a catalog queue gives up on (feed parts after 5 deliveries, listing changes and
+purges after 11; each retry backs off, up to 5 or 15 minutes) goes to that queue's dead-letter
+queue, `orderloop-catalog-<feed-parts|changes|purge>-dlq<suffix>`. The catalog Worker consumes
+all three: it writes each message to the catalog bucket at
+`dlq/<queue>/<yyyy-mm-dd>/<message id>.json` (`queue`, `id`, `timestamp`, `attempts` and the
+original `body`), logs one line, and acknowledges it. The line is logged at error level
+(`console.error`), and Workers Observability counts error logs in the Worker's Issues: alert on new
+Issues for `orderloop-catalog<suffix>`, since the API can't create an alert that matches a log
+line. To find them in the logs, query the catalog Worker's events for `"type":"dlq_message"`:
+
+```json
+{"type":"dlq_message","queue":"orderloop-catalog-changes-dlq-acme","id":"…","attempts":1}
+```
+
+`attempts` is the delivery count on the dead-letter queue, not the original one. Objects under
+`dlq/` expire after 30 days (the lifecycle rule `dlq`), and every queue keeps undelivered messages
+14 days, so a consumer that is down over a weekend loses nothing.
+
+**Inspect.** In the dashboard, **R2** > `orderloop-catalog<suffix>` > **Objects**, filter by the
+prefix `dlq/<queue>/`; or fetch one with
+`wrangler r2 object get orderloop-catalog<suffix>/dlq/<queue>/<date>/<id>.json --remote --pipe`
+(add `--jurisdiction eu` for an EU deployment). Look at the catalog Worker's logs around the
+message's `timestamp` for why its consumer failed, and fix that first: a replay into a consumer that
+still fails comes back to the dead-letter queue.
+
+**Replay.** Replaying is sending the object's `body` back to the original queue (the dead-letter
+queue's name without `-dlq`). Find the queue's id with `wrangler queues info <queue>`, then send the
+body through the Queues API (`POST /accounts/<account>/queues/<queue id>/messages` with
+`{"body": <body>, "content_type": "json"}`, a token with Queues edit), or send it from the queue's
+page in the dashboard (**Queues** > the queue). What each needs:
+
+- **Listing changes** (`orderloop-catalog-changes`) are idempotent by `at`: replay the body as it
+  is. For many, a `reindex` (`POST /api/v1/catalog/reindex`, `admin`) republishes every product and
+  rebuilds every listing instead.
+- **Feed parts** (`orderloop-catalog-feed-parts`) point at `feeds/<feed>/parts/…`, which expire
+  after 30 days; replay one only while that object exists. Its shard batch id is the part id, so a
+  replay never applies a row twice. Usually it is simpler to import the feed again.
+- **Purges** (`orderloop-catalog-purge`) are rarely worth replaying: documents refresh on their own
+  within `max-age`. Replay one only for a takedown or price correction that must leave the cache
+  now.
+
+Delete a dead letter's object once it is handled, or leave it to expire.
+
+## Bucket locks
+
+`provision.sh` sets two R2 bucket lock rules on the deployment's docs bucket
+(`orderloop-docs<suffix>`, in its jurisdiction), so nothing (a person, a script, a compromised
+token) can delete what audits and rollbacks rely on:
+
+| Rule | Prefix | Retention |
+|---|---|---|
+| `audit-archive` | `audit/` | `auditArchiveDays` days from each object's creation, the same as the lifecycle rule of that name, so the lifecycle rule deletes an archive only once its lock has lapsed; indefinitely when `auditArchiveDays` is unset (and then there is no lifecycle rule) |
+| `plugin-bundles` | `plugins/` | Indefinitely: a pinned sandboxed-plugin bundle is what a rollback loads again |
+
+It writes them with `wrangler r2 bucket lock set`, which replaces the bucket's whole lock
+configuration in one call: a re-run changes the audit retention without a moment unlocked, and a
+lock rule added to this bucket by hand is dropped (add it to the script instead). Nothing in the
+engine deletes under either prefix: erasure deletes `orders/<id>/` and inbound mail, never the
+audit archive. Shortening `auditArchiveDays` shortens both rules on the next run. List the rules
+with `wrangler r2 bucket lock list orderloop-docs<suffix>`.
 
 ## The demo
 
@@ -355,5 +418,5 @@ A deployment holds only that customer's data, so removing it is the erasure:
    `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>` and `orderloop-plugin-<plugin>-<id>` for each plugin, which removes their Durable
-   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
+   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first, and before emptying `orderloop-docs-<id>` remove its [bucket locks](#bucket-locks), `wrangler r2 bucket lock remove orderloop-docs-<id> --name audit-archive` and `--name plugin-bundles` (with `--jurisdiction` as provisioned), since a locked object can't be deleted and so neither can the bucket), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
    Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.
