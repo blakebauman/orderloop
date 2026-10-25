@@ -7,9 +7,11 @@ import { ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader } from '~/components/page';
+import { type Tone, ToneBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { cartFlows, isCartStatus, listCarts } from '~/lib/carts.server';
 import { engine } from '~/lib/env.server';
@@ -27,6 +29,16 @@ const STATUS_LABELS = {
   returned: 'Returned',
   canceled: 'Canceled',
 } as const;
+type CartStatus = keyof typeof STATUS_LABELS;
+
+/** An open or locked cart waits on its buyer; submitted and returned ones are done with. */
+const CART_TONE: Record<CartStatus, Tone> = {
+  open: 'wait',
+  locked: 'wait',
+  submitted: 'ok',
+  returned: 'ok',
+  canceled: 'idle',
+};
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
@@ -140,48 +152,58 @@ export default function Carts() {
         </nav>
 
         {carts.length ? (
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="hidden border-b text-left md:table-header-group">
-                <tr>
-                  <th className="caption px-3 py-2 font-normal">Cart</th>
-                  <th className="caption px-3 py-2 font-normal">Status</th>
-                  <th className="caption px-3 py-2 font-normal">Customer</th>
-                  <th className="caption px-3 py-2 text-right font-normal">Updated</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+          <div className="card overflow-clip">
+            <Table stack="rows" caption="Carts">
+              <TableHead>
+                <Tr>
+                  <Th>Cart</Th>
+                  <Th>Status</Th>
+                  <Th>Customer</Th>
+                  <Th numeric>Updated</Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
                 {carts.map((c) => (
-                  <tr
+                  // On a phone the row is a card, and the whole card opens the cart.
+                  <Tr
                     key={c.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-3 py-2.5 hover:bg-muted/40 md:table-row md:px-0 md:py-0"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-muted/40 max-md:relative max-md:active:bg-muted/60 md:table-row md:p-0"
                   >
-                    <td className="min-w-0 md:px-3 md:py-2">
-                      <Link to={`/carts/${c.id}`} className="font-medium hover:underline">
+                    <Td className="min-w-0">
+                      <Link
+                        to={`/carts/${c.id}`}
+                        className="font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
+                      >
                         {c.title}
                       </Link>
                       {c.orderId ? (
                         <div className="text-muted-foreground text-xs">
                           Became{' '}
-                          <Link to={`/orders/${c.orderId}`} className="text-link hover:underline">
+                          <Link
+                            to={`/orders/${c.orderId}`}
+                            className="relative z-10 text-link hover:underline"
+                          >
                             an order
                           </Link>
                         </div>
                       ) : null}
-                    </td>
-                    <td className="md:px-3 md:py-2">
-                      {STATUS_LABELS[c.status as keyof typeof STATUS_LABELS] ?? c.status}
-                    </td>
-                    <td className="text-muted-foreground md:px-3 md:py-2">
+                    </Td>
+                    <Td className="col-start-2 row-start-1 text-right md:text-left">
+                      <ToneBadge
+                        tone={CART_TONE[c.status as CartStatus] ?? 'idle'}
+                        label={STATUS_LABELS[c.status as CartStatus] ?? c.status}
+                      />
+                    </Td>
+                    <Td className="truncate text-muted-foreground text-xs md:text-sm">
                       {(c.customerId && names[c.customerId]) || 'No customer'}
-                    </td>
-                    <td className="text-right text-muted-foreground md:px-3 md:py-2">
+                    </Td>
+                    <Td numeric className="text-muted-foreground text-xs md:text-sm">
                       <Ago ms={c.updatedAt} />
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <div className="card overflow-hidden">

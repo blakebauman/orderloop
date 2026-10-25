@@ -1,4 +1,5 @@
 import { BASE_CURRENCY, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Empty } from '~/components/page';
 import { count, duration, money } from '~/lib/format';
 import type { Performance as Figures } from '~/lib/metrics.server';
@@ -70,43 +71,37 @@ export function PerformanceDetail({ p }: { p: Figures }) {
 
       <Panel title="Slowest steps, waits included">
         {slowest.length ? (
-          <table className="w-full text-sm">
-            <thead className="text-muted-foreground text-xs">
-              <tr>
-                <th scope="col" className="pb-1 text-left font-normal">
-                  Step
-                </th>
-                <th scope="col" className="pb-1 pl-2 text-right font-normal">
-                  Typical
-                </th>
-                <th scope="col" className="pb-1 pl-2 text-right font-normal">
-                  Slow
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table edge="flush" caption="Slowest steps, waits included">
+            <TableHead>
+              <Tr>
+                <Th>Step</Th>
+                <Th numeric>Typical</Th>
+                <Th numeric>Slow</Th>
+              </Tr>
+            </TableHead>
+            <TableBody>
               {slowest.map((n) => (
-                <tr key={n.type}>
-                  <td className="py-0.5 pr-2" title={n.type}>
+                <Tr key={n.type}>
+                  <Td title={n.type}>
                     {nodes.spec(n.type)?.label ?? n.type}
-                    <span className="block text-muted-foreground text-xs tabular">
+                    <span className="block text-muted-foreground text-xs">
                       {count(n.n)} {n.n === 1 ? 'run' : 'runs'}
                     </span>
-                  </td>
-                  <td className="py-0.5 pl-2 text-right align-top text-muted-foreground text-xs tabular">
+                  </Td>
+                  <Td numeric className="text-muted-foreground text-xs">
                     {duration(n.p50)}
-                  </td>
-                  <td className="py-0.5 pl-2 text-right align-top font-medium tabular">
+                  </Td>
+                  <Td numeric className="font-medium">
                     {n.n >= MIN_FOR_P95 ? (
                       duration(n.p95)
                     ) : (
                       <span className="font-normal text-muted-foreground text-xs">—</span>
                     )}
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         ) : (
           <Empty>No timed runs yet.</Empty>
         )}

@@ -7,6 +7,7 @@ import {
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Table, TableBody, TableEmpty, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Check, Mail, RefreshCw, Zap } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
@@ -21,6 +22,7 @@ import {
 } from 'react-router';
 import { Ago, WaitingAt } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
+import { ToneBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { type CommercePage, commercePage } from '~/lib/commerce.server';
 import { type Paged, pageHref, pricesKey, shown, storeKey } from '~/lib/commerce-pages';
@@ -389,55 +391,43 @@ export default function Commerce() {
             Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from
             the store. Reserved stock is held by running orders.
           </p>
-          <div className="overflow-x-auto">
-            <table className="table-stack w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th scope="col" className="caption px-4 py-2 font-medium">
-                    Item
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Available
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Reserved
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Reorder at
-                  </th>
-                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
-                    Price
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+          {inventory.total || q ? (
+            <Table stack="cards" scroll caption="Inventory">
+              <TableHead>
+                <Tr>
+                  <Th>Item</Th>
+                  <Th numeric>Available</Th>
+                  <Th numeric>Reserved</Th>
+                  <Th numeric>Reorder at</Th>
+                  <Th numeric>Price</Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
                 {inventory.rows.map((p) => {
                   const available = p.stock - p.reserved;
                   // The stock review reorders anything at or below its reorder point.
                   const level = available <= 0 ? 'Out' : available <= p.reorderPoint ? 'Low' : null;
                   return (
-                    <tr key={p.sku} id={`sku-${p.sku}`} className="scroll-mt-20 target:bg-muted/60">
-                      <td className="px-4 py-1.5">
+                    <Tr key={p.sku} id={`sku-${p.sku}`} className="scroll-mt-20 target:bg-muted/60">
+                      <Td>
                         {p.name}
-                        <span className="ml-1.5 font-mono text-muted-foreground text-xs">
+                        <span className="ml-1.5 whitespace-nowrap font-mono text-muted-foreground text-xs">
                           {p.sku}
                         </span>
-                      </td>
+                      </Td>
                       {p.kind === 'digital' ? (
-                        <td colSpan={3} className="px-2 py-1.5 text-right text-muted-foreground">
+                        <Td colSpan={3} className="text-right text-muted-foreground">
                           Digital, no stock
-                        </td>
+                        </Td>
                       ) : (
                         <>
-                          <td
-                            data-label="Available"
-                            className={`whitespace-nowrap px-2 py-1.5 text-right tabular ${
-                              level === 'Out'
-                                ? 'font-medium text-bad'
-                                : level
-                                  ? 'font-medium text-wait'
-                                  : ''
-                            }`}
+                          <Td
+                            numeric
+                            label="Available"
+                            className={cn(
+                              level === 'Out' && 'font-medium text-bad',
+                              level === 'Low' && 'font-medium text-wait',
+                            )}
                           >
                             {count(available)}
                             {level ? (
@@ -451,110 +441,95 @@ export default function Commerce() {
                                 {count(p.inStores)} in stores
                               </span>
                             ) : null}
-                          </td>
-                          <td
-                            data-label="Reserved"
-                            className="px-2 py-1.5 text-right text-muted-foreground tabular"
-                          >
+                          </Td>
+                          <Td numeric label="Reserved" className="text-muted-foreground">
                             <Held sku={p.sku} n={p.reserved} />
-                          </td>
-                          <td
-                            data-label="Reorder at"
-                            className="px-2 py-1.5 text-right text-muted-foreground tabular"
-                          >
+                          </Td>
+                          <Td numeric label="Reorder at" className="text-muted-foreground">
                             {p.reorderPoint ? count(p.reorderPoint) : 'Not reordered'}
-                          </td>
+                          </Td>
                         </>
                       )}
-                      <td data-label="Price" className="px-4 py-1.5 text-right tabular">
+                      <Td numeric label="Price">
                         {money(p.price)}
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   );
                 })}
                 {q && !inventory.total ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-3 text-muted-foreground text-xs">
-                      Nothing here matches “{q}”.
-                    </td>
-                  </tr>
+                  <TableEmpty colSpan={5}>Nothing here matches “{q}”.</TableEmpty>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          ) : (
+            <Empty>No products yet.</Empty>
+          )}
           <Pager list={inventory} listKey="inventory" hash="stock" label="Inventory" />
           {canAdmin ? <ProductIndexUpdate /> : null}
         </Section>
         <Section id="stores" title="Stores" flush>
-          <div className="overflow-x-auto">
-            <table className="table-stack w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th scope="col" className="caption px-4 py-2 font-medium">
-                    Item
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Available
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Reserved
-                  </th>
-                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
-                    On hand
-                  </th>
-                </tr>
-              </thead>
+          {stores.length ? (
+            <Table stack="cards" scroll caption="Stores">
+              <TableHead>
+                <Tr>
+                  <Th>Item</Th>
+                  <Th numeric>Available</Th>
+                  <Th numeric>Reserved</Th>
+                  <Th numeric>On hand</Th>
+                </Tr>
+              </TableHead>
               {stores.map((l) => (
-                <tbody key={l.id} className="border-b last:border-b-0 [&>tr:last-child>td]:pb-2.5">
-                  <tr>
-                    <th scope="rowgroup" colSpan={4} className="px-4 pt-2 pb-0.5 text-left">
-                      <span className="font-medium">{l.name}</span>
+                <TableBody
+                  key={l.id}
+                  className="divide-y-0 border-b last:border-b-0 [&>tr:last-child>td]:pb-2.5"
+                >
+                  <Tr>
+                    <Th
+                      scope="rowgroup"
+                      colSpan={4}
+                      className="whitespace-normal pt-2 pb-0.5 normal-case tracking-normal"
+                    >
+                      <span className="font-medium text-foreground text-sm">{l.name}</span>
                       <span className="ml-2 font-normal text-muted-foreground text-xs">
                         {[l.pickup ? 'Pickup' : null, l.ships ? 'Ships orders' : null]
                           .filter(Boolean)
                           .join(' · ') || 'In-store sales only'}
                       </span>
-                    </th>
-                  </tr>
+                    </Th>
+                  </Tr>
                   {l.stock.total ? (
                     l.stock.rows.map((s) => (
-                      <tr key={s.sku}>
-                        <td className="py-1 pr-2 pl-8">
+                      <Tr key={s.sku}>
+                        <Td className="py-1 pl-8">
                           {s.name ?? s.sku}
                           <a
                             href={`#sku-${s.sku}`}
-                            className="ml-1.5 font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
+                            className="ml-1.5 whitespace-nowrap font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
                           >
                             {s.sku}
                           </a>
-                        </td>
-                        <td data-label="Available" className="px-2 py-1 text-right tabular">
+                        </Td>
+                        <Td numeric label="Available" className="py-1">
                           {count(s.stock - s.reserved)}
-                        </td>
-                        <td
-                          data-label="Reserved"
-                          className="px-2 py-1 text-right text-muted-foreground tabular"
-                        >
+                        </Td>
+                        <Td numeric label="Reserved" className="py-1 text-muted-foreground">
                           <Held sku={s.sku} n={s.reserved} />
-                        </td>
-                        <td
-                          data-label="On hand"
-                          className="px-4 py-1 text-right text-muted-foreground tabular"
-                        >
+                        </Td>
+                        <Td numeric label="On hand" className="py-1 text-muted-foreground">
                           {count(s.stock)}
-                        </td>
-                      </tr>
+                        </Td>
+                      </Tr>
                     ))
                   ) : (
-                    <tr>
-                      <td colSpan={4} className="py-1 pr-4 pl-8 text-muted-foreground text-xs">
+                    <Tr>
+                      <Td colSpan={4} className="py-1 pl-8 text-muted-foreground text-xs">
                         {q ? 'Nothing here matches.' : 'No stock held here.'}
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   )}
                   {l.stock.total > l.stock.size ? (
-                    <tr>
-                      <td colSpan={4} className="p-0">
+                    <Tr>
+                      <Td colSpan={4} className="p-0">
                         <Pager
                           list={l.stock}
                           listKey={storeKey(l.id)}
@@ -562,13 +537,15 @@ export default function Commerce() {
                           label={`${l.name} stock`}
                           inset
                         />
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   ) : null}
-                </tbody>
+                </TableBody>
               ))}
-            </table>
-          </div>
+            </Table>
+          ) : (
+            <Empty>No stores yet.</Empty>
+          )}
         </Section>
         <Pricing pricing={pricing} />
         <Section
@@ -577,32 +554,24 @@ export default function Commerce() {
           actions={<Total list={customers} noun="customer" />}
           flush
         >
-          <div className="overflow-x-auto">
-            <table className="table-stack w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th scope="col" className="caption px-4 py-2 font-medium">
-                    Customer
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 font-medium">
-                    Terms
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Balance
-                  </th>
-                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
-                    Credit limit
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+          {customers.total || q ? (
+            <Table stack="cards" scroll caption="Customers">
+              <TableHead>
+                <Tr>
+                  <Th>Customer</Th>
+                  <Th>Terms</Th>
+                  <Th numeric>Balance</Th>
+                  <Th numeric>Credit limit</Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
                 {customers.rows.map((c) => {
                   const over = !!c.creditLimit && c.balance > c.creditLimit;
                   // Close enough that one more order could tip it over.
                   const near = !over && !!c.creditLimit && c.balance >= c.creditLimit * 0.9;
                   return (
-                    <tr key={c.id}>
-                      <td className="px-4 py-1.5">
+                    <Tr key={c.id}>
+                      <Td>
                         <Link
                           to={`/orders?q=${encodeURIComponent(c.name)}`}
                           className="hover:underline"
@@ -614,14 +583,14 @@ export default function Commerce() {
                           {humanize(c.kind)}
                           {c.kind === 'business' ? ` · ${humanize(c.tier)}` : ''}
                         </div>
-                      </td>
-                      <td data-label="Terms" className="px-2 py-1.5">
+                      </Td>
+                      <Td label="Terms">
                         {c.kind === 'business' ? humanize(c.terms) : 'Pays at checkout'}
-                      </td>
-                      <td
-                        data-label="Balance"
+                      </Td>
+                      <Td
+                        numeric
+                        label="Balance"
                         className={cn(
-                          'whitespace-nowrap px-2 py-1.5 text-right tabular',
                           over && 'font-medium text-bad',
                           near && 'font-medium text-wait',
                         )}
@@ -629,27 +598,25 @@ export default function Commerce() {
                         {money(c.balance)}
                         {over ? <span className="ml-1.5 text-xs">Over limit</span> : null}
                         {near ? <span className="ml-1.5 text-xs">Near limit</span> : null}
-                      </td>
-                      <td data-label="Credit limit" className="px-4 py-1.5 text-right tabular">
+                      </Td>
+                      <Td numeric label="Credit limit">
                         {c.creditLimit ? (
                           money(c.creditLimit)
                         ) : (
                           <span className="text-muted-foreground">No limit</span>
                         )}
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   );
                 })}
                 {q && !customers.total ? (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-3 text-muted-foreground text-xs">
-                      Nothing here matches “{q}”.
-                    </td>
-                  </tr>
+                  <TableEmpty colSpan={4}>Nothing here matches “{q}”.</TableEmpty>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          ) : (
+            <Empty>No customers yet.</Empty>
+          )}
           <Pager list={customers} listKey="customers" hash="customers" label="Customers" />
         </Section>
         <Section
@@ -658,25 +625,19 @@ export default function Commerce() {
           actions={<Total list={sellers} noun="seller" />}
           flush
         >
-          <div className="overflow-x-auto">
-            <table className="table-stack w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th scope="col" className="caption px-4 py-2 font-medium">
-                    Seller
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 font-medium">
-                    Accepts orders
-                  </th>
-                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
-                    Commission
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+          {sellers.total || q ? (
+            <Table stack="cards" scroll caption="Marketplace sellers">
+              <TableHead>
+                <Tr>
+                  <Th>Seller</Th>
+                  <Th>Accepts orders</Th>
+                  <Th numeric>Commission</Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
                 {sellers.rows.map((s) => (
-                  <tr key={s.id}>
-                    <td className="px-4 py-1.5">
+                  <Tr key={s.id}>
+                    <Td>
                       <Link
                         to={`/commerce?q=${encodeURIComponent(s.name)}#records`}
                         className={cn('hover:underline', !s.active && 'text-muted-foreground')}
@@ -686,25 +647,23 @@ export default function Commerce() {
                       </Link>
                       {s.active ? null : <Off />}
                       <div className="break-all text-muted-foreground text-xs">{s.email}</div>
-                    </td>
-                    <td data-label="Accepts orders" className="px-2 py-1.5">
+                    </Td>
+                    <Td label="Accepts orders">
                       {s.autoAccept ? 'Automatically' : 'Asked per order'}
-                    </td>
-                    <td data-label="Commission" className="px-4 py-1.5 text-right tabular">
+                    </Td>
+                    <Td numeric label="Commission">
                       {Math.round(s.commissionPct * 1000) / 10}%
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
                 {q && !sellers.total ? (
-                  <tr>
-                    <td colSpan={3} className="px-4 py-3 text-muted-foreground text-xs">
-                      Nothing here matches “{q}”.
-                    </td>
-                  </tr>
+                  <TableEmpty colSpan={3}>Nothing here matches “{q}”.</TableEmpty>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          ) : (
+            <Empty>No marketplace sellers yet.</Empty>
+          )}
           <Pager list={sellers} listKey="sellers" hash="sellers" label="Sellers" />
         </Section>
       </div>
@@ -723,7 +682,7 @@ function ProductIndexUpdate() {
   return (
     <f.Form
       method="post"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t px-4 py-2.5"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t bg-muted/50 px-4 py-3"
     >
       <input type="hidden" name="intent" value="product-index" />
       <Button type="submit" size="sm" variant="outline" disabled={running}>
@@ -759,14 +718,6 @@ function Held({ sku, n }: { sku: string; n: number }) {
     </Link>
   );
 }
-
-const TONE_CLASS = {
-  ok: 'text-ok',
-  bad: 'text-bad',
-  undo: 'text-undo',
-  wait: 'text-wait',
-  idle: 'text-muted-foreground',
-} as const;
 
 /**
  * What orders did to the outside world, by kind, newest first. Each row names its order and the
@@ -816,80 +767,61 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
       </div>
       <div id={`${tablistId}-panel`} role="tabpanel" aria-labelledby={`${tablistId}-${kind}`}>
         {rows.length ? (
-          <div className="overflow-x-auto">
-            <table className="table-stack w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th scope="col" className="caption px-4 py-2 font-medium">
-                    Record
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 font-medium">
-                    Order
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 font-medium">
-                    Status
-                  </th>
-                  <th scope="col" className="caption px-2 py-2 text-right font-medium">
-                    Amount
-                  </th>
-                  <th scope="col" className="caption px-4 py-2 text-right font-medium">
-                    When
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rows.map((r) => (
-                  <tr key={r.id} className="align-baseline">
-                    <td className="max-w-80 px-4 py-1.5">
-                      <div className="break-words">{r.what}</div>
-                      {r.detail || r.step ? (
-                        <div className="break-words text-muted-foreground text-xs">
-                          {r.detail}
-                          {r.detail && r.step ? ' · ' : ''}
-                          {r.step ? (
-                            <span title="The step that wrote it; a retry finds this same record">
-                              step <span className="font-mono">{r.step}</span>
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td data-label="Order" className="max-w-72 px-2 py-1.5">
-                      <Link to={`/orders/${r.orderId}`} className="hover:underline">
-                        {r.orderTitle || 'Order'}
-                      </Link>{' '}
-                      <span className="font-mono text-muted-foreground text-xs">
-                        ref {r.orderId.slice(-6)}
-                      </span>
-                      {r.customer ? (
-                        <div className="truncate text-muted-foreground text-xs" title={r.customer}>
-                          {r.customer}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td
-                      data-label="Status"
-                      className={cn('px-2 py-1.5 text-xs', TONE_CLASS[recordTone(r.status)])}
-                    >
-                      {r.status ? humanize(r.status) : '—'}
-                    </td>
-                    <td
-                      data-label="Amount"
-                      className="whitespace-nowrap px-2 py-1.5 text-right tabular"
-                    >
-                      {r.amount !== null ? money(r.amount, r.currency ?? undefined) : ''}
-                    </td>
-                    <td
-                      data-label="When"
-                      className="whitespace-nowrap px-4 py-1.5 text-right text-muted-foreground text-xs"
-                    >
-                      <Ago ms={r.at} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table stack="cards" scroll caption={RECORD_KINDS.find((k) => k.id === kind)?.label}>
+            <TableHead>
+              <Tr>
+                <Th>Record</Th>
+                <Th>Order</Th>
+                <Th>Status</Th>
+                <Th numeric>Amount</Th>
+                <Th numeric>When</Th>
+              </Tr>
+            </TableHead>
+            <TableBody>
+              {rows.map((r) => (
+                <Tr key={r.id}>
+                  <Td className="max-w-80">
+                    <div className="break-words">{r.what}</div>
+                    {r.detail || r.step ? (
+                      <div className="break-words text-muted-foreground text-xs">
+                        {r.detail}
+                        {r.detail && r.step ? ' · ' : ''}
+                        {r.step ? (
+                          <span title="The step that wrote it; a retry finds this same record">
+                            step <span className="font-mono">{r.step}</span>
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </Td>
+                  <Td label="Order" className="max-w-72">
+                    <Link to={`/orders/${r.orderId}`} className="hover:underline">
+                      {r.orderTitle || 'Order'}
+                    </Link>{' '}
+                    <span className="font-mono text-muted-foreground text-xs">
+                      {orderRef(r.orderId)}
+                    </span>
+                    {r.customer ? (
+                      <div className="break-words text-muted-foreground text-xs">{r.customer}</div>
+                    ) : null}
+                  </Td>
+                  <Td label="Status">
+                    {r.status ? (
+                      <ToneBadge tone={recordTone(r.status)} label={humanize(r.status)} />
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </Td>
+                  <Td numeric label="Amount">
+                    {r.amount !== null ? money(r.amount, r.currency ?? undefined) : ''}
+                  </Td>
+                  <Td numeric label="When" className="text-muted-foreground text-xs">
+                    <Ago ms={r.at} />
+                  </Td>
+                </Tr>
+              ))}
+            </TableBody>
+          </Table>
         ) : (
           <Empty>
             {q
@@ -1104,33 +1036,34 @@ function Pricing({ pricing }: Pick<Office, 'pricing'>) {
                 </span>
               </div>
               {rows.length ? (
-                <table
-                  className={`mb-2 w-full table-fixed text-sm ${s.active ? '' : 'text-muted-foreground'}`}
+                <Table
+                  edge="flush"
+                  caption={s.label}
+                  className={cn('mb-2 table-fixed', !s.active && 'text-muted-foreground')}
                 >
-                  <caption className="sr-only">{s.label}</caption>
-                  <thead className="sr-only">
-                    <tr>
-                      <th scope="col">Applies as</th>
-                      <th scope="col">To</th>
-                      <th scope="col">Price</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                  <TableHead className="sr-only">
+                    <Tr>
+                      <Th>Applies as</Th>
+                      <Th>To</Th>
+                      <Th numeric>Price</Th>
+                    </Tr>
+                  </TableHead>
+                  <TableBody className="divide-y-0">
                     {rows.map((r) => (
-                      <tr key={r.key}>
-                        <td className="w-2/5 break-words py-0.5 pr-2 pl-4 align-baseline sm:w-1/2 sm:pl-10">
+                      <Tr key={r.key}>
+                        <Td className="w-2/5 break-words py-0.5 pl-4 sm:w-1/2 sm:pl-10">
                           {r.name}
-                        </td>
-                        <td className="break-words px-2 py-0.5 align-baseline text-muted-foreground text-xs">
+                        </Td>
+                        <Td className="break-words py-0.5 text-muted-foreground text-xs">
                           {r.scope}
-                        </td>
-                        <td className="w-24 py-0.5 pr-4 pl-2 text-right align-baseline tabular">
+                        </Td>
+                        <Td numeric className="w-24 py-0.5 pr-4">
                           {r.price}
-                        </td>
-                      </tr>
+                        </Td>
+                      </Tr>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               ) : (
                 <p className="pb-2 pl-4 text-muted-foreground text-xs sm:pl-10">No entries.</p>
               )}

@@ -13,6 +13,7 @@ import {
 import { users } from '@orderloop/db';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { inArray } from 'drizzle-orm';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -361,32 +362,34 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
       <div>
         <h3 className="caption mb-1.5">Test cases</h3>
         {i.cases?.length ? (
-          <table className="w-full text-xs">
-            <thead className="text-left text-muted-foreground">
-              <tr>
-                <th className="py-1 pr-3 font-normal">Case</th>
-                <th className="py-1 pr-3 font-normal">Step</th>
-                <th className="py-1 pr-3 font-normal">Expected</th>
-                <th className="py-1 pr-3 font-normal">Got</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table edge="flush" caption="Test cases" className="text-xs">
+            <TableHead>
+              <Tr>
+                <Th>Case</Th>
+                <Th>Step</Th>
+                <Th>Expected</Th>
+                <Th>Got</Th>
+              </Tr>
+            </TableHead>
+            <TableBody>
               {i.cases.map((c, n) => (
-                <tr key={`${c.name}-${n}`} className="border-t">
-                  <td className="py-1 pr-3">
-                    <StatusDot status={c.pass ? 'completed' : 'failed'} /> {c.name}
-                  </td>
-                  <td className="py-1 pr-3">
-                    <code>{c.node}</code>
-                  </td>
-                  <td className="py-1 pr-3">{c.expect.branch}</td>
-                  <td className={c.pass ? 'py-1 pr-3' : 'py-1 pr-3 text-destructive'}>
+                <Tr key={`${c.name}-${n}`}>
+                  <Td>
+                    <StatusDot status={c.pass ? 'completed' : 'failed'} />{' '}
+                    <span className="sr-only">{c.pass ? 'Passed: ' : 'Failed: '}</span>
+                    {c.name}
+                  </Td>
+                  <Td>
+                    <code className="font-mono">{c.node}</code>
+                  </Td>
+                  <Td>{c.expect.branch}</Td>
+                  <Td className={c.pass ? undefined : 'text-bad'}>
                     {c.got.branch ?? c.got.error ?? 'nothing'}
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         ) : (
           <p className="text-muted-foreground">No cases yet: add at least one below.</p>
         )}

@@ -32,6 +32,7 @@ import {
 } from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useAgent } from 'agents/react';
 import { useEffect, useRef, useState } from 'react';
@@ -208,27 +209,33 @@ export function CartView({
           ) : null}
           <Section title="Lines" flush>
             {cart.lines.length ? (
-              <table className="w-full text-sm">
-                <thead className="border-b text-left">
-                  <tr>
-                    <th className="caption px-3 py-2 font-normal">Item</th>
-                    <th className="caption w-28 px-3 py-2 text-right font-normal">Qty</th>
-                    <th className="caption px-3 py-2 text-right font-normal">Unit</th>
-                    <th className="caption px-3 py-2 text-right font-normal">Total</th>
-                    {editable ? <th className="w-0" /> : null}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
+              <Table stack="cards" caption="Lines">
+                <TableHead>
+                  <Tr>
+                    <Th>Item</Th>
+                    <Th numeric className="w-28">
+                      Qty
+                    </Th>
+                    <Th numeric>Unit</Th>
+                    <Th numeric>Total</Th>
+                    {editable ? (
+                      <Th className="w-0">
+                        <span className="sr-only">Actions</span>
+                      </Th>
+                    ) : null}
+                  </Tr>
+                </TableHead>
+                <TableBody>
                   {cart.lines.map((l, i) => {
                     const issue = cart.issues.find((x) => x.path?.startsWith(`$.line_items[${i}]`));
                     return (
-                      <tr key={l.id}>
-                        <td className="px-3 py-2">
+                      <Tr key={l.id} className="max-md:items-center">
+                        <Td>
                           <div className="font-medium">{l.title ?? l.sku}</div>
                           <div className="font-mono text-muted-foreground text-xs">{l.sku}</div>
                           {issue ? <div className="text-bad text-xs">{issue.content}</div> : null}
-                        </td>
-                        <td className="px-3 py-2 text-right">
+                        </Td>
+                        <Td numeric label="Qty">
                           {editable ? (
                             <QtyInput
                               value={l.qty}
@@ -238,15 +245,15 @@ export function CartView({
                           ) : (
                             l.qty
                           )}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
+                        </Td>
+                        <Td numeric label="Unit">
                           {l.unitPrice != null ? money(l.unitPrice, currency) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
+                        </Td>
+                        <Td numeric label="Total">
                           {l.unitPrice != null ? money(l.unitPrice * l.qty, currency) : '—'}
-                        </td>
+                        </Td>
                         {editable ? (
-                          <td className="px-2 py-2">
+                          <Td className="max-md:ml-auto">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -255,13 +262,13 @@ export function CartView({
                             >
                               Remove
                             </Button>
-                          </td>
+                          </Td>
                         ) : null}
-                      </tr>
+                      </Tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             ) : (
               <Empty>No lines yet.</Empty>
             )}

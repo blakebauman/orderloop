@@ -27,6 +27,7 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useId, useRef, useState } from 'react';
 import { data, useLoaderData } from 'react-router';
@@ -151,51 +152,49 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       );
     case 'table':
       return b.rows.length ? (
-        <div className="overflow-x-auto card">
-          <table className="w-full text-sm">
-            <thead className="border-b text-left">
-              <tr>
+        <div className="card overflow-clip">
+          {/* A plugin's columns stack under their labels on a phone, as the core's tables do. */}
+          <Table stack="cards" scroll>
+            <TableHead>
+              <Tr>
                 {b.columns.map((c) => (
-                  <th
-                    key={c.key}
-                    className={cn(
-                      'caption px-3 py-2 font-normal',
-                      c.align === 'right' && 'text-right',
-                    )}
-                  >
+                  <Th key={c.key} numeric={c.align === 'right'}>
                     {c.label}
-                  </th>
+                  </Th>
                 ))}
-                {b.rows.some((r) => r.actions?.length) ? <th className="w-0" /> : null}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+                {b.rows.some((r) => r.actions?.length) ? (
+                  <Th className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </Th>
+                ) : null}
+              </Tr>
+            </TableHead>
+            <TableBody>
               {b.rows.map((r, i) => (
-                <tr key={i}>
-                  {b.columns.map((c) => (
-                    <td
+                <Tr key={i}>
+                  {b.columns.map((c, ci) => (
+                    <Td
                       key={c.key}
-                      className={cn(
-                        'px-3 py-2 align-top',
-                        c.align === 'right' && 'text-right tabular-nums',
-                      )}
+                      numeric={c.align === 'right'}
+                      label={ci ? c.label : undefined}
+                      className="align-top"
                     >
                       <Cell cell={r.cells[c.key]} href={href} />
-                    </td>
+                    </Td>
                   ))}
                   {r.actions?.length ? (
-                    <td className="px-2 py-1.5 text-right">
-                      <div className="flex justify-end gap-1">
+                    <Td className="py-1 text-right max-md:basis-full">
+                      <div className="flex gap-1 md:justify-end">
                         {r.actions.map((a) => (
                           <FormBlock key={`${a.action}-${a.submit}`} form={a} href={href} inline />
                         ))}
                       </div>
-                    </td>
+                    </Td>
                   ) : null}
-                </tr>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <div className="card overflow-hidden">

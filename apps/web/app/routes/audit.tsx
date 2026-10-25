@@ -1,4 +1,6 @@
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
+import { X } from 'lucide-react';
 import { Form, Link, useLoaderData, useSubmit } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
@@ -10,6 +12,9 @@ import type { Route } from './+types/audit';
 export const meta = () => [{ title: 'Audit log · OrderLoop' }];
 
 const PAGE = 100;
+
+/** Actions that record something refused or failed, drawn as a failure. */
+const REFUSED = /(_failed|_throttled|_refused|_expired|\.refused)$/;
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request, 'admin');
@@ -62,54 +67,46 @@ export default function Audit() {
         </Form>
         <Section title="Events" flush>
           {events.length ? (
-            <div className="overflow-x-auto">
-              <table className="table-stack w-full text-sm">
-                <thead className="border-b text-left">
-                  <tr>
-                    <th scope="col" className="caption px-4 py-2 font-medium">
-                      When
-                    </th>
-                    <th scope="col" className="caption px-2 py-2 font-medium">
-                      Who
-                    </th>
-                    <th scope="col" className="caption px-2 py-2 font-medium">
-                      What
-                    </th>
-                    <th scope="col" className="caption px-4 py-2 font-medium">
-                      From
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {events.map((e) => (
-                    <tr
-                      key={e.id}
-                      className={
-                        e.action.endsWith('_failed') || e.action.endsWith('_throttled')
-                          ? 'text-wait'
-                          : undefined
-                      }
-                    >
-                      <td className="whitespace-nowrap px-4 py-1.5 text-muted-foreground text-xs">
-                        <Ago ms={e.at} />
-                      </td>
-                      <td data-label="Who" className="px-2 py-1.5">
-                        {e.actor ?? '—'}
-                      </td>
-                      <td data-label="What" className="px-2 py-1.5">
-                        {describe(e)}
-                      </td>
-                      <td
-                        data-label="From"
-                        className="px-4 py-1.5 font-mono text-muted-foreground text-xs"
-                      >
-                        {e.ip}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table stack="cards" sticky caption="Events">
+              <TableHead>
+                <Tr>
+                  <Th>When</Th>
+                  <Th>Who</Th>
+                  <Th>What</Th>
+                  <Th>From</Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
+                {events.map((e) => (
+                  <Tr key={e.id}>
+                    <Td className="whitespace-nowrap text-muted-foreground text-xs">
+                      <Ago ms={e.at} />
+                    </Td>
+                    <Td label="Who">
+                      {e.actor ?? <span className="text-muted-foreground">—</span>}
+                    </Td>
+                    <Td label="What">
+                      {/* Something refused or failed: a sign-in, a step-up, an API call. */}
+                      {REFUSED.test(e.action) ? (
+                        <span className="inline-flex items-baseline gap-1.5 text-bad">
+                          <X
+                            aria-hidden="true"
+                            className="size-3 shrink-0 self-center"
+                            strokeWidth={2.5}
+                          />
+                          {describe(e)}
+                        </span>
+                      ) : (
+                        describe(e)
+                      )}
+                    </Td>
+                    <Td label="From" className="font-mono text-muted-foreground text-xs">
+                      {e.ip}
+                    </Td>
+                  </Tr>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
             <Empty>
               {group

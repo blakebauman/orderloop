@@ -57,9 +57,10 @@ export function Section({
     <section
       id={id}
       className={cn(
-        // Flush content runs to the edges, so the card clips it to its corners.
+        // Flush content runs to the edges, so the card clips it to its corners. Clip, not hidden:
+        // hidden would make the card a scroll container and stop a sticky table header at its top.
         'card min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)]',
-        flush && 'overflow-hidden',
+        flush && 'overflow-clip',
         className,
       )}
     >
@@ -82,7 +83,7 @@ export function Empty({
 }) {
   return (
     <div className="px-4 py-8 text-center text-muted-foreground text-sm">
-      <p>{children}</p>
+      <p className="mx-auto max-w-[60ch] text-balance">{children}</p>
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );

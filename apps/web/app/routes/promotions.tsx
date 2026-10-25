@@ -6,9 +6,12 @@
 import { BASE_CURRENCY } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
+import { ToneBadge } from '~/components/status';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { dateTime, money } from '~/lib/format';
@@ -83,59 +86,76 @@ export default function Promotions() {
       <Body className="grid gap-4">
         <Section title="Codes" flush>
           {promotions.length ? (
-            <table className="w-full text-sm">
-              <thead className="border-b text-left">
-                <tr>
-                  <th className="caption px-3 py-2 font-normal">Code</th>
-                  <th className="caption px-3 py-2 font-normal">Takes off</th>
-                  <th className="caption px-3 py-2 font-normal">Limits</th>
-                  <th className="caption px-3 py-2 text-right font-normal">Used</th>
-                  <th className="w-0" />
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {promotions.map((p) => (
-                  <tr key={p.id} className={p.status === 'paused' ? 'text-muted-foreground' : ''}>
-                    <td className="px-3 py-2">
-                      <span className="font-mono">{p.code}</span>
-                      {p.name ? (
-                        <div className="text-muted-foreground text-xs">{p.name}</div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2">{describe(p)}</td>
-                    <td className="px-3 py-2 text-muted-foreground text-xs">
-                      {[
-                        p.minSubtotal ? `over ${money(p.minSubtotal)}` : null,
-                        p.skus ? `${JSON.parse(p.skus).length} SKUs` : null,
-                        p.customerId ? `customer ${p.customerId}` : null,
-                        p.maxRedemptions ? `${p.maxRedemptions} uses` : null,
-                        p.perCustomerLimit ? `${p.perCustomerLimit} per customer` : null,
-                        p.validTo ? `until ${dateTime(p.validTo, 'UTC')}` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || 'None'}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.redeemed}</td>
-                    <td className="px-2 py-2">
-                      {canOperate ? (
-                        <Form method="post">
-                          <input type="hidden" name="intent" value="status" />
-                          <input type="hidden" name="id" value={p.id} />
-                          <input
-                            type="hidden"
-                            name="status"
-                            value={p.status === 'paused' ? 'active' : 'paused'}
-                          />
-                          <Button type="submit" variant="ghost" size="sm">
-                            {p.status === 'paused' ? 'Resume' : 'Pause'}
-                          </Button>
-                        </Form>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Table stack="cards" caption="Promotion codes">
+              <TableHead>
+                <Tr>
+                  <Th>Code</Th>
+                  <Th>Takes off</Th>
+                  <Th>Limits</Th>
+                  <Th numeric>Used</Th>
+                  <Th className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </Th>
+                </Tr>
+              </TableHead>
+              <TableBody>
+                {promotions.map((p) => {
+                  const paused = p.status === 'paused';
+                  return (
+                    <Tr key={p.id} className={cn(paused && 'text-muted-foreground')}>
+                      <Td>
+                        <span className="font-mono">{p.code}</span>
+                        {paused ? (
+                          <span className="ml-2 align-[0.0625em]">
+                            <ToneBadge tone="idle" label="Paused" />
+                          </span>
+                        ) : null}
+                        {p.name ? (
+                          <div className="text-muted-foreground text-xs">{p.name}</div>
+                        ) : null}
+                      </Td>
+                      <Td label="Takes off">{describe(p)}</Td>
+                      <Td label="Limits" className="text-muted-foreground text-xs">
+                        {[
+                          p.minSubtotal ? `over ${money(p.minSubtotal)}` : null,
+                          p.skus ? `${JSON.parse(p.skus).length} SKUs` : null,
+                          p.customerId ? `customer ${p.customerId}` : null,
+                          p.maxRedemptions ? `${p.maxRedemptions} uses` : null,
+                          p.perCustomerLimit ? `${p.perCustomerLimit} per customer` : null,
+                          p.validTo ? `until ${dateTime(p.validTo, 'UTC')}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'None'}
+                      </Td>
+                      <Td numeric label="Used">
+                        {p.redeemed}
+                      </Td>
+                      <Td className="max-md:-ml-3 max-md:basis-full">
+                        {canOperate ? (
+                          <Form method="post">
+                            <input type="hidden" name="intent" value="status" />
+                            <input type="hidden" name="id" value={p.id} />
+                            <input
+                              type="hidden"
+                              name="status"
+                              value={paused ? 'active' : 'paused'}
+                            />
+                            <Button
+                              type="submit"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`${paused ? 'Resume' : 'Pause'} ${p.code}`}
+                            >
+                              {paused ? 'Resume' : 'Pause'}
+                            </Button>
+                          </Form>
+                        ) : null}
+                      </Td>
+                    </Tr>
+                  );
+                })}
+              </TableBody>
+            </Table>
           ) : (
             <Empty>No promotions yet.</Empty>
           )}

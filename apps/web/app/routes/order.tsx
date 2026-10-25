@@ -18,6 +18,7 @@ import {
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Table, TableBody, TableFoot, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { useAgent } from 'agents/react';
 import {
   ChevronRight,
@@ -600,23 +601,18 @@ function Compensation({
           ) : null}
         </p>
       ) : null}
-      <table className="mt-3 w-full text-sm">
-        <caption className="sr-only">Steps reversed, in the order they were undone</caption>
-        <thead>
-          <tr className="border-b text-left">
-            <th scope="col" className="caption pb-1.5 font-medium">
-              Step
-            </th>
-            <th scope="col" className="caption pb-1.5 font-medium">
-              Reversed
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
+      <Table edge="flush" className="mt-3" caption="Steps reversed, in the order they were undone">
+        <TableHead>
+          <Tr>
+            <Th>Step</Th>
+            <Th>Reversed</Th>
+          </Tr>
+        </TableHead>
+        <TableBody>
           {reversed.length ? (
             reversed.map(([id, r]) => (
-              <tr key={id} className="align-top">
-                <td className="py-2 pr-3">
+              <Tr key={id}>
+                <Td className="py-2">
                   <button
                     type="button"
                     className="text-left hover:underline"
@@ -624,31 +620,31 @@ function Compensation({
                   >
                     {label(id)}
                   </button>
-                </td>
-                <td className="py-2 text-muted-foreground">
+                </Td>
+                <Td className="py-2 text-muted-foreground">
                   {noop(r.summary) ? 'Nothing to undo yet' : (r.summary ?? 'Reversed')}
-                </td>
-              </tr>
+                </Td>
+              </Tr>
             ))
           ) : (
-            <tr>
-              <td colSpan={2} className="py-2 text-muted-foreground">
+            <Tr>
+              <Td colSpan={2} className="py-2 text-muted-foreground">
                 Nothing had been done that needed undoing.
-              </td>
-            </tr>
+              </Td>
+            </Tr>
           )}
-        </tbody>
-        <tfoot>
-          <tr className="double-rule border-t">
-            <td className="pt-2 pb-1.5 font-medium">
+        </TableBody>
+        <TableFoot>
+          <Tr className="double-rule border-t">
+            <Td className="pt-2 font-medium">
               {undone ? `${plural(undone, 'step')} reversed` : 'Nothing needed undoing'}
-            </td>
-            <td className="pt-2 pb-1.5 text-right font-medium tabular">
+            </Td>
+            <Td numeric className="pt-2 font-medium">
               {voided ? `${money(voided, currency)} released to the card` : ''}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+            </Td>
+          </Tr>
+        </TableFoot>
+      </Table>
       {failed ? (
         <p className="mt-3 text-bad text-sm">
           {state.rollback?.error ? `${state.rollback.error}. ` : ''}Check Payments and Shipments
@@ -998,68 +994,60 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
       <section>
         <h2 className="section-title mb-2">Lines</h2>
         {o.lines.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b text-left">
-                <th scope="col" className="caption pb-1.5 font-medium">
-                  Item
-                </th>
-                <th scope="col" className="caption pb-1.5 text-right font-medium">
-                  Qty
-                </th>
-                <th scope="col" className="caption pb-1.5 text-right font-medium">
-                  Amount
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+          <Table edge="flush" caption="Lines">
+            <TableHead>
+              <Tr>
+                <Th>Item</Th>
+                <Th numeric>Qty</Th>
+                <Th numeric>Amount</Th>
+              </Tr>
+            </TableHead>
+            <TableBody>
               {o.lines.map((l) => (
-                <tr key={l.sku}>
-                  <td className="py-1.5 pr-2">
+                <Tr key={l.sku}>
+                  <Td>
                     {l.name ?? l.sku}
                     {l.name ? (
                       <span className="ml-1.5 font-mono text-muted-foreground text-xs">
                         {l.sku}
                       </span>
                     ) : null}
-                  </td>
-                  <td className="py-1.5 text-right tabular">{l.qty}</td>
-                  <td className="py-1.5 text-right tabular">
+                  </Td>
+                  <Td numeric>{l.qty}</Td>
+                  <Td numeric>
                     {l.unitPrice !== undefined ? money(l.unitPrice * l.qty, o.currency) : '—'}
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
-            </tbody>
-            <tfoot>
+            </TableBody>
+            <TableFoot>
               {o.shipping || o.shippingOption ? (
-                <tr className="border-t">
-                  <td colSpan={2} className="pt-1.5 text-muted-foreground">
+                <Tr className="border-t">
+                  <Td colSpan={2} className="text-muted-foreground">
                     Shipping
                     {o.shippingOption ? (
                       <span className="ml-1.5 font-mono text-xs">{o.shippingOption}</span>
                     ) : null}
-                  </td>
-                  <td className="pt-1.5 text-right tabular">
-                    {money(o.shipping ?? 0, o.currency)}
-                  </td>
-                </tr>
+                  </Td>
+                  <Td numeric>{money(o.shipping ?? 0, o.currency)}</Td>
+                </Tr>
               ) : null}
-              <tr className={o.shipping || o.shippingOption ? undefined : 'border-t'}>
-                <td colSpan={2} className="pt-1.5 text-muted-foreground">
+              <Tr className={o.shipping || o.shippingOption ? undefined : 'border-t'}>
+                <Td colSpan={2} className="text-muted-foreground">
                   Tax
-                </td>
-                <td className="pt-1.5 text-right tabular">{money(o.tax, o.currency)}</td>
-              </tr>
-              <tr className="double-rule">
-                <td colSpan={2} className="pt-1 pb-1 font-medium">
+                </Td>
+                <Td numeric>{money(o.tax, o.currency)}</Td>
+              </Tr>
+              <Tr className="double-rule">
+                <Td colSpan={2} className="font-medium">
                   Total
-                </td>
-                <td className="pt-1 pb-1 text-right font-semibold tabular">
+                </Td>
+                <Td numeric className="font-semibold">
                   {money(o.total, o.currency)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+                </Td>
+              </Tr>
+            </TableFoot>
+          </Table>
         ) : (
           <p className="text-muted-foreground">No lines yet.</p>
         )}
@@ -1164,17 +1152,17 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
   return (
     <section>
       <h2 className="section-title mb-2">{title}</h2>
-      <table className="w-full">
-        <tbody className="divide-y">
+      <Table edge="flush" caption={title}>
+        <TableBody>
           {rows.map((r, i) => (
-            <tr key={`${title}-${i}`}>
-              <td className="py-1.5 pr-2">{r[0]}</td>
-              <td className="py-1.5 pr-2 text-muted-foreground">{r[1]}</td>
-              <td className="py-1.5 text-right tabular">{r[2]}</td>
-            </tr>
+            <Tr key={`${title}-${i}`}>
+              <Td>{r[0]}</Td>
+              <Td className="text-muted-foreground">{r[1]}</Td>
+              <Td numeric>{r[2]}</Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </section>
   );
 }
