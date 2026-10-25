@@ -8,7 +8,7 @@
   // routes.
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "issues": { "enabled": true } },
   "upload_source_maps": true,
   "durable_objects": {
     "bindings": [
