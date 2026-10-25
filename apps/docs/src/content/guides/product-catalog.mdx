@@ -136,6 +136,12 @@ until `state` is `done` or `failed`. States: <Values of="feed-states" />. A feed
 `errors` with the `row` number, the product `key` when known and the `message`. When the whole feed
 fails (for example, a CSV without `key` and `sku` columns, or text that isn't UTF-8), `failure` says why. `GET /api/v1/catalog/feeds` lists recent feeds.
 
+To stop a feed that hasn't finished, an operator sends `POST /api/v1/catalog/feeds/:id/cancel`. The
+answer is the feed, now `cancelled`, with `cancelledBy`. No more of the file is read, but the parts
+already handed to the catalog still apply, so a cancelled feed may have written some products; its
+counts say how many. A feed that is already `done`, `failed` or `cancelled` is left as it is, and
+cancelling a `done` or `failed` one answers `409`.
+
 The file must be UTF-8. **NDJSON** is one product per line, in the same shape as the products API,
 and can express everything. **CSV** has one row per variant, a header row and RFC 4180 quoting;
 all rows of a product must be contiguous (a key that appears again later replaces the earlier rows),

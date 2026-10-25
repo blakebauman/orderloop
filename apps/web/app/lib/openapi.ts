@@ -712,6 +712,15 @@ export function openApiDocument(serverUrl: string) {
           responses: { '200': ok('{ feed }'), ...errors },
         },
       },
+      '/api/v1/catalog/feeds/{id}/cancel': {
+        post: {
+          summary: 'Cancel a feed (operator)',
+          description:
+            'Stops a feed that is queued, splitting or applying: no more of its file is read. Parts already handed to the catalog still apply, so some products may have been written. Answers 409 when the feed has already finished.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': ok('{ feed }'), ...errors },
+        },
+      },
       '/api/v1/catalog/reindex': {
         post: {
           summary: 'Republish every product (admin)',
