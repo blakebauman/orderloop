@@ -687,8 +687,10 @@ export function renderEngine(base: Config, d: Deployment): Config {
       ...config.vars,
       PLUGIN_PUBLISHERS: JSON.stringify(d.pluginInstalls.publishers),
     };
-  // Whether the assistant may draft business-rule plugins for an admin to approve.
-  if (d.pluginInstalls?.assistant) config.vars = { ...config.vars, ASSISTANT_PLUGINS: 'on' };
+  // Whether the assistant may draft business-rule plugins for an admin to approve. The base config
+  // has orderloop.app's "on", so a deployment that doesn't ask for it must not keep it.
+  const { ASSISTANT_PLUGINS: _drafts, ...vars } = config.vars;
+  config.vars = d.pluginInstalls?.assistant ? { ...vars, ASSISTANT_PLUGINS: 'on' } : vars;
   // Sandboxed plugins' secrets, on a deployment with its own Secrets Store (else PLUGIN_SECRETS,
   // a secret the deploy writes). PLUGIN_BUNDLES is added by the deploy once it has published them.
   const store = storeSecrets(d, sandboxedPlugins(d), storeBinding);

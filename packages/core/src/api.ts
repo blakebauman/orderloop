@@ -355,6 +355,11 @@ export interface EngineRpc {
     attachment: Omit<CartAttachment, 'by' | 'at'>,
     actor: CartActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Forgets every A2A push config a person (or token) registered, and what is still queued for
+   * them, when their connected apps end: a client that can no longer call /a2a stops hearing too.
+   */
+  dropA2aPushes(kind: 'user' | 'token', id: string): Promise<{ configs: number }>;
 }
 
 /**

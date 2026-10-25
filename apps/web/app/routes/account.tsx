@@ -119,7 +119,7 @@ export async function action({ request }: Route.ActionArgs) {
         await disableTwoFactor(request, me, str('password'));
         return { disabled: true };
     }
-    await changeOwnPassword(
+    const apps = await changeOwnPassword(
       request,
       me,
       String(f.get('current') ?? ''),
@@ -128,7 +128,7 @@ export async function action({ request }: Route.ActionArgs) {
     // A new password signs out everywhere else, in case the old one leaked.
     const ended = await endOtherSessions(request, me, current);
     // Replacing a temporary password is the first real sign-in: it gets a welcome, not a notice.
-    return { ok: true as const, welcome: !!me.passwordChangeDue, ended };
+    return { ok: true as const, welcome: !!me.passwordChangeDue, ended, apps };
   } catch (err) {
     if (err instanceof TeamError) return data({ error: err.message }, { status: 400 });
     if (err instanceof Throttled) return data({ error: err.message }, { status: 429 });
@@ -256,6 +256,9 @@ export default function Account() {
                     Password changed.
                     {result.ended
                       ? ` ${result.ended === 1 ? 'Your other session was' : 'Your other sessions were'} signed out.`
+                      : ''}
+                    {result.apps
+                      ? ` ${result.apps === 1 ? 'Your connected app was' : 'Your connected apps were'} disconnected; connect again to keep using them.`
                       : ''}
                   </p>
                 ) : null}

@@ -47,6 +47,7 @@ import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
 import { useAssistant, usePageContext } from '~/lib/assistant';
 import { actor, requireUser } from '~/lib/auth.server';
+import { useMedia, WIDE } from '~/lib/device';
 import { engine } from '~/lib/env.server';
 import { eventAction, eventWaiting } from '~/lib/events';
 import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
@@ -96,7 +97,8 @@ export function shouldRevalidate({
   return defaultShouldRevalidate;
 }
 
-type Tab = 'actions' | 'activity' | 'details' | 'node';
+/** `graph` is a tab only below lg; wider screens show the graph beside the panels. */
+type Tab = 'actions' | 'activity' | 'details' | 'node' | 'graph';
 type Records = Awaited<ReturnType<typeof orderRecords>>;
 
 /** How often, at most, the order page fetches its D1 records again while the run moves. */
@@ -263,6 +265,10 @@ function OrderView() {
     [orderId, title, awaitingApproval],
   );
 
+  // Below lg the graph is a tab of its own, so each view has the screen and there's one scroll
+  // region at a time rather than a capped panel above a pannable canvas.
+  const wide = useMedia(WIDE);
+  const shown: Tab = wide && tab === 'graph' ? 'activity' : tab;
   const tabs: { id: Tab; label: string; count?: number }[] = [
     {
       id: 'actions',
@@ -275,6 +281,7 @@ function OrderView() {
             : 'Actions',
       count: state.waits.length || undefined,
     },
+    ...(wide ? [] : [{ id: 'graph' as const, label: 'Graph' }]),
     { id: 'activity', label: 'Activity' },
     { id: 'details', label: 'Details' },
     { id: 'node', label: 'Node' },
@@ -382,13 +389,13 @@ function OrderView() {
       ) : null}
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <aside className="flex max-h-[75vh] min-h-0 flex-col border-b lg:col-start-2 lg:max-h-none lg:row-start-1 lg:border-b-0 lg:border-l">
+        <aside className="flex min-h-0 flex-col lg:col-start-2 lg:row-start-1 lg:border-l">
           <div
             role="tablist"
             aria-label="Order panels"
-            className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
+            className="sticky top-[var(--shell-h)] z-10 flex gap-1 overflow-x-auto border-b bg-background px-3 pt-2 [scrollbar-width:none] lg:static"
             onKeyDown={(e) => {
-              const i = tabs.findIndex((t) => t.id === tab);
+              const i = tabs.findIndex((t) => t.id === shown);
               const next =
                 e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : undefined;
               if (next === undefined) return;
@@ -404,13 +411,13 @@ function OrderView() {
                 id={`${tabsId}-${t.id}`}
                 type="button"
                 role="tab"
-                aria-selected={tab === t.id}
-                aria-controls={`${tabsId}-panel`}
-                tabIndex={tab === t.id ? 0 : -1}
+                aria-selected={shown === t.id}
+                aria-controls={`${tabsId}-${t.id === 'graph' ? 'graph-panel' : 'panel'}`}
+                tabIndex={shown === t.id ? 0 : -1}
                 onClick={() => setTab(t.id)}
                 className={cn(
                   '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 py-2 font-medium text-[13px] text-muted-foreground hover:text-foreground',
-                  tab === t.id && 'border-foreground text-foreground',
+                  shown === t.id && 'border-foreground text-foreground',
                 )}
               >
                 {t.label}
@@ -436,11 +443,12 @@ function OrderView() {
           <div
             id={`${tabsId}-panel`}
             role="tabpanel"
-            aria-labelledby={`${tabsId}-${tab}`}
-            className="min-h-0 flex-1 overflow-y-auto p-4"
+            aria-labelledby={`${tabsId}-${shown}`}
+            hidden={shown === 'graph'}
+            className="min-h-0 flex-1 p-4 lg:overflow-y-auto"
           >
             {/* Stays mounted while hidden so an open undo window survives a tab switch. */}
-            <div hidden={tab !== 'actions'}>
+            <div hidden={shown !== 'actions'}>
               <Compensation state={state} records={records} onSelect={select} />
               <Actions
                 state={state}
@@ -453,9 +461,9 @@ function OrderView() {
                 onActivity={() => setTab('activity')}
               />
             </div>
-            {tab === 'activity' ? <Activity state={state} onSelect={select} /> : null}
-            {tab === 'details' ? <Details state={state} records={records} /> : null}
-            {tab === 'node' ? (
+            {shown === 'activity' ? <Activity state={state} onSelect={select} /> : null}
+            {shown === 'details' ? <Details state={state} records={records} /> : null}
+            {shown === 'node' ? (
               node ? (
                 <Inspector node={node} run={state.nodes[node.id]} />
               ) : (
@@ -464,16 +472,22 @@ function OrderView() {
             ) : null}
           </div>
         </aside>
-        <div className="h-[60vh] min-h-[360px] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:h-auto">
-          <FlowCanvas
-            graph={flow}
-            runs={state.nodes}
-            edgeStates={state.edges}
-            issues={issues}
-            selectedId={selected}
-            onSelect={selectOnCanvas}
-          />
-        </div>
+        {wide || shown === 'graph' ? (
+          <div
+            id={`${tabsId}-graph-panel`}
+            {...(wide ? {} : { role: 'tabpanel', 'aria-labelledby': `${tabsId}-graph` })}
+            className="h-[calc(100dvh-var(--shell-h)-var(--tabbar-h)-3rem)] min-h-[320px] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:h-auto"
+          >
+            <FlowCanvas
+              graph={flow}
+              runs={state.nodes}
+              edgeStates={state.edges}
+              issues={issues}
+              selectedId={selected}
+              onSelect={selectOnCanvas}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

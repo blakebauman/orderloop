@@ -35,7 +35,7 @@ import {
   submitCart,
 } from './cart/carts';
 import { handleMcp, MCP_PATH } from './mcp';
-import { cartAgent, orderAgent } from './namespaces';
+import { a2aAgent, cartAgent, orderAgent } from './namespaces';
 import { startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins, pinnedManifest } from './plugin-host';
@@ -126,6 +126,10 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   copilot(req: CopilotRequest): Promise<CopilotResult> {
     return copilot(this.env, req);
+  }
+
+  async dropA2aPushes(kind: 'user' | 'token', id: string) {
+    return { configs: await a2aAgent(this.env, `${kind}:${id}`).dropPushes() };
   }
 
   async runReplenish() {

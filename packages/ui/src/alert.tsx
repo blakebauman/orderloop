@@ -10,6 +10,12 @@ const alertVariants = cva(
         default: 'bg-card text-card-foreground',
         destructive:
           'bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current',
+        // The Ledger status tones on the app's tinted-notice surface (`border-wait/40 bg-wait/10`):
+        // the title and icon take the tone, the text stays ink so it reads in either theme.
+        warning:
+          'border-wait/40 bg-wait/10 text-foreground *:data-[slot=alert-description]:text-foreground *:data-[slot=alert-title]:text-wait [&>svg]:text-wait',
+        success:
+          'border-ok/40 bg-ok/10 text-foreground *:data-[slot=alert-description]:text-foreground *:data-[slot=alert-title]:text-ok [&>svg]:text-ok',
       },
     },
     defaultVariants: {

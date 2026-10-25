@@ -63,7 +63,7 @@ export default function Audit() {
         <Section title="Events" flush>
           {events.length ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="table-stack w-full text-sm">
                 <thead className="border-b text-left">
                   <tr>
                     <th scope="col" className="caption px-4 py-2 font-medium">
@@ -93,9 +93,16 @@ export default function Audit() {
                       <td className="whitespace-nowrap px-4 py-1.5 text-muted-foreground text-xs">
                         <Ago ms={e.at} />
                       </td>
-                      <td className="px-2 py-1.5">{e.actor ?? '—'}</td>
-                      <td className="px-2 py-1.5">{describe(e)}</td>
-                      <td className="px-4 py-1.5 font-mono text-muted-foreground text-xs">
+                      <td data-label="Who" className="px-2 py-1.5">
+                        {e.actor ?? '—'}
+                      </td>
+                      <td data-label="What" className="px-2 py-1.5">
+                        {describe(e)}
+                      </td>
+                      <td
+                        data-label="From"
+                        className="px-4 py-1.5 font-mono text-muted-foreground text-xs"
+                      >
                         {e.ip}
                       </td>
                     </tr>

@@ -35,6 +35,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { Crosshair, LayoutGrid, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMedia } from '~/lib/device';
 import { statusColor } from '~/lib/format';
 import { useTheme } from '~/lib/theme';
 import { FlowNodeView, type FlowRfNode } from './flow-node';
@@ -47,7 +48,7 @@ const surface =
   'relative h-full min-h-[360px] w-full overflow-hidden rounded-md border bg-[var(--sheet)]';
 
 const toolbarButton =
-  'inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 font-medium text-muted-foreground text-xs transition hover:bg-muted hover:text-foreground';
+  'hit-area inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 font-medium text-muted-foreground text-xs transition hover:bg-muted hover:text-foreground';
 
 export type FlowCanvasProps = {
   graph: FlowGraph;
@@ -127,6 +128,7 @@ function Inner({
 }: FlowCanvasProps) {
   const { fitView, screenToFlowPosition, setViewport, getNodesBounds } = useReactFlow();
   const { resolved: colorMode } = useTheme();
+  const touch = useMedia('(pointer: coarse)');
   const [expanded, setExpanded] = useState(false);
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -426,7 +428,13 @@ function Inner({
   return (
     <div
       ref={wrapRef}
-      className={cn(surface, expanded && 'fixed inset-3 z-50 h-auto w-auto', className)}
+      className={cn(
+        surface,
+        // Expanded, it fills the screen inside the notch, the status bar and the home indicator.
+        expanded &&
+          'fixed top-[max(0.75rem,var(--safe-top))] right-[max(0.75rem,var(--safe-right))] bottom-[max(0.75rem,var(--safe-bottom))] left-[max(0.75rem,var(--safe-left))] z-50 h-auto w-auto',
+        className,
+      )}
     >
       <ReactFlow
         nodes={nodes}
@@ -449,6 +457,8 @@ function Inner({
           }
         }}
         nodesConnectable={editable}
+        // A connection dropped near an input snaps to it; a fingertip lands less precisely.
+        connectionRadius={touch ? 40 : 20}
         elementsSelectable
         deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
         minZoom={0.2}

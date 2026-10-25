@@ -16,9 +16,11 @@
 
 import { env } from 'cloudflare:workers';
 import {
+  insufficientScope,
   OAuthAuthorizationServer,
   OAuthError,
   type OAuthHelpers,
+  type OAuthResourceAuth,
   OAuthResourceServer,
 } from '@cloudflare/workers-oauth-provider';
 import { A2A_PATH, type Principal, ROLES, type Role } from '@orderloop/core';
@@ -113,7 +115,7 @@ function resourceServer(origin: string, as: OAuthAuthorizationServer<Env>, path:
       }
       return caller ? { props: { principal: caller }, audience: res } : null;
     },
-    handler: { fetch: (request, _env, ctx) => forward(request, path, ctx.props) },
+    handler: { fetch: (request, _env, ctx) => forward(request, path, ctx.props, ctx.auth) },
   });
 }
 
@@ -190,9 +192,35 @@ function badOrigin(request: Request) {
   }
 }
 
-async function forward(request: Request, path: Endpoint, props: Props): Promise<Response> {
+/**
+ * The grant as this token may use it: a token carries the grant's role as its scope, or less when
+ * the app asked for a narrower token (RFC 6749 §6), so the lowest role it names is the one it gets.
+ * Null for a token that names no role.
+ */
+export function scopedGrant(props: GrantProps, scope: readonly string[]): GrantProps | null {
+  const named = ROLES.filter((r) => scope.includes(r));
+  const lowest = named[0];
+  if (!lowest) return null;
+  return {
+    ...props,
+    role: ROLES.indexOf(lowest) < ROLES.indexOf(props.role) ? lowest : props.role,
+  };
+}
+
+async function forward(
+  request: Request,
+  path: Endpoint,
+  props: Props,
+  auth: OAuthResourceAuth,
+): Promise<Response> {
   if (badOrigin(request)) return Response.json({ error: 'Origin refused' }, { status: 403 });
-  const caller = 'principal' in props ? props.principal : await grantPrincipal(props);
+  let caller: Caller | null;
+  if ('principal' in props) caller = props.principal;
+  else {
+    const grant = scopedGrant(props, auth.scope);
+    if (!grant) return insufficientScope(auth, [props.role], 'This token names no role.');
+    caller = await grantPrincipal(grant);
+  }
   if (!caller)
     return Response.json(
       { error: 'This connection has ended. Connect the app again.' },

@@ -17,6 +17,9 @@ The page is admin-only: **Plugins** in the account menu.
   as part of the workspace's setup; you can't add one from the page. If none is set, an upload is
   refused with `Runtime installs are off for this deployment`.
 - A plugin the workspace already has from its setup can't be replaced by a file with the same id.
+- A plugin installed from a file can't ask OrderLoop to act for it (open carts, start or cancel
+  orders): only a plugin from the workspace's setup can be allowed to. A file whose plugin asks for
+  any of these is refused, naming what it asks for.
 
 ## Install
 

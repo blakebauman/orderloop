@@ -31,6 +31,7 @@ import { ArrowUp, ChevronDown, Info, MoreHorizontal, Square, X } from 'lucide-re
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { contextLabel, useAssistant } from '~/lib/assistant';
+import { coarse, useMedia, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
 import { useMe } from '~/lib/use-me';
 import { ActionCard, PluginDraftCard, type Previewer, ProposalCard, Prose, ReadRow } from './parts';
@@ -43,6 +44,9 @@ import { ActionCard, PluginDraftCard, type Previewer, ProposalCard, Prose, ReadR
 export function AssistantPanel() {
   const { open, setOpen } = useAssistant();
   const [opened, setOpened] = useState(false);
+  // As a sheet, it keeps its composer above the on-screen keyboard.
+  const wide = useMedia(WIDE);
+  useVisualViewport(open && !wide);
   useEffect(() => {
     if (open) setOpened(true);
   }, [open]);
@@ -55,6 +59,8 @@ export function AssistantPanel() {
         // Phones and tablets: a sheet over the page, between the top bar and the phone tab bar.
         'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200 ease-out',
         open ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+        // With the keyboard up, it takes exactly the visible area above it, over the bars.
+        'in-data-keyboard:z-50 in-data-keyboard:top-[var(--vvtop)] in-data-keyboard:bottom-auto in-data-keyboard:h-[var(--vvh)]',
         // Wide screens: a column beside the page. It opens without animating its width, which would
         // reflow the whole page (the graph canvas included) on every frame.
         'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-none',
@@ -103,7 +109,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
       <h2 className="font-semibold text-[15px] tracking-title">Assistant</h2>
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex h-6 min-w-0 max-w-[60%] items-center gap-1 rounded-sm border border-input px-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+          className="hit-area flex h-6 min-w-0 max-w-[60%] items-center gap-1 rounded-sm border border-input px-1.5 text-[12px] text-muted-foreground hover:text-foreground"
           aria-label={`Asking about: ${current}`}
         >
           <span className="truncate">{current}</span>
@@ -130,7 +136,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
         {onClear ? (
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="hit-area grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="Conversation options"
             >
               <MoreHorizontal className="size-4" />
@@ -155,7 +161,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="hit-area grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Close the assistant (⌘J)"
           title="Close (⌘J)"
         >
@@ -571,7 +577,7 @@ function HeldMessages({
             <button
               type="button"
               onClick={() => onRemove(i)}
-              className="grid size-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="hit-area grid size-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="Remove queued message"
             >
               <X className="size-3.5" />
@@ -605,7 +611,7 @@ function Composer({
   };
   return (
     <form
-      className="shrink-0 border-t p-3"
+      className="shrink-0 border-t p-3 in-data-keyboard:pb-2"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -617,10 +623,11 @@ function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+            // On a touch screen Return is a new line and the button sends; ⌘/Ctrl+Enter always sends.
+            if (coarse() && !e.metaKey && !e.ctrlKey) return;
+            e.preventDefault();
+            submit();
           }}
           rows={1}
           placeholder={
@@ -634,6 +641,7 @@ function Composer({
             type="button"
             size="icon-xs"
             variant="outline"
+            className="touch:size-8"
             onClick={onStop}
             aria-label="Stop the reply"
             title="Stop"
@@ -644,6 +652,7 @@ function Composer({
         <Button
           type="submit"
           size="icon-xs"
+          className="touch:size-8"
           disabled={!text.trim()}
           aria-label="Send"
           title="Send (Enter)"
@@ -651,7 +660,7 @@ function Composer({
           <ArrowUp />
         </Button>
       </div>
-      <p className="mt-1.5 text-muted-foreground text-xs">
+      <p className="mt-1.5 hidden text-muted-foreground text-xs fine:block">
         Enter sends · Shift+Enter for a new line · ⌘J opens and closes
       </p>
     </form>

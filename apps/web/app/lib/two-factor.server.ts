@@ -6,11 +6,11 @@
 import { type Principal, secretContext } from '@orderloop/core';
 import { recoveryCodes, users } from '@orderloop/db';
 import { count, eq } from 'drizzle-orm';
+import { endAccess, endedDetail } from './access.server';
 import { audit } from './audit.server';
 import { reauthenticate } from './auth.server';
 import { sealSecret } from './data-key.server';
 import { db } from './env.server';
-import { clearPasskeys } from './passkeys.server';
 import { twoFactorRequirement } from './settings.server';
 import { TeamError } from './team.server';
 import {
@@ -124,14 +124,20 @@ export async function resetTwoFactor(request: Request, by: Principal, id: string
     .where(eq(users.id, id))
     .get();
   if (!user) throw new TeamError('That person is no longer on the team.');
-  // A lost phone or laptop: its passkeys go too, so whoever has it can't sign in.
-  const hadPasskeys = await clearPasskeys(id);
-  if (!user.enabledAt && !hadPasskeys) return;
+  // A lost phone or laptop: its passkeys go too, so whoever has it can't sign in, and so do the
+  // sessions and connected apps it may still be signed in to.
+  const ended = await endAccess(
+    request,
+    { id, email: user.email },
+    { sessions: true, apps: true, passkeys: true },
+  );
+  if (!user.enabledAt && !ended.passkeys && !ended.sessions && !ended.apps) return;
   if (user.enabledAt) await clear(id);
+  const { passkeys, ...rest } = endedDetail(ended);
   await audit(request, 'team.two_factor_reset', {
     actor: by,
     target: user.email,
-    ...(hadPasskeys ? { detail: { passkeys: 'removed' } } : {}),
+    detail: { ...rest, ...(passkeys ? { passkeys: 'removed' } : {}) },
   });
 }
 
