@@ -23,7 +23,6 @@
     "ai": "catalog:",
     "drizzle-orm": "catalog:",
     "postal-mime": "^4.0.8",
-    "workers-ai-provider": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

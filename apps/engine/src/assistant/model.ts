@@ -1,8 +1,9 @@
 /**
- * The assistant's model: Workers AI (through AI Gateway when AI_GATEWAY_ID is set), with a
- * deterministic heuristic model behind it. The heuristic speaks the same protocol, so it calls the
- * same tools through the same approvals; it runs when AI_MODE is "mock", and takes over a turn when
- * the model errors or produces nothing within the AI timeout. The assistant never blocks on a model.
+ * The assistant's model: Workers AI (through AI Gateway when AI_GATEWAY_ID is set), then a smaller
+ * Workers AI model, with a deterministic heuristic model behind both. The heuristic speaks the same
+ * protocol, so it calls the same tools through the same approvals; it runs when AI_MODE is "mock",
+ * and takes over a turn when the models error or produce nothing within the AI timeout. The
+ * assistant never blocks on a model.
  */
 
 import type {
@@ -17,13 +18,28 @@ import {
   type AssistantContext,
   type AssistantTool,
   describeAnswers,
+  promptId,
 } from '@orderloop/core';
-import { createWorkersAI } from 'workers-ai-provider';
+import { createAI, type GatewayOptions, type WorkersAIModelId } from 'agents/models/ai-sdk';
 import { gatewayOptions } from '../ai';
 import { orderRef } from './data';
 
 /** Matches the AI nodes: a slow model must not hold a person hostage either. */
 const AI_TIMEOUT_MS = 20_000;
+
+/**
+ * Tried when ASSISTANT_MODEL fails before saying anything (an error, a capacity refusal): smaller
+ * and faster, with multi-turn tool calling, so a turn still gets a model's answer before the
+ * heuristic's.
+ */
+export const ASSISTANT_FALLBACK_MODEL = '@cf/zai-org/glm-4.7-flash';
+
+/**
+ * Bounds each gateway attempt but the last (the gateway waits out its final attempt). As long as
+ * the whole turn's deadline: a long answer that isn't streamed (A2A) can take most of it, and a
+ * shorter bound would cut healthy answers off and retry them.
+ */
+const ATTEMPT_TIMEOUT_MS = 20_000;
 
 const USAGE: LanguageModelV4Usage = {
   inputTokens: {
@@ -35,28 +51,78 @@ const USAGE: LanguageModelV4Usage = {
   outputTokens: { total: undefined, text: undefined, reasoning: undefined },
 };
 
-export type ModelSource = { source: 'model' | 'heuristic' };
+/** Which model answered: `model` names the Workers AI model when one did. */
+export type ModelSource = { source: 'model' | 'heuristic'; model?: string };
+
+/**
+ * Whose turn it is, for the gateway: where it came from, the person, and the conversation (the
+ * panel has one per person; an A2A caller's context). Neither reaches the gateway as it is.
+ */
+export type Turn = { surface: 'panel' | 'a2a'; principalId: string; conversation: string };
+
+const sha256 = async (text: string) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+/**
+ * AI Gateway's options for one turn. Every model call of the turn (each tool step, and the
+ * fallback model's) shares its event id. With logs on (`aiGatewayLogs`), the entry keeps its
+ * metadata, tokens and cost but not its payload: tool results carry customers' names and order details, and the gateway keeps its
+ * logs past the app's own erasure. With no gateway the id stays empty rather than undefined:
+ * createAI fills in its "default" gateway for undefined, and the AI binding calls Workers AI
+ * directly only for an empty id.
+ */
+export async function assistantGateway(
+  env: Env,
+  turn: Turn,
+): Promise<{ gateway: GatewayOptions; headers: Record<string, string> }> {
+  const id = String(env.AI_GATEWAY_ID ?? '');
+  if (!id) return { gateway: { id: '' }, headers: {} };
+  return {
+    gateway: {
+      id,
+      // The registry's aiGatewayLogs: with logs off the gateway keeps no entry at all.
+      collectLog: gatewayOptions(env)?.collectLog ?? false,
+      eventId: crypto.randomUUID(),
+      metadata: {
+        prompt: promptId('assistant'),
+        surface: turn.surface,
+        principal: (await sha256(`principal:${turn.principalId}`)).slice(0, 16),
+      },
+      retries: { maxAttempts: 3, retryDelayMs: 500, backoff: 'exponential' },
+      requestTimeoutMs: ATTEMPT_TIMEOUT_MS,
+    },
+    headers: { 'cf-aig-collect-log-payload': 'false' },
+  };
+}
 
 /**
  * The model for one turn. `used.source` says which model answered, so the panel can label a
  * heuristic answer as one.
  */
-export function assistantModel(
+export async function assistantModel(
   env: Env,
   context: AssistantContext,
   used: ModelSource,
-): LanguageModelV4 {
+  turn: Turn,
+): Promise<LanguageModelV4> {
   const fallback = heuristicModel(context);
   if (String(env.AI_MODE) === 'mock') {
     used.source = 'heuristic';
     return fallback;
   }
-  const workersai = createWorkersAI({
-    binding: env.AI,
-    ...(gatewayOptions(env) ? { gateway: gatewayOptions(env) } : {}),
+  const { gateway, headers } = await assistantGateway(env, turn);
+  const ai = createAI({ binding: env.AI, gateway });
+  const model = String(env.ASSISTANT_MODEL) as WorkersAIModelId;
+  const primary = ai(model, {
+    fallback: model === ASSISTANT_FALLBACK_MODEL ? [] : [ASSISTANT_FALLBACK_MODEL],
+    // Workers AI's prefix cache: the system prompt and tools (most of a turn's input) repeat
+    // within a conversation, so its turns go to the same replica.
+    sessionAffinity: await sha256(`conversation:${turn.principalId}:${turn.conversation}`),
+    headers,
   });
-  const primary = workersai(env.ASSISTANT_MODEL as Parameters<typeof workersai>[0]);
-  return withFallback(primary as unknown as LanguageModelV4, fallback, used);
+  return withFallback(primary, fallback, used);
 }
 
 function timeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
@@ -70,6 +136,12 @@ function timeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
 }
 
 const CONTENT = new Set(['text-delta', 'tool-call', 'tool-input-start', 'reasoning-delta']);
+
+/** The model that answered, from createAI's metadata: the fallback model's, when it did. */
+function answeredBy(metadata: unknown): string | undefined {
+  const model = (metadata as { cloudflare?: { model?: unknown } } | undefined)?.cloudflare?.model;
+  return typeof model === 'string' ? model : undefined;
+}
 
 /**
  * Tries the model; if it errors, or nothing useful arrives before the deadline, the heuristic
@@ -89,6 +161,7 @@ export function withFallback(
       try {
         const res = await timeout(primary.doGenerate(options), AI_TIMEOUT_MS);
         used.source = 'model';
+        used.model = answeredBy(res.providerMetadata) ?? primary.modelId;
         return res;
       } catch (err) {
         console.warn('assistant fallback', err instanceof Error ? err.message : err);
@@ -98,13 +171,15 @@ export function withFallback(
     },
     async doStream(options) {
       const deadline = Date.now() + AI_TIMEOUT_MS;
+      let reader: ReadableStreamDefaultReader<LanguageModelV4StreamPart> | undefined;
       try {
         const res = await timeout(primary.doStream(options), AI_TIMEOUT_MS);
-        const reader = res.stream.getReader();
+        reader = res.stream.getReader();
+        const read = reader;
         const held: LanguageModelV4StreamPart[] = [];
         let finished = false;
         for (;;) {
-          const { done, value } = await timeout(reader.read(), Math.max(1, deadline - Date.now()));
+          const { done, value } = await timeout(read.read(), Math.max(1, deadline - Date.now()));
           if (done) {
             finished = true;
             break;
@@ -115,26 +190,34 @@ export function withFallback(
         }
         if (finished && !held.some((p) => CONTENT.has(p.type))) throw new Error('empty answer');
         used.source = 'model';
+        used.model = primary.modelId;
+        // The finish part names the model that answered once the stream ends.
+        const note = (p: LanguageModelV4StreamPart) => {
+          if (p.type === 'finish') used.model = answeredBy(p.providerMetadata) ?? used.model;
+          return p;
+        };
         return {
           ...res,
           stream: new ReadableStream<LanguageModelV4StreamPart>({
             start(c) {
-              for (const p of held) c.enqueue(p);
+              for (const p of held) c.enqueue(note(p));
               if (finished) c.close();
             },
             async pull(c) {
               if (finished) return;
-              const { done, value } = await reader.read();
+              const { done, value } = await read.read();
               if (done) c.close();
-              else c.enqueue(value);
+              else c.enqueue(note(value));
             },
             cancel(reason) {
-              return reader.cancel(reason);
+              return read.cancel(reason);
             },
           }),
         };
       } catch (err) {
         console.warn('assistant fallback', err instanceof Error ? err.message : err);
+        // Stop paying for an answer nobody will read.
+        reader?.cancel().catch(() => {});
         used.source = 'heuristic';
         return fallback.doStream(options);
       }

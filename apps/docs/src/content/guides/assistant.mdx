@@ -156,9 +156,11 @@ MCP clients bring their own model, so they aren't counted.
 ## Without the model
 
 The assistant answers with `@cf/moonshotai/kimi-k2.6` by default (see
-[AI nodes and the assistant](/guides/ai/)). It falls back to a deterministic rule-based model,
-which calls the same tools through the same confirm cards, when AI is unavailable, the model
-errors, or nothing useful arrives within 20 seconds.
+[AI nodes and the assistant](/guides/ai/)). If that model fails before it says anything, a smaller,
+faster model, `@cf/zai-org/glm-4.7-flash`, takes the turn; its replies aren't labelled differently.
+When neither answers (AI is unavailable, both models error, or nothing useful arrives within 20
+seconds), a deterministic rule-based model takes the turn instead. It calls the same tools through
+the same confirm cards.
 
 A reply from the fallback is labelled **Answered without the language model, from fixed rules**.
 It understands plain requests ("what needs attention", "add a risk score after
