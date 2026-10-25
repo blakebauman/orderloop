@@ -63,10 +63,13 @@ Your workspace may give punchout a shorter address, such as `/punchout/` in plac
 4. When their PO arrives (cXML `OrderRequest`, type `new`), the order starts on the partner's flow
    for the partner's customer, with the PO number as its external id and the channel **EDI**. A PO
    sent again starts nothing new: the same order is answered.
-5. If they change the PO (type `update`), the order the earlier version started is cancelled and a
-   new one starts with the changed lines; if they cancel it (type `delete`), its order is
-   cancelled. An order that has already ended (shipped and paid, say) can't be changed or
-   cancelled this way: their system gets cXML status `409`.
+5. If they change the PO (type `update`), a new order starts with the changed lines and the order
+   the earlier version started is then cancelled; a change OrderLoop can't accept (a currency
+   with no exchange rate, say) is refused and the earlier order keeps running. If they cancel the
+   PO (type `delete`), its order is cancelled, and the PO can't be changed or sent as new again.
+   An order that has already ended (shipped and paid, say) can't be changed or cancelled this way,
+   and neither can one that another change is still being applied to: their system gets cXML
+   status `409`, and can send the change again once the other is done.
 
 A cXML setup or order request with an unknown identity or wrong secret is answered with cXML
 status `401`, and a return URL on a host not listed with `403`, each over HTTP 200 as cXML

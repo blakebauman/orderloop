@@ -74,8 +74,9 @@ export interface PluginHostRpc {
   ): Promise<{ ok: true; orderId: string; replayed: boolean } | { ok: false; error: string }>;
   /**
    * Cancels an order this plugin started, by the key it started it under (`orders:start`):
-   * `cancelled` (also when it already was), `finished` when it ended some other way and can't be,
-   * or not found for a key this plugin never started an order under.
+   * `cancelled` (also when it already was, or a cancel is already under way), `finished` when it
+   * ended some other way and can't be, or not found for a key this plugin never started an order
+   * under.
    */
   cancelOrder(req: {
     key: string;

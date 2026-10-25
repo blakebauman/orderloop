@@ -9,12 +9,14 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
   type ExternalCartInput,
+  type OrderState,
   type PluginCapability,
   type PluginCart,
   type PluginHostRpc,
   type PluginStartOrder,
   pluginOrderKey,
   startOrderSchema,
+  TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import { createDb, fxRates, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -57,17 +59,26 @@ export class PluginHost extends WorkerEntrypoint<Env, { id: string }> implements
     if (!row) return { ok: false as const, error: 'No order was started under that key.' };
     if (row.status === 'cancelled')
       return { ok: true as const, orderId: row.id, outcome: 'cancelled' as const };
-    const r = (await orderAgent(this.env, row.id).cancel(reason)) as { ok: boolean };
-    if (r.ok)
+    const agent = orderAgent(this.env, row.id);
+    const r = (await agent.cancel(reason)) as { ok: boolean };
+    if (r.ok) {
       await recordAudit(this.env, 'order.cancelled', {
         actor: { kind: 'plugin', id: `plugin:${id}`, name: id },
         target: row.id,
         detail: { reason, via: 'plugin' },
       });
+      return { ok: true as const, orderId: row.id, outcome: 'cancelled' as const };
+    }
+    // Refused: a cancel already under way (the order is still live, and about to be cancelled), or
+    // the order ended since the read above. Only one that ended some other way is finished.
+    const { status } = (await agent.snapshot()) as OrderState;
     return {
       ok: true as const,
       orderId: row.id,
-      outcome: r.ok ? ('cancelled' as const) : ('finished' as const),
+      outcome:
+        status !== 'cancelled' && TERMINAL_ORDER_STATUSES.includes(status)
+          ? ('finished' as const)
+          : ('cancelled' as const),
     };
   }
 
