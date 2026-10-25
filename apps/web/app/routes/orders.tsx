@@ -230,7 +230,7 @@ export default function Orders() {
               /
             </span>
           </div>
-          <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-[13px] text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]">
+          <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-[13px] text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]">
             <input
               type="checkbox"
               name="attention"

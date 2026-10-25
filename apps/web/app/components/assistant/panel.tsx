@@ -572,7 +572,7 @@ function HeldMessages({
               value={t}
               onChange={(e) => onChange(i, e.target.value)}
               aria-label="Queued message"
-              className="h-7 min-w-0 flex-1 rounded-sm border border-input bg-card px-2 text-[13px]"
+              className="h-7 min-w-0 flex-1 rounded-3xl border border-transparent bg-input/50 px-3 text-[13px] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
             />
             <button
               type="button"

@@ -59,9 +59,7 @@ export default defineConfig({
       // The app's faces, self-hosted (the docs fetch no font from a third party), then Ledger:
       // theme.css is generated from @orderloop/design (`pnpm sync:theme`); brand.css is hand-written.
       customCss: [
-        '@fontsource/ibm-plex-sans/400.css',
-        '@fontsource/ibm-plex-sans/500.css',
-        '@fontsource/ibm-plex-sans/600.css',
+        '@fontsource-variable/inter/wght.css',
         '@fontsource/ibm-plex-mono/400.css',
         '@fontsource/ibm-plex-mono/500.css',
         './src/styles/theme.css',
