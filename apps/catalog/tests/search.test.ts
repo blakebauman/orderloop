@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { DOC_FORMAT, paths } from '@orderloop/core/product';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { SearchApi } from '../src/search';
+import { type SearchApi, table } from '../src/search';
 import { api, by, product, settle, setup } from './helpers';
 
 beforeAll(setup);
@@ -68,5 +68,16 @@ describe('search', () => {
     expect(second.uids.some((u) => first.uids.includes(u))).toBe(false);
     expect((await search.search('web', 'en', 'title:"x" OR NEAR(', 10, 0)).total).toBe(0);
     expect(await search.search('web', 'en', '   ', 10, 0)).toEqual({ total: 0, uids: [] });
+  });
+});
+
+describe('search table names', () => {
+  it('keep every channel and locale apart, and leave plain codes where they were', () => {
+    const names = ['b2b-eu', 'b2b_eu', 'b2b.eu', 'b2beu'].map((c) => table(c, 'en'));
+    expect(new Set(names).size).toBe(names.length);
+    // A channel can't stand in for a channel and locale split elsewhere.
+    expect(table('a_b', 'c')).not.toBe(table('a', 'b_c'));
+    expect(table('web', 'en')).toBe('fts_web__en');
+    expect(table('web', 'en-GB')).toBe('fts_web__en_2dGB');
   });
 });

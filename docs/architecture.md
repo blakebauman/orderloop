@@ -644,11 +644,15 @@ own Durable Objects (`apps/catalog/src/search.ts`; query handling in
 - **`SearchShard`** is a Durable Object, 16 of them (`SEARCH`, SQLite, `search-<n>`, `n` from
   `searchShard(key)`, frozen like `productShard`), reached through `searcher()` in `config.ts`
   with the deployment's jurisdiction. Each holds one FTS5 table per channel and locale
-  (`fts_<channel>__<locale>`, created on first use) with columns `title`, `brand`, `skus`, `body`
+  (`table()`: `fts_<channel>__<locale>`, each with any character but a letter or digit written as
+  `_` and its hex, so `b2b-eu` and `b2b_eu` never share one; created on first use) with columns `title`, `brand`, `skus`, `body`
   and `uid` (`UNINDEXED`), tokenized with `unicode61 remove_diacritics 2` ("creme" finds "crème")
   and `prefix = '2 3'`. `seen` keeps the latest `at` per key and channel (an older change is
   skipped; a removal is a tombstone pruned after 24 hours) and `rows` which FTS rows a product
-  owns, so a change deletes them and inserts the new ones in one transaction. Results rank by BM25
+  owns (and in which table), so a change deletes them and inserts the new ones in one transaction.
+  Tables from before the encoding (every other character as `_`) are still read by `search()` until
+  the new one exists, and a [reindex](#catalog-admin-api) moves each product's rows into the new
+  table as it re-applies them; codes of letters and digits only kept their names. Results rank by BM25
   weighted title 10, SKUs 8, brand 3, body 1 (lower is better). `search()` returns that shard's
   best `k` and how many match.
 - **Routing changes.** The queue consumer runs `applyChanges` and `applySearch` together on each
