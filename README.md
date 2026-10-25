@@ -174,7 +174,7 @@ pnpm --filter @orderloop/web db:migrate:remote
 pnpm run deploy                                # engine first (web binds to it), then web
 ```
 
-Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wrangler.jsonc`). Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`), which logs them and rate-limits them; create a gateway with that id in a new account before deploying, or set the var to `""` to call Workers AI directly.
+Waits run in real time once deployed (`TIME_SCALE` is `"1"` in `apps/engine/wrangler.jsonc`). Model calls go through the `orderloop` AI Gateway (`AI_GATEWAY_ID`), which rate-limits them and keeps their prompts only when the registry's `aiGatewayLogs` is on; create a gateway with that id in a new account before deploying, or set the var to `""` to call Workers AI directly.
 
 ## Contributing
 

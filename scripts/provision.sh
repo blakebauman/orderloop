@@ -84,8 +84,9 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
   if existing_gw=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/$AI_GATEWAY" 2>/dev/null); then
     echo "AI Gateway $AI_GATEWAY already exists"
     if [ "$(jq -r '.result.collect_logs' <<<"$existing_gw")" != "$AI_GATEWAY_LOGS" ]; then
-      echo "  Its request logs don't match aiGatewayLogs ($AI_GATEWAY_LOGS): change them in the"
-      echo "  dashboard (AI > AI Gateway > $AI_GATEWAY > Settings)."
+      echo "  Its default for request logs differs from aiGatewayLogs ($AI_GATEWAY_LOGS). The engine"
+      echo "  sends aiGatewayLogs on every call, so this only matters for calls made outside it; match"
+      echo "  it in the dashboard (AI > AI Gateway > $AI_GATEWAY > Settings), and delete logs kept so far."
     fi
   else
     curl -fsS -X POST "$api" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -111,11 +112,23 @@ gh api --method PUT "repos/{owner}/{repo}/environments/$ENVIRONMENT" >/dev/null
 # deploy without them, so a deployment that already runs gets them here too. PASSWORD_PEPPER is
 # mixed into the web Worker's password hashes; a deployment that adds it later keeps working
 # (older hashes are stored again with it at each sign-in), but once set it must never change or
-# go: every password hashed with it would stop verifying. None is ever written to disk.
+# go: every password hashed with it would stop verifying. The same holds for DATA_KEY, which
+# sealed every stored secret, so neither is generated while the web Worker already holds one: a
+# new value would replace it on the next deploy. None is ever written to disk.
 EXISTING=$(gh secret list --env "$ENVIRONMENT" --json name -q '.[].name')
+RUNNING=false
+WORKER_SECRETS=""
+if WORKER_SECRETS=$(wrangler secret list --name "$WEB" 2>/dev/null); then
+  RUNNING=true
+  WORKER_SECRETS=$(jq -r '.[].name' <<<"$WORKER_SECRETS" 2>/dev/null || true)
+fi
 for KEY in PRINCIPAL_KEY DATA_KEY PASSWORD_PEPPER; do
   if grep -qx "$KEY" <<<"$EXISTING"; then
     echo "$ENVIRONMENT already has $KEY"
+  elif [ "$KEY" != PRINCIPAL_KEY ] && grep -qx "$KEY" <<<"$WORKER_SECRETS"; then
+    echo "$ENVIRONMENT has no $KEY, but $WEB already holds one. Set the deployment's own value on"
+    echo "$ENVIRONMENT from its escrowed copy; a new one would make what it protects unreadable."
+    exit 1
   else
     openssl rand -hex 32 | tr -d '\n' | gh secret set "$KEY" --env "$ENVIRONMENT"
     echo "Set $KEY on $ENVIRONMENT"
@@ -123,7 +136,7 @@ for KEY in PRINCIPAL_KEY DATA_KEY PASSWORD_PEPPER; do
 done
 # A Worker that already runs has its own secrets, set by hand or by an earlier deploy: a new
 # generated one would replace them on the next deploy, so only a new deployment gets them.
-if wrangler secret list --name "$WEB" >/dev/null 2>&1; then
+if $RUNNING; then
   echo "$WEB already exists: set its secrets on $ENVIRONMENT by hand if CI should manage them."
   exit 0
 fi

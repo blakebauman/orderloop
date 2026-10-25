@@ -155,7 +155,7 @@ export type Deployment = {
   assistantDailyTokens?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
   aiPersonalData: 'redact' | 'send';
-  /** Whether the AI Gateway keeps request logs (prompts and responses). Default true. */
+  /** Whether the AI Gateway keeps request logs (prompts and responses). Default false. */
   aiGatewayLogs: boolean;
   /**
    * The customer's OpenID Connect identity provider for single sign-on: its issuer (https, as its
@@ -515,7 +515,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(tokens !== undefined ? { assistantDailyTokens: tokens as number } : {}),
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
-    aiGatewayLogs: raw.aiGatewayLogs !== false,
+    aiGatewayLogs: raw.aiGatewayLogs === true,
     ...(sso
       ? {
           sso: {
@@ -730,7 +730,11 @@ export function renderEngine(base: Config, d: Deployment): Config {
   const store = storeSecrets(d, sandboxedPlugins(d), storeBinding);
   if (store.length)
     config.secrets_store_secrets = [...(config.secrets_store_secrets ?? []), ...store];
-  config.vars = { ...config.vars, AI_GATEWAY_ID: names(d).aiGateway };
+  config.vars = {
+    ...config.vars,
+    AI_GATEWAY_ID: names(d).aiGateway,
+    AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
+  };
   // The app's own origin (for links the engine hands out, an external cart's start link) and the
   // hosts it serves, which an external cart must never post back to.
   config.vars = {

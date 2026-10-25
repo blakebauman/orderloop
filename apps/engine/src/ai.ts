@@ -55,6 +55,17 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * The AI Gateway a model call goes through, if any. `collectLog` is sent on every call, so the
+ * registry's `aiGatewayLogs` (rendered into AI_GATEWAY_LOGS) holds whatever the gateway's own
+ * default says: its logs keep the prompts, which can carry document text and buyer details.
+ */
+export function gatewayOptions(env: Env): { id: string; collectLog: boolean } | undefined {
+  return env.AI_GATEWAY_ID
+    ? { id: String(env.AI_GATEWAY_ID), collectLog: String(env.AI_GATEWAY_LOGS) === 'true' }
+    : undefined;
+}
+
+/**
  * One line per model call, `{"type":"ai_call",…}`, for the fallback rate and latency until
  * metrics exist. A fallback other than mock mode is a warning.
  */
@@ -95,7 +106,7 @@ export async function runJson<T>(
           max_tokens: opts.maxTokens ?? 2048,
           temperature: 0.2,
         } as never,
-        env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined,
+        gatewayOptions(env) ? { gateway: gatewayOptions(env) } : undefined,
       ),
       opts.timeoutMs ?? AI_TIMEOUT_MS,
     )) as { response?: unknown };
