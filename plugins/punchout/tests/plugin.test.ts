@@ -46,6 +46,8 @@ function fakeHost() {
     },
     cancelled: [] as string[],
     finished: new Set<string>(),
+    /** Ends only once a cancel reaches it: after the status check, before the cancel. */
+    finishing: new Set<string>(),
     async startOrder(req: PluginStartOrder) {
       // As the core does: a key starts one order, and a currency with no rate is refused.
       const i = started.findIndex((s) => s.key === req.key);
@@ -55,10 +57,20 @@ function fakeHost() {
       started.push(req);
       return { ok: true as const, orderId: `ord_${started.length}`, replayed: false };
     },
+    async orderStatus(req: { key: string }) {
+      const i = started.findIndex((s) => s.key === req.key);
+      if (i < 0) return { ok: false as const, error: 'No order was started under that key.' };
+      const status = this.finished.has(req.key)
+        ? ('completed' as const)
+        : this.cancelled.includes(req.key)
+          ? ('cancelled' as const)
+          : ('running' as const);
+      return { ok: true as const, orderId: `ord_${i + 1}`, status, ended: status !== 'running' };
+    },
     async cancelOrder(req: { key: string; reason: string }) {
       const i = started.findIndex((s) => s.key === req.key);
       if (i < 0) return { ok: false as const, error: 'No order was started under that key.' };
-      if (this.finished.has(req.key))
+      if (this.finished.has(req.key) || this.finishing.has(req.key))
         return { ok: true as const, orderId: `ord_${i + 1}`, outcome: 'finished' as const };
       if (!this.cancelled.includes(req.key)) this.cancelled.push(req.key);
       return { ok: true as const, orderId: `ord_${i + 1}`, outcome: 'cancelled' as const };
@@ -315,9 +327,9 @@ describe('changing and cancelling a purchase order', () => {
       await post('/plugins/punchout/cxml/order', po(secret, 'update', 'u1@b')),
     );
     expect(late.code).toBe('409');
-    // The changed order started first, so it is withdrawn, and the PO stays at its first version.
-    expect(host.started).toHaveLength(2);
-    expect(host.cancelled).toEqual([host.started[1]!.key]);
+    // Refused before a changed order starts, and the PO stays at its first version.
+    expect(host.started).toHaveLength(1);
+    expect(host.cancelled).toEqual([]);
     expect((await versions()).map((v) => v.type)).toEqual(['new']);
     expect((await statusText(await send(po(secret, 'delete', 'd1@b')))).code).toBe('409');
     expect((await versions()).map((v) => v.type)).toEqual(['new']);
@@ -325,6 +337,16 @@ describe('changing and cancelling a purchase order', () => {
       (await statusText(await post('/plugins/punchout/cxml/order', po(secret, 'clone', 'c1@b'))))
         .code,
     ).toBe('406');
+  });
+
+  it('withdraws the changed order when the one it replaces ends after the check', async () => {
+    const secret = await partner();
+    await send(po(secret, 'new', 'n1@b'));
+    host.finishing.add(host.started[0]!.key);
+    expect((await statusText(await send(po(secret, 'update', 'u1@b', 7)))).code).toBe('409');
+    expect(host.started).toHaveLength(2);
+    expect(host.cancelled).toEqual([host.started[1]!.key]);
+    expect((await versions()).map((v) => v.type)).toEqual(['new']);
   });
 
   it('keeps the order running when the core refuses the change', async () => {

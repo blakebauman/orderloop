@@ -219,6 +219,17 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
     return xml(statusResponse(HOST, 200, 'OK', cancelled.orderId));
   }
 
+  // An update to an order that has already ended is refused before a replacement starts, so the
+  // buyer's system never sees two orders for one PO. One that ends after this check is still
+  // caught below, when it can't be cancelled.
+  if (po.type === 'update' && before?.order_id) {
+    const now = await host(env).orderStatus({ key: before.key });
+    if (now.ok && now.ended) {
+      await release();
+      return ended();
+    }
+  }
+
   // Which carts the PO came from, by the SupplierPartAuxiliaryID each returned line carried.
   const carts = [
     ...new Set(po.items.map((i) => i.aux?.split(':')[0]).filter((c) => c?.startsWith('cart_'))),

@@ -237,6 +237,28 @@ describe('the plugin host API', () => {
       });
   });
 
+  it('answers where an order it started is, and only one it started', async () => {
+    const key = `po-${crypto.randomUUID()}`;
+    const started = await hostFor('example').startOrder({
+      key,
+      flowId: 'tpl-b2b-order',
+      input: { model: 'b2b', customerId: 'cus_northwind', lines: [{ sku: 'WID-100', qty: 1 }] },
+    });
+    if (!started.ok) throw new Error(started.error);
+    const live = await hostFor('example').orderStatus({ key });
+    expect(live).toMatchObject({ ok: true, orderId: started.orderId });
+    const unknown = { ok: false, error: 'No order was started under that key.' };
+    expect(await hostFor('example').orderStatus({ key: 'never' })).toEqual(unknown);
+    expect(await hostFor('fixture-carrier').orderStatus({ key })).toMatchObject({ ok: false });
+    expect(await hostFor('example').orderStatus({ key: '' })).toMatchObject({ ok: false });
+    await hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' });
+    const after = await hostFor('example').orderStatus({ key });
+    expect(after).toMatchObject({ ok: true, orderId: started.orderId, ended: true });
+    expect(['cancelled', 'completed', 'declined', 'failed', 'rolled_back']).toContain(
+      (after as { status: string }).status,
+    );
+  });
+
   it('refuses a cancel to a plugin that may start orders but not cancel them', async () => {
     const key = `po-${crypto.randomUUID()}`;
     const req = {

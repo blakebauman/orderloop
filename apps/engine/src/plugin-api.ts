@@ -44,18 +44,39 @@ export class PluginHost extends WorkerEntrypoint<Env, { id: string }> implements
     return id && typeof cartId === 'string' ? pluginCart(this.env, id, cartId) : null;
   }
 
+  async orderStatus(req: { key: string }) {
+    const id = await this.#allowed('orders:start');
+    if (!id) return { ok: false as const, error: 'This plugin may not start orders here.' };
+    if (typeof req?.key !== 'string' || !req.key || req.key.length > 200)
+      return { ok: false as const, error: 'key is 1 to 200 characters' };
+    const row = await this.#started(id, req.key);
+    if (!row) return { ok: false as const, error: 'No order was started under that key.' };
+    // The agent's, not the index row's, which can lag behind an order that just ended.
+    const { status } = (await orderAgent(this.env, row.id).snapshot()) as OrderState;
+    return {
+      ok: true as const,
+      orderId: row.id,
+      status,
+      ended: TERMINAL_ORDER_STATUSES.includes(status),
+    };
+  }
+
+  /** The order this plugin started under `key`: its key is in this plugin's own namespace. */
+  #started(id: string, key: string) {
+    return createDb(this.env.DB)
+      .select({ id: orders.id, status: orders.status })
+      .from(orders)
+      .where(eq(orders.idempotencyKey, pluginOrderKey(id, key)))
+      .get();
+  }
+
   async cancelOrder(req: { key: string; reason: string }) {
     const id = await this.#allowed('orders:cancel');
     if (!id) return { ok: false as const, error: 'This plugin may not cancel orders here.' };
     if (typeof req?.key !== 'string' || !req.key || req.key.length > 200)
       return { ok: false as const, error: 'key is 1 to 200 characters' };
     const reason = String(req.reason ?? '').slice(0, 500) || `Cancelled by ${id}`;
-    // Only an order it started: its key is in this plugin's own namespace.
-    const row = await createDb(this.env.DB)
-      .select({ id: orders.id, status: orders.status })
-      .from(orders)
-      .where(eq(orders.idempotencyKey, pluginOrderKey(id, req.key)))
-      .get();
+    const row = await this.#started(id, req.key);
     if (!row) return { ok: false as const, error: 'No order was started under that key.' };
     if (row.status === 'cancelled')
       return { ok: true as const, orderId: row.id, outcome: 'cancelled' as const };
