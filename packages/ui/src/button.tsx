@@ -25,11 +25,11 @@ const buttonVariants = cva(
         default: 'hit-area h-9 px-3 has-[>svg]:px-2.5',
         xs: "hit-area h-6 gap-1 px-2.5 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: 'hit-area h-8 gap-1 px-3 has-[>svg]:px-2',
-        lg: 'h-10 px-4 has-[>svg]:px-3',
+        lg: 'hit-area h-10 px-4 has-[>svg]:px-3',
         icon: 'hit-area size-9',
         'icon-xs': "hit-area size-6 [&_svg:not([class*='size-'])]:size-3",
         'icon-sm': 'hit-area size-8',
-        'icon-lg': 'size-10',
+        'icon-lg': 'hit-area size-10',
       },
     },
     defaultVariants: {
