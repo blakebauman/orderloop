@@ -183,7 +183,8 @@ return viewResponse({
 ```
 
 - A view has a `title`, an optional `description` and header `actions` (links), and `blocks`: `text`,
-  `alert`, `stats`, `table` (cells are text, numbers or `{ text, href?, tone?, mono? }`, and each row
+  `alert` (tone `info`, a plain note; `success`, `warning` or `error`, drawn in the Ledger status
+  colors `ok`, `wait` and `destructive`), `stats`, `table` (cells are text, numbers or `{ text, href?, tone?, mono? }`, and each row
   may carry up to four small `form`s as buttons), `form` (fields `text`, `textarea`, `number`,
   `email`, `url`, `date`, `password`, `select`, `checkbox` or `hidden`, an optional `confirm` asked
   before it is sent, and a `danger` tone), `code` and `list`, grouped by `section`s one level deep.
@@ -334,7 +335,8 @@ refunds across payments and webhooks, and stock is the core's. A plugin adds tho
    <capabilities>, which this deployment does not grant`) unless its entry lists them:
    `"plugins": { "punchout": { "capabilities": ["carts:external", "orders:start", "orders:cancel"] } }`. They go into
    `PLUGIN_GRANTS` beside `personalData`, and give a Worker plugin its `ORDERLOOP` binding
-   ([The host API](#the-host-api)). A runtime install never gets a capability. `orders:cancel` is
+   ([The host API](#the-host-api)). A runtime install never gets a capability (one whose manifest
+   asks for any is refused at upload, [Installing at runtime](#installing-at-runtime)). `orders:cancel` is
    granted apart from `orders:start`, so a plugin trusted to place orders can't also call them off
    unless the deployment says so. Since a manifest asking for an ungranted capability refuses the
    whole plugin, a plugin that adds one ships with its grant: a sandboxed plugin's pinned bundle
@@ -553,7 +555,11 @@ signature over `orderloop-plugin:1:<id>:<version>:<sha>` (`bundleSigningMessage`
 **Uploading** (`uploadPlugin`, `apps/engine/src/plugin-installs.ts`) refuses, with a reason the page
 shows as it is: a file that isn't a bundle; a publisher not listed; a signature that isn't that
 publisher's; a `sha` that isn't the body's; a manifest whose id or version differs from what was
-signed; an id the deployment installs through its registry (registry plugins always win); an
+signed; a manifest that declares `capabilities` (only the registry grants one, so it could never
+load: refused naming them, before the manifest is parsed or anything is stored, so a capability this
+engine doesn't know is named too and a rolled-back engine never meets one in a stored manifest;
+`stageBundle` checks an assistant draft the same way, and `approvePlugin` refuses a stored version
+that declares any); an id the deployment installs through its registry (registry plugins always win); an
 upgrade signed by another publisher than the installed one; a test fixture's id (`example`,
 `fixture-carrier`; the installs tests set `PLUGIN_TEST_FIXTURES`); malformed migrations; a version
 already uploaded (uploading a pending one again answers with its review, so a retry is safe); and a bundle

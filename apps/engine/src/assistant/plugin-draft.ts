@@ -3,8 +3,8 @@
  * the order (`draft_plugin`). The model writes only the rule bodies and their test cases; the
  * engine writes everything else, so the guardrails are structural, not a matter of review:
  *
- * - the manifest: no outside hosts, secrets, buyer details, pages, events or storage, and the
- *   strictest limits;
+ * - the manifest: no outside hosts, secrets, buyer details, capabilities, pages, events or storage,
+ *   and the strictest limits;
  * - the module: a fixed host (`hostModule`) around the model's `rules`, with no SDK and no imports;
  * - the code: refused if it is too long or names what a rule never needs (`FORBIDDEN`), a backstop to
  *   the sandbox, which has no network, no storage, no secrets and a CPU cap per call.
@@ -275,6 +275,8 @@ export function draftManifest(id: string, version: string, a: DraftAnswer): Plug
     personalData: 'redact',
     secrets: [],
     provides: [],
+    // Never one: only the registry grants a capability, and a draft would be refused for asking.
+    capabilities: [],
     egress: [],
     limits: { cpuMs: 50, subRequests: 0 },
   });

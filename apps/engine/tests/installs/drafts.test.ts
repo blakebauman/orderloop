@@ -105,6 +105,7 @@ describe('plugins the assistant drafts', () => {
       secrets: [{ name: 'KEY' }],
       personalData: 'send',
       nav: [{ label: 'x', path: '/plugins/x/', icon: 'x' }],
+      capabilities: ['orders:start'],
     };
     const r = await draftPlugin(answering(greedy), admin, 'hold big orders', via);
     expect(r).toMatchObject({ id: 'ai-big-orders', version: '1', cases: { total: 2, passed: 2 } });
@@ -121,6 +122,7 @@ describe('plugins the assistant drafts', () => {
       publicPaths: [],
       events: [],
       provides: [],
+      capabilities: [],
     });
     expect(row).toMatchObject({ publisher: 'assistant', status: 'pending' });
   });

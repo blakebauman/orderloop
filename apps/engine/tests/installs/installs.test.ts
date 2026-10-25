@@ -186,7 +186,49 @@ describe('installing a plugin at runtime', () => {
     expect(await refused(await olplugin(v1), pinned)).toMatch(
       /installed by this deployment's registry/,
     );
+    // Asking for capabilities (only the registry grants one), even one this engine doesn't know:
+    // refused at upload, naming them, and nothing kept.
+    for (const capabilities of [['orders:start', 'orders:cancel'], ['orders:refund']]) {
+      const capable = JSON.stringify({
+        ...(JSON.parse(v1) as object),
+        manifest: { ...(JSON.parse(v1) as { manifest: object }).manifest, capabilities },
+      });
+      expect(await refused(await olplugin(capable))).toBe(
+        `fixture-carrier asks for capabilities (${capabilities.join(', ')}), which only a plugin this deployment's registry installs can be granted: it can't be installed at runtime`,
+      );
+      expect(
+        await env.DOCS.head(`plugins/fixture-carrier/${await sha256(capable)}.json`),
+      ).toBeNull();
+    }
     expect(await db().select().from(installedPlugins)).toEqual([]);
+  });
+
+  it('never approves a stored version that asks for capabilities', async () => {
+    // As a row stored before uploads were checked for them would be.
+    const manifest = { ...(JSON.parse(bundles.v1.body) as { manifest: object }).manifest };
+    await db()
+      .insert(installedPlugins)
+      .values({
+        id: 'fixture-carrier',
+        sha: 'c'.repeat(64),
+        version: '7',
+        publisher: 'acme',
+        manifest: JSON.stringify({ ...manifest, version: '7', capabilities: ['orders:start'] }),
+        status: 'pending',
+        personalDataGranted: 0,
+        uploadedBy: ADMIN,
+        uploadedAt: Date.now(),
+        approvedBy: null,
+        approvedAt: null,
+        request: null,
+        cases: null,
+      });
+    await expect(
+      installs.approvePlugin(env, 'fixture-carrier', 'c'.repeat(64), { personalData: true }, ADMIN),
+    ).rejects.toThrow(/fixture-carrier asks for capabilities \(orders:start\)/);
+    const [row] = await db().select().from(installedPlugins);
+    expect(row).toMatchObject({ status: 'pending', approvedBy: null });
+    await db().delete(installedPlugins);
   });
 
   it('runs a reviewed, approved install, with the secret its admin set injected at egress', async () => {
