@@ -56,9 +56,14 @@ import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { EXECUTORS } from '../src/nodes';
 import { startOrder, startOrderOnce } from '../src/orders';
-import { signed } from './principal';
+import { signed, signedActor } from './principal';
 
 const db = () => createDb(env.DB);
+/** An approval decided over the binding, as the web app signs who decides. */
+const asDecider = (id: string, name: string, orderId: string) =>
+  signedActor({ kind: 'staff', id, name, role: 'admin' }, `decide:${orderId}`);
+const apiActor = (orderId: string) => asDecider('tok_api', 'api', orderId);
+
 const agent = (id: string) => env.ORDER_AGENT.getByName(id);
 const state = async (id: string) => (await agent(id).snapshot()) as OrderState;
 
@@ -355,7 +360,9 @@ describe('cancel', () => {
     await introspect();
     const api = new EngineApi(createExecutionContext(), env);
     expect(await api.cancel('ord_doesnotexist', 'x')).toEqual({ ok: false, reason: 'not_found' });
-    expect(await api.decide('ord_doesnotexist', 'mgr', 'approved', 'api', 'tok_api')).toEqual({
+    expect(
+      await api.decide('ord_doesnotexist', 'mgr', 'approved', await apiActor('ord_doesnotexist')),
+    ).toEqual({
       ok: false,
       reason: 'not_found',
     });
@@ -373,7 +380,7 @@ describe('cancel', () => {
       }),
     });
     await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
-    expect(await api.decide(orderId, 'fin', 'approved', 'api', 'tok_api')).toEqual({
+    expect(await api.decide(orderId, 'fin', 'approved', await apiActor(orderId))).toEqual({
       ok: false,
       reason: 'not_waiting',
     });
@@ -409,7 +416,14 @@ describe('cancel', () => {
       updatedBy: 'test',
     });
     try {
-      expect(await api.decide(orderId, 'mgr', 'approved', 'maker', 'usr_maker')).toEqual({
+      expect(
+        await api.decide(
+          orderId,
+          'mgr',
+          'approved',
+          await asDecider('usr_maker', 'maker', orderId),
+        ),
+      ).toEqual({
         ok: false,
         reason: 'own_order',
         error: OWN_ORDER_REFUSAL,
@@ -422,7 +436,14 @@ describe('cancel', () => {
           (err: Error) => err.message,
         );
       expect(refused).toBe(OWN_ORDER_REFUSAL);
-      expect(await api.decide(orderId, 'mgr', 'approved', 'checker', 'usr_checker')).toMatchObject({
+      expect(
+        await api.decide(
+          orderId,
+          'mgr',
+          'approved',
+          await asDecider('usr_checker', 'checker', orderId),
+        ),
+      ).toMatchObject({
         ok: true,
       });
     } finally {

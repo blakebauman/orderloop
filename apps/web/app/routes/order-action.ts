@@ -3,6 +3,7 @@ import { data } from 'react-router';
 import { audit } from '~/lib/audit.server';
 import { actor, requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
+import { decider, signedActor } from '~/lib/principal.server';
 import type { Route } from './+types/order-action';
 
 /** Form posts from pages without a live agent connection (approvals inbox, Commerce). */
@@ -25,19 +26,29 @@ export async function action({ request, params }: Route.ActionArgs) {
       const nodeId = String(f.get('nodeId'));
       const decision = intent === 'approve' ? 'approved' : 'rejected';
       const note = String(f.get('note') ?? '') || undefined;
-      const res = await engine().decide(params.orderId, nodeId, decision, actor(me), me.id, note);
+      const res = await engine().decide(
+        params.orderId,
+        nodeId,
+        decision,
+        await signedActor(decider(me, actor(me)), `decide:${params.orderId}`),
+        note,
+      );
       if (!res.ok)
         return data(
           {
             ok: false,
             error:
-              res.reason === 'own_order'
+              res.reason === 'own_order' || res.reason === 'forbidden'
                 ? res.error
                 : res.reason === 'not_found'
                   ? 'That order no longer exists'
                   : 'That step is no longer waiting for a decision',
           },
-          { status: { own_order: 403, not_found: 404, not_waiting: 409 }[res.reason] },
+          {
+            status: { own_order: 403, forbidden: 403, not_found: 404, not_waiting: 409 }[
+              res.reason
+            ],
+          },
         );
       await record('approval.decided', { nodeId, decision, ...(note ? { note } : {}) });
       return { ok: true };

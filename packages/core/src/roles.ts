@@ -342,6 +342,47 @@ export async function verifySsoLink(
 }
 
 /**
+ * Who is acting on a call over the engine's binding (`EngineRpc.decide`, the cart methods): a
+ * staff member (their principal id, the name the record shows, their role) or an external cart's
+ * buyer. The web app signs it (`a1`) for that one call, the engine believes nothing else, so
+ * whatever else ever holds the binding can't act as anyone.
+ */
+export type RpcActor =
+  | { kind: 'staff'; id: string; name: string; role: Role }
+  | { kind: 'guest'; id: string; name: string };
+
+/** An `RpcActor` signed for one call (`signRpcActor`), as `EngineRpc` takes it. */
+export type SignedActor = string;
+
+const ACTOR_VERSION = 'a1';
+
+/** `call` names the call and what it acts on, e.g. `decide:<orderId>` or `cart:<cartId>`. */
+export function signRpcActor(
+  secret: string,
+  actor: RpcActor,
+  call: string,
+  now = Date.now(),
+): Promise<SignedActor> {
+  return seal(secret, ACTOR_VERSION, { a: actor, path: call, exp: now + PRINCIPAL_TTL_MS });
+}
+
+/** The actor a call was signed for, or null (see `verifyPrincipal`). */
+export async function verifyRpcActor(
+  secrets: readonly (string | undefined)[],
+  signed: string | null | undefined,
+  call: string,
+  now = Date.now(),
+): Promise<RpcActor | null> {
+  const body = await unseal(secrets, ACTOR_VERSION, signed, call, now);
+  const a = body?.a as Partial<{ kind: string; id: string; name: string; role: Role }> | undefined;
+  if (!a || typeof a.id !== 'string' || typeof a.name !== 'string') return null;
+  if (a.kind === 'staff' && isRole(a.role))
+    return { kind: 'staff', id: a.id, name: a.name, role: a.role };
+  if (a.kind === 'guest') return { kind: 'guest', id: a.id, name: a.name };
+  return null;
+}
+
+/**
  * The workspace setting (`workspace_settings`) that keeps whoever started an order from deciding
  * its approvals: `on` or `off` (the default).
  */

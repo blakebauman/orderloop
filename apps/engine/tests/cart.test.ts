@@ -2,6 +2,8 @@ import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   b2bOrderFlow,
+  type CartActor,
+  type CartOp,
   type CartState,
   isQuoteCurrent,
   type OrderState,
@@ -18,10 +20,21 @@ import { createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
 import { purgeEndedCarts, RETENTION } from '../src/retention';
-import { signed } from './principal';
+import { signed, signedActor } from './principal';
 
 const db = () => createDb(env.DB);
 const api = () => new EngineApi({ waitUntil() {}, passThroughOnException() {} } as never, env);
+/** The cart calls as the web app makes them: each actor signed for its cart. */
+const cartApi = {
+  changeCart: async (id: string, op: CartOp, a: CartActor) =>
+    api().changeCart(id, op, await signedActor(a, `cart:${id}`)),
+  submitCart: async (id: string, a: CartActor, version?: number) =>
+    api().submitCart(id, await signedActor(a, `cart:${id}`), version),
+  cancelCart: async (id: string, a: CartActor) =>
+    api().cancelCart(id, await signedActor(a, `cart:${id}`)),
+  attachToCart: async (id: string, file: Parameters<EngineApi['attachToCart']>[1], a: CartActor) =>
+    api().attachToCart(id, file, await signedActor(a, `cart:${id}`)),
+};
 const cart = (id: string) => env.CART_AGENT.getByName(id);
 const state = async (id: string) => (await api().cartSnapshot(id)) as CartState;
 
@@ -343,26 +356,26 @@ describe('cart files', () => {
     const id = await open();
     const ada = staff(await who('operator', 'ada'));
     const vee = staff(await who('viewer', 'vee'));
-    expect(await api().attachToCart(id, file('att_1', id), vee)).toEqual({
+    expect(await cartApi.attachToCart(id, file('att_1', id), vee)).toEqual({
       ok: false,
       error: "You can't change this cart.",
     });
     expect(
-      await api().attachToCart(id, { ...file('att_2', id), key: 'carts/cart_x/att_2' }, ada),
+      await cartApi.attachToCart(id, { ...file('att_2', id), key: 'carts/cart_x/att_2' }, ada),
     ).toEqual({
       ok: false,
       error: 'That file isn’t this cart’s.',
     });
     expect(
-      await api().attachToCart(id, { ...file('att_3', id), type: 'text/html' }, ada),
+      await cartApi.attachToCart(id, { ...file('att_3', id), type: 'text/html' }, ada),
     ).toMatchObject({
       ok: false,
     });
-    expect(await api().attachToCart(id, file('att_1', id), ada)).toEqual({ ok: true });
+    expect(await cartApi.attachToCart(id, file('att_1', id), ada)).toEqual({ ok: true });
     expect((await state(id)).attachments).toEqual([
       expect.objectContaining({ id: 'att_1', by: { id: ada.id, name: 'ada' } }),
     ]);
-    expect(await api().attachToCart('cart_nope', file('att_1', 'cart_nope'), ada)).toMatchObject({
+    expect(await cartApi.attachToCart('cart_nope', file('att_1', 'cart_nope'), ada)).toMatchObject({
       ok: false,
     });
   });
@@ -371,7 +384,7 @@ describe('cart files', () => {
     const id = await open();
     const ann = await who('operator', 'ann2');
     await env.DOCS.put(`carts/${id}/att_9`, '%PDF');
-    expect(await api().attachToCart(id, file('att_9', id), staff(ann))).toEqual({ ok: true });
+    expect(await cartApi.attachToCart(id, file('att_9', id), staff(ann))).toEqual({ ok: true });
     const viewer = await socket(id, await who('viewer', 'vic'));
     expect((await viewer.call('detach', ['att_9'])).result).toMatchObject({ ok: false });
     const owner = await socket(id, ann);
@@ -431,10 +444,22 @@ describe('submitting a cart', () => {
 });
 
 describe('staff carts over EngineApi (the REST API)', () => {
+  it('acts only as an actor the web app signed for this cart', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    const refused = { ok: false, error: 'This call must name who is acting.' };
+    // Unsigned, or signed for another cart: whoever else held the binding couldn't act as anyone.
+    expect(await api().changeCart(id, { op: 'clear' }, 'a1.forged.sig')).toEqual(refused);
+    expect(
+      await api().changeCart(id, { op: 'clear' }, await signedActor(ada, 'cart:cart_other')),
+    ).toEqual(refused);
+    expect(await api().cancelCart(id, JSON.stringify(ada))).toEqual(refused);
+  });
+
   it('applies an op as the caller and answers with the cart priced again', async () => {
     const id = await open();
     const ada = staff(await who('operator', 'ada'));
-    const r = await api().changeCart(id, { op: 'add', sku: 'WID-100', qty: 2 }, ada);
+    const r = await cartApi.changeCart(id, { op: 'add', sku: 'WID-100', qty: 2 }, ada);
     if (!r.ok) throw new Error(r.error);
     expect(r.cart).toMatchObject({ id, quoteCurrent: true, notReady: null });
     expect(r.cart.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 2 })]);
@@ -447,25 +472,25 @@ describe('staff carts over EngineApi (the REST API)', () => {
   it('refuses a viewer, a guest, a malformed op, an unknown cart and an external one', async () => {
     const id = await open();
     const viewer = staff(await who('viewer', 'vee'));
-    expect(await api().changeCart(id, { op: 'clear' }, viewer)).toEqual({
+    expect(await cartApi.changeCart(id, { op: 'clear' }, viewer)).toEqual({
       ok: false,
       error: "You can't change this cart.",
     });
-    expect(await api().submitCart(id, viewer)).toEqual({
+    expect(await cartApi.submitCart(id, viewer)).toEqual({
       ok: false,
       error: 'This needs the Operator role.',
     });
-    expect((await api().cancelCart(id, viewer)).ok).toBe(false);
+    expect((await cartApi.cancelCart(id, viewer)).ok).toBe(false);
     // Typed as staff, but the binding carries whatever its caller sends.
     const guest = { kind: 'guest', id: 'guest:x', name: 'X' } as never;
-    expect(await api().changeCart(id, { op: 'clear' }, guest)).toMatchObject({ ok: false });
-    expect(await api().submitCart(id, guest)).toMatchObject({ ok: false });
+    expect(await cartApi.changeCart(id, { op: 'clear' }, guest)).toMatchObject({ ok: false });
+    expect(await cartApi.submitCart(id, guest)).toMatchObject({ ok: false });
     const ada = staff(await who('operator', 'ada'));
-    expect(await api().changeCart(id, { op: 'add', sku: 'WID-100' } as never, ada)).toEqual({
+    expect(await cartApi.changeCart(id, { op: 'add', sku: 'WID-100' } as never, ada)).toEqual({
       ok: false,
       error: 'That is not a cart change.',
     });
-    expect(await api().changeCart('cart_nope', { op: 'clear' }, ada)).toMatchObject({
+    expect(await cartApi.changeCart('cart_nope', { op: 'clear' }, ada)).toMatchObject({
       ok: false,
       notFound: true,
     });
@@ -483,9 +508,9 @@ describe('staff carts over EngineApi (the REST API)', () => {
     );
     if (!ext.ok) throw new Error(ext.error);
     for (const r of [
-      await api().changeCart(ext.id, { op: 'lock' }, ada),
-      await api().submitCart(ext.id, ada),
-      await api().cancelCart(ext.id, ada),
+      await cartApi.changeCart(ext.id, { op: 'lock' }, ada),
+      await cartApi.submitCart(ext.id, ada),
+      await cartApi.cancelCart(ext.id, ada),
     ])
       expect(r).toMatchObject({ ok: false, notFound: true });
     expect((await state(ext.id)).cart?.status).toBe('open');
@@ -499,18 +524,27 @@ describe('staff carts over EngineApi (the REST API)', () => {
     });
     const id = await open();
     const ada = staff(await who('operator', 'ada'));
-    expect(await api().submitCart(id, ada)).toEqual({ ok: false, error: 'Add at least one line.' });
-    await api().changeCart(id, { op: 'add', sku: 'WID-100', qty: 1 }, ada);
-    const done = await api().submitCart(id, ada);
+    expect(await cartApi.submitCart(id, ada)).toEqual({
+      ok: false,
+      error: 'Add at least one line.',
+    });
+    await cartApi.changeCart(id, { op: 'add', sku: 'WID-100', qty: 1 }, ada);
+    const done = await cartApi.submitCart(id, ada);
     if (!done.ok) throw new Error(done.error);
     const order = await db().select().from(orders).where(eq(orders.id, done.orderId)).get();
     expect(order).toMatchObject({ startedBy: ada.id, externalId: id });
     // A replay starts nothing more.
-    expect(await api().submitCart(id, ada)).toEqual({ ok: false, error: 'The cart is submitted.' });
-    expect(await api().cancelCart(id, ada)).toEqual({ ok: false, error: 'The cart is submitted.' });
+    expect(await cartApi.submitCart(id, ada)).toEqual({
+      ok: false,
+      error: 'The cart is submitted.',
+    });
+    expect(await cartApi.cancelCart(id, ada)).toEqual({
+      ok: false,
+      error: 'The cart is submitted.',
+    });
 
     const other = await open(null);
-    const canceled = await api().cancelCart(other, ada);
+    const canceled = await cartApi.cancelCart(other, ada);
     expect(canceled).toMatchObject({ ok: true, cart: { status: 'canceled' } });
   });
 });
@@ -542,7 +576,7 @@ describe('cart retention', () => {
     await cart(id).applyAs(staff(ada), { op: 'add', sku: 'WID-100', qty: 1 });
     await ws.call('say', ['Ann at ann@northwind.example wants these Friday']);
     await env.DOCS.put(`carts/${id}/att_r1`, '%PDF');
-    await api().attachToCart(
+    await cartApi.attachToCart(
       id,
       { id: 'att_r1', name: 'po.pdf', type: 'application/pdf', size: 4, key: `carts/${id}/att_r1` },
       staff(ada),

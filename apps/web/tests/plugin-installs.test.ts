@@ -44,6 +44,8 @@ describe('the Plugins page’s install actions', () => {
     ['rollback', { sha }],
     ['uninstall', {}],
     ['enable', {}],
+    // Turning one off stops every flow that uses it.
+    ['disable', {}],
   ])('asks for a step-up before it will %s', async (intent, extra) => {
     const r = await pluginAction(
       request,

@@ -93,7 +93,7 @@ plugin under review and turning a plugin off need only your admin session.
 
 | Action | Effect |
 |---|---|
-| **Turn off** / **Turn on** | Off, its steps stop running at once and flows that use it can't be published; its nodes read as not installed. Nothing is deleted. Turning it on needs the identity check. |
+| **Turn off** / **Turn on** | Off, its steps stop running at once and flows that use it can't be published; its nodes read as not installed. Nothing is deleted. Turning it on or off on this page needs the identity check, since either changes what every order runs; an admin API token can still turn one off. |
 | **Roll back to** a version | Reinstalls an earlier version listed under **Earlier versions**. Needs the identity check. |
 | **Uninstall** | Refused while a published flow uses its nodes, an order that has not ended is running on it, or a label it made has not been voided yet; the page lists what is in the way (the same list as `GET /api/v1/plugins/:id/usage`). Otherwise it deletes the plugin's secrets and stored data. Needs the identity check. |
 | Replace a secret | Enter a new value next to the secret. Needs the identity check. |
