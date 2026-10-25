@@ -3,10 +3,13 @@ import {
   buildListingIndex,
   decodeListingCursor,
   encodeListingCursor,
+  LISTING_MAX_BYTES,
   LISTING_SEGMENTS,
   ListingIndex,
+  ListingIndexBuilder,
   type ListingQuery,
   listingLabels,
+  listingSecond,
   listingSorts,
   queryListing,
 } from '../src/product/listing-index';
@@ -27,15 +30,17 @@ function random(seed: number) {
 
 /**
  * A deterministic pseudo-random catalog. Creation times and prices are coarse, so many members
- * tie on them and the tie-breaks (newest first, then uid) are exercised across segments.
+ * tie on them and the tie-breaks (newest first, then uid) are exercised across segments; the
+ * milliseconds within a second are random, and the index orders by the second alone. `single`
+ * gives every product at most one price (a column stored without offsets).
  */
-function catalog(n: number, seed = 7): IndexEntry[] {
+function catalog(n: number, seed = 7, single = false): IndexEntry[] {
   const rand = random(seed);
   const brands = ['acme', 'globex', 'initech', 'umbrella', 'hooli'];
   const colors = ['red', 'blue', 'green', 'black'];
   return Array.from({ length: n }, (_, i): IndexEntry => {
     const prices = Array.from(
-      { length: 1 + Math.floor(rand() * 3) },
+      { length: single ? 1 : 1 + Math.floor(rand() * 3) },
       () => Math.round(rand() * 100) * 100,
     );
     const c = colors.filter(() => rand() < 0.4);
@@ -50,7 +55,7 @@ function catalog(n: number, seed = 7): IndexEntry[] {
         color: c,
       },
       numbers: rand() < 0.05 ? {} : { price: prices },
-      createdAt: Math.floor(rand() * 400) * 1_000,
+      createdAt: Math.floor(rand() * 400) * 1_000 + Math.floor(rand() * 1_000),
     };
   });
 }
@@ -73,7 +78,9 @@ function segmented(
 
 /** The same query, answered the slow obvious way over the whole listing. */
 function oracle(entries: IndexEntry[], q: ListingQuery, edges?: number[]) {
-  const order = [...entries].sort((a, b) => b.createdAt - a.createdAt || a.uid - b.uid);
+  const order = [...entries].sort(
+    (a, b) => listingSecond(b.createdAt) - listingSecond(a.createdAt) || a.uid - b.uid,
+  );
   const matchTerms = (e: IndexEntry, skip?: string) =>
     Object.entries(q.terms ?? {}).every(
       ([code, vals]) =>
@@ -163,7 +170,7 @@ describe('listing index segments', () => {
       expect(s.sorts).toEqual(['price_asc', 'price_desc']);
       for (let i = 0; i < s.n; i++) {
         seen.add(s.uid(i));
-        expect(s.createdAt(i)).toBe(created.get(s.uid(i)));
+        expect(s.createdAt(i)).toBe(listingSecond(created.get(s.uid(i)) as number));
         // Newest first, then by uid.
         if (i)
           expect(
@@ -206,59 +213,70 @@ describe('listing index segments', () => {
         );
     });
 
-  it('pages through random queries exactly in the oracle order, never skipping or repeating', () => {
-    const rand = random(99);
-    const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)] as T;
-    const sorts = ['newest', 'price_asc', 'price_desc'];
-    // Pages of 8 to 60: every page reruns the facets over all 3,000 entries, so tiny pages over
-    // wide results would take seconds; one-per-page paging has its own test below.
-    for (let run = 0; run < 80; run++) {
-      const q: ListingQuery = { limit: 8 + Math.floor(rand() * 53), sort: pick(sorts) };
-      if (rand() < 0.5)
-        q.terms = {
-          brand: ['acme', 'globex', 'initech', 'umbrella', 'hooli'].filter(() => rand() < 0.4),
-        };
-      if (rand() < 0.4) q.terms = { ...q.terms, color: [pick(['red', 'blue', 'green', 'black'])] };
-      if (rand() < 0.5) {
-        const lo = rand() < 0.3 ? null : Math.round(rand() * 50) * 100;
-        const hi = rand() < 0.3 ? null : (lo ?? 0) + Math.round(rand() * 60) * 100;
-        q.ranges = { price: [lo, hi] };
-      }
-      const edges = rand() < 0.5 ? [2_500, 5_000, 7_500] : undefined;
-      if (edges) q.buckets = { price: edges };
-      const want = oracle(entries, q, edges);
-      const first = queryListing(segments, q);
-      expect(first.total).toBe(want.total);
-      for (const code of spec.terms)
-        expect(
-          Object.fromEntries((first.terms[code] ?? []).map((f) => [f.value, f.count])),
-        ).toEqual(want.counts[code]);
-      // Facet values most frequent first, then by value.
-      for (const counts of Object.values(first.terms))
-        for (let i = 1; i < counts.length; i++) {
-          const [a, b] = [counts[i - 1], counts[i]] as [
-            { value: string; count: number },
-            { value: string; count: number },
-          ];
-          expect(a.count > b.count || (a.count === b.count && a.value < b.value)).toBe(true);
+  const singles = catalog(3_000, 11, true);
+  const singleSegments = segmented(singles);
+
+  it.each([
+    ['several prices a product', entries, segments],
+    ['one price a product', singles, singleSegments],
+  ] as const)(
+    'pages through random queries exactly in the oracle order (%s)',
+    (_, entries, segments) => {
+      const rand = random(99);
+      const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)] as T;
+      const sorts = ['newest', 'price_asc', 'price_desc'];
+      // Pages of 8 to 60: every page reruns the facets over all 3,000 entries, so tiny pages over
+      // wide results would take seconds; one-per-page paging has its own test below.
+      for (let run = 0; run < 50; run++) {
+        const q: ListingQuery = { limit: 8 + Math.floor(rand() * 53), sort: pick(sorts) };
+        if (rand() < 0.5)
+          q.terms = {
+            brand: ['acme', 'globex', 'initech', 'umbrella', 'hooli'].filter(() => rand() < 0.4),
+          };
+        if (rand() < 0.4)
+          q.terms = { ...q.terms, color: [pick(['red', 'blue', 'green', 'black'])] };
+        if (rand() < 0.5) {
+          const lo = rand() < 0.3 ? null : Math.round(rand() * 50) * 100;
+          const hi = rand() < 0.3 ? null : (lo ?? 0) + Math.round(rand() * 60) * 100;
+          q.ranges = { price: [lo, hi] };
         }
-      if (want.price)
-        expect(first.ranges.price).toEqual({
-          min: want.price.min,
-          max: want.price.max,
-          buckets: want.price.buckets?.map((count, b) => ({
-            lo: b === 0 ? null : (edges?.[b - 1] as number),
-            hi: b === edges?.length ? null : (edges?.[b] as number),
-            count,
-          })),
-        });
-      else expect(first.ranges.price).toBeUndefined();
-      const { got, pages: n } = pages(segments, q);
-      expect(new Set(got).size).toBe(got.length);
-      expect(got).toEqual(want.uids);
-      expect(n).toBe(Math.max(1, Math.ceil(want.uids.length / q.limit)));
-    }
-  }, 30_000);
+        const edges = rand() < 0.5 ? [2_500, 5_000, 7_500] : undefined;
+        if (edges) q.buckets = { price: edges };
+        const want = oracle(entries, q, edges);
+        const first = queryListing(segments, q);
+        expect(first.total).toBe(want.total);
+        for (const code of spec.terms)
+          expect(
+            Object.fromEntries((first.terms[code] ?? []).map((f) => [f.value, f.count])),
+          ).toEqual(want.counts[code]);
+        // Facet values most frequent first, then by value.
+        for (const counts of Object.values(first.terms))
+          for (let i = 1; i < counts.length; i++) {
+            const [a, b] = [counts[i - 1], counts[i]] as [
+              { value: string; count: number },
+              { value: string; count: number },
+            ];
+            expect(a.count > b.count || (a.count === b.count && a.value < b.value)).toBe(true);
+          }
+        if (want.price)
+          expect(first.ranges.price).toEqual({
+            min: want.price.min,
+            max: want.price.max,
+            buckets: want.price.buckets?.map((count, b) => ({
+              lo: b === 0 ? null : (edges?.[b - 1] as number),
+              hi: b === edges?.length ? null : (edges?.[b] as number),
+              count,
+            })),
+          });
+        else expect(first.ranges.price).toBeUndefined();
+        const { got, pages: n } = pages(segments, q);
+        expect(new Set(got).size).toBe(got.length);
+        expect(got).toEqual(want.uids);
+        expect(n).toBe(Math.max(1, Math.ceil(want.uids.length / q.limit)));
+      }
+    },
+    30_000,
+  );
 
   it('pages one member at a time without skipping or repeating', () => {
     for (const sort of ['newest', 'price_asc', 'price_desc']) {
@@ -381,6 +399,111 @@ describe('listing index segments', () => {
     // Counted with those edges in both segments.
     const want = oracle([...bySegment(0), ...bySegment(1)], { limit: 0 }, [5_000]);
     expect(r.ranges.price?.buckets?.map((b) => b.count)).toEqual(want.price?.buckets);
+  });
+});
+
+describe('listing index size', () => {
+  const meta = (bytes: Uint8Array) => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    return JSON.parse(new TextDecoder().decode(bytes.subarray(16, 16 + view.getUint32(8, true))));
+  };
+  const one = (uid: number, numbers: Record<string, number[]>): IndexEntry => ({
+    key: `p${uid}`,
+    uid,
+    version: 1,
+    categories: ['all'],
+    terms: {},
+    numbers,
+    createdAt: uid * 1_000,
+  });
+  const s = { terms: [], numbers: ['price', 'weight'], sorts: ['price'] };
+
+  it("keeps each member's distinct values only", () => {
+    const repeated = [one(1, { price: [500, 500, 900, 500] }), one(2, { price: [300] })];
+    const distinct = [one(1, { price: [900, 500] }), one(2, { price: [300] })];
+    expect(buildListingIndex(repeated, s, 1)).toEqual(buildListingIndex(distinct, s, 1));
+  });
+
+  it('stores a column no member has two values in without offsets, missing values included', () => {
+    const entries = [
+      one(1, { price: [500], weight: [1.5] }),
+      one(2, { price: [500, 500] }),
+      one(3, { weight: [0.25] }),
+      one(4, {}),
+    ];
+    const bytes = buildListingIndex(entries, s, 1);
+    const cols = meta(bytes).numbers as { code: string; offsets?: unknown; int: boolean }[];
+    expect(cols.map((c) => [c.code, c.offsets === undefined, c.int])).toEqual([
+      ['price', true, true],
+      ['weight', true, false],
+    ]);
+    const index = decode(bytes);
+    const uids = (q: Omit<ListingQuery, 'limit'>) =>
+      queryListing([index], { ...q, limit: 10 }).uids;
+    expect(uids({ ranges: { weight: [0, 1] } })).toEqual([3]);
+    expect(uids({ ranges: { weight: [null, null] }, sort: 'price_asc' })).toEqual([2, 1, 4, 3]);
+    expect(uids({ sort: 'price_desc' })).toEqual([2, 1, 4, 3]);
+    expect(uids({ ranges: { price: [400, 600] } })).toEqual([2, 1]);
+    const r = queryListing([index], { limit: 0 });
+    expect(r.ranges).toEqual({
+      price: { min: 500, max: 500, buckets: undefined },
+      weight: { min: 0.25, max: 1.5, buckets: undefined },
+    });
+  });
+
+  it('reads -2^31 in a Float64 single-value column as a value, not a missing one', () => {
+    const entries = [one(1, { weight: [1.5] }), one(2, { weight: [-0x8000_0000] }), one(3, {})];
+    const index = decode(buildListingIndex(entries, { ...s, sorts: ['weight'] }, 1));
+    const uids = (q: Omit<ListingQuery, 'limit'>) =>
+      queryListing([index], { ...q, limit: 10 }).uids;
+    expect(uids({ ranges: { weight: [null, 0] } })).toEqual([2]);
+    expect(uids({ sort: 'weight_asc' })).toEqual([2, 1, 3]);
+    expect(queryListing([index], { limit: 0 }).ranges.weight).toMatchObject({
+      min: -0x8000_0000,
+      max: 1.5,
+    });
+  });
+
+  it('refuses members out of listing order', () => {
+    const b = new ListingIndexBuilder(s);
+    expect(() => b.ids(Uint32Array.of(1, 2), [1_000, 2_000])).toThrow('newest first');
+    expect(() => b.ids(Uint32Array.of(2, 1), [1_500, 1_000])).toThrow('newest first');
+    expect(() => b.ids(Uint32Array.of(1, 2), [1_999, 1_000])).not.toThrow();
+  });
+
+  it('costs about 40 bytes a typical member, so a category of 1.5 million fits the cap', () => {
+    // Four facets (a sparse brand, a few colors, sizes on every product, a material), a price
+    // on three variants that mostly share it, a sorted price and a single weight.
+    const rand = random(5);
+    const n = 20_000;
+    const entries = Array.from({ length: n }, (_, i): IndexEntry => {
+      const price = 100 + Math.floor(rand() * 20_000);
+      return {
+        key: `p${i}`,
+        uid: i + 1,
+        version: 1,
+        categories: ['all'],
+        terms: {
+          brand: [`b${Math.floor(rand() * 400)}`],
+          color: [`c${Math.floor(rand() * 12)}`],
+          size: ['S', 'M', 'L'],
+          material: [`m${Math.floor(rand() * 30)}`],
+        },
+        numbers: {
+          price: rand() < 0.7 ? [price, price, price] : [price, price + 200, price + 400],
+          weight: [Math.floor(rand() * 5_000)],
+        },
+        createdAt: 1.7e12 + Math.floor(rand() * 3e10),
+      };
+    });
+    const typical = {
+      terms: ['brand', 'color', 'size', 'material'],
+      numbers: ['price', 'weight'],
+      sorts: ['price'],
+    };
+    const perMember = buildListingIndex(entries, typical).byteLength / n;
+    expect(perMember).toBeLessThan(42);
+    expect(LISTING_MAX_BYTES / perMember).toBeGreaterThan(1_500_000);
   });
 });
 

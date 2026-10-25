@@ -8,12 +8,15 @@
  * Members are products' numeric uids, not their keys: the page's cards are fetched by uid, so a
  * million-member index carries 4 MB of ids instead of the key text.
  *
- * A segment's members are numbered 0..n-1 newest first (`createdAt` descending, then uid), so the
- * default sort needs no permutation; each member's `createdAt` is stored too, so segments merge in
- * that order. A term value's members are stored as a sorted ordinal list when sparse and as a
- * bitset when dense (more than one in 32). Numeric attributes keep every value per member (CSR
- * layout), so a range filter matches a product when any of its variants' values is in range. Pure,
- * and free of zod: catalog-edge imports this module on its own.
+ * A segment's members are numbered 0..n-1 newest first (`createdAt` in whole seconds descending,
+ * then uid), so the default sort needs no permutation; each member's creation second is stored too
+ * (Uint32), so segments merge in that order. A term value's members are stored as a sorted ordinal
+ * list when sparse and as a bitset when dense (more than one in 32). Numeric attributes keep each
+ * member's distinct values (CSR layout), so a range filter matches a product when any of its
+ * variants' values is in range; a column where no member has more than one keeps one value per
+ * member and no offsets. The edge holds a listing's segments whole, so their bytes are what limits
+ * a category's size (`LISTING_MAX_BYTES`). Pure, and free of zod: catalog-edge imports this module
+ * on its own.
  */
 import type { IndexEntry } from './render';
 import { LISTING_SEGMENTS } from './routing';
@@ -21,8 +24,21 @@ import { LISTING_SEGMENTS } from './routing';
 export { LISTING_SEGMENTS };
 
 const MAGIC = 0x314c4f4c; // "LOL1" little-endian
-/** 2: members' `createdAt` (Float64, member order), for merging segments. */
-const FORMAT = 2;
+/**
+ * 3: creation seconds (Uint32), each member's distinct values only, and single-value columns
+ * without offsets. 2 added members' `createdAt` (Float64), for merging segments.
+ */
+const FORMAT = 3;
+
+/**
+ * The most a listing's segments may add up to: the edge holds them whole, in an isolate of 128 MB,
+ * and answers a listing over it with `listing too large`. With a few facets and a sorted price,
+ * that is about 1.5 million products in one category.
+ */
+export const LISTING_MAX_BYTES = 64 * 1024 * 1024;
+
+/** A missing value in a single-value Int32 column (a Float64 one uses NaN). */
+const INT_NONE = -0x8000_0000;
 
 export type ListingSpec = {
   /** Term attributes to index (filters and facet counts), including `brand`. */
@@ -54,7 +70,8 @@ type Meta = {
   terms: { code: string; values: { v: string; count: number; bits: boolean; at: Section }[] }[];
   numbers: {
     code: string;
-    offsets: Section;
+    /** Absent when no member has more than one value: `values` then holds one per member. */
+    offsets?: Section;
     values: Section;
     /** Values are stored as Int32 when every one fits (money in minor units does), else Float64. */
     int: boolean;
@@ -64,6 +81,10 @@ type Meta = {
 };
 
 const align8 = (n: number) => (n + 7) & ~7;
+
+/** The second a listing orders a product by: its creation time (milliseconds) in whole seconds. */
+export const listingSecond = (createdAt: number): number =>
+  Math.min(0xffff_ffff, Math.max(0, Math.floor(createdAt / 1000)));
 
 /**
  * Builds a listing index a piece at a time, so a caller can stream a million members out of
@@ -97,18 +118,28 @@ export class ListingIndexBuilder {
   }
 
   /**
-   * The members' uids and creation times, in listing order (`createdAt` descending, then uid):
-   * member `i` is `uids[i]`. Call first.
+   * The members' uids and creation times (milliseconds), in listing order (`listingSecond`
+   * descending, then uid): member `i` is `uids[i]`. Call first.
    */
-  ids(uids: Uint32Array, createdAt: Float64Array) {
-    if (createdAt.length !== uids.length)
-      throw new RangeError('a creation time is needed for every member');
-    this.n = uids.length;
-    this.meta.n = uids.length;
+  ids(uids: Uint32Array, createdAt: ArrayLike<number>) {
+    const n = uids.length;
+    if (createdAt.length !== n) throw new RangeError('a creation time is needed for every member');
+    const seconds = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      seconds[i] = listingSecond(createdAt[i] as number);
+      if (
+        i &&
+        ((seconds[i] as number) > (seconds[i - 1] as number) ||
+          (seconds[i] === seconds[i - 1] && (uids[i] as number) <= (uids[i - 1] as number)))
+      )
+        throw new RangeError('members must be newest first, then by uid');
+    }
+    this.n = n;
+    this.meta.n = n;
     this.add(uids, (s) => {
       this.meta.ids = s;
     });
-    this.add(createdAt, (s) => {
+    this.add(seconds, (s) => {
       this.meta.createdAt = s;
     });
   }
@@ -134,26 +165,51 @@ export class ListingIndexBuilder {
   }
 
   /**
-   * A numeric column in CSR form: member `i`'s values are `values[offsets[i]..offsets[i + 1]]`.
-   * Sorts are derived here when `spec.sorts` names the column, which is then written even with no
-   * values, so every segment built with the spec offers the sort (`listingSorts`).
+   * A numeric column in CSR form: member `i`'s values are `flat[offsets[i]..offsets[i + 1]]`. Only
+   * each member's distinct values are kept (variants often share a price), and none of the offsets
+   * when no member has more than one. Sorts are derived here when `spec.sorts` names the column,
+   * which is then written even with no values, so every segment built with the spec offers the sort
+   * (`listingSorts`).
    */
   numbers(code: string, offsets: Uint32Array, flat: ArrayLike<number>) {
     const n = this.n;
     if (!flat.length && !this.spec.sorts.includes(code)) return;
+    // Each member's distinct values, ascending, compacted in place.
+    const distinct = Float64Array.from(flat);
+    const kept = new Uint32Array(n + 1);
+    let w = 0;
+    let single = true;
+    for (let i = 0; i < n; i++) {
+      const start = w;
+      const from = offsets[i] as number;
+      const to = offsets[i + 1] as number;
+      distinct.set(distinct.subarray(from, to), start);
+      distinct.subarray(start, start + to - from).sort();
+      for (let j = start; j < start + to - from; j++)
+        if (j === start || distinct[j] !== distinct[w - 1]) distinct[w++] = distinct[j] as number;
+      kept[i + 1] = w;
+      if (w - start > 1) single = false;
+    }
     let int = true;
-    for (let i = 0; i < flat.length; i++) {
-      const v = flat[i] as number;
-      if (!Number.isInteger(v) || v < -0x8000_0000 || v > 0x7fff_ffff) {
+    for (let j = 0; j < w; j++) {
+      const v = distinct[j] as number;
+      if (!Number.isInteger(v) || v <= INT_NONE || v > 0x7fff_ffff) {
         int = false;
         break;
       }
     }
-    const values = int ? Int32Array.from(flat) : Float64Array.from(flat);
-    const col: Meta['numbers'][number] = { code, offsets: [0, 0], values: [0, 0], int };
-    this.add(offsets, (s) => {
-      col.offsets = s;
-    });
+    let values: Int32Array | Float64Array;
+    if (single) {
+      values = int ? new Int32Array(n).fill(INT_NONE) : new Float64Array(n).fill(Number.NaN);
+      for (let i = 0; i < n; i++)
+        if ((kept[i + 1] as number) > (kept[i] as number))
+          values[i] = distinct[kept[i] as number] as number;
+    } else values = int ? Int32Array.from(distinct.subarray(0, w)) : distinct.slice(0, w);
+    const col: Meta['numbers'][number] = { code, values: [0, 0], int };
+    if (!single)
+      this.add(kept, (s) => {
+        col.offsets = s;
+      });
     this.add(values, (s) => {
       col.values = s;
     });
@@ -161,15 +217,10 @@ export class ListingIndexBuilder {
       const lo = new Float64Array(n);
       const hi = new Float64Array(n);
       for (let i = 0; i < n; i++) {
-        let min = Number.POSITIVE_INFINITY;
-        let max = Number.NEGATIVE_INFINITY;
-        for (let j = offsets[i] as number; j < (offsets[i + 1] as number); j++) {
-          const v = values[j] as number;
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-        lo[i] = min;
-        hi[i] = max;
+        // Distinct values are ascending: the first is the lowest, the last the highest.
+        const has = (kept[i + 1] as number) > (kept[i] as number);
+        lo[i] = has ? (distinct[kept[i] as number] as number) : Number.POSITIVE_INFINITY;
+        hi[i] = has ? (distinct[(kept[i + 1] as number) - 1] as number) : Number.NEGATIVE_INFINITY;
       }
       // Members without a value sort last both ways; ties keep newest first. `queryListing`'s
       // merge compares members across segments the same way.
@@ -239,7 +290,9 @@ export function buildListingIndex(
   spec: ListingSpec,
   builtAt = Date.now(),
 ): Uint8Array {
-  const members = [...entries].sort((a, b) => b.createdAt - a.createdAt || a.uid - b.uid);
+  const members = [...entries].sort(
+    (a, b) => listingSecond(b.createdAt) - listingSecond(a.createdAt) || a.uid - b.uid,
+  );
   const n = members.length;
   const b = new ListingIndexBuilder(spec, builtAt);
   b.ids(
@@ -343,6 +396,22 @@ type Scan = {
 /** A segment's members in a sort's order, and each member's sort value. */
 type Sorter = { order: Uint32Array; key: (i: number) => number };
 
+type NumCol = { offsets?: Uint32Array; values: Int32Array | Float64Array };
+
+/** Where member `i`'s values start in `col.values`. */
+const first = (col: NumCol, i: number): number => (col.offsets ? (col.offsets[i] as number) : i);
+
+/**
+ * Where member `i`'s values end: a single-value column's missing value has none (INT_NONE in an
+ * Int32 column, NaN in a Float64 one, where -2^31 is a value like any other).
+ */
+function last(col: NumCol, i: number): number {
+  if (col.offsets) return col.offsets[i + 1] as number;
+  const v = col.values[i] as number;
+  const missing = col.values instanceof Int32Array ? v === INT_NONE : Number.isNaN(v);
+  return missing ? i : i + 1;
+}
+
 /** A decoded listing index segment. Construction is O(meta); arrays are views, not copies. */
 export class ListingIndex {
   readonly n: number;
@@ -353,7 +422,7 @@ export class ListingIndex {
   readonly buckets: Record<string, number[]>;
   private readonly words: number;
   private readonly ids: Uint32Array;
-  private readonly created: Float64Array;
+  private readonly created: Uint32Array;
   private readonly termCols = new Map<
     string,
     { v: string; count: number; bits?: Uint32Array; list?: Uint32Array }[]
@@ -361,7 +430,8 @@ export class ListingIndex {
   private readonly numCols = new Map<
     string,
     {
-      offsets: Uint32Array;
+      /** Absent for a single-value column: member `i`'s value is `values[i]`, unless missing. */
+      offsets?: Uint32Array;
       values: Int32Array | Float64Array;
       asc?: Uint32Array;
       desc?: Uint32Array;
@@ -384,7 +454,7 @@ export class ListingIndex {
     this.buckets = meta.buckets ?? {};
     this.words = (meta.n + 31) >>> 5;
     this.ids = u32(meta.ids);
-    this.created = f64(meta.createdAt);
+    this.created = u32(meta.createdAt);
     for (const t of meta.terms)
       this.termCols.set(
         t.code,
@@ -396,7 +466,7 @@ export class ListingIndex {
       );
     for (const c of meta.numbers)
       this.numCols.set(c.code, {
-        offsets: u32(c.offsets),
+        offsets: c.offsets && u32(c.offsets),
         values: c.int ? i32(c.values) : f64(c.values),
         asc: c.asc && u32(c.asc),
         desc: c.desc && u32(c.desc),
@@ -420,7 +490,7 @@ export class ListingIndex {
     return this.ids[i] as number;
   }
 
-  /** When member `i` was created. */
+  /** When member `i` was created, in whole seconds (`listingSecond`). */
   createdAt(i: number): number {
     return this.created[i] as number;
   }
@@ -455,7 +525,7 @@ export class ListingIndex {
     const min = lo ?? Number.NEGATIVE_INFINITY;
     const max = hi ?? Number.POSITIVE_INFINITY;
     for (let i = 0; i < this.n; i++)
-      for (let j = col.offsets[i] as number; j < (col.offsets[i + 1] as number); j++) {
+      for (let j = first(col, i), end = last(col, i); j < end; j++) {
         const v = col.values[j] as number;
         if (v >= min && v <= max) {
           out[i >>> 5] = (out[i >>> 5] as number) | (1 << (i & 31));
@@ -521,8 +591,8 @@ export class ListingIndex {
       let max = Number.NEGATIVE_INFINITY;
       for (let i = 0; i < this.n; i++) {
         if (!ListingIndex.has(base, i)) continue;
-        const start = col.offsets[i] as number;
-        const end = col.offsets[i + 1] as number;
+        const start = first(col, i);
+        const end = last(col, i);
         if (start === end) continue;
         let hit = 0;
         for (let j = start; j < end; j++) {
@@ -553,16 +623,15 @@ export class ListingIndex {
     const col = this.numCols.get(code);
     const order = dir === 'asc' ? col?.asc : col?.desc;
     if (!col || !order) throw new RangeError(`unsupported sort ${code}_${dir}`);
-    const { offsets, values } = col;
+    // A member's distinct values are ascending: its lowest is the first, its highest the last.
     return {
       order,
       key: (i) => {
-        let k = dir === 'asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
-        for (let j = offsets[i] as number; j < (offsets[i + 1] as number); j++) {
-          const v = values[j] as number;
-          if (dir === 'asc' ? v < k : v > k) k = v;
-        }
-        return k;
+        const start = first(col, i);
+        const end = last(col, i);
+        if (start === end)
+          return dir === 'asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        return col.values[dir === 'asc' ? start : end - 1] as number;
       },
     };
   }

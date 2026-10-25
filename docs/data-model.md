@@ -280,7 +280,7 @@ Published objects. `f1` is `DOC_FORMAT`, in every path so a format change is a n
 | R2 | `docs/f1/<channel>/<locale>/p/<key>.json` | The product document for that channel and locale; custom metadata `version` |
 | R2 | `docs/f1/<channel>/a/<alias, URI-encoded>` | `{ "key": "<product key>" }`: the alias pointer |
 | R2 | `docs/f1/<channel>/<locale>/categories.json` | The channel's flat category tree, names in that locale |
-| R2 | `idx/f1/<channel>/<category>/<segment>.bin` | One segment (`0` to `LISTING_SEGMENTS - 1`, 8 segments, `listingSegment(key)`) of the category's listing index (binary format 2, all locales' labels inside); custom metadata `members` and `builtAt`. A segment with no members yet has no object |
+| R2 | `idx/f1/<channel>/<category>/<segment>.bin` | One segment (`0` to `LISTING_SEGMENTS - 1`, 8 segments, `listingSegment(key)`) of the category's listing index (binary format 3, all locales' labels inside; together the segments are at most `LISTING_MAX_BYTES`, 64 MiB); custom metadata `members` and `builtAt`. A segment with no members yet has no object |
 | KV | `c:f1:<channel>:<locale>:<uid in base 36>` | The listing card |
 | KV | `u:f1:<key>` | The product's `uid` as a decimal string, written the first time the product publishes (and again under a new uid), deleted when the product is; `catalog-edge` turns a batch's keys into card keys with it |
 
@@ -301,7 +301,8 @@ Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and e
 A listing index segment is rebuilt from `ListingIndexer`, the Durable Object for one channel,
 category and segment (`<channel>:<category>:<segment>`), which holds that segment's members in SQLite: `members` (`key` primary key,
 `uid`, `at`, `created_at`, `live`, and `sig`, the entry's `entrySignature`, added to older tables by
-the constructor), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
+the constructor; index `members_second` on `live`, the creation second descending and `uid`, the
+build's order), `terms` and `nums` (`uid`, `attr`, `value`) and `settings`
 (`channel`, `category`, `segment`, `dirty`, `built`, `members` at the last build, and `rev`, the highest config
 revision its changes carried). A member holds the latest change by `at`; a removed
 one stays as a tombstone (`live` 0) for 24 hours. A product is a member of its categories and
