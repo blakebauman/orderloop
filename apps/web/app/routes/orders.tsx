@@ -34,7 +34,20 @@ import {
   statusLabel,
   waitingForLabel,
 } from '~/lib/format';
-import { customerNames, declinedOrderIds, listOrders } from '~/lib/orders.server';
+import {
+  customerNames,
+  declinedOrderIds,
+  isWithin,
+  listOrders,
+  type Within,
+} from '~/lib/orders.server';
+
+/** How the `within` filter reads in the line under the filters. */
+const WITHIN_LABEL: Record<string, string> = {
+  '24h': 'updated in the last 24 hours',
+  '7d': 'updated in the last 7 days',
+};
+
 import { pageShortcut } from '~/lib/shortcuts';
 import type { Route } from './+types/orders';
 
@@ -68,6 +81,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       q: q.get('q') || undefined,
       attention: q.get('attention') === '1',
       flow: q.get('flow') || undefined,
+      step: q.get('step') || undefined,
+      within: isWithin(q.get('within')) ? (q.get('within') as Within) : undefined,
       after: after ?? undefined,
       sort,
     },
@@ -103,7 +118,9 @@ export default function Orders() {
     params.get('status') ||
     query ||
     attention ||
-    flow
+    flow ||
+    params.get('step') ||
+    params.get('within')
   );
 
   const { revalidate } = useRevalidator();
@@ -264,6 +281,31 @@ export default function Orders() {
               className="text-link hover:underline"
             >
               All flows
+            </Link>
+          </p>
+        ) : null}
+        {params.get('step') || params.get('within') ? (
+          <p className="-mt-2 mb-3 text-muted-foreground text-xs">
+            {params.get('step') ? (
+              <>
+                At the step{' '}
+                <span className="font-medium text-foreground">{params.get('step')}</span>
+                {params.get('within') ? `, ${WITHIN_LABEL[params.get('within') ?? '']}. ` : '. '}
+              </>
+            ) : (
+              `${(WITHIN_LABEL[params.get('within') ?? ''] ?? '').replace(/^u/, 'U')}. `
+            )}
+            <Link
+              to={(() => {
+                const next = new URLSearchParams(params);
+                next.delete('step');
+                next.delete('within');
+                const s = next.toString();
+                return s ? `?${s}` : '/orders';
+              })()}
+              className="text-link hover:underline"
+            >
+              Any step, any time
             </Link>
           </p>
         ) : null}

@@ -1,20 +1,13 @@
 import { BASE_CURRENCY } from '@orderloop/core';
 import type { ChartConfig } from '@orderloop/ui/chart';
-import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
-import { lazy, Suspense, useState } from 'react';
-import { Empty, Section } from '~/components/page';
+import { lazy, Suspense } from 'react';
+import { Empty } from '~/components/page';
 import { count, money } from '~/lib/format';
 import type { Performance } from '~/lib/metrics.server';
 
-type Day = Performance['daily'][number];
-
-const RANGES = [7, 30, 90] as const;
-type Range = (typeof RANGES)[number];
-
 const base = (n: number) => money(n, BASE_CURRENCY);
-const sum = (days: Day[], k: keyof Omit<Day, 'day'>) => days.reduce((a, d) => a + d[k], 0);
 
-// Recharts arrives after the rest of the overview; until then each chart holds its height.
+// Recharts arrives after the rest of the page; until then each chart holds its height.
 const LazyChart = lazy(() => import('./trends-chart'));
 const Chart = (props: React.ComponentProps<typeof LazyChart>) => (
   <Suspense fallback={<div className="mt-3 h-44" aria-hidden="true" />}>
@@ -37,68 +30,47 @@ const paymentsConfig = {
   refunded: { label: 'Refunded', color: 'var(--chart-3)' },
 } satisfies ChartConfig;
 
-/** Per-day area charts over the last 7, 30 or 90 days: revenue, how orders ended, and money in and out. */
-export function Trends({ daily }: { daily: Day[] }) {
-  const [range, setRange] = useState<Range>(30);
-  const days = daily.slice(-range);
-  const revenue = sum(days, 'revenue');
-  const collected = sum(days, 'collected');
-  const refunded = sum(days, 'refunded');
-  const ended = sum(days, 'completed') + sum(days, 'stopped') + sum(days, 'failed');
+/** Per-day area charts over the window: revenue, how orders ended, and money in and out. */
+export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'totals' | 'days'>) {
+  const { revenue, collected, refunded, completed, stopped, failed } = totals;
+  const ended = completed + stopped + failed;
+  const period = `in the last ${days} days`;
   return (
-    <Section
-      title="Trends"
-      actions={
-        <Segmented
-          aria-label="Range"
-          value={String(range)}
-          onValueChange={(v) => setRange(Number(v) as Range)}
-          className="text-xs"
-        >
-          {RANGES.map((r) => (
-            <SegmentedItem key={r} value={String(r)} className="tabular">
-              {`${r} days`}
-            </SegmentedItem>
-          ))}
-        </Segmented>
-      }
-    >
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Panel
-          title="Revenue"
-          figure={base(revenue)}
-          summary={`${base(revenue)} from orders completed in the last ${range} days, in ${BASE_CURRENCY}.`}
-        >
-          {revenue ? (
-            <Chart days={days} config={revenueConfig} format={base} />
-          ) : (
-            <Empty>{`No revenue in the last ${range} days.`}</Empty>
-          )}
-        </Panel>
-        <Panel
-          title="Orders ended"
-          figure={count(ended)}
-          summary={`${count(ended)} orders ended in the last ${range} days: ${count(sum(days, 'completed'))} completed, ${count(sum(days, 'stopped'))} declined or cancelled, ${count(sum(days, 'failed'))} failed or rolled back.`}
-        >
-          {ended ? (
-            <Chart days={days} config={outcomeConfig} format={count} stacked />
-          ) : (
-            <Empty>{`No order has ended in the last ${range} days.`}</Empty>
-          )}
-        </Panel>
-        <Panel
-          title="Collected and refunded"
-          figure={base(collected)}
-          summary={`${base(collected)} collected and ${base(refunded)} refunded in the last ${range} days.`}
-        >
-          {collected || refunded ? (
-            <Chart days={days} config={paymentsConfig} format={base} />
-          ) : (
-            <Empty>{`No payments in the last ${range} days.`}</Empty>
-          )}
-        </Panel>
-      </div>
-    </Section>
+    <div className="grid gap-3 xl:grid-cols-3">
+      <Panel
+        title="Revenue"
+        figure={base(revenue)}
+        summary={`${base(revenue)} from orders completed ${period}, in ${BASE_CURRENCY}.`}
+      >
+        {revenue ? (
+          <Chart days={daily} config={revenueConfig} format={base} />
+        ) : (
+          <Empty>{`No revenue ${period}.`}</Empty>
+        )}
+      </Panel>
+      <Panel
+        title="Orders ended"
+        figure={count(ended)}
+        summary={`${count(ended)} orders ended ${period}: ${count(completed)} completed, ${count(stopped)} declined or cancelled, ${count(failed)} failed or rolled back.`}
+      >
+        {ended ? (
+          <Chart days={daily} config={outcomeConfig} format={count} stacked />
+        ) : (
+          <Empty>{`No order has ended ${period}.`}</Empty>
+        )}
+      </Panel>
+      <Panel
+        title="Collected and refunded"
+        figure={base(collected)}
+        summary={`${base(collected)} collected and ${base(refunded)} refunded ${period}.`}
+      >
+        {collected || refunded ? (
+          <Chart days={daily} config={paymentsConfig} format={base} />
+        ) : (
+          <Empty>{`No payments ${period}.`}</Empty>
+        )}
+      </Panel>
+    </div>
   );
 }
 

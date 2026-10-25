@@ -5,8 +5,8 @@
   --sl-color-white: oklch(0.145 0 0);
   --sl-color-gray-1: oklch(0.145 0 0);
   --sl-color-gray-2: color-mix(in oklch, oklch(0.145 0 0) 88%, oklch(1 0 0));
-  --sl-color-gray-3: oklch(0.556 0 0);
-  --sl-color-gray-4: color-mix(in oklch, oklch(0.556 0 0) 70%, oklch(1 0 0));
+  --sl-color-gray-3: oklch(0.54 0 0);
+  --sl-color-gray-4: color-mix(in oklch, oklch(0.54 0 0) 70%, oklch(1 0 0));
   --sl-color-gray-5: oklch(0.922 0 0);
   --sl-color-gray-6: oklch(0.97 0 0);
   --sl-color-gray-7: oklch(0.97 0 0);
@@ -53,7 +53,7 @@
   --ol-cat-ai: oklch(0.49 0.16 310);
   --ol-card: oklch(1 0 0);
   --ol-muted: oklch(0.97 0 0);
-  --ol-muted-foreground: oklch(0.556 0 0);
+  --ol-muted-foreground: oklch(0.54 0 0);
   --ol-rule: oklch(0.922 0 0);
   --ol-input: oklch(0.922 0 0);
   --ol-link: oklch(0.47 0.13 256);

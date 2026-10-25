@@ -1,4 +1,4 @@
-import type { FlowGraph } from '@orderloop/core';
+import { type FlowGraph, TERMINAL_ORDER_STATUSES } from '@orderloop/core';
 import {
   approvals,
   contains,
@@ -24,7 +24,7 @@ import {
   sellers,
   shipments,
 } from '@orderloop/db';
-import { and, asc, desc, eq, getTableColumns, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
 import { SCENARIO_CUSTOMERS, SCENARIO_SKUS } from './scenarios';
@@ -44,9 +44,17 @@ export type OrderFilters = {
   attention?: boolean;
   /** Only orders on this flow, any version. */
   flow?: string;
+  /** Only orders waiting at, or stopped at, this step (by its label). */
+  step?: string;
+  /** Only orders updated within this window: for ended orders, ended within it. */
+  within?: Within;
   /** Newest-first paging: only orders created before the previous page's last row. */
   after?: OrderCursor;
 };
+
+export const WITHIN = { '24h': 86_400_000, '7d': 7 * 86_400_000 } as const;
+export type Within = keyof typeof WITHIN;
+export const isWithin = (v: string | null): v is Within => !!v && v in WITHIN;
 
 export async function listOrders(f: OrderFilters = {}, limit = 200) {
   return ordersQuery(db(), f, limit);
@@ -66,6 +74,16 @@ function ordersQuery(d: Db, f: OrderFilters, limit: number) {
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
     f.flow ? eq(orders.flowId, f.flow) : undefined,
+    // A step's label as the index stores it: one label, or several joined with " · ".
+    f.step
+      ? or(
+          eq(orders.waitingAt, f.step),
+          eq(orders.stoppedAt, f.step),
+          contains(orders.waitingAt, f.step),
+          contains(orders.stoppedAt, f.step),
+        )
+      : undefined,
+    f.within ? gte(orders.updatedAt, Date.now() - WITHIN[f.within]) : undefined,
     f.status === 'declined'
       ? // Orders declined before `declined` existed were stored as cancelled (see `orderStatus`).
         or(eq(orders.status, 'declined'), inArray(orders.id, declinedIds()))
@@ -115,73 +133,78 @@ function ordersQuery(d: Db, f: OrderFilters, limit: number) {
 }
 
 /**
- * Everything the overview reads from D1, in one round trip (a D1 batch): counts by status and
- * model, the most recently updated orders, pending approvals, what needs a person (see below) and
- * how many orders were declined by policy.
+ * Everything the overview reads from D1, in one round trip (a D1 batch): open orders by status,
+ * the most recently updated orders, pending approvals, what ended in the last 24 hours, where open
+ * orders wait (by flow and step) and what failed or rolled back this week (by flow and step).
  */
-export async function overview() {
+export async function overview(now = Date.now()) {
   const d = db();
   const stopped = inArray(orders.status, ['failed', 'rolled_back']);
-  const [byStatus, byModel, pending, recent, approvalRows, failed, failedTotal, waits, declined] =
+  const dayAgo = now - WITHIN['24h'];
+  const weekAgo = now - WITHIN['7d'];
+  const [open, recent, approvalRows, ended24h, declined24h, waitsByFlow, stoppedWeek] =
     await d.batch([
+      // Open work as it is now.
+      d
+        .select({ status: orders.status, n: sql<number>`count(*)` })
+        .from(orders)
+        .where(inArray(orders.status, ['queued', 'running', 'waiting']))
+        .groupBy(orders.status),
+      ordersQuery(d, { sort: 'updated' }, 8),
+      approvalsQuery(d, 'pending'),
+      // What ended in the last 24 hours, by status (an ended order's last update is its end).
       d
         .select({
           status: orders.status,
           n: sql<number>`count(*)`,
-          // In the base currency, at each order's rate.
           total: sql<number>`coalesce(sum(${orders.total} / ${orders.fxRate}), 0)`,
         })
         .from(orders)
+        .where(and(inArray(orders.status, TERMINAL_ORDER_STATUSES), gte(orders.updatedAt, dayAgo)))
         .groupBy(orders.status),
       d
-        .select({ model: orders.model, n: sql<number>`count(*)` })
-        .from(orders)
-        .groupBy(orders.model),
-      d.select({ n: sql<number>`count(*)` }).from(approvals).where(eq(approvals.status, 'pending')),
-      ordersQuery(d, { sort: 'updated' }, 8),
-      approvalsQuery(d, 'pending'),
-      // What needs a person: orders that failed or rolled back, newest first, with where and why
-      // they stopped; and every open wait counted by step and by what it waits on (the index's
-      // `waiting_for`), with the oldest. Counted in SQL, so it holds at any volume.
+        .select({ n: sql<number>`count(distinct ${approvals.orderId})` })
+        .from(approvals)
+        .innerJoin(orders, eq(orders.id, approvals.orderId))
+        .where(and(declinedWhere, gte(orders.updatedAt, dayAgo))),
+      // Where open orders wait, by flow and step, with the oldest wait.
       d
         .select({
-          id: orders.id,
-          title: orders.title,
-          model: orders.model,
-          status: orders.status,
-          stoppedAt: orders.stoppedAt,
-          reason: orders.reason,
-          updatedAt: orders.updatedAt,
-        })
-        .from(orders)
-        .where(stopped)
-        .orderBy(desc(orders.updatedAt))
-        .limit(5),
-      d.select({ n: sql<number>`count(*)` }).from(orders).where(stopped),
-      d
-        .select({
+          flowId: orders.flowId,
           at: orders.waitingAt,
-          on: orders.waitingOn,
           for: orders.waitingFor,
           n: sql<number>`count(*)`,
           oldest: sql<number | null>`min(${orders.waitingSince})`,
         })
         .from(orders)
         .where(eq(orders.status, 'waiting'))
-        .groupBy(orders.waitingAt, orders.waitingOn, orders.waitingFor),
-      // How many cancelled orders were declined by policy.
+        .groupBy(orders.flowId, orders.waitingAt, orders.waitingFor),
+      // Where orders ended badly this week, by flow and step, with the latest reason. Grouped in
+      // SQL; the reason is the newest order's, picked by the max-updatedAt row of each group.
       d
-        .select({ n: sql<number>`count(distinct ${approvals.orderId})` })
-        .from(approvals)
-        .innerJoin(orders, eq(orders.id, approvals.orderId))
-        .where(declinedWhere),
+        .select({
+          flowId: orders.flowId,
+          at: orders.stoppedAt,
+          n: sql<number>`count(*)`,
+          rolledBack: sql<number>`sum(${orders.status} = 'rolled_back')`,
+          latest: sql<number>`max(${orders.updatedAt})`,
+          reason: sql<
+            string | null
+          >`(select o2.reason from orders o2 where o2.flow_id = ${orders.flowId} and coalesce(o2.stopped_at, '') = coalesce(${orders.stoppedAt}, '') and o2.status in ('failed', 'rolled_back') and o2.updated_at >= ${weekAgo} order by o2.updated_at desc limit 1)`,
+        })
+        .from(orders)
+        .where(and(stopped, gte(orders.updatedAt, weekAgo)))
+        .groupBy(orders.flowId, orders.stoppedAt)
+        .orderBy(sql`count(*) desc`),
     ]);
   return {
-    stats: { byStatus, byModel, pendingApprovals: pending[0]?.n ?? 0 },
+    open,
     recent,
     approvals: approvalRows,
-    attention: { failed, failedTotal: failedTotal[0]?.n ?? 0, waits },
-    declinedTotal: declined[0]?.n ?? 0,
+    ended24h,
+    declined24h: declined24h[0]?.n ?? 0,
+    waitsByFlow,
+    stoppedWeek,
   };
 }
 
@@ -204,7 +227,9 @@ function approvalsQuery(d: Db, status: string) {
       decidedAt: approvals.decidedAt,
       decidedBy: approvals.decidedBy,
       orderModel: orders.model,
-      orderTitle: orders.title,
+      // Aliased: D1's batch returns rows keyed by column name, so a second `title` would overwrite
+      // the approval's and shift every later column (the overview's currency became a customer id).
+      orderTitle: sql<string | null>`${orders.title}`.as('order_title'),
       currency: orders.currency,
       customerId: orders.customerId,
       customerName: customers.name,

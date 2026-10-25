@@ -5,28 +5,34 @@ import {
   type OrderState,
   toBase,
 } from '@orderloop/core';
+import { cn } from '@orderloop/ui/lib/utils';
 import { ArrowRight, ChevronRight, Play } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import { Form, Link, useLoaderData, useNavigation, useRevalidator } from 'react-router';
-import { Ago, WaitingAt } from '~/components/ago';
+import { Ago } from '~/components/ago';
 import { DecisionContext, lockAt } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
-import { Performance } from '~/components/performance';
-import { StatusBadge } from '~/components/status';
-import { Trends } from '~/components/trends';
+import { StatusDot } from '~/components/status';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
-import { GROUP_HREF, GROUP_LABEL, type Lane, lanes as laneList } from '~/lib/attention';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { ensureSeeded } from '~/lib/flows.server';
-import { duration, humanize, money, orderRef, orderStatus, STATUS_COLOR } from '~/lib/format';
-import { performance } from '~/lib/metrics.server';
+import { ensureSeeded, flowSteps } from '~/lib/flows.server';
+import {
+  duration,
+  humanize,
+  money,
+  orderRef,
+  orderStatus,
+  STATUS_COLOR,
+  statusLabel,
+} from '~/lib/format';
 import { customerNames, declinedOrderIds, demoAvailable, overview } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import { startScenario } from '~/lib/scenarios.server';
 import { useDateTime } from '~/lib/use-date-time';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
+import { type StoppedStep, stoppedSteps, type WaitTrail, waitTrails } from '~/lib/where';
 import type { Route } from './+types/dashboard';
 
 export const meta = () => [{ title: 'Overview · OrderLoop' }];
@@ -35,16 +41,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Signed in first (the shell shares this lookup), so a signed-out visitor costs no reads and
   // gets the redirect, not an error from one of them.
   await requireUser(request);
-  const [, { stats, recent, approvals, attention, declinedTotal }, perf, demo] = await Promise.all([
+  const [, o, steps, demo] = await Promise.all([
     ensureSeeded(),
     overview(),
-    performance(),
+    flowSteps(),
     demoAvailable(),
   ]);
-  const top = approvals.slice(0, 5);
+  const top = o.approvals.slice(0, 5);
   const [names, declinedSet, states] = await Promise.all([
-    customerNames(recent.map((o) => o.customerId)),
-    declinedOrderIds(recent.map((o) => o.id)),
+    customerNames(o.recent.map((r) => r.customerId)),
+    declinedOrderIds(o.recent.map((r) => r.id)),
     Promise.all(
       top.map((a) =>
         engine()
@@ -53,7 +59,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
     ),
   ]);
-  const declined = [...declinedSet];
   const decisions = top.map((a, i) => ({
     ...a,
     ctx: states[i]
@@ -61,18 +66,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       : ({ facts: [], trail: [] } as ApprovalContext),
   }));
   return {
-    stats,
-    perf,
-    recent,
+    open: o.open,
+    ended24h: o.ended24h,
+    declined24h: o.declined24h,
+    recent: o.recent,
     names,
-    declined,
-    declinedTotal,
+    declined: [...declinedSet],
     demo,
     decisions,
-    moreDecisions: Math.max(0, approvals.length - top.length),
-    failed: attention.failed,
-    failedTotal: attention.failedTotal,
-    lanes: laneList(attention.waits),
+    moreDecisions: Math.max(0, o.approvals.length - top.length),
+    trails: waitTrails(o.waitsByFlow, steps),
+    stopped: stoppedSteps(o.stoppedWeek, steps),
     // When this was read, for the header's "Updated" line.
     at: Date.now(),
   };
@@ -86,19 +90,21 @@ export async function action({ request }: Route.ActionArgs) {
 /** How often the overview refreshes while it is in view. */
 const REFRESH_MS = 15_000;
 
+/** A figure in the status strip: what it counts, how many, and the orders it opens. */
+type Figure = { label: string; n: number; status: string; to: string; note?: string };
+
 export default function Dashboard() {
   const {
-    stats,
-    perf,
+    open: openRows,
+    ended24h,
+    declined24h,
     recent,
     names,
     declined,
-    declinedTotal,
     decisions,
     moreDecisions,
-    failed,
-    failedTotal,
-    lanes,
+    trails,
+    stopped,
     demo,
     at,
   } = useLoaderData<typeof loader>();
@@ -121,46 +127,48 @@ export default function Dashboard() {
       document.removeEventListener('visibilitychange', onShow);
     };
   }, [revalidate]);
-  const count = (s: string[]) =>
-    stats.byStatus.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
-  const completedValue = stats.byStatus.find((r) => r.status === 'completed')?.total ?? 0;
-  // The status register in three groups, so the strip reads as open work, good endings and the
-  // rest rather than seven equal figures.
-  const groups: {
-    label: string;
-    cols: string;
-    rows: { label: string; n: number; status: string; note?: string }[];
-  }[] = [
+  const open = (s: string[]) =>
+    openRows.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
+  const day = (s: string) => ended24h.find((r) => r.status === s);
+  const moving = open(['queued', 'running']);
+  // Open work as it is now; endings over the last day. All-time totals are on Performance.
+  const now: Figure[] = [
+    { label: 'In flight', n: moving, status: 'running', to: '/orders?status=running' },
     {
-      label: 'Open',
-      cols: 'grid-cols-2',
-      rows: [
-        { label: 'In flight', n: count(['queued', 'running']), status: 'running' },
-        { label: 'Waiting', n: count(['waiting']), status: 'waiting' },
-      ],
+      label: 'Waiting',
+      n: open(['waiting']),
+      status: 'waiting',
+      to: '/orders?status=waiting&sort=waiting',
+    },
+  ];
+  const since = (status: string) => `/orders?status=${status}&within=24h&sort=updated`;
+  const lastDay: Figure[] = [
+    {
+      label: 'Completed',
+      n: day('completed')?.n ?? 0,
+      status: 'completed',
+      to: since('completed'),
+      note: day('completed')?.n ? money(day('completed')?.total ?? 0, BASE_CURRENCY) : undefined,
+    },
+    { label: 'Failed', n: day('failed')?.n ?? 0, status: 'failed', to: since('failed') },
+    {
+      label: 'Rolled back',
+      n: day('rolled_back')?.n ?? 0,
+      status: 'rolled_back',
+      to: since('rolled_back'),
+    },
+    // Older policy declines were stored as cancelled; count them where they belong.
+    {
+      label: 'Declined',
+      n: (day('declined')?.n ?? 0) + declined24h,
+      status: 'declined',
+      to: since('declined'),
     },
     {
-      label: 'Ended well',
-      cols: 'grid-cols-1',
-      rows: [
-        {
-          label: 'Completed',
-          n: count(['completed']),
-          status: 'completed',
-          note: money(completedValue, BASE_CURRENCY),
-        },
-      ],
-    },
-    {
-      label: 'Ended otherwise',
-      cols: 'grid-cols-2 sm:grid-cols-4',
-      rows: [
-        { label: 'Failed', n: count(['failed']), status: 'failed' },
-        { label: 'Rolled back', n: count(['rolled_back']), status: 'rolled_back' },
-        // Older policy declines were stored as cancelled; count them where they belong.
-        { label: 'Declined', n: count(['declined']) + declinedTotal, status: 'declined' },
-        { label: 'Cancelled', n: count(['cancelled']) - declinedTotal, status: 'cancelled' },
-      ],
+      label: 'Cancelled',
+      n: (day('cancelled')?.n ?? 0) - declined24h,
+      status: 'cancelled',
+      to: since('cancelled'),
     },
   ];
   return (
@@ -169,7 +177,7 @@ export default function Dashboard() {
         title="Overview"
         subtitle={
           <>
-            Where every order stands, and what needs you.{' '}
+            What needs you, and where your orders are.{' '}
             <span className="whitespace-nowrap" suppressHydrationWarning>
               {refreshing === 'loading' ? 'Updating…' : `Updated ${formatTime(at)}`}
             </span>
@@ -177,51 +185,20 @@ export default function Dashboard() {
         }
       />
       <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-10 sm:px-6">
-        {/* The status register, over every order: each figure opens the matching orders. */}
-        <nav aria-label="All orders by status">
-          <p className="caption mb-1.5">All orders</p>
-          <div className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_1fr_4fr]">
-            {groups.map((g) => (
-              <section key={g.label} aria-label={g.label} className="min-w-0">
-                <h2 className="caption mb-1.5">{g.label}</h2>
-                <div className={`card grid ${g.cols} gap-1 p-1.5`}>
-                  {g.rows.map((r) => (
-                    <Link
-                      key={r.status}
-                      to={`/orders?status=${r.status}`}
-                      aria-label={`${r.label}: ${r.n} ${r.n === 1 ? 'order' : 'orders'}${r.note ? `, ${r.note}` : ''}`}
-                      className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted"
-                    >
-                      <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-                        <span
-                          aria-hidden="true"
-                          className="size-1.5 rounded-full"
-                          style={{
-                            background: STATUS_COLOR[r.status as keyof typeof STATUS_COLOR],
-                          }}
-                        />
-                        {r.label}
-                      </span>
-                      <span className="mt-0.5 flex items-baseline gap-2">
-                        <span className="font-medium text-lg tabular">{r.n}</span>
-                        {r.note ? (
-                          <span className="truncate text-muted-foreground text-xs tabular">
-                            {r.note}
-                          </span>
-                        ) : null}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+        {/* Open work now, then the last day's endings: each figure opens the matching orders. */}
+        <nav aria-label="Orders by status" className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_5fr]">
+          <Strip title="Open now" figures={now} cols="grid-cols-2" lead />
+          <Strip
+            title="Ended in the last 24 hours"
+            figures={lastDay}
+            cols="grid-cols-2 sm:grid-cols-5"
+          />
         </nav>
 
-        {/* Phones read decisions, then what needs attention, then recent orders; wide screens put
-            what needs attention in the rail beside the other two. */}
+        {/* Phones read decisions, then where orders wait, then what ended badly, then recent
+            orders; wide screens put what ended badly in the rail beside the rest. */}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div className="min-w-0 lg:col-start-1">
+          <div className="min-w-0 space-y-6 lg:col-start-1">
             {decisions.length ? (
               <Section
                 title={
@@ -253,25 +230,35 @@ export default function Dashboard() {
                 </ul>
               </Section>
             ) : (
-              <p className="flex items-center gap-2 card px-4 py-2.5 text-muted-foreground text-sm">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-idle" />
-                Nothing is waiting on a decision.
+              <p className="flex items-center gap-2 card px-5 py-3 text-sm">
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-ok" />
+                <span>
+                  <span className="font-medium">No decisions waiting.</span>{' '}
+                  <span className="text-muted-foreground">
+                    Approvals that need you appear here.
+                  </span>
+                </span>
                 <Link
                   to="/approvals?status=all"
-                  className="ml-auto text-link text-xs hover:underline"
+                  className="ml-auto shrink-0 text-link text-xs hover:underline"
                 >
                   Past approvals
                 </Link>
               </p>
             )}
+
+            <WaitingTrails trails={trails} moving={moving} />
           </div>
 
-          <aside className="min-w-0 space-y-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-            <NeedsAttention failed={failed} failedTotal={failedTotal} lanes={lanes} />
+          <aside
+            aria-label="Ended badly"
+            className="min-w-0 space-y-6 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+          >
+            <EndedBadly steps={stopped} />
 
             {canOperate && demo ? (
               <details className="group card overflow-hidden">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3">
                   <span className="section-title">Demo scenarios</span>
                   <ChevronRight
                     className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
@@ -285,7 +272,7 @@ export default function Dashboard() {
                       <button
                         type="submit"
                         disabled={nav.state !== 'idle'}
-                        className="group/s flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
+                        className="group/s flex w-full items-start gap-3 rounded-2xl px-3 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
                       >
                         <Play
                           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
@@ -306,7 +293,7 @@ export default function Dashboard() {
                   ))}
                   <Link
                     to="/orders/scenarios"
-                    className="block px-2 pt-1.5 pb-1 text-link text-sm hover:underline"
+                    className="block px-3 pt-1.5 pb-1 text-link text-sm hover:underline"
                   >
                     See what each one fails on, or edit one first
                   </Link>
@@ -350,12 +337,70 @@ export default function Dashboard() {
             </Section>
           </div>
         </div>
-
-        <Trends daily={perf.daily} />
-
-        <Performance p={perf} />
       </div>
     </>
+  );
+}
+
+/**
+ * A group of figures in the status strip. `lead` is open work, set larger: it is what can still be
+ * acted on. A bad ending with any orders takes its status colour, so a failure isn't drawn like a
+ * completion.
+ */
+function Strip({
+  title,
+  figures,
+  cols,
+  lead,
+}: {
+  title: string;
+  figures: Figure[];
+  cols: string;
+  lead?: boolean;
+}) {
+  return (
+    <section aria-label={title} className="min-w-0">
+      <h2 className="caption mb-1.5">{title}</h2>
+      <div className={`card grid ${cols} gap-1 p-1.5`}>
+        {figures.map((f) => {
+          const bad = f.n > 0 && (f.status === 'failed' || f.status === 'rolled_back');
+          return (
+            <Link
+              key={f.status}
+              to={f.to}
+              aria-label={`${f.label}: ${f.n} ${f.n === 1 ? 'order' : 'orders'}${f.note ? `, ${f.note}` : ''}`}
+              className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted"
+            >
+              <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 rounded-full"
+                  style={{ background: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] }}
+                />
+                {f.label}
+              </span>
+              <span className="mt-0.5 flex items-baseline gap-2">
+                <span
+                  className={cn(
+                    'tabular',
+                    lead ? 'font-semibold text-2xl' : 'font-medium text-lg',
+                    bad && 'font-semibold',
+                  )}
+                  style={
+                    bad ? { color: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] } : undefined
+                  }
+                >
+                  {f.n}
+                </span>
+                {f.note ? (
+                  <span className="truncate text-muted-foreground text-xs tabular">{f.note}</span>
+                ) : null}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -437,7 +482,36 @@ function DecisionCard({ d }: { d: Data['decisions'][number] }) {
   );
 }
 
-/** One recently updated order: named by its title and ref, described by the rest. */
+/** Where an order is, in words: the step it waits at and for how long, or where and why it ended. */
+function Position({ o, status }: { o: Data['recent'][number]; status: string }) {
+  const now = useNow(30_000);
+  if (status === 'waiting' && (o.waitingAt || o.waitingOn))
+    return (
+      <>
+        Waiting at {o.waitingAt ?? o.waitingOn}
+        {o.waitingSince ? (
+          <span className="text-muted-foreground">
+            {' '}
+            · {duration(Math.max(0, now - o.waitingSince))}
+          </span>
+        ) : null}
+      </>
+    );
+  if (o.stoppedAt || o.reason)
+    return (
+      <>
+        {statusLabel(status)}
+        {o.stoppedAt ? ` at ${o.stoppedAt}` : ''}
+        {o.reason ? <span className="text-muted-foreground">: {o.reason}</span> : null}
+      </>
+    );
+  return <>{statusLabel(status)}</>;
+}
+
+/**
+ * One recently updated order, led by where it is (its step, or where it ended) rather than a
+ * badge: the loop, not just a status. The dot carries the status colour; the words carry the rest.
+ */
 function RecentRow({
   o,
   customer,
@@ -448,33 +522,32 @@ function RecentRow({
   status: string;
 }) {
   const detailId = useId();
+  const model = ORDER_MODEL_LABELS[o.model as OrderModel];
+  const name = o.title || o.externalId || model;
+  const tone =
+    status === 'failed' ? 'text-bad' : status === 'rolled_back' ? 'text-undo' : 'text-foreground';
   return (
-    <li className="relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-muted/40 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto]">
-      <span className="order-3 col-span-2 sm:order-none sm:col-span-1">
-        <StatusBadge status={status} />
-      </span>
+    <li className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 px-5 py-2.5 hover:bg-muted/40">
+      <StatusDot status={status} className="mt-1.5" />
       <span className="min-w-0">
         <Link
           to={`/orders/${o.id}`}
           aria-describedby={detailId}
           className="block truncate font-medium text-sm after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
         >
-          {o.title || o.externalId || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
+          {name}{' '}
           <span className="font-mono font-normal text-muted-foreground text-xs">
             {orderRef(o.id)}
           </span>
         </Link>
-        <span id={detailId} className="block truncate text-muted-foreground text-xs">
-          {customer || (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')} ·{' '}
-          {ORDER_MODEL_LABELS[o.model as OrderModel]}
-          {o.waitingOn || o.waitingAt ? (
-            <>
-              {' · '}
-              <WaitingAt prefix at={o.waitingAt} since={o.waitingSince} on={o.waitingOn} />
-            </>
-          ) : o.stoppedAt ? (
-            ` · stopped at ${o.stoppedAt}`
-          ) : null}
+        <span id={detailId} className="block">
+          <span className={cn('block truncate text-[13px]', tone)}>
+            <Position o={o} status={status} />
+          </span>
+          <span className="block truncate text-muted-foreground text-xs">
+            {customer || (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')}
+            {o.title || o.externalId ? ` · ${model}` : ''}
+          </span>
         </span>
       </span>
       <span className="text-sm">
@@ -487,106 +560,156 @@ function RecentRow({
   );
 }
 
+/** Orders waiting longer than this are drawn in the wait colour: worth a look. */
+const STALE_MS = 24 * 60 * 60 * 1000;
+
 /**
- * What needs a person, beside the decisions: orders that failed or rolled back, with where and why,
- * then every open wait by who it is on, with the oldest. Each opens where it is dealt with.
+ * Where open orders are waiting, along each flow: its waiting steps in the order the flow runs
+ * them, each with how many wait there, the oldest wait and what it waits on. Each step opens those
+ * orders, longest-waiting first.
  */
-function NeedsAttention({
-  failed,
-  failedTotal,
-  lanes,
-}: {
-  failed: Data['failed'];
-  failedTotal: number;
-  lanes: Lane[];
-}) {
+function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number }) {
   const now = useNow(30_000);
-  const groups = (['people', 'outside', 'timers', 'unknown'] as const)
-    .map((g) => ({ g, items: lanes.filter((l) => l.group === g) }))
-    .filter((x) => x.items.length);
   return (
     <Section
-      title="Needs attention"
+      title="Where orders are waiting"
       actions={
-        <Link to="/orders?attention=1" className="text-link text-xs hover:underline">
-          In Orders
+        <Link
+          to="/orders?status=waiting&sort=waiting"
+          className="text-link text-xs hover:underline"
+        >
+          Longest first
+        </Link>
+      }
+    >
+      {trails.length ? (
+        <ul className="space-y-4">
+          {trails.map((t) => (
+            <li key={t.flowId}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                <Link
+                  to={`/orders?flow=${encodeURIComponent(t.flowId)}&status=waiting&sort=waiting`}
+                  className="truncate font-medium text-sm hover:underline"
+                >
+                  {t.name}
+                </Link>
+                <span className="shrink-0 text-muted-foreground text-xs tabular">
+                  {t.open} waiting
+                </span>
+              </div>
+              <ol
+                className="flex flex-wrap items-stretch gap-y-2"
+                aria-label={`${t.name}: steps with orders waiting, in flow order`}
+              >
+                {t.steps.map((s, i) => {
+                  const age = s.oldest === null ? null : Math.max(0, now - s.oldest);
+                  return (
+                    <li key={s.step} className="flex items-stretch">
+                      {i > 0 ? (
+                        <span
+                          aria-hidden="true"
+                          className="mx-1 w-3 self-center border-t border-dashed sm:w-5"
+                        />
+                      ) : null}
+                      <Link
+                        to={`/orders?flow=${encodeURIComponent(t.flowId)}&step=${encodeURIComponent(s.step)}&status=waiting&sort=waiting`}
+                        className="tile block min-w-0 max-w-[16rem] px-3.5 py-2 hover:bg-muted"
+                      >
+                        <span className="flex items-baseline gap-2">
+                          <span className="font-semibold text-lg tabular">{s.n}</span>
+                          <span className="truncate text-sm">{s.step}</span>
+                        </span>
+                        <span className="block truncate text-muted-foreground text-xs">
+                          {age !== null ? (
+                            <span className={cn(age > STALE_MS && 'font-medium text-wait')}>
+                              oldest {duration(age)}
+                            </span>
+                          ) : null}
+                          {age !== null && s.on ? ' · ' : null}
+                          {s.on ? `on ${s.on}` : null}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ol>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-sm">No order is waiting at a step.</p>
+      )}
+      {moving ? (
+        <p className="mt-4 text-muted-foreground text-xs">
+          {moving} more {moving === 1 ? 'order is' : 'orders are'} moving between steps on their
+          own.
+        </p>
+      ) : null}
+    </Section>
+  );
+}
+
+/**
+ * What failed or rolled back this week, grouped by the step it stopped at, the step with the most
+ * first, with the latest reason: a step failing repeatedly is a flow to fix, not orders to chase.
+ */
+function EndedBadly({ steps }: { steps: StoppedStep[] }) {
+  const total = steps.reduce((a, s) => a + s.n, 0);
+  return (
+    <Section
+      title="Ended badly this week"
+      actions={
+        <Link
+          to="/orders?attention=1&within=7d&sort=updated"
+          className="text-link text-xs hover:underline"
+        >
+          See all
         </Link>
       }
       flush
     >
-      {failed.length ? (
-        <div className="border-b">
-          <h3 className="px-4 pt-2.5 pb-1 text-muted-foreground text-xs">
-            Ended badly: {failedTotal}
-          </h3>
-          <ul>
-            {failed.map((o) => (
-              <li key={o.id} className="relative px-4 py-1.5 hover:bg-muted/40">
-                <div className="flex items-baseline gap-2">
+      {steps.length ? (
+        <>
+          <ul className="divide-y" aria-label={`${total} failed or rolled back`}>
+            {steps.slice(0, 8).map((s) => (
+              <li key={`${s.flowId}-${s.step}`} className="relative px-5 py-2.5 hover:bg-muted/40">
+                <div className="flex items-baseline gap-3">
                   <Link
-                    to={`/orders/${o.id}`}
+                    to={`/orders?flow=${encodeURIComponent(s.flowId)}&step=${encodeURIComponent(s.step)}&attention=1&within=7d&sort=updated`}
                     className="min-w-0 flex-1 truncate text-sm after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
                   >
-                    {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
-                    <span className="font-mono text-muted-foreground text-xs">
-                      {orderRef(o.id)}
-                    </span>
+                    <span className="font-medium">{s.step}</span>
+                    <span className="text-muted-foreground"> · {s.name}</span>
                   </Link>
-                  <StatusBadge status={o.status} />
+                  <span className="shrink-0 font-semibold text-bad tabular">{s.n}</span>
                 </div>
-                {o.stoppedAt || o.reason ? (
-                  <p
-                    className="truncate text-muted-foreground text-xs"
-                    title={o.reason ?? undefined}
-                  >
-                    {[o.stoppedAt, o.reason].filter(Boolean).join(': ')}
+                {s.reason ? (
+                  <p className="truncate text-muted-foreground text-xs" title={s.reason}>
+                    {s.reason}
                   </p>
                 ) : null}
+                <p className="text-muted-foreground text-xs">
+                  {s.rolledBack ? (
+                    <span className="text-undo">{s.rolledBack} rolled back · </span>
+                  ) : null}
+                  latest <Ago ms={s.latest} />
+                </p>
               </li>
             ))}
           </ul>
-          {failedTotal > failed.length ? (
+          {steps.length > 8 ? (
             <Link
-              to="/orders?attention=1"
-              className="block px-4 pt-1 pb-2.5 text-link text-xs hover:underline"
+              to="/orders?attention=1&within=7d&sort=updated"
+              className="block border-t px-5 py-2.5 text-link text-xs hover:underline"
             >
-              {failedTotal - failed.length} more
+              {steps.length - 8} more steps
             </Link>
-          ) : (
-            <div className="pb-1.5" />
-          )}
-        </div>
-      ) : null}
-      {groups.length ? (
-        groups.map(({ g, items }) => (
-          <div key={g} className="border-b last:border-b-0">
-            <h3 className="px-4 pt-2.5 pb-1 text-muted-foreground text-xs">
-              Waiting {GROUP_LABEL[g].toLowerCase()}
-            </h3>
-            <ul className="pb-1.5">
-              {items.map((l) => (
-                <li key={`${l.step}-${l.on}`} className="relative px-4 py-1.5 hover:bg-muted/40">
-                  <div className="flex items-baseline gap-3 text-sm">
-                    <Link
-                      to={GROUP_HREF[g]}
-                      className="min-w-0 flex-1 truncate after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-                    >
-                      {l.step}
-                    </Link>
-                    <span className="font-medium tabular">{l.n}</span>
-                  </div>
-                  <p className="truncate text-muted-foreground text-xs">
-                    {l.on && l.on.toLowerCase() !== l.step.toLowerCase() ? `on ${l.on}` : null}
-                    {l.on && l.on.toLowerCase() !== l.step.toLowerCase() && l.oldest ? ' · ' : null}
-                    {l.oldest ? `oldest ${duration(Math.max(0, now - l.oldest))}` : null}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
-      ) : failed.length ? null : (
-        <Empty>Nothing needs attention: no order has failed, and none is waiting.</Empty>
+          ) : null}
+        </>
+      ) : (
+        <p className="px-5 pb-4 text-muted-foreground text-sm">
+          Nothing failed or rolled back this week.
+        </p>
       )}
     </Section>
   );

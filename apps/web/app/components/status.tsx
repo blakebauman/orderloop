@@ -1,5 +1,5 @@
 import { cn } from '@orderloop/ui/lib/utils';
-import { Undo2, X } from 'lucide-react';
+import { Ban, Undo2, X } from 'lucide-react';
 import { outcomeLabel, statusColor, statusLabel } from '~/lib/format';
 
 // Only running work pulses in badges and dots. A wait pulses once, on its step in the graph;
@@ -28,10 +28,13 @@ function Stamp({
   color: string;
   label: string;
   live?: boolean;
-  /** Ended badly: ruled in the colour with a mark, so it reads apart from a tinted wait. */
-  ended?: 'failed' | 'undone';
+  /**
+   * Ended other than completed: ruled in the colour with a mark, so it reads apart from a tinted
+   * wait. Failed is an X, rolled back an undo arrow, declined a "no" sign: a decision, not a fault.
+   */
+  ended?: 'failed' | 'undone' | 'declined';
 }) {
-  const Mark = ended === 'undone' ? Undo2 : X;
+  const Mark = ended === 'undone' ? Undo2 : ended === 'declined' ? Ban : X;
   return (
     <span
       className={cn(
@@ -58,9 +61,9 @@ function Stamp({
   );
 }
 
-const ENDED: Record<string, 'failed' | 'undone'> = {
+const ENDED: Record<string, 'failed' | 'undone' | 'declined'> = {
   failed: 'failed',
-  declined: 'failed',
+  declined: 'declined',
   rolled_back: 'undone',
 };
 

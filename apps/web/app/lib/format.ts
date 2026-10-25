@@ -8,7 +8,8 @@ export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
   waiting: 'var(--wait)',
   succeeded: 'var(--ok)',
   completed: 'var(--ok)',
-  declined: 'var(--undo)',
+  // A person's or a policy's decision: neutral, not the rollback's orange or a failure's red.
+  declined: 'var(--idle)',
   failed: 'var(--bad)',
   skipped: 'var(--idle)',
   cancelled: 'var(--idle)',
