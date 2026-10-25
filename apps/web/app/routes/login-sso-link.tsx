@@ -93,7 +93,7 @@ export default function LoginSsoLink() {
   }, [error]);
   return (
     <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
-      <Form method="post" className="h-fit w-full max-w-sm rounded-md border bg-card p-6">
+      <Form method="post" className="h-fit w-full max-w-sm card p-6">
         <Mark className="size-7" />
         <h1 className="mt-4 font-semibold tracking-title text-2xl">Link single sign-on</h1>
         <p className="mt-1 text-muted-foreground text-sm">

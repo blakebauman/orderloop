@@ -280,11 +280,13 @@ mobile-starlight-toc a[aria-current="true"] {
   padding-inline-start: 0;
 }
 
-/* Column labels use the app's caption: 12px, medium, muted, on no fill. */
+/* Column labels use the app's caption: 11px small capitals, medium, muted, on no fill. */
 .sl-markdown-content th:not(:where(.not-content *)) {
   background: none;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--ol-muted-foreground);
   border-bottom-color: var(--ol-input);
 }
@@ -364,19 +366,29 @@ mobile-starlight-toc a[aria-current="true"] {
   padding-inline: 0.25rem;
 }
 
-/* ── Cards (page.tsx Section): hairline, card ground, no shadow ─────────── */
+/* ── Cards (page.tsx Section, the app's `card`): very round, no border, a faint ring and soft
+   shadow ─────────────────────────────────────────────────────────────── */
 
 .sl-link-card,
 .card {
-  border: 1px solid var(--ol-rule);
-  border-radius: var(--ol-r);
+  border: 0;
+  border-radius: calc(var(--ol-radius) * 2.6);
   background: var(--ol-card);
-  box-shadow: none;
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--ol-ink) 5%, transparent),
+    0 4px 6px -1px rgb(0 0 0 / 0.06),
+    0 2px 4px -2px rgb(0 0 0 / 0.06);
+}
+
+:root[data-theme="dark"] :is(.sl-link-card, .card) {
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ol-ink) 10%, transparent);
 }
 
 .sl-link-card:hover {
-  border-color: var(--ol-ink);
   background: var(--ol-card);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--ol-ink) 25%, transparent),
+    0 4px 6px -1px rgb(0 0 0 / 0.06);
 }
 
 .sl-link-card .title {

@@ -57,15 +57,17 @@ export function Section({
     <section
       id={id}
       className={cn(
-        'min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)] rounded-md border bg-card',
+        // Flush content runs to the edges, so the card clips it to its corners.
+        'card min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)]',
+        flush && 'overflow-hidden',
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
+      <div className="flex min-h-14 items-center justify-between gap-3 px-5 pt-4 pb-2">
         <h2 className="section-title">{title}</h2>
         {actions}
       </div>
-      <div className={flush ? undefined : 'p-4'}>{children}</div>
+      <div className={flush ? 'border-t' : 'px-5 pb-5'}>{children}</div>
     </section>
   );
 }

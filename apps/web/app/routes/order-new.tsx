@@ -203,7 +203,7 @@ export default function NewOrder() {
       <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Form
           method="post"
-          className="min-w-0 divide-y rounded-md border bg-card"
+          className="min-w-0 divide-y card overflow-hidden"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -483,7 +483,7 @@ export default function NewOrder() {
         </Form>
 
         <aside className="hidden min-w-0 lg:block">
-          <div className="sticky top-20 rounded-md border bg-card p-4">
+          <div className="sticky top-20 card p-4">
             <h2 className="section-title">Catalog</h2>
             <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
               Click to add one; click again for more. Numbers are units available.

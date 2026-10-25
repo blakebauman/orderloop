@@ -61,8 +61,10 @@ typography:
     lineHeight: 1.55
   caption:
     fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
-    fontSize: "0.75rem"
+    fontSize: "0.6875rem"
     fontWeight: 500
+    letterSpacing: "0.05em"
+    textTransform: "uppercase"
   code:
     fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace"
     fontSize: "0.8125rem"
@@ -75,6 +77,7 @@ typography:
 rounded:
   md: "0.5rem"
   pill: "999px"
+  card: "1.625rem"
   stamp: "2px"
   code: "3px"
 spacing:
@@ -104,7 +107,7 @@ components:
     rounded: "{rounded.md}"
   card:
     backgroundColor: "{colors.card}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.card}"
   node-card:
     backgroundColor: "{colors.node}"
     rounded: "{rounded.md}"
@@ -152,8 +155,8 @@ button, its node cards, status stamps, and the run figure on the home page.
 - Hue only from the status ramp and the node categories, and only where there is a status or a
   node type to show.
 - One 48rem reading column; the home page widens to 72rem for the run figure.
-- Flat: hairlines and tonal steps. The node card's 1px bottom rule is the only shadow, and it is
-  the app's.
+- Cards, not ruled boxes: very round (`rounded-4xl`), no border, lifted by a faint ring and a soft
+  shadow; what sits inside a card is a muted, rounded tile. Rules remain for rows and tables.
 
 ## Colors
 
@@ -194,12 +197,14 @@ hue lands on a Ledger one.
 - **Lede**: the page's `description` under its title, 17px muted, max 68ch.
 - **Section (h2)**: Inter 600, 22px, opening on a rule. h3 17px, h4 15px.
 - **Body**: 16px, 1.7.
-- **Caption**: 12px 500 muted. Table column labels, fact labels.
+- **Caption**: 11px 500 muted, uppercase, 0.05em tracking (the preset's labels). Table column
+  labels, field and fact labels.
 - **Code**: IBM Plex Mono, 13px in blocks, 0.875em inline.
 - **Wordmark**: "OrderLoop", one word, Inter 600, 16px, −0.015em, beside the mark, never
   wrapping.
 
-Sentence case everywhere. No uppercase labels, no letter-spaced eyebrows.
+Titles, headings, buttons and running text are in sentence case. Only captions (labels) are
+uppercase; no eyebrow above a heading.
 
 ## Layout
 
@@ -214,16 +219,18 @@ queries, so it behaves the same wherever it's placed). It reads left to right, r
 
 ## Elevation & Depth
 
-Flat. Separation is a hairline; depth is a tonal step (muted against paper, card against paper,
-sheet behind nodes). The node card's `0 1px 0 rule` underline is the app's own and the only shadow
-the docs author. Starlight's own shadows (search, link cards, pagination) are removed.
+Cards carry the depth: a 1px ring at 5% of ink and a soft two-step shadow (the ring alone in dark),
+as the app's `card` utility draws them. Inside a card, separation is a tonal step (a muted tile) or a
+hairline between rows. The node card's `0 1px 0 rule` underline is the canvas's own. Starlight's
+other shadows (search, pagination) are removed.
 
 ## Shapes
 
 - **Pill** (`--ol-pill`): buttons, the header button, the search field, as the app's `rounded-4xl`
   buttons and `rounded-3xl` fields.
-- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): cards, callouts, node
-  cards, code blocks, the sidebar's current page.
+- **26px** (2.6 × `--ol-radius`, the app's `rounded-4xl` `card`): link cards and other cards.
+- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): callouts, node cards, code
+  blocks, the sidebar's current page.
 - **3px**: inline code, focus rings.
 - **2px**: status stamps and output handles.
 - Borders are 1px. The node card's 3px status rule is the one thicker line, and it is the app's
@@ -329,8 +336,9 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
 
 - **Don't** hand-edit `src/styles/theme.css`; a hook blocks it and the design tests catch it.
 - **Don't** use green for anything but "succeeded", or a status hue for decoration.
-- **Don't** add shadows, gradients, glass, or coloured edges thicker than 1px. The node card's
+- **Don't** add shadows beyond the card's, gradients, glass, or coloured edges thicker than 1px. The node card's
   status rule is the one exception, and it is the app's.
-- **Don't** add uppercase or letter-spaced labels, or an eyebrow above a heading.
+- **Don't** set titles or buttons in uppercase, or put an eyebrow above a heading; uppercase is for
+  captions only.
 - **Don't** borrow styling from other projects (felix-web, durablefibers, Supabase). Ledger is
   shadcn's base-luma preset as this product applies it, not another product's look.

@@ -271,7 +271,7 @@ export function ActionCard({
   return (
     <section
       aria-labelledby={titleId}
-      className="ol-confirm my-1 rounded-md border border-input bg-card text-sm"
+      className="ol-confirm my-1 rounded-2xl border border-input bg-card text-sm"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && approvalId && !sent) {
           e.stopPropagation();
@@ -400,7 +400,7 @@ export function PluginDraftCard({ part }: { part: Part }) {
   const d = part.output as PluginDraftResult;
   const allPass = d.cases.total > 0 && d.cases.passed === d.cases.total;
   return (
-    <section className="my-1 rounded-md border border-input bg-card text-sm">
+    <section className="my-1 rounded-2xl border border-input bg-card text-sm">
       <header className="border-b px-3 py-2">
         <h3 className="font-semibold leading-snug">
           Drafted {d.name}{' '}
@@ -449,7 +449,7 @@ export function ProposalCard({ part }: { part: Part }) {
       </Settled>
     );
   return (
-    <section className="my-1 rounded-md border border-input bg-card text-sm">
+    <section className="my-1 rounded-2xl border border-input bg-card text-sm">
       <header className="border-b px-3 py-2">
         <h3 className="font-semibold leading-snug">Proposed change to {pr.flowName}</h3>
       </header>

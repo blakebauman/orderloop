@@ -141,7 +141,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       return (
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {b.items.map((s) => (
-            <div key={s.label} className="rounded-md border bg-card px-3 py-2">
+            <div key={s.label} className="card px-3 py-2">
               <dt className="caption">{s.label}</dt>
               <dd className="font-semibold text-lg tabular-nums">{s.value}</dd>
               {s.hint ? <dd className="text-muted-foreground text-xs">{s.hint}</dd> : null}
@@ -151,7 +151,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       );
     case 'table':
       return b.rows.length ? (
-        <div className="overflow-x-auto rounded-md border bg-card">
+        <div className="overflow-x-auto card">
           <table className="w-full text-sm">
             <thead className="border-b text-left">
               <tr>
@@ -198,7 +198,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
           </table>
         </div>
       ) : (
-        <div className="rounded-md border bg-card">
+        <div className="card overflow-hidden">
           <Empty>{b.empty ?? 'Nothing here yet.'}</Empty>
         </div>
       );
@@ -271,7 +271,7 @@ function FormBlock({
       ref={ref}
       method="post"
       action={href(form.action)}
-      className={inline ? 'inline' : 'grid max-w-xl gap-3 rounded-md border bg-card p-4'}
+      className={inline ? 'inline' : 'grid max-w-xl gap-3 card p-4'}
       onSubmit={(e) => {
         if (!form.confirm || confirmed.current) return;
         e.preventDefault();

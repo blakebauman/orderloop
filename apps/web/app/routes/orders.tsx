@@ -275,7 +275,7 @@ export default function Orders() {
         ) : null}
 
         {n ? (
-          <div className="rounded-md border bg-card">
+          <div className="card overflow-hidden">
             <table className="w-full text-sm">
               <thead className="hidden border-b text-left md:table-header-group">
                 <tr>
@@ -348,7 +348,7 @@ export default function Orders() {
             </table>
           </div>
         ) : (
-          <div className="rounded-md border bg-card">
+          <div className="card overflow-hidden">
             <Empty
               action={
                 filtered ? null : (
