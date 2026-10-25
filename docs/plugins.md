@@ -510,8 +510,8 @@ A sandboxed plugin, in `apps/engine/src/plugin-host.ts`:
   request let in meanwhile. Its storage is in the deployment's jurisdiction (`pluginStorage`), and
   only `query` and `batch` answer over RPC (the rest is JS-private).
 - **Egress** (`globalOutbound` is `PluginEgress`): https only, to a public host in its manifest's
-  `egress` (a name, or `*.` and one); never a private, loopback, link-local, CGNAT, multicast or
-  metadata address, an internal name or a wildcard-DNS service (`egressRefusal`, whatever `egress`
+  `egress` (a name, or `*.` and one); never a private, loopback, link-local, CGNAT, multicast,
+  documentation, NAT64 or 6to4 address or the metadata address, an internal name or a wildcard-DNS service (`egressRefusal`, whatever `egress`
   says), nor a URL with credentials. Redirects are followed by the gateway, at most 5, each
   checked again; when one leaves the origin, `authorization`, `cookie` and `proxy-authorization`
   are dropped. A secret declared `inject: { host, header, format }` (an exact host, never `*.`) is

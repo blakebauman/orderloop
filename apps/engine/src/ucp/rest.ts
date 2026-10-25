@@ -22,6 +22,7 @@ import {
   ucpErrorResponse,
   verifyPlatform,
 } from '@orderloop/core';
+import { idempotencyKeyProblem, readCappedText } from '../body';
 import {
   cancelCheckout,
   completeCheckout,
@@ -90,11 +91,6 @@ export async function contextFor(
   }
 }
 
-async function readBody(request: Request): Promise<string | null> {
-  const text = await request.text();
-  return text.length > MAX_BODY ? null : text;
-}
-
 export async function handleUcp(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const caller = await platformOf(env, request);
@@ -110,7 +106,7 @@ export async function handleUcp(request: Request, env: Env): Promise<Response> {
   const parts = url.pathname.slice(UCP_REST_PATH.length).split('/').filter(Boolean);
   const method = request.method;
   const key = request.headers.get('idempotency-key');
-  const body = method === 'GET' ? '' : await readBody(request);
+  const body = method === 'GET' ? '' : await readCappedText(request, MAX_BODY);
   if (body === null) return reply(refuse(413, 'too_large', 'The request body is too large.'));
   const parse = () => {
     try {
@@ -125,10 +121,8 @@ export async function handleUcp(request: Request, env: Env): Promise<Response> {
       return required
         ? Promise.resolve(refuse(400, 'idempotency_key_required', 'Send an Idempotency-Key.'))
         : op();
-    if (key.length < 16 || key.length > 255)
-      return Promise.resolve(
-        refuse(400, 'invalid_idempotency_key', 'Idempotency-Key must be 16–255 characters.'),
-      );
+    const problem = idempotencyKeyProblem(key);
+    if (problem) return Promise.resolve(refuse(400, 'invalid_idempotency_key', problem));
     return once(env, caller.id, key, `${method} ${url.pathname}`, body, op);
   };
 

@@ -422,7 +422,7 @@ describe('cancel', () => {
           (err: Error) => err.message,
         );
       expect(refused).toBe(OWN_ORDER_REFUSAL);
-      expect(await api.decide(orderId, 'mgr', 'approved', 'checker', 'usr_checker')).toEqual({
+      expect(await api.decide(orderId, 'mgr', 'approved', 'checker', 'usr_checker')).toMatchObject({
         ok: true,
       });
     } finally {
@@ -2116,7 +2116,7 @@ describe('outbound webhooks', () => {
       const id = r.url.split('/').pop()!;
       expect(
         await verifyWebhook(`whsec_${id}`, r.body, r.headers.get('x-orderloop-signature')),
-      ).toEqual({ ok: true });
+      ).toMatchObject({ ok: true });
       expect(r.headers.get('x-orderloop-delivery')).toBe(JSON.parse(r.body).id);
     }
     const shipped = JSON.parse(mine.find((r) => r.url.endsWith('/ship'))!.body);

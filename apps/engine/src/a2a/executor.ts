@@ -50,7 +50,7 @@ import {
 import { assistantModel, type ModelSource } from '../assistant/model';
 import { isActionTool, runTool, TOOL_INPUTS, type ToolInput } from '../assistant/tools';
 import { recordAudit } from '../audit';
-import { startOrderOnce } from '../orders';
+import { fromOutside, startOrderOnce } from '../orders';
 import { assistantBudgetSpent, finishTurn } from '../usage';
 import { dataArtifact, newTask, readMessage, statusEvent } from './parts';
 import type { SqlTaskStore } from './store';
@@ -167,11 +167,14 @@ export class OrderLoopExecutor implements AgentExecutor {
   ): Promise<string | null> {
     const parsed = startOrderSchema.safeParse(input);
     if (!parsed.success) throw new Refused(`The order is not valid: ${issues(parsed.error)}`);
-    const result = await startOrderOnce(this.env, {
-      ...parsed.data,
-      startedBy: p.id,
-      idempotencyKey: `a2a:${p.id}:${message.messageId}`,
-    });
+    const result = await startOrderOnce(
+      this.env,
+      fromOutside({
+        ...parsed.data,
+        startedBy: p.id,
+        idempotencyKey: `a2a:${p.id}:${message.messageId}`,
+      }),
+    );
     if ('mismatch' in result)
       throw new Refused('This message id already placed a different order. Use a new message id.');
     if (!result.replayed)

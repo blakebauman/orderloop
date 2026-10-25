@@ -22,6 +22,7 @@ export * from './lines';
 export * from './logic';
 export * from './mcp-skills';
 export * from './money';
+export * from './order-schemas';
 export * from './payments';
 export * from './plugin-host';
 export * from './plugin-ui';

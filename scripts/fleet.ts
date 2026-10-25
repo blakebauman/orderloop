@@ -69,6 +69,7 @@ const SECRETS = {
     'DATA_KEY_PREVIOUS',
     'SETUP_TOKEN',
     'SHOPIFY_WEBHOOK_SECRET',
+    'SHOPIFY_SHOPS',
     'STRIPE_WEBHOOK_SECRET',
     'OIDC_CLIENT_SECRET',
   ],
@@ -91,6 +92,21 @@ const SECRETS = {
  * secrets, A2A push credentials).
  */
 const REQUIRED_SECRETS = ['PRINCIPAL_KEY', 'DATA_KEY'] as const;
+
+/** The shared keys, and the ones before them during a rotation: each at least this long. */
+const KEYS = ['PRINCIPAL_KEY', 'PRINCIPAL_KEY_PREVIOUS', 'DATA_KEY', 'DATA_KEY_PREVIOUS'] as const;
+export const MIN_KEY_LENGTH = 32;
+
+/**
+ * Why the shared keys can't be used, or null: one set but shorter than `MIN_KEY_LENGTH`
+ * characters is guessable offline from anything it signed. `provision.sh` makes 64 hex digits.
+ */
+export function keysProblem(env: Record<string, string | undefined>): string | null {
+  const short = KEYS.filter((k) => env[k] && env[k]!.length < MIN_KEY_LENGTH);
+  return short.length
+    ? `${short.join(', ')} must be at least ${MIN_KEY_LENGTH} characters (openssl rand -hex 32)`
+    : null;
+}
 
 export type Deployment = {
   id: string;
@@ -934,6 +950,8 @@ function secrets(app: string | undefined, out: string | undefined, id?: string, 
     throw new Error(
       `${missing.join(', ')} not set: add it to the deployment's GitHub environment (scripts/provision.sh generates one)`,
     );
+  const short = keysProblem(process.env);
+  if (short) throw new Error(short);
   const problem = app === 'engine' && id ? secretsProblem(byId(id), process.env) : null;
   if (problem) throw new Error(problem);
   // Only the ones set: `--secrets-file` adds to a Worker's secrets and never removes one.

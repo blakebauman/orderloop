@@ -4,6 +4,7 @@ import {
   b2bOrderFlow,
   type CartState,
   isQuoteCurrent,
+  type OrderState,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
@@ -12,6 +13,7 @@ import { carts, createDb, orders, promotions, publishFlow, sessions, users } fro
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
+import { PROMO_TRIES } from '../src/cart/agent';
 import { createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
 import worker from '../src/index';
@@ -208,6 +210,28 @@ describe('promotion codes on a cart', () => {
         content: "NOPE isn't a promotion.",
       }),
     );
+  });
+
+  it('limits how many promotion codes one cart may try in an hour', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    for (let i = 0; i < PROMO_TRIES; i++) {
+      await cart(id).applyAs(ada, { op: 'promo_add', code: `TRY${i}` });
+      await cart(id).applyAs(ada, { op: 'promo_remove', code: `TRY${i}` });
+    }
+    expect(await cart(id).applyAs(ada, { op: 'promo_add', code: 'ONEMORE' })).toEqual({
+      ok: false,
+      error: 'Too many promotion codes tried on this cart. Try again later.',
+    });
+  });
+
+  it('counts only codes actually tried, so someone who can’t edit can’t spend the tries', async () => {
+    const id = await open();
+    const vee = staff(await who('viewer', 'vee'));
+    for (let i = 0; i <= PROMO_TRIES; i++)
+      expect((await cart(id).applyAs(vee, { op: 'promo_add', code: `NO${i}` })).ok).toBe(false);
+    const ada = staff(await who('operator', 'ada'));
+    expect(await cart(id).applyAs(ada, { op: 'promo_add', code: 'MINE' })).toEqual({ ok: true });
   });
 
   it('keeps the codes, and says so when the cart’s flow never applies them', async () => {
@@ -488,6 +512,25 @@ describe('staff carts over EngineApi (the REST API)', () => {
     const other = await open(null);
     const canceled = await api().cancelCart(other, ada);
     expect(canceled).toMatchObject({ ok: true, cart: { status: 'canceled' } });
+  });
+});
+
+describe('orders started from outside the engine', () => {
+  it('drop the engine’s own cart and UCP marks from meta', async () => {
+    const { orderId } = await api().startOrder({
+      flowId: 'tpl-b2b-order',
+      input: {
+        model: 'b2b',
+        channel: 'api',
+        currency: 'USD',
+        customerId: 'cus_contoso',
+        lines: [{ sku: 'WID-200', qty: 1 }],
+        meta: { ucp: { platformId: 'ucp_forged' }, cart: { id: 'cart_forged' }, po: 'PO-1' },
+      },
+    });
+    const order = ((await env.ORDER_AGENT.getByName(orderId).snapshot()) as OrderState).order!;
+    expect(order.meta).toEqual({ po: 'PO-1' });
+    await env.ORDER_AGENT.getByName(orderId).cancel('Cleanup');
   });
 });
 

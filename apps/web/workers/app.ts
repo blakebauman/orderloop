@@ -364,9 +364,16 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       ifNoneMatch ? { onlyIf: new Headers({ 'if-none-match': ifNoneMatch }) } : undefined,
     );
     if (!obj) return new Response('Not found', { status: 404 });
+    const type = obj.httpMetadata?.contentType ?? 'application/octet-stream';
     const headers = {
-      'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream',
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'content-type': type,
+      // A document is someone else's text (an email, an order PDF): it may style itself, nothing
+      // more, and runs sandboxed as its own origin, with no forms, scripts or navigation. A PDF
+      // keeps the browser's viewer, which a sandbox would blank; it runs no page script anyway.
+      'content-security-policy': type.startsWith('application/pdf')
+        ? "default-src 'none'; style-src 'unsafe-inline'"
+        : "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      'x-content-type-options': 'nosniff',
       etag: obj.httpEtag,
       // Only this browser may keep it, and it asks every time, so the sign-in is checked on each
       // view (a signed-out or disabled person can't reopen it); an unchanged one is a 304.

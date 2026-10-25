@@ -81,6 +81,12 @@ const CHAT_WINDOW_MS = 10_000;
 /** Changes a guest may make in a burst. */
 const EDIT_BURST = 20;
 const EDIT_WINDOW_MS = 10_000;
+/**
+ * Promotion codes tried on one cart in an hour, by anyone: enough for a buyer's typos, too few to
+ * guess at codes (each answer says whether a code works here).
+ */
+export const PROMO_TRIES = 10;
+const PROMO_WINDOW_MS = 60 * 60_000;
 
 type ChatRow = {
   id: string;
@@ -426,8 +432,20 @@ export class CartAgent extends Agent<Env, CartState> {
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     // While an order starts or a return renders, the cart is held as it was checked.
     if (this.submitting) return { ok: false, error: 'The cart is being sent.' };
-    const r = applyCartOp(this.cart(), op, actor, Date.now());
+    const now = Date.now();
+    const tries =
+      op.op === 'promo_add'
+        ? ((await this.ctx.storage.get<number[]>('promo_tries')) ?? []).filter(
+            (t) => now - t < PROMO_WINDOW_MS,
+          )
+        : [];
+    if (tries.length >= PROMO_TRIES)
+      return { ok: false, error: 'Too many promotion codes tried on this cart. Try again later.' };
+    const r = applyCartOp(this.cart(), op, actor, now);
     if (!r.ok) return r;
+    // Counted once a code is actually tried: a refusal (no right to edit, a closed cart, a code
+    // already there) uses up nothing, so no one can spend the cart's tries for its buyer.
+    if (op.op === 'promo_add') await this.ctx.storage.put('promo_tries', [...tries, now]);
     await this.save(r.cart);
     if (r.reprice) await this.reprice();
     return { ok: true };

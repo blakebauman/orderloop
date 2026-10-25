@@ -62,12 +62,17 @@ const eligible = (p: Pick<Promotion, 'skus'>, lines: OrderLine[]) =>
 const subtotalOf = (lines: OrderLine[]) =>
   money(lines.reduce((s, l) => s + l.qty * (l.unitPrice ?? 0), 0));
 
+/** What a code that matches no promotion (or one reserved for another customer) is told. */
+export const unknownPromotion = (code: string) => `${code} isn't a promotion.`;
+
 /** Why `p` doesn't apply to this order, or null when it does. */
 export function promotionProblem(p: Promotion, c: PromotionContext): string | null {
+  // Before anything else, and in the same words as a code that doesn't exist, so a buyer can't
+  // learn that another customer's code exists (nor that it's paused, upcoming or expired).
+  if (p.customerId && p.customerId !== c.customerId) return unknownPromotion(p.code);
   if (p.status !== 'active') return `${p.code} is paused.`;
   if (p.validFrom !== null && c.now < p.validFrom) return `${p.code} isn't valid yet.`;
   if (p.validTo !== null && c.now >= p.validTo) return `${p.code} has expired.`;
-  if (p.customerId && p.customerId !== c.customerId) return `${p.code} isn't for this customer.`;
   if (p.currency && p.currency !== c.currency) return `${p.code} is for ${p.currency} orders.`;
   if (p.maxRedemptions !== null && c.redeemed.total >= p.maxRedemptions)
     return `${p.code} has been used up.`;

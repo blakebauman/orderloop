@@ -39,6 +39,7 @@ import {
   pluginSecrets,
 } from '@orderloop/db';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
+import { readCapped } from './body';
 import { openSecret } from './data-key';
 import { pluginStorage } from './namespaces';
 
@@ -433,6 +434,11 @@ export function isPrivateAddress(host: string): boolean {
       (a === 192 && b === 168) ||
       (a === 192 && b === 0) ||
       (a === 198 && (b === 18 || b === 19)) ||
+      // Documentation ranges (192.0.2.0/24 is in 192.0 above).
+      (a === 198 && b === 51 && Number(v4[3]) === 100) ||
+      (a === 203 && b === 0 && Number(v4[3]) === 113) ||
+      // The 6to4 relay anycast.
+      (a === 192 && b === 88 && Number(v4[3]) === 99) ||
       a >= 224
     );
   }
@@ -446,6 +452,12 @@ export function isPrivateAddress(host: string): boolean {
     if (hi !== undefined && lo !== undefined)
       return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
   }
+  // NAT64 (64:ff9b::/96, 64:ff9b:1::/48) and 6to4 (2002::/16) carry an IPv4 address that may be a
+  // private one, so they are refused outright, as is the documentation range (2001:db8::/32).
+  if (/^(64:ff9b:|2002:|2001:db8:)/.test(h)) return true;
+  // Teredo (2001::/32) wraps one too, and so does an IPv4-compatible address (`::a.b.c.d`, which
+  // URLs write as `::hhhh:hhhh`).
+  if (/^2001:0?:/.test(h) || /^::[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(h)) return true;
   return /^(fc|fd|fe8|fe9|fea|feb|ff)/.test(h);
 }
 
@@ -520,29 +532,6 @@ const CROSS_ORIGIN_DROPPED = ['authorization', 'cookie', 'proxy-authorization'];
 const MAX_EGRESS_BODY = 10 * 1024 * 1024;
 
 /** The stream's bytes, or null once more than `max` have come. */
-async function readCapped(stream: ReadableStream<Uint8Array>, max: number) {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.byteLength;
-  }
-  return out.buffer;
-}
-
 function refuse(id: string, url: string, why: string, status = 403) {
   // The origin and path only: a query string or redirect target may carry what it shouldn't.
   let where = url;

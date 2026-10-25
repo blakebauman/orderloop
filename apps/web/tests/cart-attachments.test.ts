@@ -164,6 +164,21 @@ describe('downloading a cart’s file', () => {
     expect((await get('att_1')).status).toBe(401);
   });
 
+  it('lets the buyer download while the cart is open or returned, not once it closed', async () => {
+    objects.set(file.key, { body: new TextEncoder().encode('%PDF').buffer as ArrayBuffer });
+    const external = (expiresAt: number) => ({ expiresAt }) as Cart['external'];
+    const as = async (c: Partial<Cart>) => {
+      cartSnapshot.mockResolvedValue(state(c, [file]));
+      return (await get('att_1', { cookie: await guestCookie() })).status;
+    };
+    const later = Date.now() + 60_000;
+    expect(await as({ external: external(later) })).toBe(200);
+    expect(await as({ external: external(0), status: 'returned' })).toBe(200);
+    expect(await as({ external: external(later), status: 'canceled' })).toBe(404);
+    expect(await as({ external: external(later), status: 'submitted' })).toBe(404);
+    expect(await as({ external: external(0) })).toBe(404);
+  });
+
   it('keeps a staff cart’s files from a buyer’s cookie', async () => {
     cartSnapshot.mockResolvedValue(state({}, [file]));
     expect((await get('att_1', { cookie: await guestCookie() })).status).toBe(404);

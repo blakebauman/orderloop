@@ -87,7 +87,8 @@
   }
   // Secrets (wrangler secret put): SETUP_TOKEN — the one-time setup code that creates an admin on
   // /setup (app/lib/setup.server.ts); a new one recovers admin access. SHOPIFY_WEBHOOK_SECRET —
-  // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders.
+  // the Shopify app's client secret; enables POST /api/v1/channels/shopify/orders, with
+  // SHOPIFY_SHOPS, the *.myshopify.com stores it takes orders from.
   // STRIPE_WEBHOOK_SECRET — the Stripe webhook endpoint's signing secret (whsec_…); enables
   // POST /api/v1/webhooks/stripe. PRINCIPAL_KEY — signs what this Worker forwards to the engine.
   // DATA_KEY (and DATA_KEY_PREVIOUS during a rotation) — encrypts the secrets stored in D1.

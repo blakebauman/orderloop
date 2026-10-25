@@ -7,6 +7,7 @@ import {
   promoCodesOf,
   promotionProblem,
   regionalTaxRate,
+  unknownPromotion,
 } from '../src';
 
 const promo = (p: Partial<Promotion> = {}): Promotion => ({
@@ -54,7 +55,19 @@ describe('promotion codes', () => {
     expect(promotionProblem(promo({ status: 'paused' }), ctx)).toMatch(/paused/);
     expect(promotionProblem(promo({ validFrom: 2_000 }), ctx)).toMatch(/isn't valid yet/);
     expect(promotionProblem(promo({ validTo: 1_000 }), ctx)).toMatch(/expired/);
-    expect(promotionProblem(promo({ customerId: 'cus_2' }), ctx)).toMatch(/customer/);
+    // Another customer's code reads exactly like one that doesn't exist, so codes can't be probed.
+    expect(promotionProblem(promo({ customerId: 'cus_2' }), ctx)).toBe(
+      unknownPromotion(promo().code),
+    );
+    // Paused, upcoming or expired, it still reads as unknown: none of that may show it exists.
+    for (const over of [
+      { status: 'paused' as const },
+      { validFrom: ctx.now + 1 },
+      { validTo: ctx.now - 1 },
+    ])
+      expect(promotionProblem(promo({ customerId: 'cus_2', ...over }), ctx)).toBe(
+        unknownPromotion(promo().code),
+      );
     expect(promotionProblem(promo({ currency: 'EUR' }), ctx)).toMatch(/EUR orders/);
     expect(
       promotionProblem(promo({ maxRedemptions: 1 }), {
