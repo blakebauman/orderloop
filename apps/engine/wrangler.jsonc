@@ -15,6 +15,7 @@
     "enabled": true,
     "head_sampling_rate": 1,
     "logs": { "enabled": true, "invocation_logs": true },
+    "issues": { "enabled": true },
     "traces": { "enabled": true }
   },
   // A runaway invocation stops at 10 s of CPU (the default is 30 s). Workflow steps, agents and

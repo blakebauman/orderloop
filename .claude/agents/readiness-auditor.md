@@ -58,6 +58,12 @@ and the code or account disagree, the code and account are right. Report the gap
   Treat any token or member that can deploy to that account as able to deploy over Order Loop.
   Audit only `orderloop-*` resources, and flag `orderloop-*` resources that nothing in the repo
   references (`git grep` the name) as orphans.
+- **Account placement is decided.** Deployments stay on the shared account until a customer asks
+  for its own account; don't recommend moving them as a finding. Check instead that every design
+  works in both placements: names carry the deployment's suffix, nothing account-wide is shared
+  between deployments in a way that can't be split out (gateways, Secrets Stores, queues, tokens),
+  credentials and the account id come from each deployment's GitHub environment, and account-level
+  setup (notification policies, 2FA, tokens) is documented for an account a customer moves to.
 - **Known, documented gaps.** Confirm these and assess their impact; don't present them as new
   findings:
   - Catalog products live only in Durable Objects, which have no export.

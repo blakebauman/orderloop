@@ -214,6 +214,29 @@ or turning on of any of its versions; one already running keeps running.
 A leaked publisher key: remove it from the registry and merge, then review, and if need be turn
 off, each plugin it signed (the Plugins page names the publisher).
 
+## Alerting
+
+Failures reach a person through Cloudflare Notifications, which are set on the account, not per
+Worker. Every app Worker turns on Workers Issues (`observability.issues.enabled` in its
+`wrangler.jsonc`): uncaught exceptions, failed invocations, `5xx` responses and logs written with
+`console.error` become issues, so an error-level log line (a dead letter's `dlq_message`, a failed
+retention sweep) alerts without a rule of its own. The account holds these notification policies,
+all sent to the account's email:
+
+| Policy | Alert type | Fires on |
+|---|---|---|
+| Order Loop: Worker issues | `workers_observability_real_time_issue` | A new or recurring issue on any Worker with Issues on |
+| Order Loop: HTTP DDoS | `dos_attack_l7` | An HTTP DDoS attack mitigated on one of the account's zones |
+| Order Loop: Universal SSL | `universal_ssl_event_type` | Universal certificate validation, issuance, renewal and expiry |
+| Order Loop: Advanced certificates | `dedicated_ssl_certificate_event_type` | Advanced certificate validation, issuance, renewal and expiry |
+
+They were created through the API (2026-10-25); nothing in the repo provisions them. On a shared
+account one set covers every deployment there. A deployment on its own Cloudflare account needs
+the same four policies created on that account (dashboard **Notifications**, or the API's
+`/alerting/v3/policies`), sent to whoever is on call for it. Add a webhook or PagerDuty destination
+to a policy when email isn't enough. Log-match alert rules (Workers Observability alerts on a
+query) can only be made in the dashboard; prefer an error-level log, which Issues already catches.
+
 ## Holding and checking deployments
 
 - **Hold a customer** on what they run now (a change freeze, an incident) with `"hold": true` in

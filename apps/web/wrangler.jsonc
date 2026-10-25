@@ -12,6 +12,7 @@
     "enabled": true,
     "head_sampling_rate": 1,
     "logs": { "enabled": true, "invocation_logs": true },
+    "issues": { "enabled": true },
     "traces": { "enabled": true }
   },
   // A runaway request stops at 5 s of CPU (the default is 30 s). Rendering, a PBKDF2 sign-in and an
