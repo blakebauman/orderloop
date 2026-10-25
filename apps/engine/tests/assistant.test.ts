@@ -517,9 +517,29 @@ describe('assistant socket', () => {
     const orderId = await waitingOrder();
     const kim = await who('viewer', 'kim@example.com');
 
-    // Someone else's assistant refuses the connection.
-    const wrong = await socket('usr_someone_else', kim);
-    await until(async () => wrong.closed() === 4403, 'the refusal');
+    // Someone else's assistant refuses the connection, and its messages, before they reach it.
+    const signedFor = async (path: string) =>
+      new Headers({ [PRINCIPAL_HEADER]: await signed(kim, path) });
+    const other = '/agents/assistant-agent/usr_someone_else';
+    const messages = `${other}/get-messages`;
+    expect(
+      (
+        await worker.fetch(
+          new Request(`http://engine${messages}`, { headers: await signedFor(messages) }),
+          env,
+        )
+      ).status,
+    ).toBe(403);
+    const upgrade = await signedFor(other);
+    upgrade.set('Upgrade', 'websocket');
+    const wrong = await worker.fetch(
+      new Request(`http://engine${other}`, { headers: upgrade }),
+      env,
+    );
+    expect(wrong.status).toBe(403);
+    expect(wrong.webSocket).toBeNull();
+    // With no principal, nothing answers at all.
+    expect((await worker.fetch(new Request(`http://engine${other}`), env)).status).toBe(401);
 
     const mine = await socket(kim.id, kim);
     const res = await mine.call('attention', []);

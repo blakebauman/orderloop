@@ -1542,12 +1542,19 @@ describe('agent socket roles', () => {
     const ws = res.webSocket!;
     ws.accept();
     const pending = new Map<string, (m: { success: boolean; error?: string }) => void>();
+    let messages = 0;
     ws.addEventListener('message', (e) => {
+      messages++;
       const m = JSON.parse(String(e.data));
       if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
     });
+    const closed = new Promise<number>((resolve) =>
+      ws.addEventListener('close', (e) => resolve(e.code)),
+    );
     let n = 0;
     return {
+      closed,
+      messages: () => messages,
       call: (method: string, args: unknown[]) =>
         new Promise<{ success: boolean; error?: string }>((resolve) => {
           const id = `c${++n}`;
@@ -1556,6 +1563,13 @@ describe('agent socket roles', () => {
         }),
       close: () => ws.close(),
     };
+  };
+  /** The upgrade response alone, for one the engine refuses before it opens. */
+  const upgrade = async (orderId: string, principal: ProxiedPrincipal | null, path = orderId) => {
+    const headers = new Headers({ Upgrade: 'websocket' });
+    if (principal)
+      headers.set(PRINCIPAL_HEADER, await signed(principal, `/agents/order-agent/${path}`));
+    return worker.fetch(new Request(`http://engine/agents/order-agent/${path}`, { headers }), env);
   };
   /** A person with a live session, as the web proxy describes them. */
   const who = async (role: Principal['role'], email: string): Promise<ProxiedPrincipal> => {
@@ -1597,10 +1611,8 @@ describe('agent socket roles', () => {
     });
     expect((await viewer.call('cancel', ['nope'])).error).toBe('This needs the Operator role.');
     viewer.close();
-    // A socket with no principal (not opened through the web proxy) can't act either.
-    const anonymous = await socket(orderId, null);
-    expect((await anonymous.call('decide', ['mgr', 'approved'])).success).toBe(false);
-    anonymous.close();
+    // A socket with no principal (not opened through the web proxy) doesn't open at all.
+    expect((await upgrade(orderId, null)).status).toBe(401);
     expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
 
     // An approver decides, and the record names them, not what the page claimed.
@@ -1656,10 +1668,51 @@ describe('agent socket roles', () => {
     expect((await other.call('cancel', ['nope'])).success).toBe(false);
     other.close();
     // A forged session id can't stand in for a real one.
-    const forged = await socket(orderId, { ...sam, session: 'made-up' });
-    expect((await forged.call('whoami', [])).success).toBe(false);
-    forged.close();
+    expect((await upgrade(orderId, { ...sam, session: 'made-up' })).status).toBe(401);
     expect((await state(orderId)).waits.some((w) => w.nodeId === 'mgr')).toBe(true);
+    await agent(orderId).cancel('Cleanup');
+  });
+
+  it('closes an open page once its person is signed out, and opens none for a missing order', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-purchase-request',
+      input: input({
+        model: 'procurement',
+        customerId: 'cus_internal',
+        title: 'Desks',
+        lines: [{ sku: 'LAP-14', qty: 8 }],
+      }),
+    });
+    await waitingOn(orderId, (x) => x.waits.some((w) => w.nodeId === 'mgr'), 'manager approval');
+    const lee = await who('viewer', 'lee@example.com');
+    const stays = await who('viewer', 'stay@example.com');
+    const page = await socket(orderId, lee);
+    const other = await socket(orderId, stays);
+    expect((await page.call('whoami', [])).success).toBe(true);
+    // Disabled without the page calling anything: the next check closes it, and only it.
+    await db().update(users).set({ disabledAt: Date.now() }).where(eq(users.id, lee.id));
+    await agent(orderId).recheckConnections();
+    expect(await page.closed).toBe(4401);
+    expect((await other.call('whoami', [])).success).toBe(true);
+    other.close();
+
+    // A name with no order behind it gets no socket, nor does a child object inside a real one,
+    // nor any agent besides orders, carts and assistants.
+    expect((await upgrade('ord_missing', stays)).status).toBe(404);
+    expect(
+      (await upgrade(orderId, stays, `${orderId}/sub/assistant-agent/${stays.id}`)).status,
+    ).toBe(404);
+    for (const path of ['/agents/a2a-agent/x', '/agents/plugin-storage/x']) {
+      const headers = new Headers({ [PRINCIPAL_HEADER]: await signed(stays, path) });
+      expect(
+        (await worker.fetch(new Request(`http://engine${path}`, { headers }), env)).status,
+      ).toBe(404);
+      headers.set('Upgrade', 'websocket');
+      expect(
+        (await worker.fetch(new Request(`http://engine${path}`, { headers }), env)).status,
+      ).toBe(404);
+    }
     await agent(orderId).cancel('Cleanup');
   });
 

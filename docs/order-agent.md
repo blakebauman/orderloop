@@ -119,6 +119,13 @@ the same methods over RPC.
 
 ### Roles on the socket
 
+Before a socket or request reaches the object, `orderGate` (`apps/engine/src/agent-routes.ts`, run by
+`routeAgents` on the route the SDK matched) refuses one without a principal signed for that order's
+path and a live sign-in (`401`), below viewer (`403`), or for an order the `orders` table doesn't
+have (`404`), so a socket can't create an OrderAgent. `routeAgents` answers `404` for any agent
+other than the order, assistant and cart agents, and for any `/sub/` path inside one (the SDK would
+route it to a child object past the gates; each of the three also refuses in `onBeforeSubAgent`).
+
 The web app proxies the socket with the signed-in principal in `x-orderloop-principal`
 (`PRINCIPAL_HEADER`), set by the web Worker after removing any copy the browser sent
 (`setPrincipalHeader`, `apps/web/app/lib/principal.server.ts`). The value is `v1.<payload>.<signature>`
@@ -128,7 +135,11 @@ once with `forwardedPrincipal` (`apps/engine/src/principal.ts`, `verifyPrincipal
 or unsigned header, a bad signature, another path or an expired one is refused, so a request that
 reaches the engine another way cannot name a principal. It accepts `PRINCIPAL_KEY_PREVIOUS` as well,
 for [key rotation](operations.md#rotating-the-principal-key). `onConnect` then
-stores the principal as the connection's state, which is not checked again for expiry. For a signed-in person the header also carries their
+stores the principal as the connection's state, which is not checked again for expiry, or closes
+the socket with `4401` when there is none. While anyone has the order open, `recheckConnections`
+runs every 30 seconds (`RECHECK_S`) and closes with `4401` each socket whose principal
+`livePrincipal` no longer finds, or finds below viewer, since state broadcasts reach a socket that
+never calls anything. For a signed-in person the header also carries their
 session's id (the SHA-256 that keys `sessions`), which never reaches the browser.
 
 Each callable calls `authorize(min)`. On a socket call it re-reads the session and its user from

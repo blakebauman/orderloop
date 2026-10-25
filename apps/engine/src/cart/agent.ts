@@ -629,6 +629,11 @@ export class CartAgent extends Agent<Env, CartState> {
     this.syncMembers(connection.id);
   }
 
+  /** No child agents: a `/sub/` path inside this one is refused (agent-routes.ts refuses it first). */
+  override async onBeforeSubAgent(): Promise<Response> {
+    return new Response('Not found', { status: 404 });
+  }
+
   /** How often open sockets are checked against live sign-ins. */
   private static RECHECK_S = 30;
 
@@ -659,7 +664,10 @@ export class CartAgent extends Agent<Env, CartState> {
       else open++;
     }
     this.syncMembers();
-    if (open) await this.schedule(CartAgent.RECHECK_S, 'recheckConnections');
+    // Counted afresh: a socket that opened while this ran found this job still queued and
+    // scheduled none of its own.
+    if (open || [...this.getConnections()].length)
+      await this.schedule(CartAgent.RECHECK_S, 'recheckConnections');
   }
 
   private async keepChecking() {

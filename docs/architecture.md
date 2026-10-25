@@ -1075,8 +1075,10 @@ the buyer's system has to open it top-level there.
 `AssistantAgent` (`apps/engine/src/assistant/agent.ts`) is an `AIChatAgent` from
 `@cloudflare/ai-chat`, one Durable Object per person (binding `ASSISTANT_AGENT`, migration `v2`).
 The panel in the web app talks to it over the proxied `/agents/assistant-agent/*` socket, never
-through `EngineRpc`. `onConnect` closes with `4403` unless the proxied principal's id is the
-instance name, and keeps the principal. The `@callable()` methods are `attention()`, the data for
+through `EngineRpc`. `assistantGate` (`apps/engine/src/agent-routes.ts`) refuses any socket or request,
+`get-messages` included, without a principal signed for that path and a live sign-in (`401`) or
+whose id isn't the instance name (`403`) before it reaches the object; `onConnect` still closes
+with `4403` on a mismatch, and keeps the principal. The `@callable()` methods are `attention()`, the data for
 the top of the panel, and `preview(tool, input)`, which resolves an action against live data for
 its confirm card. Tools are `ASSISTANT_TOOLS` in `packages/core/src/assistant.ts`. Reads run
 directly, as do `create_cart` and `change_cart` (a cart orders nothing until it is submitted);
