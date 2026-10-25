@@ -447,6 +447,39 @@
   }
 }
 
+/* A table that stacks on a phone: each row becomes a card, its first cell (the thing the row is
+   about) on a line of its own and the rest wrapping beneath it, each named by its `data-label`.
+   Wider than md it's an ordinary table. */
+@utility table-stack {
+  @media (width < 48rem) {
+    & thead {
+      display: none;
+    }
+    & tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.125rem 1rem;
+      padding: 0.625rem 1rem;
+    }
+    & td {
+      display: block;
+      padding: 0;
+      text-align: left;
+    }
+    & td:first-child,
+    & td[colspan] {
+      flex-basis: 100%;
+    }
+    & td[data-label]::before {
+      content: attr(data-label) " ";
+      color: var(--muted-foreground);
+      font-size: 0.75rem;
+      font-weight: 400;
+    }
+  }
+}
+
 /* iOS zooms the page into any field set under 16px when it's focused, and stays zoomed. On a
    touch screen every field is 16px, whatever its classes say: this rule sits outside the cascade
    layers on purpose, so it outranks Tailwind's `text-sm` and `text-xs` at every call site. */
