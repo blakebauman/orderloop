@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 /**
  * Whether a media query matches, following changes live. The server can't know the viewport, so
@@ -74,3 +74,13 @@ export function isStandalone() {
 export const isIos = () =>
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/**
+ * A ⌘ or Ctrl shortcut as this device writes it: "⌘J" on a Mac, iPhone or iPad, "Ctrl+J"
+ * elsewhere. It reads ⌘ until mounted, so the server's HTML matches the first render.
+ */
+export function useShortcutLabel(key: string) {
+  const [apple, setApple] = useState(true);
+  useEffect(() => setApple(/Mac|iPhone|iPad|iPod/.test(navigator.platform)), []);
+  return apple ? `⌘${key}` : `Ctrl+${key}`;
+}

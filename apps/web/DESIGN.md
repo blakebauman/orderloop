@@ -175,9 +175,9 @@ Tailwind's default breakpoints, read as devices:
 
 | Width | Typically | What changes |
 |---|---|---|
-| below `sm` (640px) | iPhone upright | Top bar shows icons only |
+| below `sm` (640px) | iPhone upright | Top bar shows the mark and Assistant as icons |
 | below `md` (768px) | phones, either way up | Bottom tab bar; tables stack into cards (see Tables); the Commerce jump links stick under the top bar |
-| `md` to `lg` (768–1023px) | iPad upright | Links in the top bar, scrolling sideways with a fade at the edge; Assistant, New order and the account name are icons |
+| `md` to `lg` (768–1023px) | iPad upright | Links in the top bar; Assistant, New order and the account name are icons |
 | `lg` and up (1024px) | iPad on its side, desktop | The full flow editor; the order page's graph beside its panels; the assistant as a column |
 
 Size and hint by what is pointing, not by width: `touch:` is a coarse pointer (a finger), `fine:` a
@@ -187,11 +187,34 @@ under 32rem tall, under 64rem wide).
 ## The shell
 
 - **Top bar:** 3rem plus the status bar's inset (`--shell-h`), sticky, with a rule under it. The
-  wordmark, the main links from md, then Assistant, New order, theme and account.
-- **Tab bar (below md):** Overview, Orders, Approvals (with its count), Flows, and More: the pages
-  an operator reaches for, in thumb reach. 3.5rem plus the home indicator (`--tabbar-h`); in
-  `short:` 2.75rem with the labels for screen readers only. More is a bottom sheet with the other
-  pages, the theme and the account's pages, and it closes when a page is chosen.
+  wordmark, the main links from md, then Assistant, New order (from md) and account.
+- **Its links:** the day's work (Overview, Orders, Approvals, Carts), a hairline, Flows, then
+  **More**: links that didn't fit, reference pages (Commerce, Performance), and plugins' pages
+  under "From plugins". The row never scrolls: an invisible ruler measures every link (they grow
+  with the reader's text size) and those that don't fit move into More from the right, which then
+  carries the approvals count if Approvals is inside it. More is underlined while you're on one of
+  its pages; its label stays More. A tab marks as soon as it is chosen, not when its page arrives.
+  Focus outlines on the links sit inside them, clear of the rule.
+- **Approvals count:** a filled `wait` pill, 99+ past two digits, in the top bar, tab bar and
+  More alike: the bar's one call for attention.
+- **New order:** ink, except on Approvals and Flows, where it steps back to an outline. From md to
+  lg it is an icon with a `title`.
+- **Account:** its menu holds who is signed in, their and the team's pages, the theme and signing
+  out. The button names who: a person's name, Workspace, or with sign-in off the role everyone acts
+  as ("Admin, no sign-in"); its accessible name is that plus "account menu", and its `title` the
+  full identity.
+- **Shortcuts** are written for the device: ⌘J on Apple, Ctrl+J elsewhere (`useShortcutLabel`).
+  The Assistant's hint shows from xl with a fine pointer, so the links keep their room at 1024px.
+- **Transitions** in the bars name their properties (`tint`), never `transition-colors`, which
+  would fade the focus outline in.
+- **One order everywhere:** the top bar, the tab bar and More list pages in `NAV`'s order.
+- **New order on a phone:** a floating pill (`shadow-float`) above the tab bar on the right, on
+  the overview and the orders list only; main pads its foot so the last row clears it.
+- **Tab bar (below md):** Overview, Orders, Approvals (with its count), Carts, and More: the day's
+  work, in thumb reach; a phone keeps up and decides, and only reviews flows. 3.5rem plus the home
+  indicator (`--tabbar-h`); in `short:` 2.75rem with the labels for screen readers only. More is a
+  bottom sheet grouped like the desktop: Pages (and From plugins), Account and team, the theme,
+  then signing in or out. It closes when a page is chosen.
 - **Main** pads its foot by `--tabbar-h`. A full-height page (the flow editor, the order page at
   lg) is `calc(100dvh - var(--shell-h))`; never hard-code the bar heights.
 - **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the
@@ -270,6 +293,7 @@ ring alone separates a card.
 ### Shadow Vocabulary
 - **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
+- **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
 
 ### Named Rules
 **The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
