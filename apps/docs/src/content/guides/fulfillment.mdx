@@ -225,7 +225,7 @@ when no shipping-rate node ran.
 
 Each live carrier is sent a `POST` to its `url` with
 `{ "itemCount": 3, "country": "DE", "subtotal": 42.5, "currency": "USD" }` (`country` is `null` when
-the order has no ship-to country), plus `billableKg` when `basis` is `weight` or `dim_weight`, and must answer within 5 seconds with:
+the order has no ship-to country), plus `billableKg` when `basis` is `weight` or `dim_weight`, and must answer within 5 seconds, without a redirect (its credential goes to that `url` only) and in at most 256 KB, with:
 
 ```json
 { "options": [{ "id": "ground", "amount": 7.25, "title": "Ground", "carrier": "acme", "minDays": 2, "maxDays": 4 }] }

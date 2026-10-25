@@ -19,6 +19,8 @@ import { DurableObject, WorkerEntrypoint, exports as workerExports } from 'cloud
 import {
   ASSISTANT_PUBLISHER,
   egressAllows,
+  isInternalName,
+  isPrivateAddress,
   PLUGIN_LIMIT_CAPS,
   PLUGIN_SECRET_NAME_RE,
   type PluginCapability,
@@ -414,53 +416,6 @@ export class PluginSecrets extends WorkerEntrypoint<Env, Pinned> {
 
 // ── Egress ───────────────────────────────────────────────────────────────────
 
-/** Host names that only resolve inside a network, and wildcard-DNS services that point anywhere. */
-const BLOCKED_HOST =
-  /(^|\.)(localhost|local|internal|intranet|lan|home\.arpa|metadata\.google\.internal|nip\.io|sslip\.io|xip\.io|localtest\.me)$/i;
-
-/** An IP literal in a private, loopback, link-local, CGNAT, multicast or reserved range. */
-export function isPrivateAddress(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 192 && b === 0) ||
-      (a === 198 && (b === 18 || b === 19)) ||
-      // Documentation ranges (192.0.2.0/24 is in 192.0 above).
-      (a === 198 && b === 51 && Number(v4[3]) === 100) ||
-      (a === 203 && b === 0 && Number(v4[3]) === 113) ||
-      // The 6to4 relay anycast.
-      (a === 192 && b === 88 && Number(v4[3]) === 99) ||
-      a >= 224
-    );
-  }
-  if (!h.includes(':')) return false;
-  if (h === '::' || h === '::1') return true;
-  // IPv4-mapped (::ffff:a.b.c.d or ::ffff:hhhh:hhhh) is checked as the IPv4 address.
-  const mapped = /^::ffff:(.+)$/.exec(h)?.[1];
-  if (mapped) {
-    if (mapped.includes('.')) return isPrivateAddress(mapped);
-    const [hi, lo] = mapped.split(':').map((x) => Number.parseInt(x, 16));
-    if (hi !== undefined && lo !== undefined)
-      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-  }
-  // NAT64 (64:ff9b::/96, 64:ff9b:1::/48) and 6to4 (2002::/16) carry an IPv4 address that may be a
-  // private one, so they are refused outright, as is the documentation range (2001:db8::/32).
-  if (/^(64:ff9b:|2002:|2001:db8:)/.test(h)) return true;
-  // Teredo (2001::/32) wraps one too, and so does an IPv4-compatible address (`::a.b.c.d`, which
-  // URLs write as `::hhhh:hhhh`).
-  if (/^2001:0?:/.test(h) || /^::[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(h)) return true;
-  return /^(fc|fd|fe8|fe9|fea|feb|ff)/.test(h);
-}
-
 /** Why a sandboxed plugin may not reach `url`, or null when it may. */
 export function egressRefusal(manifest: Pick<PluginManifest, 'egress'>, url: URL): string | null {
   if (url.protocol !== 'https:') return 'only https is allowed';
@@ -470,7 +425,7 @@ export function egressRefusal(manifest: Pick<PluginManifest, 'egress'>, url: URL
     .replace(/^\[|\]$/g, '')
     .replace(/\.$/, '')
     .toLowerCase();
-  if (isPrivateAddress(host) || BLOCKED_HOST.test(host)) return `${host} is not a public host`;
+  if (isPrivateAddress(host) || isInternalName(host)) return `${host} is not a public host`;
   if (!egressAllows(manifest.egress, host)) return `${host} is not in the plugin's egress`;
   return null;
 }

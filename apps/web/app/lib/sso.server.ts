@@ -20,10 +20,14 @@
 
 import { env } from 'cloudflare:workers';
 import {
+  EgressRefused,
   newId,
   type Principal,
   type Role,
+  readCappedJson,
+  readCappedText,
   SSO_LINK_TTL_MS,
+  safeFetch,
   signSsoFlow,
   signSsoLink,
   verifySsoFlow,
@@ -31,7 +35,7 @@ import {
 } from '@orderloop/core';
 import { users } from '@orderloop/db';
 import { and, eq, isNull } from 'drizzle-orm';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, customFetch, jwtVerify } from 'jose';
 import { audit } from './audit.server';
 import { type Caller, cookie, forgetUserCount, startSession } from './auth.server';
 import { normalizeEmail, randomToken } from './credentials';
@@ -100,11 +104,11 @@ const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 async function metadata(c: SsoConfig): Promise<Metadata> {
   if (discovered?.issuer === c.issuer && Date.now() - discovered.at < DISCOVERY_MS)
     return discovered.value;
-  const res = await fetch(`${c.issuer}/.well-known/openid-configuration`, {
-    signal: AbortSignal.timeout(FETCH_MS),
-  });
+  // A credential-free GET, so a couple of redirects (a trailing slash, a moved tenant) are fine:
+  // each is checked, and the issuer check below still binds the document.
+  const res = await providerFetch(`${c.issuer}/.well-known/openid-configuration`, {}, 2);
   if (!res.ok) throw new SsoError(`discovery returned HTTP ${res.status}`);
-  const m = (await res.json()) as Partial<Metadata>;
+  const m = await providerJson<Partial<Metadata>>(res);
   // The document must speak for the issuer it was fetched from.
   if (m.issuer?.replace(/\/+$/, '') !== c.issuer) throw new SsoError('discovery issuer mismatch');
   for (const k of ['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as const)
@@ -114,10 +118,54 @@ async function metadata(c: SsoConfig): Promise<Metadata> {
   return discovered.value;
 }
 
+/** What a provider document may be, at most: discovery, a token response, a key set. */
+const PROVIDER_MAX_BYTES = 256 * 1024;
+
+/**
+ * A fetch to the identity provider behind the egress policy (`safeFetch`): https, no redirects (the
+ * token request carries the client secret), bounded time. A refusal is a failed sign-in.
+ */
+async function providerFetch(
+  url: string,
+  init: RequestInit = {},
+  redirects = 0,
+): Promise<Response> {
+  try {
+    return await safeFetch(url, { ...init, timeoutMs: FETCH_MS, redirects });
+  } catch (err) {
+    if (err instanceof EgressRefused) throw new SsoError(err.message);
+    throw err;
+  }
+}
+
+async function providerJson<T>(res: Response): Promise<T> {
+  try {
+    return await readCappedJson<T>(res, PROVIDER_MAX_BYTES);
+  } catch (err) {
+    throw new SsoError(err instanceof EgressRefused ? err.message : 'the provider sent no JSON');
+  }
+}
+
 function keySet(uri: string) {
   let set = keySets.get(uri);
   if (!set) {
-    set = createRemoteJWKSet(new URL(uri), { timeoutDuration: FETCH_MS });
+    set = createRemoteJWKSet(new URL(uri), {
+      timeoutDuration: FETCH_MS,
+      // The keys come through the same egress policy as everything else the provider serves.
+      // jose reads the body itself, so it gets a copy already read under the cap.
+      [customFetch]: async (url, init) => {
+        const res = await providerFetch(url, { method: init.method, headers: init.headers });
+        let text: string;
+        try {
+          text = await readCappedText(res, PROVIDER_MAX_BYTES);
+        } catch (err) {
+          throw new SsoError(
+            err instanceof EgressRefused ? err.message : 'the key set could not be read',
+          );
+        }
+        return new Response(text, { status: res.status, headers: res.headers });
+      },
+    });
     keySets.set(uri, set);
   }
   return set;
@@ -228,14 +276,9 @@ export async function verifyCallback(
       `Basic ${btoa(`${encodeURIComponent(c.clientId)}:${encodeURIComponent(c.clientSecret)}`)}`,
     );
   else body.set('client_secret', c.clientSecret);
-  const res = await fetch(m.token_endpoint, {
-    method: 'POST',
-    headers,
-    body,
-    signal: AbortSignal.timeout(FETCH_MS),
-  });
+  const res = await providerFetch(m.token_endpoint, { method: 'POST', headers, body });
   if (!res.ok) throw new SsoError(`token endpoint returned HTTP ${res.status}`);
-  const { id_token } = (await res.json()) as { id_token?: unknown };
+  const { id_token } = await providerJson<{ id_token?: unknown }>(res);
   if (typeof id_token !== 'string') throw new SsoError('no ID token');
 
   let claims: Record<string, unknown>;

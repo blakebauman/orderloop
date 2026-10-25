@@ -20,7 +20,11 @@ curl -X POST https://orderloop.app/api/v1/webhook-subscriptions \
   -d '{ "url": "https://erp.example.com/hooks/orderloop", "events": ["order.shipped", "order.paid"] }'
 ```
 
-- `url` must be `https`. Deliveries go to public addresses only, never private or loopback ones.
+- `url` must be `https`, with a public host name: an IP address, `localhost` or an internal name
+  (`.internal`, `.local`, `.lan`, a single label, a wildcard-DNS service such as `nip.io`) returns
+  `400`. Deliveries go to public addresses only, never private or loopback ones. A redirect from
+  your receiver isn't followed: it counts as a failed delivery and is retried, so point the
+  subscription at the final URL.
   (A plain `http` URL for `localhost`, `127.0.0.1` or `[::1]` is accepted when subscribing but is
   never reached.)
 - `events` is a list of the event names above, or `["*"]` for every event (the default). An unknown name returns `400`.

@@ -2,6 +2,7 @@ import { adminSecretsStore, introspectWorkflow } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import {
   checkPluginView,
+  isPrivateAddress,
   type OrderInput,
   type OrderState,
   PLUGIN_VIEW_TYPE,
@@ -15,13 +16,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import { startOrder } from '../../src/orders';
-import {
-  egressRefusal,
-  isPrivateAddress,
-  knownManifests,
-  limitsFor,
-  pluginStub,
-} from '../../src/plugin-host';
+import { egressRefusal, knownManifests, limitsFor, pluginStub } from '../../src/plugin-host';
 import { manifests, pluginStatuses } from '../../src/plugins';
 import { edge, node, probeFlow, settled, stampFlow, stampInput } from '../plugin-helpers';
 

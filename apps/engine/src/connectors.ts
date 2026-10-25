@@ -29,10 +29,12 @@ import {
   type RateRequest,
   rankStores,
   rateOptions,
+  readCappedJson,
   type ShippingConfig,
   type ShippingOption,
   type StockLine,
   type StockSource,
+  safeFetch,
   shipToPoint,
 } from '@orderloop/core';
 import {
@@ -1071,14 +1073,17 @@ function carrierAuth(env: Env): Record<string, string> {
  * currency), plus `billableKg` when the basis weighs units, and reads `{ options: [...] }`. Any failure (https only, 5 s, non-2xx, bad JSON)
  * returns no options, so the caller falls back to the static services.
  */
+/** The most of a carrier's quote read: a list of options, not a document. */
+const CARRIER_MAX_BYTES = 256 * 1024;
+
 async function liveQuote(
   carrier: ShippingConfig['liveCarriers'][number],
   req: RateRequest,
   auth: string | undefined,
 ): Promise<ShippingOption[]> {
-  if (!carrier.url.startsWith('https://')) return [];
   try {
-    const res = await fetch(carrier.url, {
+    // Behind the egress policy: https only, and no redirect carries the carrier's credential.
+    const res = await safeFetch(carrier.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -1091,10 +1096,10 @@ async function liveQuote(
         subtotal: req.subtotal,
         currency: BASE_CURRENCY,
       }),
-      signal: AbortSignal.timeout(CARRIER_TIMEOUT_MS),
+      timeoutMs: CARRIER_TIMEOUT_MS,
     });
     if (!res.ok) return [];
-    return parseCarrierQuote(carrier, await res.json());
+    return parseCarrierQuote(carrier, await readCappedJson(res, CARRIER_MAX_BYTES));
   } catch {
     return [];
   }

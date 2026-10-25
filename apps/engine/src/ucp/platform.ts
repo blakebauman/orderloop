@@ -1,16 +1,19 @@
 /**
  * The calling platform's UCP profile, fetched from the URL it was registered with and kept on its
- * row for an hour (UCP asks at least a minute). The fetch follows UCP's rules: https only, no
- * redirects, a timeout and a size cap. A profile that can't be fetched or read refuses the request
+ * row for an hour (UCP asks at least a minute). The fetch follows UCP's rules, behind the egress
+ * policy (`safeFetch`): https only, no redirects, a timeout and a size cap. A profile that can't be fetched or read refuses the request
  * (424 / 422); one that can is negotiated against ours.
  */
 
 import {
+  EgressRefused,
   type Negotiated,
   negotiate,
   type PlatformCaller,
   type PlatformProfile,
   parsePlatformProfile,
+  readCappedText,
+  safeFetch,
 } from '@orderloop/core';
 import { createDb, ucpPlatforms } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -32,16 +35,12 @@ export class ProfileError extends Error {
 async function fetchProfile(url: string): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url, {
-      redirect: 'manual',
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    res = await safeFetch(url, { headers: { accept: 'application/json' }, timeoutMs: TIMEOUT_MS });
   } catch (err) {
     throw new ProfileError(
       424,
       'profile_unreachable',
-      `Fetching the platform profile failed: ${String(err)}`,
+      `Fetching the platform profile failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   if (!res.ok) {
@@ -52,9 +51,14 @@ async function fetchProfile(url: string): Promise<unknown> {
       `The platform profile answered HTTP ${res.status}.`,
     );
   }
-  const text = await res.text();
-  if (text.length > MAX_BYTES)
-    throw new ProfileError(422, 'profile_malformed', 'The platform profile is too large.');
+  let text: string;
+  try {
+    text = await readCappedText(res, MAX_BYTES);
+  } catch (err) {
+    if (err instanceof EgressRefused)
+      throw new ProfileError(422, 'profile_malformed', 'The platform profile is too large.');
+    throw new ProfileError(424, 'profile_unreachable', `Reading the platform profile failed.`);
+  }
   try {
     return JSON.parse(text);
   } catch {

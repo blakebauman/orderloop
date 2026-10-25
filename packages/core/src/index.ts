@@ -10,6 +10,7 @@ export * from './channels/shopify';
 export * from './channels/x12';
 export * from './checkout';
 export * from './credentials';
+export * from './egress';
 export * from './encryption';
 export * from './erasure';
 export * from './fulfillment';

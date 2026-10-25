@@ -109,8 +109,9 @@ caller needs no open request and no polling. Register a URL in either of two way
   assigned; creating with an existing `id` replaces that config. Deleting a config also drops any
   notification still queued for it, so nothing more is sent to that URL.
 
-A `url` must be `https`; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`
-(the same rule as [webhook subscriptions](/guides/outbound-webhooks/)). Anything else, or a sixth
+A `url` must be `https`, with a public host name rather than an IP address or an internal name;
+plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]` (the same rule as [webhook
+subscriptions](/guides/outbound-webhooks/)). Anything else, or a sixth
 URL, is refused with an invalid-request error. Notifications reach public addresses only, and a
 redirect from your receiver isn't followed: it counts as a failed delivery, so the token and
 credentials go only to the URL you registered.

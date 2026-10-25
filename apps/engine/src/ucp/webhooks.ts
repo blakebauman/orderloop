@@ -10,6 +10,7 @@ import {
   negotiate,
   ORDER_CAPABILITY,
   parsePlatformProfile,
+  safeFetch,
   signMessage,
   ucpAgentHeader,
 } from '@orderloop/core';
@@ -88,12 +89,14 @@ export async function syncUcpOrder(
   headers.set('signature-input', sig.signatureInput);
   headers.set('signature', sig.signature);
   try {
-    const res = await fetch(profile.webhookUrl, {
+    // Behind the egress policy: the signed delivery goes to the profile's webhook only.
+    const res = await safeFetch(profile.webhookUrl, {
       method: 'POST',
       headers,
       body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      timeoutMs: TIMEOUT_MS,
+      // The profile parser keeps a localhost webhook for a local UCP harness.
+      loopback: true,
     });
     await res.body?.cancel();
     if (res.ok) return { sent: true, digest };
