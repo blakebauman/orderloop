@@ -182,7 +182,7 @@ export default function Commerce() {
           ) : undefined
         }
       />
-      <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
+      <div className="mx-auto max-w-page px-4 sm:px-6">
         {review ? (
           <p
             role={review.started ? 'status' : 'alert'}
@@ -230,7 +230,7 @@ export default function Commerce() {
           ) : null}
         </Form>
       </div>
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
+      <div className="mx-auto grid max-w-page gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
         {/* On a phone the sections run long: the links stay under the top bar, on one scrolling line. */}
         <nav
           aria-label="On this page"
@@ -731,7 +731,7 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
             aria-controls={`${tablistId}-panel`}
             onClick={() => setKind(k.id)}
             className={cn(
-              'min-h-8 rounded-md px-2.5 py-1 text-[13px]',
+              'min-h-8 rounded-md px-2.5 py-1 text-ui',
               kind === k.id
                 ? 'bg-primary font-medium text-primary-foreground'
                 : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',

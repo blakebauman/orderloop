@@ -281,7 +281,7 @@ export default function Flows() {
           ) : null
         }
       />
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mx-auto grid max-w-page gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
             <Input

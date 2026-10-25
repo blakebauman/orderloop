@@ -105,7 +105,7 @@ export default function Login() {
       {demo && !connecting ? (
         <Form method="post" className="w-full max-w-sm card p-6">
           <input type="hidden" name="intent" value="demo" />
-          <h1 className="font-semibold tracking-title text-2xl">OrderLoop demo</h1>
+          <h2 className="font-semibold tracking-title text-2xl">OrderLoop demo</h2>
           <p className="mt-1 text-muted-foreground text-sm">
             A sample workspace with customers, a catalog and stores. Run scenarios, edit flows and
             decide approvals as an operator. It resets every night.

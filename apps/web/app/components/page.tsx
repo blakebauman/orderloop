@@ -12,10 +12,10 @@ export function PageHeader({
   crumbs?: React.ReactNode;
 }) {
   return (
-    <header className="mx-auto flex w-full max-w-[1400px] flex-wrap items-end justify-between gap-3 px-4 pt-7 pb-5 sm:px-6">
+    <header className="mx-auto flex w-full max-w-page flex-wrap items-end justify-between gap-3 px-4 pt-7 pb-5 sm:px-6">
       <div className="min-w-0">
         {crumbs ? <div className="caption mb-1">{crumbs}</div> : null}
-        <h1 className="truncate font-semibold tracking-title text-[1.75rem] leading-tight">
+        <h1 className="break-words font-semibold tracking-title text-[1.75rem] leading-tight">
           {title}
         </h1>
         {subtitle ? (
@@ -30,7 +30,7 @@ export function PageHeader({
 /** Page body width, matching the header. */
 export function Body({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('mx-auto w-full min-w-0 max-w-[1400px] px-4 pb-10 sm:px-6', className)}>
+    <div className={cn('mx-auto w-full min-w-0 max-w-page px-4 pb-10 sm:px-6', className)}>
       {children}
     </div>
   );

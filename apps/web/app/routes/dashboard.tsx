@@ -184,7 +184,7 @@ export default function Dashboard() {
           </>
         }
       />
-      <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page space-y-6 px-4 pb-10 sm:px-6">
         {/* Open work now, then the last day's endings: each figure opens the matching orders. */}
         <nav aria-label="Orders by status" className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_5fr]">
           <Strip title="Open now" figures={now} cols="grid-cols-2" lead />
@@ -204,13 +204,13 @@ export default function Dashboard() {
                 title={
                   <span className="flex items-center gap-2">
                     Needs a decision
-                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-[11px] text-wait tabular">
+                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-2xs text-wait tabular">
                       {decisions.length + moreDecisions}
                     </span>
                   </span>
                 }
                 actions={
-                  <Link to="/approvals" className="text-link text-xs hover:underline">
+                  <Link to="/approvals" className="hit-area text-link text-xs hover:underline">
                     Open the queue
                   </Link>
                 }
@@ -240,7 +240,7 @@ export default function Dashboard() {
                 </span>
                 <Link
                   to="/approvals?status=all"
-                  className="ml-auto shrink-0 text-link text-xs hover:underline"
+                  className="hit-area ml-auto shrink-0 text-link text-xs hover:underline"
                 >
                   Past approvals
                 </Link>
@@ -306,7 +306,10 @@ export default function Dashboard() {
             <Section
               title="Recently updated"
               actions={
-                <Link to="/orders?sort=updated" className="text-link text-xs hover:underline">
+                <Link
+                  to="/orders?sort=updated"
+                  className="hit-area text-link text-xs hover:underline"
+                >
                   All orders
                 </Link>
               }
@@ -541,7 +544,7 @@ function RecentRow({
           </span>
         </Link>
         <span id={detailId} className="block">
-          <span className={cn('block truncate text-[13px]', tone)}>
+          <span className={cn('block truncate text-ui', tone)}>
             <Position o={o} status={status} />
           </span>
           <span className="block truncate text-muted-foreground text-xs">
@@ -576,7 +579,7 @@ function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number
       actions={
         <Link
           to="/orders?status=waiting&sort=waiting"
-          className="text-link text-xs hover:underline"
+          className="hit-area text-link text-xs hover:underline"
         >
           Longest first
         </Link>
@@ -661,7 +664,7 @@ function EndedBadly({ steps }: { steps: StoppedStep[] }) {
       actions={
         <Link
           to="/orders?attention=1&within=7d&sort=updated"
-          className="text-link text-xs hover:underline"
+          className="hit-area text-link text-xs hover:underline"
         >
           See all
         </Link>
@@ -700,7 +703,7 @@ function EndedBadly({ steps }: { steps: StoppedStep[] }) {
           {steps.length > 8 ? (
             <Link
               to="/orders?attention=1&within=7d&sort=updated"
-              className="block border-t px-5 py-2.5 text-link text-xs hover:underline"
+              className="hit-area block border-t px-5 py-2.5 text-link text-xs hover:underline"
             >
               {steps.length - 8} more steps
             </Link>

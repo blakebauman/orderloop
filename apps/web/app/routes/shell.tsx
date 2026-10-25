@@ -155,7 +155,7 @@ const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
 
 function PendingCount({ n }: { n: number }) {
   return (
-    <span className="rounded-sm bg-wait/15 px-1.5 py-px font-medium text-[11px] text-wait tabular">
+    <span className="rounded-full bg-wait/15 px-1.5 py-px font-medium text-2xs text-wait tabular">
       {n}
       <span className="sr-only"> pending</span>
     </span>
@@ -194,7 +194,7 @@ function AssistantToggle() {
       aria-pressed={open}
       title={open ? 'Close the assistant (⌘J)' : 'Ask the assistant (⌘J)'}
       className={cn(
-        'hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl border px-3 text-[13px] transition-colors md:h-8 md:min-w-0',
+        'hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui transition-colors md:h-8 md:min-w-0',
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
           : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -202,7 +202,7 @@ function AssistantToggle() {
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
       <span className="sr-only sm:not-sr-only md:max-lg:sr-only">Assistant</span>
-      <kbd className="hidden font-sans text-[11px] text-muted-foreground lg:fine:inline">⌘J</kbd>
+      <kbd className="hidden font-sans text-2xs text-muted-foreground lg:fine:inline">⌘J</kbd>
     </button>
   );
 }
@@ -261,7 +261,7 @@ function ShellFrame() {
         <div className="flex h-[calc(3rem-1px)] items-center gap-3 px-safe-4 sm:gap-6 sm:px-safe-5">
           <Link
             to="/"
-            className="hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-[16px]"
+            className="hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-base"
             aria-label="OrderLoop overview"
           >
             <Mark className="size-5" />
@@ -280,7 +280,7 @@ function ShellFrame() {
                 reloadDocument={document}
                 className={({ isActive }) =>
                   cn(
-                    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors',
+                    'flex snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui transition-colors',
                     isActive
                       ? 'border-foreground font-medium text-foreground'
                       : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
@@ -297,7 +297,7 @@ function ShellFrame() {
             {operator ? (
               <Link
                 to="/orders/new"
-                className="hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
+                className="hit-area inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-ui text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
               >
                 <Plus className="size-3.5" aria-hidden="true" />
                 <span className="sr-only sm:not-sr-only md:max-lg:sr-only">New order</span>
@@ -305,7 +305,7 @@ function ShellFrame() {
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hit-area hidden size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:grid data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                className="hit-area hidden size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:grid data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label={`Theme: ${THEMES.find((t) => t.value === theme.choice)?.label ?? theme.choice}`}
               >
                 <ThemeIcon className="size-4" />
@@ -317,7 +317,7 @@ function ShellFrame() {
             {/* Who is signed in, and the pages that belong to them and the team. */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                className="hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
               >
                 <UserRound className="size-4" aria-hidden="true" />
@@ -365,7 +365,7 @@ function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
     t.end ? pathname === t.to : pathname === t.to || pathname.startsWith(`${t.to}/`),
   );
   const item =
-    'relative flex flex-col items-center justify-center gap-0.5 text-[11px] transition-colors short:gap-0';
+    'relative flex flex-col items-center justify-center gap-0.5 text-2xs transition-colors short:gap-0';
   const state = (active: boolean) =>
     active
       ? 'font-medium text-foreground before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:bg-foreground'
@@ -386,7 +386,7 @@ function TabBar({ nav, pending }: { nav: NavItem[]; pending: number }) {
                 <span className="relative">
                   <Icon className="size-5" aria-hidden="true" />
                   {badge && pending > 0 ? (
-                    <span className="absolute -top-1.5 left-3.5 min-w-4 rounded-sm bg-wait px-1 text-center font-medium text-[10px] text-background leading-4 tabular">
+                    <span className="absolute -top-1.5 left-3.5 min-w-4 rounded-full bg-wait px-1 text-center font-medium text-[10px] text-background leading-4 tabular">
                       {pending > 99 ? '99+' : pending}
                     </span>
                   ) : null}

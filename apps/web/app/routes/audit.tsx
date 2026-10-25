@@ -32,7 +32,7 @@ export default function Audit() {
         subtitle="Sign-ins, team and token changes, and what was done to orders, flows and webhooks, newest first. Kept 400 days unless your contract sets another period."
         crumbs={<Link to="/team">Team</Link>}
       />
-      <div className="mx-auto max-w-[1400px] space-y-4 px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page space-y-4 px-4 pb-10 sm:px-6">
         <Form method="get" className="flex items-center gap-2">
           <label htmlFor="type" className="text-muted-foreground text-sm">
             Show

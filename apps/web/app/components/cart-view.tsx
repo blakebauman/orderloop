@@ -780,7 +780,7 @@ function ReturnForm({ post }: { post: ReturnPost }) {
       ref={form}
       method="post"
       action={post.url}
-      className="mx-auto max-w-[1400px] px-4 pt-6 sm:px-6"
+      className="mx-auto max-w-page px-4 pt-6 sm:px-6"
     >
       {Object.entries(post.fields).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />

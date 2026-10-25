@@ -46,7 +46,7 @@ export default function Performance() {
           </Segmented>
         }
       />
-      <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-10 sm:px-6" aria-busy={busy}>
+      <div className="mx-auto max-w-page space-y-6 px-4 pb-10 sm:px-6" aria-busy={busy}>
         <Section title="Day by day">
           <Trends daily={p.daily} totals={p.totals} days={p.days} />
         </Section>

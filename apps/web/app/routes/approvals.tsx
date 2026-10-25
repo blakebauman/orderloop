@@ -173,7 +173,7 @@ export default function Approvals() {
           </Segmented>
         }
       />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         {shown.length ? (
           <>
             {anyOpen && !canApprove ? (
@@ -401,7 +401,10 @@ function Row({
             ) : (
               <span className="text-muted-foreground text-xs">Decided elsewhere</span>
             )}
-            <Link to={`/orders/${r.orderId}`} className="text-link text-xs hover:underline">
+            <Link
+              to={`/orders/${r.orderId}`}
+              className="hit-area text-link text-xs hover:underline"
+            >
               See what happened
             </Link>
           </div>

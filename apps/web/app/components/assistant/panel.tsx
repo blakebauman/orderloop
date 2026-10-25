@@ -378,7 +378,7 @@ function Conversation() {
             </ol>
           )}
           {thinking ? (
-            <div role="status" className="flex items-center gap-2 text-[13px]">
+            <div role="status" className="flex items-center gap-2 text-ui">
               <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
               <Shimmer as="span">
                 {chat.isRecovering ? 'Picking up where it left off' : 'Working on it'}
@@ -788,7 +788,7 @@ function HeldMessages({
               value={t}
               onChange={(e) => onChange(i, e.target.value)}
               aria-label="Queued message"
-              className="h-7 min-w-0 flex-1 rounded-xl bg-transparent px-2 text-[13px] focus-visible:bg-background focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+              className="h-7 min-w-0 flex-1 rounded-xl bg-transparent px-2 text-ui focus-visible:bg-background focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
             />
             <QueueItemActions>
               <QueueItemAction label="Remove queued message" onClick={() => onRemove(i)}>
