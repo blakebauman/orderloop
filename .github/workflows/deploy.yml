@@ -305,31 +305,70 @@ jobs:
           check "https://$DOMAIN/health/deep" 1.0
           check "https://$CATALOG_DOMAIN/health" 0.5
       # Any failure once the catalog has shipped puts each Worker that deployed back on its
-      # previous version, so the deployment never runs a new engine behind an old web app (or the
-      # reverse). D1 migrations are not rolled back, which is why they must be additive.
+      # previous version: the engine, then the web app, the plugins, catalog-edge and the catalog.
+      # The engine goes first because it is the one that can refuse (Cloudflare won't roll a Worker
+      # back past a Durable Object migration). If it can't go back, nothing else is rolled back
+      # either: the web app, plugins and catalog stay on the versions the new engine was deployed
+      # with, so the deployment never runs a new engine behind an old web app, and the step fails
+      # with an error for a person to decide. A Worker's first deploy has no earlier version, which
+      # wrangler reports as "Could not find stable Worker Version to rollback to": that one stays as
+      # it is. Any other rollback failure is an error, after the rest are rolled back. The job ends
+      # failed either way, from the step that failed. D1 migrations are not rolled back, which is
+      # why they must be additive.
       - name: Roll back on a failed deploy
         if: failure() && steps.catalog.outcome == 'success'
+        env:
+          ENGINE: ${{ steps.engine.outcome }}
+          WEB: ${{ steps.web.outcome }}
+          CATALOG_EDGE: ${{ steps.catalog_edge.outcome }}
         run: |
           msg="Deploy failed for ${GITHUB_SHA::7}"
-          if [ "${{ steps.web.outcome }}" = "success" ]; then
-            retry pnpm --filter @orderloop/web exec wrangler rollback -y -m "$msg" --config "$CONFIG"
+          # rollback <name> <pnpm filter>: 0 rolled back, 2 no earlier version, 1 failed. Retries
+          # like `retry`, except a first deploy: asking again won't find an earlier version.
+          rollback() {
+            local name=$1 filter=$2 out attempt
+            for attempt in 1 2 3; do
+              if out=$(pnpm --filter "$filter" exec wrangler rollback -y -m "$msg" --config "$CONFIG" </dev/null 2>&1); then
+                printf '%s\n' "$out"
+                echo "Rolled back $name" >> "$GITHUB_STEP_SUMMARY"
+                return 0
+              fi
+              printf '%s\n' "$out"
+              if grep -q 'Could not find stable Worker Version to rollback to' <<<"$out"; then
+                echo "::notice::$name has no earlier version (its first deploy), so it stays as it is"
+                echo "Left $name as it is: no earlier version" >> "$GITHUB_STEP_SUMMARY"
+                return 2
+              fi
+              echo "::warning::attempt $attempt to roll back $name failed"
+              [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+            done
+            echo "::error::$name could not be rolled back; it is still on ${GITHUB_SHA::7}"
+            echo "**Failed to roll back $name**" >> "$GITHUB_STEP_SUMMARY"
+            return 1
+          }
+          if [ "$ENGINE" = success ]; then
+            engine=0
+            rollback engine @orderloop/engine || engine=$?
+            if [ "$engine" = 1 ]; then
+              echo "::error::The engine could not be rolled back (a Durable Object migration since its last version, for one, prevents it), so the web app, plugins and catalog were left on ${GITHUB_SHA::7} to match it. Fix forward, or roll back by hand once the cause is known."
+              exit 1
+            fi
           fi
-          if [ "${{ steps.engine.outcome }}" = "success" ]; then
-            retry pnpm --filter @orderloop/engine exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
-              || echo "::warning::The engine could not be rolled back (a Durable Object migration can prevent it)"
+          failed=0
+          # The web app follows the engine: back only if the engine went back (or never deployed).
+          if [ "$WEB" = success ] && [ "${engine:-0}" = 0 ]; then
+            rollback web @orderloop/web || [ $? = 2 ] || failed=1
           fi
-          # A plugin's first deploy has no earlier version to go back to.
-          [ -f "$RUNNER_TEMP/plugins-deployed" ] && while read -r p; do
-            retry pnpm --filter "./plugins/$p" exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
-              || echo "No earlier version of plugin $p to roll back to"
-          done <"$RUNNER_TEMP/plugins-deployed"
-          # A deployment's first catalog or catalog-edge has no earlier version to go back to.
-          if [ "${{ steps.catalog_edge.outcome }}" = "success" ]; then
-            retry pnpm --filter @orderloop/catalog-edge exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
-              || echo "No earlier catalog-edge version to roll back to"
+          if [ -f "$RUNNER_TEMP/plugins-deployed" ]; then
+            while read -r p; do
+              rollback "plugin $p" "./plugins/$p" || [ $? = 2 ] || failed=1
+            done <"$RUNNER_TEMP/plugins-deployed"
           fi
-          retry pnpm --filter @orderloop/catalog exec wrangler rollback -y -m "$msg" --config "$CONFIG" \
-            || echo "No earlier catalog version to roll back to"
+          if [ "$CATALOG_EDGE" = success ]; then
+            rollback catalog-edge @orderloop/catalog-edge || [ $? = 2 ] || failed=1
+          fi
+          rollback catalog @orderloop/catalog || [ $? = 2 ] || failed=1
+          exit "$failed"
       # Static docs Worker; independent of the app, so it goes last and can't block a deploy above
       # (the app's rollback step has already run by now, so a docs failure never rolls the app back).
       - name: Deploy docs

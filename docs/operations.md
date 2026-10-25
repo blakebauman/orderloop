@@ -123,8 +123,7 @@ Each deployment's job, `.github/workflows/deploy.yml`, runs in that deployment's
    each with `--secrets-file` (the catalog and catalog-edge have no secrets). That adds the
    environment's secrets to the Worker and never removes one, so a secret set by hand survives.
 4. Smoke-test `https://<domain>/health`, `/health/deep` and `/login`, then `https://<catalogDomain>/health`.
-5. If anything fails after the catalog deployed, roll back each Worker that deployed (the web app, the engine, the plugins, catalog-edge,
-   then the catalog last, and not when either has no earlier version). Rolling the engine back restores its previous `PLUGIN_BUNDLES` pins; the bundles stay in `DOCS` (nothing removes them), so the old version finds the ones it pins. D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
+5. If anything fails after the catalog deployed, roll back each Worker that deployed: the engine, then the web app, the plugins, catalog-edge and the catalog. A Worker on its first deploy has no earlier version and is left as it is. If the engine can't be rolled back (a Durable Object migration since its last version prevents it, for one), the step fails with an error and nothing else is rolled back, so the web app stays on the version that matches the engine; fix forward. Any other Worker that fails to roll back is an error too, after the rest have gone back ([CI](deploy.md#ci)). Rolling the engine back restores its previous `PLUGIN_BUNDLES` pins; the bundles stay in `DOCS` (nothing removes them), so the old version finds the ones it pins. D1 isn't rolled back (see [Restoring D1](deploy.md#restoring-d1)).
 
 To gate a ring, add a required reviewer to its deployments' environments: the `canary` jobs then
 wait for approval after `internal` succeeds.

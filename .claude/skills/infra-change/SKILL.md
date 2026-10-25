@@ -45,9 +45,12 @@ CI deploys every deployment from `main` in ring order. Nothing provisions during
 - A deployment missing `d1Id`, `catalogKvId` or a plugin's `d1Id` stops the whole CI plan.
 - **A renamed binding or resource** is expand/contract like a migration: add the new one, deploy,
   move reads and writes, then remove the old one in a later change.
-- **Durable Object classes** need a `migrations` entry (`new_sqlite_classes`, `renamed_classes`,
-  `deleted_classes`) with a new tag; never edit an existing tag. A rename or delete of a DO class
-  holding data is a data migration; plan it with the user.
+- **Durable Object classes** need a `migrations` entry with a new tag (`new_sqlite_classes`),
+  appended at the end of the app's `wrangler.jsonc` and to `APPLIED` in
+  `scripts/do-migrations.test.ts` in the same change; never edit, remove or reorder an existing
+  tag. That test (in `pnpm test:fleet`) fails CI on any of those, and on `deleted_classes`,
+  `renamed_classes` or `transferred_classes`: a rename or delete of a DO class holding data is a
+  data migration; plan it with the user, then allowlist it there (`DESTRUCTIVE_ALLOWED`).
 - **Workflow names** are unique per account, which is why they carry the suffix.
 - **Jurisdiction** is fixed at creation for D1, R2 and Durable Objects; never add or change it for
   a deployment that has orders.

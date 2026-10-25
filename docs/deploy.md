@@ -189,9 +189,20 @@ checks their latency (the best of three requests to `/login`, `/health/deep` and
 `/health` against budgets of 1.5 s, 1 s and 0.5 s; over budget is a warning on the run, never a
 failure or a rollback) and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
 deployment before its migration. If anything fails once the catalog has deployed (the engine deploy,
-the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed;
-the plugins, catalog-edge and then the catalog go last, and one with no earlier version (a deployment's first) is left as it is. D1 is not rolled
-back, which is why migrations only add; see [Restoring D1](#restoring-d1). The docs then get their
+the web deploy or the smoke test), the job runs `wrangler rollback` for each Worker that deployed:
+the engine first, then the web app, the plugins, catalog-edge and the catalog. The engine goes
+first because it is the one that can refuse (Cloudflare won't roll a Worker back past a Durable
+Object migration): if it can't go back, the step fails with an error and leaves every other Worker
+on the new version, so the web app never runs against an engine it wasn't built with, and a person
+decides whether to fix forward. A Worker with no earlier version (a deployment's first deploy;
+wrangler says it "could not find stable Worker Version to rollback to") is left as it is, with a
+notice; any other rollback failure is an error once the rest have been rolled back. The run summary
+lists what was rolled back, and the job ends failed either way. D1 is not rolled
+back, which is why migrations only add; see [Restoring D1](#restoring-d1). Durable Object
+migrations (`migrations` in the engine's and catalog's `wrangler.jsonc`) can't be rolled back
+either: `scripts/do-migrations.test.ts` (in `pnpm test:fleet`) freezes the applied tags, so an
+edited, removed or reordered tag, a new one not frozen there, a deleted, renamed or transferred
+class, or a bound class with no migration fails CI. The docs then get their
 own smoke test, on the host in `apps/docs/wrangler.jsonc`: the home page with its canonical URL, a
 reference page, `/openapi.json` as an OpenAPI 3.1 document, and a real `404` for an unknown page.
 If it fails, only the docs Worker is rolled back; the app has already passed.
