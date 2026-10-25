@@ -90,4 +90,31 @@ export async function livePrincipal(env: Env, p: ProxiedPrincipal): Promise<Prin
   return { kind: 'user', ...person, role: row.role };
 }
 
+/**
+ * Whether whoever is behind `<kind>:<id>` (an A2AAgent's name) may still hear about their orders
+ * when no request is open: not a person who has been disabled, nor a token revoked or expired. A
+ * name that matches no row isn't refused (tests, and rows are never deleted); a kind other than a
+ * person, a token or open local dev is.
+ */
+export async function stillActive(env: Env, kind: string, id: string): Promise<boolean> {
+  const db = createDb(env.DB);
+  if (kind === 'user') {
+    const row = await db
+      .select({ disabledAt: users.disabledAt })
+      .from(users)
+      .where(eq(users.id, id))
+      .get();
+    return !row?.disabledAt;
+  }
+  if (kind === 'token') {
+    const row = await db
+      .select({ revokedAt: apiTokens.revokedAt, expiresAt: apiTokens.expiresAt })
+      .from(apiTokens)
+      .where(eq(apiTokens.id, id))
+      .get();
+    return !row || (!row.revokedAt && (row.expiresAt === null || row.expiresAt > Date.now()));
+  }
+  return kind === 'open';
+}
+
 export const SESSION_ENDED = 'Your sign-in has ended. Reload the page to sign in again.';

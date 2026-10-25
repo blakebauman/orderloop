@@ -29,7 +29,7 @@ import {
 import { A2A_LEGACY_PROTOCOL_VERSION, A2A_PROTOCOL_VERSION, agentCard } from '@orderloop/core';
 import { Refused } from '../assistant/data';
 import { runTool } from '../assistant/tools';
-import { forwardedPrincipal } from '../principal';
+import { forwardedPrincipal, stillActive } from '../principal';
 import { OrderLoopExecutor, PrincipalUser, principalOf } from './executor';
 import { PushSender, SqlPushStore } from './push';
 import { isTerminal, SqlTaskStore } from './store';
@@ -99,9 +99,10 @@ export class A2AAgent extends DurableObject<Env> {
   /**
    * An order this caller's tasks follow has moved (OrderAgent.notifyWatchers). Each task it
    * changed is pushed as a status update; a task already showing that state sends nothing, so a
-   * repeated call is harmless.
+   * repeated call is harmless. Nothing goes out once the caller is disabled or their token revoked.
    */
   async orderChanged(orderId: string): Promise<void> {
+    if (!(await this.ownerActive())) return;
     for (const { task, changed } of await this.store.following(orderId)) {
       if (!changed || !task.status) continue;
       await this.push.send(
@@ -122,9 +123,26 @@ export class A2AAgent extends DurableObject<Env> {
     }
   }
 
-  /** Retries push notifications that are due. */
+  /** Retries push notifications that are due, while the caller may still hear them. */
   override async alarm(): Promise<void> {
-    await this.push.deliver();
+    if (await this.ownerActive()) await this.push.deliver();
+    else await this.dropPushes();
+  }
+
+  /** Forgets every push config and what is still queued: how many configs there were. */
+  async dropPushes(): Promise<number> {
+    const sql = this.ctx.storage.sql;
+    const n = sql.exec<{ n: number }>('SELECT count(*) AS n FROM push_configs').one().n;
+    sql.exec('DELETE FROM push_configs');
+    sql.exec("DELETE FROM push_outbox WHERE status = 'pending'");
+    return n;
+  }
+
+  /** Whether the caller this object belongs to (its name, `<kind>:<id>`) is still active. */
+  private ownerActive(): Promise<boolean> {
+    const name = this.ctx.id.name ?? '';
+    const at = name.indexOf(':');
+    return stillActive(this.env, name.slice(0, at), name.slice(at + 1));
   }
 
   override async fetch(request: Request): Promise<Response> {

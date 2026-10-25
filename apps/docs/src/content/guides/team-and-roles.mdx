@@ -50,15 +50,21 @@ Admins manage people and tokens at `/team`:
 - **Add person:** email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
   privately.
-- **Role:** change and save. You can't lower your own role.
-- **Reset password:** after you confirm, gives the person a new temporary password and signs them
-  out everywhere.
-- **Disable / Enable:** after you confirm, a disabled person can't sign in, and their sessions end. You can't disable yourself.
+- **Role:** change and save. You can't lower your own role. Lowering someone's role revokes the API
+  tokens they made with a role above their new one; their [connected apps](#connected-apps) follow
+  the new role on their own.
+- **Reset password:** after you confirm, gives the person a new temporary password, signs them
+  out everywhere, disconnects their [connected apps](#connected-apps) and removes their
+  [passkeys](#passkeys), since whoever had the old password could have set those up.
+- **Disable / Enable:** after you confirm, a disabled person can't sign in, their sessions end, their
+  connected apps are disconnected and the API tokens they made are revoked. Enabling them again
+  brings none of these back. You can't disable yourself.
 - **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
   confirm, it turns
   their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
   can set it up again. It also removes their [passkeys](#passkeys), in case the lost device holds
-  one, and applies even if they had passkeys but no authenticator app. You can't reset your own.
+  one, and ends their sessions and connected apps, which that device may still be signed in to. It
+  applies even if they had passkeys but no authenticator app. You can't reset your own.
 - The last active admin can't be demoted or disabled, so someone can always manage the team.
 - **Single sign-on:** when your identity provider is connected, a section for who may join and
   whether it is the only way in; see [Single sign-on](#single-sign-on).
@@ -84,8 +90,9 @@ Choosing a new password ends it, and the Team page marks people still on one wit
 The **Account** page lists where you're signed in: each session's browser and system, address,
 sign-in time and last activity, with this browser marked. **Sign out** ends one other session;
 **Sign out everywhere else** ends all but this one. Changing your password also signs you out
-everywhere else. An admin's **Reset password** or **Disable** on the Team page ends all of a
-person's sessions.
+everywhere else and disconnects your [connected apps](#connected-apps), in case the old password
+leaked; connect them again afterwards. An admin's **Reset password**, **Reset two-factor** or
+**Disable** on the Team page ends all of a person's sessions.
 
 ### Two-factor sign-in
 
@@ -238,7 +245,8 @@ the **Endpoint** (your address followed by `/scim/v2`) and make the token to giv
   give roles has the highest of those roles; someone whose groups give none has Viewer. A person's
   role is re-worked when a mapped group gains or loses a member, when a mapped group is deleted
   and when an admin saves the mapping. A group with no role changes nobody's role, so roles you
-  set by hand for people outside mapped groups stay. The last active admin is never demoted by
+  set by hand for people outside mapped groups stay. When a group change lowers someone's role,
+  the API tokens they made with a higher role are revoked, as on the Team page. The last active admin is never demoted by
   this; the audit log notes that it was kept.
 
 Everything SCIM does is audited as it is done by SCIM provisioning (`team.user_added`,
@@ -298,8 +306,8 @@ Each event records when, who acted, what they acted on, details and the address:
 
 | Kind | Actions |
 |---|---|
-| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed`, `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on; `confirmed: password` when they gave their password first), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
-| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.user_updated` (a new name or email), `team.role_changed` (from and to), `team.password_reset`, `team.user_disabled` (when SCIM or an admin ends access: how many sessions, apps and tokens), `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to), `team.scim_roles` (from and to, which groups give which role) |
+| Sign-in | `auth.sign_in`, `auth.sign_in_failed` (with the email tried and why: unknown email, wrong password, disabled, no password set, no email, or password sign-in refused because the workspace is single sign-on only), `auth.sign_in_throttled`, `auth.sign_out`, `auth.password_changed` (and how many connected apps it disconnected), `auth.session_ended` (device and address), `auth.other_sessions_ended` (how many), `auth.two_factor_enabled`, `auth.two_factor_disabled`, `auth.two_factor_failed` (wrong code or wrong recovery code), `auth.two_factor_throttled`, `auth.recovery_codes_replaced`, `auth.recovery_code_used` (how many are left), `auth.sso_linked` (an existing person's first single sign-on; `confirmed: password` when they gave their password first), `auth.reauthenticated` (signed in again with single sign-on to confirm a sensitive change). `auth.passkey_added` and `auth.passkey_removed` (with the passkey's name). A two-factor `auth.sign_in` records whether it used the app or a recovery code; a passkey `auth.sign_in` is shown "with a passkey" |
+| Team | `team.first_admin`, `team.recovery_admin` (a new admin from a new setup code), `team.setup_refused` (a wrong setup code), `team.user_added`, `team.user_updated` (a new name or email), `team.role_changed` (from and to, and how many tokens a demotion revoked), `team.password_reset` (how many sessions, apps and passkeys it ended), `team.user_disabled` (how many sessions, apps and tokens it ended, whether SCIM or an admin disabled them), `team.user_enabled`, `team.two_factor_reset` (also notes when passkeys were removed, and how many sessions and apps ended), `team.two_factor_requirement` (from and to), `team.approval_separation` (from and to: `on` or `off`), `team.sso_settings` (from and to), `team.scim_roles` (from and to, which groups give which role) |
 | SCIM provisioning | `scim.token_created` (notes when it replaced an old one), `scim.token_revoked` |
 | API tokens | `token.created` (role, prefix and `expiresAt`), `token.revoked` |
 | Integrations | `integration.created`, `integration.rotated`, `integration.revoked` (the target is the integration's name; the detail has its `id`) |

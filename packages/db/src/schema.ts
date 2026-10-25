@@ -724,13 +724,18 @@ export const apiTokens = sqliteTable(
     tokenHash: text('token_hash').notNull(),
     role: text('role').notNull(),
     createdBy: text('created_by').notNull(),
+    /** The person who made it; null for tokens made before this was kept, matched by `created_by`. */
+    createdById: text('created_by_id'),
     createdAt: integer('created_at').notNull(),
     lastUsedAt: integer('last_used_at'),
     revokedAt: integer('revoked_at'),
     /** When the token stops working; null never expires. */
     expiresAt: integer('expires_at'),
   },
-  (t) => [uniqueIndex('api_tokens_hash').on(t.tokenHash)],
+  (t) => [
+    uniqueIndex('api_tokens_hash').on(t.tokenHash),
+    index('api_tokens_created_by_id').on(t.createdById),
+  ],
 );
 
 /** Settings operators change in the app; `key` names one, e.g. `two_factor_required`. */

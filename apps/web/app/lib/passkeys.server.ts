@@ -151,10 +151,10 @@ export async function removePasskey(request: Request, by: Principal, id: string,
   await audit(request, 'auth.passkey_removed', { actor: by, detail: { name: gone.name } });
 }
 
-/** Removes every passkey a person has, as an admin's two-factor reset does. True when any were. */
-export async function clearPasskeys(userId: string) {
+/** Removes every passkey a person has, as an admin's two-factor reset does: how many there were. */
+export async function clearPasskeys(userId: string): Promise<number> {
   const gone = await db().delete(passkeys).where(eq(passkeys.userId, userId)).returning();
-  return gone.length > 0;
+  return gone.length;
 }
 
 /** What the sign-in page asks the browser for, and the cookie that ties the answer to it. */

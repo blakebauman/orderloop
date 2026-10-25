@@ -16,19 +16,12 @@
  */
 
 import { atLeast, newId, type Principal, type Role } from '@orderloop/core';
-import {
-  apiTokens,
-  scimGroupMembers,
-  scimGroups,
-  sessions,
-  users,
-  workspaceSettings,
-} from '@orderloop/db';
+import { apiTokens, scimGroupMembers, scimGroups, users, workspaceSettings } from '@orderloop/db';
 import { and, count, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { endAccess } from './access.server';
 import { audit, clientIp } from './audit.server';
 import { randomToken, secretEqual, sha256Hex } from './credentials';
 import { db } from './env.server';
-import { oauthApi } from './oauth.server';
 import { overBudget } from './rate-limit';
 import {
   type Filter,
@@ -83,8 +76,13 @@ export interface ScimStore {
   /** Active admins other than `exceptId`. */
   otherAdmins(exceptId: string): Promise<number>;
   setDisabled(id: string, at: number | null): Promise<void>;
+  /** Revokes the API tokens a person made with a role above `role`: how many. */
+  revokeTokensAbove(p: { id: string; email: string }, role: Role): Promise<number>;
   /** Ends a person's sessions, connected apps and the API tokens they created. */
-  revokeAccess(p: ScimPerson): Promise<{ sessions: number; apps: number; tokens: number }>;
+  revokeAccess(p: {
+    id: string;
+    email: string;
+  }): Promise<{ sessions: number; apps: number; tokens: number }>;
   groups(
     f: Filter | null,
     offset: number,
@@ -274,6 +272,8 @@ class People {
   }
 
   async update(p: ScimPerson, c: PersonChanges): Promise<ScimPerson> {
+    // Tokens were made under the address they had before this change.
+    const before = { id: p.id, email: p.email };
     const set: { email?: string; name?: string; scimExternalId?: string | null } = {};
     if (c.email && c.email !== p.email) {
       const taken = await this.store.personByEmail(c.email);
@@ -308,7 +308,7 @@ class People {
       await this.keepAnAdmin(p.id, 'deactivate');
       disabledAt = this.now;
       await this.store.setDisabled(p.id, disabledAt);
-      const ended = await this.store.revokeAccess({ ...p, ...set });
+      const ended = await this.store.revokeAccess(before);
       await this.record('team.user_disabled', {
         actor: this.actor,
         target: set.email ?? p.email,
@@ -363,10 +363,12 @@ class People {
       return;
     }
     await this.store.setRole(userId, to);
+    // As on the Team page: tokens they made above the new role go; apps follow the role live.
+    const tokens = atLeast(to, from) ? 0 : await this.store.revokeTokensAbove(p, to);
     await this.record('team.role_changed', {
       actor: this.actor,
       target: p.email,
-      detail: { from, to, via: 'scim' },
+      detail: { from, to, via: 'scim', ...(tokens ? { tokens } : {}) },
     });
   }
 
@@ -637,6 +639,20 @@ export function d1Store(request: Request): ScimStore {
         .values({ ...p, role: 'viewer' });
     },
     async updatePerson(id, set) {
+      if (set.email) {
+        // Tokens made before their maker's id was kept are matched by the address they were made
+        // under; tie them to the person before that address changes.
+        const was = await db()
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, id))
+          .get();
+        if (was)
+          await db()
+            .update(apiTokens)
+            .set({ createdById: id })
+            .where(and(isNull(apiTokens.createdById), eq(apiTokens.createdBy, was.email)));
+      }
       await db().update(users).set(set).where(eq(users.id, id));
     },
     async signsInWith(id) {
@@ -665,20 +681,16 @@ export function d1Store(request: Request): ScimStore {
     async setDisabled(id, at) {
       await db().update(users).set({ disabledAt: at }).where(eq(users.id, id));
     },
+    async revokeTokensAbove(p, role) {
+      return (await endAccess(request, p, { tokens: { above: role } })).tokens;
+    },
     async revokeAccess(p) {
-      const ended = await db()
-        .delete(sessions)
-        .where(eq(sessions.userId, p.id))
-        .returning({ id: sessions.tokenHash });
-      const tokens = await db()
-        .update(apiTokens)
-        .set({ revokedAt: Date.now() })
-        .where(and(eq(apiTokens.createdBy, p.email), isNull(apiTokens.revokedAt)))
-        .returning({ id: apiTokens.id });
-      const oauth = oauthApi(request);
-      const grants = (await oauth.listUserGrants(p.id)).items;
-      for (const g of grants) await oauth.revokeGrant(g.id, p.id);
-      return { sessions: ended.length, apps: grants.length, tokens: tokens.length };
+      const { sessions, apps, tokens } = await endAccess(request, p, {
+        sessions: true,
+        tokens: true,
+        apps: true,
+      });
+      return { sessions, apps, tokens };
     },
     async groups(f, offset, limit) {
       const where = groupWhere(f);

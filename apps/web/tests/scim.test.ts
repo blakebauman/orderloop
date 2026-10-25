@@ -111,6 +111,10 @@ function memoryStore() {
   const members = new Map<string, Set<string>>();
   const map: Record<string, Role> = {};
   const revoked: string[] = [];
+  /** The address each revoke matched tokens by: the one they were made under. */
+  const revokedAs: string[] = [];
+  /** Demotions' token revokes, as `<id>><role>`. */
+  const revokedAbove: string[] = [];
   /** People with a password, and people single sign-on is linked to. */
   const passwords = new Set<string>();
   const linked = new Set<string>();
@@ -143,8 +147,13 @@ function memoryStore() {
     async setDisabled(id, at) {
       people.get(id)!.disabledAt = at;
     },
+    async revokeTokensAbove(p, role) {
+      revokedAbove.push(`${p.id}>${role}`);
+      return 1;
+    },
     async revokeAccess(p) {
       revoked.push(p.id);
+      revokedAs.push(p.email);
       return { sessions: 1, apps: 0, tokens: 0 };
     },
     async groups(f, offset, limit) {
@@ -179,7 +188,7 @@ function memoryStore() {
     groupsOf: async (userId) => [...members].filter(([, m]) => m.has(userId)).map(([g]) => g),
     roleMap: async () => map,
   };
-  return { store, people, map, revoked, passwords, linked };
+  return { store, people, map, revoked, revokedAs, revokedAbove, passwords, linked };
 }
 
 describe('the SCIM protocol', () => {
@@ -267,6 +276,18 @@ describe('the SCIM protocol', () => {
     expect((await call('DELETE', `/Users/${ann.id}`)).status).toBe(204);
     expect(mem.people.get(ann.id)?.disabledAt).toBe(1_000);
     expect((await call('GET', `/Groups/${g.id}`)).body.members).toEqual([]);
+  });
+
+  it('revokes by the address tokens were made under when a rename and a deactivate come together', async () => {
+    const { body: ann } = await call('POST', '/Users', { userName: 'ann@example.com' });
+    await call('PATCH', `/Users/${ann.id}`, {
+      Operations: [
+        { op: 'replace', path: 'userName', value: 'ann@new.example' },
+        { op: 'replace', path: 'active', value: false },
+      ],
+    });
+    expect(mem.revoked).toEqual([ann.id]);
+    expect(mem.revokedAs).toEqual(['ann@example.com']);
   });
 
   it('never changes the email of someone who signs in with a password and has not linked SSO', async () => {
@@ -365,6 +386,8 @@ describe('the SCIM protocol', () => {
       Operations: [{ op: 'replace', path: 'members', value: [] }],
     });
     expect(mem.people.get(ann.id)?.role).toBe('viewer');
+    // Each demotion took back the tokens they made above the new role; promotions took none.
+    expect(mem.revokedAbove).toEqual([`${ann.id}>operator`, `${ann.id}>viewer`]);
   });
 
   it('an unmapped group changes nobody’s role', async () => {
