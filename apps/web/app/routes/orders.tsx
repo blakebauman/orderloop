@@ -217,11 +217,15 @@ export default function Orders() {
               aria-label="Search orders by order number, title, customer, email or external id"
               aria-keyshortcuts="/"
               type="search"
-              className="h-8 pr-8"
+              enterKeyHint="search"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="h-8 pr-8 touch:pr-3"
             />
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-[11px] text-muted-foreground"
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-[11px] text-muted-foreground touch:hidden"
             >
               /
             </span>
