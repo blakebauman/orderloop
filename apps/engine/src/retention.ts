@@ -111,6 +111,7 @@ export async function sweep(env: Env, now = Date.now()) {
   return {
     auditArchived: await archiveAudit(env, now),
     cartsPurged: await purgeEndedCarts(env, now),
+    cartBuyersIndexed: await indexCartBuyers(env),
     personalDataErased: await expirePersonalData(env, now),
     confirmations: await pruneConfirmations(env, now),
     aiUsageDays: await pruneUsage(env, now),
@@ -150,6 +151,30 @@ export async function purgeEndedCarts(env: Env, now = Date.now()) {
     if (r.purged) purged++;
   }
   return purged;
+}
+
+/** External carts one sweep re-indexes; the rest wait for the next day's. */
+const BACKFILL_MAX = 200;
+
+/**
+ * Records the buyer of external carts opened before `carts.buyer_id` existed (migration 0050), so
+ * a data subject request finds them: each cart's agent writes its row again. Once every row has
+ * been indexed this finds nothing (an erased or purged buyer is indexed as '').
+ */
+export async function indexCartBuyers(env: Env) {
+  const db = createDb(env.DB);
+  const due = await db
+    .select({ id: carts.id })
+    .from(carts)
+    .where(and(isNotNull(carts.pluginId), isNull(carts.buyerId)))
+    .limit(BACKFILL_MAX);
+  let indexed = 0;
+  for (const c of due) {
+    if (await cartAgent(env, c.id).reindex()) indexed++;
+    // A row whose agent holds nothing has no buyer to find: mark it done.
+    else await db.update(carts).set({ buyerId: '' }).where(eq(carts.id, c.id));
+  }
+  return indexed;
 }
 
 /** Audit events per archive object, and the most one sweep moves. */

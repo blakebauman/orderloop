@@ -15,6 +15,7 @@ import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import worker from '../../src/index';
 import { PluginHost } from '../../src/plugin-api';
+import { indexCartBuyers } from '../../src/retention';
 import { eraseDataSubject, exportDataSubject } from '../../src/subjects';
 
 const testEnv = env as Env & { EXAMPLE_DB: D1Database; TEST_EXAMPLE_MIGRATIONS: D1Migration[] };
@@ -394,7 +395,28 @@ describe('a punchout buyer’s data subject request', () => {
     expect(s.attachments).toEqual([]);
     expect(await env.DOCS.get(`carts/${c.cartId}/att_b1`)).toBeNull();
     const row = await db().select().from(carts).where(eq(carts.id, c.cartId)).get();
-    expect(row?.buyerId).toBeNull();
+    // Indexed, with no buyer: neither found by a request nor backfilled again.
+    expect(row?.buyerId).toBe('');
     expect((await exportDataSubject(env, email)).carts).toEqual([]);
+  });
+});
+
+describe('external carts from before buyers were indexed', () => {
+  it('are given their buyer by the sweep, once, so a data subject request finds them', async () => {
+    const email = `old-${crypto.randomUUID().slice(0, 6)}@northwind.example`;
+    const c = await open({ buyer: { id: email, name: 'Olga Old' } });
+    // As a row written before migration 0050 looks.
+    await db().update(carts).set({ buyerId: null }).where(eq(carts.id, c.cartId));
+    expect((await exportDataSubject(env, email)).carts).toEqual([]);
+    expect(await indexCartBuyers(env)).toBeGreaterThanOrEqual(1);
+    expect((await db().select().from(carts).where(eq(carts.id, c.cartId)).get())?.buyerId).toBe(
+      email,
+    );
+    expect((await exportDataSubject(env, email)).carts).toEqual([
+      expect.objectContaining({ id: c.cartId }),
+    ]);
+    // Nothing left to backfill for it.
+    const again = await db().select().from(carts).where(eq(carts.id, c.cartId)).get();
+    expect(again?.buyerId).toBe(email);
   });
 });
