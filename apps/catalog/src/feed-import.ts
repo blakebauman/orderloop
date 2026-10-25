@@ -10,6 +10,9 @@
  *
  * The parts consumer (`applyPart`) applies each part on its shard and records it with CatalogFeeds;
  * the part that completes the feed wakes the Workflow, which then marks it done.
+ *
+ * Cancelling a feed terminates its instance; should that fail, the Workflow stops at its next
+ * record or check step, which read the feed's state. Parts already queued still apply.
  */
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import {
@@ -219,9 +222,11 @@ export class FeedImport extends WorkflowEntrypoint<Env, FeedParams> {
           { retries: { limit: 3, delay: '10 seconds', backoff: 'exponential' } },
           () => splitChunk(this.env, p, chunk, from),
         );
-        await step.do(`record ${chunk}`, async () => {
-          await feeds(this.env).chunkSplit(p.id, chunk, out);
+        const state = await step.do(`record ${chunk}`, async () => {
+          return (await feeds(this.env).chunkSplit(p.id, chunk, out))?.state ?? null;
         });
+        // Cancelled (and the instance couldn't be terminated): split no more.
+        if (state === 'cancelled') return;
         if (out.done) break;
         from = { ...from, offset: out.offset, row: out.row };
       }
@@ -232,8 +237,9 @@ export class FeedImport extends WorkflowEntrypoint<Env, FeedParams> {
       for (let check = 0; ; check++) {
         const status = await step.do(`check ${check}`, async () => {
           const s = await feeds(this.env).get(p.id);
-          return { parts: s?.parts ?? 0, partsDone: s?.partsDone ?? 0 };
+          return { parts: s?.parts ?? 0, partsDone: s?.partsDone ?? 0, state: s?.state };
         });
+        if (status.state === 'cancelled') return;
         if (status.partsDone >= status.parts) break;
         try {
           await step.waitForEvent(`applied ${check}`, { type: 'applied', timeout: '1 minute' });

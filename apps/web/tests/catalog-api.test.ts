@@ -15,6 +15,7 @@ const catalog = {
   startFeed: vi.fn(),
   feedStatus: vi.fn(),
   listFeeds: vi.fn(),
+  cancelFeed: vi.fn(),
   reindex: vi.fn(),
   deleteType: vi.fn(),
   deleteChannel: vi.fn(),
@@ -203,6 +204,24 @@ describe('catalog setup over REST', () => {
     expect((await call('POST', 'feeds?format=csv', operator, 'key,sku', 'text/csv')).status).toBe(
       500,
     );
+  });
+
+  it('cancels a feed for an operator, with 404 when unknown and 409 once finished', async () => {
+    expect((await call('POST', 'feeds/feed_1/cancel', viewer)).status).toBe(403);
+    catalog.cancelFeed.mockResolvedValueOnce({ id: 'feed_1', state: 'cancelled' });
+    const r = await call('POST', 'feeds/feed_1/cancel', operator);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ feed: { id: 'feed_1', state: 'cancelled' } });
+    expect(catalog.cancelFeed).toHaveBeenCalledWith('feed_1', 'ops@example.com');
+    expect(audit).toHaveBeenCalledWith(
+      expect.anything(),
+      'catalog.feed_cancelled',
+      expect.objectContaining({ target: 'feed_1' }),
+    );
+    catalog.cancelFeed.mockResolvedValueOnce(null);
+    expect((await call('POST', 'feeds/nope/cancel', operator)).status).toBe(404);
+    catalog.cancelFeed.mockResolvedValueOnce({ id: 'feed_2', state: 'done' });
+    expect((await call('POST', 'feeds/feed_2/cancel', operator)).status).toBe(409);
   });
 
   it('reindexes only for an admin', async () => {
