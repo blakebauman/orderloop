@@ -49,7 +49,7 @@ export function Trends({ daily }: { daily: Day[] }) {
       title="Trends"
       flush
       actions={
-        <fieldset className="flex rounded-md border p-0.5 text-xs">
+        <fieldset className="flex rounded-full bg-muted p-1 text-xs">
           <legend className="sr-only">Range</legend>
           {RANGES.map((r) => (
             <button
@@ -57,7 +57,7 @@ export function Trends({ daily }: { daily: Day[] }) {
               type="button"
               aria-pressed={range === r}
               onClick={() => setRange(r)}
-              className="rounded-sm px-2 py-1 text-muted-foreground tabular aria-pressed:bg-muted aria-pressed:text-foreground"
+              className="rounded-full px-2.5 py-1 text-muted-foreground tabular hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:bg-input/30"
             >
               {`${r} days`}
             </button>
@@ -72,7 +72,7 @@ export function Trends({ daily }: { daily: Day[] }) {
           summary={`${base(revenue)} from orders completed in the last ${range} days, in ${BASE_CURRENCY}.`}
         >
           {revenue ? (
-            <Chart days={days} config={revenueConfig} format={base} legend={false} />
+            <Chart days={days} config={revenueConfig} format={base} />
           ) : (
             <Empty>{`No revenue in the last ${range} days.`}</Empty>
           )}
@@ -131,13 +131,11 @@ function Chart({
   config,
   format,
   stacked = false,
-  legend = true,
 }: {
   days: Day[];
   config: ChartConfig;
   format: (n: number) => string;
   stacked?: boolean;
-  legend?: boolean;
 }) {
   const id = useId().replace(/:/g, '');
   const keys = Object.keys(config);
@@ -170,19 +168,22 @@ function Chart({
             />
           }
         />
+        {/* Stacked bands are counts: straight segments, so no curve swings past a day's value,
+            and solid tints, so each band reads against the one under it. */}
         {keys.map((k) => (
           <Area
             key={k}
             dataKey={k}
-            type="monotone"
+            type={stacked ? 'linear' : 'monotone'}
             stroke={`var(--color-${k})`}
             strokeWidth={1.5}
-            fill={`url(#${id}-${k})`}
+            fill={stacked ? `var(--color-${k})` : `url(#${id}-${k})`}
+            fillOpacity={stacked ? 0.4 : 1}
             stackId={stacked ? 'a' : undefined}
             isAnimationActive={false}
           />
         ))}
-        {legend ? <ChartLegend content={<ChartLegendContent />} /> : null}
+        <ChartLegend content={<ChartLegendContent />} />
       </AreaChart>
     </ChartContainer>
   );
