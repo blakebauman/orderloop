@@ -109,7 +109,7 @@ describe('model calls in an order step', () => {
     const m = model(() => ({ response: { ok: true } }), { AI_GATEWAY_ID: 'gw' });
     await ask(m.env, { orderId: 'ord_1' });
     expect(m.calls[0]!.options).toEqual({
-      gateway: { id: 'gw', metadata: { prompt: 'risk@1', orderId: 'ord_1' } },
+      gateway: { id: 'gw', collectLog: false, metadata: { prompt: 'risk@1', orderId: 'ord_1' } },
     });
     const a = model(() => ({ answers: {} }), { AI_GATEWAY_ID: 'gw' });
     await assess(a.env, { state: {}, questions: {} }, { orderId: 'ord_2' });
