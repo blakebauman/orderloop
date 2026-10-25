@@ -598,6 +598,8 @@ export const users = sqliteTable(
     totpLastStep: integer('totp_last_step'),
     /** The password was set by an operator (first or reset); the person must choose their own. */
     passwordChangeDue: integer('password_change_due', { mode: 'boolean' }).notNull().default(false),
+    /** When a temporary password stops working; null for one the person chose. */
+    passwordExpiresAt: integer('password_expires_at'),
     /** The identity provider's own id for this person, as SCIM provisioning sent it. */
     scimExternalId: text('scim_external_id'),
   },

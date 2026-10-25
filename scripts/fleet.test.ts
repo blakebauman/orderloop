@@ -280,6 +280,21 @@ test("a customer's sso sets the web Worker's identity provider", () => {
     () => toDeployment({ ...acme, sso: { issuer: 'https://acme.okta.com' } }),
     /clientId/,
   );
+  // An email without email_verified is trusted only when the registry says so (Entra ID).
+  assert.equal(c.vars.OIDC_TRUST_EMAIL, '');
+  const entra = toDeployment({
+    ...acme,
+    sso: { issuer: 'https://login.microsoftonline.com/t/v2.0', clientId: 'app', trustEmail: true },
+  });
+  assert.equal(renderWeb(base('web'), entra).vars.OIDC_TRUST_EMAIL, 'true');
+  assert.throws(
+    () =>
+      toDeployment({
+        ...acme,
+        sso: { issuer: 'https://acme.okta.com', clientId: 'x', trustEmail: 'yes' },
+      }),
+    /trustEmail/,
+  );
 });
 
 test("a customer's assistantDailyTokens sets the assistant's budget", () => {

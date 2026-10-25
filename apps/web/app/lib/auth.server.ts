@@ -25,6 +25,7 @@ import {
   SESSION_MAX_MS,
   SESSION_TOUCH_MS,
   secretContext,
+  sessionIdleMs,
 } from '@orderloop/core';
 import {
   apiTokens,
@@ -170,7 +171,8 @@ async function lookUpPrincipal(request: Request): Promise<Caller | null> {
         ),
       )
       .get();
-    if (row) {
+    // An admin's session goes idle sooner than the query's limit for everyone.
+    if (row && now - row.seen <= sessionIdleMs(row.role as Role)) {
       const { seen, totpEnabledAt, passwordChangeDue, passwordHash, ...person } = row;
       if (now - seen > SESSION_TOUCH_MS)
         afterResponse(
@@ -213,6 +215,37 @@ export class Throttled extends Error {
 export async function waitFor(keys: string[]) {
   const rows = await db().select().from(authFailures).where(inArray(authFailures.key, keys));
   return blockedFor(rows, Date.now());
+}
+
+/**
+ * How long a password sign-in must wait (`signInKeys`). Failures for the account from many places
+ * (its `email` key) don't hold back a place that has signed this person in before (one of their
+ * sessions was last seen there), so someone who knows only an address can't lock its owner out;
+ * that place's own limits (`email-ip`, `ip`) still apply.
+ */
+async function signInWait(email: string, ip: string): Promise<number> {
+  const keys = signInKeys(email, ip);
+  const rows = (
+    await db().select().from(authFailures).where(inArray(authFailures.key, keys))
+  ).filter((r) => keys.includes(r.key));
+  const now = Date.now();
+  const wait = blockedFor(rows, now);
+  if (!wait) return 0;
+  const placeKeys = keys.slice(0, 2);
+  const here = blockedFor(
+    rows.filter((r) => placeKeys.includes(r.key)),
+    now,
+  );
+  if (here) return here;
+  const known = await db()
+    .select({ id: sessions.tokenHash })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(
+      and(eq(users.email, normalizeEmail(email)), eq(sessions.ip, ip), gt(sessions.expiresAt, now)),
+    )
+    .get();
+  return known ? 0 : wait;
 }
 
 /** Counts a failure against each key, starting a fresh window where the old one has ended. */
@@ -398,7 +431,7 @@ export async function signIn(
 ): Promise<SignInResult | null> {
   const keys = signInKeys(email, clientIp(request));
   const target = normalizeEmail(email) || null;
-  const wait = await waitFor(keys);
+  const wait = await signInWait(email, clientIp(request));
   if (wait) {
     await audit(request, 'auth.sign_in_throttled', { target });
     throw new Throttled(wait);
@@ -427,13 +460,20 @@ export async function signIn(
  */
 export async function signInToLink(
   request: Request,
-  user: { id: string; email: string; passwordHash: string; totpEnabledAt: number | null },
+  user: {
+    id: string;
+    email: string;
+    passwordHash: string;
+    totpEnabledAt: number | null;
+    passwordChangeDue: boolean;
+    passwordExpiresAt: number | null;
+  },
   given: string,
 ): Promise<
   { twoFactor: true; cookie: string } | { twoFactor: false; signIn: () => Promise<string> } | null
 > {
   const keys = signInKeys(user.email, clientIp(request));
-  const wait = await waitFor(keys);
+  const wait = await signInWait(user.email, clientIp(request));
   if (wait) {
     await audit(request, 'auth.sign_in_throttled', { target: user.email });
     throw new Throttled(wait);
@@ -443,6 +483,15 @@ export async function signInToLink(
     await audit(request, 'auth.sign_in_failed', {
       target: user.email,
       detail: { reason: 'wrong password', method: 'sso' },
+    });
+    return null;
+  }
+  // A temporary password that ran out links nothing, as it signs no one in.
+  if (temporaryPasswordExpired(user)) {
+    await recordFailure(keys);
+    await audit(request, 'auth.sign_in_failed', {
+      target: user.email,
+      detail: { reason: 'temporary password expired', method: 'sso' },
     });
     return null;
   }
@@ -466,6 +515,15 @@ export async function signInToLink(
   };
 }
 
+/**
+ * Whether the person is on a temporary password that has run out. Only while one is due: a
+ * password they chose never expires, even if an older Worker left the column set.
+ */
+const temporaryPasswordExpired = (u: {
+  passwordChangeDue: boolean;
+  passwordExpiresAt: number | null;
+}) => u.passwordChangeDue && u.passwordExpiresAt !== null && u.passwordExpiresAt <= Date.now();
+
 async function checkCredentials(
   email: string,
   given: string,
@@ -483,6 +541,7 @@ async function checkCredentials(
   if (await ssoOnlyInEffect()) return { reason: 'SSO only' };
   if (!ok) return { reason: 'wrong password' };
   if (user.disabledAt) return { reason: 'disabled' };
+  if (temporaryPasswordExpired(user)) return { reason: 'temporary password expired' };
   return {
     twoFactor: !!user.totpEnabledAt,
     principal: {

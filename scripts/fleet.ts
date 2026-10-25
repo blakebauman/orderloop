@@ -139,7 +139,7 @@ export type Deployment = {
    * discovery document names it) and this deployment's client id. The client secret is the
    * environment's OIDC_CLIENT_SECRET; the redirect URI to register is https://<domain>/login/sso/callback.
    */
-  sso?: { issuer: string; clientId: string };
+  sso?: { issuer: string; clientId: string; trustEmail?: boolean };
   /**
    * How the engine takes payments: `mock` (the default) records them without taking money;
    * `stripe` authorizes, captures and refunds through Stripe with the environment's
@@ -336,6 +336,8 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
       throw new Error(`${file}: sso.issuer must be the identity provider's https issuer URL`);
     if (typeof sso.clientId !== 'string' || !sso.clientId.trim())
       throw new Error(`${file}: sso.clientId must be the client id the provider issued`);
+    if (sso.trustEmail !== undefined && typeof sso.trustEmail !== 'boolean')
+      throw new Error(`${file}: sso.trustEmail must be true or false`);
   }
   if (raw.payments !== undefined && raw.payments !== 'mock' && raw.payments !== 'stripe')
     throw new Error(`${file}: payments must be "mock" or "stripe"`);
@@ -490,7 +492,15 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs !== false,
-    ...(sso ? { sso: { issuer: sso.issuer as string, clientId: sso.clientId as string } } : {}),
+    ...(sso
+      ? {
+          sso: {
+            issuer: sso.issuer as string,
+            clientId: sso.clientId as string,
+            ...(sso.trustEmail === true ? { trustEmail: true } : {}),
+          },
+        }
+      : {}),
     payments,
     ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
     plugins: plugins as Deployment['plugins'],
@@ -842,7 +852,12 @@ export function renderWeb(base: Config, d: Deployment): Config {
   };
   if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };
   if (d.sso)
-    config.vars = { ...config.vars, OIDC_ISSUER: d.sso.issuer, OIDC_CLIENT_ID: d.sso.clientId };
+    config.vars = {
+      ...config.vars,
+      OIDC_ISSUER: d.sso.issuer,
+      OIDC_CLIENT_ID: d.sso.clientId,
+      OIDC_TRUST_EMAIL: d.sso.trustEmail ? 'true' : '',
+    };
   return config;
 }
 

@@ -75,6 +75,15 @@ describe('SSO settings', () => {
     ]);
   });
 
+  it('never lets someone new join as an admin', () => {
+    expect(
+      readSsoSettings(JSON.stringify({ jitRole: 'admin', domains: ['x.com'] })).jitRole,
+    ).toBeNull();
+    expect(
+      readSsoSettings(JSON.stringify({ jitRole: 'operator', domains: ['x.com'] })).jitRole,
+    ).toBe('operator');
+  });
+
   it('reads stored settings, with anything unreadable at its default', () => {
     expect(readSsoSettings(null)).toEqual(DEFAULT_SSO);
     expect(readSsoSettings('{oops')).toEqual(DEFAULT_SSO);
@@ -353,6 +362,19 @@ describe('the OpenID Connect flow', () => {
   it('keeps an unverified email from matching anyone', async () => {
     claims = { email_verified: false };
     expect((await (await roundTrip()).result).identity.email).toBeNull();
+    // A token that leaves the claim out vouches for nothing, unless the deployment trusts its
+    // provider's addresses (Entra ID: OIDC_TRUST_EMAIL).
+    claims = { email_verified: undefined };
+    expect((await (await roundTrip()).result).identity.email).toBeNull();
+    env.OIDC_TRUST_EMAIL = 'true';
+    try {
+      expect((await (await roundTrip()).result).identity.email).toBe('ann@acme.com');
+      // Entra's own word that the address's domain isn't verified still counts.
+      claims = { email_verified: undefined, xms_edov: false };
+      expect((await (await roundTrip()).result).identity.email).toBeNull();
+    } finally {
+      delete env.OIDC_TRUST_EMAIL;
+    }
   });
 
   it('refuses a callback with no flow in this browser, or a provider error', async () => {

@@ -3,14 +3,7 @@
  * once to show the operator, and stored only as a hash.
  */
 
-import {
-  atLeast,
-  isRole,
-  newId,
-  type Principal,
-  type Role,
-  SESSION_IDLE_MS,
-} from '@orderloop/core';
+import { atLeast, isRole, newId, type Principal, type Role, sessionIdleMs } from '@orderloop/core';
 import { apiTokens, sessions, startsWith, users } from '@orderloop/db';
 import { and, count, desc, eq, gt, isNull, ne } from 'drizzle-orm';
 import { endAccess, endedDetail } from './access.server';
@@ -29,6 +22,9 @@ import { describeAgent, sessionRef } from './sessions';
 import { expiresAtFor, isTokenLifetime } from './tokens';
 
 export class TeamError extends Error {}
+
+/** How long a temporary password (a new person's, or a reset) works before it must be used. */
+export const TEMPORARY_PASSWORD_MS = 7 * 86_400_000;
 
 export async function listTeam() {
   const [people, tokens] = await Promise.all([
@@ -153,6 +149,7 @@ export async function addUser(
       role: r,
       passwordHash: await hashPassword(password),
       passwordChangeDue: true,
+      passwordExpiresAt: Date.now() + TEMPORARY_PASSWORD_MS,
       createdAt: Date.now(),
     });
   forgetUserCount();
@@ -204,7 +201,11 @@ export async function resetPassword(request: Request, by: Principal, id: string)
   const password = generatePassword();
   await db()
     .update(users)
-    .set({ passwordHash: await hashPassword(password), passwordChangeDue: true })
+    .set({
+      passwordHash: await hashPassword(password),
+      passwordChangeDue: true,
+      passwordExpiresAt: Date.now() + TEMPORARY_PASSWORD_MS,
+    })
     .where(eq(users.id, id));
   const ended = await endAccess(
     request,
@@ -321,7 +322,11 @@ export async function changeOwnPassword(
   if (problem) throw new TeamError(problem);
   await db()
     .update(users)
-    .set({ passwordHash: await hashPassword(next), passwordChangeDue: false })
+    .set({
+      passwordHash: await hashPassword(next),
+      passwordChangeDue: false,
+      passwordExpiresAt: null,
+    })
     .where(eq(users.id, by.id));
   // In case the old password leaked: apps connected with it go (the route ends other sessions).
   const ended = await endAccess(request, user, { apps: true });
@@ -351,7 +356,7 @@ export async function ownSessions(by: Principal, currentHash: string | undefined
       createdAt: r.createdAt,
       lastSeenAt: r.lastSeenAt ?? r.createdAt,
     }))
-    .filter((r) => now - r.lastSeenAt < SESSION_IDLE_MS)
+    .filter((r) => now - r.lastSeenAt < sessionIdleMs(by.role))
     .sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt - a.lastSeenAt);
 }
 

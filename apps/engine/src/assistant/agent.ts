@@ -64,9 +64,9 @@ export class AssistantAgent extends AIChatAgent<Env> {
   }
 
   /** The person this assistant works for, as they are now; throws once their sign-in has ended. */
-  private async caller(): Promise<Principal> {
+  private async caller({ touch = true }: { touch?: boolean } = {}): Promise<Principal> {
     const stored = await this.ctx.storage.get<ProxiedPrincipal>('principal');
-    const p = stored ? await livePrincipal(this.env, stored) : null;
+    const p = stored ? await livePrincipal(this.env, stored, { touch }) : null;
     if (!p) throw new Refused(SESSION_ENDED);
     return p;
   }
@@ -74,7 +74,8 @@ export class AssistantAgent extends AIChatAgent<Env> {
   /** What is waiting on people, for the line at the top of the panel. */
   @callable()
   async attention() {
-    await this.caller();
+    // The panel polls this every minute: not use, so an open panel still lets the session go idle.
+    await this.caller({ touch: false });
     return attention(this.env);
   }
 

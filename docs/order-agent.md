@@ -137,7 +137,7 @@ reaches the engine another way cannot name a principal. It accepts `PRINCIPAL_KE
 for [key rotation](operations.md#rotating-the-principal-key). `onConnect` then
 stores the principal as the connection's state, which is not checked again for expiry, or closes
 the socket with `4401` when there is none. While anyone has the order open, `recheckConnections`
-runs every 30 seconds (`RECHECK_S`) and closes with `4401` each socket whose principal
+runs every 30 seconds (`RECHECK_S`), reading sessions with `livePrincipal(…, { touch: false })` so the check doesn't count as use, and closes with `4401` each socket whose principal
 `livePrincipal` no longer finds, or finds below viewer, since state broadcasts reach a socket that
 never calls anything. For a signed-in person the header also carries their
 session's id (the SHA-256 that keys `sessions`), which never reaches the browser.

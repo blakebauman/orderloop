@@ -80,7 +80,10 @@
     // registry's `sso`. With the OIDC_CLIENT_SECRET secret, they put "Sign in with single sign-on"
     // on the sign-in page; admins set the rest on the Team page. Empty: no SSO.
     "OIDC_ISSUER": "",
-    "OIDC_CLIENT_ID": ""
+    "OIDC_CLIENT_ID": "",
+    // "true" when the provider leaves out email_verified for addresses it owns (Entra ID): the
+    // registry's sso.trustEmail. Otherwise an unverified email never matches anyone.
+    "OIDC_TRUST_EMAIL": ""
   }
   // Secrets (wrangler secret put): SETUP_TOKEN — the one-time setup code that creates an admin on
   // /setup (app/lib/setup.server.ts); a new one recovers admin access. SHOPIFY_WEBHOOK_SECRET —
