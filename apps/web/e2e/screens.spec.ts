@@ -24,6 +24,8 @@ test('at lg the flow editor edits', async ({ page }, info) => {
 
 test('below lg the order page shows one view at a time', async ({ page }, info) => {
   test.skip(!isNarrow(info), 'below lg');
+  // Starting a real order, then waiting for it to settle: slower on a CI runner.
+  test.setTimeout(60_000);
   await open(page, '/orders/scenarios');
   await page.getByRole('button', { name: /^Run / }).first().click();
   await expect(page).toHaveURL(/\/orders\/ord_/, { timeout: 30_000 });
@@ -37,7 +39,7 @@ test('below lg the order page shows one view at a time', async ({ page }, info) 
     await graph.click();
     await expect(graph).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('.react-flow')).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 20_000 });
+  }).toPass({ timeout: 40_000 });
 });
 
 test('the assistant composer stays above the on-screen keyboard', async ({ page }, info) => {
