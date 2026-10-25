@@ -91,6 +91,18 @@ describe('plugin manifests', () => {
     expect(parseManifest(manifest()).nodes[0]!.type).toBe('example.stamp');
   });
 
+  it('declares host capabilities, cancelling apart from starting, each once', () => {
+    const capabilities = ['carts:external', 'orders:start', 'orders:cancel'];
+    expect(parseManifest(manifest({ capabilities })).capabilities).toEqual(capabilities);
+    expect(parseManifest(manifest({ capabilities: ['orders:start'] })).capabilities).toEqual([
+      'orders:start',
+    ]);
+    expect(() => parseManifest(manifest({ capabilities: ['orders:delete'] }))).toThrow();
+    expect(() =>
+      parseManifest(manifest({ capabilities: ['orders:cancel', 'orders:cancel'] })),
+    ).toThrow(/Each capability once/);
+  });
+
   it('refuses a manifest written for another contract version', () => {
     expect(() => parseManifest(manifest({ apiVersion: 2 }))).toThrow(/apiVersion must be 1/);
     expect(() => parseManifest({ ...manifest(), apiVersion: undefined })).toThrow(/apiVersion/);

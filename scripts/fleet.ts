@@ -177,7 +177,7 @@ export type Deployment = {
 };
 
 /** What a plugin may ask of the core through ORDERLOOP (`PLUGIN_CAPABILITIES` in core). */
-const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start'];
+const PLUGIN_CAPABILITIES = ['carts:external', 'orders:start', 'orders:cancel'];
 
 /**
  * Top-level path segments the web app serves itself: its pages (apps/web/app/routes.ts) and what

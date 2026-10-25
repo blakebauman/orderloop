@@ -16,6 +16,7 @@ import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import worker from '../../src/index';
 import { PluginHost } from '../../src/plugin-api';
+import { pluginStatuses } from '../../src/plugins';
 import { indexCartBuyers } from '../../src/retention';
 import { eraseDataSubject, exportDataSubject } from '../../src/subjects';
 
@@ -233,6 +234,55 @@ describe('the plugin host API', () => {
         orderId: started.orderId,
         outcome: 'cancelled',
       });
+  });
+
+  it('refuses a cancel to a plugin that may start orders but not cancel them', async () => {
+    const key = `po-${crypto.randomUUID()}`;
+    const req = {
+      key,
+      flowId: 'tpl-b2b-order',
+      input: {
+        model: 'b2b' as const,
+        customerId: 'cus_northwind',
+        lines: [{ sku: 'WID-100', qty: 1 }],
+      },
+    };
+    const started = await hostFor('example').startOrder(req);
+    if (!started.ok) throw new Error(started.error);
+    // The example as a deployment would run it with `orders:start` alone: declared and granted.
+    const real = (await pluginStatuses(env, true)).find((p) => p.id === 'example')!.manifest!;
+    const startOnly = (grant: string[], capabilities = ['carts:external', 'orders:start']) =>
+      new PluginHost(
+        { waitUntil() {}, passThroughOnException() {}, props: { id: 'example' } } as never,
+        {
+          ...env,
+          PLUGIN_EXAMPLE: { fetch() {}, manifest: async () => ({ ...real, capabilities }) },
+          PLUGIN_GRANTS: JSON.stringify({ example: { capabilities: grant } }),
+        } as unknown as Env,
+      );
+    const refused = { ok: false, error: 'This plugin may not cancel orders here.' };
+    const host = startOnly(['carts:external', 'orders:start']);
+    // It still starts orders (this key's, replayed), but can't call one off.
+    expect(await host.startOrder(req)).toEqual({
+      ok: true,
+      orderId: started.orderId,
+      replayed: true,
+    });
+    expect(await host.cancelOrder({ key, reason: 'x' })).toEqual(refused);
+    // A grant its manifest doesn't ask for gives it nothing either.
+    expect(
+      await startOnly(['carts:external', 'orders:start', 'orders:cancel']).cancelOrder({
+        key,
+        reason: 'x',
+      }),
+    ).toEqual(refused);
+    expect((await api().snapshot(started.orderId))?.status).not.toBe('cancelled');
+    // With both, the same call cancels it.
+    expect(await hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' })).toEqual({
+      ok: true,
+      orderId: started.orderId,
+      outcome: 'cancelled',
+    });
   });
 
   it('answers cancelled to a cancel that arrives while another is under way', async () => {

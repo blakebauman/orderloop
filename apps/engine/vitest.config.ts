@@ -169,7 +169,7 @@ export default defineConfig(async () => {
             ),
             PLUGIN_GRANTS: JSON.stringify({
               'fixture-carrier': { personalData: 'send' },
-              example: { capabilities: ['carts:external', 'orders:start'] },
+              example: { capabilities: ['carts:external', 'orders:start', 'orders:cancel'] },
             }),
           },
           [
@@ -200,7 +200,7 @@ export default defineConfig(async () => {
             PLUGIN_SECRETS: JSON.stringify({ example: { PING_TOKEN: 'ping-secret-8f2d' } }),
             PLUGIN_GRANTS: JSON.stringify({
               'fixture-carrier': { personalData: 'send' },
-              example: { capabilities: ['carts:external', 'orders:start'] },
+              example: { capabilities: ['carts:external', 'orders:start', 'orders:cancel'] },
             }),
           },
           [],
@@ -232,13 +232,13 @@ export default defineConfig(async () => {
           { outboundService: carrierUpstream },
         ),
         // Payments through Stripe, against the in-memory fake in tests/stripe-fake.ts.
-        // The punchout plugin sandboxed, granted both capabilities: a procurement system's setup,
+        // The punchout plugin sandboxed, granted its three capabilities: a procurement system's setup,
         // the buyer's cart and return, and its PO, against the real host API (tests/punchout/).
         project('punchout', ['tests/punchout/**/*.test.ts'], {
           TEST_BUNDLES: JSON.stringify(punchout),
           PLUGIN_BUNDLES: JSON.stringify({ punchout: punchout.punchout.sha }),
           PLUGIN_GRANTS: JSON.stringify({
-            punchout: { capabilities: ['carts:external', 'orders:start'] },
+            punchout: { capabilities: ['carts:external', 'orders:start', 'orders:cancel'] },
           }),
         }),
         project('stripe', ['tests/stripe/**/*.test.ts'], {

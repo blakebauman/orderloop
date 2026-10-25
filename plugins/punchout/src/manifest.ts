@@ -10,8 +10,9 @@ export default {
   id: 'punchout',
   name: 'Punchout',
   version: '1',
-  // Opens a cart for a procurement system's buyer, and starts the order its PO sends.
-  capabilities: ['carts:external', 'orders:start'],
+  // Opens a cart for a procurement system's buyer, starts the order its PO sends, and cancels it
+  // when a later version of the PO calls it off.
+  capabilities: ['carts:external', 'orders:start', 'orders:cancel'],
   nav: [{ label: 'Punchout', path: '/plugins/punchout/', icon: 'ShoppingCart' }],
   pageRole: 'admin',
   // The procurement systems call these themselves; each checks the partner's secret.

@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // cXML and OCI punchout (src/index.ts). Installed per deployment through its registry, with
-  // capabilities ["carts:external", "orders:start"] granted.
+  // capabilities ["carts:external", "orders:start", "orders:cancel"] granted.
   "name": "orderloop-plugin-punchout",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
