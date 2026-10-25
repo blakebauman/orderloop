@@ -493,7 +493,43 @@ export class OrderAgent extends Agent<Env, State> {
   // from the web app's own authorized routes) or by the Workflow have no connection and are trusted.
 
   override async onConnect(connection: Connection<ConnectionState>, ctx: ConnectionContext) {
-    connection.setState({ principal: await forwardedPrincipal(this.env, ctx.request) });
+    const principal = await forwardedPrincipal(this.env, ctx.request);
+    // The gate (agent-routes.ts) refuses this before it gets here; this close is a backstop, and
+    // comes after the SDK's own first frames.
+    if (!principal) {
+      connection.close(4401, 'Session ended');
+      return;
+    }
+    connection.setState({ principal });
+    if (!this.getSchedules().some((s) => s.callback === 'recheckConnections'))
+      await this.schedule(OrderAgent.RECHECK_S, 'recheckConnections');
+  }
+
+  /** No child agents: a `/sub/` path inside this one is refused (agent-routes.ts refuses it first). */
+  override async onBeforeSubAgent(): Promise<Response> {
+    return new Response('Not found', { status: 404 });
+  }
+
+  /** How often open sockets are checked against live sign-ins. */
+  private static RECHECK_S = 30;
+
+  /**
+   * Closes every socket whose person can no longer read the order (signed out, disabled, a revoked
+   * token, a role below viewer): state broadcasts reach a socket without it calling anything, so a
+   * call's own check isn't enough. Runs on a schedule while anyone has the order open.
+   */
+  async recheckConnections() {
+    let open = 0;
+    for (const c of this.getConnections<ConnectionState>()) {
+      const stored = c.state?.principal ?? null;
+      const p = stored ? await livePrincipal(this.env, stored) : null;
+      if (!p || !atLeast(p.role, 'viewer')) c.close(4401, 'Session ended');
+      else open++;
+    }
+    // Counted afresh: a socket that opened while this ran found this job still queued and
+    // scheduled none of its own.
+    if (open || [...this.getConnections()].length)
+      await this.schedule(OrderAgent.RECHECK_S, 'recheckConnections');
   }
 
   /**

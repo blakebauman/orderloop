@@ -58,6 +58,11 @@ export class AssistantAgent extends AIChatAgent<Env> {
     await this.ctx.storage.put('principal', p);
   }
 
+  /** No child agents: a `/sub/` path inside this one is refused (agent-routes.ts refuses it first). */
+  override async onBeforeSubAgent(): Promise<Response> {
+    return new Response('Not found', { status: 404 });
+  }
+
   /** The person this assistant works for, as they are now; throws once their sign-in has ended. */
   private async caller(): Promise<Principal> {
     const stored = await this.ctx.storage.get<ProxiedPrincipal>('principal');
