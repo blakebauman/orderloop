@@ -598,7 +598,7 @@ be set before it runs. **Approve** (`approvePlugin`) needs every required secret
 plugin that asks for buyer details, the admin's grant (a checkbox, off by default); the grant is
 stored on the row (`personal_data_granted`) and is the plugin's grant, as `PLUGIN_GRANTS` is for a
 registry plugin. The version that ran before is `superseded`. Approving, rolling back, turning on,
-uninstalling, and setting a secret of a plugin that runs each need a **step-up** (`stepUp`, `apps/web/app/lib/auth.server.ts`): a current
+uninstalling, turning off (for a person; an admin API token may still turn one off) and setting a secret of a plugin that runs each need a **step-up** (`stepUp`, `apps/web/app/lib/auth.server.ts`): a current
 two-factor code from someone with two-factor sign-in, otherwise their password, otherwise (single
 sign-on only) signing in again at the identity provider on this session within the last ten minutes
 (`/login/sso?reauth=1` sends `prompt=login` and `max_age=0`, the callback needs the ID token's

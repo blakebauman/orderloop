@@ -10,12 +10,14 @@ import {
   signCartGuestSession,
   signPlatform,
   signPrincipal,
+  signRpcActor,
   signSsoFlow,
   signSsoLink,
   verifyCartGuest,
   verifyCartGuestSession,
   verifyPlatform,
   verifyPrincipal,
+  verifyRpcActor,
   verifySsoFlow,
   verifySsoLink,
 } from '../src/roles';
@@ -177,6 +179,40 @@ describe('cart guest envelopes', () => {
     expect(await verifyCartGuest([key], cookie, path, now)).toBeNull();
     const header = await signCartGuest(key, g, path, now);
     expect(await verifyCartGuestSession([key], header, 'cart_1', now)).toBeNull();
+  });
+});
+
+describe('signed actors on binding calls', () => {
+  const key = 'k';
+  const now = 1_000_000;
+  const ann = { kind: 'staff' as const, id: 'usr_1', name: 'ann@x.com', role: 'approver' as const };
+
+  it('holds an actor to the one call it was signed for, for a minute', async () => {
+    const a = await signRpcActor(key, ann, 'decide:ord_1', now);
+    expect(await verifyRpcActor([key], a, 'decide:ord_1', now)).toEqual(ann);
+    expect(await verifyRpcActor([key], a, 'decide:ord_2', now)).toBeNull();
+    expect(await verifyRpcActor([key], a, 'cart:ord_1', now)).toBeNull();
+    expect(await verifyRpcActor([key], a, 'decide:ord_1', now + PRINCIPAL_TTL_MS + 1)).toBeNull();
+    expect(await verifyRpcActor(['other'], a, 'decide:ord_1', now)).toBeNull();
+    // Never a principal header, nor a principal header an actor.
+    expect(await verifyPrincipal([key], a, 'decide:ord_1', now)).toBeNull();
+    const p = await signPrincipal(key, { ...ann, kind: 'user' }, 'decide:ord_1', now);
+    expect(await verifyRpcActor([key], p, 'decide:ord_1', now)).toBeNull();
+    // Nor a cart guest's cookie or socket header, signed for the same `cart:<id>` path.
+    const g = { cartId: 'c', id: 'guest:b', name: 'Bea' };
+    expect(
+      await verifyRpcActor([key], await signCartGuestSession(key, g, now + 60_000), 'cart:c', now),
+    ).toBeNull();
+    expect(
+      await verifyRpcActor([key], await signCartGuest(key, g, 'cart:c', now), 'cart:c', now),
+    ).toBeNull();
+    expect(await verifyRpcActor([key], ann as never, 'decide:ord_1', now)).toBeNull();
+    // The previous key during a rotation.
+    expect(await verifyRpcActor(['new', key], a, 'decide:ord_1', now)).toEqual(ann);
+    const guest = { kind: 'guest' as const, id: 'guest:b', name: 'Bea' };
+    expect(
+      await verifyRpcActor([key], await signRpcActor(key, guest, 'cart:c', now), 'cart:c', now),
+    ).toEqual(guest);
   });
 });
 

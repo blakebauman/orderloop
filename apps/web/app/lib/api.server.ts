@@ -137,6 +137,7 @@ import {
 import { currencies, customerIdByEmail, listOrders } from './orders.server';
 import { pluginAction, uploadBundle } from './plugin-installs.server';
 import { pluginStatuses } from './plugins.server';
+import { decider, signedActor } from './principal.server';
 import { overBudget } from './rate-limit';
 import {
   addPlatform,
@@ -383,8 +384,7 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         orderId,
         parts[3],
         b.decision,
-        actor(caller),
-        caller.id,
+        await signedActor(decider(caller, actor(caller)), `decide:${orderId}`),
         b.note,
       );
       if (res.ok) {
@@ -400,7 +400,8 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
         });
         return json(res);
       }
-      if (res.reason === 'own_order') return json({ error: res.error }, 403);
+      if (res.reason === 'own_order' || res.reason === 'forbidden')
+        return json({ error: res.error }, 403);
       return res.reason === 'not_found'
         ? json({ error: 'Not found' }, 404)
         : json({ error: `${parts[3]} is not waiting for an approval` }, 409);
@@ -514,7 +515,7 @@ async function handleCarts(
   if (parts.length !== 3 || request.method !== 'POST') return json({ error: 'Not found' }, 404);
   const denied = need('operator');
   if (denied) return denied;
-  const actor = staffCartActor(caller);
+  const actor = await signedActor(staffCartActor(caller), `cart:${id}`);
 
   if (verb === 'ops') {
     const op = cartOpSchema.safeParse(await body());
