@@ -43,6 +43,7 @@ import { DecisionContext, DecisionControls, sendDecision } from '~/components/de
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Empty } from '~/components/page';
+import { ShareButton } from '~/components/share-button';
 import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
 import { useAssistant, usePageContext } from '~/lib/assistant';
@@ -341,6 +342,7 @@ function OrderView() {
           >
             <MessageSquareText /> Ask
           </Button>
+          <ShareButton title={`${title} ${orderRef(order.id)}`} />
           {!terminal && canOperate ? (
             <Button
               variant="outline"
