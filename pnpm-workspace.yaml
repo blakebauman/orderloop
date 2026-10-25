@@ -19,6 +19,7 @@ catalog:
   lucide-react: ^1.58.0
   radix-ui: ^1.6.0
   tailwind-merge: ^3.0.2
+  recharts: ^3.10.1
 
   # Styling — Tailwind v4 is CSS-first; keep the plugin and core in lockstep
   tailwindcss: ^4.3.3

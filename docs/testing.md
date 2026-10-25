@@ -332,6 +332,7 @@ generated `apps/docs/src/styles/theme.css` is stale. Fix it by mirroring the `ap
 | `origin.test.ts` | `crossOrigin`: reads pass from anywhere; writes from another origin, a sibling subdomain, `null` or plain http are refused; the WebSocket handshake is checked although it is a `GET`; the `Sec-Fetch-Site` fallback; clients with neither header pass; `bearerApiCall` exempts only a bearer call under `/api/v1/` |
 | `logout.test.ts` | `routes/logout.tsx`: a `GET` asks and signs no one out, sends someone already signed out to the sign-in page with `next`, and a `POST` signs out and keeps `next`; a `GET` leaves a pending two-factor sign-in alone, and an off-site `next` is dropped |
 | `ago.test.ts` | `Ago` server-renders a machine-readable time with the UTC time as its tooltip, and a dash without a time |
+| `metrics.test.ts` | `fillDays` gives one row per UTC day, oldest first and ending today, with empty days filled and rows outside the window dropped; `Trends` server-renders the 30-day figures and an empty state for each chart with nothing to show |
 | `inbound.test.ts` | `POST /api/v1/webhooks/orders`: starts the routed flow once per channel and external id, with a payload fingerprint; `ORDER_ROUTES` is used and an unpublished flow refused; a bad signature, a bad body and an unknown currency are refused; each integration is held to its scope (`startOrders`, channel, `flows`) with `403`; a signed order is audited once against its integration (`via: 'webhook'`) and the replay is not |
 | `channels.test.ts` | The channel routes: a Shopify order starts once for the customer matching its email; a bad signature is refused, other topics ignored and unmappable orders reported; an 850 interchange starts one order per PO for the partner's customer; unknown partners, bad X12 and callers below `operator` are refused |
 | `stripe-webhook.test.ts` | `POST /api/v1/webhooks/stripe`: a verified event reaches `EngineRpc.paymentEvent`; any of several `v1` signatures passes; a bad or missing signature is `400` without calling the engine; a `retry` outcome is `409`; an unset secret `503`; a signed body that isn't an event `400` and an engine failure `500` |
@@ -419,6 +420,45 @@ deploy's smoke test requests only `/health`, which the gateway answers without t
 | `.claude/hooks/tests/guard-hooks.test.sh` | `guard-bash` denying deploys, rollbacks, remote migrations, Time Travel restores and resource deletes (also chained after another command) and asking before pushing `main`, force pushes, `gh pr merge`, remote D1 SQL, Worker secrets and provisioning; `guard-invariants` denying an edit to a migration already on `origin/main` (a throwaway repo), the vendored UCP schemas and z-suffixed routes, and asking before the routing golden test; `rules-impact` once per file; `format` fixing and reporting through Biome; `session-context` in a plain checkout and a worktree |
 
 CI runs it in the verify job.
+
+## Catalog benchmark
+
+`scripts/catalog-bench.ts` (`pnpm catalog:bench <deployment> [products]`) measures a deployed catalog
+end to end through its REST API and public catalog, with an operator's or admin's token in
+`ORDERLOOP_API_TOKEN`. It is run by hand, after a deploy that changes publishing, listings or search,
+never in CI. It:
+
+1. saves its own channel `bench` (one locale, `en`), type `bench-apparel` (`material`, `color`, and
+   `size` as the variant axis) and categories (`bench-shop` with five leaves), so it never touches a
+   storefront's catalog;
+2. streams a generated CSV feed of N products (50,000 by default, two variants each, keys
+   `bench-0000000` up, seeded so every run sends the same feed) as it generates it;
+3. polls the feed and the root listing's `total` every 5 seconds (each poll a different page size,
+   so it isn't a cached copy) until the import is done and every product is listed;
+4. samples catalog-edge latencies five times each, as cache misses (page sizes no one asked for) and
+   hits: the root listing, a filtered and sorted page and its next page, a leaf listing, search and a
+   product document;
+5. prints a JSON report (`uploadSeconds`, `importSeconds`, `publishedSeconds`, `productsPerSecond`,
+   and `p50` and `max` per request), then deletes the products five calls of 500 a second (the API's
+   rate limit), waits for the listing to be empty and checks that none of 100 sampled products is
+   still served.
+
+`--keep` leaves the products in place, and `--cleanup` only deletes them, after a run that was
+stopped. A run refuses to start while `bench-shop` still lists products. `publishedSeconds` is from
+the start of the upload to the listing showing every product, so it includes the import and the
+listing's rebuild delay (`debounceMs`) and is an upper bound on publishing alone.
+`scripts/catalog-bench.test.ts` (in `pnpm test:fleet`) checks the generated feed: its header, two
+variant rows a product, unique keys, categories and attribute values its type declares, and that it
+is the same every run.
+
+What it measured on `orderloop` (production), each run with the products deleted afterwards:
+
+| Date | Products | Import | Every product listed | Change |
+|---|---|---|---|---|
+| 2026-10-24 | 1,000,000 | about 8,000 a second | about 370 a second average | #166 (all of a publisher's writes at once) |
+| 2026-10-25 | 250,000 | 177 s (about 1,400 a second) | 341 s from the upload (about 730 a second) | #184 (up to four publish passes in flight per shard) |
+
+Both were run with the scratch scripts that preceded this one, from a feed of the same shape.
 
 ## What isn't covered
 

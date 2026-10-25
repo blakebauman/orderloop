@@ -13,6 +13,7 @@ import { DecisionContext, lockAt } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { Performance } from '~/components/performance';
 import { StatusBadge } from '~/components/status';
+import { Trends } from '~/components/trends';
 import { type ApprovalContext, approvalContext } from '~/lib/approvals';
 import { GROUP_HREF, GROUP_LABEL, type Lane, lanes as laneList } from '~/lib/attention';
 import { requireUser } from '~/lib/auth.server';
@@ -351,6 +352,8 @@ export default function Dashboard() {
             </Section>
           </div>
         </div>
+
+        <Trends daily={perf.daily} />
 
         <Performance p={perf} />
       </div>
