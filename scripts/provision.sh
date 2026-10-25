@@ -88,6 +88,10 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
       echo "  sends aiGatewayLogs on every call, so this only matters for calls made outside it; match"
       echo "  it in the dashboard (AI > AI Gateway > $AI_GATEWAY > Settings), and delete logs kept so far."
     fi
+    if [ "$(jq -r '[.result.retry_max_attempts, .result.retry_delay, .result.retry_backoff] | map(tostring) | join(" ")' <<<"$existing_gw")" != "3 500 exponential" ]; then
+      echo "  Its retries aren't orderloop's (3 attempts, 500 ms, exponential): set them in the"
+      echo "  dashboard (AI > AI Gateway > $AI_GATEWAY > Settings > Retry Requests)."
+    fi
   else
     curl -fsS -X POST "$api" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
       -H 'Content-Type: application/json' \
@@ -95,7 +99,8 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
         id: $id, authentication: true, collect_logs: $logs,
         log_management: 100000, log_management_strategy: "DELETE_OLDEST",
         cache_ttl: 0, cache_invalidate_on_update: false,
-        rate_limiting_limit: 120, rate_limiting_interval: 60, rate_limiting_technique: "sliding"
+        rate_limiting_limit: 120, rate_limiting_interval: 60, rate_limiting_technique: "sliding",
+        retry_max_attempts: 3, retry_delay: 500, retry_backoff: "exponential"
       }')" >/dev/null
     echo "Created AI Gateway $AI_GATEWAY"
   fi
