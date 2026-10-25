@@ -51,6 +51,11 @@
       "summary": "Subtotal $349.00",
       "branches": ["out"]
     },
+    "promo": {
+      "status": "succeeded",
+      "summary": "No promotion codes",
+      "branches": ["out"]
+    },
     "shipping": {
       "status": "succeeded",
       "summary": "No shipping (pick up in store)",
