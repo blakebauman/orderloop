@@ -557,7 +557,8 @@ decides who that is.
 **Publishers.** `pluginInstalls.publishers` in `deployments/<id>.jsonc` names each trusted
 publisher's Ed25519 public key (base64url, the raw 32 bytes):
 `"pluginInstalls": { "publishers": { "orderloop": "…43 characters…" } }`. `renderEngine` writes it
-to the engine's `PLUGIN_PUBLISHERS`. A deployment without it has runtime installs off: an upload is
+to the engine's `PLUGIN_PUBLISHERS`. A deployment without it has runtime installs off: the Plugins page
+shows no upload form (`pluginPublishers`, the names only, never the keys), and an upload is still
 refused with `Runtime installs are off for this deployment`. Adding or rotating a key is a reviewed
 registry change ([Operations](operations.md#plugin-publishers)).
 

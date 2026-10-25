@@ -143,6 +143,16 @@ afterEach(async () => {
 });
 
 describe('installing a plugin at runtime', () => {
+  it('names the publishers it trusts, and none without the registry’s', () => {
+    expect(installs.publisherNames(env)).toEqual(['acme']);
+    expect(installs.publisherNames({ ...env, PLUGIN_PUBLISHERS: '' } as unknown as Env)).toEqual(
+      [],
+    );
+    expect(installs.publisherNames({ ...env, PLUGIN_PUBLISHERS: '{' } as unknown as Env)).toEqual(
+      [],
+    );
+  });
+
   it('refuses a bundle the deployment can’t trust', async () => {
     const v1 = bundles.v1.body;
     const refused = async (file: string, e = env) =>

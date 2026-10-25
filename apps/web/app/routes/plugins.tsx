@@ -33,10 +33,11 @@ const RECENT = 10;
 
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
-  const [statuses, installs, stepUp] = await Promise.all([
+  const [statuses, installs, stepUp, publishers] = await Promise.all([
     engine().pluginCatalog(),
     engine().listPluginInstalls(),
     stepUpMethod(me),
+    engine().pluginPublishers(),
   ]);
   const plugins = await Promise.all(
     statuses.map(async (s) => {
@@ -74,7 +75,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .where(inArray(users.id, ids))
     : [];
   const names = Object.fromEntries(people.map((u) => [u.id, u.name]));
-  return { plugins, installs: shown, stepUp, names };
+  return { plugins, installs: shown, stepUp, names, publishers };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -96,7 +97,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Plugins() {
-  const { plugins, installs, stepUp, names } = useLoaderData<typeof loader>();
+  const { plugins, installs, stepUp, names, publishers } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const pending = installs.filter((i) => i.status === 'pending');
   // A plugin turned off is out of the catalog, but still installed: it keeps its controls.
@@ -118,7 +119,8 @@ export default function Plugins() {
             {result.ok ? result.done : result.error}
           </p>
         ) : null}
-        <Upload />
+        {/* Without a trusted publisher every upload would be refused, so there is no form. */}
+        {publishers.length ? <Upload publishers={publishers} /> : null}
         {pending.map((i) => (
           <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
         ))}
@@ -170,7 +172,7 @@ const busyWith = (state: ReturnType<typeof useNavigation>, intent: string, key: 
   state.formData?.get('intent') === intent &&
   (state.formData.get('sha') ?? state.formData.get('id')) === key;
 
-function Upload() {
+function Upload({ publishers }: { publishers: string[] }) {
   const nav = useNavigation();
   const busy = nav.state !== 'idle' && nav.formData?.get('intent') === 'upload';
   return (
@@ -179,7 +181,7 @@ function Upload() {
         <input type="hidden" name="intent" value="upload" />
         <Field
           label="Plugin file"
-          hint="A .olplugin signed by a publisher this workspace trusts. Nothing runs until you approve it."
+          hint={`A .olplugin signed by ${publishers.join(', ')}, which this workspace trusts. Nothing runs until you approve it.`}
         >
           <Input type="file" name="bundle" accept=".olplugin,application/json" required />
         </Field>

@@ -105,6 +105,9 @@ function publishers(env: Env): Record<string, string> {
   }
 }
 
+/** The trusted publishers' names, for the Plugins page: uploading is off without one. */
+export const publisherNames = (env: Env) => Object.keys(publishers(env)).sort();
+
 /** Whether this deployment lets the assistant draft plugins (`pluginInstalls.assistant`). */
 export const assistantDrafts = (env: Env) =>
   (env as unknown as { ASSISTANT_PLUGINS?: string }).ASSISTANT_PLUGINS === 'on';
