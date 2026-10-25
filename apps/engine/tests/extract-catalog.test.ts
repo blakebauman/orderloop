@@ -9,8 +9,10 @@ import {
   type RunContext,
 } from '@orderloop/core';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { EngineApi } from '../src/api';
 import { EXECUTORS } from '../src/nodes';
 import { EMBEDDING_MODEL, extractCatalog, reindexProducts } from '../src/product-index';
+import { signedActor } from './principal';
 
 /**
  * What `ai.extract` shows the model: the whole catalog while it is small, and for a catalog of
@@ -233,9 +235,9 @@ describe('reindexProducts', () => {
     const total = BULK + 2;
 
     const first = await reindexProducts(e, 3_000);
-    expect(first).toEqual({ indexed: 3_000, removed: 0, more: true });
+    expect(first).toEqual({ status: 'done', indexed: 3_000, removed: 0, more: true });
     const second = await reindexProducts(e, 3_000);
-    expect(second).toEqual({ indexed: total - 3_000, removed: 0, more: false });
+    expect(second).toEqual({ status: 'done', indexed: total - 3_000, removed: 0, more: false });
     expect(new Set(upserted.map((v) => v.id)).size).toBe(total);
     expect(upserted.find((v) => v.id === 'VLV-220')!.metadata).toEqual({
       name: 'Brass ball valve 1/2"',
@@ -248,7 +250,12 @@ describe('reindexProducts', () => {
 
     // Nothing changed: nothing written. A run repeats harmlessly.
     upserted.length = 0;
-    expect(await reindexProducts(e)).toEqual({ indexed: 0, removed: 0, more: false });
+    expect(await reindexProducts(e)).toEqual({
+      status: 'done',
+      indexed: 0,
+      removed: 0,
+      more: false,
+    });
     expect(upserted).toEqual([]);
 
     // A rename re-embeds that SKU alone; a deleted SKU's vector goes.
@@ -258,10 +265,20 @@ describe('reindexProducts', () => {
       .bind(sku(1))
       .run();
     await db.prepare('DELETE FROM products WHERE sku = ?').bind(sku(2)).run();
-    expect(await reindexProducts(e)).toEqual({ indexed: 1, removed: 1, more: false });
+    expect(await reindexProducts(e)).toEqual({
+      status: 'done',
+      indexed: 1,
+      removed: 1,
+      more: false,
+    });
     expect(upserted.map((v) => v.id)).toEqual([sku(1)]);
     expect(deleted).toEqual([sku(2)]);
-    expect(await reindexProducts(e)).toEqual({ indexed: 0, removed: 0, more: false });
+    expect(await reindexProducts(e)).toEqual({
+      status: 'done',
+      indexed: 0,
+      removed: 0,
+      more: false,
+    });
   });
 
   it('records nothing when the index write fails, so the next run retries', async () => {
@@ -282,11 +299,111 @@ describe('reindexProducts', () => {
   });
 
   it('does nothing without the index or in mock mode', async () => {
-    expect(await reindexProducts(live(null).env)).toEqual({ skipped: true });
+    expect(await reindexProducts(live(null).env)).toEqual({ status: 'no_index' });
     const { stub } = index();
-    expect(await reindexProducts(mock(live(null, stub).env))).toEqual({
-      skipped: true,
+    expect(await reindexProducts(mock(live(null, stub).env))).toEqual({ status: 'no_index' });
+    expect(await reindexProducts(env)).toEqual({ status: 'no_index' });
+  });
+
+  it('runs one at a time: a second run while the first holds the lease is busy', async () => {
+    const db = testEnv.EXTRACT_DB;
+    await db
+      .prepare("UPDATE products SET name = 'Steel bushing, bronze' WHERE sku = ?")
+      .bind(sku(4))
+      .run();
+    // The first run's index write waits until the second has answered.
+    let open!: () => void;
+    const gate = new Promise<void>((r) => {
+      open = r;
     });
-    expect(await reindexProducts(env)).toEqual({ skipped: true });
+    const { stub, upserted } = index();
+    const slow: Partial<VectorizeIndex> = {
+      ...stub,
+      upsert: async (v) => {
+        await gate;
+        return stub.upsert!(v);
+      },
+    };
+    const first = reindexProducts(live(null, slow).env);
+    // Until the first has the lease, a second could take it first; wait for the row.
+    while (!(await db.prepare('SELECT 1 FROM product_index_lease').first()))
+      await new Promise((r) => setTimeout(r, 5));
+    const second = await reindexProducts(live(null, stub).env);
+    expect(second).toEqual({ status: 'busy' });
+    expect(upserted).toEqual([]);
+    open();
+    expect(await first).toEqual({ status: 'done', indexed: 1, removed: 0, more: false });
+    expect(upserted.map((v) => v.id)).toEqual([sku(4)]);
+    // The lease is given back, so the next run goes ahead.
+    expect(await db.prepare('SELECT count(*) AS n FROM product_index_lease').first('n')).toBe(0);
+    expect(await reindexProducts(live(null, stub).env)).toMatchObject({ status: 'done' });
+  });
+
+  it('takes a lease its holder left to lapse, and not one still running', async () => {
+    const db = testEnv.EXTRACT_DB;
+    const hold = (expiresAt: number) =>
+      db
+        .prepare(
+          'INSERT OR REPLACE INTO product_index_lease (id, holder, expires_at) VALUES (1, ?, ?)',
+        )
+        .bind('crashed', expiresAt)
+        .run();
+    const { stub } = index();
+    await hold(Date.now() + 60_000);
+    expect(await reindexProducts(live(null, stub).env)).toEqual({ status: 'busy' });
+    await hold(Date.now() - 1);
+    expect(await reindexProducts(live(null, stub).env)).toMatchObject({ status: 'done' });
+    expect(await db.prepare('SELECT count(*) AS n FROM product_index_lease').first('n')).toBe(0);
+  });
+});
+
+describe('EngineRpc.reindexProducts', () => {
+  const admin = { kind: 'staff', id: 'usr_admin', name: 'ann@example.com', role: 'admin' } as const;
+  const api = (e: Env) => new EngineApi({ waitUntil: () => {} } as never, e);
+  const stub: Partial<VectorizeIndex> = {
+    upsert: async (v) => ({ ids: v.map((x) => x.id), count: v.length }) as never,
+    deleteByIds: async (ids) => ({ ids, count: ids.length }) as never,
+  };
+
+  it('runs for an admin and answers with what it did', async () => {
+    await testEnv.EXTRACT_DB.prepare(
+      "UPDATE products SET name = 'Steel collar, split' WHERE sku = ?",
+    )
+      .bind(sku(9))
+      .run();
+    const r = await api(live(null, stub).env).reindexProducts(
+      await signedActor(admin, 'reindex-products'),
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: { status: 'done', indexed: 1, removed: 0, more: false },
+    });
+  });
+
+  it('says there is no index rather than failing without one', async () => {
+    const r = await api(env).reindexProducts(await signedActor(admin, 'reindex-products'));
+    expect(r).toEqual({ ok: true, value: { status: 'no_index' } });
+  });
+
+  it('refuses anyone below Admin, and an actor signed for another call or not at all', async () => {
+    let calls = 0;
+    const counted: Partial<VectorizeIndex> = {
+      ...stub,
+      upsert: async (v) => {
+        calls++;
+        return stub.upsert!(v);
+      },
+    };
+    const e = live(null, counted).env;
+    const operator = { ...admin, id: 'usr_op', role: 'operator' } as const;
+    expect(await api(e).reindexProducts(await signedActor(operator, 'reindex-products'))).toEqual({
+      ok: false,
+      error: 'This needs the Admin role.',
+    });
+    expect(await api(e).reindexProducts(await signedActor(admin, 'decide:ord_1'))).toMatchObject({
+      ok: false,
+    });
+    expect(await api(e).reindexProducts('not signed')).toMatchObject({ ok: false });
+    expect(calls).toBe(0);
   });
 });

@@ -182,6 +182,16 @@ export const productVectors = sqliteTable('product_vectors', {
   indexedAt: integer('indexed_at').notNull(),
 });
 
+/**
+ * The one lease a product index reindex holds while it runs (`id` is always 1), so the hourly cron
+ * and an admin's run never overlap; free once `expiresAt` (ms) has passed.
+ */
+export const productIndexLease = sqliteTable('product_index_lease', {
+  id: integer('id').primaryKey(),
+  holder: text('holder').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+});
+
 /** A store that holds its own stock, for pickup, ship-from-store and point of sale. */
 export const locations = sqliteTable('locations', {
   id: text('id').primaryKey(),

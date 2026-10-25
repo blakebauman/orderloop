@@ -42,6 +42,7 @@ import { installedPlugins, pinnedManifest } from './plugin-host';
 import * as installs from './plugin-installs';
 import { manifests, plugin, pluginStatuses, pluginUsage } from './plugins';
 import { rpcActor } from './principal';
+import { reindexProducts } from './product-index';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
 import { ucpProfile } from './ucp/config';
@@ -154,6 +155,14 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async runReplenish() {
     const instance = await this.env.REPLENISH.create({ params: {} });
     return { instanceId: instance.id };
+  }
+
+  async reindexProducts(signed: SignedActor) {
+    const actor = await rpcActor(this.env, signed, 'reindex-products');
+    if (actor?.kind !== 'staff') return UNSIGNED;
+    if (!atLeast(actor.role, 'admin'))
+      return { ok: false as const, error: 'This needs the Admin role.' };
+    return { ok: true as const, value: await reindexProducts(this.env) };
   }
 
   async health() {

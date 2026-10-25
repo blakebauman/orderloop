@@ -33,6 +33,7 @@ import {
   recentInboundEmails,
   waitingOrders,
 } from '~/lib/orders.server';
+import { updateProductIndex } from '~/lib/product-index.server';
 import { RECORD_KINDS, type RecordKind, type RecordRow, recordTone } from '~/lib/records';
 import { recentRecords } from '~/lib/records.server';
 import { useCan } from '~/lib/use-me';
@@ -103,7 +104,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request, 'operator');
+  const me = await requireUser(request, 'operator');
+  // An admin's, refused for anyone else (`updateProductIndex`).
+  if ((await request.formData()).get('intent') === 'product-index')
+    return { productIndex: await updateProductIndex(request, me) };
   try {
     await engine().runReplenish();
     return { started: true as const };
@@ -124,7 +128,9 @@ export function shouldRevalidate({
   formData,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
-  if (formData?.get('intent') === 'event') return false;
+  // Nor does updating the product index change anything the page shows.
+  if (formData?.get('intent') === 'event' || formData?.get('intent') === 'product-index')
+    return false;
   return defaultShouldRevalidate;
 }
 
@@ -152,9 +158,11 @@ export default function Commerce() {
   const events = allEvents.filter(
     (e) => !term || [e.title, e.customer, e.orderId].some((x) => x?.toLowerCase().includes(term)),
   );
-  const review = useActionData<typeof action>();
+  const answered = useActionData<typeof action>();
+  const review = answered && 'started' in answered ? answered : undefined;
   const nav = useNavigation();
   const canOperate = useCan('operator');
+  const canAdmin = useCan('admin');
   const [recorded, setRecorded] = useState<ReadonlySet<string>>(new Set());
   const open = events.filter((e) => !recorded.has(eventKey(e))).length;
   // The stock review is the only form on this page that navigates.
@@ -475,6 +483,7 @@ export default function Commerce() {
             </table>
           </div>
           <Pager list={inventory} listKey="inventory" hash="stock" label="Inventory" />
+          {canAdmin ? <ProductIndexUpdate /> : null}
         </Section>
         <Section id="stores" title="Stores" flush>
           <div className="overflow-x-auto">
@@ -700,6 +709,40 @@ export default function Commerce() {
         </Section>
       </div>
     </>
+  );
+}
+
+/**
+ * An admin's run of the product index now, rather than at the next hourly update: after a large
+ * import, say. It answers with what the run did; the page around it doesn't change.
+ */
+function ProductIndexUpdate() {
+  const f = useFetcher<typeof action>();
+  const running = f.state !== 'idle';
+  const r = f.data && 'productIndex' in f.data ? f.data.productIndex : null;
+  return (
+    <f.Form
+      method="post"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t px-4 py-2.5"
+    >
+      <input type="hidden" name="intent" value="product-index" />
+      <Button type="submit" size="sm" variant="outline" disabled={running}>
+        {running ? 'Updating index…' : 'Update product index'}
+      </Button>
+      <p
+        aria-live="polite"
+        className={cn(
+          'min-w-0 flex-1 basis-56 text-xs',
+          r && !r.ok ? 'text-bad' : 'text-muted-foreground',
+        )}
+      >
+        {r
+          ? r.ok
+            ? r.message
+            : r.error
+          : 'Order extraction finds products by meaning once they are in the index, which updates hourly. Update it now after a large import.'}
+      </p>
+    </f.Form>
   );
 }
 

@@ -37,6 +37,22 @@ suite('audit vocabulary', () => {
     ).toBe('Signed in: two-factor app');
     expect(
       describe({
+        action: 'catalog.products_indexed',
+        actor: 'ann@example.com',
+        target: null,
+        detail: { status: 'done', indexed: 3000, removed: 2, more: true },
+      }),
+    ).toBe('Updated the product index: 3000 added or renamed, 2 removed, more waiting');
+    expect(
+      describe({
+        action: 'catalog.products_indexed',
+        actor: 'ann@example.com',
+        target: null,
+        detail: { status: 'busy' },
+      }),
+    ).toBe('Updated the product index: skipped, another run was going');
+    expect(
+      describe({
         action: 'auth.recovery_code_used',
         actor: 'ann@example.com',
         target: 'ann@example.com',
