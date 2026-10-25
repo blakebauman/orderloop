@@ -21,7 +21,7 @@ const entry = (
   brand: string,
   color: string[],
   price: number,
-  createdAt = uid,
+  createdAt = uid * 1_000,
 ): IndexEntry => ({
   key: `p${uid}`,
   uid,
@@ -54,7 +54,7 @@ const many = Array.from({ length: 300 }, (_, i) =>
     ['acme', 'globex', 'hooli'][i % 3] as string,
     i % 4 ? ['red'] : ['blue'],
     ((i * 7919) % 13) * 100,
-    Math.floor(i / 10),
+    Math.floor(i / 10) * 1_000,
   ),
 );
 let teesSegments: number[] = [];
@@ -334,10 +334,26 @@ describe('held listing indexes', () => {
     expect(Math.max(...sizes)).toBeLessThan(INDEX_LIMITS.max);
     const r = await get('/v1/web/en/categories/many/products');
     expect(r.status).toBe(503);
-    expect(await r.json()).toEqual({ error: 'listing unavailable' });
+    expect(await r.json()).toEqual({ error: 'listing too large' });
     expect(heldListings().listings.has('web/many')).toBe(false);
     INDEX_LIMITS.max = sum;
     expect(await total('many')).toBe(300);
+  });
+
+  it('answers 503 for a listing with a segment in another format until it is rebuilt', async () => {
+    const entries = [entry(9101, 'acme', [], 100), entry(9102, 'acme', [], 200)];
+    await publish('older', entries, spec);
+    const s = listingSegment('p9101');
+    const old = buildListingIndex([entries[0] as IndexEntry], spec);
+    new DataView(old.buffer, old.byteOffset).setUint32(4, 2, true);
+    await env.PUBLISHED.put(paths.listing(DOC_FORMAT, 'web', 'older', s), old);
+    const r = await get('/v1/web/en/categories/older/products');
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ error: 'listing rebuilding' });
+    expect(heldListings().listings.has('web/older')).toBe(false);
+    await publish('older', entries, spec);
+    forgetListings();
+    expect(await total('older')).toBe(2);
   });
 });
 

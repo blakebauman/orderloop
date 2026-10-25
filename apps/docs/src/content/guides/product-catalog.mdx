@@ -197,11 +197,16 @@ A category listing takes:
 | `cursor`, `limit` | Page with the previous answer's `next` as `cursor`, passed back exactly as it came: it is an opaque token (a malformed one answers `400`), and pages followed this way never skip or repeat a product. `limit` is 1 to 100 (24 by default) |
 
 The answer is `{ total, next, sorts, products, facets, ranges }`. `next` is a string, `null` on the
-last page.
+last page. `newest` orders by creation time to the second; products created in the same second keep
+one fixed order between them.
 `facets` maps each filterable attribute to `{ label, values: [{ value, label, count }] }` (at most 50
 values, most products first); each attribute's counts ignore its own filter, so choosing a brand still
 shows how many products every other brand has. `ranges` gives `min`, `max` and, where the attribute
 declares `buckets`, counts per bucket.
+
+A category page holds up to about 1.5 million products (fewer when products have many filterable
+or sortable attributes). A larger category answers `503` with `{ "error": "listing too large" }`:
+split it into subcategories, or find its products with search.
 
 Search takes `q`, `cursor` and `limit` and answers `{ total, next, products }` (a
 `partial: true` marks an answer that couldn't reach every part of the index; retry shortly). Terms

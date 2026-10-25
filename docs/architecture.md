@@ -550,7 +550,17 @@ members) took 30 to 36 seconds per rebuild (alarm p99). From about 600,000 membe
 batches queued behind the rebuild until the object refused them (`Durable Object is overloaded`,
 292 errors), and at about 900,000, with changes still arriving, the rebuild overran storage and the
 object was reset, so the index stopped publishing until the feed ended. Leaf categories of up to
-250,000 were fine; the target is 10M products a category, which is 1.25M a segment.
+250,000 were fine.
+
+How large a category can be is set by the edge, not the indexers: `catalog-edge` holds a listing's
+segments whole, in an isolate of 128 MB, so their bytes together are capped at `LISTING_MAX_BYTES`
+(64 MiB). A member with four facets, a price on three variants and a sorted price, and one more number
+costs about 40 bytes (the size test in `product-listing.test.ts`), so a category holds about 1.5
+million products; more facets or numbers mean fewer. A larger set of products is for search, not a
+category page. After a build, an indexer whose segment is over 80% of its share of the cap
+(`LISTING_MAX_BYTES / LISTING_SEGMENTS`) logs `listing_near_cap` with the channel, category,
+segment, members, bytes and `share` (of the cap the whole listing is estimated at, since segments
+are about the same size).
 
 Four parts:
 
@@ -582,17 +592,24 @@ whose new document format, locale or labels change the index without changing th
   changes during a build rebuild once more after the debounce. The build uses the config at the
   highest `rev` its changes carry (`ListingChange.rev`), from an isolate copy at most 2 seconds old.
   The alarm streams the members, ordered
-  newest first (`created_at DESC, uid`), into `ListingIndexBuilder` (uids and their `createdAt`, then each term value's members, then each numeric
+  newest first by the second (`CAST(created_at / 1000 AS INTEGER) DESC, uid`, index `members_second`; the builder refuses any other order), into `ListingIndexBuilder` (uids and their `createdAt`, then each term value's members, then each numeric
   column, counted per member with a `GROUP BY uid` and then filled in place, then `finish`) and puts `idx/f1/<channel>/<category>/<segment>.bin` in `PUBLISHED` with custom
   metadata `members` and `builtAt`, and records `members` in `settings` for the next debounce. `buildListingIndex` is the same builder over an in-memory array
-  (tests). A channel that no longer exists keeps its last index. The blob is format 2 (the header's
-  version; the decoder refuses any other): format 1 had no `createdAt` column, and its single-blob
-  objects and paths are simply abandoned, a `reindex` repopulating the segments.
+  (tests). A channel that no longer exists keeps its last index. The blob is format 3 (the header's
+  version; the decoder refuses any other, so after a deploy that changes it a listing whose
+  segments aren't all rebuilt answers `503` `listing rebuilding` (`MISSING`) rather than a partial
+  page: run a `reindex`). A build that throws leaves the segment `dirty` and logs
+  `listing_build_failed`, so the alarm's retry builds it again. Format 3 stores creation times as
+  whole seconds (`listingSecond`, Uint32), each member's distinct values only, and a numeric column
+  no member has two values in as one value per member with no offsets (a missing value is
+  `-2^31` in an Int32 column, `NaN` in a Float64 one), which took a typical member from about 54
+  bytes to 40. Format 2 stored `createdAt` in milliseconds (Float64) and every value with offsets;
+  format 1 had no `createdAt`.
 - **Querying.** `queryListing(segments, q)` runs the filters on every segment (`ListingIndex.scan`)
   and adds up: `total` and each facet value's count are summed (then sorted by count, then value),
   a range's `min` and `max` span the segments, and its buckets, counted with the same edges in each,
   are summed. The page is a k-way merge of the segments' own orders by the sort key: `newest` is
-  `createdAt` descending, `<attr>_asc` a member's lowest value ascending and `<attr>_desc` its
+  the creation second descending (products created in the same second are in uid order), `<attr>_asc` a member's lowest value ascending and `<attr>_desc` its
   highest descending (members without a value last either way, so a segment with no values for the
   attribute is all last), each tie broken by `createdAt` descending and then uid, which is also the
   order within a segment. The cursor is each segment's position in its order, in base 36 joined by `.`
@@ -757,8 +774,8 @@ seconds and then revalidated with its ETag, so an unchanged segment is a `304` a
 downloaded or decoded again; an empty one is asked for again. Concurrent requests for one listing
 share one load (a request waits on another's for at most 5 seconds, then loads it itself). The
 internal path sends each segment's `content-length`, and a listing whose segments (held and
-fetched) add up to more than 64 MiB (`INDEX_LIMITS.max`) is never buffered: the page is `503`
-(`listing unavailable`, `MISSING`) and the size is logged. The bytes actually read are held to the
+fetched) add up to more than `LISTING_MAX_BYTES` (64 MiB, `INDEX_LIMITS.max`) is never buffered:
+the page is `503` (`listing too large`, `MISSING`) and the size is logged. The bytes actually read are held to the
 same cap. A page reads its cards from KV in one bulk `get` (a
 card missing from KV is skipped) and returns facets (`{ attr: { label, values: [{ value, label, count }] } }`,
 the top 50 values by count, counted disjunctively over the whole result) and ranges

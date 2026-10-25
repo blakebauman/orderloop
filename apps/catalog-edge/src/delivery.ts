@@ -10,6 +10,7 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
+  LISTING_MAX_BYTES,
   LISTING_SEGMENTS,
   ListingIndex,
   listingLabels,
@@ -40,7 +41,7 @@ const INDEX_PATH = '/_idx/';
  */
 export const INDEX_LIMITS = {
   budget: 32 * 1024 * 1024,
-  max: 64 * 1024 * 1024,
+  max: LISTING_MAX_BYTES,
   trustMs: 30_000,
 };
 /** How long a request waits on another's load of the same listing before loading it itself. */
@@ -61,6 +62,8 @@ const loading = new Map<string, Promise<(ListingIndex | null)[] | null>>();
 const uidCache = new Map<string, number>();
 
 class IndexTooLarge extends Error {}
+/** A segment this Worker can't decode: built in another format, until a reindex rebuilds it. */
+class IndexUnreadable extends Error {}
 
 /**
  * Holds listing `id`, most recently used, and evicts other listings, least recently used first,
@@ -408,8 +411,14 @@ export class Delivery extends WorkerEntrypoint<Env> {
         bytes += buffer.byteLength;
         if (bytes > INDEX_LIMITS.max)
           throw new IndexTooLarge(`listing index ${id} is over the cap`);
+        let index: ListingIndex;
+        try {
+          index = new ListingIndex(buffer);
+        } catch (err) {
+          throw new IndexUnreadable(`listing index ${id}: ${(err as Error).message}`);
+        }
         return {
-          index: new ListingIndex(buffer),
+          index,
           etag: r.headers.get('etag') ?? '',
           bytes: buffer.byteLength,
           checked,
@@ -434,9 +443,17 @@ export class Delivery extends WorkerEntrypoint<Env> {
     try {
       segments = await this.loadListing(route.channel, route.category);
     } catch (err) {
+      if (err instanceof IndexUnreadable) {
+        console.error(err.message);
+        // A deploy changed the index format and this listing isn't rebuilt yet: not a partial page.
+        return json(JSON.stringify({ error: 'listing rebuilding' }), 503, {
+          'cache-control': MISSING,
+        });
+      }
       if (!(err instanceof IndexTooLarge)) throw err;
       console.error(err.message);
-      return json(JSON.stringify({ error: 'listing unavailable' }), 503, {
+      // Not a passing failure: the category is larger than a listing can be. Search covers it.
+      return json(JSON.stringify({ error: 'listing too large' }), 503, {
         'cache-control': MISSING,
       });
     }

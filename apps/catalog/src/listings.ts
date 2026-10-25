@@ -24,6 +24,8 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   DOC_FORMAT,
   type IndexEntry,
+  LISTING_MAX_BYTES,
+  LISTING_SEGMENTS,
   ListingIndexBuilder,
   listingSegment,
   listingSpec,
@@ -86,6 +88,15 @@ export function entrySignature(e: IndexEntry): string {
       .map((k) => [k, o[k]]);
   return JSON.stringify([e.uid, e.createdAt, sorted(e.terms), sorted(e.numbers)]);
 }
+/** A member's creation second in SQL, as `listingSecond` computes it: the index's order. */
+const SECOND = 'CAST(created_at / 1000 AS INTEGER)';
+
+/**
+ * A segment's share of `LISTING_MAX_BYTES` past which its listing is reported as nearly full.
+ * Segments split a category by key hash, so they are about the same size.
+ */
+const NEAR_CAP = 0.8;
+
 /** Tombstones are kept long enough to outlive any redelivered change. */
 const TOMBSTONE_MS = 24 * 60 * 60 * 1000;
 
@@ -218,7 +229,8 @@ export class ListingIndexer extends DurableObject<Env> {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS members (
         key TEXT PRIMARY KEY, uid INTEGER, at INTEGER NOT NULL, created_at INTEGER, live INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS members_order ON members (live, created_at DESC, uid);
+      DROP INDEX IF EXISTS members_order;
+      CREATE INDEX IF NOT EXISTS members_second ON members (live, ${SECOND} DESC, uid);
       CREATE TABLE IF NOT EXISTS terms (uid INTEGER NOT NULL, attr TEXT NOT NULL, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS terms_attr ON terms (attr, value);
       CREATE INDEX IF NOT EXISTS terms_uid ON terms (uid);
@@ -338,7 +350,23 @@ export class ListingIndexer extends DurableObject<Env> {
     const spec = listingSpec(config.types, channel);
     const builtAt = Date.now();
     this.set('dirty', 0);
-    const bytes = this.build(spec, builtAt);
+    let bytes: Uint8Array;
+    try {
+      bytes = this.build(spec, builtAt);
+    } catch (err) {
+      // Still dirty, so the alarm's retry builds it again rather than finding nothing to do.
+      this.set('dirty', 1);
+      console.error(
+        JSON.stringify({
+          type: 'listing_build_failed',
+          channel: channelCode,
+          category,
+          segment,
+          error: String(err),
+        }),
+      );
+      throw err;
+    }
     const members = this.count();
     await this.env.PUBLISHED.put(paths.listing(DOC_FORMAT, channelCode, category, segment), bytes, {
       httpMetadata: { contentType: 'application/octet-stream' },
@@ -346,6 +374,20 @@ export class ListingIndexer extends DurableObject<Env> {
     });
     this.set('built', builtAt);
     this.set('members', members);
+    // The edge holds a listing's segments whole and refuses one over the cap: say so before then.
+    const share = (bytes.byteLength * LISTING_SEGMENTS) / LISTING_MAX_BYTES;
+    if (share > NEAR_CAP)
+      console.warn(
+        JSON.stringify({
+          type: 'listing_near_cap',
+          channel: channelCode,
+          category,
+          segment,
+          members,
+          bytes: bytes.byteLength,
+          share: Math.round(share * 100) / 100,
+        }),
+      );
     // Changes that arrived while building rebuild once more, after the debounce.
     if (this.setting('dirty') === '1') await this.ctx.storage.setAlarm(builtAt + this.debounce());
   }
@@ -358,7 +400,7 @@ export class ListingIndexer extends DurableObject<Env> {
     const created = new Float64Array(n);
     let i = 0;
     for (const r of this.sql.exec<{ uid: number; created_at: number }>(
-      'SELECT uid, created_at FROM members WHERE live = 1 ORDER BY created_at DESC, uid',
+      `SELECT uid, created_at FROM members WHERE live = 1 ORDER BY ${SECOND} DESC, uid`,
     )) {
       created[i] = r.created_at;
       ids[i++] = r.uid;
