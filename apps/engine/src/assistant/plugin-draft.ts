@@ -30,6 +30,14 @@ import {
 import { createDb, installedPlugins } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { runJson } from '../ai';
+
+/**
+ * How long the model may take to write a draft: up to 4,096 tokens of code and cases from the
+ * assistant's model, far past the 20 seconds an order step's model call gets. An admin asked for
+ * it and waits on it; no order does.
+ */
+export const DRAFT_TIMEOUT_MS = 120_000;
+
 import { recordAudit } from '../audit';
 import { runCases } from '../plugin-cases';
 import { assistantDrafts, InstallRefused, sha256, stageBundle } from '../plugin-installs';
@@ -439,7 +447,7 @@ async function draft(
     ],
     DRAFT_SCHEMA,
     () => heuristicDraft(ask),
-    { model: String(env.ASSISTANT_MODEL), maxTokens: 4096 },
+    { model: String(env.ASSISTANT_MODEL), maxTokens: 4096, timeoutMs: DRAFT_TIMEOUT_MS },
   );
   // Only mock mode drafts without the model: a failed call must not pass off a stock rule.
   if (answer.source === 'heuristic' && answer.fallback !== 'mock')

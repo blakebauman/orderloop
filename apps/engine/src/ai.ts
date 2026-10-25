@@ -70,8 +70,11 @@ export async function runJson<T>(
   messages: Msg[],
   schema: Record<string, unknown>,
   fallback: () => T,
-  /** Another model than `AI_MODEL` (the assistant's, to write code) and a larger answer. */
-  opts: { model?: string; maxTokens?: number } = {},
+  /**
+   * Another model than `AI_MODEL` (the assistant's, to write code), a larger answer, and longer to
+   * write it than `AI_TIMEOUT_MS`, for a call no order step waits on.
+   */
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {},
 ): Promise<{ value: T } & AiProvenance> {
   const model = opts.model ?? String(env.AI_MODEL);
   const id = promptId(prompt);
@@ -94,7 +97,7 @@ export async function runJson<T>(
         } as never,
         env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined,
       ),
-      AI_TIMEOUT_MS,
+      opts.timeoutMs ?? AI_TIMEOUT_MS,
     )) as { response?: unknown };
     const raw = res.response;
     const value = (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
