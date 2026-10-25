@@ -150,7 +150,9 @@ The [expressions reference](/reference/expressions/) has the operators and the p
 
 Each commerce, AI, Condition and Set node runs as one durable step. Its retry limit is the node's
 `retries`, else the node type's default (`commerce.charge` has `0`), else `3`, with a 5-second
-exponential backoff. Its timeout is the node's `timeout`, else `"5 minutes"`. Approval,
+exponential backoff. An AI node whose model call fails uses these retries before it falls back
+to its heuristic on the last attempt ([AI nodes](/guides/ai/)). Its timeout is the node's
+`timeout`, else `"5 minutes"`. Approval,
 Wait-for-event and Wait nodes don't use these; their waits have their own `timeout` field.
 
 ## Publishing and versions

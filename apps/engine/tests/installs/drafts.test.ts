@@ -1,6 +1,11 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { type OrderState, type Principal, validateGraph } from '@orderloop/core';
+import {
+  ASSISTANT_BUDGET_SPENT,
+  type OrderState,
+  type Principal,
+  validateGraph,
+} from '@orderloop/core';
 import { createDb, installedPlugins, publishFlow } from '@orderloop/db';
 import { pluginContract } from '@orderloop/plugin-sdk/contract';
 import { eq } from 'drizzle-orm';
@@ -160,6 +165,59 @@ describe('plugins the assistant drafts', () => {
     const second = await draftPlugin(answering(answer({ name: 'Same name' })), admin, 'b', via);
     expect([first.id, second.id]).toEqual(['ai-same-name', 'ai-same-name-2']);
     expect(second.version).toBe('1');
+  });
+
+  it('asks for code without reasoning, with room to write it, and counts its tokens', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const counted = {
+      ...env,
+      AI_MODE: 'model',
+      ASSISTANT_DAILY_TOKENS: '500',
+      AI: {
+        run: async (_model: string, input: Record<string, unknown>) => {
+          sent.push(input);
+          // As Kimi K2.6 answers: a chat completion, with its usage.
+          return {
+            choices: [{ message: { content: JSON.stringify(answer()) }, finish_reason: 'stop' }],
+            usage: { total_tokens: 900 },
+          };
+        },
+      },
+    } as unknown as Env;
+    const drafter: Principal = { ...admin, id: 'usr_drafter' };
+    expect(await draftPlugin(counted, drafter, 'hold orders over $100', via)).toMatchObject({
+      cases: { passed: 2 },
+    });
+    expect(sent[0]).toMatchObject({
+      max_tokens: 16_384,
+      chat_template_kwargs: { thinking: false },
+    });
+    // 900 of the day's 500: the next draft is refused before it calls the model.
+    expect(await refusal(draftPlugin(counted, drafter, 'and over $200', via))).toBe(
+      ASSISTANT_BUDGET_SPENT,
+    );
+    expect(sent).toHaveLength(1);
+  });
+
+  it('counts a draft’s tokens even when its answer can’t be used', async () => {
+    const cut = {
+      ...env,
+      AI_MODE: 'model',
+      ASSISTANT_DAILY_TOKENS: '500',
+      AI: {
+        run: async () => ({
+          choices: [{ message: { content: '{"name":"Big' }, finish_reason: 'length' }],
+          usage: { total_tokens: 16_000 },
+        }),
+      },
+    } as unknown as Env;
+    const drafter: Principal = { ...admin, id: 'usr_cut' };
+    expect(await refusal(draftPlugin(cut, drafter, 'hold big orders', via))).toMatch(
+      /couldn’t draft that \(the answer ran past max_tokens\)/,
+    );
+    expect(await refusal(draftPlugin(cut, drafter, 'hold big orders', via))).toBe(
+      ASSISTANT_BUDGET_SPENT,
+    );
   });
 
   it('gives the model longer to write a draft than an order step’s call', async () => {

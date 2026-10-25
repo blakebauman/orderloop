@@ -12,7 +12,15 @@ OrderLoop uses Workers AI in three places: the AI nodes in a flow, the flow copi
   fallback below applies.
 - **A 20-second cap.** A slower call is abandoned.
 - **A deterministic fallback.** When AI is unavailable, or the model errors, times out or returns
-  nothing, a heuristic produces the result instead. An order never stalls on the model.
+  nothing, a heuristic produces the result instead. An order never stalls on the model. In a
+  running order, an error or timeout is first retried with the step (its `retries`, 3 by default,
+  with a growing delay), and the heuristic answers only on the last attempt; an answer in the wrong
+  shape isn't retried.
+- **Risk and routing fail closed.** When the heuristic answered for Risk score or Agent router
+  because the model couldn't (not in a test or demo workspace, where AI is simulated), the order is
+  not waved through: Risk score takes `high` and Agent router takes `needs_approval` if the flow
+  has that route. Their output has `unchecked: true` and the summary says the model was
+  unavailable.
 - **The source is recorded.** Each AI node's output says where its answer came from: `source`
   (`"model"` or `"heuristic"`), `model` (the model that answered, `null` for the heuristic),
   `prompt` (the instructions' name and version, such as `router@1`; the version changes whenever
@@ -33,10 +41,10 @@ Each node's output is in `nodes.<id>` for later expressions, along with `source`
 |---|---|---|---|
 | [Extract order](/reference/nodes/#ai.extract) | Read `documentText` (or the order's document at `documentKey`) and map items to catalog SKUs | Regexes for `120 x WID-100`-style lines and `SKU … qty N`, `PO #…`, `From: …` | When it finds known SKUs, replaces the order's lines with them. A line counts only when its SKU is in the catalog and its quantity is a whole number from 1 to 10,000 (repeats of a SKU add up); the rest are listed in `rejected`, and the summary says how many were held back. It sets `customerId` when the order had none and `customerName` matches exactly one customer's name, ignoring case and punctuation (a near match or several matches attach nobody); titles the order `PO <number>` on `b2b` and `procurement` orders and `Ref <number>` on the rest, sets `vars.poNumber`. With no document it passes the order through. The model reads the first 20,000 characters |
 | [Classify](/reference/nodes/#ai.classify) | Pick one of `labels` with a confidence | Keyword match on the title and lines; the first label otherwise | Sets `vars.<into>` (default `category`). A label outside the list becomes the first label; the confidence is held to 0–1 |
-| [Risk score](/reference/nodes/#ai.risk_score) | Score fraud and credit risk 0–100 with up to three reasons | 10, +15 for a guest (a `contact`, no customer), +30 with neither, +30 over 20,000, +20 for a line over 1,000 units | Takes `high` at or above `threshold` (default 70), else `low`; sets `vars.risk`. A score outside 0–100 is held to the range |
+| [Risk score](/reference/nodes/#ai.risk_score) | Score fraud and credit risk 0–100 with up to three reasons | 10, +15 for a guest (a `contact`, no customer), +30 with neither, +30 over 20,000, +20 for a line over 1,000 units | Takes `high` at or above `threshold` (default 70), else `low`; sets `vars.risk`. A score outside 0–100 is held to the range. Without the model (outside simulated AI) it takes `high`, with `vars.risk` at least the threshold |
 | [Demand forecast](/reference/nodes/#ai.forecast) | Suggest quantities for SKUs whose available stock (stock minus reserved) is at or below their reorder point, over `horizonDays` | Each low SKU's `reorderQty` | Replaces the order's lines; sets `vars.supplier` from the first SKU. With nothing low it reports "Stock is healthy" without calling the model |
 | [Summarize](/reference/nodes/#ai.summarize) | Two sentences on the order and its progress | `<model label> order <id>: N lines, total … <currency>` | Sets `vars.<into>` (default `summary`) |
-| [Agent router](/reference/nodes/#ai.router) | Follow `instructions` and choose exactly one of `routes`, with a one-sentence reason | No lines → `ask_customer` (the last route if there is none by that name); total over 10,000 USD → `needs_approval` (the first route if none); else the first route | Takes the chosen route as its branch; a route outside the list becomes the first route |
+| [Agent router](/reference/nodes/#ai.router) | Follow `instructions` and choose exactly one of `routes`, with a one-sentence reason | No lines → `ask_customer` (the last route if there is none by that name); total over 10,000 USD → `needs_approval` (the first route if none); else the first route | Takes the chosen route as its branch; a route outside the list becomes the first route. Without the model (outside simulated AI) it takes `needs_approval` if that is one of `routes`, else the fallback's route |
 
 The router's routes are its outputs, so editing `routes` changes the handles on the canvas.
 The model sees the order, the customer's account terms, the run variables and the outputs of

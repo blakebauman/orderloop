@@ -1113,7 +1113,19 @@ Every AI node except Assess, and the copilot, go through `runJson` (`apps/engine
 `response_format: json_schema`, temperature `0.2`, `max_tokens` 2048, a 20-second cap
 (`AI_TIMEOUT_MS`; a caller no order waits on may pass a longer `timeoutMs`, as the plugin drafter does), and the answer checked with `conforms` (`packages/core/src/json-schema.ts`); a
 non-conforming answer is treated like an error. On `AI_MODE=mock`, an error, a timeout or an empty
-answer, each node's heuristic runs and the output records `source: "heuristic"`. Every answer
+answer, each node's heuristic runs and the output records `source: "heuristic"`. In an order step,
+an error or timeout first throws while the step has attempts left (`AiCall.retry`, from the
+executor's `retriesLeft`; see [Executor nodes](workflow.md#executor-nodes)), so the heuristic
+answers only on the last attempt; a bad answer (non-conforming, empty, or cut off with
+`finish_reason: "length"`) falls back at once, since the same prompt tends to get it again. Risk
+score and Agent router fail closed on a heuristic answer outside mock mode (`unchecked` in
+`nodes.ts`): risk takes `high` with `vars.risk` at least the threshold, the router takes
+`needs_approval` when the flow has that route, and both add `unchecked: true` to the output and
+"model unavailable" to the summary. `runJson` reads Workers AI's `response` or a chat completion's
+`choices[0].message.content`, and returns `tokens` (`usage.total_tokens`) when the model reports
+them. Every call sets AI Gateway metadata `{ prompt, orderId? }` (`callOptions`; no personal
+data) alongside the registry's `aiGatewayLogs` as `collectLog` (`gatewayOptions`), so with logs off
+the gateway keeps no entry, metadata included. Every answer
 carries `AiProvenance` (`packages/core/src/provenance.ts`): `source`, `model` (null for the
 heuristic), `prompt` (`router@1`, from `AI_PROMPTS`; bump a prompt's version whenever its
 instructions or answer schema change) and `fallback` (`mock`, the error or timeout message, a
@@ -1126,11 +1138,14 @@ than `mock` is a warning. This is the way to read the fallback rate until metric
 #26). The assistant's turns are also held to `ASSISTANT_DAILY_TOKENS` a person a UTC day
 (`apps/engine/src/usage.ts`, table `ai_usage`): `assistantBudgetSpent` refuses a turn with
 `ASSISTANT_BUDGET_SPENT` once spent, and `finishTurn` adds `totalUsage.totalTokens` when it ends.
+A plugin draft counts against the drafting admin's budget the same way: refused once it is spent,
+and the draft call's `tokens` recorded whether or not its answer could be used.
 Heuristic turns cost nothing; MCP clients bring their own model and aren't counted. Extract order and
 Summarize send at most the first 20,000 characters (Summarize's, after redaction).
 
 Assess calls Clef directly (`assess` in `apps/engine/src/clef.ts`, `ASSESS_MODEL`) with the fixed
-body `model: "clef"`, `state`, `questions`, `images`; same cap and `AI_MODE` fallback. Answers go through `clampAnswers`
+body `model: "clef"`, `state`, `questions`, `images`; same cap, `AI_MODE` fallback, step retry
+and gateway metadata. Answers go through `clampAnswers`
 (`packages/core/src/assess.ts`). Images are embedded inside the step: R2 keys under
 `orders/<orderId>/` only, `https` URLs, or `data:` URLs.
 

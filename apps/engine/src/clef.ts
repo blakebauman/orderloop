@@ -2,7 +2,8 @@
  * Assessments on Workers AI Clef: a multimodal decision model that reads a state (text or JSON,
  * plus up to 4 images) and answers typed questions with a probability for every allowed option.
  * Like every AI call here it has a deterministic heuristic fallback, used when AI_MODE is "mock"
- * or the model errors, and answers are held to the questions asked (`clampAnswers`).
+ * or the model errors (in an order step, once the step's retries are spent: `AiCall`), and answers
+ * are held to the questions asked (`clampAnswers`).
  *
  * Clef takes only embedded images, so references (R2 keys, https or data URLs) are resolved here,
  * inside the caller's step. R2 keys are limited to the order's own documents.
@@ -16,7 +17,7 @@ import {
   promptId,
   safeFetch,
 } from '@orderloop/core';
-import { gatewayOptions, logAiCall, withTimeout } from './ai';
+import { type AiCall, callOptions, logAiCall, retryModelCall, withTimeout } from './ai';
 
 /** Clef's limits: 4 images, 4 MiB each, 8 MiB decoded in all. */
 export const MAX_IMAGES = 4;
@@ -176,6 +177,7 @@ export function assessHeuristic(questions: AssessQuestions, state: unknown): Ass
 export async function assess(
   env: Env,
   input: { state: unknown; questions: AssessQuestions; images?: ClefImage[] },
+  call: AiCall = {},
 ): Promise<{ value: Assessment } & AiProvenance> {
   const prompt = promptId('assess');
   const started = Date.now();
@@ -185,8 +187,9 @@ export async function assess(
     return { value: { answers: assessHeuristic(input.questions, input.state) }, ...p };
   };
   if (String(env.AI_MODE) === 'mock') return heuristic('mock');
+  let res: { answers?: unknown; usage?: Assessment['usage']; result?: Assessment };
   try {
-    const res = (await withTimeout(
+    res = (await withTimeout(
       env.AI.run(
         env.ASSESS_MODEL as never,
         {
@@ -195,10 +198,16 @@ export async function assess(
           questions: input.questions,
           ...(input.images?.length ? { images: input.images } : {}),
         } as never,
-        gatewayOptions(env) ? { gateway: gatewayOptions(env) } : undefined,
+        callOptions(env, prompt, call.orderId),
       ),
       AI_TIMEOUT_MS,
-    )) as { answers?: unknown; usage?: Assessment['usage']; result?: Assessment };
+    )) as typeof res;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (call.retry) retryModelCall(prompt, String(env.ASSESS_MODEL), Date.now() - started, reason);
+    return heuristic(reason);
+  }
+  try {
     const body = res.answers ? res : (res.result ?? res);
     if (!body.answers || typeof body.answers !== 'object') throw new Error('no answers');
     const p: AiProvenance = { source: 'model', model: String(env.ASSESS_MODEL), prompt };

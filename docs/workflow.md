@@ -73,6 +73,12 @@ replay patches the context the same way without running the executor again.
 Inside the step the executor sends a durable report when it starts (with an `attempt N` timeline
 entry from the second attempt on) and when it finishes.
 
+The executor gets `retriesLeft` (`ExecInput`): true while `sctx.attempt <= limit`, false on the last
+attempt (`limit + 1`). The AI nodes pass it to the model call as `AiCall.retry`: a failed call
+(Workers AI or gateway error, or the 20-second cap) throws while attempts are left, so the step
+retries with its backoff, and only the last attempt stores the heuristic's answer. A malformed,
+empty or truncated answer is not retried. A node with `retries: 0` falls back at once.
+
 A thrown executor, once its retries are exhausted, reports the node `failed`, reports the order
 `failed`, emits `order.failed` with the node and its error, and rethrows, which fails the instance.
 

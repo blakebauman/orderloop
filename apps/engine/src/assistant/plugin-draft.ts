@@ -15,6 +15,7 @@
  */
 
 import {
+  ASSISTANT_BUDGET_SPENT,
   ASSISTANT_PUBLISHER,
   type AuditVia,
   boundText,
@@ -32,15 +33,26 @@ import { eq } from 'drizzle-orm';
 import { runJson } from '../ai';
 
 /**
- * How long the model may take to write a draft: up to 4,096 tokens of code and cases from the
- * assistant's model, far past the 20 seconds an order step's model call gets. An admin asked for
- * it and waits on it; no order does.
+ * How long the model may take to write a draft, far past the 20 seconds an order step's model call
+ * gets. An admin asked for it and waits on it; no order does.
  */
 export const DRAFT_TIMEOUT_MS = 120_000;
+
+/**
+ * How the assistant's model (Kimi K2.6) writes a draft. Its reasoning is on (and high) by default
+ * and counts against `max_tokens`: drafts ran out at 4,096 tokens with the JSON unfinished. A rule
+ * and its cases need the room for code, not for thinking.
+ */
+export const DRAFT_MODEL_OPTIONS = {
+  maxTokens: 16_384,
+  timeoutMs: DRAFT_TIMEOUT_MS,
+  input: { chat_template_kwargs: { thinking: false } },
+};
 
 import { recordAudit } from '../audit';
 import { runCases } from '../plugin-cases';
 import { assistantDrafts, InstallRefused, sha256, stageBundle } from '../plugin-installs';
+import { assistantBudgetSpent, recordAssistantUsage } from '../usage';
 import { Refused } from './data';
 
 /** The longest rule code the assistant may write. */
@@ -438,6 +450,8 @@ async function draft(
     )
       throw new Refused(`${opts.pluginId} wasn’t drafted by the assistant, so it can’t revise it`);
   }
+  // A draft is the assistant's work, so it comes out of the admin's daily tokens like a turn.
+  if (await assistantBudgetSpent(env, p)) throw new Refused(ASSISTANT_BUDGET_SPENT);
   const answer = await runJson<DraftAnswer>(
     env,
     'plugin_draft',
@@ -447,8 +461,10 @@ async function draft(
     ],
     DRAFT_SCHEMA,
     () => heuristicDraft(ask),
-    { model: String(env.ASSISTANT_MODEL), maxTokens: 4096, timeoutMs: DRAFT_TIMEOUT_MS },
+    { model: String(env.ASSISTANT_MODEL), ...DRAFT_MODEL_OPTIONS },
   );
+  // What the model used counts even when its answer can't be used.
+  if (answer.tokens !== undefined) await recordAssistantUsage(env, p, answer.tokens);
   // Only mock mode drafts without the model: a failed call must not pass off a stock rule.
   if (answer.source === 'heuristic' && answer.fallback !== 'mock')
     throw new Refused(`The model couldn’t draft that (${answer.fallback}). Try again.`);

@@ -387,7 +387,10 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
             },
             true,
           );
-          const r = await exec({ env, node, config, ctx, stepKey: fx, registry });
+          // `limit` retries after the first try: attempt `retries + 1` is the last, where a model
+          // node answers with its fallback instead of throwing (`AiCall`).
+          const retriesLeft = sctx.attempt <= retries;
+          const r = await exec({ env, node, config, ctx, stepKey: fx, registry, retriesLeft });
           await report(
             {
               node: {

@@ -149,8 +149,9 @@ it can't.
 
 Each person can use up to 1,000,000 model tokens a day in the assistant, counted from midnight UTC.
 When it is spent, the assistant says "You've used today's assistant allowance. It resets at
-midnight UTC; your OrderLoop contact can raise it." and answers again the next day. Answers from
-the fixed rules below cost nothing. Your OrderLoop administrator can raise the limit or remove it.
+midnight UTC; your OrderLoop contact can raise it." and answers again the next day. A
+[plugin draft](#plugin-drafts) counts against the allowance of the admin who asked for it, and is
+refused once it is spent. Answers from the fixed rules below cost nothing. Your OrderLoop administrator can raise the limit or remove it.
 MCP clients bring their own model, so they aren't counted.
 
 ## Without the model

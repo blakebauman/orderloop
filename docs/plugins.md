@@ -643,8 +643,11 @@ US") and it drafts a plugin of rule steps (`draft_plugin`, `apps/engine/src/assi
 Nothing it writes runs until an admin approves it on the Plugins page, with a step-up, like any
 upload.
 
-**What the model writes.** Only JSON (`runJson` with `ASSISTANT_MODEL`, prompt `plugin_draft@1`, up to 4,096 tokens and
-`DRAFT_TIMEOUT_MS`, two minutes, since writing code takes far longer than an order step's 20 seconds):
+**What the model writes.** Only JSON (`runJson` with `ASSISTANT_MODEL`, prompt `plugin_draft@1`,
+`DRAFT_MODEL_OPTIONS`: up to 16,384 tokens with Kimi K2.6's reasoning off
+(`chat_template_kwargs: { thinking: false }`; on by default it used the whole budget before the JSON
+was done), and `DRAFT_TIMEOUT_MS`, two minutes, since writing code takes far longer than an order
+step's 20 seconds; the draft's tokens count against the admin's daily assistant budget):
 a name, steps (snake_case name, label, outputs, and number, string or boolean settings with
 defaults), the rule code, and test cases. The code defines `const rules = { <step>: ({ order,
 config, vars }) => ({ branch, summary?, vars? }) }` over a `RedactedOrder`. In mock mode only,

@@ -1,7 +1,9 @@
 /**
  * Workers AI calls. Every call uses JSON mode against a schema and has a deterministic heuristic
  * fallback, used when AI_MODE is "mock" (tests, offline dev) or the model errors, so an order never
- * stalls on the model. Results record which path produced them. What an order call shows the
+ * stalls on the model. In an order step a failed call is retried with the step first (`AiCall`), and
+ * the risk and router nodes treat a fallback outside mock mode as unchecked (they fail closed).
+ * Results record which path produced them. What an order call shows the
  * model goes through `modelView` (`redact.ts` in core): personal data is left out unless the
  * deployment's AI_PERSONAL_DATA is "send". Untrusted content goes in `dataBlock`s under `DATA_RULES`
  * (`untrusted.ts` in core), and answers are held to their bounds before a step uses them.
@@ -59,9 +61,16 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * registry's `aiGatewayLogs` (rendered into AI_GATEWAY_LOGS) holds whatever the gateway's own
  * default says: its logs keep the prompts, which can carry document text and buyer details.
  */
-export function gatewayOptions(env: Env): { id: string; collectLog: boolean } | undefined {
+export function gatewayOptions(
+  env: Env,
+  metadata?: Record<string, string>,
+): { id: string; collectLog: boolean; metadata?: Record<string, string> } | undefined {
   return env.AI_GATEWAY_ID
-    ? { id: String(env.AI_GATEWAY_ID), collectLog: String(env.AI_GATEWAY_LOGS) === 'true' }
+    ? {
+        id: String(env.AI_GATEWAY_ID),
+        collectLog: String(env.AI_GATEWAY_LOGS) === 'true',
+        ...(metadata ? { metadata } : {}),
+      }
     : undefined;
 }
 
@@ -75,6 +84,38 @@ export function logAiCall(p: AiProvenance, ms: number, extra: Record<string, unk
   else console.log(line);
 }
 
+/**
+ * How an order step calls the model. `retry` is set while its Workflow step has attempts left: a
+ * call that fails (an error from Workers AI or the gateway, or a timeout) then throws, so the step
+ * retries with its backoff instead of storing the heuristic's answer for good. The last attempt,
+ * and every caller outside a step, falls back at once. `orderId` tags the gateway's log entry.
+ */
+export type AiCall = { retry?: boolean; orderId?: string };
+
+/**
+ * The binding options for an AI call: its gateway, tagged with the prompt and, in an order step,
+ * the order (five metadata keys at most, and never personal data).
+ */
+export const callOptions = (env: Env, prompt: string, orderId?: string) => {
+  const gateway = gatewayOptions(env, { prompt, ...(orderId ? { orderId } : {}) });
+  return gateway ? { gateway } : undefined;
+};
+
+/** A failed call in a step with attempts left: logged like a fallback, then thrown to retry. */
+export function retryModelCall(prompt: string, model: string, ms: number, reason: string): never {
+  console.warn(
+    JSON.stringify({ type: 'ai_call', source: 'error', model, prompt, ms, retrying: reason }),
+  );
+  throw new Error(`The model call failed (${reason}); trying again`);
+}
+
+/** Workers AI's own models answer in `response`; chat-completions models in `choices`. */
+type ModelAnswer = {
+  response?: unknown;
+  choices?: { message?: { content?: unknown }; finish_reason?: string }[];
+  usage?: { total_tokens?: number };
+};
+
 export async function runJson<T>(
   env: Env,
   prompt: AiPrompt,
@@ -82,22 +123,29 @@ export async function runJson<T>(
   schema: Record<string, unknown>,
   fallback: () => T,
   /**
-   * Another model than `AI_MODEL` (the assistant's, to write code), a larger answer, and longer to
-   * write it than `AI_TIMEOUT_MS`, for a call no order step waits on.
+   * Another model than `AI_MODEL` (the assistant's, to write code), a larger answer, longer to
+   * write it than `AI_TIMEOUT_MS` (for a call no order step waits on), and inputs only that model
+   * takes.
    */
-  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {},
-): Promise<{ value: T } & AiProvenance> {
+  opts: AiCall & {
+    model?: string;
+    maxTokens?: number;
+    timeoutMs?: number;
+    input?: Record<string, unknown>;
+  } = {},
+): Promise<{ value: T; tokens?: number } & AiProvenance> {
   const model = opts.model ?? String(env.AI_MODEL);
   const id = promptId(prompt);
   const started = Date.now();
-  const heuristic = (reason: string) => {
+  const heuristic = (reason: string, extra: Record<string, unknown> = {}) => {
     const p: AiProvenance = { source: 'heuristic', model: null, prompt: id, fallback: reason };
-    logAiCall(p, Date.now() - started);
+    logAiCall(p, Date.now() - started, extra);
     return { value: fallback(), ...p };
   };
   if (String(env.AI_MODE) === 'mock') return heuristic('mock');
+  let res: ModelAnswer;
   try {
-    const res = (await withTimeout(
+    res = (await withTimeout(
       env.AI.run(
         model as keyof AiModels,
         {
@@ -105,21 +153,34 @@ export async function runJson<T>(
           response_format: { type: 'json_schema', json_schema: schema },
           max_tokens: opts.maxTokens ?? 2048,
           temperature: 0.2,
+          ...opts.input,
         } as never,
-        gatewayOptions(env) ? { gateway: gatewayOptions(env) } : undefined,
+        callOptions(env, id, opts.orderId),
       ),
       opts.timeoutMs ?? AI_TIMEOUT_MS,
-    )) as { response?: unknown };
-    const raw = res.response;
+    )) as ModelAnswer;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (opts.retry) retryModelCall(id, model, Date.now() - started, reason);
+    return heuristic(reason);
+  }
+  // A bad answer isn't retried: the same prompt tends to get the same answer, at another call's
+  // cost. What the model used counts either way.
+  const tokens = res.usage?.total_tokens;
+  const finish = res.choices?.[0]?.finish_reason;
+  const used = { ...(tokens !== undefined ? { tokens } : {}), ...(finish ? { finish } : {}) };
+  try {
+    if (finish === 'length') throw new Error('the answer ran past max_tokens');
+    const raw = res.response ?? res.choices?.[0]?.message?.content;
     const value = (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
     if (value === undefined || value === null) throw new Error('empty response');
-    // A malformed answer would fail the step and call the model again on every retry.
     if (!conforms(value, schema)) throw new Error('response does not match the schema');
     const p: AiProvenance = { source: 'model', model, prompt: id };
-    logAiCall(p, Date.now() - started);
-    return { value, ...p };
+    logAiCall(p, Date.now() - started, used);
+    return { value, ...p, ...(tokens !== undefined ? { tokens } : {}) };
   } catch (err) {
-    return heuristic(err instanceof Error ? err.message : String(err));
+    const fell = heuristic(err instanceof Error ? err.message : String(err), used);
+    return { ...fell, ...(tokens !== undefined ? { tokens } : {}) };
   }
 }
 
@@ -163,6 +224,7 @@ export async function extractOrder(
   env: Env,
   text: string,
   catalog: { sku: string; name: string }[],
+  call: AiCall = {},
 ) {
   return runJson<Extracted>(
     env,
@@ -195,6 +257,7 @@ export async function extractOrder(
       required: ['customerName', 'poNumber', 'lines'],
     },
     () => extractHeuristic(text),
+    call,
   ).then(({ value, source }) => {
     const { lines, rejected } = boundExtractedLines(
       Array.isArray(value.lines) ? value.lines : [],
@@ -223,7 +286,7 @@ const KEYWORDS: Record<string, string[]> = {
   travel: ['flight', 'hotel', 'travel'],
 };
 
-export async function classify(env: Env, order: Order, labels: string[]) {
+export async function classify(env: Env, order: Order, labels: string[], call: AiCall = {}) {
   return runJson<{ label: string; confidence: number }>(
     env,
     'classify',
@@ -245,6 +308,7 @@ export async function classify(env: Env, order: Order, labels: string[]) {
       const hit = labels.find((l) => (KEYWORDS[l] ?? [l]).some((k) => text.includes(k)));
       return { label: hit ?? labels[0]!, confidence: hit ? 0.7 : 0.3 };
     },
+    call,
   ).then((r) => ({
     ...r,
     value: {
@@ -256,7 +320,12 @@ export async function classify(env: Env, order: Order, labels: string[]) {
 
 // ── Risk ───────────────────────────────────────────────────────────────────
 
-export async function riskScore(env: Env, order: Order, customer: ModelContextInput['customer']) {
+export async function riskScore(
+  env: Env,
+  order: Order,
+  customer: ModelContextInput['customer'],
+  call: AiCall = {},
+) {
   return runJson<{ score: number; reasons: string[] }>(
     env,
     'risk',
@@ -287,6 +356,7 @@ export async function riskScore(env: Env, order: Order, customer: ModelContextIn
       if (order.lines.some((l) => l.qty > 1000)) (score += 20), reasons.push('Unusual quantity');
       return { score: Math.min(score, 100), reasons };
     },
+    call,
   ).then((r) => ({
     ...r,
     value: {
@@ -312,7 +382,7 @@ type StockRow = {
   supplier: string;
 };
 
-export async function forecast(env: Env, rows: StockRow[], horizonDays: number) {
+export async function forecast(env: Env, rows: StockRow[], horizonDays: number, call: AiCall = {}) {
   const low = rows.filter((r) => r.stock - r.reserved <= r.reorderPoint);
   const fallback = () => ({
     lines: low.map((r) => ({ sku: r.sku, qty: r.reorderQty, reason: 'At or below reorder point' })),
@@ -354,6 +424,7 @@ export async function forecast(env: Env, rows: StockRow[], horizonDays: number) 
       required: ['lines'],
     },
     fallback,
+    call,
   ).then((r) => {
     const valid = new Set(low.map((x) => x.sku));
     const lines = r.value.lines.filter((l) => valid.has(l.sku) && l.qty > 0);
@@ -376,6 +447,7 @@ export async function route(
   instructions: string,
   routes: string[],
   context: ModelContextInput,
+  call: AiCall = {},
 ) {
   return runJson<{ route: string; reason: string }>(
     env,
@@ -407,6 +479,7 @@ export async function route(
         };
       return { route: routes[0]!, reason: 'Routine order; nothing unusual stands out.' };
     },
+    call,
   ).then((r) => ({
     ...r,
     value: {
@@ -429,7 +502,7 @@ export function routerPrompt(instructions: string, routes: string[]) {
   ].join('\n\n');
 }
 
-export async function summarize(env: Env, context: ModelContextInput) {
+export async function summarize(env: Env, context: ModelContextInput, call: AiCall = {}) {
   return runJson<{ summary: string }>(
     env,
     'summarize',
@@ -450,6 +523,7 @@ export async function summarize(env: Env, context: ModelContextInput) {
         summary: `${ORDER_MODEL_LABELS[o.model]} order ${o.id}: ${o.lines.length} lines, total ${o.total.toFixed(2)} ${o.currency}.`,
       };
     },
+    call,
   ).then((r) => ({ ...r, value: { summary: boundText(r.value.summary, 600) ?? '' } }));
 }
 
