@@ -159,7 +159,7 @@ export default function Approvals() {
         title="Approvals"
         subtitle="Decisions people owe running orders, most urgent first. A decision resumes the order where it stopped."
         actions={
-          <fieldset className="flex rounded-md border bg-card p-0.5 text-[13px]">
+          <fieldset className="flex rounded-full bg-muted p-1 text-[13px]">
             <legend className="sr-only">Show approvals</legend>
             {FILTERS.map((s) => (
               <button
@@ -168,9 +168,9 @@ export default function Approvals() {
                 aria-pressed={status === s}
                 onClick={() => setParams({ status: s })}
                 className={cn(
-                  'min-h-8 rounded-[4px] px-2.5 py-1.5',
+                  'min-h-7 rounded-full px-3 py-1',
                   status === s
-                    ? 'bg-primary font-medium text-primary-foreground'
+                    ? 'bg-background font-medium text-foreground shadow-sm dark:bg-input/30'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
               >

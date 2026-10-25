@@ -419,5 +419,5 @@ strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, a `Permissions-Policy
 camera, microphone, geolocation and payment, and `Strict-Transport-Security: max-age=31536000;
 includeSubDomains`. HTML pages also get a `Content-Security-Policy` with a fresh nonce per
 response: scripts run only from the app's own origin or with that nonce, styles and fonts load only
-from the app's own origin (IBM Plex is served by OrderLoop itself), `frame-ancestors 'none'`,
+from the app's own origin (its fonts are served by OrderLoop itself), `frame-ancestors 'none'`,
 `form-action 'self'`, `connect-src 'self'`. OrderLoop can't be embedded in another site's frame.

@@ -9,18 +9,18 @@
 /* Streamdown renders the assistant's markdown with Tailwind classes of its own. */
 @source "../node_modules/streamdown/dist/*.js";
 
-/* Ledger: a commerce back office kept like a bound ledger. Blue-black ink on warm paper, hairline
-   rules, one registrar-blue accent for links, focus and work in progress, and signal colours reserved
-   for order and step status. Green means "succeeded" and nothing else; it is never the brand.
-   Light is the default; dark is an ink-night variant chosen with the theme switch. */
+/* Ledger, on shadcn's base-luma preset: neutral greys with no tint, Inter, generous radii and pill
+   controls (buttons and one-line fields are fully round). One blue accent for links and work in
+   progress, and signal colours reserved for order and step status. Green means "succeeded" and
+   nothing else; it is never the brand. Light is the default; dark is chosen with the theme switch. */
 
 /* Dark tokens follow `data-theme` on <html> (set before paint by root.tsx), not the OS directly. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  /* Titles and the wordmark: Plex Sans 600, set a touch tighter than running text. */
+  /* Titles and the wordmark: Inter 600, set a touch tighter than running text. */
   --tracking-title: -0.015em;
 }
 
@@ -64,46 +64,49 @@
   --color-cat-control: var(--cat-control);
   --color-cat-ai: var(--cat-ai);
 
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 :root {
-  --radius: 0.375rem;
-  --paper: oklch(0.972 0.01 85);
+  --radius: 0.625rem;
+  --paper: oklch(1 0 0);
   --background: var(--paper);
-  --ink: oklch(0.25 0.022 262);
+  --ink: oklch(0.145 0 0);
   --foreground: var(--ink);
-  --card: oklch(0.993 0.004 85);
+  --card: oklch(1 0 0);
   --card-foreground: var(--ink);
-  --popover: oklch(0.993 0.004 85);
+  --popover: oklch(1 0 0);
   --popover-foreground: var(--ink);
-  /* Primary actions are written in ink. */
-  --primary: oklch(0.27 0.035 262);
-  --primary-foreground: oklch(0.975 0.008 85);
-  --secondary: oklch(0.935 0.012 85);
-  --secondary-foreground: var(--ink);
-  --muted: oklch(0.94 0.011 85);
-  --muted-foreground: oklch(0.46 0.016 70);
-  --accent: oklch(0.93 0.013 85);
-  --accent-foreground: var(--ink);
-  --destructive: oklch(0.5 0.185 28);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --rule: oklch(0.86 0.014 80);
+  --rule: oklch(0.922 0 0);
   --border: var(--rule);
-  --input: oklch(0.8 0.016 80);
-  /* Registrar blue: links, focus, selection and live work. */
+  --input: oklch(0.922 0 0);
+  /* Links and live work. Focus uses the preset's grey ring on fields and buttons, and ink for the
+     page-wide outline, which needs the contrast. */
   --link: oklch(0.47 0.13 256);
-  --ring: var(--link);
+  --ring: oklch(0.708 0 0);
 
   --ok: oklch(0.455 0.105 152);
   --run: var(--link);
   --wait: oklch(0.49 0.115 62);
   --bad: oklch(0.5 0.185 28);
   --undo: oklch(0.485 0.135 42);
-  --idle: oklch(0.48 0.012 75);
+  --idle: oklch(0.48 0 0);
   --ai: oklch(0.49 0.16 310);
 
   --cat-trigger: var(--ink);
@@ -112,50 +115,52 @@
   --cat-ai: var(--ai);
 
   /* The flow graph sheet. */
-  --sheet: oklch(0.985 0.006 85);
-  --sheet-grid: oklch(0.87 0.012 80);
-  --node: oklch(0.998 0.002 85);
-  --node-border: oklch(0.8 0.016 75);
-  --edge: oklch(0.62 0.015 70);
+  --sheet: oklch(0.985 0 0);
+  --sheet-grid: oklch(0.87 0 0);
+  --node: oklch(1 0 0);
+  --node-border: oklch(0.85 0 0);
+  --edge: oklch(0.62 0 0);
   --edge-active: var(--ink);
-  --edge-idle: oklch(0.86 0.012 80);
+  --edge-idle: oklch(0.88 0 0);
 
   color-scheme: light;
 }
 
-/* Ink night: the same book after hours. Blue-black paper, warm paper-coloured type. */
 :root[data-theme="dark"] {
-  --paper: oklch(0.2 0.016 264);
-  --ink: oklch(0.92 0.014 85);
-  --card: oklch(0.232 0.018 264);
-  --popover: oklch(0.25 0.018 264);
-  --primary: oklch(0.92 0.014 85);
-  --primary-foreground: oklch(0.22 0.03 262);
-  --secondary: oklch(0.28 0.018 264);
-  --muted: oklch(0.262 0.018 264);
-  --muted-foreground: oklch(0.72 0.014 80);
-  --accent: oklch(0.29 0.02 264);
-  --destructive: oklch(0.68 0.17 28);
-  --rule: oklch(0.33 0.018 264);
-  --input: oklch(0.38 0.02 264);
+  --paper: oklch(0.145 0 0);
+  --ink: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --popover: oklch(0.205 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --rule: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
   --link: oklch(0.76 0.11 250);
+  --ring: oklch(0.556 0 0);
 
   --ok: oklch(0.77 0.1 152);
   --wait: oklch(0.8 0.12 75);
   --bad: oklch(0.71 0.16 28);
   --undo: oklch(0.76 0.13 50);
-  --idle: oklch(0.67 0.012 75);
+  --idle: oklch(0.67 0 0);
   --ai: oklch(0.75 0.09 305);
 
   --cat-commerce: oklch(0.76 0.07 230);
   --cat-control: oklch(0.8 0.11 75);
 
-  --sheet: oklch(0.215 0.017 264);
-  --sheet-grid: oklch(0.31 0.018 264);
-  --node: oklch(0.25 0.018 264);
-  --node-border: oklch(0.39 0.02 264);
-  --edge: oklch(0.56 0.014 75);
-  --edge-idle: oklch(0.33 0.018 264);
+  --sheet: oklch(0.17 0 0);
+  --sheet-grid: oklch(0.27 0 0);
+  --node: oklch(0.205 0 0);
+  --node-border: oklch(0.37 0 0);
+  --edge: oklch(0.56 0 0);
+  --edge-idle: oklch(0.269 0 0);
 
   color-scheme: dark;
 }
@@ -167,7 +172,6 @@
   body {
     background-color: var(--background);
     color: var(--foreground);
-    font-feature-settings: "ss02";
     @apply antialiased;
   }
   ::selection {
@@ -175,9 +179,9 @@
   }
   /* One focus ring for every control, including raw buttons that skip the UI primitives. */
   :where(a, button, summary, [role="tab"], [tabindex]):focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 2px solid var(--ink);
     outline-offset: 2px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
   }
   a {
     text-underline-offset: 3px;
@@ -293,7 +297,7 @@
   border-bottom: 3px double var(--ink);
 }
 
-/* React Flow chrome on the Ledger sheet. */
+/* React Flow chrome on the flow sheet. */
 .react-flow {
   --xy-background-color: var(--sheet);
   --xy-controls-box-shadow: none;
@@ -340,7 +344,7 @@
   }
 }
 
-/* The assistant's prose: running text at panel size, links in registrar blue, tables as ledger rows. */
+/* The assistant's prose: running text at panel size, links in blue, tables as ruled rows. */
 .ol-prose {
   font-size: 13.5px;
   line-height: 1.6;

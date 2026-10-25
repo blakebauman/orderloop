@@ -1,19 +1,19 @@
 ---
 name: Order Loop docs
-description: The bound ledger's reading copy. The web app's Ledger system, read rather than operated.
+description: The app's reading copy. The web app's Ledger system, read rather than operated.
 colors:
-  paper: "oklch(0.972 0.01 85)"
-  paper-dark: "oklch(0.2 0.016 264)"
-  ink: "oklch(0.25 0.022 262)"
-  ink-dark: "oklch(0.92 0.014 85)"
-  card: "oklch(0.993 0.004 85)"
-  card-dark: "oklch(0.232 0.018 264)"
-  muted: "oklch(0.94 0.011 85)"
-  muted-dark: "oklch(0.262 0.018 264)"
-  muted-foreground: "oklch(0.46 0.016 70)"
-  muted-foreground-dark: "oklch(0.72 0.014 80)"
-  rule: "oklch(0.86 0.014 80)"
-  rule-dark: "oklch(0.33 0.018 264)"
+  paper: "oklch(1 0 0)"
+  paper-dark: "oklch(0.145 0 0)"
+  ink: "oklch(0.145 0 0)"
+  ink-dark: "oklch(0.985 0 0)"
+  card: "oklch(1 0 0)"
+  card-dark: "oklch(0.205 0 0)"
+  muted: "oklch(0.97 0 0)"
+  muted-dark: "oklch(0.269 0 0)"
+  muted-foreground: "oklch(0.556 0 0)"
+  muted-foreground-dark: "oklch(0.708 0 0)"
+  rule: "oklch(0.922 0 0)"
+  rule-dark: "oklch(1 0 0 / 10%)"
   link: "oklch(0.47 0.13 256)"
   link-dark: "oklch(0.76 0.11 250)"
   ok: "oklch(0.455 0.105 152)"
@@ -28,39 +28,39 @@ colors:
   ai-dark: "oklch(0.75 0.09 305)"
   cat-commerce: "oklch(0.45 0.07 230)"
   cat-control: "oklch(0.5 0.1 62)"
-  sheet: "oklch(0.985 0.006 85)"
-  sheet-grid: "oklch(0.87 0.012 80)"
-  node: "oklch(0.998 0.002 85)"
-  node-border: "oklch(0.8 0.016 75)"
+  sheet: "oklch(0.985 0 0)"
+  sheet-grid: "oklch(0.87 0 0)"
+  node: "oklch(1 0 0)"
+  node-border: "oklch(0.85 0 0)"
 typography:
   display:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "clamp(2.125rem, 1.4rem + 3vw, 3.5rem)"
     fontWeight: 600
     lineHeight: 1.08
     letterSpacing: "-0.025em"
   page-title:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "clamp(1.875rem, 1.35rem + 1.6vw, 2.375rem)"
     fontWeight: 600
     lineHeight: 1.15
     letterSpacing: "-0.015em"
   section:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1.375rem"
     fontWeight: 600
   body:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.7
   lede:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1.0625rem"
     fontWeight: 400
     lineHeight: 1.55
   caption:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "0.75rem"
     fontWeight: 500
   code:
@@ -68,12 +68,13 @@ typography:
     fontSize: "0.8125rem"
     fontWeight: 400
   wordmark:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 600
     letterSpacing: "-0.015em"
 rounded:
-  md: "0.375rem"
+  md: "0.5rem"
+  pill: "999px"
   stamp: "2px"
   code: "3px"
 spacing:
@@ -85,17 +86,17 @@ components:
   button-primary:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.pill}"
     height: "2.25rem"
   button-secondary:
     backgroundColor: "{colors.card}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.pill}"
     height: "2.25rem"
   header-button:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.pill}"
     height: "2rem"
   sidebar-current:
     backgroundColor: "{colors.muted}"
@@ -120,16 +121,18 @@ components:
 # Design System: Order Loop docs
 
 This file describes `apps/docs`: the Starlight site at docs.orderloop.app and the Scalar page at
-`/api/`. The system itself is the web app's, "Ledger", authored in `apps/web/app/app.css`; this file
+`/api/`. The system itself is the web app's, "Ledger" (shadcn's base-luma preset, `b1VlIttI`, with the
+app's status ramp kept), authored in `apps/web/app/app.css`; this file
 records what the docs do with it. It is **derived from the shipped code** (`src/styles/brand.css`,
 `src/components/`, the generated `src/styles/theme.css`). When the code and this file disagree,
 fix whichever is wrong and say which in the commit.
 
 ## Overview
 
-**North star: the ledger's reading copy.** The app is a commerce back office kept like a bound
-ledger: blue-black ink on warm paper, hairline rules, one registrar blue, signal colours that mean a
-status and nothing else. The docs are the same book for the moments you're not at the desk:
+**North star: the app's reading copy.** The app is a commerce back office in shadcn's base-luma
+preset: neutral greys with no tint, Inter, generous radii and pill controls, one blue for links, and
+signal colours that mean a status and nothing else. The docs are the same system for the moments
+you're not at the desk:
 setting it up, looking up a route or a node, learning why an order took the branch it took. So the
 material is the app's, and the page shows the mechanism with real data: real node types, real step
 keys, a real run.
@@ -140,10 +143,12 @@ button, its node cards, status stamps, and the run figure on the home page.
 
 **Key characteristics**
 
-- Warm paper and blue-black ink; light by default, "ink night" when the reader picks Dark or Match
-  system. Never dark by category.
-- IBM Plex, one family: Sans for everything, titles and the wordmark included; Mono for code,
-  ids and step keys. Self-hosted. No serif.
+- Neutral white and near-black; light by default, dark when the reader picks Dark or Match system.
+  Never dark by category.
+- Inter for everything, titles and the wordmark included; IBM Plex Mono for code, ids and step
+  keys. Self-hosted. No serif.
+- Controls are pills (buttons, the search field); panels, cards and code blocks take the app's
+  `rounded-md`.
 - Hue only from the status ramp and the node categories, and only where there is a status or a
   node type to show.
 - One 48rem reading column; the home page widens to 72rem for the run figure.
@@ -165,7 +170,7 @@ tokens, not approximations.
 - **Card** is the app's panel ground: link cards, node cards' surroundings, code blocks, the run
   figure. **Muted** is the tonal step: inline code, the sidebar's current page.
 - **Rule** is every hairline. **Input** is the stronger line under table header rows.
-- **Link** (registrar blue) is links, focus and selection. It is not a status colour here, and
+- **Link** (the one blue) is links and selection; focus is an ink outline. It is not a status colour here, and
   notes do not use it.
 
 ### The status ramp (the only hue)
@@ -183,15 +188,15 @@ hue lands on a Ledger one.
 
 ## Typography
 
-- **Display** (hero title): Plex Sans 600, `clamp(34px, …, 56px)`, 1.08, −0.025em, max 24ch.
-- **Page title**: Plex Sans 600, `clamp(30px, …, 38px)`, −0.015em, as the app's `PageHeader` sets
+- **Display** (hero title): Inter 600, `clamp(34px, …, 56px)`, 1.08, −0.025em, max 24ch.
+- **Page title**: Inter 600, `clamp(30px, …, 38px)`, −0.015em, as the app's `PageHeader` sets
   it (`tracking-title`). Size and weight carry it; there is no second face.
 - **Lede**: the page's `description` under its title, 17px muted, max 68ch.
-- **Section (h2)**: Plex Sans 600, 22px, opening on a rule. h3 17px, h4 15px.
+- **Section (h2)**: Inter 600, 22px, opening on a rule. h3 17px, h4 15px.
 - **Body**: 16px, 1.7.
 - **Caption**: 12px 500 muted. Table column labels, fact labels.
-- **Code**: Plex Mono, 13px in blocks, 0.875em inline.
-- **Wordmark**: "OrderLoop", one word, Plex Sans 600, 16px, −0.015em, beside the mark, never
+- **Code**: IBM Plex Mono, 13px in blocks, 0.875em inline.
+- **Wordmark**: "OrderLoop", one word, Inter 600, 16px, −0.015em, beside the mark, never
   wrapping.
 
 Sentence case everywhere. No uppercase labels, no letter-spaced eyebrows.
@@ -215,8 +220,10 @@ the docs author. Starlight's own shadows (search, link cards, pagination) are re
 
 ## Shapes
 
-- **6px** (`--ol-radius`, the app's `--radius`): buttons, inputs, cards, callouts, node cards, code
-  blocks, the sidebar's current page.
+- **Pill** (`--ol-pill`): buttons, the header button, the search field, as the app's `rounded-4xl`
+  buttons and `rounded-3xl` fields.
+- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): cards, callouts, node
+  cards, code blocks, the sidebar's current page.
 - **3px**: inline code, focus rings.
 - **2px**: status stamps and output handles.
 - Borders are 1px. The node card's 3px status rule is the one thicker line, and it is the app's
@@ -226,7 +233,7 @@ the docs author. Starlight's own shadows (search, link cards, pagination) are re
 
 ### Top bar
 
-The wordmark with the mark; search as an app input (card ground, hairline, 32px); then "API
+The wordmark with the mark; search as an app input (a filled pill, 32px); then "API
 explorer" as a muted text link and **Open the app** as the one ink button, the app's "New order"
 slot; GitHub; the theme select. The links ride an override of `SocialIcons`, the one slot in
 Starlight's header right group, so `Header` stays Starlight's. Below 50rem the right group hides
@@ -257,13 +264,13 @@ column labels on no fill, a hairline under each row, a soft muted hover, tabular
 
 ### Callouts
 
-1px border at 30% of the hue, a 5% flat tint into paper, 6px corners. Note is ink (neutral), tip
+1px border at 30% of the hue, a 5% flat tint into paper, 8px corners. Note is ink (neutral), tip
 is `ok`, caution is `wait`, danger is `bad`. Never a thick coloured edge.
 
 ### Buttons
 
 Starlight's `LinkButton`: primary is ink with paper text, secondary is card with a hairline,
-minimal is a link. 36px, 14px 500, 6px corners.
+minimal is a link. 36px, 14px 500, pill corners.
 
 ### Status stamp
 
@@ -293,7 +300,7 @@ when the engine would now run it differently.
 ### Code blocks
 
 Expressive Code with GitHub light and dark-dimmed syntax on the card ground, a hairline frame,
-6px corners, no shadow, Plex Mono at 13px.
+8px corners, no shadow, IBM Plex Mono at 13px.
 
 ### OpenAPI explorer (`src/pages/api.astro`)
 
@@ -302,7 +309,7 @@ Scalar under the app's top bar (48px, rule, wordmark with the mark), with its pa
 
 ### Browser surfaces
 
-Focus is a 2px registrar-blue outline offset 2px on every control; selection is the link at 24%;
+Focus is a 2px ink outline offset 2px on every control; selection is the link at 24%;
 the caret is link blue; scrollbars are thin, in the rule colour; link underlines sit 3px clear at
 40% of the link colour, full on hover; list markers are muted.
 
@@ -316,7 +323,7 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
   for nodes, real step keys and branch names.
 - **Do** use real data in figures, with a test or a script that keeps it real.
 - **Do** separate with 1px hairlines and tonal steps.
-- **Do** set every title in Plex Sans 600 with negative tracking; don't bring back a serif.
+- **Do** set every title in Inter 600 with negative tracking; don't bring back a serif.
 
 ### Don't
 
@@ -325,5 +332,5 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
 - **Don't** add shadows, gradients, glass, or coloured edges thicker than 1px. The node card's
   status rule is the one exception, and it is the app's.
 - **Don't** add uppercase or letter-spaced labels, or an eyebrow above a heading.
-- **Don't** borrow styling from other projects (felix-web, durablefibers, Supabase): Ledger is
-  this product's own.
+- **Don't** borrow styling from other projects (felix-web, durablefibers, Supabase). Ledger is
+  shadcn's base-luma preset as this product applies it, not another product's look.

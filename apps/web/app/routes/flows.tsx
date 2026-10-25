@@ -395,11 +395,11 @@ export default function Flows() {
               </Field>
               <fieldset aria-describedby={hintId}>
                 <legend className="caption mb-1.5">Start from</legend>
-                <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border bg-[var(--rule)] text-[13px]">
+                <div className="grid grid-cols-3 gap-1 rounded-full bg-muted p-1 text-[13px]">
                   {STARTS.map((o) => (
                     <label
                       key={o.id}
-                      className="cursor-pointer bg-card px-2 py-1.5 text-center text-muted-foreground has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
+                      className="cursor-pointer rounded-full px-2 py-1 text-center text-muted-foreground has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm dark:has-[:checked]:bg-input/30 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
                     >
                       <input
                         type="radio"
@@ -422,7 +422,7 @@ export default function Flows() {
                   <Textarea
                     name="prompt"
                     rows={5}
-                    className="bg-transparent text-base md:text-sm"
+                    className="text-base md:text-sm"
                     placeholder={EXAMPLES[model]}
                     aria-invalid={formError?.field === 'prompt' || undefined}
                   />

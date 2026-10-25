@@ -191,7 +191,7 @@ function AssistantToggle() {
       aria-pressed={open}
       title={open ? 'Close the assistant (⌘J)' : 'Ask the assistant (⌘J)'}
       className={cn(
-        'inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors md:h-8 md:min-w-0',
+        'inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl border px-3 text-[13px] transition-colors md:h-8 md:min-w-0',
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
           : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -268,7 +268,7 @@ function ShellFrame() {
             {operator ? (
               <Link
                 to="/orders/new"
-                className="inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
+                className="inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-4xl bg-primary px-3 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3 md:h-8 md:min-w-0"
               >
                 <Plus className="size-3.5" aria-hidden="true" />
                 <span className="sr-only sm:not-sr-only md:max-lg:sr-only">New order</span>
@@ -288,7 +288,7 @@ function ShellFrame() {
             {/* Who is signed in, and the pages that belong to them and the team. */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hidden h-8 items-center gap-2 rounded-md border px-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                className="hidden h-8 items-center gap-2 rounded-4xl border px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground"
                 aria-label={`Account: ${who(me, auth)}, ${ROLE_LABELS[me.role]}`}
               >
                 <UserRound className="size-4" aria-hidden="true" />

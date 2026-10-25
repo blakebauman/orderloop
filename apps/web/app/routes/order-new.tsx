@@ -277,7 +277,7 @@ export default function NewOrder() {
 
           <fieldset className="space-y-3 p-5">
             <legend className="section-title float-left mb-3 w-full">Buyer</legend>
-            <div className="clear-left grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-[var(--rule)] text-[13px] sm:w-80">
+            <div className="clear-left grid grid-cols-2 gap-1 rounded-full bg-muted p-1 text-[13px] sm:w-80">
               {(
                 [
                   ['account', 'Customer account'],
@@ -286,7 +286,7 @@ export default function NewOrder() {
               ).map(([value, label]) => (
                 <label
                   key={value}
-                  className="cursor-pointer bg-card px-2 py-1.5 text-center text-muted-foreground has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
+                  className="cursor-pointer rounded-full px-2 py-1 text-center text-muted-foreground has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm dark:has-[:checked]:bg-input/30 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]"
                 >
                   <input
                     type="radio"
@@ -360,7 +360,7 @@ export default function NewOrder() {
                   rows={4}
                   spellCheck={false}
                   autoCapitalize="characters"
-                  className="bg-transparent font-mono text-base md:text-sm"
+                  className="font-mono text-base md:text-sm"
                   value={lines}
                   onChange={(e) => setLines(e.target.value)}
                   aria-invalid={!!linesError || undefined}
@@ -390,7 +390,7 @@ export default function NewOrder() {
                 <Textarea
                   name="documentText"
                   rows={6}
-                  className="bg-transparent text-base md:text-sm"
+                  className="text-base md:text-sm"
                   defaultValue={input?.documentText ?? ''}
                 />
               </Field>
