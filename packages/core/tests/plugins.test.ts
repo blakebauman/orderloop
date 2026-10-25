@@ -292,6 +292,19 @@ describe('plugin keys', () => {
       await verifyPrincipal([await pluginKey('k', 'example')], forPlugin, '/plugins/example/'),
     ).toMatchObject({ id: 'usr_1' });
   });
+
+  it("give each runtime install its version's own key, apart from the registry's", async () => {
+    const [registry, v1, v2] = await Promise.all([
+      pluginKey('k', 'acme'),
+      pluginKey('k', 'acme', 'a'.repeat(64)),
+      pluginKey('k', 'acme', 'b'.repeat(64)),
+    ]);
+    expect(new Set([registry, v1, v2]).size).toBe(3);
+    // A key that leaked from one version opens nothing once another runs.
+    const p = { kind: 'user' as const, id: 'usr_1', name: 'Ada', role: 'admin' as const };
+    const old = await signPrincipal(v1, p, '/plugins/acme/');
+    expect(await verifyPrincipal([v2], old, '/plugins/acme/')).toBeNull();
+  });
 });
 
 describe('providers', () => {

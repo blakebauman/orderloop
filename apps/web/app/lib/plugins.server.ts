@@ -231,7 +231,13 @@ export async function pluginFetch(request: Request): Promise<Response> {
     if (!atLeast(caller.role, manifest.pageRole)) return new Response('Forbidden', { status: 403 });
     const limited = await overBudget('API_LIMIT', `plugin:${id}:${caller.id}`);
     if (limited) return limited;
-    await setPluginPrincipalHeader(headers, caller, url.pathname, id);
+    await setPluginPrincipalHeader(
+      headers,
+      caller,
+      url.pathname,
+      id,
+      status?.source === 'installed' ? status.sha : undefined,
+    );
   }
 
   const body =

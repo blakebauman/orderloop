@@ -188,7 +188,10 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
     id,
     runtime,
     source,
+    sha,
   }: (typeof installed)[number]): Promise<PluginStatus> => {
+    // A runtime install's page key is its version's (`pluginKey`): the web app signs with it.
+    const install = source === 'installed' && sha ? { sha } : {};
     try {
       const stub = await pluginStub(env, id, 'serve');
       if (!stub) throw new Error('not installed');
@@ -211,7 +214,7 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
           `It asks to ${ungranted.join(' and ')}, which this deployment does not grant`,
         );
       lastGood.set(id, m);
-      return { id, runtime, source, manifest: m, healthy: true };
+      return { id, runtime, source, ...install, manifest: m, healthy: true };
     } catch (err) {
       console.error('plugin manifest refused', id, err);
       // The last good manifest stands in, but never past a grant the deployment has withdrawn.
@@ -224,6 +227,7 @@ export async function pluginStatuses(env: Env, fresh = false): Promise<PluginSta
         id,
         runtime,
         source,
+        ...install,
         manifest: allowed ? fallback : null,
         healthy: false,
         error: message(err),
