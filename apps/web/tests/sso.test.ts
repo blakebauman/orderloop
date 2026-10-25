@@ -155,11 +155,11 @@ describe('the OpenID Connect flow', () => {
   }
 
   /** Starts a flow, then comes back the way the provider would redirect the browser. */
-  async function roundTrip(tamper: (q: URLSearchParams) => void = () => {}) {
+  async function roundTrip(tamper: (q: URLSearchParams) => void = () => {}, reauth = false) {
     const c = ssoConfig()!;
     let flowNonce = '';
     provider(() => flowNonce);
-    const start = await startSso(new Request('https://app.test/login/sso'), c, '/orders');
+    const start = await startSso(new Request('https://app.test/login/sso'), c, '/orders', reauth);
     const auth = new URL(start.location);
     flowNonce = auth.searchParams.get('nonce')!;
     const q = new URLSearchParams({ code: 'code-1', state: auth.searchParams.get('state')! });
@@ -178,7 +178,11 @@ describe('the OpenID Connect flow', () => {
     expect(await result).toEqual({
       identity: { sub: 'sub-1', email: 'ann@acme.com', name: 'Ann' },
       next: '/orders',
+      reauthAt: null,
     });
+    // An ordinary sign-in doesn't make the provider ask again.
+    expect(auth.searchParams.has('prompt')).toBe(false);
+    expect(auth.searchParams.has('max_age')).toBe(false);
     const token = calls.find((r) => r.url.endsWith('/token'))!;
     expect(token.headers.get('authorization')).toBe(`Basic ${btoa('client-1:s3cret')}`);
     const body = new URLSearchParams(await token.text());
@@ -197,6 +201,20 @@ describe('the OpenID Connect flow', () => {
     signWith = {};
     claims = { nonce: 'replayed' };
     await expect((await roundTrip()).result).rejects.toThrow(/nonce mismatch/);
+  });
+
+  it('asks the provider to sign them in again for a step-up, and takes only a fresh sign-in', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    claims = { auth_time: now };
+    const { auth, result } = await roundTrip(undefined, true);
+    expect(auth.searchParams.get('prompt')).toBe('login');
+    expect(auth.searchParams.get('max_age')).toBe('0');
+    expect((await result).reauthAt).toBeGreaterThan(0);
+    // The provider answered from a sign-in before the step-up began, or didn't say when.
+    claims = { auth_time: now - 30 * 60 };
+    await expect((await roundTrip(undefined, true)).result).rejects.toThrow(/sign them in again/);
+    claims = {};
+    await expect((await roundTrip(undefined, true)).result).rejects.toThrow(/sign them in again/);
   });
 
   it('keeps an unverified email from matching anyone', async () => {

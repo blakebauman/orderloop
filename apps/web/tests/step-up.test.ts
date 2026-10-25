@@ -12,9 +12,10 @@ type User = {
   totpSecret: string | null;
   totpLastStep: number | null;
   passwordHash: string | null;
+  externalSub?: string | null;
 };
 let user: User;
-let session: { createdAt: number } | undefined;
+let session: { createdAt: number; reauthAt: number | null } | undefined;
 let ssoOnly = false;
 const failures = new Map<string, { key: string; count: number; windowStart: number }>();
 
@@ -46,8 +47,14 @@ const insert = () => ({
   }),
 });
 const update = () => ({
-  set: (v: { totpLastStep: number }) => ({
+  set: (v: { totpLastStep: number; reauthAt?: number }) => ({
     where: () => ({
+      // recordReauth: the session's step-up time.
+      // biome-ignore lint/suspicious/noThenProperty: drizzle's queries are awaited directly
+      then: (ok: (r: unknown) => unknown) => {
+        if (session && v.reauthAt) session.reauthAt = v.reauthAt;
+        return ok(undefined);
+      },
       run: async () => {
         const won = user.totpLastStep === null || v.totpLastStep > user.totpLastStep;
         if (won) user.totpLastStep = v.totpLastStep;
@@ -69,7 +76,7 @@ vi.mock('~/lib/settings.server', () => ({
   twoFactorRequirement: async () => 'off',
 }));
 
-const { stepUp, stepUpMethod } = await import('~/lib/auth.server');
+const { recordReauth, stepUp, stepUpMethod } = await import('~/lib/auth.server');
 
 const admin: Principal = { kind: 'user', id: 'usr_1', name: 'Ann', role: 'admin' };
 const request = new Request('https://app.test/plugins', {
@@ -80,7 +87,7 @@ const request = new Request('https://app.test/plugins', {
 beforeEach(() => {
   failures.clear();
   ssoOnly = false;
-  session = { createdAt: Date.now() - 60 * 60_000 };
+  session = { createdAt: Date.now() - 60 * 60_000, reauthAt: null };
   user = {
     id: 'usr_1',
     totpEnabledAt: null,
@@ -114,14 +121,27 @@ describe('stepUp', () => {
     expect(await stepUp(request, admin, { password: 'wrong' })).toMatch(/password is not right/);
     expect(await stepUp(request, admin, { password: 'right horse' })).toBeNull();
     ssoOnly = true;
-    expect(await stepUpMethod(admin)).toBe('recent-sign-in');
-    expect(await stepUp(request, admin, { password: 'right horse' })).toMatch(/Sign in again/);
+    expect(await stepUpMethod(admin)).toBe('sso');
+    expect(await stepUp(request, admin, { password: 'right horse' })).toMatch(/single sign-on/);
   });
 
-  it('takes a single sign-on within the last ten minutes, from someone with neither', async () => {
-    expect(await stepUpMethod(admin)).toBe('recent-sign-in');
-    expect(await stepUp(request, admin, {})).toMatch(/Sign in again/);
-    session = { createdAt: Date.now() - 5 * 60_000 };
+  it('takes signing in again at the provider in the last ten minutes, from someone with neither', async () => {
+    expect(await stepUpMethod(admin)).toBe('sso');
+    expect(await stepUp(request, admin, {})).toMatch(/Confirm with single sign-on/);
+    // A new session alone isn't enough: the provider may have answered from its own session.
+    session = { createdAt: Date.now() - 60_000, reauthAt: null };
+    expect(await stepUp(request, admin, {})).toMatch(/Confirm with single sign-on/);
+    session = { createdAt: Date.now() - 60 * 60_000, reauthAt: Date.now() - 11 * 60_000 };
+    expect(await stepUp(request, admin, {})).toMatch(/Confirm with single sign-on/);
+    session = { createdAt: Date.now() - 60 * 60_000, reauthAt: Date.now() - 5 * 60_000 };
+    expect(await stepUp(request, admin, {})).toBeNull();
+  });
+
+  it('records signing in again only for the identity linked to the person', async () => {
+    user = { ...user, externalSub: 'sub-1' };
+    expect(await recordReauth(request, admin, 'sub-2', Date.now())).toBe(false);
+    expect(await stepUp(request, admin, {})).toMatch(/Confirm with single sign-on/);
+    expect(await recordReauth(request, admin, 'sub-1', Date.now())).toBe(true);
     expect(await stepUp(request, admin, {})).toBeNull();
   });
 

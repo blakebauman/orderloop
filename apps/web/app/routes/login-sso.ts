@@ -1,5 +1,6 @@
 import { redirect } from 'react-router';
 import { clientIp } from '~/lib/audit.server';
+import { principal } from '~/lib/auth.server';
 import { nextPath } from '~/lib/next-path';
 import { overBudget } from '~/lib/rate-limit';
 import { SsoError, ssoConfig, startSso } from '~/lib/sso.server';
@@ -8,6 +9,7 @@ import type { Route } from './+types/login-sso';
 /**
  * Starts single sign-on: off to the identity provider, with this browser's flow in a cookie. A
  * plain link reaches it (a GET), so the CSP's `form-action 'self'` doesn't stand in the way.
+ * `?reauth=1` from someone signed in is a step-up: the provider is asked to sign them in again.
  */
 export async function loader({ request }: Route.LoaderArgs) {
   const c = ssoConfig();
@@ -16,8 +18,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const limited = await overBudget('API_LIMIT', `sso:${clientIp(request)}`);
   if (limited) return limited;
   const next = nextPath(request);
+  const reauth =
+    new URL(request.url).searchParams.get('reauth') === '1' && !!(await principal(request));
   try {
-    const { location, cookie } = await startSso(request, c, next);
+    const { location, cookie } = await startSso(request, c, next, reauth);
     return redirect(location, { headers: { 'set-cookie': cookie } });
   } catch (err) {
     if (!(err instanceof SsoError)) throw err;
