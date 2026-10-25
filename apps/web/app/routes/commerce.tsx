@@ -229,8 +229,14 @@ export default function Commerce() {
             </p>
           ) : null}
         </Form>
-        <nav aria-label="On this page" className="mb-4 text-sm">
-          <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
+      </div>
+      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
+        {/* On a phone the sections run long: the links stay under the top bar, on one scrolling line. */}
+        <nav
+          aria-label="On this page"
+          className="sticky top-[var(--shell-h)] z-10 -mx-4 min-w-0 border-b bg-background px-4 text-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 xl:col-span-2"
+        >
+          <ul className="flex gap-x-5 gap-y-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
             {[
               ['#outside-events', 'Outside events'],
               ['#records', 'Records'],
@@ -242,15 +248,13 @@ export default function Commerce() {
               ['#sellers', 'Marketplace sellers'],
             ].map(([href, label]) => (
               <li key={href}>
-                <a href={href} className="inline-block py-1 text-link hover:underline">
+                <a href={href} className="inline-block py-2.5 text-link hover:underline sm:py-1">
                   {label}
                 </a>
               </li>
             ))}
           </ul>
         </nav>
-      </div>
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-2 xl:items-start">
         <Section
           id="outside-events"
           title="Outside events"
@@ -377,7 +381,7 @@ export default function Commerce() {
             the store. Reserved stock is held by running orders.
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
                 <tr>
                   <th scope="col" className="caption px-4 py-2 font-medium">
@@ -417,6 +421,7 @@ export default function Commerce() {
                       ) : (
                         <>
                           <td
+                            data-label="Available"
                             className={`whitespace-nowrap px-2 py-1.5 text-right tabular ${
                               level === 'Out'
                                 ? 'font-medium text-bad'
@@ -438,15 +443,23 @@ export default function Commerce() {
                               </span>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1.5 text-right text-muted-foreground tabular">
+                          <td
+                            data-label="Reserved"
+                            className="px-2 py-1.5 text-right text-muted-foreground tabular"
+                          >
                             <Held sku={p.sku} n={p.reserved} />
                           </td>
-                          <td className="px-2 py-1.5 text-right text-muted-foreground tabular">
+                          <td
+                            data-label="Reorder at"
+                            className="px-2 py-1.5 text-right text-muted-foreground tabular"
+                          >
                             {p.reorderPoint ? count(p.reorderPoint) : 'Not reordered'}
                           </td>
                         </>
                       )}
-                      <td className="px-4 py-1.5 text-right tabular">{money(p.price)}</td>
+                      <td data-label="Price" className="px-4 py-1.5 text-right tabular">
+                        {money(p.price)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -463,7 +476,7 @@ export default function Commerce() {
         </Section>
         <Section id="stores" title="Stores" flush>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
                 <tr>
                   <th scope="col" className="caption px-4 py-2 font-medium">
@@ -504,13 +517,19 @@ export default function Commerce() {
                             {s.sku}
                           </a>
                         </td>
-                        <td className="px-2 py-1 text-right tabular">
+                        <td data-label="Available" className="px-2 py-1 text-right tabular">
                           {count(s.stock - s.reserved)}
                         </td>
-                        <td className="px-2 py-1 text-right text-muted-foreground tabular">
+                        <td
+                          data-label="Reserved"
+                          className="px-2 py-1 text-right text-muted-foreground tabular"
+                        >
                           <Held sku={s.sku} n={s.reserved} />
                         </td>
-                        <td className="px-4 py-1 text-right text-muted-foreground tabular">
+                        <td
+                          data-label="On hand"
+                          className="px-4 py-1 text-right text-muted-foreground tabular"
+                        >
                           {count(s.stock)}
                         </td>
                       </tr>
@@ -530,7 +549,7 @@ export default function Commerce() {
         <Pricing pricing={pricing} customers={customers} productName={productName} />
         <Section id="customers" title="Customers" flush>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
                 <tr>
                   <th scope="col" className="caption px-4 py-2 font-medium">
@@ -567,10 +586,11 @@ export default function Commerce() {
                           {c.kind === 'business' ? ` · ${humanize(c.tier)}` : ''}
                         </div>
                       </td>
-                      <td className="px-2 py-1.5">
+                      <td data-label="Terms" className="px-2 py-1.5">
                         {c.kind === 'business' ? humanize(c.terms) : 'Pays at checkout'}
                       </td>
                       <td
+                        data-label="Balance"
                         className={cn(
                           'whitespace-nowrap px-2 py-1.5 text-right tabular',
                           over && 'font-medium text-bad',
@@ -581,7 +601,7 @@ export default function Commerce() {
                         {over ? <span className="ml-1.5 text-xs">Over limit</span> : null}
                         {near ? <span className="ml-1.5 text-xs">Near limit</span> : null}
                       </td>
-                      <td className="px-4 py-1.5 text-right tabular">
+                      <td data-label="Credit limit" className="px-4 py-1.5 text-right tabular">
                         {c.creditLimit ? (
                           money(c.creditLimit)
                         ) : (
@@ -604,7 +624,7 @@ export default function Commerce() {
         </Section>
         <Section id="sellers" title="Marketplace sellers" flush>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
                 <tr>
                   <th scope="col" className="caption px-4 py-2 font-medium">
@@ -632,10 +652,10 @@ export default function Commerce() {
                       {s.active ? null : <Off />}
                       <div className="break-all text-muted-foreground text-xs">{s.email}</div>
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td data-label="Accepts orders" className="px-2 py-1.5">
                       {s.autoAccept ? 'Automatically' : 'Asked per order'}
                     </td>
-                    <td className="px-4 py-1.5 text-right tabular">
+                    <td data-label="Commission" className="px-4 py-1.5 text-right tabular">
                       {Math.round(s.commissionPct * 1000) / 10}%
                     </td>
                   </tr>
@@ -727,7 +747,7 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
       <div id={`${tablistId}-panel`} role="tabpanel" aria-labelledby={`${tablistId}-${kind}`}>
         {rows.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-stack w-full text-sm">
               <thead className="border-b text-left">
                 <tr>
                   <th scope="col" className="caption px-4 py-2 font-medium">
@@ -764,7 +784,7 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
                         </div>
                       ) : null}
                     </td>
-                    <td className="max-w-72 px-2 py-1.5">
+                    <td data-label="Order" className="max-w-72 px-2 py-1.5">
                       <Link to={`/orders/${r.orderId}`} className="hover:underline">
                         {r.orderTitle || 'Order'}
                       </Link>{' '}
@@ -777,13 +797,22 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
                         </div>
                       ) : null}
                     </td>
-                    <td className={cn('px-2 py-1.5 text-xs', TONE_CLASS[recordTone(r.status)])}>
+                    <td
+                      data-label="Status"
+                      className={cn('px-2 py-1.5 text-xs', TONE_CLASS[recordTone(r.status)])}
+                    >
                       {r.status ? humanize(r.status) : '—'}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right tabular">
+                    <td
+                      data-label="Amount"
+                      className="whitespace-nowrap px-2 py-1.5 text-right tabular"
+                    >
                       {r.amount !== null ? money(r.amount, r.currency ?? undefined) : ''}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-1.5 text-right text-muted-foreground text-xs">
+                    <td
+                      data-label="When"
+                      className="whitespace-nowrap px-4 py-1.5 text-right text-muted-foreground text-xs"
+                    >
                       <Ago ms={r.at} />
                     </td>
                   </tr>

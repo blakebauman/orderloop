@@ -482,7 +482,7 @@ export default function NewOrder() {
             <Button type="submit" disabled={busy || !flow}>
               {busy ? 'Starting…' : 'Start order'}
             </Button>
-            <span className="text-muted-foreground text-xs">
+            <span className="text-muted-foreground text-xs touch:hidden">
               <kbd className="font-sans">⌘</kbd> or <kbd className="font-sans">Ctrl</kbd> +{' '}
               <kbd className="font-sans">Enter</kbd>
             </span>

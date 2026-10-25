@@ -188,7 +188,7 @@ export default function Approvals() {
                 You can see what is waiting; people with the approver role decide.
               </p>
             ) : anyOpen ? (
-              <p className="mb-3 hidden text-muted-foreground text-xs sm:block">
+              <p className="mb-3 hidden text-muted-foreground text-xs fine:block">
                 Keyboard: <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd>{' '}
                 move between rows, <kbd className="font-mono">A</kbd> approves,{' '}
                 <kbd className="font-mono">R</kbd> rejects, <kbd className="font-mono">Z</kbd>{' '}
