@@ -7,6 +7,7 @@ import {
   type ExternalCartInput,
   PRINCIPAL_HEADER,
   signCartGuest,
+  subjectTarget,
 } from '@orderloop/core';
 import { auditEvents, carts, createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -415,8 +416,50 @@ describe('external carts from before buyers were indexed', () => {
     expect((await exportDataSubject(env, email)).carts).toEqual([
       expect.objectContaining({ id: c.cartId }),
     ]);
-    // Nothing left to backfill for it.
+    // A second sweep finds nothing left to do for it.
+    await indexCartBuyers(env);
     const again = await db().select().from(carts).where(eq(carts.id, c.cartId)).get();
     expect(again?.buyerId).toBe(email);
+  });
+
+  it('erases a buyer from such a cart if they were erased before it named them', async () => {
+    const email = `gone-${crypto.randomUUID().slice(0, 6)}@northwind.example`;
+    const c = await open({ buyer: { id: email, name: 'Gina Gone' } });
+    await db().update(carts).set({ buyerId: null }).where(eq(carts.id, c.cartId));
+    // Their erasure ran while the cart had no buyer on its row, so it couldn't find it.
+    await db()
+      .insert(auditEvents)
+      .values({
+        id: `aud_${crypto.randomUUID()}`,
+        at: Date.now(),
+        action: 'personal_data.erased',
+        target: await subjectTarget(email),
+      });
+    await indexCartBuyers(env);
+    const s = (await api().cartSnapshot(c.cartId))!;
+    expect(s.cart?.external?.buyer).toEqual({ id: '[erased]', name: '[erased]' });
+    expect((await db().select().from(carts).where(eq(carts.id, c.cartId)).get())?.buyerId).toBe('');
+    expect((await exportDataSubject(env, email)).carts).toEqual([]);
+  });
+
+  it('marks a row with nothing behind it as done, and an erasure of no one finds no cart', async () => {
+    const id = `cart_${crypto.randomUUID().slice(0, 8)}`;
+    const now = Date.now();
+    await db()
+      .insert(carts)
+      .values({
+        id,
+        title: 'Bare',
+        status: 'open',
+        flowId: 'tpl-b2b-order',
+        pluginId: 'example',
+        sessionRef: `bare-${id}`,
+        createdBy: 'plugin:example',
+        createdAt: now,
+        updatedAt: now,
+      });
+    await indexCartBuyers(env);
+    expect((await db().select().from(carts).where(eq(carts.id, id)).get())?.buyerId).toBe('');
+    expect((await exportDataSubject(env, '')).carts).toEqual([]);
   });
 });

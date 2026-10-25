@@ -32,7 +32,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizz
 import { pruneConfirmations } from './confirmations';
 import { resealSecrets } from './data-key';
 import { cartAgent } from './namespaces';
-import { eraseOrders } from './subjects';
+import { eraseIfErased, eraseOrders } from './subjects';
 import { pruneUsage } from './usage';
 
 const DAY = 86_400_000;
@@ -170,9 +170,27 @@ export async function indexCartBuyers(env: Env) {
     .limit(BACKFILL_MAX);
   let indexed = 0;
   for (const c of due) {
-    if (await cartAgent(env, c.id).reindex()) indexed++;
-    // A row whose agent holds nothing has no buyer to find: mark it done.
-    else await db.update(carts).set({ buyerId: '' }).where(eq(carts.id, c.id));
+    try {
+      if (await cartAgent(env, c.id).reindex()) {
+        indexed++;
+        // Someone erased before this cart named them is erased from it now.
+        const row = await db
+          .select({ buyerId: carts.buyerId })
+          .from(carts)
+          .where(eq(carts.id, c.id))
+          .get();
+        if (row?.buyerId) await eraseIfErased(env, c.id, row.buyerId);
+      }
+      // A row whose agent holds nothing has no buyer to find: mark it done.
+      else
+        await db
+          .update(carts)
+          .set({ buyerId: '' })
+          .where(and(eq(carts.id, c.id), isNull(carts.buyerId)));
+    } catch (e) {
+      // One cart that can't answer waits for the next sweep; the rest of the sweep goes on.
+      console.error(JSON.stringify({ type: 'cart_reindex_failed', id: c.id, error: String(e) }));
+    }
   }
   return indexed;
 }

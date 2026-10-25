@@ -14,9 +14,11 @@ import {
   type OrderState,
   type SubjectExport,
   subjectEmail,
+  subjectTarget,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import {
+  auditEvents,
   carts,
   createDb,
   customers,
@@ -159,12 +161,36 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
 
 /** External carts whose buyer is the subject (`carts.buyer_id`, written lower-cased). */
 async function cartsOf(env: Env, email: string) {
+  // '' marks a cart with no buyer to find (erased, purged or empty): never anyone's.
+  if (!email) return [];
   const rows = await createDb(env.DB)
     .select({ id: carts.id })
     .from(carts)
     .where(eq(carts.buyerId, email))
     .limit(EXPORT_MAX);
   return rows.map((r) => r.id);
+}
+
+/**
+ * Erases the buyer from one external cart if they were erased before the cart was indexed under
+ * them (carts opened before migration 0050, which an erasure couldn't find). True if it did.
+ */
+export async function eraseIfErased(env: Env, cartId: string, email: string): Promise<boolean> {
+  if (!email) return false;
+  const erased = await createDb(env.DB)
+    .select({ id: auditEvents.id })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.action, 'personal_data.erased'),
+        eq(auditEvents.target, await subjectTarget(email)),
+      ),
+    )
+    .limit(1)
+    .get();
+  if (!erased) return false;
+  await cartAgent(env, cartId).eraseSubject((await subject(env, email)).terms);
+  return true;
 }
 
 export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureResult> {
