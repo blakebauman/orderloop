@@ -163,6 +163,13 @@ functions), revenue per day from completed `orders`, and refund rate from `payme
 `fx_rate`. The page shows counts instead of a completion rate below five ended orders per model,
 and a step's 95th percentile only from 20 runs (`apps/web/app/components/performance.tsx`).
 
+Above it, **Trends** (`apps/web/app/components/trends.tsx`) charts `daily`, a 90-day series from
+the same request (`fillDays`, one row per UTC day so empty days still show), over 7, 30 or 90 days:
+revenue from completed `orders`; orders ended per day by `updated_at`, stacked as completed,
+declined or cancelled, and failed or rolled back; and money collected and refunded from succeeded
+`payments` by `created_at`. The charts use `@orderloop/ui/chart` (shadcn's Chart over Recharts),
+colored with the existing Ledger tokens.
+
 The overview's **Needs attention** (`overview` in `apps/web/app/lib/orders.server.ts`, one D1 batch with the overview's other counts) reads
 the orders index: the newest failed and rolled-back orders with `stopped_at` and `reason`, and the
 open waits grouped in SQL by `waiting_at`, `waiting_on` and `waiting_for` with the oldest
