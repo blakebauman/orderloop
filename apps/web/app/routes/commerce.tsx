@@ -206,6 +206,10 @@ export default function Commerce() {
           <Input
             name="q"
             type="search"
+            enterKeyHint="search"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             defaultValue={q}
             placeholder="Find an order, customer, SKU or seller"
             aria-label="Find an order, customer, SKU or seller"

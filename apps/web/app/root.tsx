@@ -29,15 +29,30 @@ export const links: Route.LinksFunction = () => [
   fontPreload(plexSans400),
   fontPreload(plexSans600),
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+  { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+  { rel: 'manifest', href: '/manifest.webmanifest' },
 ];
 
-export const meta: Route.MetaFunction = () => [{ title: 'OrderLoop' }];
+/** Added to the Home Screen, it opens as its own app with the system status bar over the paper. */
+export const meta: Route.MetaFunction = () => [
+  { title: 'OrderLoop' },
+  { name: 'apple-mobile-web-app-capable', content: 'yes' },
+  { name: 'mobile-web-app-capable', content: 'yes' },
+  { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
+  { name: 'apple-mobile-web-app-title', content: 'OrderLoop' },
+  { name: 'format-detection', content: 'telephone=no' },
+];
+
+/** Browser chrome colour per theme: `--paper` from app.css, in hex (the manifest needs hex too). */
+const THEME_COLOR = { light: '#f9f5ee', dark: '#12161d' } as const;
 
 /**
  * Resolves the stored theme choice ("light" by default, "dark", or "system") to `data-theme` before
- * first paint, and follows the OS while "system" is chosen. Kept tiny and inline on purpose.
+ * first paint, and follows the OS while "system" is chosen. It also keeps a `theme-color` meta of
+ * its own first in <head>, so the browser chrome matches the chosen theme rather than the OS (the
+ * per-scheme metas below are only the fallback without script). Kept tiny and inline on purpose.
  */
-const THEME_SCRIPT = `(function(){var d=document.documentElement,m=window.matchMedia('(prefers-color-scheme: dark)');function a(){var c='light';try{c=localStorage.getItem('ol-theme')||'light'}catch(e){c=d.dataset.themeChoice||'light'}d.dataset.themeChoice=c;d.dataset.theme=c==='system'?(m.matches?'dark':'light'):c}a();m.addEventListener('change',a);window.addEventListener('ol-theme',a)})()`;
+const THEME_SCRIPT = `(function(){var d=document.documentElement,m=window.matchMedia('(prefers-color-scheme: dark)'),t=document.createElement('meta');t.name='theme-color';document.head.prepend(t);function a(){var c='light';try{c=localStorage.getItem('ol-theme')||'light'}catch(e){c=d.dataset.themeChoice||'light'}d.dataset.themeChoice=c;d.dataset.theme=c==='system'?(m.matches?'dark':'light'):c;t.content=d.dataset.theme==='dark'?'${THEME_COLOR.dark}':'${THEME_COLOR.light}'}a();m.addEventListener('change',a);window.addEventListener('ol-theme',a)})()`;
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const nonce = useContext(NonceContext);
@@ -45,7 +60,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* viewport-fit=cover lets pages pad themselves with the safe-area insets (app.css). */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: light)"
+          content={THEME_COLOR.light}
+        />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content={THEME_COLOR.dark} />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Meta />
         <Links />
