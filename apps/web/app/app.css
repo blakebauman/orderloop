@@ -22,6 +22,12 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   /* Titles and the wordmark: Inter 600, set a touch tighter than running text. */
   --tracking-title: -0.015em;
+  /* The console's two small steps under Tailwind's scale: chrome and controls (13px), and counts and
+     tags (11px). In rem, so they grow with the reader's text size. */
+  --text-ui: 0.8125rem;
+  --text-2xs: 0.6875rem;
+  /* A page's body and header width (components/page.tsx). */
+  --container-page: 87.5rem;
 }
 
 @theme inline {
@@ -95,7 +101,8 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* A step darker than the preset's 0.556, so it holds 4.5:1 on muted fills and tiles too. */
+  --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -103,10 +110,11 @@
   --rule: oklch(0.922 0 0);
   --border: var(--rule);
   --input: oklch(0.922 0 0);
-  /* Links and live work. Focus uses the preset's grey ring on fields and buttons, and ink for the
-     page-wide outline, which needs the contrast. */
+  /* Links and live work. Focus is the preset's grey ring on fields and buttons, set dark enough that
+     its edge holds 3:1 on white and on muted fills (the preset's 0.708 doesn't); ink for the
+     page-wide outline. */
   --link: oklch(0.47 0.13 256);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.556 0 0);
 
   --ok: oklch(0.455 0.105 152);
   --run: var(--link);

@@ -256,7 +256,7 @@ function Consent({
           OrderLoop?
         </h1>
         {details.clientDomain ? null : (
-          <span className="mt-1.5 inline-block rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
+          <span className="mt-1.5 inline-block rounded-full bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
             Unverified name
           </span>
         )}

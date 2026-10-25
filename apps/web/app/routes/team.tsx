@@ -397,7 +397,7 @@ export default function Team() {
           </>
         }
       />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="max-w-[1000px] space-y-6">
           <Section title="Roles">
             <RoleGuide />
@@ -758,7 +758,7 @@ function FirstAdmin({ error }: { error: string | null }) {
         title="Team"
         subtitle="Anyone can use this workspace until it has a first admin."
       />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="grid max-w-[1000px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <Section title="Create your admin account">
             <Form method="post" className="space-y-3">

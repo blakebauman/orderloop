@@ -138,7 +138,7 @@ export default function Orders() {
   return (
     <>
       <PageHeader title="Orders" subtitle={<span aria-live="polite">{subtitle}</span>} />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <Form
           className="mb-4 grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap"
           onChange={(e) => {
@@ -224,12 +224,12 @@ export default function Orders() {
             />
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-[11px] text-muted-foreground touch:hidden"
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-2xs text-muted-foreground touch:hidden"
             >
               /
             </span>
           </div>
-          <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-[13px] text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]">
+          <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]">
             <input
               type="checkbox"
               name="attention"

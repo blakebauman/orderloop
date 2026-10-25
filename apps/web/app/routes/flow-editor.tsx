@@ -347,7 +347,7 @@ export default function FlowEditor() {
                   : ''}
             </span>
             {dirty ? (
-              <span className="rounded-sm bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
+              <span className="rounded-full bg-wait/15 px-1.5 py-0.5 font-medium text-wait text-xs">
                 Unsaved
               </span>
             ) : null}

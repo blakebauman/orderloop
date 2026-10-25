@@ -734,7 +734,10 @@ function Deliveries({ deliveries }: { deliveries: Plugin['deliveries'] }) {
             <li key={d.id} className="flex flex-wrap items-baseline gap-x-2">
               <StatusDot status={d.status === 'delivered' ? 'completed' : 'failed'} />
               <span>{d.event}</span>
-              <Link to={`/orders/${d.orderId}`} className="text-link text-xs hover:underline">
+              <Link
+                to={`/orders/${d.orderId}`}
+                className="hit-area text-link text-xs hover:underline"
+              >
                 {d.orderId}
               </Link>
               <span className="text-muted-foreground text-xs">

@@ -176,7 +176,7 @@ export default function Dashboard() {
           </>
         }
       />
-      <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page space-y-6 px-4 pb-10 sm:px-6">
         {/* The status register, over every order: each figure opens the matching orders. */}
         <nav aria-label="All orders by status">
           <p className="caption mb-1.5">All orders</p>
@@ -227,13 +227,13 @@ export default function Dashboard() {
                 title={
                   <span className="flex items-center gap-2">
                     Needs a decision
-                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-[11px] text-wait tabular">
+                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-2xs text-wait tabular">
                       {decisions.length + moreDecisions}
                     </span>
                   </span>
                 }
                 actions={
-                  <Link to="/approvals" className="text-link text-xs hover:underline">
+                  <Link to="/approvals" className="hit-area text-link text-xs hover:underline">
                     Open the queue
                   </Link>
                 }
@@ -258,7 +258,7 @@ export default function Dashboard() {
                 Nothing is waiting on a decision.
                 <Link
                   to="/approvals?status=all"
-                  className="ml-auto text-link text-xs hover:underline"
+                  className="hit-area ml-auto text-link text-xs hover:underline"
                 >
                   Past approvals
                 </Link>
@@ -319,7 +319,10 @@ export default function Dashboard() {
             <Section
               title="Recently updated"
               actions={
-                <Link to="/orders?sort=updated" className="text-link text-xs hover:underline">
+                <Link
+                  to="/orders?sort=updated"
+                  className="hit-area text-link text-xs hover:underline"
+                >
                   All orders
                 </Link>
               }
@@ -508,7 +511,7 @@ function NeedsAttention({
     <Section
       title="Needs attention"
       actions={
-        <Link to="/orders?attention=1" className="text-link text-xs hover:underline">
+        <Link to="/orders?attention=1" className="hit-area text-link text-xs hover:underline">
           In Orders
         </Link>
       }
@@ -548,7 +551,7 @@ function NeedsAttention({
           {failedTotal > failed.length ? (
             <Link
               to="/orders?attention=1"
-              className="block px-4 pt-1 pb-2.5 text-link text-xs hover:underline"
+              className="hit-area block px-4 pt-1 pb-2.5 text-link text-xs hover:underline"
             >
               {failedTotal - failed.length} more
             </Link>

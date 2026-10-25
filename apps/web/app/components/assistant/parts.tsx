@@ -290,7 +290,7 @@ export function ActionCard({
         {p?.href ? (
           <Link
             to={p.href}
-            className="shrink-0 text-link text-xs hover:underline"
+            className="hit-area shrink-0 text-link text-xs hover:underline"
             aria-label={`Open ${p.title}`}
           >
             Open
@@ -301,7 +301,7 @@ export function ActionCard({
         p.consequences.length ? (
           <ul className="divide-y divide-dashed px-3 tabular">
             {p.consequences.map((c) => (
-              <li key={c} className="py-1.5 text-[13px] leading-snug">
+              <li key={c} className="py-1.5 text-ui leading-snug">
                 {c}
               </li>
             ))}
@@ -317,7 +317,7 @@ export function ActionCard({
       )}
       <footer className="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-3 py-2">
         {blocked ? (
-          <p className="min-w-0 flex-1 text-[13px] text-wait leading-snug">{blocked}</p>
+          <p className="min-w-0 flex-1 text-ui text-wait leading-snug">{blocked}</p>
         ) : (
           <p className="min-w-0 flex-1 text-muted-foreground text-xs">
             Nothing is sent until you confirm.
@@ -373,7 +373,7 @@ function Settled({
     </>
   );
   const cls = cn(
-    'flex items-start gap-2 border-y py-1.5 text-[13px] leading-snug',
+    'flex items-start gap-2 border-y py-1.5 text-ui leading-snug',
     tone === 'ink' && 'font-medium text-foreground',
     tone === 'muted' && 'text-muted-foreground',
     tone === 'bad' && 'text-bad',
@@ -413,7 +413,7 @@ export function PluginDraftCard({ part }: { part: Part }) {
         </h3>
       </header>
       <div className="space-y-1.5 px-3 py-2">
-        <p className="text-[13px] leading-snug">{d.explanation}</p>
+        <p className="text-ui leading-snug">{d.explanation}</p>
         <ul className="text-muted-foreground text-xs">
           {d.nodes.map((n) => (
             <li key={n.type}>
@@ -459,7 +459,7 @@ export function ProposalCard({ part }: { part: Part }) {
         <h3 className="font-semibold leading-snug">Proposed change to {pr.flowName}</h3>
       </header>
       <div className="space-y-1.5 px-3 py-2">
-        <p className="text-[13px] leading-snug">{pr.explanation}</p>
+        <p className="text-ui leading-snug">{pr.explanation}</p>
         <p className="text-muted-foreground text-xs tabular">
           {diff}
           {pr.errors.length ? (

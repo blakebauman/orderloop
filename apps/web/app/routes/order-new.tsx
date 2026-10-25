@@ -200,7 +200,7 @@ export default function NewOrder() {
           ) : null
         }
       />
-      <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mx-auto grid max-w-page gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Form
           method="post"
           className="min-w-0 divide-y card overflow-hidden"
@@ -538,7 +538,7 @@ function FlowSummary({
       tone: 'text-undo',
     });
   return (
-    <div id={id} className="rounded-md bg-muted/50 px-3 py-2.5 text-[13px]">
+    <div id={id} className="rounded-md bg-muted/50 px-3 py-2.5 text-ui">
       <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[9rem_minmax(0,1fr)]">
         {rows.map(({ term, value, tone }) => (
           <div key={term} className="contents">

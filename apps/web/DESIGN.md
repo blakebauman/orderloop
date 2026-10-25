@@ -1,6 +1,103 @@
 ---
 name: OrderLoop web app
 description: The operator console. Ledger on a desktop, an iPad and an iPhone, in a tab or on the Home Screen.
+colors:
+  paper: "oklch(1 0 0)"
+  ink: "oklch(0.145 0 0)"
+  primary: "oklch(0.205 0 0)"
+  primary-foreground: "oklch(0.985 0 0)"
+  muted: "oklch(0.97 0 0)"
+  muted-foreground: "oklch(0.52 0 0)"
+  rule: "oklch(0.922 0 0)"
+  input: "oklch(0.922 0 0)"
+  ring: "oklch(0.556 0 0)"
+  link: "oklch(0.47 0.13 256)"
+  destructive: "oklch(0.577 0.245 27.325)"
+  ok: "oklch(0.455 0.105 152)"
+  wait: "oklch(0.49 0.115 62)"
+  bad: "oklch(0.5 0.185 28)"
+  undo: "oklch(0.485 0.135 42)"
+  idle: "oklch(0.48 0 0)"
+  ai: "oklch(0.49 0.16 310)"
+  paper-dark: "oklch(0.145 0 0)"
+  card-dark: "oklch(0.205 0 0)"
+  ink-dark: "oklch(0.985 0 0)"
+  muted-dark: "oklch(0.269 0 0)"
+  muted-foreground-dark: "oklch(0.708 0 0)"
+  link-dark: "oklch(0.76 0.11 250)"
+typography:
+  title:
+    fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "1.75rem"
+    fontWeight: 600
+    lineHeight: 1.25
+    letterSpacing: "-0.015em"
+  section-title:
+    fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "15px"
+    fontWeight: 600
+    lineHeight: 1.3
+  body:
+    fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 400
+    lineHeight: 1.43
+  ui:
+    fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.8125rem"
+    fontWeight: 400
+  caption:
+    fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "11px"
+    fontWeight: 500
+    lineHeight: 1.4
+    letterSpacing: "0.05em"
+  mono:
+    fontFamily: "IBM Plex Mono, ui-monospace, SF Mono, Menlo, monospace"
+    fontSize: "0.75rem"
+    fontWeight: 400
+rounded:
+  sm: "0.375rem"
+  md: "0.5rem"
+  lg: "0.625rem"
+  xl: "0.875rem"
+  2xl: "1.125rem"
+  3xl: "1.375rem"
+  4xl: "1.625rem"
+  full: "9999px"
+spacing:
+  gutter-phone: "1rem"
+  gutter: "1.5rem"
+  page-width: "87.5rem"
+components:
+  button-primary:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.primary-foreground}"
+    rounded: "{rounded.4xl}"
+    height: "2.25rem"
+    padding: "0 0.75rem"
+  button-outline:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.4xl}"
+    height: "2.25rem"
+    padding: "0 0.75rem"
+  input:
+    textColor: "{colors.ink}"
+    rounded: "{rounded.3xl}"
+    height: "2.25rem"
+    padding: "0.25rem 0.75rem"
+  card:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.4xl}"
+  tile:
+    backgroundColor: "{colors.muted}"
+    rounded: "{rounded.2xl}"
+    padding: "1rem"
+  status-badge:
+    rounded: "{rounded.full}"
+    padding: "0.125rem 0.5rem"
 ---
 
 # Design System: OrderLoop web app
@@ -13,6 +110,64 @@ primitives in `packages/ui`, with status tokens (`ok`, `wait`, `bad`, `undo`, `r
 that mean one thing each. The tokens live in `apps/web/app/app.css`, are mirrored in
 `packages/design/src/tokens.ts`, and the docs site's reading of them is recorded in
 `apps/docs/DESIGN.md`. This file is about how the app is laid out and operated across screens.
+
+## Colors
+
+Neutral greys with no tint carry everything; colour is reserved for one blue and for status.
+
+### Primary
+- **Ink** (`primary`, near-black): primary buttons, the New order button, the active tab's rule. Ink
+  is the brand; there is no accent colour behind it.
+
+### Secondary
+- **Work blue** (`link`): links, live work (`run`), the slow-page bar and the caret. Never a fill
+  for a button.
+
+### Neutral
+- **Paper** (`paper`): the page and the card. In dark the page is near-black and cards lift a step
+  (`card-dark`).
+- **Muted** (`muted`): tiles, segmented tracks, hover fills.
+- **Muted text** (`muted-foreground`): secondary text and captions. Set to hold 4.5:1 on paper,
+  on muted and on a tile.
+- **Rule** and **Input** (`rule`, `input`): hairlines, and the fill of fields (at half strength).
+- **Ring** (`ring`): the focus edge on fields and buttons, dark enough to hold 3:1 on paper and on
+  muted fills. The page-wide focus outline is ink.
+
+### Status
+`ok` succeeded, `wait` waits on a person or event, `bad` failed, `undo` rolled back, `idle` ended
+otherwise or not started, `ai` a model's work, `run` (the work blue) running. Each badge, dot and
+chart series for a status uses its token through `var()`, so it switches with the theme.
+
+### Named Rules
+**The Green Means Done Rule.** `ok` is the only green, and it means "succeeded". No green brand,
+no green button, no green decoration.
+
+**The One Meaning Rule.** A status colour is never used decoratively. If it isn't a status, it is
+grey.
+
+## Typography
+
+**Body Font:** Inter Variable (with the system sans)
+**Label/Mono Font:** IBM Plex Mono, for order refs, ids, code and figures read as data
+
+**Character:** one quiet sans for everything, set small and dense for operators, with Plex Mono
+only where a value must be read character by character.
+
+### Hierarchy
+- **Title** (600, 1.75rem, 1.25, -0.015em): a page's h1. It wraps; it is never truncated.
+- **Section title** (600, 15px, 1.3): a card's heading, in sentence case.
+- **Body** (400, 0.875rem): running text, rows, fields.
+- **UI** (400, 0.8125rem, `text-ui`): the top bar, segmented controls, compact controls.
+- **Caption** (500, 11px, 0.05em, UPPERCASE): field, column and fact labels. The only uppercase in
+  the product.
+- **2xs** (0.6875rem, `text-2xs`): counts and tags in the bars.
+
+### Named Rules
+**The Sentence Case Rule.** Titles, buttons and menu items are sentence case. Only captions are
+uppercase, and never in mono.
+
+**The Scale Lives In The Theme Rule.** Sizes come from the theme (`text-ui`, `text-2xs`,
+Tailwind's steps), not hand-written pixel values, so they grow with the reader's text size.
 
 ## Screens and breakpoints
 
@@ -82,8 +237,43 @@ variables, never `env()` directly: the device tests fake a notch by setting them
   the others wrapping beneath it, each named by its `data-label`. A table that already fits keeps
   its rows.
 
+## Elevation & Depth
+
+Lifted, lightly. A card sits on the page with a faint ring and a soft two-layer shadow; inside it,
+depth is tonal: tiles are a muted step, not another shadow. In dark the shadow is dropped and the
+ring alone separates a card.
+
+### Shadow Vocabulary
+- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
+- **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
+
+### Named Rules
+**The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
+
+## Shapes
+
+Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 4xl, tiles 2xl,
+one-line fields 3xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
+pills. Hairlines divide rows inside a card; cards themselves have no border.
+
+**The Pill Rule.** Anything you press or that labels a status is fully round. Square corners are
+for code and data blocks only.
+
 ## Components
 
+- **Buttons** (`packages/ui/src/button.tsx`): pills. Primary is an ink fill with paper text; outline is a
+  rule on paper; ghost fills muted on hover; link is the work blue. Focus turns the edge to `ring`
+  with a soft halo. Every size carries `hit-area`.
+- **Fields** (`input.tsx`, `textarea.tsx`, `native-select.tsx`): filled pills (`input` at half
+  strength), no rest border. Focus: the `ring` edge and halo. Invalid: the destructive edge.
+- **Segmented** (`segmented.tsx`): a radio group drawn as a muted pill track; the chosen segment
+  is raised on paper. Arrow keys move the choice.
+- **Card and tile** (`card`, `tile` in app.css): the panel and the step inside it. `Section`
+  (`components/page.tsx`) is a card with a section title and optional actions.
+- **Status badge** (`components/status.tsx`): a pill tinted 11% in the status colour; an ending
+  that went badly is ruled in the colour with a mark (✕ or undo) instead of tinted, so it reads
+  apart without colour.
+- **Counts** (pending approvals in the bars): `wait` pills.
 - **Confirm** (`components/confirm.tsx`): an "are you sure?" where the action was, never a modal.
   The safe choice has focus, Escape backs out of the newest one, and focus goes back to what
   asked. Its actions are children, so it sits inside the caller's form.
@@ -107,6 +297,9 @@ actions must reach the engine.
 
 ### Do
 
+- **Do** keep text at 4.5:1 and focus edges at 3:1, in both themes, on the surface they sit on
+  (paper, muted, tile).
+- **Do** take sizes from the theme (`text-ui`, `text-2xs`, `max-w-page`).
 - **Do** check a layout change with `pnpm --filter @orderloop/web e2e` (WebKit as an iPhone and an
   iPad, both ways up, and a desktop). See `docs/testing.md`.
 - **Do** give a small control `hit-area` rather than growing it.
@@ -115,6 +308,8 @@ actions must reach the engine.
 
 ### Don't
 
+- **Don't** fade the focus ring below 3:1, or remove the outline without drawing an edge.
+- **Don't** put a status colour on something that isn't a status.
 - **Don't** read `env(safe-area-inset-*)` directly, or hard-code 3rem for the top bar.
 - **Don't** set a field under 16px for touch, or show a keyboard shortcut to a finger.
 - **Don't** let a narrow screen change what it can't save (the flow editor below lg).

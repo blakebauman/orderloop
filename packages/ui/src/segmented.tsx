@@ -13,7 +13,7 @@ function Segmented({ className, ...props }: React.ComponentProps<typeof RadioGro
       data-slot="segmented"
       orientation="horizontal"
       className={cn(
-        'inline-grid auto-cols-fr grid-flow-col gap-1 rounded-full bg-muted p-1 text-[13px]',
+        'inline-grid auto-cols-fr grid-flow-col gap-1 rounded-full bg-muted p-1 text-ui',
         className,
       )}
       {...props}
@@ -29,7 +29,7 @@ function SegmentedItem({
     <RadioGroupPrimitive.Item
       data-slot="segmented-item"
       className={cn(
-        "hit-area inline-flex min-h-7 items-center justify-center gap-1.5 rounded-full px-3 py-1 whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-background data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-sm dark:data-[state=checked]:bg-input/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "hit-area inline-flex min-h-7 items-center justify-center gap-1.5 rounded-full border border-transparent px-3 py-1 whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-background data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-sm dark:data-[state=checked]:bg-input/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}

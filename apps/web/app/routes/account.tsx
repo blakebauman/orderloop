@@ -173,7 +173,7 @@ export default function Account() {
           me.kind === 'user' ? (me.email ?? me.name) : 'Sign-in is off'
         } · ${ROLE_LABELS[me.role]}`}
       />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="max-w-[560px]">
           {/* Not alerts: they are there when the page loads, so they're read in order. */}
           {me.passwordChangeDue ? (

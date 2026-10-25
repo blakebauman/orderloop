@@ -103,7 +103,7 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
         />
       ) : null}
 
-      <div className="flex items-center gap-1.5 px-3 pt-2 text-[11px] leading-4">
+      <div className="flex items-center gap-1.5 px-3 pt-2 text-2xs leading-4">
         <span
           style={{ color: CATEGORY_COLOR[category] }}
           className="flex items-center"
@@ -129,10 +129,10 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
         ) : null}
       </div>
       <div className="px-3 pt-0.5">
-        <div className="truncate font-semibold text-[13px] text-[var(--ink)] leading-tight">
+        <div className="truncate font-semibold text-ui text-[var(--ink)] leading-tight">
           {data.label}
         </div>
-        <div className="truncate font-mono text-[11px] text-[var(--muted-foreground)]">{id}</div>
+        <div className="truncate font-mono text-2xs text-[var(--muted-foreground)]">{id}</div>
       </div>
 
       {data.run?.summary || data.run?.error || data.issue ? (
@@ -155,7 +155,7 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
               <div key={o} className="relative flex h-5 items-center justify-end pr-3">
                 <span
                   className={cn(
-                    'flex items-center gap-1 font-mono text-[11px] text-[var(--muted-foreground)]',
+                    'flex items-center gap-1 font-mono text-2xs text-[var(--muted-foreground)]',
                     taken && 'font-semibold text-[var(--ink)]',
                   )}
                 >

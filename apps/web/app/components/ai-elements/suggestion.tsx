@@ -28,7 +28,7 @@ export const Suggestion = ({
 }: SuggestionProps) => (
   <li className="max-w-full">
     <Button
-      className={cn('h-auto max-w-full whitespace-normal py-1.5 text-left text-[13px]', className)}
+      className={cn('h-auto max-w-full whitespace-normal py-1.5 text-left text-ui', className)}
       onClick={() => onClick?.(suggestion)}
       size={size}
       type="button"

@@ -418,13 +418,13 @@ function OrderView() {
                 tabIndex={shown === t.id ? 0 : -1}
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 py-2 font-medium text-[13px] text-muted-foreground hover:text-foreground',
+                  '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 py-2 font-medium text-ui text-muted-foreground hover:text-foreground',
                   shown === t.id && 'border-foreground text-foreground',
                 )}
               >
                 {t.label}
                 {t.count ? (
-                  <span className="rounded-sm bg-wait/15 px-1.5 py-px text-[11px] text-wait tabular">
+                  <span className="rounded-full bg-wait/15 px-1.5 py-px text-2xs text-wait tabular">
                     {t.count}
                   </span>
                 ) : null}

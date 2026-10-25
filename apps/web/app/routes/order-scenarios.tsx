@@ -71,7 +71,7 @@ export default function Scenarios() {
         }
         subtitle="Each one starts a real order on the demo data and takes a different path through its flow. Some fail on purpose, to show what happens then."
       />
-      <div className="mx-auto max-w-[1400px] px-4 pb-10 sm:px-6">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="max-w-[1000px] space-y-6">
           {groups.map((g) => (
             <Section key={g.model} title={ORDER_MODEL_LABELS[g.model as OrderModel]} flush>
