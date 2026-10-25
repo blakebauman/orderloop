@@ -3,6 +3,12 @@
  *
  * Passwords are PBKDF2-SHA256 stored as `pbkdf2:<iterations>:<salt>:<hash>` (base64url parts).
  * workerd caps PBKDF2 at 100k iterations; the count travels with the hash so it can rise later.
+ * With a pepper (the deployment's `PASSWORD_PEPPER`, never stored with the hashes) the scheme is
+ * `pbkdf2p:<pepper id>:<iterations>:<salt>:<hash>`, over HMAC-SHA256(pepper, password): a copy of
+ * the database alone can't be cracked. The pepper id (`pepperId`) names which pepper made a hash,
+ * so a deployment whose pepper was lost or changed is told so (`pepperMismatch`) instead of seeing
+ * only wrong passwords. An unpeppered hash still verifies, and `needsRehash` says to store it
+ * peppered.
  * Session and API tokens are random and stored only as SHA-256.
  */
 
@@ -58,18 +64,86 @@ async function derive(password: string, salt: Uint8Array<ArrayBuffer>, iteration
   return base64url(new Uint8Array(bits));
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  return `pbkdf2:${ITERATIONS}:${base64url(salt)}:${await derive(password, salt, ITERATIONS)}`;
+/** The password as PBKDF2 sees it: peppered first (HMAC-SHA256, base64url) when there is one. */
+async function peppered(password: string, pepper: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(pepper),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(password));
+  return base64url(new Uint8Array(mac));
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, iterStr, saltB64, expected] = stored.split(':');
-  if (scheme !== 'pbkdf2' || !iterStr || !saltB64 || !expected) return false;
-  const iterations = Number(iterStr);
-  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 1_000_000) return false;
-  return constantTimeEqual(await derive(password, base64urlToBytes(saltB64), iterations), expected);
+/**
+ * A short, public name for a pepper: the first 8 base64url characters (48 bits) of an HMAC under
+ * it of a fixed label. It tells peppers apart without saying anything about one.
+ */
+export async function pepperId(pepper: string): Promise<string> {
+  return (await peppered('orderloop password pepper id', pepper)).slice(0, 8);
 }
+
+export async function hashPassword(password: string, pepper?: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const tail = async (input: string) =>
+    `${ITERATIONS}:${base64url(salt)}:${await derive(input, salt, ITERATIONS)}`;
+  if (!pepper) return `pbkdf2:${await tail(password)}`;
+  return `pbkdf2p:${await pepperId(pepper)}:${await tail(await peppered(password, pepper))}`;
+}
+
+/** A stored hash's parts, or null when it isn't one this module made. */
+function parseHash(stored: string) {
+  const parts = stored.split(':');
+  const scheme = parts[0];
+  const [pid, iterStr, saltB64, expected] =
+    scheme === 'pbkdf2p' && parts.length === 5
+      ? parts.slice(1)
+      : scheme === 'pbkdf2' && parts.length === 4
+        ? [undefined, ...parts.slice(1)]
+        : [];
+  if (!iterStr || !saltB64 || !expected || (scheme === 'pbkdf2p' && !pid)) return null;
+  const iterations = Number(iterStr);
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 1_000_000) return null;
+  return { pid, iterations, saltB64, expected };
+}
+
+/**
+ * Whether `password` is the one `stored` was made from. A peppered hash needs its own pepper:
+ * without it, or with another (a deployment that lost or changed the secret), it never verifies,
+ * rather than falling back; `pepperMismatch` says when that is why.
+ */
+export async function verifyPassword(
+  password: string,
+  stored: string,
+  pepper?: string,
+): Promise<boolean> {
+  const h = parseHash(stored);
+  if (!h) return false;
+  const mismatch = h.pid !== undefined && (!pepper || h.pid !== (await pepperId(pepper)));
+  const input = h.pid !== undefined && !mismatch ? await peppered(password, pepper!) : password;
+  // A mismatch still pays for the derivation, so it answers no faster than an unknown email.
+  const ok = constantTimeEqual(
+    await derive(input, base64urlToBytes(h.saltB64), h.iterations),
+    h.expected,
+  );
+  return ok && !mismatch;
+}
+
+/**
+ * Whether `stored` was peppered with a pepper other than `pepper` (or there is none now): no
+ * password can verify against it until the pepper it was made with is restored.
+ */
+export async function pepperMismatch(stored: string, pepper?: string): Promise<boolean> {
+  const h = parseHash(stored);
+  if (!h || h.pid === undefined) return false;
+  return !pepper || h.pid !== (await pepperId(pepper));
+}
+
+/** Whether a hash that just verified should be stored again: unpeppered while there is a pepper. */
+export const needsRehash = (stored: string, pepper?: string) =>
+  !!pepper && stored.startsWith('pbkdf2:');
 
 /** A password an operator hands to a new user, or after a reset: 20 characters, about 120 bits. */
 export function generatePassword(): string {

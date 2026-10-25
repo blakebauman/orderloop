@@ -80,7 +80,7 @@ counted against the same limit as other step-ups and audited as `auth.step_up_fa
   whether it is the only way in; see [Single sign-on](#single-sign-on).
 
 Passwords must be 10 to 256 characters, not a common password and not contain the email address or its part before the `@` (when that is 4 or more characters).
-They are stored only as salted PBKDF2-SHA256 hashes.
+They are stored only as salted PBKDF2-SHA256 hashes, mixed with a secret your deployment keeps apart from its database, so a copy of the database alone doesn't reveal them.
 
 A session is a `__Host-ol_session` cookie holding a random token, of which only a hash is stored.
 It ends 30 days after sign-in, or after 7 days without use (12 hours for an admin), whichever comes first. Pages and what you do on the

@@ -711,6 +711,12 @@ test('the reserved path segments cover every top-level path the web app serves',
 test('the deploy refuses a shared key too short to sign with', () => {
   const key = 'a'.repeat(64);
   assert.equal(keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key }), null);
+  // The password pepper too, when it's set.
+  assert.equal(keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key, PASSWORD_PEPPER: key }), null);
+  assert.match(
+    keysProblem({ PRINCIPAL_KEY: key, DATA_KEY: key, PASSWORD_PEPPER: 'short' }) ?? '',
+    /^PASSWORD_PEPPER must be at least 32 characters/,
+  );
   assert.match(
     keysProblem({ PRINCIPAL_KEY: 'short', DATA_KEY: key, DATA_KEY_PREVIOUS: 'x'.repeat(31) }) ?? '',
     /^PRINCIPAL_KEY, DATA_KEY_PREVIOUS must be at least 32 characters/,

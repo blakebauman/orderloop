@@ -138,6 +138,7 @@ jobs:
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
           SHOPIFY_WEBHOOK_SECRET: ${{ secrets.SHOPIFY_WEBHOOK_SECRET }}
           SHOPIFY_SHOPS: ${{ secrets.SHOPIFY_SHOPS }}
+          PASSWORD_PEPPER: ${{ secrets.PASSWORD_PEPPER }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
           INTAKE_ALLOWLIST: ${{ secrets.INTAKE_ALLOWLIST }}

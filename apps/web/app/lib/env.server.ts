@@ -13,6 +13,14 @@ export function catalog(): ProductCatalogRpc {
   return env.CATALOG as unknown as ProductCatalogRpc;
 }
 
+/**
+ * The deployment's password pepper (`PASSWORD_PEPPER`), mixed into every password hash and never
+ * stored with them; unset in local development, where hashes are made without one.
+ */
+export function passwordPepper(): string | undefined {
+  return (env as { PASSWORD_PEPPER?: string }).PASSWORD_PEPPER || undefined;
+}
+
 export function db() {
   return createDb(env.DB);
 }

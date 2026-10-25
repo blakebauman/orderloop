@@ -577,7 +577,10 @@ export const inboundEmails = sqliteTable(
   ],
 );
 
-/** People with a role; see ROLES in core. `password_hash` is PBKDF2 (`pbkdf2:<iter>:<salt>:<hash>`). */
+/**
+ * People with a role; see ROLES in core. `password_hash` is PBKDF2 (`pbkdf2:<iter>:<salt>:<hash>`),
+ * or `pbkdf2p:…` over the password peppered with `PASSWORD_PEPPER`.
+ */
 export const users = sqliteTable(
   'users',
   {

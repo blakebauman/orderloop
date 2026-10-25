@@ -108,10 +108,12 @@ fi
 gh api --method PUT "repos/{owner}/{repo}/environments/$ENVIRONMENT" >/dev/null
 # The keys both Workers share: PRINCIPAL_KEY signs the requests the web Worker forwards and the
 # engine checks; DATA_KEY encrypts the secrets they store. CI sets them on both Workers and won't
-# deploy without them, so a deployment that already runs gets them here too. Neither is ever
-# written to disk.
+# deploy without them, so a deployment that already runs gets them here too. PASSWORD_PEPPER is
+# mixed into the web Worker's password hashes; a deployment that adds it later keeps working
+# (older hashes are stored again with it at each sign-in), but once set it must never change or
+# go: every password hashed with it would stop verifying. None is ever written to disk.
 EXISTING=$(gh secret list --env "$ENVIRONMENT" --json name -q '.[].name')
-for KEY in PRINCIPAL_KEY DATA_KEY; do
+for KEY in PRINCIPAL_KEY DATA_KEY PASSWORD_PEPPER; do
   if grep -qx "$KEY" <<<"$EXISTING"; then
     echo "$ENVIRONMENT already has $KEY"
   else
