@@ -8,6 +8,7 @@ import {
   ScrollRestoration,
 } from 'react-router';
 import type { Route } from './+types/root';
+import { RouteAnnouncer } from './components/route-announcer';
 // IBM Plex, served from this origin (no render-blocking third-party stylesheet). Each file's
 // unicode-range means a browser fetches only the subsets a page uses.
 import '@fontsource/ibm-plex-sans/400.css';
@@ -82,7 +83,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <RouteAnnouncer />
+    </>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

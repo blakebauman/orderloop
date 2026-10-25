@@ -52,12 +52,12 @@ export function AssistantPanel() {
       inert={!open}
       className={cn(
         'z-30 overflow-hidden bg-card motion-reduce:transition-none',
-        // Phones and tablets: a sheet over the page, below the top bar.
-        'fixed inset-x-0 top-12 bottom-0 transition-[opacity,translate] duration-200 ease-out',
+        // Phones and tablets: a sheet over the page, between the top bar and the phone tab bar.
+        'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200 ease-out',
         open ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
         // Wide screens: a column beside the page. It opens without animating its width, which would
         // reflow the whole page (the graph canvas included) on every frame.
-        'lg:sticky lg:inset-auto lg:top-12 lg:h-[calc(100dvh-3rem)] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-none',
+        'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-none',
         open ? 'lg:w-[400px] lg:border-l' : 'lg:w-0',
       )}
       onKeyDown={(e) => {

@@ -205,6 +205,16 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* The top bar's height (shell.tsx) and, on phones, the tab bar's: what a full-height page
+       subtracts from the viewport and pads its foot with. */
+    --shell-h: calc(3rem + var(--safe-top));
+    --tabbar-h: 0px;
+    @media (width < 48rem) {
+      --tabbar-h: calc(3.5rem + var(--safe-bottom));
+    }
+    @media (width < 48rem) and (orientation: landscape) and (max-height: 32rem) {
+      --tabbar-h: calc(2.75rem + var(--safe-bottom));
+    }
   }
   /* Live order pages update themselves; pull-to-refresh and the rubber band only get in the way. */
   body {
@@ -237,6 +247,12 @@
 }
 @utility px-safe-* {
   padding-right: max(--spacing(--value(integer)), var(--safe-right));
+  padding-left: max(--spacing(--value(integer)), var(--safe-left));
+}
+@utility pr-safe-* {
+  padding-right: max(--spacing(--value(integer)), var(--safe-right));
+}
+@utility pl-safe-* {
   padding-left: max(--spacing(--value(integer)), var(--safe-left));
 }
 
