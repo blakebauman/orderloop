@@ -371,17 +371,31 @@ export async function publishedFlowGraphs() {
   );
 }
 
+/**
+ * `ids` in runs that fit one D1 statement, which binds at most 100 parameters; 90 leaves room for
+ * the rest of the query's. A list page passes up to 200 ids.
+ */
+function batches<T>(ids: T[], size = 90): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 /** Display names for the given customer ids, for lists that only carry the id. */
 export async function customerNames(
   ids: (string | null | undefined)[],
 ): Promise<Record<string, string>> {
   const wanted = [...new Set(ids.filter((id): id is string => !!id))];
   if (!wanted.length) return {};
-  const rows = await db()
-    .select({ id: customers.id, name: customers.name })
-    .from(customers)
-    .where(inArray(customers.id, wanted));
-  return Object.fromEntries(rows.map((r) => [r.id, r.name]));
+  const rows = await Promise.all(
+    batches(wanted).map((b) =>
+      db()
+        .select({ id: customers.id, name: customers.name })
+        .from(customers)
+        .where(inArray(customers.id, b)),
+    ),
+  );
+  return Object.fromEntries(rows.flat().map((r) => [r.id, r.name]));
 }
 
 /**
@@ -390,12 +404,16 @@ export async function customerNames(
  */
 export async function declinedOrderIds(ids: string[]): Promise<Set<string>> {
   if (!ids.length) return new Set();
-  const rows = await db()
-    .selectDistinct({ id: approvals.orderId })
-    .from(approvals)
-    .innerJoin(orders, eq(orders.id, approvals.orderId))
-    .where(and(declinedWhere, inArray(approvals.orderId, ids)));
-  return new Set(rows.map((r) => r.id));
+  const rows = await Promise.all(
+    batches(ids).map((b) =>
+      db()
+        .selectDistinct({ id: approvals.orderId })
+        .from(approvals)
+        .innerJoin(orders, eq(orders.id, approvals.orderId))
+        .where(and(declinedWhere, inArray(approvals.orderId, b))),
+    ),
+  );
+  return new Set(rows.flat().map((r) => r.id));
 }
 
 const declinedWhere = and(
