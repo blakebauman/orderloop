@@ -1,15 +1,7 @@
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { useEffect, useRef, useState } from 'react';
-import {
-  data,
-  Form,
-  Link,
-  redirect,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from 'react-router';
+import { data, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Mark } from '~/components/mark';
 import {
   clearChallengeCookie,
@@ -125,14 +117,17 @@ export default function LoginTwoFactor() {
             {recovery ? 'Use a code from your app instead' : 'Lost your phone? Use a recovery code'}
           </button>
           <p>No codes left? Ask an admin to reset your two-factor sign-in.</p>
-          <Link
-            to="/logout"
+          <button
+            type="submit"
+            form="different-account"
             className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
           >
             Use a different account
-          </Link>
+          </button>
         </div>
       </Form>
+      {/* Outside the code form: it signs out, which ends the challenge too. */}
+      <form id="different-account" method="post" action="/logout" hidden />
     </main>
   );
 }

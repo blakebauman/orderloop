@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { crossOrigin, isLocalHost } from '../app/lib/origin';
+import { bearerApiCall, crossOrigin, isLocalHost } from '../app/lib/origin';
 
 const ORIGIN = 'https://orderloop.app';
 const req = (method: string, headers: Record<string, string> = {}) =>
@@ -30,6 +30,24 @@ describe('crossOrigin', () => {
     expect(crossOrigin(req('POST', { 'sec-fetch-site': 'same-site' }), ORIGIN)).toBe(true);
     expect(crossOrigin(req('POST', { 'sec-fetch-site': 'cross-site' }), ORIGIN)).toBe(true);
     expect(crossOrigin(req('POST'), ORIGIN)).toBe(false);
+  });
+});
+
+describe('bearerApiCall', () => {
+  const call = (path: string, auth?: string) => {
+    const url = new URL(path, ORIGIN);
+    const headers: Record<string, string> = { origin: 'https://evil.example', cookie: 's=1' };
+    if (auth) headers.authorization = auth;
+    return bearerApiCall(new Request(url, { method: 'POST', headers }), url);
+  };
+
+  it('exempts only a REST API call with a bearer token', () => {
+    expect(call('/api/v1/orders', 'Bearer ol_live_x')).toBe(true);
+    expect(call('/api/v1/orders')).toBe(false);
+    // A page's action reads the cookie whatever else is sent, so a bearer header buys nothing.
+    expect(call('/team', 'Bearer x')).toBe(false);
+    expect(call('/orders/ord_1', 'bearer x')).toBe(false);
+    expect(call('/api/v1/orders', 'Basic eDp4')).toBe(false);
   });
 });
 

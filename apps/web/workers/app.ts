@@ -33,7 +33,7 @@ import { docs, engine } from '../app/lib/env.server';
 import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
-import { crossOrigin } from '../app/lib/origin';
+import { bearerApiCall, crossOrigin } from '../app/lib/origin';
 import { pluginPageContext } from '../app/lib/plugin-view';
 import { isPluginPublicPath, pluginFetch, pluginPathId, unalias } from '../app/lib/plugins.server';
 import { setGuestHeader, setPrincipalHeader } from '../app/lib/principal.server';
@@ -238,9 +238,11 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleShopifyOrder(request);
   }
 
-  // A browser's state-changing requests and the order page's socket must come from this origin;
-  // bearer-token calls carry no ambient cookie, so they're exempt.
-  const bearer = /^Bearer\s/i.test(request.headers.get('authorization') ?? '');
+  // A browser's state-changing requests and the order page's socket must come from this origin.
+  // A REST API call with a bearer token is exempt: with one, `apiPrincipal` never reads the
+  // cookie. Elsewhere a page action would still sign the caller in from the cookie, so a bearer
+  // header there exempts nothing.
+  const bearer = bearerApiCall(request, url);
   // A plugin's public path is exempt too: it is forwarded without the cookie or any sign-in, so
   // there is nothing ambient to forge (a buyer's procurement system posts it from its own site).
   if (!bearer && crossOrigin(request, url.origin) && !(await isPluginPublicPath(url.pathname)))
