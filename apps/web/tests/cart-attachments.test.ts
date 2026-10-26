@@ -12,12 +12,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const env = { PRINCIPAL_KEY: 'web-test-key' };
 const cartSnapshot = vi.fn();
 const attachToCart = vi.fn();
+const keepCartOpen = vi.fn();
 const objects = new Map<string, { body: ArrayBuffer; type?: string }>();
 const principal = vi.fn(async (_r: Request): Promise<Principal | null> => null);
 
 vi.mock('cloudflare:workers', () => ({ env, WorkerEntrypoint: class {} }));
 vi.mock('~/lib/env.server', () => ({
-  engine: () => ({ cartSnapshot, attachToCart }),
+  engine: () => ({ cartSnapshot, attachToCart, keepCartOpen }),
   docs: () => ({
     put: async (key: string, body: ArrayBuffer, o: { httpMetadata?: { contentType?: string } }) => {
       objects.set(key, { body, type: o.httpMetadata?.contentType });
@@ -82,6 +83,7 @@ beforeEach(() => {
   objects.clear();
   cartSnapshot.mockReset();
   attachToCart.mockReset();
+  keepCartOpen.mockReset();
   principal.mockResolvedValue(null);
 });
 
@@ -149,6 +151,8 @@ describe('downloading a cart’s file', () => {
   };
 
   it('serves it as a download that runs nothing, to someone who may read the cart', async () => {
+    // Staff fetching a file don't keep a buyer's session open.
+    keepCartOpen.mockRejectedValue(new Error('not for staff'));
     objects.set(file.key, { body: new TextEncoder().encode('%PDF').buffer as ArrayBuffer });
     cartSnapshot.mockResolvedValue(state({}, [file]));
     principal.mockResolvedValue({ ...staff, role: 'viewer' });
@@ -169,7 +173,7 @@ describe('downloading a cart’s file', () => {
     expect((await get('att_1')).status).toBe(401);
   });
 
-  it('lets the buyer download while the cart is open or returned, not once it closed', async () => {
+  it('lets the buyer download while the cart is open or returned until its time, not once it closed', async () => {
     objects.set(file.key, { body: new TextEncoder().encode('%PDF').buffer as ArrayBuffer });
     const external = (expiresAt: number) => ({ expiresAt }) as Cart['external'];
     const as = async (c: Partial<Cart>) => {
@@ -178,10 +182,20 @@ describe('downloading a cart’s file', () => {
     };
     const later = Date.now() + 60_000;
     expect(await as({ external: external(later) })).toBe(200);
-    expect(await as({ external: external(0), status: 'returned' })).toBe(200);
+    expect(await as({ external: external(later), status: 'returned' })).toBe(200);
+    // A returned cart past its time is closed to the buyer, though their cookie lasts longer.
+    expect(await as({ external: external(0), status: 'returned' })).toBe(404);
     expect(await as({ external: external(later), status: 'canceled' })).toBe(404);
     expect(await as({ external: external(later), status: 'submitted' })).toBe(404);
     expect(await as({ external: external(0) })).toBe(404);
+    // Each download the buyer got counts as working on the cart, signed as them for it alone.
+    expect(keepCartOpen).toHaveBeenCalledTimes(2);
+    const [cartId, actor] = keepCartOpen.mock.calls[0]!;
+    expect(cartId).toBe('cart_1');
+    expect(await verifyRpcActor([env.PRINCIPAL_KEY], actor, 'cart:cart_1')).toMatchObject({
+      kind: 'guest',
+      id: guest.id,
+    });
   });
 
   it('keeps a staff cart’s files from a buyer’s cookie', async () => {

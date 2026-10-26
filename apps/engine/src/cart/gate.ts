@@ -2,12 +2,14 @@
  * What may reach a cart's agent from outside. Unlike an order's socket, a cart's sends the whole
  * cart the moment it opens, so the principal is checked before the request reaches the object:
  * a signature for this cart's path (`forwardedPrincipal`), a live sign-in with at least the
- * viewer role, and a cart that exists (a socket can't create one).
+ * viewer role, and a cart that exists (a socket can't create one). An external cart's buyer needs
+ * the cart still theirs (`guestCartOpen`) and the plugin that opened it still allowed carts.
  */
 
-import { atLeast } from '@orderloop/core';
+import { atLeast, type CartStatus, guestCartOpen } from '@orderloop/core';
 import { carts, createDb } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
+import { mayUse } from '../plugins';
 import { forwardedGuest, forwardedPrincipal, livePrincipal } from '../principal';
 
 /** `name` is the object name the SDK routes to, checked against D1 as it is. */
@@ -33,9 +35,11 @@ export async function cartGate(
       .get();
     if (!row?.pluginId) return new Response('Forbidden', { status: 403 });
     if (
-      row.status === 'canceled' ||
-      row.status === 'submitted' ||
-      (row.status !== 'returned' && (row.expiresAt ?? 0) <= Date.now())
+      !guestCartOpen(
+        { status: row.status as CartStatus, expiresAt: row.expiresAt ?? 0 },
+        Date.now(),
+      ) ||
+      !(await mayUse(env, row.pluginId, 'carts:external'))
     )
       return new Response('This cart has closed.', { status: 410 });
     return undefined;

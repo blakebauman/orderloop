@@ -10,8 +10,7 @@ import {
   type CartActor,
   canReadCart,
   cartAttachmentKey,
-  isCartExpired,
-  isFinalCart,
+  guestCartOpen,
   newId,
 } from '@orderloop/core';
 import { principal, setupDue } from './auth.server';
@@ -67,16 +66,21 @@ export async function readAttachment(cartId: string, id: string, actor: CartActo
   const snapshot = await engine().cartSnapshot(cartId);
   const cart = snapshot?.cart;
   if (!cart || !canReadCart(cart, actor)) return null;
-  // A guest's cookie is for this cart only; cartActor already scoped it to `cartId`. It lasts while
-  // the cart is open, or returned to their system, as the cart's socket does (cartGate).
+  // A guest's cookie is for this cart only; cartActor already scoped it to `cartId`. It works while
+  // the cart is open, or returned to their system until its time, as the cart's socket does
+  // (cartGate).
   if (
     actor.kind === 'guest' &&
-    cart.status !== 'returned' &&
-    (isFinalCart(cart) || isCartExpired(cart, Date.now()))
+    (!cart.external ||
+      !guestCartOpen({ status: cart.status, expiresAt: cart.external.expiresAt }, Date.now()))
   )
     return null;
   const a = snapshot.attachments?.find((f) => f.id === id);
   if (!a || a.key !== cartAttachmentKey(cartId, id)) return null;
   const obj = await docs().get(a.key);
-  return obj ? { attachment: a, body: obj.body } : null;
+  if (!obj) return null;
+  // Fetching a file is the buyer working on the cart, as much as editing it.
+  if (actor.kind === 'guest')
+    await engine().keepCartOpen(cartId, await signedActor(actor, `cart:${cartId}`));
+  return { attachment: a, body: obj.body };
 }

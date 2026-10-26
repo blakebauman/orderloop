@@ -188,7 +188,7 @@ describe('the buyer’s pages refuse in a frame they can show', () => {
     expect(cartSnapshot).not.toHaveBeenCalled();
   });
 
-  it('a cart that has closed, but not one that went back to the buyer', async () => {
+  it('a cart that has closed, and one that went back to the buyer past its time', async () => {
     const request = new Request('https://app.test/cart/cart_1', {
       headers: { cookie: await guestCookie() },
     });
@@ -197,6 +197,8 @@ describe('the buyer’s pages refuse in a frame they can show', () => {
       { status: 'canceled' as const },
       { status: 'submitted' as const },
       { external: { ...external, expiresAt: Date.now() - 1 } },
+      // Its cookie may outlast it (an idle window's cap), but a returned cart ends at its time.
+      { status: 'returned' as const, external: { ...external, expiresAt: Date.now() - 1 } },
     ]) {
       cartSnapshot.mockResolvedValueOnce(snapshot(cart));
       const r = await refusal(load);

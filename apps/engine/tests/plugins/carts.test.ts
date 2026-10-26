@@ -8,9 +8,10 @@ import {
   MAX_EXTERNAL_CART_MS,
   PRINCIPAL_HEADER,
   signCartGuest,
+  signPrincipal,
   subjectTarget,
 } from '@orderloop/core';
-import { auditEvents, carts, createDb, orders } from '@orderloop/db';
+import { auditEvents, carts, createDb, orders, sessions, users } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../../src/api';
@@ -518,6 +519,83 @@ async function timeOf(cartId: string) {
   };
 }
 
+/** Runs `fn` with the example plugin's `carts:external` grant withdrawn, here and in the agent. */
+async function withoutGrant(cartId: string, fn: () => Promise<void>) {
+  type Grants = { PLUGIN_GRANTS?: string };
+  const grants = (env as Grants).PLUGIN_GRANTS;
+  const set = async (v: string | undefined) => {
+    (env as Grants).PLUGIN_GRANTS = v;
+    await runInDurableObject(cartAgent(cartId), async (a) => {
+      (a as unknown as { env: Grants }).env.PLUGIN_GRANTS = v;
+    });
+  };
+  await set(JSON.stringify({ example: { capabilities: ['orders:start'] } }));
+  try {
+    await fn();
+  } finally {
+    await set(grants);
+  }
+}
+
+/** The cart's socket as a signed-in admin, as the web proxy opens it. */
+async function staffSocket(cartId: string) {
+  const id = 'usr_keepopen_ada';
+  await db()
+    .insert(users)
+    .values({
+      id,
+      email: 'keepopen-ada@example.com',
+      name: 'Ada',
+      role: 'admin',
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing();
+  await db()
+    .insert(sessions)
+    .values({
+      tokenHash: `sess_${id}`,
+      userId: id,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 3_600_000,
+    })
+    .onConflictDoNothing();
+  const path = `/agents/cart-agent/${cartId}`;
+  const headers = new Headers({ Upgrade: 'websocket' });
+  headers.set(
+    PRINCIPAL_HEADER,
+    await signPrincipal(
+      (env as { PRINCIPAL_KEY?: string }).PRINCIPAL_KEY!,
+      {
+        kind: 'user',
+        id,
+        name: 'Ada',
+        email: 'keepopen-ada@example.com',
+        role: 'admin',
+        session: `sess_${id}`,
+      },
+      path,
+    ),
+  );
+  const res = await worker.fetch(new Request(`http://engine${path}`, { headers }), env);
+  const ws = res.webSocket;
+  if (!ws) throw new Error(`socket refused: ${res.status}`);
+  ws.accept();
+  const pending = new Map<string, (m: { result?: unknown }) => void>();
+  ws.addEventListener('message', (e) => {
+    const m = JSON.parse(String(e.data));
+    if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
+  });
+  let n = 0;
+  return {
+    call: (method: string, args: unknown[] = []) =>
+      new Promise<{ result?: unknown }>((resolve) => {
+        const rid = `s${++n}`;
+        pending.set(rid, resolve);
+        ws.send(JSON.stringify({ type: 'rpc', id: rid, method, args }));
+      }),
+  };
+}
+
 describe('an external cart that stays open while its buyer works', () => {
   const H = 3_600_000;
 
@@ -601,19 +679,117 @@ describe('an external cart that stays open while its buyer works', () => {
     ).toBe(401);
     expect((await timeOf(theirs.cartId)).expiresAt).toBe(expiresAt);
 
-    const grants = (env as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
-    const withdrawn = JSON.stringify({ example: { capabilities: ['orders:start'] } });
-    await runInDurableObject(cartAgent(mine.cartId), async (a) => {
-      (a as unknown as { env: { PLUGIN_GRANTS?: string } }).env.PLUGIN_GRANTS = withdrawn;
-    });
-    try {
-      await guestSocket(mine.cartId, guest);
+    // Without the grant the gate refuses the buyer, and nothing reaching the cart moves it either.
+    await withoutGrant(mine.cartId, async () => {
+      expect((await guestSocket(mine.cartId, guest)).status).toBe(410);
+      await api().keepCartOpen(
+        mine.cartId,
+        await signedActor({ kind: 'guest', id: guest.id, name: guest.name }, `cart:${mine.cartId}`),
+      );
       expect((await timeOf(mine.cartId)).expiresAt).toBe(expiresAt);
-    } finally {
-      await runInDurableObject(cartAgent(mine.cartId), async (a) => {
-        (a as unknown as { env: { PLUGIN_GRANTS?: string } }).env.PLUGIN_GRANTS = grants;
-      });
-    }
+    });
+  });
+
+  it('is not moved on by staff, whose activity isn’t the buyer’s', async () => {
+    const expiresAt = Date.now() + 10 * 60_000;
+    const c = await open({ expiresAt, idleMs: 2 * H });
+    const ada = await staffSocket(c.cartId);
+    expect((await ada.call('whoami')).result).toMatchObject({ kind: 'staff' });
+    expect((await timeOf(c.cartId)).expiresAt).toBe(expiresAt);
+  });
+
+  it('is moved on by its buyer’s searches, files and downloads too', async () => {
+    const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 2 * H });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const buyer = { kind: 'guest' as const, id: guest.id, name: guest.name };
+    const signed = () => signedActor(buyer, `cart:${c.cartId}`);
+    const moved = async (act: () => Promise<unknown>) => {
+      await atTime(c.cartId, Date.now() + 10 * 60_000);
+      const t = Date.now();
+      await act();
+      return (await timeOf(c.cartId)).expiresAt >= t + 2 * H;
+    };
+    expect(
+      await moved(async () =>
+        expect(await api().searchCartProducts(c.cartId, 'widget', await signed())).toMatchObject({
+          ok: true,
+        }),
+      ),
+    ).toBe(true);
+    const id = 'att_keepopen1';
+    expect(
+      await moved(async () =>
+        expect(
+          await api().attachToCart(
+            c.cartId,
+            {
+              id,
+              name: 'po.pdf',
+              type: 'application/pdf',
+              size: 10,
+              key: `carts/${c.cartId}/${id}`,
+            },
+            await signed(),
+          ),
+        ).toEqual({ ok: true }),
+      ),
+    ).toBe(true);
+    expect(await moved(async () => api().keepCartOpen(c.cartId, await signed()))).toBe(true);
+    // Staff signed for the same call move nothing; nor does a cart no one opened.
+    const ada = { kind: 'staff' as const, id: 'usr_ada', name: 'Ada', role: 'admin' as const };
+    expect(
+      await moved(async () =>
+        api().keepCartOpen(c.cartId, await signedActor(ada, `cart:${c.cartId}`)),
+      ),
+    ).toBe(false);
+    await api().keepCartOpen('cart_nobody', await signedActor(buyer, 'cart:cart_nobody'));
+  });
+
+  it('keeps the index row a cancel wrote while it was moved on', async () => {
+    const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 2 * H });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    // As though a cancel's index landed between the agent moving the time and writing it.
+    await atTime(c.cartId, Date.now() + 10 * 60_000);
+    await db().update(carts).set({ status: 'canceled' }).where(eq(carts.id, c.cartId));
+    const before = (await db().select().from(carts).where(eq(carts.id, c.cartId)).get())!;
+    await ws.call('whoami');
+    const row = (await db().select().from(carts).where(eq(carts.id, c.cartId)).get())!;
+    expect(row.status).toBe('canceled');
+    expect(row.expiresAt).toBe(before.expiresAt);
+  });
+
+  it('lets a returned cart’s buyer back only until its time, and while the plugin may have carts', async () => {
+    const c = await open({
+      expiresAt: Date.now() + 10 * 60_000,
+      idleMs: 2 * H,
+      lines: [{ sku: 'WID-100', qty: 1 }],
+    });
+    const redeemed = (await api().redeemCartStart(c.cartId, c.token))!;
+    const ws = await guestSocket(c.cartId, redeemed.guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    expect((await ws.call<{ ok: boolean }>('transfer')).result).toMatchObject({ ok: true });
+    const { expiresAt, cart } = await timeOf(c.cartId);
+    expect(cart.status).toBe('returned');
+    // Returned, it can be opened again to post it again, and activity no longer moves it.
+    const again = await guestSocket(c.cartId, redeemed.guest);
+    if (!again.call) throw new Error(`socket refused: ${again.status}`);
+    await atTime(c.cartId, expiresAt - 30 * 60_000);
+    await again.call('returnForm');
+    expect((await timeOf(c.cartId)).expiresAt).toBe(expiresAt - 30 * 60_000);
+    await withoutGrant(c.cartId, async () => {
+      expect((await guestSocket(c.cartId, redeemed.guest)).status).toBe(410);
+    });
+    // Past its time, though well before its cap and the buyer's cookie, it is closed to them.
+    await atTime(c.cartId, Date.now() - 1);
+    await db()
+      .update(carts)
+      .set({ expiresAt: Date.now() - 1 })
+      .where(eq(carts.id, c.cartId));
+    expect(redeemed.expiresAt).toBeGreaterThan(Date.now() + H);
+    expect((await guestSocket(c.cartId, redeemed.guest)).status).toBe(410);
+    expect((await again.call('returnForm')).error).toMatch(/closed/);
   });
 
   it('closes at its time even after an expiry alarm from before it was moved on', async () => {

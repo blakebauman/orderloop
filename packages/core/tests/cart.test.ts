@@ -23,6 +23,7 @@ import {
   externalCartEnd,
   externalCartProblem,
   finishCart,
+  guestCartOpen,
   isCartExpired,
   isQuoteCurrent,
   MAX_CART_ATTACHMENTS,
@@ -566,6 +567,16 @@ describe('an external cart that stays open while its buyer works', () => {
     expect(extendedCartExpiry(open(), 3 * H)).toBeNull();
     // A locked cart is still open: its buyer is waiting on staff, not gone.
     expect(extendedCartExpiry(open({}, { status: 'locked' }), 2 * H)).toBe(4 * H);
+  });
+
+  it('is its buyer’s while open or returned before its time, never once submitted or canceled', () => {
+    expect(guestCartOpen({ status: 'open', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'locked', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'returned', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'returned', expiresAt: 10 }, 10)).toBe(false);
+    expect(guestCartOpen({ status: 'open', expiresAt: 10 }, 10)).toBe(false);
+    expect(guestCartOpen({ status: 'canceled', expiresAt: 10 }, 9)).toBe(false);
+    expect(guestCartOpen({ status: 'submitted', expiresAt: 10 }, 9)).toBe(false);
   });
 
   it('lets its buyer in for as long as it could stay open', () => {

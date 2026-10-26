@@ -215,6 +215,14 @@ export const isCartExpired = (c: Pick<Cart, 'external' | 'status'>, now: number)
   !isFinalCart(c) && c.external !== null && c.external.expiresAt <= now;
 
 /**
+ * Whether an external cart's buyer may still have it: while it is open (or locked) and before its
+ * time, or once returned to their system, to post it again, until the time it had then (which
+ * activity no longer moves). Never once submitted or canceled.
+ */
+export const guestCartOpen = (c: { status: CartStatus; expiresAt: number }, now: number) =>
+  c.expiresAt > now && (c.status === 'returned' || !FINAL_CART_STATUSES.includes(c.status));
+
+/**
  * Activity moves an external cart's time on only by at least this much (or to its cap), so a busy
  * cart writes its new time at most once a minute.
  */
@@ -224,7 +232,7 @@ export const CART_EXTEND_STEP_MS = 60_000;
 export const externalCartCap = (c: Pick<Cart, 'createdAt'>) => c.createdAt + MAX_EXTERNAL_CART_MS;
 
 /**
- * When activity at `now` keeps an external cart open until: `idleMs` from now, never past
+ * When its buyer's activity at `now` keeps an external cart open until: `idleMs` from now, never past
  * `externalCartCap`. Null when it doesn't move it: a staff cart, one with a fixed time, one that
  * has ended or closed (activity never reopens it), or a move of less than `CART_EXTEND_STEP_MS`.
  */

@@ -369,6 +369,15 @@ export interface EngineRpc {
     actor: SignedActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
   /**
+   * Counts a request from an external cart's buyer (a file download, say) as activity on it, so a
+   * cart with an idle window stays open (`extendedCartExpiry`). Anyone else is ignored.
+   */
+  keepCartOpen(
+    cartId: string,
+    /** The cart's buyer, signed for `cart:<cartId>`. */
+    actor: SignedActor,
+  ): Promise<void>;
+  /**
    * Finds products to add to a cart by SKU or name (`CART_SEARCH_LIMIT` at most), among those its
    * quote can price, with the unit price its flow charges where that is shown. Only for someone
    * who may change the cart while it is open; an empty `q` lists the first products by SKU.

@@ -1117,17 +1117,22 @@ it goes back to, the origins that may frame it and the buyer. The plugin gets a 
 redeeming it (`CartAgent.redeemStart`, the token kept only as a hash) admits the buyer as a
 `CartGuest`, whose socket header is its own envelope (`signCartGuest` / `verifyCartGuest`, `g1`)
 signed for that cart's path alone, which `cartGate` accepts only for an external cart that is
-still open (`410` once it was canceled). A guest edits lines (at most 20 changes in 10 seconds, each prices the cart) and chats, but can't
+still theirs (`guestCartOpen`: open or locked before `expiresAt`, or returned before the time it had
+when it went back) and whose plugin still has `carts:external` (`410` otherwise). A guest edits lines (at most 20 changes in 10 seconds, each prices the cart) and chats, but can't
 lock, rename, submit or cancel; the cart's chat is shared with them. Guest sockets are checked
-every 30 seconds too, and closed once the cart is canceled, submitted or past its time, or the
-plugin loses its grant. A cart past `expiresAt` takes no start link and admits no guest even before
+every 30 seconds too, and closed once the cart is canceled, submitted or past its time (returned
+or not), or the plugin loses its grant; the buyer's page and file downloads refuse the same carts. A cart past `expiresAt` takes no start link and admits no guest even before
 its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. A cart whose plugin set
-`idleMs` stays open while someone works on it: the guest of that cart or staff connecting to its
-socket or calling it (`keepOpen`) moves `expiresAt` to `idleMs` from now (`extendedCartExpiry`:
+`idleMs` stays open while its buyer works on it: the guest of that cart connecting to its socket
+or calling it, searching it, adding a file or downloading one (`keepOpen`; `keepOpenFor` from
+`attachAs`, `EngineRpc.searchCartProducts` and `EngineRpc.keepCartOpen`, which the web app calls
+for a buyer's download) moves `expiresAt` to `idleMs` from now (`extendedCartExpiry`:
 only by a minute or more, `CART_EXTEND_STEP_MS`, or the last step to the cap; never past
 `createdAt + MAX_EXTERNAL_CART_MS`, `externalCartCap`; never once it has ended or closed), without
-bumping its version, then moves its one `expire` schedule and writes `carts.expires_at` for the
-gate. It does so only while the plugin keeps `carts:external`, so withdrawing the grant leaves the
+bumping its version, then moves its one `expire` schedule (the new one added before the old one is
+cancelled) and writes only `carts.expires_at`, only while the row is still `open` or `locked`, so
+an index a cancel, return or erasure wrote at the same time stands. Staff activity never moves it:
+the idle window is the buyer's. It does so only while the plugin keeps `carts:external`, so withdrawing the grant leaves the
 time it had. An `expire` alarm that fires before `expiresAt` schedules itself again. A cart without
 `idleMs` (one opened before it, or by a plugin that doesn't set it; `storedCart` reads it as null)
 closes at the time it opened with. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
@@ -1137,7 +1142,8 @@ In the web app the start path is the route `/cart/start/:cartId/:token`: it rede
 (`EngineRpc.redeemCartStart`) and sets a cookie for that cart alone (`ol_<cartId>`, the `gs1`
 envelope `signCartGuestSession`, `HttpOnly; Secure; SameSite=None; Partitioned`, until the latest the cart can stay open,
 `externalCartEnd`: its `expiresAt`, or its cap when it has `idleMs`, so no extension outlives the
-cookie; the cart's own time still decides whether the gate admits it), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
+cookie; the cart's own time still decides whether the gate, the page and its downloads admit them,
+returned or not), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
 `apps/web/app/components/cart-view.tsx`, shared with the staff page). That page's CSP lets the
 cart's `frameOrigins` frame it and its form post to the cart's `returnUrl` (`EMBED_HEADER`, folded
 in by `entry.server.tsx`; `withSecurityHeaders` then leaves out `X-Frame-Options`). Its socket is

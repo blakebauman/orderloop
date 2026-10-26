@@ -3,6 +3,7 @@
 import {
   applyLines,
   type Cart,
+  type CartActor,
   type CartAnswer,
   type CartOp,
   type CartState,
@@ -219,6 +220,20 @@ export async function redeemCartStart(env: Env, cartId: string, token: string) {
   const guest = await agent.redeemStart(token);
   const expiresAt = guest ? await agent.admittedUntil() : null;
   return guest && expiresAt ? { guest, expiresAt } : null;
+}
+
+/**
+ * A request from an external cart's buyer outside its socket, as activity on it (`keepOpenFor`).
+ * Only an external cart's agent is woken: never one for an id no cart has.
+ */
+export async function keepCartOpen(env: Env, cartId: string, actor: CartActor) {
+  if (actor.kind !== 'guest') return;
+  const row = await createDb(env.DB)
+    .select({ pluginId: carts.pluginId })
+    .from(carts)
+    .where(eq(carts.id, cartId))
+    .get();
+  if (row?.pluginId) await cartAgent(env, cartId).keepOpenFor(actor);
 }
 
 /** A cart as the plugin that opened it sees it, or null for anyone else's. */
