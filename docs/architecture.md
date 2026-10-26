@@ -1064,7 +1064,9 @@ the rest is in its SQL, paged by `history`).
   deletes it. Downloads (`/carts/<cartId>/attachments/<id>`) go to staff and to the cart's own buyer
   (`cartActor`), as attachments under a sandboxing CSP.
 - **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
-  (0 removes), remove, clear, promo codes, ship-to and shipping option, and, for staff, lock,
+  (0 removes), set several quantities (`set_qtys`: one version and one reprice for the lot, refused
+  whole if any line is gone or named twice, bounded by `MAX_CHECKOUT_LINES` in `applyCartOp` itself
+  since the socket's ops skip `cartOpSchema`), remove, clear, promo codes, ship-to and shipping option, and, for staff, lock,
   unlock and rename. Staff need
   `viewer` to read and `operator` to edit.
 - **Lock, unlock and rename** keep a current quote current (they bump the version and the quoted

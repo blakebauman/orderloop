@@ -43,6 +43,7 @@ describe('OpenAPI document', () => {
       expect.arrayContaining([
         'add',
         'set_qty',
+        'set_qtys',
         'remove',
         'lock',
         'rename',

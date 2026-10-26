@@ -161,6 +161,100 @@ describe('applyCartOp', () => {
     expect(refuse(cart({ lines: [] }), { op: 'clear' })).toMatch(/empty/);
   });
 
+  it('sets several quantities as one change, removing the lines set to 0', () => {
+    const c = cart({
+      lines: [
+        { id: 'li_1', sku: 'A', qty: 1 },
+        { id: 'li_2', sku: 'B', qty: 1 },
+        { id: 'li_3', sku: 'C', qty: 1 },
+      ],
+      quote,
+      quotedVersion: 1,
+    });
+    const r = apply(c, {
+      op: 'set_qtys',
+      lines: [
+        { lineId: 'li_3', qty: 5 },
+        { lineId: 'li_1', qty: 0 },
+      ],
+    });
+    // In the cart's order, whatever order they were named in.
+    expect(r.cart.lines.map((l) => [l.sku, l.qty])).toEqual([
+      ['B', 1],
+      ['C', 5],
+    ]);
+    expect(r.cart.version).toBe(2);
+    expect(r.reprice).toBe(true);
+    expect(isQuoteCurrent(r.cart)).toBe(false);
+    // The buyer of an external cart sets them too.
+    expect(
+      apply(cart({ external }), { op: 'set_qtys', lines: [{ lineId: 'li_1', qty: 4 }] }, guest).cart
+        .lines[0]?.qty,
+    ).toBe(4);
+  });
+
+  it('sets several quantities all or none', () => {
+    const c = cart({
+      lines: [
+        { id: 'li_1', sku: 'A', qty: 1 },
+        { id: 'li_2', sku: 'B', qty: 1 },
+      ],
+    });
+    // A line someone removed meanwhile refuses the lot.
+    expect(
+      refuse(c, {
+        op: 'set_qtys',
+        lines: [
+          { lineId: 'li_1', qty: 3 },
+          { lineId: 'li_9', qty: 3 },
+        ],
+      }),
+    ).toMatch(/gone/);
+    expect(
+      refuse(c, {
+        op: 'set_qtys',
+        lines: [
+          { lineId: 'li_1', qty: 3 },
+          { lineId: 'li_1', qty: 4 },
+        ],
+      }),
+    ).toMatch(/once/);
+    for (const qty of [-1, 1.5, MAX_LINE_QUANTITY + 1])
+      expect(
+        refuse(c, {
+          op: 'set_qtys',
+          lines: [
+            { lineId: 'li_1', qty: 2 },
+            { lineId: 'li_2', qty },
+          ],
+        }),
+      ).toMatch(/quantity/);
+    // The socket's ops never pass `cartOpSchema`, so the cart bounds them itself.
+    expect(refuse(c, { op: 'set_qtys', lines: [] })).toMatch(/Choose/);
+    expect(refuse(c, { op: 'set_qtys' } as unknown as CartOp)).toMatch(/Choose/);
+    expect(
+      refuse(c, {
+        op: 'set_qtys',
+        lines: Array.from({ length: MAX_CHECKOUT_LINES + 1 }, (_, i) => ({
+          lineId: `li_${i}`,
+          qty: 1,
+        })),
+      }),
+    ).toMatch(/Choose/);
+    expect(
+      refuse(c, { op: 'set_qtys', lines: [null, { lineId: 'li_1', qty: 1 }] } as unknown as CartOp),
+    ).toMatch(/quantity/);
+    expect(
+      refuse(apply(c, { op: 'lock' }).cart, {
+        op: 'set_qtys',
+        lines: [{ lineId: 'li_1', qty: 2 }],
+      }),
+    ).toMatch(/locked/);
+    expect(refuse(c, { op: 'set_qtys', lines: [{ lineId: 'li_1', qty: 2 }] }, viewer)).toMatch(
+      /can't change/,
+    );
+  });
+
   it('refuses line changes on a locked cart, and lets staff unlock it', () => {
     const locked = apply(cart(), { op: 'lock' }).cart;
     expect(locked.status).toBe('locked');
@@ -477,6 +571,16 @@ describe('carts outside their page', () => {
       { op: 'add', sku: 'SKU-1', qty: MAX_LINE_QUANTITY + 1 },
       { op: 'set_qty', lineId: 'li_1', qty: 1.5 },
       { op: 'remove', lineIds: [] },
+      { op: 'set_qtys', lines: [] },
+      { op: 'set_qtys', lines: [{ lineId: 'li_1', qty: -1 }] },
+      { op: 'set_qtys', lines: [{ lineId: '', qty: 1 }] },
+      {
+        op: 'set_qtys',
+        lines: Array.from({ length: MAX_CHECKOUT_LINES + 1 }, (_, i) => ({
+          lineId: `li_${i}`,
+          qty: 1,
+        })),
+      },
       { op: 'rename', title: '' },
       { op: 'set_ship_to' },
       { op: 'set_ship_to', address: { line1: 'x'.repeat(201) } },

@@ -236,6 +236,7 @@ POST /api/v1/carts/cart_…/ops
 |---|---|---|
 | `add` | `sku`, `qty` (1 to 10,000) | Adds a line, or adds to the line with that SKU |
 | `set_qty` | `lineId`, `qty` (0 to 10,000) | Sets a line's quantity; 0 removes it |
+| `set_qtys` | `lines`: 1 to 100 `{ lineId, qty }` (`qty` 0 to 10,000), each line once | Sets several lines' quantities as one change, priced once; 0 removes a line. Refused, changing nothing, if any of the lines is gone |
 | `remove` | `lineIds` | Removes lines |
 | `clear` | | Removes every line |
 | `promo_add`, `promo_remove` | `code` | Adds or removes a promotion code (up to five) |

@@ -31,6 +31,11 @@ way an order on that flow is priced. Until the new price is in, the cart shows *
   you already know.
 - Adding a SKU the cart already has adds to that line.
 - Setting a quantity to 0 removes the line.
+- Tick lines (or **Select all**) to change several at once: **Set quantity** gives every ticked
+  line the same quantity (0 removes them) and **Remove** takes them all off, each as one change
+  priced once. A quantity of 0 removes them, and the button says so. If someone removed one of the
+  ticked lines meanwhile, the page says so and **Set quantity** changes none of them until you
+  choose again; a line removed and added back comes back unticked.
 - A cart holds at most 100 lines, and a line at most 10,000 units.
 - **Promotion codes** go in the box under the price (up to five a cart). They change the price
   only if the cart's flow has an Apply promotions step; a code that doesn't apply, or a flow

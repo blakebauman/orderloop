@@ -9,6 +9,7 @@ import {
   ATTACHMENT_TYPES,
   attachmentProblem,
   CART_CHAT_BROADCAST,
+  type Cart,
   type CartAttachment,
   type CartChatMessage,
   type CartOp,
@@ -46,6 +47,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
+import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
 import { money } from '~/lib/format';
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -73,14 +75,21 @@ export function CartView({
   const [state, setState] = useState<CartState>(snapshot);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ticks, setTicks] = useState<CartTicks>(NO_TICKS);
   const cart = state.cart!;
+  const editableAs = (c: Cart) => (guest || canOperate) && c.status === 'open';
 
   const agent = useAgent<CartState>({
     agent: 'cart-agent',
     name: cart.id,
     // The buyer connects as the guest of this cart, whatever else this browser is signed in as.
     ...(guest ? { query: { as: 'guest' } } : {}),
-    onStateUpdate: (s) => setState(s),
+    onStateUpdate: (s) => {
+      setState(s);
+      // Against each state as it arrives, so a line removed and added again (taking the same id)
+      // is seen gone in between and comes back unticked.
+      if (s.cart) setTicks((t) => keepTicks(t, s.cart!.lines, editableAs(s.cart!)));
+    },
   });
 
   /** Calls the agent; a refusal (or a dropped socket) shows above the lines. */
@@ -104,11 +113,12 @@ export function CartView({
   const apply = (op: CartOp) => call<Result>('apply', [op]);
 
   const final = isFinalCart(cart);
-  const editable = (guest || canOperate) && cart.status === 'open';
+  const editable = editableAs(cart);
   const priced = isQuoteCurrent(cart);
   const ready = cartReadyProblem(cart);
   const q = cart.quote;
   const currency = q?.currency ?? 'USD';
+  const chosen = editable ? ticked(ticks, cart.lines) : [];
 
   return (
     <>
@@ -213,6 +223,34 @@ export function CartView({
             </p>
           ) : null}
           <Section title="Lines" flush>
+            {editable && cart.lines.length ? (
+              <BulkLines
+                chosen={chosen.length}
+                gone={ticks.gone}
+                total={cart.lines.length}
+                busy={busy}
+                onAll={(on) => setTicks(tickAll(cart.lines, on))}
+                onSetQty={async (qty) => {
+                  // All or none, as the cart applies it: a ticked line gone since refuses the
+                  // lot here, since its id may already name a line added after it.
+                  if (ticks.gone) {
+                    setError('A line you chose is gone.');
+                    setTicks({ ...ticks, gone: 0 });
+                    return null;
+                  }
+                  const r = await apply({
+                    op: 'set_qtys',
+                    lines: chosen.map((l) => ({ lineId: l.id, qty })),
+                  });
+                  if (r?.ok && qty === 0) setTicks(NO_TICKS);
+                  return r;
+                }}
+                onRemove={async () => {
+                  const r = await apply({ op: 'remove', lineIds: chosen.map((l) => l.id) });
+                  if (r?.ok) setTicks(NO_TICKS);
+                }}
+              />
+            ) : null}
             {cart.lines.length ? (
               <Table stack="cards" caption="Lines">
                 <TableHead>
@@ -236,9 +274,28 @@ export function CartView({
                     return (
                       <Tr key={l.id} className="max-md:items-center">
                         <Td>
-                          <div className="font-medium">{l.title ?? l.sku}</div>
-                          <div className="font-mono text-muted-foreground text-xs">{l.sku}</div>
-                          {issue ? <div className="text-bad text-xs">{issue.content}</div> : null}
+                          <div className="flex items-start gap-2.5">
+                            {editable ? (
+                              <label className="hit-area mt-0.5 inline-flex shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={ticks.picked.get(l.id) === l.sku}
+                                  onChange={(e) =>
+                                    setTicks(tick(ticks, l, e.currentTarget.checked))
+                                  }
+                                  className="relative z-[1] size-4 accent-primary"
+                                />
+                                <span className="sr-only">Select {l.sku}</span>
+                              </label>
+                            ) : null}
+                            <div className="min-w-0">
+                              <div className="font-medium">{l.title ?? l.sku}</div>
+                              <div className="font-mono text-muted-foreground text-xs">{l.sku}</div>
+                              {issue ? (
+                                <div className="text-bad text-xs">{issue.content}</div>
+                              ) : null}
+                            </div>
+                          </div>
                         </Td>
                         <Td numeric label="Qty">
                           {editable ? (
@@ -389,6 +446,110 @@ const STATUS_TEXT: Record<CartStatus, string> = {
   returned: 'Returned to the buyer',
   canceled: 'Canceled',
 };
+
+/**
+ * What to do with the lines ticked below: select them all, set one quantity on every one (a
+ * single change, priced once; 0 removes them) or remove them.
+ */
+function BulkLines({
+  chosen,
+  gone,
+  total,
+  busy,
+  onAll,
+  onSetQty,
+  onRemove,
+}: {
+  chosen: number;
+  /** Ticked lines someone else has removed since: Set quantity refuses until the person chooses again. */
+  gone: number;
+  total: number;
+  busy: boolean;
+  onAll: (on: boolean) => void;
+  onSetQty: (qty: number) => Promise<Result | null>;
+  onRemove: () => Promise<void>;
+}) {
+  const [qty, setQty] = useState('');
+  const all = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (all.current) all.current.indeterminate = chosen > 0 && chosen < total;
+  }, [chosen, total]);
+  // The box sits above its label's touch target (`hit-area`), so a tap on either toggles it.
+  const n = Number(qty);
+  const valid = qty.trim() !== '' && Number.isInteger(n) && n >= 0 && n <= MAX_LINE_QUANTITY;
+  return (
+    <fieldset
+      aria-label="Selected lines"
+      className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm"
+    >
+      <label className="hit-area inline-flex cursor-pointer items-center gap-2.5">
+        <input
+          ref={all}
+          type="checkbox"
+          checked={chosen > 0 && chosen === total}
+          onChange={(e) => onAll(e.currentTarget.checked)}
+          className="relative z-[1] size-4 accent-primary"
+        />
+        Select all
+      </label>
+      <span className="text-muted-foreground" aria-live="polite">
+        {chosen ? `${chosen} of ${total} selected` : null}
+        {gone ? (
+          <span className="text-bad">
+            {chosen ? ' · ' : null}
+            {gone === 1 ? 'A line you chose is gone' : `${gone} lines you chose are gone`}
+          </span>
+        ) : null}
+      </span>
+      {chosen ? (
+        <>
+          <form
+            className="flex items-center gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (valid && (await onSetQty(n))?.ok) setQty('');
+            }}
+          >
+            <Input
+              aria-label="Quantity for the selected lines"
+              inputMode="numeric"
+              enterKeyHint="done"
+              placeholder="Qty"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              aria-invalid={(qty.trim() !== '' && !valid) || undefined}
+              className="h-8 w-20 text-right"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              disabled={busy || !valid}
+              className="hit-area"
+            >
+              {/* 0 takes the lines off: the button says so, where a thumb sees it (no tooltip). */}
+              {valid && n === 0
+                ? `Set 0, removing ${chosen === 1 ? 'the line' : `${chosen} lines`}`
+                : 'Set quantity'}
+            </Button>
+          </form>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void onRemove()}
+            className="hit-area sm:ml-auto"
+          >
+            {removeLabel(chosen)}
+          </Button>
+        </>
+      ) : null}
+    </fieldset>
+  );
+}
+
+const removeLabel = (n: number) => (n === 1 ? 'Remove line' : `Remove ${n} lines`);
 
 /** A quantity that is sent when it changes and the field loses focus or Enter is pressed. */
 function QtyInput({
