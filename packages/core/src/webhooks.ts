@@ -197,6 +197,14 @@ export type OutboundEvent = OrderEvent | CartEvent;
 export const isCartEvent = (event: string): event is CartEvent =>
   (CART_EVENTS as readonly string[]).includes(event);
 
+/**
+ * How often a cart's event is retried after its first attempt, from its CartAgent's schedule: 10
+ * seconds doubling to an hour (`cartEventRetryDelaySec`), then hourly, about a day in all, so a
+ * receiver down overnight still gets it. The delivery then stays `failed`.
+ */
+export const CART_EVENT_RETRIES = 32;
+export const cartEventRetryDelaySec = (attempt: number) => Math.min(10 * 2 ** attempt, 3600);
+
 /** Nodes that emit an event when they finish, and the branch that counts as success. */
 export const NODE_EVENTS: Record<string, { event: OrderEvent; branch?: string }> = {
   'commerce.capture_payment': { event: 'order.paid', branch: 'ok' },

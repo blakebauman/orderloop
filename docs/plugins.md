@@ -67,7 +67,7 @@ The manifest (`pluginManifestSchema`) has:
 | `id` | `PLUGIN_ID_RE` (2 to 31 lowercase letters, digits and dashes, starting with a letter); not `trigger`, `commerce`, `control`, `ai`, `core` or `orderloop`; must match the binding it is reached by |
 | `name`, `version` | Non-empty. Change `version` whenever the manifest changes |
 | `nodes` | At most 50 `PluginNodeSpec`s: `type` is `<id>.<name>` (name lowercase, digits, underscores); `category` is `commerce`, `control` or `ai`; `label`, `description`, `icon` (a lucide-react name); `fields` (at most 50; the catalog's field kinds, with `jsonSchema` in place of a zod schema); `outputs` (at least one, fixed); optional `rollback` and `retries` (0 to 10, default 3). A type the built-in catalog has is refused |
-| `events` | Outbound event names, or `"*"` for all |
+| `events` | Outbound event names, or `"*"` for all, which includes the `cart.*` events (a cart event's `orderId` is `null` until the cart is submitted) |
 | `nav` | `{ label, path, icon }`; each `path` is a plain path under `/plugins/<id>/` (`PLUGIN_PAGE_PATH_RE`: letters, digits and `- _ . ~ /`, no `.` or `..` segment, no query or fragment) |
 | `publicPaths` | Exact plain paths (same rule) under `/plugins/<id>/` forwarded with no signed-in person |
 | `requires` | Ids of plugins that must also be installed |

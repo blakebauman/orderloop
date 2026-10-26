@@ -7,17 +7,42 @@
 
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { type CartActor, type CartEventPayload, cartSummary, verifyWebhook } from '@orderloop/core';
-import { createDb, users, webhookDeliveries, webhookSubscriptions } from '@orderloop/db';
+import {
+  CART_EVENT_RETRIES,
+  type CartActor,
+  type CartEventPayload,
+  type CartSummary,
+  cartSummary,
+  TERMINAL_ORDER_STATUSES,
+  verifyWebhook,
+} from '@orderloop/core';
+import {
+  carts,
+  createDb,
+  customers,
+  users,
+  webhookDeliveries,
+  webhookSubscriptions,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EngineApi } from '../src/api';
 import { createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
+import { eraseDataSubject } from '../src/subjects';
 
 const db = () => createDb(env.DB);
 const api = () => new EngineApi({ waitUntil() {}, passThroughOnException() {} } as never, env);
 const cart = (id: string) => env.CART_AGENT.getByName(id);
+type Queued = { id: string; callback: string; time: number; payload: { attempt: number } };
+/** The cart's queued event deliveries (the stub's RPC typing doesn't carry `getSchedules`). */
+const queued = async (id: string) =>
+  ((await (cart(id).getSchedules() as unknown)) as Queued[]).filter(
+    (q) => q.callback === 'emitWebhook',
+  );
+const unqueue = async (id: string) => {
+  for (const q of await queued(id)) await cart(id).cancelSchedule(q.id);
+};
 const ada: CartActor = { kind: 'staff', id: 'usr_hooks_ada', name: 'Ada', role: 'operator' };
 
 let introspector: Awaited<ReturnType<typeof introspectWorkflow>> | undefined;
@@ -229,9 +254,7 @@ describe('cart events', () => {
     expect(canceled!.payload).not.toContain('Bee Buyer');
     expect(received.map((r) => r.payload.event)).toEqual(['cart.canceled']);
     // The failed cart.created isn't retried with the name it carried.
-    // getSchedules is synchronous on the agent, which the stub's RPC typing doesn't carry.
-    const queued = (await (cart(id).getSchedules() as unknown)) as { callback: string }[];
-    expect(queued.filter((q) => q.callback === 'emitWebhook')).toEqual([]);
+    expect(await queued(id)).toEqual([]);
   });
 
   it('resends only a delivery that failed, under the same id, and nothing once it arrived', async () => {
@@ -265,5 +288,138 @@ describe('cart events', () => {
       ['flaky', 'delivered', 2],
       ['steady', 'delivered', 1],
     ]);
+  });
+
+  it('keeps retrying past six failures, for about a day, and then leaves the delivery failed', async () => {
+    let down = true;
+    receiver(() => (down ? new Response('no', { status: 500 }) : new Response('ok')));
+    await subscribe('slow', ['cart.canceled']);
+    const id = await staffCart();
+    await cart(id).cancelAs(ada);
+    await until(async () => (await rows(id))[0]?.attempts === 1, 'the first attempt');
+    const summary = cartSummary((await api().cartSnapshot(id))!.cart!);
+    const attempt = async (n: number) => {
+      await unqueue(id);
+      await cart(id).emitWebhook({ event: 'cart.canceled', cart: summary, attempt: n, erasure: 0 });
+    };
+    for (let n = 1; n <= 5; n++) await attempt(n);
+    // Six failures in, the next try is still queued, ten seconds doubled six times later.
+    const [next] = await queued(id);
+    expect(next!.payload.attempt).toBe(6);
+    const wait = next!.time * 1000 - Date.now();
+    expect(wait).toBeGreaterThan(300_000);
+    expect(wait).toBeLessThanOrEqual(320_000);
+    expect((await rows(id))[0]).toMatchObject({
+      status: 'failed',
+      attempts: 6,
+      responseStatus: 500,
+    });
+
+    down = false;
+    await attempt(6);
+    expect((await rows(id))[0]).toMatchObject({ status: 'delivered', attempts: 7 });
+    expect(await queued(id)).toEqual([]);
+  });
+
+  it('gives up after its last retry, the delivery left failed where its subscription shows it', async () => {
+    receiver(() => new Response('no', { status: 500 }));
+    await subscribe('dead', ['cart.canceled']);
+    const id = await staffCart();
+    await cart(id).cancelAs(ada);
+    await until(async () => (await rows(id))[0]?.attempts === 1, 'the first attempt');
+    await unqueue(id);
+    const summary = cartSummary((await api().cartSnapshot(id))!.cart!);
+    await cart(id).emitWebhook({
+      event: 'cart.canceled',
+      cart: summary,
+      attempt: CART_EVENT_RETRIES,
+      erasure: 0,
+    });
+    expect(await queued(id)).toEqual([]);
+    expect((await rows(id))[0]).toMatchObject({ status: 'failed', attempts: 2 });
+  });
+
+  it('takes back what a delivery on its way wrote when an erasure ran meanwhile', async () => {
+    let calls = 0;
+    const received = receiver();
+    vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+      const payload = JSON.parse(String(init?.body)) as CartEventPayload;
+      received.push({ url: '', body: String(init?.body), headers: new Headers(), payload });
+      // The first, cart.created, is slow and then fails: the erasure runs while it is on its way.
+      // (Its timer runs in the cart's own context; a promise the test settled would never reach it.)
+      if (++calls === 1)
+        return new Promise<Response>((r) =>
+          setTimeout(() => r(new Response('down', { status: 503 })), 2_000),
+        );
+      return new Response('ok');
+    });
+    await subscribe('all', ['*']);
+    const id = await externalCart('Punchout for Bee Buyer');
+    await until(async () => calls === 1, 'cart.created on its way');
+    await cart(id).eraseSubject(['bee@buyer.example']);
+    // Erased before the slow delivery answered.
+    expect(calls).toBe(1);
+    await until(
+      async () =>
+        (await rows(id)).some((r) => r.event === 'cart.canceled' && r.status === 'delivered'),
+      'cart.canceled delivered',
+    );
+    await until(async () => (await rows(id)).length === 1, 'the stale delivery taken back');
+    expect((await rows(id)).map((r) => r.event)).toEqual(['cart.canceled']);
+    // Nothing queued to send the old title again, and a stale retry sends nothing.
+    expect(await queued(id)).toEqual([]);
+    const stale = received.find((r) => r.payload.event === 'cart.created')!.payload.data
+      .cart as CartSummary;
+    await cart(id).emitWebhook({ event: 'cart.created', cart: stale, attempt: 1, erasure: 0 });
+    expect(received).toHaveLength(2);
+    expect((await rows(id)).every((r) => !r.payload.includes('Bee Buyer'))).toBe(true);
+  });
+
+  it('forgets a staff cart’s events and erases its title when its customer is erased', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const received = receiver();
+    await subscribe('all', ['*']);
+    const customerId = `cus_quill_${crypto.randomUUID().slice(0, 6)}`;
+    const email = `${customerId}@example.com`;
+    await db().insert(customers).values({ id: customerId, name: 'Quill Hardware', email });
+    const made = await api().createCart({
+      title: 'Restock for Quill Hardware',
+      flowId: 'tpl-b2b-order',
+      customerId,
+      createdBy: ada.id,
+    });
+    if (!made.ok) throw new Error(made.error);
+    const id = made.id;
+    await cart(id).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 1 });
+    const done = await cart(id).submitAs(ada);
+    if (!done.ok) throw new Error(done.error);
+    await settled(id, 2);
+    // The order ends (cancelled where it waits), so the customer can be erased.
+    const order = env.ORDER_AGENT.getByName(done.orderId);
+    const status = async () => ((await order.snapshot()) as { status: string }).status;
+    await until(async () => !['queued', 'running'].includes(await status()), 'the order to wait');
+    if (!TERMINAL_ORDER_STATUSES.includes((await status()) as never)) await order.cancel('test');
+    await until(
+      async () => TERMINAL_ORDER_STATUSES.includes((await status()) as never),
+      'the order to end',
+    );
+    expect(received.some((r) => r.body.includes('Quill Hardware'))).toBe(true);
+
+    expect(await eraseDataSubject(env, email)).toMatchObject({ ok: true });
+    expect(await rows(id)).toEqual([]);
+    const all = await db()
+      .select()
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.subscriptionId, 'all'));
+    expect(all.filter((r) => r.payload.includes('Quill Hardware'))).toEqual([]);
+    const after = (await api().cartSnapshot(id))!.cart!;
+    expect(after.title).not.toContain('Quill Hardware');
+    const row = await db().select().from(carts).where(eq(carts.id, id)).get();
+    expect(row!.title).toBe(after.title);
+    expect(await queued(id)).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CART_EVENT_RETRIES,
   CART_EVENTS,
+  cartEventRetryDelaySec,
   constantTimeEqual,
   isCartEvent,
   isWebhookUrl,
@@ -168,5 +170,15 @@ describe('outbound events', () => {
       'cart.submitted',
     ]);
     expect(() => pluginManifestSchema.parse({ ...base, events: ['cart.changed'] })).toThrow();
+  });
+
+  it('retry a cart event for about a day, from ten seconds doubling to an hour', () => {
+    expect([0, 1, 5, 8, 9, 20].map(cartEventRetryDelaySec)).toEqual([
+      10, 20, 320, 2560, 3600, 3600,
+    ]);
+    let total = 0;
+    for (let n = 0; n < CART_EVENT_RETRIES; n++) total += cartEventRetryDelaySec(n);
+    expect(total / 3600).toBeGreaterThan(23);
+    expect(total / 3600).toBeLessThan(25);
   });
 });

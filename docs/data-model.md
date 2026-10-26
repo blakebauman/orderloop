@@ -432,7 +432,9 @@ Each call first erases the subject's external carts (`carts`, counted in `carts`
 (with the buyer's id and name) are erased from everyone else's messages and the title, the return
 form and start links are dropped, their sockets are closed, and the buyer becomes `[erased]`, which
 clears `buyer_id`; its `webhook_deliveries` are deleted and its pending event retries dropped, and
-a cancel it caused is announced (`cart.canceled`) with the title erased. The cart's lines, quote and order stay. Staff carts for their customer accounts
+a cancel it caused is announced (`cart.canceled`) with the title erased. Staff carts for their
+accounts, and carts submitted as an order being erased (`eraseOrders`), have the terms erased from
+their title and their deliveries deleted the same way (`CartAgent.eraseFromEvents`). The cart's lines, quote and order stay. Staff carts for their customer accounts
 (`carts.customer_id`) lose their ship-to (`CartAgent.eraseShipTo`; an open one is priced again),
 each counted in `carts`.
 
