@@ -158,7 +158,8 @@ only where a value must be read character by character.
 - **Section title** (600, 15px, 1.3): a card's heading, in sentence case.
 - **Body** (400, 0.875rem): running text, rows, fields.
 - **UI** (400, 0.8125rem, `text-ui`): the top bar, segmented controls, compact controls.
-- **Caption** (500, 0.6875rem: 11px, 0.05em, UPPERCASE): field, column and fact labels. The only uppercase in
+- **Caption** (500, 0.6875rem: 11px, 0.05em, UPPERCASE): field, column and fact labels, and the group
+  labels in menus and sheets (the `caption` utility alone; a menu label sets no size of its own). The only uppercase in
   the product.
 - **2xs** (0.6875rem, `text-2xs`): counts and tags in the bars.
 
@@ -193,7 +194,13 @@ under 32rem tall, under 64rem wide).
   "From plugins", and for admins the workspace's pages under "Workspace" (Team and roles, Audit
   log, Plugins). While you're on one of its pages, More reads as that page, underlined; it carries
   the approvals count while Approvals is inside it. A tab marks as soon as it is chosen, not when
-  its page arrives. Focus outlines on the links sit inside them, clear of the rule.
+  its page arrives. Focus outlines on the links sit inside them, clear of the rule. A transparent
+  2px rule on top balances the underline, so tab text sits on the bar's centre line with the
+  wordmark and the pills. Menu items are 500 already, so More marks the page you're on with a
+  check, as the theme's radio items do, not with weight.
+- **Titles in the bar's menus and sheets** (the account menu's who, a sheet's title) are 600 with
+  `tracking-title`, the title tier, so they read as headers over 500 items; hints (⌘J, ?) are
+  11px/400 muted everywhere except the shortcuts list's boxed keys.
 - **Fitting the bar:** it never scrolls or overlaps, whatever the window or text size
   (`useFittingBar`). An invisible ruler holds every link, and each way More can read, at natural
   width. Before paint, labels give way first, in this order: the wordmark, the account's name,

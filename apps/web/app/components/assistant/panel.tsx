@@ -158,7 +158,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
           <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel className="caption font-medium">Ask about</DropdownMenuLabel>
+          <DropdownMenuLabel className="caption">Ask about</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={onPage ? scope : 'workspace'}
             onValueChange={(v) => setScope(v as 'page' | 'workspace')}
