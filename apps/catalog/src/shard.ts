@@ -12,28 +12,49 @@
  * shard's input gate, so two shards claiming from each other can't deadlock; the transaction then
  * re-checks what it read.
  *
- * The same transaction keeps the product editor's index current (docs/product-editor.md): each
- * product's content gaps, the last row refused for its key, and its card on the board. CatalogApi
- * sums and pages them across shards, so no shard ever asks another.
+ * The same transaction keeps the product editor's state (docs/product-editor.md). A product's
+ * stored body is what goes live: the feed's version with the editor's overrides applied, so the
+ * next import doesn't wipe an edit; while it has overrides, the feed's own version is kept beside it
+ * (`feed_rows`). Edits are staged first and go live only when published. Each product's content
+ * gaps and conflicts, the last row refused for its key, and its card on the board are rewritten with
+ * it. CatalogApi sums and pages them across shards, so no shard ever asks another.
  */
 import { DurableObject } from 'cloudflare:workers';
 import {
   aliasShard,
+  applyOverrides,
+  type BasedOverride,
   type BoardCard,
   type BoardColumn,
   contentGaps,
   contentHash,
   DOC_FORMAT,
+  type EditResult,
+  type EditSource,
+  editIssues,
+  type FieldOverride,
+  type FieldRef,
+  fieldId,
+  fieldValue,
+  type Gap,
   type GapKind,
   type Issue,
   type Localized,
+  overrideConflict,
   type Product,
   type ProductData,
+  type ProductSheet,
+  type PublishResult,
   type PurgeMessage,
+  parseFieldId,
   paths,
   productAliases,
   productShard,
   productUid,
+  type Rejection,
+  type Revision,
+  type StagedEdit,
+  type StageEdit,
   tags,
   type WriteResult,
 } from '@orderloop/core/product';
@@ -72,17 +93,68 @@ export type RejectedRow = {
   at?: number;
 };
 
-/** Gap kinds that come from a product's content (`contentGaps`), rewritten with it. */
+/** Gap kinds rewritten with a product: its content's (`contentGaps`) and its overrides' conflicts. */
 const CONTENT_KINDS: GapKind[] = [
   'missing_title',
   'missing_description',
   'missing_attribute',
   'missing_alt',
+  'conflict',
 ];
 const IN_CONTENT = `kind IN (${CONTENT_KINDS.map((k) => `'${k}'`).join(', ')})`;
 
 /** A title to show for a product: any locale's. */
 const anyText = (l: Localized | undefined) => (l ? (Object.values(l)[0] ?? '') : '');
+
+/** The field and locale an edit names, as stored (`locale` is '' for status), or null for none. */
+function fieldKey(ref: FieldRef): { field: string; locale: string; ref: FieldRef } | null {
+  const parsed = parseFieldId(fieldId(ref));
+  if (!parsed) return null;
+  const locale = parsed.field === 'status' ? '' : (ref.locale ?? '');
+  return { field: fieldId(parsed), locale, ref: locale ? { ...parsed, locale } : parsed };
+}
+
+/** The edit a stored field and locale name. */
+function refOf(field: string, locale: string): FieldRef {
+  const parsed = parseFieldId(field) ?? { field: 'title' };
+  return locale ? { ...parsed, locale } : parsed;
+}
+
+/** A field and locale for a person to read: `description (fr)`. */
+const label = (field: string, locale: string) => (locale ? `${field} (${locale})` : field);
+
+type OverrideRow = {
+  field: string;
+  locale: string;
+  value: string | null;
+  base: string | null;
+  source: EditSource;
+  who: string;
+  at: number;
+};
+type StagedRow = {
+  field: string;
+  locale: string;
+  op: 'set' | 'clear';
+  value: string | null;
+  seen: string | null;
+  source: EditSource;
+  who: string;
+  at: number;
+  failure: string | null;
+};
+/** A change publishing will record, before it has a time. */
+type PlannedRevision = Omit<Revision, 'ref' | 'at'> & { field: string; locale: string };
+const asOverride = (o: OverrideRow): BasedOverride => ({
+  ref: refOf(o.field, o.locale),
+  value: o.value,
+  base: o.base,
+});
+
+/** How long a product stays in the board's Published column. */
+const PUBLISHED_FOR_MS = 24 * 60 * 60 * 1000;
+/** Published changes kept per product for the sheet's history. */
+const REVISIONS_KEPT = 50;
 
 type Row = {
   key: string;
@@ -148,6 +220,21 @@ export class CatalogShard extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS gap_rebuild (
         id INTEGER PRIMARY KEY CHECK (id = 1), requested INTEGER NOT NULL, due INTEGER NOT NULL,
         cursor TEXT);
+      CREATE TABLE IF NOT EXISTS feed_rows (
+        key TEXT PRIMARY KEY, hash TEXT NOT NULL, body TEXT NOT NULL, live TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS overrides (
+        key TEXT NOT NULL, field TEXT NOT NULL, locale TEXT NOT NULL, value TEXT, base TEXT,
+        source TEXT NOT NULL, who TEXT NOT NULL, at INTEGER NOT NULL,
+        PRIMARY KEY (key, field, locale));
+      CREATE TABLE IF NOT EXISTS staged (
+        key TEXT NOT NULL, field TEXT NOT NULL, locale TEXT NOT NULL, op TEXT NOT NULL, value TEXT,
+        seen TEXT, source TEXT NOT NULL, who TEXT NOT NULL, at INTEGER NOT NULL, failure TEXT,
+        PRIMARY KEY (key, field, locale));
+      CREATE TABLE IF NOT EXISTS revisions (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, field TEXT NOT NULL,
+        locale TEXT NOT NULL, op TEXT NOT NULL, value TEXT, previous TEXT, source TEXT NOT NULL,
+        who TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS revisions_key ON revisions (key, seq);
     `);
     // Added later, so shards created before them gain them here. `rev`: the config revision a write
     // was validated against (null: unknown, so the alarm fetches the latest). `forced`: a reindex,
@@ -231,6 +318,165 @@ export class CatalogShard extends DurableObject<Env> {
     return row ? productAliases(JSON.parse(row.body) as ProductData) : [];
   }
 
+  /** The feed's version of a stored product: kept apart only while it has overrides. */
+  private feedOf(key: string): ProductData | undefined {
+    const row =
+      this.sql
+        .exec<{ body: string }>('SELECT body FROM feed_rows WHERE key = ?', key)
+        .toArray()[0] ??
+      this.sql.exec<{ body: string }>('SELECT body FROM products WHERE key = ?', key).toArray()[0];
+    return row ? (JSON.parse(row.body) as ProductData) : undefined;
+  }
+
+  /**
+   * The content hash of the feed's version: what an unchanged feed row is recognized by. A kept
+   * feed row counts only while the live product is still the one its overrides made (`live`): one
+   * written without them (by a Worker from before overrides, during a rollback) is recomputed.
+   */
+  private feedHash(key: string): string | undefined {
+    const kept = this.sql
+      .exec<{ hash: string; fresh: number }>(
+        `SELECT f.hash, p.hash = f.live AS fresh FROM feed_rows f JOIN products p ON p.key = f.key
+         WHERE f.key = ?`,
+        key,
+      )
+      .toArray()[0];
+    if (kept) return kept.fresh ? kept.hash : undefined;
+    return this.head(key)?.hash;
+  }
+
+  private overrideRows(key: string): OverrideRow[] {
+    return this.sql
+      .exec<OverrideRow>(
+        'SELECT field, locale, value, base, source, who, at FROM overrides WHERE key = ? ORDER BY field, locale',
+        key,
+      )
+      .toArray();
+  }
+
+  private stagedRows(key: string): StagedRow[] {
+    return this.sql
+      .exec<StagedRow>(
+        `SELECT field, locale, op, value, seen, source, who, at, failure FROM staged WHERE key = ?
+         ORDER BY field, locale`,
+        key,
+      )
+      .toArray();
+  }
+
+  /**
+   * Keeps the feed's version beside the live one (whose hash is `live`) while the product has
+   * overrides; else drops it.
+   */
+  private storeFeed(key: string, feed: ProductData, hash: string, live: string) {
+    const overridden = this.sql
+      .exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM overrides WHERE key = ?) AS e', key)
+      .one().e;
+    if (overridden)
+      this.sql.exec(
+        'INSERT OR REPLACE INTO feed_rows VALUES (?, ?, ?, ?)',
+        key,
+        hash,
+        JSON.stringify(feed),
+        live,
+      );
+    else this.sql.exec('DELETE FROM feed_rows WHERE key = ?', key);
+  }
+
+  /** Drops a product's editor state: its feed row, overrides, staged edits and history. */
+  private forgetEdits(key: string) {
+    for (const t of ['feed_rows', 'overrides', 'staged', 'revisions'])
+      this.sql.exec(`DELETE FROM ${t} WHERE key = ?`, key);
+  }
+
+  /** Stores the live product as a new version and queues it to publish. Returns the version. */
+  private writeProduct(
+    data: ProductData,
+    hash: string,
+    current: { version: number } | undefined,
+    w: { shard: number; by: string; urgent?: boolean; rev: number | null },
+    now: number,
+  ): number {
+    const version = (current?.version ?? 0) + 1;
+    if (current)
+      this.sql.exec(
+        `UPDATE products SET type = ?, type_version = ?, status = ?, version = ?, hash = ?,
+         body = ?, updated_at = ?, updated_by = ? WHERE key = ?`,
+        data.type,
+        data.typeVersion,
+        data.status,
+        version,
+        hash,
+        JSON.stringify(data),
+        now,
+        w.by,
+        data.key,
+      );
+    else {
+      const seq = this.setting('seq') ?? 0;
+      this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('seq', ?)`, seq + 1);
+      this.sql.exec(
+        'INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        data.key,
+        productUid(w.shard, seq),
+        data.type,
+        data.typeVersion,
+        data.status,
+        version,
+        hash,
+        JSON.stringify(data),
+        now,
+        now,
+        w.by,
+      );
+    }
+    this.sql.exec(
+      'INSERT INTO outbox (key, urgent, rev) VALUES (?, ?, ?)',
+      data.key,
+      w.urgent ? 1 : 0,
+      w.rev,
+    );
+    return version;
+  }
+
+  /**
+   * Claims the aliases each product gains on the shards that own them, outside any transaction.
+   * Returns, per product, the ones another product holds.
+   */
+  private async claimAliases(
+    self: number,
+    items: { key: string; prev: string[]; next: string[] }[],
+  ): Promise<Map<string, Issue[]>> {
+    const claims = new Map<number, { owner: string; aliases: string[] }[]>();
+    for (const p of items) {
+      const prev = new Set(p.prev);
+      for (const a of p.next.filter((x) => !prev.has(x))) {
+        const n = aliasShard(a);
+        const list = claims.get(n) ?? [];
+        list.push({ owner: p.key, aliases: [a] });
+        claims.set(n, list);
+      }
+    }
+    const conflicts = new Map<string, Issue[]>();
+    await Promise.all(
+      [...claims].map(async ([n, list]) => {
+        const lost = await this.claimOn(self, n, list);
+        for (const c of lost) {
+          const issues = conflicts.get(c.owner) ?? [];
+          issues.push({ path: c.alias, message: `already used by ${c.holder}` });
+          conflicts.set(c.owner, issues);
+        }
+      }),
+    );
+    return conflicts;
+  }
+
+  /** Aliases to give back: what a product no longer claims, or what it claimed for a refused write. */
+  private static releases(key: string, give: string[], keep: string[]) {
+    const kept = new Set(keep);
+    return give.filter((a) => !kept.has(a)).map((alias) => ({ owner: key, alias }));
+  }
+
   async apply(batch: ApplyBatch): Promise<WriteResult[]> {
     this.shardNumber(batch.shard);
     const done = this.sql
@@ -238,45 +484,45 @@ export class CatalogShard extends DurableObject<Env> {
       .toArray()[0];
     if (done) return JSON.parse(done.result) as WriteResult[];
 
-    // 1. What changes: rows whose content hash differs from what's stored. A key repeated in the
-    // batch keeps its last row. Only a changed row's stored body is parsed (for its old aliases):
-    // in a daily full feed, most rows are unchanged.
+    // 1. What changes: rows whose content hash differs from the feed version stored. A key repeated
+    // in the batch keeps its last row. Only a changed row's stored body is parsed (for its old
+    // aliases) and its overrides applied: in a daily full feed, most rows are unchanged.
     const last = new Map(batch.rows.map((data, i) => [data.key, i]));
     const planned = batch.rows.map((data, i) => {
-      const hash = contentHash(data);
+      const feedHash = contentHash(data);
       const before = this.head(data.key);
       const repeated = last.get(data.key) !== i;
-      const changes = !repeated && hash !== before?.hash;
+      const changes = !repeated && feedHash !== this.feedHash(data.key);
+      // What goes live: the row with the product's overrides over it. A new product has none
+      // (rows a Worker from before overrides left for a deleted key are cleared when it's written).
+      const live =
+        changes && before
+          ? applyOverrides(data, this.overrideRows(data.key).map(asOverride))
+          : data;
       const prevAliases = changes && before ? this.storedAliases(data.key) : [];
-      return { i, data, hash, before, prevAliases, aliases: productAliases(data), repeated };
+      const hash = live === data ? feedHash : contentHash(live);
+      return {
+        i,
+        data,
+        feedHash,
+        live,
+        hash,
+        before,
+        prevAliases,
+        aliases: productAliases(live),
+        repeated,
+        changes,
+      };
     });
-    const changed = planned.filter((p) => !p.repeated && p.hash !== p.before?.hash);
+    const changed = planned.filter((p) => p.changes);
     // Types and channels for the changed products' gaps: from CatalogMeta, never another shard,
     // and only when something changes (a daily full feed is mostly unchanged rows).
     const config = changed.length ? await this.loadConfig(batch.rev) : undefined;
 
     // 2. Claim new aliases on the shards that own them, outside any transaction.
-    const claims = new Map<number, { owner: string; aliases: string[] }[]>();
-    for (const p of changed) {
-      const prev = new Set(p.prevAliases);
-      const add = p.aliases.filter((a) => !prev.has(a));
-      for (const a of add) {
-        const n = aliasShard(a);
-        const list = claims.get(n) ?? [];
-        list.push({ owner: p.data.key, aliases: [a] });
-        claims.set(n, list);
-      }
-    }
-    const conflicts = new Map<string, Issue[]>();
-    await Promise.all(
-      [...claims].map(async ([n, items]) => {
-        const lost = await this.claimOn(batch.shard, n, items);
-        for (const c of lost) {
-          const list = conflicts.get(c.owner) ?? [];
-          list.push({ path: c.alias, message: `already used by ${c.holder}` });
-          conflicts.set(c.owner, list);
-        }
-      }),
+    const conflicts = await this.claimAliases(
+      batch.shard,
+      changed.map((p) => ({ key: p.data.key, prev: p.prevAliases, next: p.aliases })),
     );
 
     // 3. One transaction: re-read (another request may have written meanwhile), then write.
@@ -291,34 +537,37 @@ export class CatalogShard extends DurableObject<Env> {
         this.refreshBoard(r.key, now);
       }
       for (const p of planned) {
+        const key = p.data.key;
         if (p.repeated) {
           results.push({
-            key: p.data.key,
+            key,
             status: 'rejected',
             issues: [{ path: 'key', message: 'repeated later in the same batch' }],
           });
           continue;
         }
-        const current = this.head(p.data.key);
-        if (current?.hash === p.hash) {
-          results.push({ key: p.data.key, status: 'unchanged', version: current.version });
+        const current = this.head(key);
+        if (current && p.feedHash === this.feedHash(key)) {
+          results.push({ key, status: 'unchanged', version: current.version });
           // Sent again as it is: whatever was refused for it before no longer stands.
-          if (this.writeRejection(p.data.key, null, now)) this.refreshBoard(p.data.key, now);
+          if (this.writeRejection(key, null, now)) this.refreshBoard(key, now);
           continue;
         }
-        // Another write landed while this one claimed aliases: what was claimed may be wrong.
-        const raced = current?.hash !== p.before?.hash;
+        // Another write (or a publish) landed while this one claimed aliases: what was claimed,
+        // and the overrides applied, may be wrong. By version, since a write can change overrides
+        // or the feed's row and leave the live content (its hash) as it was.
+        const raced = !p.changes || current?.version !== p.before?.version;
         const issues = raced
           ? [{ path: 'key', message: 'changed by another write meanwhile; send it again' }]
-          : conflicts.get(p.data.key);
+          : conflicts.get(key);
         if (issues) {
-          results.push({ key: p.data.key, status: 'rejected', issues });
+          results.push({ key, status: 'rejected', issues });
           // A taken alias is the sender's to fix: it goes on the board. A race just needs a resend.
           if (!raced) {
             this.writeRejection(
-              p.data.key,
+              key,
               {
-                key: p.data.key,
+                key,
                 title: anyText(p.data.title),
                 issues,
                 feed: batch.feed,
@@ -326,60 +575,21 @@ export class CatalogShard extends DurableObject<Env> {
               },
               now,
             );
-            this.refreshBoard(p.data.key, now);
+            this.refreshBoard(key, now);
           }
-          // Give back what this product did claim.
-          const prev = new Set(p.prevAliases);
-          for (const a of p.aliases)
-            if (!prev.has(a)) releases.push({ owner: p.data.key, alias: a });
+          // Give back what this one claimed, but not what the product as stored now holds: a
+          // write that raced it may have claimed the same alias for it.
+          releases.push(...CatalogShard.releases(key, p.aliases, this.storedAliases(key)));
           continue;
         }
-        const version = (current?.version ?? 0) + 1;
-        if (current)
-          this.sql.exec(
-            `UPDATE products SET type = ?, type_version = ?, status = ?, version = ?, hash = ?,
-             body = ?, updated_at = ?, updated_by = ? WHERE key = ?`,
-            p.data.type,
-            p.data.typeVersion,
-            p.data.status,
-            version,
-            p.hash,
-            JSON.stringify(p.data),
-            now,
-            batch.by,
-            p.data.key,
-          );
-        else {
-          const seq = this.setting('seq') ?? 0;
-          this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('seq', ?)`, seq + 1);
-          this.sql.exec(
-            'INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            p.data.key,
-            productUid(batch.shard, seq),
-            p.data.type,
-            p.data.typeVersion,
-            p.data.status,
-            version,
-            p.hash,
-            JSON.stringify(p.data),
-            now,
-            now,
-            batch.by,
-          );
-        }
-        this.sql.exec(
-          'INSERT INTO outbox (key, urgent, rev) VALUES (?, ?, ?)',
-          p.data.key,
-          batch.urgent ? 1 : 0,
-          batch.rev,
-        );
-        const next = new Set(p.aliases);
-        for (const a of p.prevAliases)
-          if (!next.has(a)) releases.push({ owner: p.data.key, alias: a });
-        if (config) this.writeGaps(p.data.key, p.data, config);
-        this.writeRejection(p.data.key, null, now);
-        this.refreshBoard(p.data.key, now);
-        results.push({ key: p.data.key, status: current ? 'updated' : 'created', version });
+        if (!current) this.forgetEdits(key);
+        const version = this.writeProduct(p.live, p.hash, current, batch, now);
+        releases.push(...CatalogShard.releases(key, p.prevAliases, p.aliases));
+        this.storeFeed(key, p.data, p.feedHash, p.hash);
+        if (config) this.writeGaps(key, p.live, config);
+        this.writeRejection(key, null, now);
+        this.refreshBoard(key, now);
+        results.push({ key, status: current ? 'updated' : 'created', version });
       }
       this.sql.exec(
         'INSERT INTO applied VALUES (?, ?, ?)',
@@ -408,6 +618,7 @@ export class CatalogShard extends DurableObject<Env> {
         this.sql.exec('DELETE FROM gaps WHERE key = ?', key);
         this.sql.exec('DELETE FROM rejections WHERE key = ?', key);
         this.sql.exec('DELETE FROM board WHERE key = ?', key);
+        this.forgetEdits(key);
         const row = this.read(key);
         if (!row) {
           results.push({ key, status: 'unchanged' });
@@ -514,9 +725,18 @@ export class CatalogShard extends DurableObject<Env> {
 
   // --- The product editor's index ---
 
-  /** Rewrites a product's content gaps from its data (none for a product whose type is gone). */
+  /**
+   * Rewrites a product's content gaps from its live data (none for a product whose type is gone),
+   * and a conflict for each override the feed changed a value under. Its feed version and
+   * overrides must be stored first.
+   */
   private writeGaps(key: string, data: ProductData, config: CatalogConfig) {
     this.sql.exec(`DELETE FROM gaps WHERE key = ? AND ${IN_CONTENT}`, key);
+    const overrides = this.overrideRows(key);
+    const feed = overrides.length ? this.feedOf(key) : undefined;
+    for (const o of overrides)
+      if (feed && overrideConflict(feed, asOverride(o)))
+        this.sql.exec(`INSERT INTO gaps VALUES (?, 'conflict', ?, ?, '')`, key, o.field, o.locale);
     const type = typeResolver(config)(data.type, data.typeVersion);
     if (!type) return;
     for (const g of contentGaps(data, type, config.channels))
@@ -567,8 +787,9 @@ export class CatalogShard extends DurableObject<Env> {
   }
 
   /**
-   * The product's card on the board, from its gaps: on Gaps while it has any, off the board when it
-   * has none. A card keeps the time it joined its column.
+   * The product's card on the board: on Gaps while it has any (conflicts and refused rows count),
+   * else on Staged while it has staged edits, else on Published for a day after its edits went
+   * live, else off the board. A card keeps the time it joined its column.
    */
   private refreshBoard(key: string, now: number) {
     const kinds = Object.fromEntries(
@@ -580,7 +801,21 @@ export class CatalogShard extends DurableObject<Env> {
         .toArray()
         .map((r) => [r.kind, r.n]),
     );
-    if (!Object.keys(kinds).length) {
+    const staged = this.sql
+      .exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM staged WHERE key = ?) AS e', key)
+      .one().e;
+    const published =
+      this.sql
+        .exec<{ at: number | null }>('SELECT MAX(at) AS at FROM revisions WHERE key = ?', key)
+        .one().at ?? 0;
+    const col: BoardColumn | null = Object.keys(kinds).length
+      ? 'gaps'
+      : staged
+        ? 'staged'
+        : published > now - PUBLISHED_FOR_MS
+          ? 'published'
+          : null;
+    if (!col) {
       this.sql.exec('DELETE FROM board WHERE key = ?', key);
       return;
     }
@@ -594,7 +829,6 @@ export class CatalogShard extends DurableObject<Env> {
         .toArray()[0]?.title ??
         '') ||
       key;
-    const col: BoardColumn = 'gaps';
     this.sql.exec(
       `INSERT INTO board VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (key) DO UPDATE SET title = excluded.title, kinds = excluded.kinds,
@@ -616,7 +850,10 @@ export class CatalogShard extends DurableObject<Env> {
   } {
     const columns = Object.fromEntries(
       this.sql
-        .exec<{ col: string; n: number }>('SELECT col, COUNT(*) AS n FROM board GROUP BY col')
+        .exec<{ col: string; n: number }>(
+          `SELECT col, COUNT(*) AS n FROM board WHERE col != 'published' OR at > ? GROUP BY col`,
+          Date.now() - PUBLISHED_FOR_MS,
+        )
         .toArray()
         .map((r) => [r.col, r.n]),
     );
@@ -652,16 +889,22 @@ export class CatalogShard extends DurableObject<Env> {
         row: number | null;
         issues: string | null;
         rejected_at: number | null;
+        staged: number;
+        failure: string | null;
       }>(
-        `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at
+        `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at,
+           (SELECT COUNT(*) FROM staged s WHERE s.key = b.key) AS staged,
+           (SELECT MAX(failure) FROM staged s WHERE s.key = b.key) AS failure
          FROM board b LEFT JOIN rejections r ON r.key = b.key
          WHERE b.col = ?1 AND b.key > ?2
            AND (?3 IS NULL OR EXISTS (SELECT 1 FROM gaps g WHERE g.key = b.key AND g.kind = ?3))
+           AND (b.col != 'published' OR b.at > ?5)
          ORDER BY b.key LIMIT ?4`,
         q.column,
         q.cursor ?? '',
         q.kind ?? null,
         q.limit,
+        Date.now() - PUBLISHED_FOR_MS,
       )
       .toArray()
       .map((r) => ({
@@ -678,6 +921,8 @@ export class CatalogShard extends DurableObject<Env> {
                 issues: JSON.parse(r.issues) as Issue[],
                 at: r.rejected_at ?? 0,
               },
+        staged: r.staged,
+        failure: r.failure,
         at: r.at,
       }));
   }
@@ -773,6 +1018,402 @@ export class CatalogShard extends DurableObject<Env> {
       this.sql.exec('UPDATE gap_rebuild SET cursor = ? WHERE requested = ?', r.next, job.requested);
       if (Date.now() > deadline) return;
     }
+  }
+
+  // --- The product editor's edits ---
+
+  /**
+   * Stages edits, each checked against the product as it is live. Nothing goes live until
+   * `publishStaged`; a later edit to the same field and locale replaces the earlier one.
+   */
+  async stageEdits(input: {
+    shard: number;
+    edits: StageEdit[];
+    by: string;
+  }): Promise<EditResult[]> {
+    this.shardNumber(input.shard);
+    const resolve = typeResolver(await this.loadConfig());
+    const now = Date.now();
+    const results: EditResult[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const touched = new Set<string>();
+      for (const e of input.edits) {
+        const fail = (...issues: string[]) =>
+          results.push({ key: e.key, ref: e.ref, ok: false, issues });
+        const at = fieldKey(e.ref);
+        if (!at) {
+          fail('not an editable field');
+          continue;
+        }
+        const body = this.sql
+          .exec<{ body: string }>('SELECT body FROM products WHERE key = ?', e.key)
+          .toArray()[0]?.body;
+        if (!body) {
+          fail('no such product');
+          continue;
+        }
+        const live = JSON.parse(body) as ProductData;
+        let value: string | null = null;
+        if (e.op === 'clear') {
+          const overridden = this.sql
+            .exec<{ e: number }>(
+              'SELECT EXISTS (SELECT 1 FROM overrides WHERE key = ? AND field = ? AND locale = ?) AS e',
+              e.key,
+              at.field,
+              at.locale,
+            )
+            .one().e;
+          if (!overridden) {
+            fail('no edit to clear: it already shows the feed value');
+            continue;
+          }
+        } else {
+          const type = resolve(live.type, live.typeVersion);
+          const issues = type
+            ? editIssues(live, type, { ref: at.ref, value: e.value })
+            : [`type ${live.type}@${live.typeVersion} is gone`];
+          if (issues.length) {
+            fail(...issues);
+            continue;
+          }
+          value = e.value;
+        }
+        this.sql.exec(
+          'INSERT OR REPLACE INTO staged VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)',
+          e.key,
+          at.field,
+          at.locale,
+          e.op,
+          value,
+          fieldValue(live, at.ref),
+          e.source === 'assistant' ? 'assistant' : 'person',
+          input.by,
+          now,
+        );
+        touched.add(e.key);
+        results.push({ key: e.key, ref: at.ref, ok: true });
+      }
+      for (const key of touched) this.refreshBoard(key, now);
+    });
+    return results;
+  }
+
+  /** Drops staged edits: one field's, or with no `ref` all of a product's. Returns how many. */
+  discardStaged(input: { shard: number; items: { key: string; ref?: FieldRef }[] }): number {
+    this.shardNumber(input.shard);
+    const now = Date.now();
+    let discarded = 0;
+    this.ctx.storage.transactionSync(() => {
+      const touched = new Set<string>();
+      for (const { key, ref } of input.items) {
+        const at = ref ? fieldKey(ref) : undefined;
+        if (at === null) continue;
+        discarded += at
+          ? this.sql.exec(
+              'DELETE FROM staged WHERE key = ? AND field = ? AND locale = ?',
+              key,
+              at.field,
+              at.locale,
+            ).rowsWritten
+          : this.sql.exec('DELETE FROM staged WHERE key = ?', key).rowsWritten;
+        touched.add(key);
+      }
+      for (const key of touched) this.refreshBoard(key, now);
+    });
+    return discarded;
+  }
+
+  /**
+   * What publishing `key`'s staged edits would store, or why it can't: a value it changes was
+   * changed since it was staged, or an edit no longer fits the product.
+   */
+  private planPublish(
+    key: string,
+    config: CatalogConfig,
+  ):
+    | { key: string; nothing: true }
+    | { key: string; failure: string; staged: string }
+    | {
+        key: string;
+        staged: string;
+        live: ProductData;
+        feed: ProductData;
+        hash: string;
+        before: { version: number; hash: string };
+        overrides: OverrideRow[];
+        revisions: PlannedRevision[];
+        prevAliases: string[];
+        aliases: string[];
+      } {
+    const staged = this.stagedRows(key);
+    const snapshot = JSON.stringify(staged.map((s) => ({ ...s, failure: null })));
+    if (!staged.length) return { key, nothing: true };
+    const fail = (failure: string) => ({ key, failure, staged: snapshot });
+    const before = this.head(key);
+    const feed = this.feedOf(key);
+    const body = this.sql
+      .exec<{ body: string }>('SELECT body FROM products WHERE key = ?', key)
+      .toArray()[0]?.body;
+    if (!before || !feed || !body) return fail('the product was deleted');
+    const live = JSON.parse(body) as ProductData;
+    const type = typeResolver(config)(live.type, live.typeVersion);
+    if (!type) return fail(`type ${live.type}@${live.typeVersion} is gone`);
+    const overrides = new Map(
+      this.overrideRows(key).map((o) => [`${o.field}\u0000${o.locale}`, o]),
+    );
+    const revisions: PlannedRevision[] = [];
+    for (const s of staged) {
+      const ref = refOf(s.field, s.locale);
+      const now = fieldValue(live, ref);
+      if (now !== s.seen) return fail(`${label(s.field, s.locale)} changed since it was staged`);
+      const id = `${s.field}\u0000${s.locale}`;
+      if (s.op === 'clear') overrides.delete(id);
+      else {
+        const issues = editIssues(live, type, { ref, value: s.value });
+        if (issues.length) return fail(`${label(s.field, s.locale)}: ${issues.join('; ')}`);
+        overrides.set(id, {
+          field: s.field,
+          locale: s.locale,
+          value: s.value,
+          base: fieldValue(feed, ref),
+          source: s.source,
+          who: s.who,
+          at: s.at,
+        });
+      }
+      revisions.push({
+        field: s.field,
+        locale: s.locale,
+        op: s.op,
+        value: s.op === 'set' ? s.value : fieldValue(feed, ref),
+        previous: now,
+        source: s.source,
+        by: s.who,
+      });
+    }
+    const next = applyOverrides(feed, [...overrides.values()].map(asOverride));
+    // Every edit must show in the result: applyOverrides skips one that can't hold (the last
+    // title, media the feed dropped), and that must not publish as if it had.
+    for (const r of revisions)
+      if (fieldValue(next, refOf(r.field, r.locale)) !== r.value)
+        return fail(`${label(r.field, r.locale)} can't be set on the product as it is`);
+    return {
+      key,
+      staged: snapshot,
+      live: next,
+      feed,
+      hash: contentHash(next),
+      before,
+      overrides: [...overrides.values()],
+      revisions,
+      prevAliases: productAliases(live),
+      aliases: productAliases(next),
+    };
+  }
+
+  /**
+   * Publishes the staged edits of `keys`, each product's all or none, through the same transaction
+   * and outbox as every write. A refused product keeps its edits staged, with why. Re-sending a
+   * request id returns the first answer and writes nothing.
+   */
+  async publishStaged(input: {
+    shard: number;
+    keys: string[];
+    by: string;
+    requestId: string;
+    urgent?: boolean;
+  }): Promise<PublishResult[]> {
+    this.shardNumber(input.shard);
+    const batchId = `publish:${input.requestId}`;
+    const done = this.sql
+      .exec<{ result: string }>('SELECT result FROM applied WHERE batch = ?', batchId)
+      .toArray()[0];
+    if (done) {
+      // The same request again: its answer. A key it didn't have means the id was reused.
+      const first = new Map((JSON.parse(done.result) as PublishResult[]).map((r) => [r.key, r]));
+      return [...new Set(input.keys)].map(
+        (key) =>
+          first.get(key) ?? {
+            key,
+            status: 'failed',
+            issues: ['this request id was used for other products; publish with a new one'],
+          },
+      );
+    }
+    const config = await this.loadConfig();
+    const plans = [...new Set(input.keys)].map((key) => this.planPublish(key, config));
+    const ready = plans.filter((p) => 'live' in p);
+    const conflicts = await this.claimAliases(
+      input.shard,
+      ready.map((p) => ({ key: p.key, prev: p.prevAliases, next: p.aliases })),
+    );
+
+    const now = Date.now();
+    const results: PublishResult[] = [];
+    const releases: { owner: string; alias: string }[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const refuse = (key: string, failure: string) => {
+        this.sql.exec('UPDATE staged SET failure = ? WHERE key = ?', failure, key);
+        this.refreshBoard(key, now);
+        results.push({ key, status: 'failed', issues: [failure] });
+      };
+      for (const p of plans) {
+        if ('nothing' in p) {
+          results.push({ key: p.key, status: 'unchanged' });
+          continue;
+        }
+        if (!('live' in p)) {
+          refuse(p.key, p.failure);
+          continue;
+        }
+        const taken = conflicts.get(p.key);
+        // Written, or restaged, while this one claimed aliases: publish again to see it.
+        const current = this.head(p.key);
+        const stagedNow = JSON.stringify(
+          this.stagedRows(p.key).map((s) => ({ ...s, failure: null })),
+        );
+        const raced = current?.version !== p.before.version || stagedNow !== p.staged;
+        if (taken || raced) {
+          // Give back what this one claimed, but not what the product as stored now holds.
+          releases.push(...CatalogShard.releases(p.key, p.aliases, this.storedAliases(p.key)));
+          if (!current)
+            results.push({ key: p.key, status: 'failed', issues: ['the product was deleted'] });
+          else if (stagedNow !== p.staged)
+            // Restaged meanwhile: those edits haven't been tried, so they carry no failure.
+            results.push({
+              key: p.key,
+              status: 'failed',
+              issues: ['restaged meanwhile; publish again'],
+            });
+          else if (raced) refuse(p.key, 'changed by another write meanwhile; publish again');
+          else refuse(p.key, (taken ?? []).map((i) => `${i.path} ${i.message}`).join('; '));
+          continue;
+        }
+        const version = this.writeProduct(
+          p.live,
+          p.hash,
+          current,
+          { shard: input.shard, by: input.by, urgent: input.urgent, rev: config.rev },
+          now,
+        );
+        releases.push(...CatalogShard.releases(p.key, p.prevAliases, p.aliases));
+        this.sql.exec('DELETE FROM overrides WHERE key = ?', p.key);
+        for (const o of p.overrides)
+          this.sql.exec(
+            'INSERT INTO overrides VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            p.key,
+            o.field,
+            o.locale,
+            o.value,
+            o.base,
+            o.source,
+            o.who,
+            o.at,
+          );
+        this.storeFeed(p.key, p.feed, contentHash(p.feed), p.hash);
+        for (const r of p.revisions)
+          this.sql.exec(
+            'INSERT INTO revisions (key, field, locale, op, value, previous, source, who, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            p.key,
+            r.field,
+            r.locale,
+            r.op,
+            r.value,
+            r.previous,
+            r.source,
+            r.by,
+            now,
+          );
+        this.sql.exec(
+          `DELETE FROM revisions WHERE key = ?1 AND seq NOT IN
+             (SELECT seq FROM revisions WHERE key = ?1 ORDER BY seq DESC LIMIT ?2)`,
+          p.key,
+          REVISIONS_KEPT,
+        );
+        this.sql.exec('DELETE FROM staged WHERE key = ?', p.key);
+        this.writeGaps(p.key, p.live, config);
+        this.refreshBoard(p.key, now);
+        results.push({ key: p.key, status: 'published', version });
+      }
+      this.sql.exec('INSERT INTO applied VALUES (?, ?, ?)', batchId, now, JSON.stringify(results));
+    });
+    await this.releaseOn(input.shard, releases);
+    await this.schedulePublish();
+    return results;
+  }
+
+  /** Everything the editor's sheet shows for one product; null when there's no such product. */
+  sheet(key: string): ProductSheet | null {
+    const product = this.get(key);
+    const feed = this.feedOf(key);
+    if (!product || !feed) return null;
+    const overrides: FieldOverride[] = this.overrideRows(key).map((o) => {
+      const based = asOverride(o);
+      return {
+        ...based,
+        feed: fieldValue(feed, based.ref),
+        conflict: overrideConflict(feed, based),
+        source: o.source,
+        by: o.who,
+        at: o.at,
+      };
+    });
+    const staged: StagedEdit[] = this.stagedRows(key).map((s) => ({
+      ref: refOf(s.field, s.locale),
+      op: s.op,
+      value: s.value,
+      seen: s.seen,
+      source: s.source,
+      by: s.who,
+      at: s.at,
+      failure: s.failure,
+    }));
+    const gaps = this.sql
+      .exec<Gap>(
+        'SELECT kind, field, locale, channel FROM gaps WHERE key = ? ORDER BY kind, field, locale, channel',
+        key,
+      )
+      .toArray();
+    const r = this.sql
+      .exec<{ feed: string | null; row: number | null; issues: string; at: number }>(
+        'SELECT feed, row, issues, at FROM rejections WHERE key = ?',
+        key,
+      )
+      .toArray()[0];
+    const rejection: Rejection | null = r
+      ? {
+          ...(r.feed ? { feed: r.feed } : {}),
+          ...(r.row !== null ? { row: r.row } : {}),
+          issues: JSON.parse(r.issues) as Issue[],
+          at: r.at,
+        }
+      : null;
+    const revisions: Revision[] = this.sql
+      .exec<{
+        field: string;
+        locale: string;
+        op: 'set' | 'clear';
+        value: string | null;
+        previous: string | null;
+        source: EditSource;
+        who: string;
+        at: number;
+      }>(
+        `SELECT field, locale, op, value, previous, source, who, at FROM revisions WHERE key = ?
+         ORDER BY seq DESC`,
+        key,
+      )
+      .toArray()
+      .map((v) => ({
+        ref: refOf(v.field, v.locale),
+        op: v.op,
+        value: v.value,
+        previous: v.previous,
+        source: v.source,
+        by: v.who,
+        at: v.at,
+      }));
+    return { product, feed, overrides, staged, gaps, rejection, revisions };
   }
 
   // --- Alias claims (this shard as the alias owner) ---
@@ -888,6 +1529,10 @@ export class CatalogShard extends DurableObject<Env> {
    */
   override async alarm() {
     this.sql.exec('DELETE FROM applied WHERE at < ?', Date.now() - APPLIED_TTL_MS);
+    this.sql.exec(
+      `DELETE FROM board WHERE col = 'published' AND at <= ?`,
+      Date.now() - PUBLISHED_FOR_MS,
+    );
     const deadline = Date.now() + ALARM_WINDOW_MS;
     const inFlight = new Set<string>();
     const running = new Set<Promise<void>>();

@@ -3,12 +3,13 @@
  * Worker's `CatalogApi` entrypoint over a service binding. Callers never import catalog source.
  */
 
-import type { GapKind } from './content';
+import type { FieldRef, Gap, GapKind } from './content';
 import type {
   Category,
   CategoryInput,
   Channel,
   Product,
+  ProductData,
   ProductInput,
   ProductType,
   ProductTypeInput,
@@ -92,8 +93,8 @@ export type DeleteCategoriesResult = DeleteResult<{ deleted: string[] }>;
 
 /**
  * The product editor's board: products move from Gaps (missing content, rejected feed rows,
- * conflicts) through Drafted and Staged to Published. Only Gaps is filled so far; the others follow
- * with staged edits and drafts (docs/product-editor.md).
+ * conflicts) through Drafted and Staged to Published (in the last day). Drafted follows with the
+ * assistant's drafts (docs/product-editor.md).
  */
 export const BOARD_COLUMNS = ['gaps', 'drafted', 'staged', 'published'] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
@@ -117,8 +118,91 @@ export type BoardCard = {
   /** Its gaps by kind. */
   kinds: Partial<Record<GapKind, number>>;
   rejection: Rejection | null;
+  /** Edits staged for it, in any column. */
+  staged: number;
+  /** Why its staged edits didn't publish last time, if they didn't. */
+  failure: string | null;
   /** When it joined this column. */
   at: number;
+};
+
+/** Who an edit came from: a person, or an assistant draft a person accepted. */
+export const EDIT_SOURCES = ['person', 'assistant'] as const;
+export type EditSource = (typeof EDIT_SOURCES)[number];
+
+/**
+ * An edit to stage: set a value (null removes the feed's value in that locale), or clear the
+ * override so the feed's value shows again. Nothing goes live until it is published.
+ */
+export type StageEdit = { key: string; ref: FieldRef; source?: EditSource } & (
+  | { op: 'set'; value: string | null }
+  | { op: 'clear' }
+);
+
+export type EditResult =
+  | { key: string; ref: FieldRef; ok: true }
+  | { key: string; ref: FieldRef; ok: false; issues: string[] };
+
+/** An edit waiting to publish, with the value the person saw when they staged it. */
+export type StagedEdit = {
+  ref: FieldRef;
+  op: 'set' | 'clear';
+  value: string | null;
+  seen: string | null;
+  source: EditSource;
+  by: string;
+  at: number;
+  /** Why it didn't publish last time. */
+  failure: string | null;
+};
+
+/** A live override, with the feed value it was made against and the feed's value now. */
+export type FieldOverride = {
+  ref: FieldRef;
+  value: string | null;
+  base: string | null;
+  feed: string | null;
+  /** The feed changed the value since the override was made (`overrideConflict`). */
+  conflict: boolean;
+  source: EditSource;
+  by: string;
+  at: number;
+};
+
+/** One published change to a field: the last 50 per product are kept. */
+export type Revision = {
+  ref: FieldRef;
+  op: 'set' | 'clear';
+  value: string | null;
+  previous: string | null;
+  source: EditSource;
+  by: string;
+  at: number;
+};
+
+/** Everything the editor's sheet shows for one product. */
+export type ProductSheet = {
+  /** As it is live: the feed's version with the overrides applied. */
+  product: Product;
+  /** As the last feed (or API write) sent it. */
+  feed: ProductData;
+  overrides: FieldOverride[];
+  staged: StagedEdit[];
+  gaps: Gap[];
+  rejection: Rejection | null;
+  /** Newest first. */
+  revisions: Revision[];
+};
+
+/**
+ * What publishing did with a product's staged edits: published them all, published none (with
+ * why, and they stay staged), or there was nothing staged.
+ */
+export type PublishResult = {
+  key: string;
+  status: 'published' | 'failed' | 'unchanged';
+  version?: number;
+  issues?: string[];
 };
 
 export type BoardSummary = {
@@ -198,4 +282,26 @@ export interface ProductCatalogRpc {
    * index for products stored before it). Returns how many products it read.
    */
   rebuildGaps(by: string): Promise<{ products: number }>;
+
+  /** A product's live and feed versions, overrides, staged edits, gaps and history; null if none. */
+  getProductSheet(key: string): Promise<ProductSheet | null>;
+  /**
+   * Stages edits (at most 500 per call), each checked against the product as it is live. A later
+   * edit to the same field and locale replaces the earlier one.
+   */
+  stageEdits(edits: StageEdit[], by: string): Promise<EditResult[]>;
+  /** Drops staged edits: one field's, or with no `ref` all of a product's. Returns how many. */
+  discardStaged(
+    items: { key: string; ref?: FieldRef }[],
+    by: string,
+  ): Promise<{ discarded: number }>;
+  /**
+   * Publishes the staged edits of up to 500 products, each product's all or none: one is refused
+   * when a value it changes was changed by someone else since it was staged, or an edit no longer
+   * fits. Calling again with the same `requestId` returns the first answer and publishes nothing.
+   */
+  publishStaged(
+    keys: string[],
+    opts: { by: string; requestId: string; urgent?: boolean },
+  ): Promise<PublishResult[]>;
 }
