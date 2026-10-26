@@ -1208,7 +1208,11 @@ and the assistant's `assess_order` record it too.
 Each model call (`runJson`, `clef.assess`, each assistant and A2A chat turn) logs one JSON line,
 `{"type":"ai_call", source, model, prompt, fallback?, ms, tokens?}` (`logAiCall`); a fallback other
 than `mock` is a warning. This is the way to read the fallback rate until metrics exist (plan item
-#26). The assistant's turns are also held to `ASSISTANT_DAILY_TOKENS` a person a UTC day
+#26). A fallback the model caused (anything but `mock` and the forecast's `nothing to reorder`) is
+also logged as an `Error`, `<prompt> answered from the heuristic: the model failed`, so Workers
+Issues opens one issue per prompt and the "Worker issues" policy alerts
+([Operations](operations.md#alerting)): with the model down, risk and router fail closed and orders
+queue for approval. The assistant's turns are also held to `ASSISTANT_DAILY_TOKENS` a person a UTC day
 (`apps/engine/src/usage.ts`, table `ai_usage`): `assistantBudgetSpent` refuses a turn with
 `ASSISTANT_BUDGET_SPENT` once spent, and `finishTurn` adds `totalUsage.totalTokens` when it ends.
 A plugin draft counts against the drafting admin's budget the same way: refused once it is spent,

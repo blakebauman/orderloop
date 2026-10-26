@@ -220,7 +220,7 @@ Failures reach a person through Cloudflare Notifications, which are set on the a
 Worker. Every app Worker turns on Workers Issues (`observability.issues.enabled` in its
 `wrangler.jsonc`): uncaught exceptions, failed invocations, `5xx` responses and logs written with
 `console.error` become issues, so an error-level log line (a dead letter's `dlq_message`, a failed
-retention sweep) alerts without a rule of its own. The account holds these notification policies,
+retention sweep, a model call that fell back to the heuristic) alerts without a rule of its own. The account holds these notification policies,
 all sent to the account's email:
 
 | Policy | Alert type | Fires on |

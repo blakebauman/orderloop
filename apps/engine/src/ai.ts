@@ -74,14 +74,22 @@ export function gatewayOptions(
     : undefined;
 }
 
+/** Heuristic answers that aren't a failure: mock mode, and a forecast with nothing to ask about. */
+const EXPECTED_FALLBACKS = new Set(['mock', 'nothing to reorder']);
+
 /**
  * One line per model call, `{"type":"ai_call",…}`, for the fallback rate and latency until
- * metrics exist. A fallback other than mock mode is a warning.
+ * metrics exist. A fallback other than mock mode is a warning, and one the model caused (it was
+ * unavailable, timed out or answered badly) is also logged as an error with one message per
+ * prompt, which Workers Issues groups into an issue of its own and alerts on: the gating nodes
+ * fail closed then, so orders wait for approval until the model is back.
  */
 export function logAiCall(p: AiProvenance, ms: number, extra: Record<string, unknown> = {}) {
   const line = JSON.stringify({ type: 'ai_call', ...p, ms, ...extra });
   if (p.source === 'heuristic' && p.fallback !== 'mock') console.warn(line);
   else console.log(line);
+  if (p.source === 'heuristic' && !EXPECTED_FALLBACKS.has(String(p.fallback)))
+    console.error(new Error(`${p.prompt} answered from the heuristic: the model failed`));
 }
 
 /**

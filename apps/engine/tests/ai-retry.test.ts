@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { FlowNode, Order, RunContext } from '@orderloop/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runJson } from '../src/ai';
 import { assess } from '../src/clef';
 import { EXECUTORS, type ExecInput } from '../src/nodes';
@@ -122,6 +122,24 @@ describe('model calls in an order step', () => {
     const direct = model(() => ({ response: { ok: true } }));
     await ask(direct.env, { orderId: 'ord_1' });
     expect(direct.calls[0]!.options).toBeUndefined();
+  });
+
+  it('report a failed call as an error, one message per prompt, but not mock mode', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await ask(down().env);
+      await ask(model(() => ({ response: 'not json' })).env);
+      expect(errors.mock.calls.map(([e]) => (e as Error).message)).toEqual([
+        'risk@1 answered from the heuristic: the model failed',
+        'risk@1 answered from the heuristic: the model failed',
+      ]);
+      errors.mockClear();
+      await ask(model(() => ({ response: { ok: true } })).env);
+      await ask(model(() => ({ response: { ok: true } }), { AI_MODE: 'mock' }).env);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('Assess retries too', async () => {
