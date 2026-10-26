@@ -16,6 +16,7 @@ import { Button } from '@orderloop/ui/button';
 import { cn } from '@orderloop/ui/lib/utils';
 import { type DynamicToolUIPart, getToolName, type ToolUIPart } from 'ai';
 import {
+  ArrowDown,
   ArrowUpRight,
   Ban,
   Boxes,
@@ -117,14 +118,14 @@ function found(name: string, out: Record<string, unknown>): string | null {
       const c = out.counts as { approvals: number; failed: number; stalled: number } | undefined;
       if (!c) return null;
       const total = c.approvals + c.failed + c.stalled;
-      return total
-        ? `${c.approvals} approvals · ${c.failed} failed · ${c.stalled} stalled`
-        : 'Nothing waiting';
+      // Nothing waiting is already said by the attention line above the conversation.
+      return total ? `${c.approvals} approvals · ${c.failed} failed · ${c.stalled} stalled` : null;
     }
     case 'find_orders':
       return `${out.count} found · ${out.total}`;
     case 'get_order':
-      return `${out.ref} · ${String(out.status ?? '').replace('_', ' ')}`;
+      // Where the order is in its flow, not only its status.
+      return `${out.ref} · ${whereAt(out) ?? statusWords(out.status)}`;
     case 'find_products':
       return `${n(out.products)} products`;
     case 'list_carts':
@@ -142,7 +143,38 @@ function found(name: string, out: Record<string, unknown>): string | null {
   }
 }
 
-/** A tool the assistant used to read, as one ruled row. */
+export const statusWords = (s: unknown) => String(s ?? '').replaceAll('_', ' ');
+
+type Wait = { nodeId: string; step?: string; since?: string };
+type Step = { nodeId: string; step: string; status: string };
+const list = <T,>(v: unknown) => (Array.isArray(v) ? (v as T[]) : []);
+
+/** Where an order is held ("waiting at Credit approval, 2h") or stopped ("failed at Charge"). */
+function whereAt(out: Record<string, unknown>): string | null {
+  const w = list<Wait>(out.waits).find((x) => x.step);
+  if (w) return `waiting at ${w.step}${w.since ? `, ${age(w.since)}` : ''}`;
+  const stopped = list<Step>(out.steps).find((x) => x.status === 'failed');
+  return stopped ? `${statusWords(out.status)} at ${stopped.step}` : null;
+}
+
+/** The node an order read opens on the order's graph: the step it waits at or failed at. */
+function focusNode(out: Record<string, unknown>): string | null {
+  return (
+    list<Wait>(out.waits)[0]?.nodeId ??
+    list<Step>(out.steps).find((x) => x.status === 'failed')?.nodeId ??
+    null
+  );
+}
+
+function age(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (Number.isNaN(mins)) return '';
+  if (mins < 60) return `${mins}m`;
+  const h = Math.round(mins / 60);
+  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
+/** A tool the assistant used to read, as one ruled row. An order read links to its step. */
 export function ReadRow({ part }: { part: Part }) {
   const name = getToolName(part);
   const Icon = ICONS[name] ?? Search;
@@ -151,6 +183,12 @@ export function ReadRow({ part }: { part: Part }) {
   const failed = part.state === 'output-error';
   const out =
     part.state === 'output-available' ? ((part.output ?? {}) as Record<string, unknown>) : null;
+  const result = out ? found(name, out) : null;
+  const node = out && name === 'get_order' ? focusNode(out) : null;
+  const href =
+    out && name === 'get_order' && typeof out.href === 'string'
+      ? `${out.href}${node ? `?node=${encodeURIComponent(node)}` : ''}`
+      : null;
   return (
     <div className="flex min-h-7 items-center gap-2 border-rule border-y border-dashed py-1 text-[12.5px] text-muted-foreground [&+&]:border-t-0">
       <Icon className="size-3.5 shrink-0" aria-hidden="true" />
@@ -160,10 +198,18 @@ export function ReadRow({ part }: { part: Part }) {
           <span aria-hidden="true" className="ol-dots" />
         </span>
       ) : (
-        <span className="min-w-0 truncate">{label}</span>
+        // The label is short and stays whole; a long result truncates instead.
+        <span className="shrink-0">{label}</span>
       )}
-      {out ? (
-        <span className="ml-auto shrink-0 tabular text-foreground/80">{found(name, out)}</span>
+      {result && href ? (
+        <Link
+          to={href}
+          className="hit-area ml-auto min-w-0 truncate text-foreground/80 tabular hover:text-foreground hover:underline"
+        >
+          {result}
+        </Link>
+      ) : result ? (
+        <span className="ml-auto min-w-0 truncate text-foreground/80 tabular">{result}</span>
       ) : null}
       {failed ? (
         <span className="ml-auto min-w-0 truncate text-bad" title={part.errorText}>
@@ -191,18 +237,29 @@ const VERB: Record<string, (input: Record<string, unknown>) => string> = {
   run_stock_review: () => 'Run review',
 };
 
+/** The confirm button's word for an action, e.g. "Approve" or "Run review". */
+export const actionVerb = (name: string, input: unknown) =>
+  VERB[name]?.((input ?? {}) as Record<string, unknown>) ?? 'Confirm';
+
 /**
  * An action the assistant prepared. Before anything is sent the card states what will happen,
- * resolved against live data; one press confirms it, and focus starts on the safe choice.
+ * resolved against live data; one press confirms it. Focus starts on the safe choice when the
+ * person is already in the conversation, never pulled out of the composer. A card that a newer,
+ * identical request replaced stops asking, so only one button can do the thing.
  */
 export function ActionCard({
   part,
   preview,
   respond,
+  actionKey,
+  replaced,
 }: {
   part: Part;
   preview: Previewer;
   respond: (approvalId: string, approved: boolean) => void;
+  /** Unique in the conversation (`actionKey`); a tool call id need not be. */
+  actionKey: string;
+  replaced?: boolean;
 }) {
   const name = getToolName(part);
   const input = (part.input ?? {}) as Record<string, unknown>;
@@ -211,7 +268,7 @@ export function ActionCard({
   const [sent, setSent] = useState(false);
   const titleId = useId();
   const safe = useRef<HTMLButtonElement>(null);
-  const asking = part.state === 'approval-requested';
+  const asking = part.state === 'approval-requested' && !replaced;
   const inputKey = JSON.stringify(input);
 
   useEffect(() => {
@@ -226,10 +283,21 @@ export function ActionCard({
   }, [asking, name, inputKey, preview, part.toolCallId]);
 
   useEffect(() => {
-    if (asking && p && !p.blocked) safe.current?.focus({ preventScroll: true });
+    if (!asking || !p || p.blocked) return;
+    const el = safe.current;
+    const now = document.activeElement;
+    const inLog = !now || now === document.body || el?.closest('[role="log"]')?.contains(now);
+    if (inLog) el?.focus({ preventScroll: true });
   }, [asking, p]);
 
   const fallbackTitle = isAssistantTool(name) ? ASSISTANT_TOOLS[name].label : name;
+
+  if (replaced && part.state === 'approval-requested')
+    return (
+      <Settled icon={ArrowDown} tone="muted">
+        {fallbackTitle}: replaced by the newer request below.
+      </Settled>
+    );
 
   // Settled: one ruled line, in the words of what happened.
   if (!asking) {
@@ -267,23 +335,19 @@ export function ActionCard({
   }
 
   const approvalId = part.approval?.id;
-  const verb = VERB[name]?.(input) ?? 'Confirm';
+  const verb = actionVerb(name, input);
   const blocked = p?.blocked;
+  // No `overflow-hidden`: it would clip the buttons' touch areas (`hit-area`). Escape leaves the
+  // card as it does anywhere else; declining is always a button press.
   return (
     <Confirmation
       approval={part.approval}
       state={part.state}
       aria-labelledby={titleId}
-      className="ol-confirm my-1 overflow-hidden rounded-2xl border border-input bg-card text-sm"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape' && approvalId && !sent) {
-          e.stopPropagation();
-          setSent(true);
-          respond(approvalId, false);
-        }
-      }}
+      data-action={actionKey}
+      className="ol-confirm my-1 scroll-my-4 rounded-2xl border border-input bg-card text-sm"
     >
-      <header className="flex items-baseline gap-2 border-b px-3 py-2">
+      <div className="flex items-baseline gap-2 border-b px-3 py-2">
         <h3 id={titleId} className="min-w-0 flex-1 font-semibold leading-snug">
           {p?.title ?? fallbackTitle}
         </h3>
@@ -296,7 +360,7 @@ export function ActionCard({
             Open
           </Link>
         ) : null}
-      </header>
+      </div>
       {p ? (
         p.consequences.length ? (
           <ul className="divide-y divide-dashed px-3 tabular">
@@ -315,12 +379,12 @@ export function ActionCard({
           {loadError ? null : <span aria-hidden="true" className="ol-dots" />}
         </p>
       )}
-      <footer className="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-3 py-2">
+      <div className="space-y-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
         {blocked ? (
-          <p className="min-w-0 flex-1 text-ui text-wait leading-snug">{blocked}</p>
+          <p className="text-ui text-wait leading-snug">{blocked}</p>
         ) : (
-          <p className="min-w-0 flex-1 text-muted-foreground text-xs">
-            Nothing is sent until you confirm.
+          <p className="text-muted-foreground text-xs leading-snug">
+            Nothing is sent until you confirm, here or wherever else you’re signed in.
           </p>
         )}
         <ConfirmationActions>
@@ -350,7 +414,7 @@ export function ActionCard({
             </Button>
           )}
         </ConfirmationActions>
-      </footer>
+      </div>
     </Confirmation>
   );
 }
@@ -387,6 +451,16 @@ function Settled({
   );
 }
 
+/** Marks something a model drafted, in the `ai` colour (the same dot as "Working on it"). */
+function AiDot() {
+  return (
+    <span
+      aria-hidden="true"
+      className="size-1.5 shrink-0 translate-y-[-0.1em] self-center rounded-full bg-ai"
+    />
+  );
+}
+
 // ── Plugin drafts ──────────────────────────────────────────────────────────
 
 /** What a draft's footer says: whether its cases pass, and that nothing runs yet. */
@@ -406,12 +480,13 @@ export function PluginDraftCard({ part }: { part: Part }) {
   const allPass = d.cases.total > 0 && d.cases.passed === d.cases.total;
   return (
     <section className="my-1 rounded-2xl border border-input bg-card text-sm">
-      <header className="border-b px-3 py-2">
-        <h3 className="font-semibold leading-snug">
+      <div className="border-b px-3 py-2">
+        <h3 className="flex items-baseline gap-2 font-semibold leading-snug">
+          <AiDot />
           Drafted {d.name}{' '}
           <span className="font-normal text-muted-foreground text-xs">version {d.version}</span>
         </h3>
-      </header>
+      </div>
       <div className="space-y-1.5 px-3 py-2">
         <p className="text-ui leading-snug">{d.explanation}</p>
         <ul className="text-muted-foreground text-xs">
@@ -425,14 +500,14 @@ export function PluginDraftCard({ part }: { part: Part }) {
           {draftStatus(d)}
         </p>
       </div>
-      <footer className="flex items-center gap-2 border-t bg-muted/40 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
         <p className="min-w-0 flex-1 text-muted-foreground text-xs">
           Nothing runs until an admin approves it.
         </p>
         <Button size="sm" onClick={() => navigate(d.href)}>
           Review
         </Button>
-      </footer>
+      </div>
     </section>
   );
 }
@@ -455,9 +530,12 @@ export function ProposalCard({ part }: { part: Part }) {
     );
   return (
     <section className="my-1 rounded-2xl border border-input bg-card text-sm">
-      <header className="border-b px-3 py-2">
-        <h3 className="font-semibold leading-snug">Proposed change to {pr.flowName}</h3>
-      </header>
+      <div className="border-b px-3 py-2">
+        <h3 className="flex items-baseline gap-2 font-semibold leading-snug">
+          <AiDot />
+          Proposed change to {pr.flowName}
+        </h3>
+      </div>
       <div className="space-y-1.5 px-3 py-2">
         <p className="text-ui leading-snug">{pr.explanation}</p>
         <p className="text-muted-foreground text-xs tabular">
@@ -473,7 +551,7 @@ export function ProposalCard({ part }: { part: Part }) {
           ) : null}
         </p>
       </div>
-      <footer className="flex items-center gap-2 border-t bg-muted/40 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
         <p className="min-w-0 flex-1 text-muted-foreground text-xs">
           Nothing changes until you apply it.
         </p>
@@ -487,7 +565,7 @@ export function ProposalCard({ part }: { part: Part }) {
         >
           Review in editor
         </Button>
-      </footer>
+      </div>
     </section>
   );
 }

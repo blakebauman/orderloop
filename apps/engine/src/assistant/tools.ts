@@ -138,6 +138,8 @@ const orderRow = row({
   ref: z.string(),
   title: z.string(),
   status: z.string(),
+  waitingAt: z.string().nullable().describe('The steps it is waiting at, joined with ·'),
+  stoppedAt: z.string().nullable().describe('The steps it failed or stopped at'),
   total: money,
   href,
 });
@@ -187,7 +189,15 @@ export const TOOL_OUTPUTS = {
     title: z.string(),
     status: z.string(),
     total: money,
-    waits: z.array(row({ nodeId: z.string(), kind: z.string(), title: z.string() })),
+    waits: z.array(
+      row({
+        nodeId: z.string(),
+        step: z.string().describe('The label of the step it waits at'),
+        since: z.string(),
+        kind: z.string(),
+        title: z.string(),
+      }),
+    ),
     steps: z.array(row({ nodeId: z.string(), step: z.string(), status: z.string() })),
     recent: z.array(row({ at: z.string(), message: z.string() })),
   }),

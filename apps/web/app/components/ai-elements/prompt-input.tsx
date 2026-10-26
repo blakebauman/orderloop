@@ -107,7 +107,7 @@ export const PromptInputSubmit = ({
   ) : (
     <InputGroupButton
       aria-label="Send"
-      title="Send (Enter)"
+      title="Send"
       className={className}
       size={size}
       type="submit"

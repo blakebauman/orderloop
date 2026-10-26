@@ -207,6 +207,8 @@ export async function findOrders(env: Env, f: FindOrders) {
         total: orders.total,
         currency: orders.currency,
         waitingOn: orders.waitingOn,
+        waitingAt: orders.waitingAt,
+        stoppedAt: orders.stoppedAt,
         createdAt: orders.createdAt,
         updatedAt: orders.updatedAt,
       })
@@ -322,6 +324,8 @@ export async function getOrder(env: Env, ref: string) {
     flow: s.flow ? `${s.flow.name} v${s.flow.version}` : null,
     waits: s.waits.map((w) => ({
       nodeId: w.nodeId,
+      step: label(s, w.nodeId),
+      since: new Date(w.since).toISOString(),
       kind: w.kind,
       title: w.title,
       event: w.event,

@@ -346,6 +346,13 @@ function describeCart(o: Record<string, unknown>) {
     .join(' ');
 }
 
+/** Where an order is in its loop: the step it waits at or stopped at, else its status. */
+function where(status: string, waitingAt?: string | null, stoppedAt?: string | null) {
+  const s = status.replaceAll('_', ' ');
+  if (waitingAt) return `waiting at ${waitingAt}`;
+  return stoppedAt ? `${s} at ${stoppedAt}` : s;
+}
+
 /** One plain-language line per tool result, with links to what it found. */
 export function describeResult(tool: string, output: unknown): string {
   const o = (output ?? {}) as Record<string, unknown>;
@@ -380,6 +387,8 @@ export function describeResult(tool: string, output: unknown): string {
         status: string;
         total: string;
         customer: string | null;
+        waitingAt?: string | null;
+        stoppedAt?: string | null;
       }>(o.orders);
       if (!rows.length) return 'No orders match that.';
       return [
@@ -387,16 +396,24 @@ export function describeResult(tool: string, output: unknown): string {
         '',
         ...rows.map(
           (r) =>
-            `- [${r.ref}](${r.href}) ${r.title || r.customer || ''} · ${r.status.replace('_', ' ')} · ${r.total}`,
+            `- [${r.ref}](${r.href}) ${r.title || r.customer || ''} · ${where(r.status, r.waitingAt, r.stoppedAt)} · ${r.total}`,
         ),
       ].join('\n');
     }
     case 'get_order': {
-      const waits = list<{ title: string; kind: string; event?: string }>(o.waits);
+      const waits = list<{ title: string; kind: string; event?: string; step?: string }>(o.waits);
+      const failed = list<{ step: string; status: string }>(o.steps).find(
+        (x) => x.status === 'failed',
+      );
       return [
-        `[${o.ref}](${o.href}) ${o.title} is **${String(o.status).replace('_', ' ')}**${o.reason ? `: ${o.reason}` : ''}. ${o.total}${o.customer ? ` for ${o.customer}` : ''}.`,
+        `[${o.ref}](${o.href}) ${o.title} is **${String(o.status).replaceAll('_', ' ')}**${failed && !waits.length ? ` at ${failed.step}` : ''}${o.reason ? `: ${o.reason}` : ''}. ${o.total}${o.customer ? ` for ${o.customer}` : ''}.`,
         waits.length
-          ? `It waits on ${waits.map((w) => (w.kind === 'approval' ? w.title : `${w.event}`)).join(' and ')}.`
+          ? `It waits at ${waits
+              .map(
+                (w) =>
+                  `${w.step ?? w.title} for ${w.kind === 'approval' ? 'an approval' : `the event ${w.event}`}`,
+              )
+              .join(' and ')}.`
           : '',
       ]
         .filter(Boolean)

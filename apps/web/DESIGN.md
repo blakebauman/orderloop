@@ -235,7 +235,11 @@ under 32rem tall, under 64rem wide).
   lg) is `calc(100dvh - var(--shell-h))`; never hard-code the bar heights.
 - **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the
   tab bar. While the on-screen keyboard is up (`data-keyboard` on `<html>`, from
-  `useVisualViewport`) it takes exactly the area above the keyboard.
+  `useVisualViewport`) it takes exactly the area above the keyboard. Both slide in 200ms on an
+  exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`): the sheet from the right edge, the column
+  by its width with its 400px content pinned to the right, so the page narrows with it and nothing
+  inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
+  confirmation is pinned above the composer (`wait` tint) until it is answered.
 - **Slow pages:** a navigation that takes over 400ms draws a link-blue rule sweeping under the top
   bar and marks main `aria-busy`. Quicker ones show nothing.
 - **Route announcer:** after a client-side navigation, the new page's h1 is read out in a polite

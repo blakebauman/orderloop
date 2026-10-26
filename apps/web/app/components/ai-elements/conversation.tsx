@@ -37,7 +37,7 @@ export const ConversationScrollButton = ({
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
   return isAtBottom ? null : (
     <Button
-      className={cn('absolute bottom-3 left-1/2 -translate-x-1/2 shadow-sm', className)}
+      className={cn('hit-area absolute bottom-3 left-1/2 -translate-x-1/2 shadow-sm', className)}
       onClick={() => void scrollToBottom()}
       size="icon-sm"
       type="button"
