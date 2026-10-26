@@ -3,6 +3,7 @@
  * Worker's `CatalogApi` entrypoint over a service binding. Callers never import catalog source.
  */
 
+import type { GapKind } from './content';
 import type {
   Category,
   CategoryInput,
@@ -89,6 +90,52 @@ export type DeleteTypeResult = DeleteResult<{ code: string; versions: number }>;
 export type DeleteChannelResult = DeleteResult<{ code: string; unpublished: number }>;
 export type DeleteCategoriesResult = DeleteResult<{ deleted: string[] }>;
 
+/**
+ * The product editor's board: products move from Gaps (missing content, rejected feed rows,
+ * conflicts) through Drafted and Staged to Published. Only Gaps is filled so far; the others follow
+ * with staged edits and drafts (docs/product-editor.md).
+ */
+export const BOARD_COLUMNS = ['gaps', 'drafted', 'staged', 'published'] as const;
+export type BoardColumn = (typeof BOARD_COLUMNS)[number];
+
+/** A feed row (or API write) the catalog refused for a product key, with why. */
+export type Rejection = {
+  /** The feed it came from; absent for an API write. */
+  feed?: string;
+  /** Its row in the feed file. */
+  row?: number;
+  issues: Issue[];
+  at: number;
+};
+
+/** One product on the board. */
+export type BoardCard = {
+  key: string;
+  /** The product's title (any locale), the rejected row's, or the key. */
+  title: string;
+  column: BoardColumn;
+  /** Its gaps by kind. */
+  kinds: Partial<Record<GapKind, number>>;
+  rejection: Rejection | null;
+  /** When it joined this column. */
+  at: number;
+};
+
+export type BoardSummary = {
+  /** Products in each column. */
+  columns: Record<BoardColumn, number>;
+  /** Gaps of each kind, and how many products have one. */
+  gapsByKind: Partial<Record<GapKind, { gaps: number; products: number }>>;
+  /** The most recent finished feed, and one still running. */
+  lastFeed: FeedStatus | null;
+  runningFeed: FeedStatus | null;
+  /**
+   * False until every shard has indexed the gaps of the products it held before the index existed
+   * (`rebuildGaps`); until then the board can miss some.
+   */
+  indexBuilt: boolean;
+};
+
 export interface ProductCatalogRpc {
   /** Validates and stores products; unchanged ones write nothing. At most 500 per call. */
   putProducts(items: ProductInput[], opts: WriteOptions): Promise<WriteResult[]>;
@@ -136,4 +183,19 @@ export interface ProductCatalogRpc {
    * queues all its products for its publisher. Returns how many were queued.
    */
   reindex(by: string): Promise<{ queued: number }>;
+
+  /** The board's counts and the latest feeds. */
+  catalogBoard(): Promise<BoardSummary>;
+  /** One column's products in key order, `limit` (at most 100, default 50) after `cursor`. */
+  listBoard(q: {
+    column: BoardColumn;
+    kind?: GapKind;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ items: BoardCard[]; cursor: string | null }>;
+  /**
+   * Recomputes every product's content gaps (after a channel's locales change, or to build the
+   * index for products stored before it). Returns how many products it read.
+   */
+  rebuildGaps(by: string): Promise<{ products: number }>;
 }

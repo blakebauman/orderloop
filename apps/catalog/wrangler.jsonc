@@ -125,6 +125,9 @@
     // A minimum wait before a listing index builds. 0: a new category's index builds at once.
     // Tests set it to an hour and run builds themselves, so none is left running at teardown.
     "LISTING_DELAY_MS": "0",
+    // A wait before a shard rebuilds its product-editor gap index after a channel change. 0 in
+    // production; tests set it to an hour and rebuild themselves, so none runs at teardown.
+    "GAP_REBUILD_DELAY_MS": "0",
     // Publishers each shard spreads its storage writes over: an invocation has only six writes in
     // flight, so this multiplies how fast a shard publishes (publisher.ts).
     "PUBLISH_FANOUT": "32"

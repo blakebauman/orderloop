@@ -11,17 +11,23 @@
  * The parts consumer (`applyPart`) applies each part on its shard and records it with CatalogFeeds;
  * the part that completes the feed wakes the Workflow, which then marks it done.
  *
+ * A row refused with a key goes to that key's shard too, in an object beside the part
+ * (`rejectedKey`), so the product editor's board shows it against the product. A separate object
+ * rather than a new line shape, so a Worker rolled back to before it still reads the parts.
+ *
  * Cancelling a feed terminates its instance; should that fail, the Workflow stops at its next
  * record or check step, which read the feed's state. Parts already queued still apply.
  */
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import {
+  CODE,
   csvHeader,
   csvProducts,
   csvRecords,
   FEED_CHUNK,
   type FeedFormat,
   type FeedRow,
+  type Localized,
   ndjsonRecords,
   type ProductData,
   type ProductInput,
@@ -30,6 +36,7 @@ import {
 } from '@orderloop/core/product';
 import { feeds, meta, shard, typeResolver } from './config';
 import type { FeedError, PartCounts } from './feeds';
+import type { RejectedRow } from './shard';
 
 export type FeedParams = { id: string; format: FeedFormat; key: string; by: string };
 
@@ -41,6 +48,8 @@ export type FeedPart = {
   key: string;
   rev: number;
   by: string;
+  /** Rows refused for keys on this shard (`RejectedRow` per line), when there are any. */
+  rejectedKey?: string;
 };
 
 type PartLine = { row: number; data: ProductData };
@@ -57,6 +66,14 @@ type Chunk = {
 };
 
 export const partKey = (feed: string, part: string) => `feeds/${feed}/parts/${part}.ndjson`;
+export const rejectedKey = (feed: string, part: string) =>
+  `feeds/${feed}/parts/${part}.rejected.ndjson`;
+
+const lines = async (env: Env, key: string) => {
+  const object = await env.PUBLISHED.get(key);
+  if (!object) throw new Error(`part ${key} is missing`);
+  return (await object.text()).split('\n').filter(Boolean);
+};
 
 /** Products from the file, starting at `offset` (a product boundary). */
 async function* readProducts(
@@ -102,6 +119,7 @@ export async function splitChunk(
   const resolve = typeResolver(config);
   const channels = new Map(config.channels.map((c) => [c.code, c]));
   const buffers = new Map<number, PartLine[]>();
+  const refused = new Map<number, RejectedRow[]>();
   const reject = (row: number, message: string, key?: string) => {
     out.rejected++;
     if (out.errors.length < 20) out.errors.push({ row, key, message });
@@ -115,9 +133,24 @@ export async function splitChunk(
     if (r.error || !r.product) reject(r.row, r.error ?? 'empty row');
     else {
       const v = validateProduct(r.product, resolve);
-      if (!v.ok)
-        reject(r.row, v.issues.map((i) => `${i.path}: ${i.message}`).join('; '), r.product.key);
-      else {
+      if (!v.ok) {
+        const key = r.product.key;
+        reject(r.row, v.issues.map((i) => `${i.path}: ${i.message}`).join('; '), key);
+        // Kept against the product, when the row names one the catalog could hold.
+        if (typeof key === 'string' && CODE.test(key)) {
+          const n = productShard(key);
+          const title = r.product.title as Localized | undefined;
+          const list = refused.get(n) ?? [];
+          list.push({
+            key,
+            title: title && typeof title === 'object' ? String(Object.values(title)[0] ?? '') : '',
+            row: r.row,
+            issues: v.issues,
+            at: Date.now(),
+          });
+          refused.set(n, list);
+        }
+      } else {
         const n = productShard(v.data.key);
         const list = buffers.get(n) ?? [];
         list.push({ row: r.row, data: v.data });
@@ -130,12 +163,21 @@ export async function splitChunk(
     }
   }
   const messages: { body: FeedPart }[] = [];
+  // A shard with only refused rows still gets a part (with no rows), to record them.
+  const shards = new Set([...buffers.keys(), ...refused.keys()]);
   await Promise.all(
-    [...buffers].map(async ([n, lines]) => {
+    [...shards].map(async (n) => {
       const part = `${chunk}-${n}`;
       const key = partKey(p.id, part);
-      await env.PUBLISHED.put(key, lines.map((l) => JSON.stringify(l)).join('\n'));
-      messages.push({ body: { feed: p.id, part, shard: n, key, rev: config.rev, by: p.by } });
+      const rows = buffers.get(n) ?? [];
+      await env.PUBLISHED.put(key, rows.map((l) => JSON.stringify(l)).join('\n'));
+      const message: FeedPart = { feed: p.id, part, shard: n, key, rev: config.rev, by: p.by };
+      const bad = refused.get(n);
+      if (bad) {
+        message.rejectedKey = rejectedKey(p.id, part);
+        await env.PUBLISHED.put(message.rejectedKey, bad.map((b) => JSON.stringify(b)).join('\n'));
+      }
+      messages.push({ body: message });
     }),
   );
   for (let i = 0; i < messages.length; i += 100)
@@ -146,18 +188,20 @@ export async function splitChunk(
 
 /** Applies one part on its shard and records it; wakes the Workflow when it finished the feed. */
 export async function applyPart(env: Env, m: FeedPart): Promise<void> {
-  const object = await env.PUBLISHED.get(m.key);
-  if (!object) throw new Error(`part ${m.key} is missing`);
-  const lines = (await object.text())
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as PartLine);
+  const parsed = (await lines(env, m.key)).map((l) => JSON.parse(l) as PartLine);
+  // Counted when the chunk was split: recorded here, not counted again.
+  const refused = m.rejectedKey
+    ? (await lines(env, m.rejectedKey)).map((l) => JSON.parse(l) as RejectedRow)
+    : undefined;
   const results = await shard(env, m.shard).apply({
     shard: m.shard,
     batchId: `${m.feed}:${m.part}`,
-    rows: lines.map((l) => l.data),
+    rows: parsed.map((l) => l.data),
+    rowNumbers: parsed.map((l) => l.row),
     rev: m.rev,
     by: m.by,
+    feed: m.feed,
+    ...(refused ? { rejected: refused } : {}),
   });
   const counts: PartCounts = { created: 0, updated: 0, unchanged: 0, rejected: 0 };
   const errors: FeedError[] = [];
@@ -166,7 +210,7 @@ export async function applyPart(env: Env, m: FeedPart): Promise<void> {
     counts[r.status] += 1;
     if (r.status === 'rejected' && errors.length < 20)
       errors.push({
-        row: (lines[i] as PartLine).row,
+        row: (parsed[i] as PartLine).row,
         key: r.key,
         message: (r.issues ?? []).map((x) => `${x.path}: ${x.message}`).join('; '),
       });

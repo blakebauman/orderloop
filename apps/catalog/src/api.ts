@@ -10,6 +10,10 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { newId } from '@orderloop/core';
 import {
   aliasShard,
+  BOARD_COLUMNS,
+  type BoardCard,
+  type BoardColumn,
+  type BoardSummary,
   type CategoriesResult,
   type Category,
   type CategoryInput,
@@ -23,6 +27,7 @@ import {
   FEED_FORMATS,
   type FeedFormat,
   type FeedStatus,
+  type GapKind,
   LISTING_SEGMENTS,
   PRODUCT_SHARDS,
   type Product,
@@ -43,6 +48,11 @@ import { storeStream } from './upload';
 
 /** Products per putProducts call. */
 export const MAX_WRITE = 500;
+/** Cards per board page, at most. */
+const BOARD_PAGE_MAX = 100;
+/** Products a shard re-reads per gap rebuild call. */
+const GAP_REBUILD_PAGE = 500;
+const RUNNING: FeedStatus['state'][] = ['queued', 'splitting', 'applying'];
 /**
  * How long an isolate trusts its copy of the config. A product naming a type without a version gets
  * the latest this isolate has seen: at most this old, and always valid (versions only add).
@@ -155,6 +165,8 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
   async putChannel(channel: Channel, _by: string): Promise<ChannelResult> {
     const result = await meta(this.env).putChannel(channel);
     cached = undefined;
+    // A channel's locales decide which content is missing: every shard recounts its gaps.
+    if (result.ok) await this.markGapsStale();
     return result;
   }
 
@@ -234,6 +246,90 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     return { queued: counts.reduce((a, b) => a + b, 0) };
   }
 
+  async catalogBoard(): Promise<BoardSummary> {
+    const [parts, recent] = await Promise.all([
+      Promise.all(
+        Array.from({ length: PRODUCT_SHARDS }, (_, n) => shard(this.env, n).boardCounts()),
+      ),
+      feeds(this.env).list(20),
+    ]);
+    const columns = Object.fromEntries(BOARD_COLUMNS.map((c) => [c, 0])) as Record<
+      BoardColumn,
+      number
+    >;
+    const gapsByKind: BoardSummary['gapsByKind'] = {};
+    for (const p of parts) {
+      for (const [c, n] of Object.entries(p.columns)) columns[c as BoardColumn] += n;
+      for (const [k, v] of Object.entries(p.kinds)) {
+        const sum = gapsByKind[k as GapKind] ?? { gaps: 0, products: 0 };
+        sum.gaps += v.gaps;
+        sum.products += v.products;
+        gapsByKind[k as GapKind] = sum;
+      }
+    }
+    return {
+      columns,
+      gapsByKind,
+      lastFeed: recent.find((f) => f.state === 'done') ?? null,
+      runningFeed: recent.find((f) => RUNNING.includes(f.state)) ?? null,
+      indexBuilt: parts.every((p) => p.built),
+    };
+  }
+
+  async listBoard(q: {
+    column: BoardColumn;
+    kind?: GapKind;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ items: BoardCard[]; cursor: string | null }> {
+    if (!BOARD_COLUMNS.includes(q.column)) throw new RangeError(`no column ${q.column}`);
+    const asked = Number.isFinite(q.limit) ? Math.trunc(q.limit as number) : 50;
+    const limit = Math.min(Math.max(1, asked), BOARD_PAGE_MAX);
+    // One more than a page from each shard: more than `limit` in all means there's another page.
+    const pages = await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, (_, n) =>
+        shard(this.env, n).boardPage({
+          column: q.column,
+          kind: q.kind,
+          cursor: q.cursor,
+          limit: limit + 1,
+        }),
+      ),
+    );
+    const all = (pages.flat() as BoardCard[]).sort((a, b) =>
+      a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
+    );
+    const items = all.slice(0, limit);
+    return { items, cursor: all.length > limit ? (items.at(-1)?.key ?? null) : null };
+  }
+
+  /** Has every shard's alarm recompute its gaps (`CatalogShard.markGapsStale`). */
+  private async markGapsStale(): Promise<void> {
+    await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, (_, n) => shard(this.env, n).markGapsStale(n)),
+    );
+  }
+
+  async rebuildGaps(_by: string): Promise<{ products: number }> {
+    const counts = await Promise.all(
+      Array.from({ length: PRODUCT_SHARDS }, async (_, n) => {
+        let total = 0;
+        let cursor: string | null = null;
+        do {
+          const r: { next: string | null; products: number } = await shard(this.env, n).refreshGaps(
+            n,
+            cursor,
+            GAP_REBUILD_PAGE,
+          );
+          total += r.products;
+          cursor = r.next;
+        } while (cursor);
+        return total;
+      }),
+    );
+    return { products: counts.reduce((a, b) => a + b, 0) };
+  }
+
   /** How many products, across every shard, use a type or are filed in a category. */
   private async using(q: { type?: string; category?: string }): Promise<number> {
     const counts = await Promise.all(
@@ -279,6 +375,8 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     // Listing indexes, and anything a crashed publish left behind.
     await this.sweep(`idx/${DOC_FORMAT}/${code}/`);
     await this.sweep(`docs/${DOC_FORMAT}/${code}/`);
+    // Its locales no longer count: every shard recounts its gaps.
+    await this.markGapsStale();
     const unpublished = taken.reduce((a, b) => a + b, 0);
     if (!channel && !unpublished)
       return { ok: false, issues: [`${code}: unknown channel`], notFound: true };
