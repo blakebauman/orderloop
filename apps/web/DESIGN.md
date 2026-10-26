@@ -48,7 +48,7 @@ typography:
     fontWeight: 400
   caption:
     fontFamily: "Inter Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "11px"
+    fontSize: "0.6875rem"
     fontWeight: 500
     lineHeight: 1.4
     letterSpacing: "0.05em"
@@ -158,7 +158,7 @@ only where a value must be read character by character.
 - **Section title** (600, 15px, 1.3): a card's heading, in sentence case.
 - **Body** (400, 0.875rem): running text, rows, fields.
 - **UI** (400, 0.8125rem, `text-ui`): the top bar, segmented controls, compact controls.
-- **Caption** (500, 11px, 0.05em, UPPERCASE): field, column and fact labels. The only uppercase in
+- **Caption** (500, 0.6875rem: 11px, 0.05em, UPPERCASE): field, column and fact labels. The only uppercase in
   the product.
 - **2xs** (0.6875rem, `text-2xs`): counts and tags in the bars.
 
@@ -189,22 +189,31 @@ under 32rem tall, under 64rem wide).
 - **Top bar:** 3rem plus the status bar's inset (`--shell-h`), sticky, with a rule under it. The
   wordmark, the main links from md, then Assistant, New order (from md) and account.
 - **Its links:** the day's work (Overview, Orders, Approvals, Carts), a hairline, Flows, then
-  **More**: links that didn't fit, reference pages (Commerce, Performance), and plugins' pages
-  under "From plugins". The row never scrolls: an invisible ruler measures every link (they grow
-  with the reader's text size) and those that don't fit move into More from the right, which then
-  carries the approvals count if Approvals is inside it. More is underlined while you're on one of
-  its pages; its label stays More. A tab marks as soon as it is chosen, not when its page arrives.
-  Focus outlines on the links sit inside them, clear of the rule.
+  **More**: links that didn't fit, reference pages (Commerce, Performance), plugins' pages under
+  "From plugins", and for admins the workspace's pages under "Workspace" (Team and roles, Audit
+  log, Plugins). While you're on one of its pages, More reads as that page, underlined; it carries
+  the approvals count while Approvals is inside it. A tab marks as soon as it is chosen, not when
+  its page arrives. Focus outlines on the links sit inside them, clear of the rule.
+- **Fitting the bar:** it never scrolls or overlaps, whatever the window or text size
+  (`useFittingBar`). An invisible ruler holds every link, and each way More can read, at natural
+  width. Before paint, labels give way first, in this order: the wordmark, the account's name,
+  Assistant's words and hint, New order's words (each stays an icon with its name); only then do
+  links fold into More from the right. The links' room never gets narrower than More. What gave way
+  is marked on the bar as `data-squeeze` and the labels hide by it. Before hydration (or without
+  JavaScript) the row clips rather than drawing under the controls.
 - **Approvals count:** a filled `wait` pill, 99+ past two digits, in the top bar, tab bar and
   More alike: the bar's one call for attention.
 - **New order:** ink, except on Approvals and Flows, where it steps back to an outline. From md to
   lg it is an icon with a `title`.
-- **Account:** its menu holds who is signed in, their and the team's pages, the theme and signing
-  out. The button names who: a person's name, Workspace, or with sign-in off the role everyone acts
+- **Account:** its menu holds who is signed in, their Account page, Keyboard shortcuts (with a
+  fine pointer), the theme and signing in or out; the workspace's pages are in More. The button names who: a person's name, Workspace, or with sign-in off the role everyone acts
   as ("Admin, no sign-in"); its accessible name is that plus "account menu", and its `title` the
   full identity.
 - **Shortcuts** are written for the device: ⌘J on Apple, Ctrl+J elsewhere (`useShortcutLabel`).
-  The Assistant's hint shows from xl with a fine pointer, so the links keep their room at 1024px.
+  The Assistant's hint shows from xl with a fine pointer and is hidden from screen readers, which
+  get `aria-keyshortcuts`. G then a letter goes to a page (H Overview, O Orders, A Approvals, C
+  Carts, F Flows, P Performance) and ? opens the list of every shortcut; they follow
+  `pageShortcut`'s rules and run before a page's own keys.
 - **Transitions** in the bars name their properties (`tint`), never `transition-colors`, which
   would fade the focus outline in.
 - **One order everywhere:** the top bar, the tab bar and More list pages in `NAV`'s order.
@@ -213,8 +222,8 @@ under 32rem tall, under 64rem wide).
 - **Tab bar (below md):** Overview, Orders, Approvals (with its count), Carts, and More: the day's
   work, in thumb reach; a phone keeps up and decides, and only reviews flows. 3.5rem plus the home
   indicator (`--tabbar-h`); in `short:` 2.75rem with the labels for screen readers only. More is a
-  bottom sheet grouped like the desktop: Pages (and From plugins), Account and team, the theme,
-  then signing in or out. It closes when a page is chosen.
+  bottom sheet grouped like the desktop: Pages, From plugins and Workspace (as in More), then
+  Account, the theme and signing in or out (as in the account menu). It closes when a page is chosen.
 - **Main** pads its foot by `--tabbar-h`. A full-height page (the flow editor, the order page at
   lg) is `calc(100dvh - var(--shell-h))`; never hard-code the bar heights.
 - **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the

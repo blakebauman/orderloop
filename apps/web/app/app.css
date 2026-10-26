@@ -317,7 +317,8 @@
 /* Field, column and fact labels: small capitals, as the preset's labels are set. Titles stay in
    sentence case. */
 @utility caption {
-  font-size: 11px;
+  /* 11px, in rem so it grows with the reader's text size. */
+  font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.4;
   letter-spacing: 0.05em;
