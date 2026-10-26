@@ -483,14 +483,14 @@ Not covered by the redaction:
 
 ### To AI Gateway and logs
 
-- **AI Gateway** records every model call's metadata. Only with request logs on (the registry's
-  `aiGatewayLogs`, default `false`) does it keep the prompts and responses, up to 100,000 entries
-  and until they're deleted. The engine sends the setting with every call (`collectLog`, from
+- **AI Gateway** keeps a log entry per model call only with request logs on (the registry's
+  `aiGatewayLogs`, default `false`), up to 100,000 entries and until they're deleted. The engine sends the setting with every call (`collectLog`, from
   `AI_GATEWAY_LOGS`), so it holds whatever the gateway's own default is; logs kept before it was
   turned off stay until deleted in the dashboard.
-  The assistant's calls never keep a payload even with logs on: they send
-  `cf-aig-collect-log-payload: false`, so their entries keep the model, tokens, cost and a hashed
-  principal but not the prompt or the tool results (customer names and order details) in them.
+  No call keeps a payload even with logs on: every one sends `cf-aig-collect-log-payload: false`
+  (`NO_LOG_PAYLOAD` in `apps/engine/src/ai.ts`), so an entry keeps the model, tokens, cost and its
+  metadata (the prompt id, the order id, or the assistant's surface and hashed principal) but not
+  the prompt, the document text, the buyer details or the tool results in it.
 - **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines

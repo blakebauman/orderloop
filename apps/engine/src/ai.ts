@@ -93,12 +93,19 @@ export function logAiCall(p: AiProvenance, ms: number, extra: Record<string, unk
 export type AiCall = { retry?: boolean; orderId?: string };
 
 /**
+ * Sent on every gateway call. With request logs on, an entry keeps the model, tokens, cost and
+ * metadata, but never the prompt or the answer: those carry document text, and buyer details when
+ * `AI_PERSONAL_DATA` is `send`, which the retention sweep can't erase from the gateway.
+ */
+export const NO_LOG_PAYLOAD = { 'cf-aig-collect-log-payload': 'false' } as const;
+
+/**
  * The binding options for an AI call: its gateway, tagged with the prompt and, in an order step,
- * the order (five metadata keys at most, and never personal data).
+ * the order (five metadata keys at most, and never personal data), and no payload in its log.
  */
 export const callOptions = (env: Env, prompt: string, orderId?: string) => {
   const gateway = gatewayOptions(env, { prompt, ...(orderId ? { orderId } : {}) });
-  return gateway ? { gateway } : undefined;
+  return gateway ? { gateway, extraHeaders: NO_LOG_PAYLOAD } : undefined;
 };
 
 /** A failed call in a step with attempts left: logged like a fallback, then thrown to retry. */

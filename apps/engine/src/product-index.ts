@@ -30,7 +30,7 @@ import {
 } from '@orderloop/core';
 import { createDb, products, productVectors } from '@orderloop/db';
 import { inArray, sql } from 'drizzle-orm';
-import { gatewayOptions, withTimeout } from './ai';
+import { gatewayOptions, NO_LOG_PAYLOAD, withTimeout } from './ai';
 
 /** 768 dimensions, cosine: the index is created with these (scripts/provision.sh). */
 export const EMBEDDING_MODEL = '@cf/baai/bge-base-en-v1.5';
@@ -65,7 +65,9 @@ async function embed(env: Env, text: string[]): Promise<number[][]> {
       // cls pooling: more accurate than the default mean, and not comparable with it, so every
       // vector in the index and every query must use it.
       { text, pooling: 'cls' } as never,
-      gatewayOptions(env) ? { gateway: gatewayOptions(env) } : undefined,
+      gatewayOptions(env)
+        ? { gateway: gatewayOptions(env), extraHeaders: NO_LOG_PAYLOAD }
+        : undefined,
     ),
     20_000,
   )) as { data?: number[][] };
