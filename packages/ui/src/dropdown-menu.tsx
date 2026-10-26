@@ -134,7 +134,7 @@ function DropdownMenuLabel({
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
       data-inset={inset}
-      className={cn('px-3 py-2.5 text-xs text-muted-foreground data-[inset]:pl-8', className)}
+      className={cn('px-3 py-2.5 text-muted-foreground data-[inset]:pl-8', className)}
       {...props}
     />
   );

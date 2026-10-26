@@ -16,6 +16,7 @@ import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
+  Check,
   ChevronDown,
   Ellipsis,
   LayoutDashboard,
@@ -273,7 +274,7 @@ function ShortcutsSheet({
   const row = 'flex items-center justify-between gap-4 py-1.5 text-sm';
   const group = (title: string, rows: [string, string[], string?][]) => (
     <section className="px-4 pt-3 pb-2">
-      <h3 className="caption mb-1 font-medium">{title}</h3>
+      <h3 className="caption mb-1">{title}</h3>
       <ul>
         {rows.map(([what, keys, sep]) => (
           <li key={what} className={row}>
@@ -288,7 +289,9 @@ function ShortcutsSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="gap-0 overflow-y-auto">
         <div className="border-b px-4 pt-4 pb-3 pr-14">
-          <SheetTitle className="text-base">Keyboard shortcuts</SheetTitle>
+          <SheetTitle className="font-semibold text-base tracking-title">
+            Keyboard shortcuts
+          </SheetTitle>
           <SheetDescription className="text-xs">
             Single keys work outside fields, with no menu open.
           </SheetDescription>
@@ -481,11 +484,12 @@ function useFittingBar(count: number, current: number, badge: number) {
 /** A top-bar link's underline tab; its outline sits inside it, clear of the rule below. */
 const navTab = (active: boolean) =>
   cn(
-    'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-ui focus-visible:outline-offset-[-2px]',
+    // A transparent rule on top balances the underline, so the text sits on the bar's centre line.
+    'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-y-2 border-t-transparent px-2.5 text-ui focus-visible:outline-offset-[-2px]',
     tint,
     active
-      ? 'border-foreground font-medium text-foreground'
-      : 'border-transparent text-muted-foreground hover:border-rule hover:text-foreground',
+      ? 'border-b-foreground font-medium text-foreground'
+      : 'border-b-transparent text-muted-foreground hover:border-b-rule hover:text-foreground',
   );
 
 /** A link's place in the top bar, with the hairline that starts its group. */
@@ -520,24 +524,31 @@ function NavMore({
 }) {
   const current = [...overflow, ...reference, ...plugins, ...workspace].find((i) => isAt(path, i));
   const waiting = pending > 0 ? overflow.find((i) => i.badge) : undefined;
-  const item = ({ to, label, end, badge, document }: NavItem) => (
-    <DropdownMenuItem key={to} asChild>
-      <Link
-        to={to}
-        reloadDocument={document}
-        aria-current={isAt(path, { to, end }) ? 'page' : undefined}
-        className="justify-between aria-[current=page]:font-medium"
-      >
-        {label}
-        {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-      </Link>
-    </DropdownMenuItem>
-  );
+  // Menu items are already 500, so the page you're on is marked with a check, not weight.
+  const item = ({ to, label, end, badge, document }: NavItem) => {
+    const here = isAt(path, { to, end });
+    return (
+      <DropdownMenuItem key={to} asChild>
+        <Link
+          to={to}
+          reloadDocument={document}
+          aria-current={here ? 'page' : undefined}
+          className="justify-between"
+        >
+          {label}
+          <span className="flex items-center gap-2">
+            {badge && pending > 0 ? <PendingCount n={pending} /> : null}
+            {here ? <Check className="size-3.5 text-muted-foreground" aria-hidden="true" /> : null}
+          </span>
+        </Link>
+      </DropdownMenuItem>
+    );
+  };
   const section = (title: string, items: NavItem[]) =>
     items.length ? (
       <>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="caption font-medium">{title}</DropdownMenuLabel>
+        <DropdownMenuLabel className="caption">{title}</DropdownMenuLabel>
         {items.map(item)}
       </>
     ) : null;
@@ -855,7 +866,7 @@ function MoreMenu({
   const admin = atLeast(me.role, 'admin');
   const row =
     'flex min-h-11 items-center justify-between gap-3 rounded-md px-3 text-base hover:bg-accent aria-[current=page]:font-medium';
-  const heading = 'caption px-3 pt-2 pb-1 font-medium';
+  const heading = 'caption px-3 pt-2 pb-1';
   const list = (items: NavItem[]) => (
     <ul>
       {items.map(({ to, label, end, badge, document }) => (
@@ -873,7 +884,9 @@ function MoreMenu({
   return (
     <>
       <div className="border-b px-4 pt-4 pb-3 pr-14">
-        <SheetTitle className="truncate text-base">{who(me, auth)}</SheetTitle>
+        <SheetTitle className="truncate font-semibold text-base tracking-title">
+          {who(me, auth)}
+        </SheetTitle>
         <SheetDescription className="text-xs">{ROLE_LABELS[me.role]}</SheetDescription>
       </div>
       <div className="p-2">
@@ -894,7 +907,7 @@ function MoreMenu({
       </div>
       <div className="border-t p-2">{list([{ to: '/account', label: 'Account' }])}</div>
       <fieldset className="border-t px-4 pt-3 pb-3">
-        <legend className="caption float-left mb-2 w-full font-medium">Theme</legend>
+        <legend className="caption float-left mb-2 w-full">Theme</legend>
         <Segmented
           aria-label="Theme"
           value={theme.choice}
@@ -937,7 +950,7 @@ function ThemeItems({
 }) {
   return (
     <>
-      <DropdownMenuLabel className="caption font-medium">Theme</DropdownMenuLabel>
+      <DropdownMenuLabel className="caption">Theme</DropdownMenuLabel>
       <DropdownMenuRadioGroup value={value} onValueChange={(v) => onChange(v as ThemeChoice)}>
         {THEMES.map(({ value: v, label, icon: Icon }) => (
           <DropdownMenuRadioItem key={v} value={v}>
@@ -979,7 +992,10 @@ function AccountItems({
   return (
     <>
       <DropdownMenuLabel className="font-normal">
-        <span className="block truncate font-medium text-foreground text-sm" title={who(me, auth)}>
+        <span
+          className="block truncate font-semibold text-foreground text-sm"
+          title={who(me, auth)}
+        >
           {who(me, auth)}
         </span>
         <span className="text-muted-foreground text-xs">{ROLE_LABELS[me.role]}</span>
@@ -990,7 +1006,7 @@ function AccountItems({
       </DropdownMenuItem>
       <DropdownMenuItem onSelect={onShortcuts} className="hidden justify-between fine:flex">
         Keyboard shortcuts
-        <kbd className="font-sans text-2xs text-muted-foreground">?</kbd>
+        <kbd className="font-normal font-sans text-2xs text-muted-foreground">?</kbd>
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <ThemeItems value={theme.choice} onChange={theme.setChoice} />
