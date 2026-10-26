@@ -4,6 +4,7 @@
  * the docs; kept out of the root export so the rest of Order Loop doesn't bundle it.
  */
 export * from './api';
+export * from './content';
 export * from './feed';
 export * from './listing-index';
 export * from './listing-spec';

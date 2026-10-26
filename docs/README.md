@@ -21,6 +21,7 @@ matter to someone with the source or a Cloudflare account (file paths, bindings,
 | [OrderAgent](order-agent.md) | The per-order Durable Object: state, reports, waits, the socket |
 | [Plugins](plugins.md) | Optional features as their own Workers: the manifest and `PluginRpc` contract, writing, installing and removing one |
 | [Data model](data-model.md) | D1 tables, R2 keys and the catalog's stores |
+| [Product editor](product-editor.md) | The plan for catalog overrides, staged publishing, the gap index and assistant drafts, PR by PR |
 | [Testing](testing.md) | The test suites, what each covers, and the recorded runs on the docs home page |
 
 Links to `https://docs.orderloop.app/…` point at the public pages these build on. Keep these files

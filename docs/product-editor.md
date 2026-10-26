@@ -1,0 +1,75 @@
+# Product editor
+
+The plan for the catalog's product editor: a board where catalog staff fix what feed imports leave
+broken or missing, have the assistant draft content, and publish on purpose. This page is the
+engine plan, PR by PR. Each section says whether it is built; update it in the same change as the
+code, and fold a finished section into [Architecture](architecture.md) and
+[Data model](data-model.md) once it ships.
+
+## What it does
+
+- **Overrides survive imports.** A feed writes whole products (`CatalogShard.apply`), so an edit
+  made in Order Loop would be wiped by the next import. Edits are kept per product, field and locale
+  and re-applied over every import. Each override records the feed value it was made against; when
+  an import changes that value, the override is a **conflict**: it stays live (the person's text is
+  not silently undone) and the product returns to the board's Gaps column until someone keeps the
+  override, takes the feed value or writes new text. An API `putProducts` counts as feed input too,
+  so it can't overwrite an overridden field either; it makes a conflict.
+- **Changes are staged.** Edits and accepted assistant drafts collect as pending changes and go live
+  only when a person publishes them (up to `MAX_WRITE`, 500 products, at a time) through the shard's
+  transaction and outbox, like every catalog write.
+- **Gaps are indexed.** Per product: a title missing in a locale of a channel it is visible in;
+  a description, localized text attribute or media alt text that has a value in some locale but not
+  that one; rows a feed rejected (`missing_required` when the issue was a required attribute, which a
+  stored product always has); conflicts.
+- **The assistant drafts, never writes.** `draft_product_content` drafts per field and locale from
+  the product's own data. Drafts are stored with the product (the board's Drafted column); accepting
+  one stages it as the person.
+
+Content only in the first version: title, description, slug, product-scoped localized text
+attributes and product media alt text, per locale, and status. Variants, prices, channels,
+categories and media stay with the feed. Viewer reads, operator writes and publishes, admin rebuilds
+the gap index; every write is in the audit log.
+
+## Where the state lives
+
+In the `CatalogShard` that owns the product (`productShard(key)`), in tables created in the
+constructor like the shard's others. No new Durable Object class, queue, bucket or KV namespace, no
+D1 migration, and no change to `routing.ts` or `DOC_FORMAT`: overrides produce a `ProductData` of
+the same shape, rendered by the unchanged `renderForChannel`.
+
+| Table | Holds |
+|---|---|
+| `feed_rows` | The feed's own version of a product, only while it has overrides (otherwise `products.body` is the feed version) |
+| `overrides` | Live edits: `(key, field, locale)`, the value (`null` removes the feed's), `base` (the feed value it was made against), `conflict` (a newer feed value), source, who and when |
+| `staged` | Pending edits (`set` or `clear`) with the product version the person saw, and a failure reason after a refused publish |
+| `drafts` | Unaccepted assistant drafts, with the product hash they were drafted from (stale when it changes) |
+| `gaps` | `(key, kind, field, locale, channel)`, rewritten in every transaction that changes the product |
+| `rejections` | The last feed row refused for a key, with its issues |
+| `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published), counts and failure |
+| `revisions` | Per-field history for the sheet, the last 50 per key |
+
+Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or k-way merged
+there, as `using()` does, so no shard awaits another.
+
+## PRs
+
+| # | PR | Status |
+|---|---|---|
+| 1 | Core content model: `packages/core/src/product/content.ts` (`FieldRef`, `fieldId`, `fieldValue`, `applyOverrides`, `editIssues`, `contentGaps`, `GAP_KINDS`), pure, tested in `product-content.test.ts` | Built |
+| 2 | Shard: gap index, keyed feed rejections (a `rejectedKey` R2 object per part, which an older Worker ignores), the board table; RPC `catalogBoard`, `listBoard`, `rebuildGaps`; optional `FeedStatus.gaps` | Planned |
+| 3 | Shard: `feed_rows`, `overrides` and `staged` in `apply`; `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet` | Planned |
+| 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` | Planned |
+| 5 | Web API under `/api/v1/catalog` (board, sheet, edits, publish, drafts, gap rebuild) with audit actions and OpenAPI | Planned |
+| 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Planned |
+| 7 | `draft_product_content` (core tool, engine executor through `runJson` with the product in a `dataBlock`, `EngineRpc.draftProductContent`, the web route that saves drafts) | Planned |
+| 8 | Backfill: `POST /api/v1/catalog/gaps/rebuild` once per deployment after PR 2 | Planned |
+
+The board UI follows PRs 5 and 7. Its design brief is the surface brief for `app/routes/catalog.tsx`.
+
+## Decisions
+
+- "The last feed" on the board is the most recent finished import; a running one shows separately.
+- An override can be cleared back to the feed value (a staged `clear`).
+- Media alt text is keyed by `src`: a feed that renames an image makes its alt override a conflict.
+- Whether **Published today** gets an undo (republishing the previous revision) is open.
