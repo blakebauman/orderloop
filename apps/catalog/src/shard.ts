@@ -11,13 +11,22 @@
  * Alias claims on other shards are awaited outside any transaction and never while holding the
  * shard's input gate, so two shards claiming from each other can't deadlock; the transaction then
  * re-checks what it read.
+ *
+ * The same transaction keeps the product editor's index current (docs/product-editor.md): each
+ * product's content gaps, the last row refused for its key, and its card on the board. CatalogApi
+ * sums and pages them across shards, so no shard ever asks another.
  */
 import { DurableObject } from 'cloudflare:workers';
 import {
   aliasShard,
+  type BoardCard,
+  type BoardColumn,
+  contentGaps,
   contentHash,
   DOC_FORMAT,
+  type GapKind,
   type Issue,
+  type Localized,
   type Product,
   type ProductData,
   type PurgeMessage,
@@ -28,7 +37,7 @@ import {
   tags,
   type WriteResult,
 } from '@orderloop/core/product';
-import { type CatalogConfig, meta, shard } from './config';
+import { type CatalogConfig, meta, shard, typeResolver } from './config';
 import { type ListingChange, sendChanges } from './listings';
 import { publishKeys } from './publish';
 
@@ -42,7 +51,38 @@ export type ApplyBatch = {
   rev: number;
   by: string;
   urgent?: boolean;
+  /** The feed the batch is part of, recorded with its rejections. */
+  feed?: string;
+  /** Rows the feed refused before they reached a shard, for keys this shard owns. */
+  rejected?: RejectedRow[];
+  /** Each row's number in its feed, recorded with a refusal. */
+  rowNumbers?: number[];
 };
+
+/**
+ * A row refused for a product key: why, and enough to show it on the board. `at` is when it was
+ * refused: parts can apply out of order, and a refusal older than the product's last write no
+ * longer stands.
+ */
+export type RejectedRow = {
+  key: string;
+  title: string;
+  row?: number;
+  issues: Issue[];
+  at?: number;
+};
+
+/** Gap kinds that come from a product's content (`contentGaps`), rewritten with it. */
+const CONTENT_KINDS: GapKind[] = [
+  'missing_title',
+  'missing_description',
+  'missing_attribute',
+  'missing_alt',
+];
+const IN_CONTENT = `kind IN (${CONTENT_KINDS.map((k) => `'${k}'`).join(', ')})`;
+
+/** A title to show for a product: any locale's. */
+const anyText = (l: Localized | undefined) => (l ? (Object.values(l)[0] ?? '') : '');
 
 type Row = {
   key: string;
@@ -65,6 +105,8 @@ type OutboxRow = { seq: number; key: string; urgent: number; rev: number | null;
 const PURGE_TAGS = 100;
 /** How long a shard trusts its copy of the config without a newer revision asking for more. */
 const CONFIG_TTL_MS = 2_000;
+/** Products an alarm's gap rebuild reads per page. */
+const GAP_PAGE = 500;
 /** How long a batch id is remembered: longer than a feed part can wait to be redelivered. */
 const APPLIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -92,6 +134,20 @@ export class CatalogShard extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS outbox_key ON outbox (key);
       CREATE INDEX IF NOT EXISTS applied_at ON applied (at);
+      CREATE TABLE IF NOT EXISTS gaps (
+        key TEXT NOT NULL, kind TEXT NOT NULL, field TEXT NOT NULL, locale TEXT NOT NULL,
+        channel TEXT NOT NULL, PRIMARY KEY (key, kind, field, locale, channel));
+      CREATE INDEX IF NOT EXISTS gaps_kind ON gaps (kind, key);
+      CREATE TABLE IF NOT EXISTS rejections (
+        key TEXT PRIMARY KEY, title TEXT NOT NULL, feed TEXT, row INTEGER, issues TEXT NOT NULL,
+        at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS board (
+        key TEXT PRIMARY KEY, col TEXT NOT NULL, title TEXT NOT NULL, kinds TEXT NOT NULL,
+        at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS board_col ON board (col, key);
+      CREATE TABLE IF NOT EXISTS gap_rebuild (
+        id INTEGER PRIMARY KEY CHECK (id = 1), requested INTEGER NOT NULL, due INTEGER NOT NULL,
+        cursor TEXT);
     `);
     // Added later, so shards created before them gain them here. `rev`: the config revision a write
     // was validated against (null: unknown, so the alarm fetches the latest). `forced`: a reindex,
@@ -105,6 +161,13 @@ export class CatalogShard extends DurableObject<Env> {
     if (!columns.has('rev')) this.sql.exec('ALTER TABLE outbox ADD COLUMN rev INTEGER');
     if (!columns.has('forced'))
       this.sql.exec('ALTER TABLE outbox ADD COLUMN forced INTEGER NOT NULL DEFAULT 0');
+    // Every write keeps the gap index from here on: a shard with no products yet is complete.
+    // One that held products before the index existed is complete once `refreshGaps` has run.
+    if (
+      this.setting('gaps_built') === undefined &&
+      !this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e
+    )
+      this.sql.exec(`INSERT INTO settings VALUES ('gaps_built', 1)`);
   }
 
   private setting(k: string): number | undefined {
@@ -143,6 +206,13 @@ export class CatalogShard extends DurableObject<Env> {
       .toArray()[0];
   }
 
+  /** When a stored product was last written. */
+  private updatedAt(key: string): number | undefined {
+    return this.sql
+      .exec<{ at: number }>('SELECT updated_at AS at FROM products WHERE key = ?', key)
+      .toArray()[0]?.at;
+  }
+
   /** A stored product's version and content hash, without its body. */
   private head(key: string): { version: number; hash: string } | undefined {
     return this.sql
@@ -178,9 +248,12 @@ export class CatalogShard extends DurableObject<Env> {
       const repeated = last.get(data.key) !== i;
       const changes = !repeated && hash !== before?.hash;
       const prevAliases = changes && before ? this.storedAliases(data.key) : [];
-      return { data, hash, before, prevAliases, aliases: productAliases(data), repeated };
+      return { i, data, hash, before, prevAliases, aliases: productAliases(data), repeated };
     });
     const changed = planned.filter((p) => !p.repeated && p.hash !== p.before?.hash);
+    // Types and channels for the changed products' gaps: from CatalogMeta, never another shard,
+    // and only when something changes (a daily full feed is mostly unchanged rows).
+    const config = changed.length ? await this.loadConfig(batch.rev) : undefined;
 
     // 2. Claim new aliases on the shards that own them, outside any transaction.
     const claims = new Map<number, { owner: string; aliases: string[] }[]>();
@@ -211,6 +284,12 @@ export class CatalogShard extends DurableObject<Env> {
     const results: WriteResult[] = [];
     const releases: { owner: string; alias: string }[] = [];
     this.ctx.storage.transactionSync(() => {
+      // Refused rows first: a good row for the same key later in the feed clears them.
+      for (const r of batch.rejected ?? []) {
+        if (r.at !== undefined && r.at < (this.updatedAt(r.key) ?? 0)) continue;
+        this.writeRejection(r.key, { ...r, feed: batch.feed }, now);
+        this.refreshBoard(r.key, now);
+      }
       for (const p of planned) {
         if (p.repeated) {
           results.push({
@@ -223,6 +302,8 @@ export class CatalogShard extends DurableObject<Env> {
         const current = this.head(p.data.key);
         if (current?.hash === p.hash) {
           results.push({ key: p.data.key, status: 'unchanged', version: current.version });
+          // Sent again as it is: whatever was refused for it before no longer stands.
+          if (this.writeRejection(p.data.key, null, now)) this.refreshBoard(p.data.key, now);
           continue;
         }
         // Another write landed while this one claimed aliases: what was claimed may be wrong.
@@ -232,6 +313,21 @@ export class CatalogShard extends DurableObject<Env> {
           : conflicts.get(p.data.key);
         if (issues) {
           results.push({ key: p.data.key, status: 'rejected', issues });
+          // A taken alias is the sender's to fix: it goes on the board. A race just needs a resend.
+          if (!raced) {
+            this.writeRejection(
+              p.data.key,
+              {
+                key: p.data.key,
+                title: anyText(p.data.title),
+                issues,
+                feed: batch.feed,
+                row: batch.rowNumbers?.[p.i],
+              },
+              now,
+            );
+            this.refreshBoard(p.data.key, now);
+          }
           // Give back what this product did claim.
           const prev = new Set(p.prevAliases);
           for (const a of p.aliases)
@@ -280,6 +376,9 @@ export class CatalogShard extends DurableObject<Env> {
         const next = new Set(p.aliases);
         for (const a of p.prevAliases)
           if (!next.has(a)) releases.push({ owner: p.data.key, alias: a });
+        if (config) this.writeGaps(p.data.key, p.data, config);
+        this.writeRejection(p.data.key, null, now);
+        this.refreshBoard(p.data.key, now);
         results.push({ key: p.data.key, status: current ? 'updated' : 'created', version });
       }
       this.sql.exec(
@@ -305,6 +404,10 @@ export class CatalogShard extends DurableObject<Env> {
     const releases: { owner: string; alias: string }[] = [];
     this.ctx.storage.transactionSync(() => {
       for (const key of input.keys) {
+        // A key that only ever had refused rows leaves the board too.
+        this.sql.exec('DELETE FROM gaps WHERE key = ?', key);
+        this.sql.exec('DELETE FROM rejections WHERE key = ?', key);
+        this.sql.exec('DELETE FROM board WHERE key = ?', key);
         const row = this.read(key);
         if (!row) {
           results.push({ key, status: 'unchanged' });
@@ -409,6 +512,269 @@ export class CatalogShard extends DurableObject<Env> {
     return !!row && productAliases(JSON.parse(row.body) as ProductData).includes(alias);
   }
 
+  // --- The product editor's index ---
+
+  /** Rewrites a product's content gaps from its data (none for a product whose type is gone). */
+  private writeGaps(key: string, data: ProductData, config: CatalogConfig) {
+    this.sql.exec(`DELETE FROM gaps WHERE key = ? AND ${IN_CONTENT}`, key);
+    const type = typeResolver(config)(data.type, data.typeVersion);
+    if (!type) return;
+    for (const g of contentGaps(data, type, config.channels))
+      this.sql.exec(
+        'INSERT OR IGNORE INTO gaps VALUES (?, ?, ?, ?, ?)',
+        key,
+        g.kind,
+        g.field,
+        g.locale,
+        g.channel,
+      );
+  }
+
+  /**
+   * Records the row refused for `key` (replacing any before it), or clears it for null. A refusal
+   * for a missing required attribute is its own kind: a stored product always has them. Returns
+   * whether anything changed.
+   */
+  private writeRejection(
+    key: string,
+    r: (RejectedRow & { feed?: string }) | null,
+    now: number,
+  ): boolean {
+    const had = this.sql
+      .exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM rejections WHERE key = ?) AS e', key)
+      .one().e;
+    if (!r && !had) return false;
+    this.sql.exec(
+      `DELETE FROM gaps WHERE key = ? AND kind IN ('rejected', 'missing_required')`,
+      key,
+    );
+    this.sql.exec('DELETE FROM rejections WHERE key = ?', key);
+    if (!r) return true;
+    const kind: GapKind = r.issues.every((i) => i.message === 'required')
+      ? 'missing_required'
+      : 'rejected';
+    this.sql.exec(
+      'INSERT INTO rejections VALUES (?, ?, ?, ?, ?, ?)',
+      key,
+      r.title,
+      r.feed ?? null,
+      r.row ?? null,
+      JSON.stringify(r.issues),
+      now,
+    );
+    this.sql.exec(`INSERT INTO gaps VALUES (?, ?, '', '', '')`, key, kind);
+    return true;
+  }
+
+  /**
+   * The product's card on the board, from its gaps: on Gaps while it has any, off the board when it
+   * has none. A card keeps the time it joined its column.
+   */
+  private refreshBoard(key: string, now: number) {
+    const kinds = Object.fromEntries(
+      this.sql
+        .exec<{ kind: string; n: number }>(
+          'SELECT kind, COUNT(*) AS n FROM gaps WHERE key = ? GROUP BY kind',
+          key,
+        )
+        .toArray()
+        .map((r) => [r.kind, r.n]),
+    );
+    if (!Object.keys(kinds).length) {
+      this.sql.exec('DELETE FROM board WHERE key = ?', key);
+      return;
+    }
+    const body = this.sql
+      .exec<{ body: string }>('SELECT body FROM products WHERE key = ?', key)
+      .toArray()[0]?.body;
+    const title =
+      (body ? anyText((JSON.parse(body) as ProductData).title) : '') ||
+      (this.sql
+        .exec<{ title: string }>('SELECT title FROM rejections WHERE key = ?', key)
+        .toArray()[0]?.title ??
+        '') ||
+      key;
+    const col: BoardColumn = 'gaps';
+    this.sql.exec(
+      `INSERT INTO board VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (key) DO UPDATE SET title = excluded.title, kinds = excluded.kinds,
+         at = CASE WHEN board.col = excluded.col THEN board.at ELSE excluded.at END,
+         col = excluded.col`,
+      key,
+      col,
+      title,
+      JSON.stringify(kinds),
+      now,
+    );
+  }
+
+  /** This shard's board: products per column, gaps per kind, and whether its index is built. */
+  boardCounts(): {
+    columns: Record<string, number>;
+    kinds: Record<string, { gaps: number; products: number }>;
+    built: boolean;
+  } {
+    const columns = Object.fromEntries(
+      this.sql
+        .exec<{ col: string; n: number }>('SELECT col, COUNT(*) AS n FROM board GROUP BY col')
+        .toArray()
+        .map((r) => [r.col, r.n]),
+    );
+    const kinds = Object.fromEntries(
+      this.sql
+        .exec<{ kind: string; gaps: number; products: number }>(
+          'SELECT kind, COUNT(*) AS gaps, COUNT(DISTINCT key) AS products FROM gaps GROUP BY kind',
+        )
+        .toArray()
+        .map((r) => [r.kind, { gaps: r.gaps, products: r.products }]),
+    );
+    const built =
+      this.setting('gaps_built') === 1 ||
+      !this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e;
+    return { columns, kinds, built };
+  }
+
+  /** Up to `limit` cards of a column after `cursor`, in key order, optionally with a gap kind. */
+  boardPage(q: {
+    column: BoardColumn;
+    kind?: GapKind;
+    cursor?: string;
+    limit: number;
+  }): BoardCard[] {
+    return this.sql
+      .exec<{
+        key: string;
+        col: string;
+        title: string;
+        kinds: string;
+        at: number;
+        feed: string | null;
+        row: number | null;
+        issues: string | null;
+        rejected_at: number | null;
+      }>(
+        `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at
+         FROM board b LEFT JOIN rejections r ON r.key = b.key
+         WHERE b.col = ?1 AND b.key > ?2
+           AND (?3 IS NULL OR EXISTS (SELECT 1 FROM gaps g WHERE g.key = b.key AND g.kind = ?3))
+         ORDER BY b.key LIMIT ?4`,
+        q.column,
+        q.cursor ?? '',
+        q.kind ?? null,
+        q.limit,
+      )
+      .toArray()
+      .map((r) => ({
+        key: r.key,
+        title: r.title,
+        column: r.col as BoardColumn,
+        kinds: JSON.parse(r.kinds) as BoardCard['kinds'],
+        rejection:
+          r.issues === null
+            ? null
+            : {
+                ...(r.feed ? { feed: r.feed } : {}),
+                ...(r.row !== null ? { row: r.row } : {}),
+                issues: JSON.parse(r.issues) as Issue[],
+                at: r.rejected_at ?? 0,
+              },
+        at: r.at,
+      }));
+  }
+
+  /**
+   * Recomputes the gaps of up to `limit` products after `cursor`, in key order, against the latest
+   * config. Returns the cursor to go on from, null once the shard is done (its index then counts as
+   * built), and how many products it read.
+   */
+  async refreshGaps(
+    n: number,
+    cursor: string | null,
+    limit: number,
+  ): Promise<{ next: string | null; products: number }> {
+    this.shardNumber(n);
+    const config = await this.loadConfig();
+    const rows = this.sql
+      .exec<{ key: string; body: string }>(
+        'SELECT key, body FROM products WHERE key > ? ORDER BY key LIMIT ?',
+        cursor ?? '',
+        limit,
+      )
+      .toArray();
+    const now = Date.now();
+    const last = rows.length < limit;
+    this.ctx.storage.transactionSync(() => {
+      if (cursor === null) {
+        this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('gaps_started', ?)`, now);
+        // Until this pass is through, the index may still hold the old config's gaps.
+        if (!last) this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('gaps_built', 0)`);
+      }
+      for (const r of rows) {
+        this.writeGaps(r.key, JSON.parse(r.body) as ProductData, config);
+        this.refreshBoard(r.key, now);
+      }
+      if (last) {
+        // Rows for a key with neither a product nor a refusal (left by a Worker that predates the
+        // index, during a rollback) go.
+        const orphan =
+          'key NOT IN (SELECT key FROM products) AND key NOT IN (SELECT key FROM rejections)';
+        this.sql.exec(`DELETE FROM gaps WHERE ${orphan}`);
+        this.sql.exec(`DELETE FROM board WHERE ${orphan}`);
+        // Done, unless the config changed again after this pass began: then it runs once more.
+        const job = this.rebuildJob();
+        if (!job || job.requested <= (this.setting('gaps_started') ?? 0)) {
+          this.sql.exec('DELETE FROM gap_rebuild');
+          this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('gaps_built', 1)`);
+        }
+      }
+    });
+    return { next: last ? null : (rows.at(-1)?.key ?? null), products: rows.length };
+  }
+
+  private rebuildJob(): { requested: number; due: number; cursor: string | null } | undefined {
+    return this.sql
+      .exec<{ requested: number; due: number; cursor: string | null }>(
+        'SELECT requested, due, cursor FROM gap_rebuild',
+      )
+      .toArray()[0];
+  }
+
+  /**
+   * The channels changed: this shard's gaps may be wrong until they are recomputed. Marks the
+   * index unbuilt and has the alarm rebuild it, GAP_REBUILD_DELAY_MS from now (0 in production;
+   * tests rebuild themselves), page by page and resuming where it stopped, so a rebuild is never
+   * lost to a request ending. A shard with no products has nothing to rebuild.
+   */
+  async markGapsStale(n: number): Promise<void> {
+    this.shardNumber(n);
+    this.config = undefined;
+    if (!this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e) {
+      this.sql.exec('DELETE FROM gap_rebuild');
+      this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('gaps_built', 1)`);
+      return;
+    }
+    const now = Date.now();
+    const due = now + (Number(this.env.GAP_REBUILD_DELAY_MS) || 0);
+    this.sql.exec('INSERT OR REPLACE INTO gap_rebuild VALUES (1, ?, ?, NULL)', now, due);
+    this.sql.exec(`INSERT OR REPLACE INTO settings VALUES ('gaps_built', 0)`);
+    await this.scheduleAt(due);
+  }
+
+  /** Runs a due gap rebuild a page at a time until it is done or `deadline` passes. */
+  private async rebuildPass(deadline: number) {
+    for (;;) {
+      const job = this.rebuildJob();
+      if (!job || job.due > Date.now()) return;
+      const r = await this.refreshGaps(this.setting('shard') ?? 0, job.cursor, GAP_PAGE);
+      // Finished: refreshGaps cleared the job, or kept it (with a fresh start) if it was asked for
+      // again meanwhile; look again either way.
+      if (r.next === null) continue;
+      // Only the pass this page belongs to: one asked for again meanwhile starts over.
+      this.sql.exec('UPDATE gap_rebuild SET cursor = ? WHERE requested = ?', r.next, job.requested);
+      if (Date.now() > deadline) return;
+    }
+  }
+
   // --- Alias claims (this shard as the alias owner) ---
 
   /**
@@ -495,7 +861,13 @@ export class CatalogShard extends DurableObject<Env> {
   // --- Publishing ---
 
   private async schedulePublish() {
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now());
+    await this.scheduleAt(Date.now());
+  }
+
+  /** Has the alarm fire by `at`: sooner than one already set for later. */
+  private async scheduleAt(at: number) {
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) await this.ctx.storage.setAlarm(at);
   }
 
   /** Products waiting to publish (tests and the status page read it). */
@@ -540,7 +912,10 @@ export class CatalogShard extends DurableObject<Env> {
       await Promise.race(running);
     }
     if (failure !== undefined) throw failure;
+    await this.rebuildPass(deadline);
+    const job = this.rebuildJob();
     if (this.hasPending()) await this.ctx.storage.setAlarm(Date.now());
+    else if (job) await this.ctx.storage.setAlarm(Math.max(Date.now(), job.due));
   }
 
   /** The outbox rows of the next pass: up to PUBLISH_BATCH products, none of them in flight. */

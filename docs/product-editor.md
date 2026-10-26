@@ -49,15 +49,17 @@ the same shape, rendered by the unchanged `renderForChannel`.
 | `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published), counts and failure |
 | `revisions` | Per-field history for the sheet, the last 50 per key |
 
-Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or k-way merged
-there, as `using()` does, so no shard awaits another.
+Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or merged there,
+as `using()` does, so no shard awaits another. A column pages in key order. `gaps`, `rejections`
+and `board` exist now (their columns in [Data model](data-model.md#product-catalog)); the other
+tables come with PRs 3 and 4.
 
 ## PRs
 
 | # | PR | Status |
 |---|---|---|
 | 1 | Core content model: `packages/core/src/product/content.ts` (`FieldRef`, `fieldId`, `fieldValue`, `applyOverrides`, `editIssues`, `contentGaps`, `GAP_KINDS`), pure, tested in `product-content.test.ts` | Built |
-| 2 | Shard: gap index, keyed feed rejections (a `rejectedKey` R2 object per part, which an older Worker ignores), the board table; RPC `catalogBoard`, `listBoard`, `rebuildGaps`; optional `FeedStatus.gaps` | Planned |
+| 2 | Shard: gap index, keyed feed rejections (a `rejectedKey` R2 object per part, which an older Worker ignores), the board table; RPC `catalogBoard`, `listBoard`, `rebuildGaps`; a channel change has each shard's alarm rebuild its gaps (`markGapsStale`, `GAP_REBUILD_DELAY_MS`). A per-feed gap count (`FeedStatus.gaps`) was left out: the board shows the live total | Built |
 | 3 | Shard: `feed_rows`, `overrides` and `staged` in `apply`; `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet` | Planned |
 | 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` | Planned |
 | 5 | Web API under `/api/v1/catalog` (board, sheet, edits, publish, drafts, gap rebuild) with audit actions and OpenAPI | Planned |

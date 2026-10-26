@@ -14,7 +14,12 @@ export default defineConfig(async () => {
         // Listing indexes build only when a test runs the indexer's alarm: one firing on its own
         // as a test file ends is cut off mid-RPC, which vitest reports as an unhandled error.
         miniflare: {
-          bindings: { FEED_CHUNK: '300', LISTING_DELAY_MS: '3600000', TEST_MIGRATIONS: migrations },
+          bindings: {
+            FEED_CHUNK: '300',
+            LISTING_DELAY_MS: '3600000',
+            GAP_REBUILD_DELAY_MS: '3600000',
+            TEST_MIGRATIONS: migrations,
+          },
         },
       }),
     ],

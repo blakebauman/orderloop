@@ -282,7 +282,11 @@ tables on first use (`CREATE TABLE IF NOT EXISTS`); there are no migration files
 | `outbox` | `seq`, `key`, `urgent`, `rev` (the config revision the write was validated against; null for a removal or a reindex) and `forced` (1 for a reindex, whose listing changes rebuild their indexes even when no entry changed): products waiting to publish; the alarm deletes rows once their product is published. Indexed on `key`. `rev` and `forced` were added later: the constructor adds them to a table that lacks them |
 | `applied` | `batch` id, `at` and the `result` of every `apply` batch, so a retried batch returns its first answer. The alarm deletes rows older than 7 days (longer than a feed part waits for redelivery). Indexed on `at` |
 | `published` | Per `key` and `channel`: the locales and aliases (and the product's `uid`) last published, so a later pass can delete what is no longer published. Before a pass writes, the row holds the union of what was and what will be published (the old `uid` while one is recorded); after it, exactly what was |
-| `settings` | `shard` (the number this object was first called as; a call as another number throws) and `seq` (the next `uid` sequence) |
+| `settings` | `shard` (the number this object was first called as; a call as another number throws), `seq` (the next `uid` sequence) and `gaps_started` (when the last `refreshGaps` pass began) and `gaps_built` (1 when the gap index covers every product: set when the shard is created with no products, since every write keeps the index from then on, or by a `refreshGaps` pass that has read every product; a pass sets it to 0 while it runs) |
+| `gaps` | The [product editor](product-editor.md)'s gap index: `key`, `kind` (`GAP_KINDS`), `field` (`fieldId`, `''` for a refusal), `locale` and `channel`. Content gaps (`contentGaps`) are rewritten in every `apply` that writes the product; `rejected` and `missing_required` follow `rejections`. Indexed on `(kind, key)` |
+| `rejections` | The last row refused for a key, from a feed (with `feed` and `row`) or a write refused for a taken alias: `title`, `issues` (JSON) and `at`. Cleared when the key is next written, sent again unchanged or deleted. A feed's refusal carries the time it was split, and is skipped when the product was written after that (feed parts can apply out of order) |
+| `board` | One row per product on the editor's board: `col` (`gaps` for now), `title`, `kinds` (JSON, gaps per kind) and `at` (when it joined the column). Rewritten with its gaps; a product with none is off the board. A finished `refreshGaps` pass deletes `gaps` and `board` rows whose key has neither a product nor a refusal. Indexed on `(col, key)` |
+| `gap_rebuild` | At most one row: a gap rebuild the alarm owes after a channel change (`markGapsStale`): `requested`, `due` (`GAP_REBUILD_DELAY_MS` later) and the `cursor` it has reached. Deleted when a pass that began after `requested` finishes |
 
 `CatalogFeeds` (`feeds`): `feeds` (`id`, `created_at`, `body`: the `FeedStatus` as JSON, newest listed first), `chunks` (`feed`, `chunk`) and `parts` (`feed`, `part`), the last two being the keys that make recording a split chunk or an applied part idempotent. Feeds and their rows are kept; nothing deletes them.
 
@@ -319,7 +323,8 @@ Feed files share the catalog's R2 bucket under their own prefix, `feeds/`, and e
 | Key | Holds |
 |---|---|
 | `feeds/<id>/source.<csv or ndjson>` | The uploaded feed, as streamed in |
-| `feeds/<id>/parts/<chunk>-<shard>.ndjson` | One chunk's validated products for one shard, a `{ row, data }` JSON object a line |
+| `feeds/<id>/parts/<chunk>-<shard>.ndjson` | One chunk's validated products for one shard, a `{ row, data }` JSON object a line (empty when the shard has only refused rows) |
+| `feeds/<id>/parts/<chunk>-<shard>.rejected.ndjson` | The chunk's rows refused for keys that shard owns, a `RejectedRow` (`key`, `title`, `row`, `issues`) a line; named by the part's `rejectedKey` |
 
 `scripts/provision.sh` adds an R2 lifecycle rule named `feeds` on that prefix that expires objects after 30 days, so a feed is retained only for as long as an import can need it (see [Operations](operations.md#adding-a-customer)).
 
