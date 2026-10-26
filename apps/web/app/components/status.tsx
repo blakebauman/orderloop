@@ -79,6 +79,22 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+export type Tone = 'ok' | 'wait' | 'bad' | 'undo' | 'idle' | 'run';
+
+/**
+ * A status from another vocabulary (a record's outcome, a cart, a promotion) in the status stamp,
+ * by the token it means: a failure and a reversal are ruled, as an order's are.
+ */
+export function ToneBadge({ tone, label }: { tone: Tone; label: string }) {
+  return (
+    <Stamp
+      color={`var(--${tone})`}
+      label={label}
+      ended={tone === 'bad' ? 'failed' : tone === 'undo' ? 'undone' : undefined}
+    />
+  );
+}
+
 const APPROVAL_COLOR: Record<string, string> = {
   pending: 'var(--wait)',
   approved: 'var(--ok)',

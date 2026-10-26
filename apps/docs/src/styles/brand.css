@@ -261,7 +261,7 @@ mobile-starlight-toc a[aria-current="true"] {
   border-color: var(--ol-rule);
 }
 
-/* ── Tables (the app's tables, as in apps/web/app/routes/orders.tsx) ── */
+/* ── Tables (the app's tables: `Table` in packages/ui/src/table.tsx) ── */
 
 .sl-markdown-content table:not(:where(.not-content *)) {
   font-size: 0.875rem;

@@ -176,7 +176,7 @@ Tailwind's default breakpoints, read as devices:
 | Width | Typically | What changes |
 |---|---|---|
 | below `sm` (640px) | iPhone upright | Top bar shows the mark and Assistant as icons |
-| below `md` (768px) | phones, either way up | Bottom tab bar; tables stack into cards; the Commerce jump links stick under the top bar |
+| below `md` (768px) | phones, either way up | Bottom tab bar; tables stack into cards (see Tables); the Commerce jump links stick under the top bar |
 | `md` to `lg` (768–1023px) | iPad upright | Links in the top bar; Assistant, New order and the account name are icons |
 | `lg` and up (1024px) | iPad on its side, desktop | The full flow editor; the order page's graph beside its panels; the assistant as a column |
 
@@ -248,6 +248,30 @@ variables, never `env()` directly: the device tests fake a notch by setting them
   dialog, menu or sheet is open: an iPad with a keyboard has both.
 - **The composer:** on a touch screen Return is a new line and the Send button sends; ⌘ or Ctrl
   with Enter always sends.
+
+## Tables
+
+Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`TableHead`,
+`TableBody`, `TableFoot`, `Tr`, `Th`, `Td`, `TableEmpty`); never a hand-styled `<table>`.
+
+- **Cells** are padded by the table (app.css, at zero specificity, so a cell's own classes win).
+  `edge="card"` runs edge to edge inside a card, its outer columns inset 1rem; `edge="flush"` lines
+  them up with the text of a padded panel.
+- **Headers** are captions, `scope="col"`. A column without a name (row actions) still gets one
+  for screen readers. The column a list is sorted by is ink, with its direction drawn; a header
+  that can sort is a link to that order.
+- **Figures** (`numeric`) are right-aligned, tabular and unbroken. Ids and SKUs are mono and never
+  wrap; an order is always `orderRef` (`#abc123`).
+- **Status** in a cell is a badge: `StatusBadge` for orders and steps, `ToneBadge` for another
+  vocabulary (records, carts, a paused promotion), never coloured text alone.
+- **Empty:** no rows at all is `<Empty>` in place of the table; a search that missed is a
+  `TableEmpty` row under the header.
+- **Phones:** `stack="cards"` turns each row into a card, the first cell on its own line and the
+  rest named by their `label`; `stack="rows"` leaves the row's layout to the caller (the orders and
+  carts lists, where the whole card opens the row). Either way the header stays for screen readers
+  and the parts keep their table roles.
+- **Long lists** (`sticky`) keep the header under the top bar; the card clips with
+  `overflow-clip`, never `overflow-hidden`, which would stop it.
 
 ## Screens that change shape
 

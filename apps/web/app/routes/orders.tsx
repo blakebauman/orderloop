@@ -9,7 +9,9 @@ import {
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { useEffect, useRef } from 'react';
 import {
   Form,
@@ -135,12 +137,25 @@ export default function Orders() {
     return () => window.clearInterval(t);
   }, [live, revalidate]);
 
-  // "/" jumps to search from anywhere on the page that isn't already taking text.
+  // "/" jumps to search from anywhere on the page that isn't already taking text. J and K move
+  // between orders (from the first, when no order has focus yet); Enter opens the focused one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '/' || !pageShortcut(e)) return;
-      e.preventDefault();
-      search.current?.focus();
+      if (!pageShortcut(e)) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        search.current?.focus();
+        return;
+      }
+      if (e.key !== 'j' && e.key !== 'k') return;
+      const rows = [...document.querySelectorAll<HTMLElement>('main a[data-row]')];
+      const at = rows.indexOf(document.activeElement as HTMLElement);
+      const next = rows[at === -1 ? 0 : at + (e.key === 'j' ? 1 : -1)];
+      if (next) {
+        e.preventDefault();
+        next.focus();
+        next.scrollIntoView({ block: 'nearest' });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -212,6 +227,7 @@ export default function Orders() {
             ))}
           </NativeSelect>
           <NativeSelect
+            key={sort}
             name="sort"
             defaultValue={sort}
             wrapperClassName="w-full sm:w-auto"
@@ -316,23 +332,27 @@ export default function Orders() {
         ) : null}
 
         {n ? (
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="hidden border-b text-left md:table-header-group">
-                <tr>
-                  <Th sorted={sort === 'created' || sort === 'oldest' ? sort : undefined}>Order</Th>
+          <div className="card overflow-clip">
+            <Table stack="rows" sticky caption="Orders">
+              <TableHead>
+                <Tr>
+                  <SortTh column="created" sort={sort} params={params}>
+                    Order
+                  </SortTh>
                   <Th>Status</Th>
-                  <Th sorted={sort === 'waiting' ? 'waiting' : undefined}>Where</Th>
+                  <SortTh column="waiting" sort={sort} params={params}>
+                    Where
+                  </SortTh>
                   <Th>Customer</Th>
-                  <Th right sorted={sort === 'total' ? 'total' : undefined}>
+                  <SortTh column="total" sort={sort} params={params} numeric>
                     Total
-                  </Th>
-                  <Th right sorted={sort === 'updated' ? 'updated' : undefined}>
+                  </SortTh>
+                  <SortTh column="updated" sort={sort} params={params} numeric>
                     Updated
-                  </Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+                  </SortTh>
+                </Tr>
+              </TableHead>
+              <TableBody>
                 {orders.map((o) => {
                   const status = orderStatus(o.status, o.id, declined);
                   const modelLabel = ORDER_MODEL_LABELS[o.model as OrderModel] ?? o.model;
@@ -343,14 +363,19 @@ export default function Orders() {
                     'No customer';
                   const title = o.title || o.externalId;
                   return (
-                    <tr
+                    // On a phone the row is a card, and the whole card opens the order.
+                    <Tr
                       key={o.id}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-3 py-2.5 hover:bg-muted/40 md:table-row md:px-0 md:py-0"
+                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-4 py-2.5 hover:bg-muted/40 has-[a[data-row]:focus-visible]:bg-muted/40 max-md:relative max-md:active:bg-muted/60 md:table-row md:p-0"
                     >
-                      <td className="min-w-0 md:px-3 md:py-2">
+                      <Td className="min-w-0">
                         <Link
                           to={`/orders/${o.id}`}
-                          className={title ? 'font-medium hover:underline' : 'hover:underline'}
+                          data-row
+                          className={cn(
+                            'scroll-mt-[calc(var(--shell-h)+2.5rem)] scroll-mb-4 hover:underline max-md:after:absolute max-md:after:inset-0',
+                            title && 'font-medium',
+                          )}
                         >
                           {title || <span className="text-muted-foreground">Untitled</span>}
                         </Link>{' '}
@@ -366,27 +391,30 @@ export default function Orders() {
                         <div className="truncate text-muted-foreground text-xs md:hidden">
                           {customer}
                         </div>
-                      </td>
-                      <td className="row-start-2 mt-1.5 md:mt-0 md:px-3 md:py-2">
+                      </Td>
+                      <Td className="row-start-2 mt-1.5 md:mt-0">
                         <StatusBadge status={status} />
-                      </td>
-                      <td className="col-span-2 mt-1 min-w-0 text-xs md:max-w-72 md:px-3 md:py-2">
+                      </Td>
+                      <Td className="col-span-2 mt-1 min-w-0 text-xs md:max-w-72">
                         <Where order={o} status={status} />
-                      </td>
-                      <td className="hidden max-w-56 truncate text-muted-foreground md:table-cell md:px-3 md:py-2">
+                      </Td>
+                      <Td className="hidden max-w-56 truncate text-muted-foreground md:table-cell">
                         {customer}
-                      </td>
-                      <td className="col-start-2 row-start-1 text-right tabular md:px-3 md:py-2">
+                      </Td>
+                      <Td numeric className="col-start-2 row-start-1">
                         {money(o.total, o.currency)}
-                      </td>
-                      <td className="col-start-2 row-start-2 mt-1.5 text-right text-muted-foreground text-xs md:mt-0 md:px-3 md:py-2">
+                      </Td>
+                      <Td
+                        numeric
+                        className="col-start-2 row-start-2 mt-1.5 text-muted-foreground text-xs md:mt-0"
+                      >
                         <Ago ms={o.updatedAt} />
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <div className="card overflow-hidden">
@@ -418,6 +446,13 @@ export default function Orders() {
           </div>
         )}
 
+        {n ? (
+          <p className="mt-3 hidden text-muted-foreground text-xs fine:block">
+            Keyboard: <kbd className="font-mono">/</kbd> searches,{' '}
+            <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd> move between
+            orders, <kbd className="font-mono">Enter</kbd> opens one.
+          </p>
+        ) : null}
         {older || paged ? (
           <nav aria-label="Pages" className="mt-3 flex justify-between text-sm">
             {paged ? (
@@ -452,30 +487,52 @@ function pageLink(params: URLSearchParams, after: string | null) {
   return s ? `?${s}` : '/orders';
 }
 
-function Th({
+/**
+ * A header the list can be ordered by: a link to that order, with the column marked and its
+ * direction drawn while it's the one in use. Order flips between newest and oldest first; the
+ * others have one direction.
+ */
+function SortTh({
+  column,
+  sort,
+  params,
+  numeric,
   children,
-  right,
-  sorted,
 }: {
+  column: Exclude<Sort, 'oldest'>;
+  sort: Sort;
+  params: URLSearchParams;
+  numeric?: boolean;
   children: React.ReactNode;
-  right?: boolean;
-  /** The active sort, when this column is what the list is ordered by. */
-  sorted?: Sort;
 }) {
+  const active = sort === column || (column === 'created' && sort === 'oldest');
+  const next: Sort = column === 'created' && sort === 'created' ? 'oldest' : column;
+  const to = new URLSearchParams(params);
+  to.delete('after');
+  if (next === 'created') to.delete('sort');
+  else to.set('sort', next);
+  const href = to.toString();
   return (
-    <th
-      scope="col"
-      aria-sort={
-        sorted
-          ? sorted === 'oldest' || sorted === 'waiting'
-            ? 'ascending'
-            : 'descending'
-          : undefined
+    <Th
+      numeric={numeric}
+      sort={
+        active ? (sort === 'oldest' || sort === 'waiting' ? 'ascending' : 'descending') : undefined
       }
-      className={`caption px-3 py-2 font-medium ${right ? 'text-right' : ''} ${sorted ? 'text-foreground' : ''}`}
     >
-      {children}
-    </th>
+      <Link
+        to={href ? `?${href}` : '/orders'}
+        replace
+        preventScrollReset
+        className="hit-area hover:text-foreground hover:underline"
+      >
+        {children}
+        <span className="sr-only">
+          {active && next === column
+            ? ''
+            : `, sort ${SORTS.find((s) => s.value === next)?.label.toLowerCase()}`}
+        </span>
+      </Link>
+    </Th>
   );
 }
 

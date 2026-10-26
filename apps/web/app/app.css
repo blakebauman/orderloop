@@ -552,14 +552,47 @@
   }
 }
 
-/* A table that stacks on a phone: each row becomes a card, its first cell (the thing the row is
-   about) on a line of its own and the rest wrapping beneath it, each named by its `data-label`.
-   Wider than md it's an ordinary table. */
+/* Tables (`Table` in packages/ui). The table pads its cells at zero specificity, so a cell's own
+   classes always win: a card table runs edge to edge, its outer columns inset from the card's
+   edge; a flush one lines them up with the panel's text. Every figure in a table is tabular. */
+@layer components {
+  :where([data-slot="table"]) {
+    font-variant-numeric: tabular-nums;
+  }
+  :where([data-slot="table"]) :where(th, td) {
+    padding: 0.375rem 0.5rem;
+    vertical-align: baseline;
+  }
+  :where([data-slot="table"]) :where(thead th) {
+    padding-block: 0.5rem;
+    vertical-align: bottom;
+  }
+  :where([data-slot="table"][data-edge="card"] :is(th, td):first-child) {
+    padding-left: 1rem;
+  }
+  :where([data-slot="table"][data-edge="card"] :is(th, td):last-child) {
+    padding-right: 1rem;
+  }
+  :where([data-slot="table"][data-edge="flush"] :is(th, td):first-child) {
+    padding-left: 0;
+  }
+  :where([data-slot="table"][data-edge="flush"] :is(th, td):last-child) {
+    padding-right: 0;
+  }
+  /* A stacked row pads itself on a phone, as a card does. */
+  @media (width < 48rem) {
+    :where([data-slot="table"][data-stack]) :where(th, td) {
+      padding: 0;
+    }
+  }
+}
+
+/* A table that stacks on a phone (`stack="cards"`): each row becomes a card, its first cell (the
+   thing the row is about) on a line of its own and the rest wrapping beneath it, each named by
+   its `data-label`. The label is drawn only: screen readers get the column's own header, which
+   the table keeps for them. Wider than md it's an ordinary table. */
 @utility table-stack {
   @media (width < 48rem) {
-    & thead {
-      display: none;
-    }
     & tr {
       display: flex;
       flex-wrap: wrap;
@@ -578,6 +611,9 @@
     }
     & td[data-label]::before {
       content: attr(data-label) " ";
+      /* biome-ignore lint/suspicious/noDuplicateProperties: the line above is the fallback where
+         content's alt text (empty, so a screen reader skips the label) isn't supported. */
+      content: attr(data-label) " " / "";
       color: var(--muted-foreground);
       font-size: 0.75rem;
       font-weight: 400;

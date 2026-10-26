@@ -266,7 +266,7 @@ fill, ink, 600), not Starlight's inverted pill.
 
 An h2 opens on a 1px rule with space above it, as the app's panels open on their header row. The
 rule sits on Starlight's `.sl-heading-wrapper` so it spans the column; the first section on a page
-skips it because the page header already has one. Tables follow the app's (`routes/orders.tsx`): caption
+skips it because the page header already has one. Tables follow the app's (`Table` in `packages/ui`): caption
 column labels on no fill, a hairline under each row, a soft muted hover, tabular numbers.
 
 ### Callouts

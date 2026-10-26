@@ -3,6 +3,7 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   data,
@@ -445,33 +446,27 @@ export default function Team() {
               <div>
                 {/* A table on wide screens; on a phone each person stacks into a block, so the
                     role select keeps its width and nothing pushes the page sideways. */}
-                <table className="w-full text-sm">
-                  <thead className="hidden border-b text-left sm:table-header-group">
-                    <tr>
-                      <th scope="col" className="caption px-4 py-2 font-medium">
-                        Person
-                      </th>
-                      <th scope="col" className="caption px-2 py-2 font-medium">
-                        Role
-                      </th>
-                      <th scope="col" className="caption px-2 py-2 font-medium">
-                        Last sign-in
-                      </th>
-                      <th scope="col" className="caption px-4 py-2 text-right font-medium">
+                <Table stack="rows" caption="People">
+                  <TableHead>
+                    <Tr>
+                      <Th>Person</Th>
+                      <Th>Role</Th>
+                      <Th>Last sign-in</Th>
+                      <Th className="text-right">
                         <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
+                      </Th>
+                    </Tr>
+                  </TableHead>
+                  <TableBody>
                     {people.map((p) => (
                       <Fragment key={p.id}>
-                        <tr
+                        <Tr
                           className={cn(
-                            'block space-y-2 px-4 py-3 sm:table-row sm:space-y-0 sm:p-0',
+                            'block space-y-2 px-4 py-3 md:table-row md:space-y-0 md:p-0',
                             p.disabledAt && 'text-muted-foreground',
                           )}
                         >
-                          <td className="block sm:table-cell sm:px-4 sm:py-2">
+                          <Td className="block md:table-cell">
                             {p.name}
                             {p.id === me.id ? (
                               <span className="ml-1.5 text-muted-foreground text-xs">you</span>
@@ -482,8 +477,8 @@ export default function Team() {
                               {p.passwordChangeDue ? ' · temporary password' : ''}
                               {p.disabledAt ? ' · disabled' : ''}
                             </div>
-                          </td>
-                          <td className="block sm:table-cell sm:px-2 sm:py-2">
+                          </Td>
+                          <Td className="block md:table-cell">
                             <RoleForm
                               id={p.id}
                               name={p.name}
@@ -491,26 +486,32 @@ export default function Team() {
                               stepUp={stepUp}
                               fetcher={fetcher}
                             />
-                          </td>
-                          <td className="block text-muted-foreground text-xs sm:table-cell sm:px-2 sm:py-2">
-                            <span className="sm:hidden">Last sign-in: </span>
+                          </Td>
+                          <Td className="block text-muted-foreground text-xs md:table-cell">
+                            <span aria-hidden="true" className="md:hidden">
+                              Last sign-in:{' '}
+                            </span>
                             {p.lastLoginAt ? <Ago ms={p.lastLoginAt} /> : 'Never'}
-                          </td>
-                          <td className="block sm:table-cell sm:px-4 sm:py-2">
-                            <div className="-ml-3 flex flex-wrap gap-1.5 sm:ml-0 sm:justify-end">
-                              <AskButton id={p.id} intent="reset" asking={asking} ask={ask}>
-                                Reset password…
-                              </AskButton>
-                              {p.twoFactorAt && p.id !== me.id ? (
-                                <AskButton
-                                  id={p.id}
-                                  intent="reset-two-factor"
-                                  asking={asking}
-                                  ask={ask}
-                                >
-                                  Reset two-factor…
+                          </Td>
+                          <Td className="block md:table-cell">
+                            {/* Disabling sits apart from the resets, so a thumb aimed at one
+                                doesn't land on the other. */}
+                            <div className="-ml-3 flex flex-wrap gap-x-5 gap-y-1.5 md:ml-0 md:justify-end md:gap-x-3">
+                              <div className="flex flex-wrap gap-1.5">
+                                <AskButton id={p.id} intent="reset" asking={asking} ask={ask}>
+                                  Reset password…
                                 </AskButton>
-                              ) : null}
+                                {p.twoFactorAt && p.id !== me.id ? (
+                                  <AskButton
+                                    id={p.id}
+                                    intent="reset-two-factor"
+                                    asking={asking}
+                                    ask={ask}
+                                  >
+                                    Reset two-factor…
+                                  </AskButton>
+                                ) : null}
+                              </div>
                               {p.id === me.id ? null : p.disabledAt ? (
                                 <AskButton id={p.id} intent="enable" asking={asking} ask={ask}>
                                   Enable…
@@ -521,13 +522,13 @@ export default function Team() {
                                 </AskButton>
                               )}
                             </div>
-                          </td>
-                        </tr>
+                          </Td>
+                        </Tr>
                         {/* The question gets its own line under the person, so their row keeps its
                           shape and the name stays beside what's being asked. */}
                         {asking?.id === p.id ? (
-                          <tr className="block sm:table-row">
-                            <td colSpan={4} className="block px-4 pb-3 sm:table-cell">
+                          <Tr className="block md:table-row">
+                            <Td colSpan={4} className="block px-4 pt-0 pb-3 md:table-cell">
                               <fetcher.Form
                                 method="post"
                                 className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2"
@@ -556,13 +557,13 @@ export default function Team() {
                                   </Button>
                                 </Confirm>
                               </fetcher.Form>
-                            </td>
-                          </tr>
+                            </Td>
+                          </Tr>
                         ) : null}
                       </Fragment>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             ) : (
               <Empty>Nobody is on the team yet. Add the first person below.</Empty>
