@@ -1,0 +1,224 @@
+import { describe, expect, it } from 'vitest';
+import {
+  applyOverrides,
+  contentGaps,
+  editIssues,
+  fieldId,
+  fieldValue,
+  parseFieldId,
+} from '../src/product/content';
+import type { Channel } from '../src/product/model';
+import { contentHash } from '../src/product/routing';
+import { apparel, stored, tee, web } from './fixtures/product';
+
+const feed = stored(tee());
+
+describe('field ids', () => {
+  it('round-trips every editable field', () => {
+    for (const ref of [
+      { field: 'title' },
+      { field: 'description' },
+      { field: 'slug' },
+      { field: 'status' },
+      { field: 'attribute', code: 'care' },
+      { field: 'mediaAlt', src: 'media/tee.jpg' },
+    ] as const)
+      expect(parseFieldId(fieldId(ref))).toEqual(ref);
+    expect(fieldId({ field: 'mediaAlt', src: 'https://x/a:b.jpg' })).toBe('alt:https://x/a:b.jpg');
+    expect(parseFieldId('alt:https://x/a:b.jpg')).toEqual({
+      field: 'mediaAlt',
+      src: 'https://x/a:b.jpg',
+    });
+  });
+
+  it('names nothing for unknown or empty ids', () => {
+    for (const id of ['', 'price', 'attribute', 'mediaAlt', 'attr:', 'alt:'])
+      expect(parseFieldId(id)).toBeNull();
+  });
+});
+
+describe('field values', () => {
+  it('reads one locale of each field', () => {
+    expect(fieldValue(feed, { field: 'title', locale: 'fr' })).toBe('T-shirt classique');
+    expect(fieldValue(feed, { field: 'slug', locale: 'en' })).toBe('classic-tee');
+    expect(fieldValue(feed, { field: 'description', locale: 'en' })).toBeNull();
+    expect(fieldValue(feed, { field: 'attribute', code: 'care', locale: 'en' })).toBe('Wash cold');
+    expect(fieldValue(feed, { field: 'attribute', code: 'material', locale: 'en' })).toBeNull();
+    expect(fieldValue(feed, { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'en' })).toBe(
+      'A tee',
+    );
+    expect(fieldValue(feed, { field: 'mediaAlt', src: 'gone.jpg', locale: 'en' })).toBeNull();
+    expect(fieldValue(feed, { field: 'status' })).toBe('active');
+  });
+});
+
+describe('overrides', () => {
+  it('sets and removes values per locale over the feed, leaving the feed untouched', () => {
+    const before = contentHash(feed);
+    const out = applyOverrides(feed, [
+      { ref: { field: 'description', locale: 'fr' }, value: 'Un t-shirt en coton.' },
+      { ref: { field: 'title', locale: 'fr' }, value: null },
+      { ref: { field: 'slug', locale: 'fr' }, value: 'tee-classique' },
+      { ref: { field: 'attribute', code: 'care', locale: 'fr' }, value: 'Lavage à froid' },
+      { ref: { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'fr' }, value: 'Un t-shirt' },
+      { ref: { field: 'status' }, value: 'draft' },
+    ]);
+    expect(out.description).toEqual({ fr: 'Un t-shirt en coton.' });
+    expect(out.title).toEqual({ en: 'Classic tee' });
+    expect(out.slug).toEqual({ en: 'classic-tee', fr: 'tee-classique' });
+    expect(out.attributes.care).toEqual({ en: 'Wash cold', fr: 'Lavage à froid' });
+    expect(out.attributes.material).toBe('cotton');
+    expect(out.media[0]?.alt).toEqual({ en: 'A tee', fr: 'Un t-shirt' });
+    expect(out.status).toBe('draft');
+    expect(contentHash(feed)).toBe(before);
+  });
+
+  it('drops a field once its last locale is removed', () => {
+    const out = applyOverrides(feed, [
+      { ref: { field: 'slug', locale: 'en' }, value: null },
+      { ref: { field: 'attribute', code: 'care', locale: 'en' }, value: null },
+      { ref: { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'en' }, value: null },
+    ]);
+    expect(out.slug).toBeUndefined();
+    expect('care' in out.attributes).toBe(false);
+    expect(out.media[0] && 'alt' in out.media[0]).toBe(false);
+  });
+
+  it('skips an override whose media the feed no longer has', () => {
+    const out = applyOverrides(feed, [
+      { ref: { field: 'mediaAlt', src: 'old.jpg', locale: 'en' }, value: 'Old' },
+    ]);
+    expect(out.media).toEqual(feed.media);
+  });
+
+  it('returns the feed as it is when there are no overrides', () => {
+    expect(applyOverrides(feed, [])).toBe(feed);
+  });
+
+  it('gives the same product, and hash, whichever order the overrides come in', () => {
+    const edits = [
+      { ref: { field: 'description' as const, locale: 'fr' }, value: 'Coton.' },
+      { ref: { field: 'title' as const, locale: 'fr' }, value: 'T-shirt' },
+    ];
+    expect(contentHash(applyOverrides(feed, edits))).toBe(
+      contentHash(applyOverrides(feed, [...edits].reverse())),
+    );
+  });
+});
+
+describe('edit checks', () => {
+  const issues = (ref: Parameters<typeof fieldId>[0], value: string | null) =>
+    editIssues(feed, apparel, { ref, value });
+
+  it('accepts content edits', () => {
+    expect(issues({ field: 'description', locale: 'fr' }, 'Coton.')).toEqual([]);
+    expect(issues({ field: 'attribute', code: 'care', locale: 'fr' }, 'Froid')).toEqual([]);
+    expect(issues({ field: 'mediaAlt', src: 'media/tee.jpg', locale: 'fr' }, 'Un t-shirt')).toEqual(
+      [],
+    );
+    expect(issues({ field: 'slug', locale: 'fr' }, 'tee-classique')).toEqual([]);
+    expect(issues({ field: 'title', locale: 'fr' }, null)).toEqual([]);
+    expect(issues({ field: 'status' }, 'archived')).toEqual([]);
+  });
+
+  it('refuses what the catalog would not store', () => {
+    expect(issues({ field: 'description' }, 'x')).toEqual(['needs a locale']);
+    expect(issues({ field: 'description', locale: 'FR' }, 'x')).toEqual(['needs a locale']);
+    expect(issues({ field: 'description', locale: 'fr' }, 'x'.repeat(10_001))).toEqual([
+      'over 10000 characters',
+    ]);
+    expect(issues({ field: 'description', locale: 'fr' }, '  ')).toEqual([
+      'empty: remove the value instead',
+    ]);
+    expect(issues({ field: 'slug', locale: 'fr' }, 'Tee Classique')).toEqual([
+      'lowercase words joined by "-"',
+    ]);
+    expect(issues({ field: 'status' }, 'live')).toEqual([
+      'status must be one of draft, active, archived',
+    ]);
+    expect(issues({ field: 'mediaAlt', src: 'gone.jpg', locale: 'en' }, 'x')).toEqual([
+      'no such media',
+    ]);
+  });
+
+  it('edits only product text with a value per locale', () => {
+    expect(issues({ field: 'attribute', code: 'material', locale: 'en' }, 'x')).toEqual([
+      "material isn't product text with a value per locale",
+    ]);
+    expect(issues({ field: 'attribute', code: 'size', locale: 'en' }, 'x')).toEqual([
+      "size isn't product text with a value per locale",
+    ]);
+    expect(issues({ field: 'attribute', code: 'fit', locale: 'en' }, 'x')).toEqual([
+      'no attribute fit in apparel@1',
+    ]);
+  });
+
+  it('keeps a title in at least one locale', () => {
+    const one = stored(tee({ title: { en: 'Classic tee' } }));
+    expect(
+      editIssues(one, apparel, { ref: { field: 'title', locale: 'en' }, value: null }),
+    ).toEqual(['a product needs a title in at least one locale']);
+  });
+});
+
+describe('content gaps', () => {
+  const pos: Channel = {
+    code: 'pos',
+    name: 'Stores',
+    currency: 'USD',
+    locales: ['en', 'de'],
+    defaultLocale: 'en',
+  };
+
+  it('finds what is missing in each locale of each channel the product is visible in', () => {
+    const p = stored(
+      tee({
+        description: { en: 'A cotton tee.' },
+        channels: {
+          web: { visible: true },
+          pos: { visible: true },
+        },
+      }),
+    );
+    expect(contentGaps(p, apparel, [web, pos])).toEqual([
+      { kind: 'missing_title', field: 'title', locale: 'de', channel: 'pos' },
+      { kind: 'missing_description', field: 'description', locale: 'de', channel: 'pos' },
+      { kind: 'missing_attribute', field: 'attr:care', locale: 'de', channel: 'pos' },
+      { kind: 'missing_alt', field: 'alt:media/tee.jpg', locale: 'de', channel: 'pos' },
+      { kind: 'missing_description', field: 'description', locale: 'fr', channel: 'web' },
+      { kind: 'missing_attribute', field: 'attr:care', locale: 'fr', channel: 'web' },
+      { kind: 'missing_alt', field: 'alt:media/tee.jpg', locale: 'fr', channel: 'web' },
+    ]);
+  });
+
+  it('counts by exact locale, not the fallback publishing would use', () => {
+    const p = stored(tee({ title: { en: 'Classic tee' } }));
+    expect(contentGaps(p, apparel, [web]).filter((g) => g.kind === 'missing_title')).toEqual([
+      { kind: 'missing_title', field: 'title', locale: 'fr', channel: 'web' },
+    ]);
+  });
+
+  it("doesn't count content the product has in no locale", () => {
+    const p = stored(
+      tee({
+        title: { en: 'Classic tee', fr: 'T-shirt classique' },
+        media: [{ src: 'media/tee.jpg' }],
+        attributes: { material: 'cotton' },
+      }),
+    );
+    expect(contentGaps(p, apparel, [web])).toEqual([]);
+  });
+
+  it('skips channels the product is hidden in or the catalog does not have', () => {
+    const p = stored(tee({ channels: { web: { visible: false }, pos: { visible: true } } }));
+    expect(contentGaps(p, apparel, [web])).toEqual([]);
+  });
+
+  it('closes a gap once an override fills it', () => {
+    const p = applyOverrides(stored(tee()), [
+      { ref: { field: 'attribute', code: 'care', locale: 'fr' }, value: 'Lavage à froid' },
+      { ref: { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'fr' }, value: 'Un t-shirt' },
+    ]);
+    expect(contentGaps(p, apparel, [web])).toEqual([]);
+  });
+});
