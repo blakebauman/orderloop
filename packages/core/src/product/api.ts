@@ -93,8 +93,8 @@ export type DeleteCategoriesResult = DeleteResult<{ deleted: string[] }>;
 
 /**
  * The product editor's board: products move from Gaps (missing content, rejected feed rows,
- * conflicts) through Drafted and Staged to Published (in the last day). Drafted follows with the
- * assistant's drafts (docs/product-editor.md).
+ * conflicts) through Drafted (assistant drafts to review) and Staged to Published (in the last
+ * day). See docs/product-editor.md.
  */
 export const BOARD_COLUMNS = ['gaps', 'drafted', 'staged', 'published'] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
@@ -120,6 +120,8 @@ export type BoardCard = {
   rejection: Rejection | null;
   /** Edits staged for it, in any column. */
   staged: number;
+  /** Assistant drafts waiting for review, in any column. */
+  drafts: number;
   /** Why its staged edits didn't publish last time, if they didn't. */
   failure: string | null;
   /** When it joined this column. */
@@ -156,6 +158,25 @@ export type StagedEdit = {
   failure: string | null;
 };
 
+/**
+ * An assistant draft for one field and locale. Never live: a person accepts it by staging it
+ * (`stageEdits` with `source: 'assistant'`), and staging any edit to the field consumes it.
+ */
+export type DraftInput = { key: string; ref: FieldRef; value: string; model?: string };
+
+/** A stored draft, with the live value it was drafted against. */
+export type Draft = {
+  ref: FieldRef;
+  value: string;
+  seen: string | null;
+  /** The field's live value has changed since it was drafted. */
+  stale: boolean;
+  model: string | null;
+  /** Who asked for it. */
+  by: string;
+  at: number;
+};
+
 /** A live override, with the feed value it was made against and the feed's value now. */
 export type FieldOverride = {
   ref: FieldRef;
@@ -188,6 +209,7 @@ export type ProductSheet = {
   feed: ProductData;
   overrides: FieldOverride[];
   staged: StagedEdit[];
+  drafts: Draft[];
   gaps: Gap[];
   rejection: Rejection | null;
   /** Newest first. */
@@ -287,9 +309,20 @@ export interface ProductCatalogRpc {
   getProductSheet(key: string): Promise<ProductSheet | null>;
   /**
    * Stages edits (at most 500 per call), each checked against the product as it is live. A later
-   * edit to the same field and locale replaces the earlier one.
+   * edit to the same field and locale replaces the earlier one, and consumes its draft.
    */
   stageEdits(edits: StageEdit[], by: string): Promise<EditResult[]>;
+  /**
+   * Stores assistant drafts (at most 500 per call), each checked like an edit against the product
+   * as it is live; status isn't drafted. A later draft to the same field and locale replaces the
+   * earlier one. Nothing is staged or published.
+   */
+  putDrafts(drafts: DraftInput[], by: string): Promise<EditResult[]>;
+  /** Drops drafts: one field's, or with no `ref` all of a product's. Returns how many. */
+  discardDrafts(
+    items: { key: string; ref?: FieldRef }[],
+    by: string,
+  ): Promise<{ discarded: number }>;
   /** Drops staged edits: one field's, or with no `ref` all of a product's. Returns how many. */
   discardStaged(
     items: { key: string; ref?: FieldRef }[],

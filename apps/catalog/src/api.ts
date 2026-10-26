@@ -24,6 +24,7 @@ import {
   type DeleteChannelResult,
   type DeleteTypeResult,
   DOC_FORMAT,
+  type DraftInput,
   type EditResult,
   FEED_FORMATS,
   type FeedFormat,
@@ -371,6 +372,40 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
       }),
     );
     return results;
+  }
+
+  async putDrafts(drafts: DraftInput[], by: string): Promise<EditResult[]> {
+    if (drafts.length > MAX_WRITE) throw new RangeError(`at most ${MAX_WRITE} drafts per call`);
+    const results: EditResult[] = new Array(drafts.length);
+    await Promise.all(
+      [...byShard(drafts, (d) => d.key)].map(async ([n, idx]) => {
+        const out = await shard(this.env, n).putDrafts({
+          shard: n,
+          drafts: idx.map((i) => drafts[i] as DraftInput),
+          by,
+        });
+        out.forEach((r, j) => {
+          results[idx[j] as number] = r as EditResult;
+        });
+      }),
+    );
+    return results;
+  }
+
+  async discardDrafts(
+    items: { key: string; ref?: FieldRef }[],
+    _by: string,
+  ): Promise<{ discarded: number }> {
+    if (items.length > MAX_WRITE) throw new RangeError(`at most ${MAX_WRITE} items per call`);
+    const counts = await Promise.all(
+      [...byShard(items, (i) => i.key)].map(([n, idx]) =>
+        shard(this.env, n).discardDrafts({
+          shard: n,
+          items: idx.map((i) => items[i] as { key: string; ref?: FieldRef }),
+        }),
+      ),
+    );
+    return { discarded: counts.reduce((a, b) => a + b, 0) };
   }
 
   async discardStaged(

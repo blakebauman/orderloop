@@ -26,8 +26,10 @@ code, and fold a finished section into [Architecture](architecture.md) and
   that one; rows a feed rejected (`missing_required` when the issue was a required attribute, which a
   stored product always has); conflicts.
 - **The assistant drafts, never writes.** `draft_product_content` drafts per field and locale from
-  the product's own data. Drafts are stored with the product (the board's Drafted column); accepting
-  one stages it as the person.
+  the product's own data. Drafts are stored with the product (the board's Drafted column), each
+  with the live value it was drafted against: it is stale once that field changes. Accepting one
+  is staging it (`stageEdits` with `source: 'assistant'`, as the person); staging any edit to the
+  field consumes its draft. Status isn't drafted.
 
 Content only in the first version: title, description, slug, product-scoped localized text
 attributes and product media alt text, per locale, and status. Variants, prices, channels,
@@ -46,15 +48,15 @@ the same shape, rendered by the unchanged `renderForChannel`.
 | `feed_rows` | The feed's own version of a product, only while it has overrides (otherwise `products.body` is the feed version) |
 | `overrides` | Live edits: `(key, field, locale)`, the value (`null` removes the feed's), `base` (the feed value it was made against), `conflict` (a newer feed value), source, who and when |
 | `staged` | Pending edits (`set` or `clear`) with the live value the person saw, and a failure reason after a refused publish |
-| `drafts` | Unaccepted assistant drafts, with the product hash they were drafted from (stale when it changes) |
+| `drafts` | Unaccepted assistant drafts, with the field's live value they were drafted against (stale when it changes) |
 | `gaps` | `(key, kind, field, locale, channel)`, rewritten in every transaction that changes the product |
 | `rejections` | The last feed row refused for a key, with its issues |
 | `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published for a day) and counts; staged counts and failures are read from `staged` |
 | `revisions` | Per-field history for the sheet, the last 50 per key |
 
 Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or merged there,
-as `using()` does, so no shard awaits another. A column pages in key order. All but `drafts`
-exist now (their columns in [Data model](data-model.md#product-catalog)); `drafts` comes with PR 4.
+as `using()` does, so no shard awaits another. A column pages in key order. All of them
+exist now (their columns in [Data model](data-model.md#product-catalog)).
 
 ## PRs
 
@@ -63,7 +65,7 @@ exist now (their columns in [Data model](data-model.md#product-catalog)); `draft
 | 1 | Core content model: `packages/core/src/product/content.ts` (`FieldRef`, `fieldId`, `fieldValue`, `applyOverrides`, `editIssues`, `contentGaps`, `GAP_KINDS`), pure, tested in `product-content.test.ts` | Built |
 | 2 | Shard: gap index, keyed feed rejections (a `rejectedKey` R2 object per part, which an older Worker ignores), the board table; RPC `catalogBoard`, `listBoard`, `rebuildGaps`; a channel change has each shard's alarm rebuild its gaps (`markGapsStale`, `GAP_REBUILD_DELAY_MS`). A per-feed gap count (`FeedStatus.gaps`) was left out: the board shows the live total | Built |
 | 3 | Shard: `feed_rows`, `overrides`, `staged` and `revisions`, with `apply` applying overrides over feed rows and indexing `conflict`s (`overrideConflict`); `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet`; the board's Staged and Published columns | Built |
-| 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` | Planned |
+| 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` (which consumes the field's draft); the board's Drafted column and `drafts` counts; drafts on the sheet | Built |
 | 5 | Web API under `/api/v1/catalog` (board, sheet, edits, publish, drafts, gap rebuild) with audit actions and OpenAPI | Planned |
 | 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Planned |
 | 7 | `draft_product_content` (core tool, engine executor through `runJson` with the product in a `dataBlock`, `EngineRpc.draftProductContent`, the web route that saves drafts) | Planned |
