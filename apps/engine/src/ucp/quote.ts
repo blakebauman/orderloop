@@ -224,7 +224,9 @@ export async function quoteCheckout(
  * What the flow's Price lines step charges for one of each SKU on the session's draft order: its
  * customer's contract prices and price rules, in its currency, before promotions, shipping and tax.
  * Run in process as a quote runs it, with the same draft, so a search shows what the quote then
- * charges for a line of one. `atCost` when the step prices at cost (basis `cost`, or `auto` on a
+ * charges for a line of one. Only the Price lines step runs: the one quote step before it
+ * (validate) names and checks lines without pricing them (tests/cart-search.test.ts pins the two
+ * prices together). `atCost` when the step prices at cost (basis `cost`, or `auto` on a
  * buy-side flow), for the caller to decide who may see a cost. Null when the flow has no Price
  * lines step or it can't price now (no exchange rate, say): the search then shows no prices.
  */

@@ -70,6 +70,19 @@ describe('searching products from a cart', () => {
     expect(anon.products[0]).toEqual({ sku: 'WID-100', name: 'Industrial widget', unitPrice: 24 });
   });
 
+  it('shows each product at the unit price the cart’s quote then charges for it', async () => {
+    // Northwind has contract prices on some of these, the price chain prices the rest.
+    const id = await open();
+    const shown = (await page(id, '')).products;
+    expect(shown.length).toBeGreaterThan(5);
+    const agent = env.CART_AGENT.getByName(id);
+    for (const p of shown) await agent.applyAs(ada, { op: 'add', sku: p.sku, qty: 1 });
+    const quote = (await api().cartSnapshot(id))!.cart!.quote!;
+    expect(quote.lines.map((l) => [l.sku, l.unitPrice])).toEqual(
+      shown.map((p) => [p.sku, p.unitPrice]),
+    );
+  });
+
   it('puts a SKU typed exactly first, matches a word as it is typed, and lists by SKU when empty', async () => {
     const id = await open();
     expect((await page(id, 'GSK-010')).products[0]?.sku).toBe('GSK-010');

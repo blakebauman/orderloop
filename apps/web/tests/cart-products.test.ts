@@ -6,7 +6,8 @@ import {
 } from '@orderloop/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const env = { PRINCIPAL_KEY: 'web-test-key' };
+const limit = vi.fn(async (_o: { key: string }) => ({ success: true }));
+const env = { PRINCIPAL_KEY: 'web-test-key', API_LIMIT: { limit } };
 const searchCartProducts = vi.fn();
 const principal = vi.fn(async (_r: Request): Promise<Principal | null> => null);
 
@@ -47,15 +48,16 @@ const get = (q: string | null, headers: Record<string, string> = {}, cartId = 'c
     } as never)
     .then(
       (r) => ({ status: r.init?.status ?? 200, data: r.data, headers: r.init?.headers }),
-      (e: { init?: { status: number }; data?: unknown }) => ({
-        status: e.init?.status,
-        data: e.data,
-        headers: undefined,
-      }),
+      async (e: { init?: { status: number }; data?: unknown } | Response) =>
+        e instanceof Response
+          ? { status: e.status, data: await e.json(), headers: Object.fromEntries(e.headers) }
+          : { status: e.init?.status, data: e.data, headers: undefined },
     );
 
 beforeEach(() => {
   searchCartProducts.mockReset();
+  limit.mockReset();
+  limit.mockResolvedValue({ success: true });
   principal.mockResolvedValue(null);
 });
 
@@ -144,5 +146,28 @@ describe('searching products from a cart', () => {
     const call = searchCartProducts.mock.calls[0]!;
     expect(call).toHaveLength(3);
     expect(call.slice(0, 2)).toEqual(['cart_1', 'w']);
+  });
+
+  it('spends a budget of its own per person, and a buyer’s per cart, refusing past it', async () => {
+    principal.mockResolvedValue(staff);
+    searchCartProducts.mockResolvedValue(found);
+    await get('widget');
+    principal.mockResolvedValue(null);
+    await get('widget', { cookie: await guestCookie() });
+    // Not the /api/v1 key (the person's id alone), so searching never spends the API's budget.
+    expect(limit.mock.calls.map((c) => c[0].key)).toEqual([
+      'cart-search:usr_1',
+      'cart-search:cart_1:guest:b1',
+    ]);
+    searchCartProducts.mockClear();
+    limit.mockResolvedValue({ success: false });
+    const r = await get('widget', { cookie: await guestCookie() });
+    expect(r).toMatchObject({ status: 429, headers: { 'retry-after': '60' } });
+    expect(r.data).toMatchObject({ error: expect.stringMatching(/Too many requests/) });
+    expect(searchCartProducts).not.toHaveBeenCalled();
+    // A stranger is refused before spending anyone's budget.
+    limit.mockClear();
+    expect(await get('widget')).toMatchObject({ status: 401 });
+    expect(limit).not.toHaveBeenCalled();
   });
 });

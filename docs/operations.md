@@ -439,6 +439,18 @@ A deployment holds only that customer's data, so removing it is the erasure:
 
 1. Export what the contract requires first (a D1 export with
    `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
+   D1 can't export a database that has a virtual table (Cloudflare's D1 import and export docs,
+   "Known limitations"), and `products_search` (migration 0058, the products' keyword index) is
+   one. Drop it and its triggers first, in one `wrangler d1 execute orderloop-<id> --remote
+   --command`: `DROP TRIGGER products_search_insert; DROP TRIGGER products_search_update; DROP
+   TRIGGER products_search_delete; DROP TABLE products_search;` (the triggers too, or every write
+   to `products` fails on the missing table). Nothing else depends on it: until it's back, a
+   cart's product search errors and nothing else changes. If the database is kept, recreate it
+   afterwards with `wrangler d1 execute orderloop-<id> --remote --file
+   packages/db/migrations/0058_products_search.sql`, which creates the table and triggers again
+   and rebuilds the index from `products` (`d1_migrations` still lists 0058, so
+   `db:migrate:remote` won't run it). The same `rebuild` repairs an index in doubt at any time:
+   `INSERT INTO products_search(products_search) VALUES('rebuild')`.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>` and `orderloop-plugin-<plugin>-<id>` for each plugin, which removes their Durable
    Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first, and before emptying `orderloop-docs-<id>` remove its [bucket locks](#bucket-locks), `wrangler r2 bucket lock remove orderloop-docs-<id> --name audit-archive` and `--name plugin-bundles` (with `--jurisdiction` as provisioned), since a locked object can't be deleted and so neither can the bucket), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI

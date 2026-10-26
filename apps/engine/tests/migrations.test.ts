@@ -212,7 +212,7 @@ describe('0031_invoices_payment_events', () => {
 });
 
 describe('0058_products_search', () => {
-  it('indexes the products there are, and every write after', async () => {
+  it('indexes the products there are and every write after, and can be rebuilt', async () => {
     const db = testEnv.MIGRATION_DB;
     const { applied, next } = before('0058_');
     await applyD1Migrations(db, applied);
@@ -230,7 +230,25 @@ describe('0058_products_search', () => {
           .bind(q)
           .all<{ sku: string }>()
       ).results.map((r) => r.sku);
+    // FTS5 compares the index with `products` term for term, and throws when they differ.
+    const consistent = () =>
+      db
+        .prepare(
+          "INSERT INTO products_search (products_search, rank) VALUES ('integrity-check', 1)",
+        )
+        .run();
+    // The catalog's upsert (apps/catalog/src/orders.ts), which always sets the name.
+    const upsert = (sku: string, name: string, price: number) =>
+      db
+        .prepare(
+          `INSERT INTO products (sku, name, price, cost) VALUES (?, ?, ?, 0)
+           ON CONFLICT (sku) DO UPDATE SET name = excluded.name, price = excluded.price`,
+        )
+        .bind(sku, name, price)
+        .run();
     expect(await found('"lantern"')).toEqual(['OLD-1']);
+    await consistent();
+
     await db.batch([
       db.prepare(
         "INSERT INTO products (sku, name, price, cost) VALUES ('NEW-1', 'Storm lantern', 12, 5)",
@@ -240,7 +258,28 @@ describe('0058_products_search', () => {
     ]);
     expect(await found('"lantern"')).toEqual(['NEW-1']);
     expect(await found('"kettle"')).toEqual(['OLD-1']);
-    await db.prepare("DELETE FROM products WHERE sku = 'NEW-1'").run();
+    await consistent();
+
+    // A price-only upsert writes the product row and nothing in the index; a rename writes both.
+    const stock = await db.prepare("UPDATE products SET stock = 4 WHERE sku = 'NEW-1'").run();
+    const priceOnly = await upsert('NEW-1', 'Storm lantern', 13);
+    const renamed = await upsert('NEW-1', 'Storm lamp', 13);
+    expect(priceOnly.meta.rows_written).toBe(stock.meta.rows_written);
+    expect(renamed.meta.rows_written).toBeGreaterThan(priceOnly.meta.rows_written);
     expect(await found('"lantern"')).toEqual([]);
+    expect(await found('"lamp"')).toEqual(['NEW-1']);
+    await consistent();
+
+    await db.prepare("DELETE FROM products WHERE sku = 'NEW-1'").run();
+    expect(await found('"lamp"')).toEqual([]);
+    await consistent();
+
+    // Emptied, it no longer matches `products`; a rebuild remakes it from them.
+    await db.prepare("INSERT INTO products_search (products_search) VALUES ('delete-all')").run();
+    expect(await found('"kettle"')).toEqual([]);
+    await expect(consistent()).rejects.toThrow();
+    await db.prepare("INSERT INTO products_search (products_search) VALUES ('rebuild')").run();
+    expect(await found('"kettle"')).toEqual(['OLD-1']);
+    await consistent();
   });
 });

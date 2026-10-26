@@ -2,8 +2,9 @@
  * Finding a product to add to a cart. It searches `products`, the table the cart's quote prices
  * from (the catalog writes its sellable variants there, alongside Order Loop's own rows), so it
  * never offers a product the cart can't price. The words match its keyword index
- * (`products_search`, migration 0058) through core's `ftsQuery`, as the catalog's own search
- * does, so text never reaches FTS5 syntax; a SKU typed exactly comes first.
+ * (`products_search`, migration 0058, which ranks SKU and name as the catalog's search weighs SKUs
+ * and titles) through core's `ftsQuery`, as the catalog's own search does, so text never reaches
+ * FTS5 syntax; a SKU typed exactly comes first.
  *
  * A page shows the unit price the cart's Price lines step charges for one (`unitPrices`), worked
  * out for the cart's customer. A flow that prices at cost shows its buyer none: that would be the
@@ -26,9 +27,6 @@ import { unitPrices } from '../ucp/quote';
 import { cartSnapshot } from './carts';
 import { cartDraftExtra, cartSession } from './session';
 
-/** BM25 column weights: SKU, name, as the catalog's search weighs SKUs against titles. */
-const WEIGHTS = '8.0, 10.0';
-
 type Row = { sku: string; name: string };
 
 const MAX_TYPED = 200;
@@ -46,12 +44,15 @@ async function find(env: Env, q: string, limit: number): Promise<Row[]> {
   const exact = env.DB.prepare('SELECT sku, name FROM products WHERE sku = ?').bind(typed);
   const match = ftsQuery(normalizeQuery(typed));
   if (!match) return (await exact.all<Row>()).results;
-  // Joined on the SKU, so an index row whose product is gone finds nothing.
+  // Ranked (by the weights the migration set) and cut to a page inside FTS5, so only that page
+  // is joined to `products`.
   const [bySku, byWords] = await env.DB.batch<Row>([
     exact,
     env.DB.prepare(
-      `SELECT p.sku, p.name FROM products_search JOIN products p ON p.sku = products_search.sku
-       WHERE products_search MATCH ? ORDER BY bm25(products_search, ${WEIGHTS}), p.sku LIMIT ?`,
+      `SELECT p.sku, p.name FROM (
+         SELECT rowid AS id, rank FROM products_search WHERE products_search MATCH ?
+         ORDER BY rank LIMIT ?
+       ) m JOIN products p ON p.rowid = m.id ORDER BY m.rank, p.sku`,
     ).bind(match, limit + 1),
   ]);
   const seen = new Set<string>();

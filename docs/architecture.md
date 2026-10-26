@@ -1044,8 +1044,11 @@ the rest is in its SQL, paged by `history`).
   (`apps/engine/src/cart/search.ts`) answers only someone who may change the cart while it is open
   and unexpired, with at most `CART_SEARCH_LIMIT` (20) `CartProduct`s (`sku`, `name`, `unitPrice`)
   and `more`. It searches `products`, the table the quote prices from, through the FTS5 index
-  `products_search` (migration 0058, kept by triggers) with core's `ftsQuery`, a SKU typed exactly
-  first; an empty search lists by SKU. `unitPrice` comes from running the flow's `commerce.price`
+  `products_search` (migration 0058, external content kept by triggers) with core's `ftsQuery`,
+  ranked and cut to a page inside FTS5 before it is joined to `products`, a SKU typed exactly
+  first; an empty search lists by SKU. Each caller spends the `API_LIMIT` budget under its own key
+  (`cart-search:<actorId>`, a buyer's `cart-search:<cartId>:<actorId>`), apart from their
+  `/api/v1` one, and is refused with `429` and `retry-after` past it. `unitPrice` comes from running the flow's `commerce.price`
   executor dry on the cart's draft order with one of each result (`unitPrices` in
   `ucp/quote.ts`, the same draft the quote uses: contract prices and price rules, before
   promotions, shipping and tax). A flow that prices at cost shows a guest no prices, and a search
