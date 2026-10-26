@@ -21,6 +21,7 @@ import {
   MAX_CHECKOUT_LINES,
   MAX_LINE_QUANTITY,
 } from './checkout';
+import { MAX_EXTERNAL_CART_MS } from './plugin-host';
 import { atLeast, type Principal, type Role } from './roles';
 
 export const CART_STATUSES = ['open', 'locked', 'submitted', 'returned', 'canceled'] as const;
@@ -58,7 +59,13 @@ export type ExternalCart = {
   pluginId: string;
   /** The plugin's own id for the session (a punchout BuyerCookie, say); unique per plugin. */
   sessionRef: string;
+  /** When it closes if it hasn't gone back; activity moves it on when `idleMs` is set. */
   expiresAt: number;
+  /**
+   * The buyer's idle window (`extendedCartExpiry`), or null for a cart that closes at the time it
+   * opened with (a plugin that didn't set one, or a cart from before carts stayed open).
+   */
+  idleMs: number | null;
   /** Where the cart goes back to: its return is posted here, and nowhere else. */
   returnUrl: string;
   /** Origins that may frame the cart's pages. */
@@ -207,6 +214,39 @@ export const isQuoteCurrent = (c: Pick<Cart, 'quote' | 'quotedVersion' | 'versio
 export const isCartExpired = (c: Pick<Cart, 'external' | 'status'>, now: number) =>
   !isFinalCart(c) && c.external !== null && c.external.expiresAt <= now;
 
+/**
+ * Activity moves an external cart's time on only by at least this much (or to its cap), so a busy
+ * cart writes its new time at most once a minute.
+ */
+export const CART_EXTEND_STEP_MS = 60_000;
+
+/** The latest an external cart can stay open, from when it opened: `MAX_EXTERNAL_CART_MS`. */
+export const externalCartCap = (c: Pick<Cart, 'createdAt'>) => c.createdAt + MAX_EXTERNAL_CART_MS;
+
+/**
+ * When activity at `now` keeps an external cart open until: `idleMs` from now, never past
+ * `externalCartCap`. Null when it doesn't move it: a staff cart, one with a fixed time, one that
+ * has ended or closed (activity never reopens it), or a move of less than `CART_EXTEND_STEP_MS`.
+ */
+export function extendedCartExpiry(
+  c: Pick<Cart, 'external' | 'status' | 'createdAt'>,
+  now: number,
+): number | null {
+  const x = c.external;
+  if (!x?.idleMs || isCartExpired(c, now) || isFinalCart(c)) return null;
+  const cap = externalCartCap(c);
+  const next = Math.min(now + x.idleMs, cap);
+  if (next <= x.expiresAt) return null;
+  return next - x.expiresAt >= CART_EXTEND_STEP_MS || next === cap ? next : null;
+}
+
+/**
+ * The latest an external cart's buyer can need it: its time, or for one that stays open while
+ * they work, its cap. What the buyer's cookie lasts, so it outlives every extension.
+ */
+export const externalCartEnd = (c: Pick<Cart, 'external' | 'createdAt'>): number | null =>
+  !c.external ? null : c.external.idleMs ? externalCartCap(c) : c.external.expiresAt;
+
 /** Whether `actor` may read the cart. A guest sees only an external cart it was admitted to. */
 export function canReadCart(c: Pick<Cart, 'external'>, actor: CartActor): boolean {
   return actor.kind === 'staff' ? atLeast(actor.role, 'viewer') : c.external !== null;
@@ -242,9 +282,10 @@ export function cartShipTo(raw: unknown): Partial<ShipAddress> | null {
   return Object.keys(out).length ? out : null;
 }
 
-/** A stored cart, with what a cart from before ship-to lacks read as unset. */
+/** A stored cart, with what a cart from before ship-to or idle windows lacks read as unset. */
 export const storedCart = (c: Cart): Cart => ({
   ...c,
+  external: c.external ? { ...c.external, idleMs: c.external.idleMs ?? null } : null,
   shipTo: c.shipTo ?? null,
   shippingOption: c.shippingOption ?? null,
 });

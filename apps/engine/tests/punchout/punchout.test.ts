@@ -130,6 +130,11 @@ describe('punchout, end to end', () => {
     const redeemed = await api().redeemCartStart(cartId!, token!);
     expect(redeemed?.guest).toMatchObject({ cartId, name: 'Ann & Co. Buyer' });
     expect(await api().redeemCartStart(cartId!, token!)).toBeNull();
+    // The partner's idle timeout (two hours by default) keeps the cart open while they work,
+    // and their cookie lasts as long as the cart could: a day from when it opened.
+    const opened = (await api().cartSnapshot(cartId!))!.cart!;
+    expect(opened.external?.idleMs).toBe(120 * 60_000);
+    expect(redeemed!.expiresAt).toBe(opened.createdAt + 24 * 3_600_000);
 
     // 3. They fill the cart, priced at Northwind's contract price, and send it back.
     const call = await guestSocket(cartId!, redeemed!.guest);

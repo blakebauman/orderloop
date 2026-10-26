@@ -40,6 +40,8 @@ import {
   ERASED,
   eraseText,
   erasureTerms,
+  extendedCartExpiry,
+  externalCartEnd,
   finishCart,
   isCartExpired,
   isFinalCart,
@@ -153,6 +155,8 @@ export class CartAgent extends Agent<Env, CartState> {
       customerId: c.customerId,
       orderId: c.orderId,
       updatedAt: c.updatedAt,
+      // What the gate admits a buyer by: moved on while they work (`keepOpen`).
+      expiresAt: c.external?.expiresAt ?? null,
       // Who an external cart is for, so a data subject request finds it: '' once erased (indexed,
       // no buyer), null only on a staff cart or an external one not indexed since 0050.
       buyerId: c.external
@@ -168,7 +172,6 @@ export class CartAgent extends Agent<Env, CartState> {
         flowId: c.flowId,
         pluginId: c.external?.pluginId ?? null,
         sessionRef: c.external?.sessionRef ?? null,
-        expiresAt: c.external?.expiresAt ?? null,
         createdBy: c.createdBy,
         createdAt: c.createdAt,
         ...row,
@@ -351,6 +354,12 @@ export class CartAgent extends Agent<Env, CartState> {
   async expire() {
     const c = this.state.cart;
     if (!c || isFinalCart(c) || !c.external) return;
+    // Kept open since this was scheduled (`keepOpen` moves the schedule, so this is a fallback). A
+    // schedule's time is in whole seconds, so it may fire up to one early.
+    if (c.external.expiresAt - Date.now() > 1_000) {
+      await this.scheduleExpiry(c.external.expiresAt);
+      return;
+    }
     // Mid-return: look again shortly, so a failed return can't outlive the cart's time.
     if (this.submitting) {
       await this.schedule(10, 'expire');
@@ -358,6 +367,45 @@ export class CartAgent extends Agent<Env, CartState> {
     }
     await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
     for (const conn of this.getConnections()) conn.close(4410, 'Cart expired');
+  }
+
+  /** The one `expire` schedule, at `at`. */
+  private async scheduleExpiry(at: number) {
+    for (const s of await this.listSchedules())
+      if (s.callback === 'expire') await this.cancelSchedule(s.id);
+    await this.schedule(new Date(at), 'expire');
+  }
+
+  /**
+   * Keeps an external cart open while someone works on it: its buyer or staff connecting to it or
+   * calling it moves its time to its idle window from now (`extendedCartExpiry`: at most once a
+   * minute, never past 24 hours from when it opened), and its expiry with it. Only while the
+   * plugin that opened it may still have carts, so withdrawing that grant leaves the time it had.
+   * Never fails the call it came with: a cart that isn't moved on just closes when it would have.
+   */
+  private async keepOpen() {
+    const c = this.state.cart;
+    if (!c?.external || this.submitting || extendedCartExpiry(c, Date.now()) === null) return;
+    try {
+      if (!(await mayUse(this.env, c.external.pluginId, 'carts:external'))) return;
+      // Read again: the cart may have changed, ended or been moved on while that was checked.
+      const now = this.state.cart;
+      const until = now ? extendedCartExpiry(now, Date.now()) : null;
+      if (!now?.external || until === null || this.submitting) return;
+      // Not a change to the cart: its version (and so its quote) stays as it is.
+      const next: Cart = { ...now, external: { ...now.external, expiresAt: until } };
+      this.setState({ ...this.state, cart: next });
+      await this.scheduleExpiry(until);
+      await this.index(next);
+    } catch (err) {
+      console.warn(`keeping cart ${c.id} open`, err);
+    }
+  }
+
+  /** How long a redeemed start link's buyer is let in for (`externalCartEnd`). */
+  async admittedUntil(): Promise<number | null> {
+    const c = this.state.cart;
+    return c ? externalCartEnd(storedCart(c)) : null;
   }
 
   /** A start link for an open external cart's buyer (else null): works once, within `CART_START_TTL_MS`. */
@@ -670,6 +718,8 @@ export class CartAgent extends Agent<Env, CartState> {
     connection.setState({ principal, guest, member });
     this.syncMembers();
     await this.keepChecking();
+    // The gate let only staff or this cart's buyer this far.
+    if (member) await this.keepOpen();
   }
 
   override async onClose(connection: Connection) {
@@ -747,6 +797,7 @@ export class CartAgent extends Agent<Env, CartState> {
       if (guest.cartId !== c.id || !c.external) throw new Error('This isn’t your cart.');
       if (c.status === 'canceled' || isCartExpired(c, Date.now()))
         throw new Error('This cart has closed.');
+      await this.keepOpen();
       return { kind: 'guest', id: guest.id, name: guest.name };
     }
     const stored = state?.principal ?? null;
@@ -757,6 +808,7 @@ export class CartAgent extends Agent<Env, CartState> {
     }
     const actor: CartActor = { kind: 'staff', id: p.id, name: p.name, role: p.role };
     if (!canReadCart(this.cart(), actor)) throw new Error('This needs the Viewer role.');
+    await this.keepOpen();
     return actor;
   }
 

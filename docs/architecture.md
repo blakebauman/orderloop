@@ -1112,7 +1112,7 @@ the rest is in its SQL, paged by `history`).
 
 A plugin with the `carts:external` capability opens a cart for a buyer outside OrderLoop (a
 punchout session) through the host API ([Plugins](plugins.md#the-host-api)). The cart carries
-`external`: the plugin, its `sessionRef`, `expiresAt` (an alarm cancels it then), the `returnUrl`
+`external`: the plugin, its `sessionRef`, `expiresAt` (an alarm cancels it then), `idleMs`, the `returnUrl`
 it goes back to, the origins that may frame it and the buyer. The plugin gets a one-time start path;
 redeeming it (`CartAgent.redeemStart`, the token kept only as a hash) admits the buyer as a
 `CartGuest`, whose socket header is its own envelope (`signCartGuest` / `verifyCartGuest`, `g1`)
@@ -1121,19 +1121,30 @@ still open (`410` once it was canceled). A guest edits lines (at most 20 changes
 lock, rename, submit or cancel; the cart's chat is shared with them. Guest sockets are checked
 every 30 seconds too, and closed once the cart is canceled, submitted or past its time, or the
 plugin loses its grant. A cart past `expiresAt` takes no start link and admits no guest even before
-its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
+its alarm runs, and an alarm that fires mid-return looks again 10 seconds later. A cart whose plugin set
+`idleMs` stays open while someone works on it: the guest of that cart or staff connecting to its
+socket or calling it (`keepOpen`) moves `expiresAt` to `idleMs` from now (`extendedCartExpiry`:
+only by a minute or more, `CART_EXTEND_STEP_MS`, or the last step to the cap; never past
+`createdAt + MAX_EXTERNAL_CART_MS`, `externalCartCap`; never once it has ended or closed), without
+bumping its version, then moves its one `expire` schedule and writes `carts.expires_at` for the
+gate. It does so only while the plugin keeps `carts:external`, so withdrawing the grant leaves the
+time it had. An `expire` alarm that fires before `expiresAt` schedules itself again. A cart without
+`idleMs` (one opened before it, or by a plugin that doesn't set it; `storedCart` reads it as null)
+closes at the time it opened with. `transfer` (the buyer only) sends the cart back: the core holds it, calls the plugin's
 `renderReturn`, keeps the fields (`returnForm` returns them again) and marks the cart `returned`.
 
 In the web app the start path is the route `/cart/start/:cartId/:token`: it redeems the link
 (`EngineRpc.redeemCartStart`) and sets a cookie for that cart alone (`ol_<cartId>`, the `gs1`
-envelope `signCartGuestSession`, `HttpOnly; Secure; SameSite=None; Partitioned`, until the cart
-expires), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
+envelope `signCartGuestSession`, `HttpOnly; Secure; SameSite=None; Partitioned`, until the latest the cart can stay open,
+`externalCartEnd`: its `expiresAt`, or its cap when it has `idleMs`, so no extension outlives the
+cookie; the cart's own time still decides whether the gate admits it), then goes to `/cart/:cartId`, the cart without staff controls (`CartView` in
 `apps/web/app/components/cart-view.tsx`, shared with the staff page). That page's CSP lets the
 cart's `frameOrigins` frame it and its form post to the cart's `returnUrl` (`EMBED_HEADER`, folded
 in by `entry.server.tsx`; `withSecurityHeaders` then leaves out `X-Frame-Options`). Its socket is
 proxied with the cookie's guest signed for the path (`setGuestHeader`). Sending the cart back
 posts the fields from the page itself, in the same window, with a button if the post doesn't
-start.
+start. While the cart is open the page says when its session ends, and how to keep it open when it
+has `idleMs`; in the last 10 minutes, or at its cap, that turns into a warning (`SessionEnds`).
 
 The return URL goes into `form-action` as its origin and path (`parseEmbed` in
 `apps/web/app/lib/csp.ts`; CSP ignores the query), with `;` `,` and `'` in the path

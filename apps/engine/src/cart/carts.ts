@@ -173,6 +173,7 @@ export async function openExternalCart(
         pluginId,
         sessionRef: input.sessionRef,
         expiresAt: input.expiresAt,
+        idleMs: input.idleMs ?? null,
         returnUrl: input.returnUrl,
         frameOrigins: input.frameOrigins ?? [],
         buyer: { id: input.buyer.id, name: input.buyer.name },
@@ -202,16 +203,22 @@ export async function openExternalCart(
   };
 }
 
-/** The buyer an external cart's start link admits, once (`CartAgent.redeemStart`). */
+/**
+ * The buyer an external cart's start link admits, once (`CartAgent.redeemStart`), and until when:
+ * the latest the cart can stay open (`externalCartEnd`), so their cookie outlasts every extension
+ * of a cart that stays open while they work. The cart's own time still decides when it closes.
+ */
 export async function redeemCartStart(env: Env, cartId: string, token: string) {
   const row = await createDb(env.DB)
-    .select({ pluginId: carts.pluginId, expiresAt: carts.expiresAt })
+    .select({ pluginId: carts.pluginId })
     .from(carts)
     .where(eq(carts.id, cartId))
     .get();
-  if (!row?.pluginId || !row.expiresAt) return null;
-  const guest = await cartAgent(env, cartId).redeemStart(token);
-  return guest ? { guest, expiresAt: row.expiresAt } : null;
+  if (!row?.pluginId) return null;
+  const agent = cartAgent(env, cartId);
+  const guest = await agent.redeemStart(token);
+  const expiresAt = guest ? await agent.admittedUntil() : null;
+  return guest && expiresAt ? { guest, expiresAt } : null;
 }
 
 /** A cart as the plugin that opened it sees it, or null for anyone else's. */

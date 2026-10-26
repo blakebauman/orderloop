@@ -1,10 +1,11 @@
-import { applyD1Migrations, introspectWorkflow } from 'cloudflare:test';
+import { applyD1Migrations, introspectWorkflow, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import type { D1Migration } from '@cloudflare/vitest-plugin';
 import {
   type CartGuest,
   type CartState,
   type ExternalCartInput,
+  MAX_EXTERNAL_CART_MS,
   PRINCIPAL_HEADER,
   signCartGuest,
   subjectTarget,
@@ -489,10 +490,147 @@ describe('an external cart’s buyer', () => {
   it('loses the cart when it expires', async () => {
     const c = await open();
     const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    await atTime(c.cartId, Date.now());
     await cartAgent(c.cartId).expire();
     expect((await api().cartSnapshot(c.cartId))?.cart?.status).toBe('canceled');
     expect((await guestSocket(c.cartId, guest)).status).toBe(410);
     expect(await cartAgent(c.cartId).issueStart()).toBeNull();
+  });
+});
+
+/** Sets the cart's time, as though it opened with it or that much time had passed. */
+const atTime = (cartId: string, expiresAt: number) =>
+  runInDurableObject(cartAgent(cartId), async (a) => {
+    const c = a.state.cart!;
+    a.setState({ ...a.state, cart: { ...c, external: { ...c.external!, expiresAt } } });
+  });
+
+/** The cart's time, as its agent, the D1 row the gate reads and its expiry schedule have it. */
+async function timeOf(cartId: string) {
+  const cart = (await api().cartSnapshot(cartId))!.cart!;
+  const row = await db().select().from(carts).where(eq(carts.id, cartId)).get();
+  const schedules = await runInDurableObject(cartAgent(cartId), (a) => a.listSchedules());
+  return {
+    cart,
+    expiresAt: cart.external!.expiresAt,
+    indexed: row!.expiresAt,
+    alarms: schedules.filter((s) => s.callback === 'expire').map((s) => s.time),
+  };
+}
+
+describe('an external cart that stays open while its buyer works', () => {
+  const H = 3_600_000;
+
+  it('moves its time on when its buyer connects or edits, at most once a minute', async () => {
+    const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 2 * H });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const before = Date.now();
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    const moved = await timeOf(c.cartId);
+    expect(moved.expiresAt).toBeGreaterThanOrEqual(before + 2 * H);
+    expect(moved.expiresAt).toBeLessThanOrEqual(Date.now() + 2 * H);
+    // The gate and the alarm go by the same time, and the old alarm is gone.
+    expect(moved.indexed).toBe(moved.expiresAt);
+    expect(moved.alarms).toEqual([Math.floor(moved.expiresAt / 1000)]);
+    // An edit straight after moves nothing, and isn't a change to the cart's time.
+    const version = moved.cart.version;
+    expect((await ws.call('apply', [{ op: 'add', sku: 'WID-100', qty: 1 }])).result).toEqual({
+      ok: true,
+    });
+    const again = await timeOf(c.cartId);
+    expect(again.expiresAt).toBe(moved.expiresAt);
+    expect(again.cart.version).toBe(version + 1);
+
+    // Once the window has run down a minute or more, the next edit moves it again.
+    await atTime(c.cartId, Date.now() + 30 * 60_000);
+    const t = Date.now();
+    expect((await ws.call('say', ['Still here'])).result).toMatchObject({ ok: true });
+    const later = await timeOf(c.cartId);
+    expect(later.expiresAt).toBeGreaterThanOrEqual(t + 2 * H);
+    expect(later.alarms).toEqual([Math.floor(later.expiresAt / 1000)]);
+  });
+
+  it('never stays open past 24 hours from when it opened, and lets its buyer in for that long', async () => {
+    const c = await open({ expiresAt: Date.now() + H, idleMs: MAX_EXTERNAL_CART_MS });
+    const redeemed = (await api().redeemCartStart(c.cartId, c.token))!;
+    const { cart } = await timeOf(c.cartId);
+    const cap = cart.createdAt + MAX_EXTERNAL_CART_MS;
+    // The buyer's cookie covers every extension, and no more.
+    expect(redeemed.expiresAt).toBe(cap);
+    const ws = await guestSocket(c.cartId, redeemed.guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    expect((await timeOf(c.cartId)).expiresAt).toBe(cap);
+    expect((await ws.call('whoami')).result).toMatchObject({ kind: 'guest' });
+    expect((await timeOf(c.cartId)).expiresAt).toBe(cap);
+  });
+
+  it('keeps the time a cart opened with when it has no idle window', async () => {
+    const expiresAt = Date.now() + 10 * 60_000;
+    const c = await open({ expiresAt });
+    const redeemed = (await api().redeemCartStart(c.cartId, c.token))!;
+    expect(redeemed.expiresAt).toBe(expiresAt);
+    const ws = await guestSocket(c.cartId, redeemed.guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    await ws.call('apply', [{ op: 'add', sku: 'WID-100', qty: 1 }]);
+    const t = await timeOf(c.cartId);
+    expect(t.expiresAt).toBe(expiresAt);
+    expect(t.indexed).toBe(expiresAt);
+    expect(t.alarms).toEqual([Math.floor(expiresAt / 1000)]);
+    // Nor does a cart stored before idle windows, which has none at all.
+    const old = await open({ expiresAt, idleMs: 2 * H });
+    await runInDurableObject(cartAgent(old.cartId), async (a) => {
+      const { idleMs: _, ...external } = a.state.cart!.external!;
+      a.setState({ ...a.state, cart: { ...a.state.cart!, external: external as never } });
+    });
+    const guest = (await cartAgent(old.cartId).redeemStart(old.token))!;
+    const ows = await guestSocket(old.cartId, guest);
+    if (!ows.call) throw new Error(`socket refused: ${ows.status}`);
+    await ows.call('whoami');
+    expect((await timeOf(old.cartId)).expiresAt).toBe(expiresAt);
+  });
+
+  it('is moved on only by its own buyer, and not once the plugin may no longer have carts', async () => {
+    const expiresAt = Date.now() + 10 * 60_000;
+    const mine = await open({ expiresAt, idleMs: 2 * H });
+    const theirs = await open({ expiresAt, idleMs: 2 * H });
+    const guest = (await cartAgent(mine.cartId).redeemStart(mine.token))!;
+    // Signed for one cart, refused at the other's gate, which keeps its time.
+    expect(
+      (await guestSocket(theirs.cartId, guest, `/agents/cart-agent/${theirs.cartId}`)).status,
+    ).toBe(401);
+    expect((await timeOf(theirs.cartId)).expiresAt).toBe(expiresAt);
+
+    const grants = (env as { PLUGIN_GRANTS?: string }).PLUGIN_GRANTS;
+    const withdrawn = JSON.stringify({ example: { capabilities: ['orders:start'] } });
+    await runInDurableObject(cartAgent(mine.cartId), async (a) => {
+      (a as unknown as { env: { PLUGIN_GRANTS?: string } }).env.PLUGIN_GRANTS = withdrawn;
+    });
+    try {
+      await guestSocket(mine.cartId, guest);
+      expect((await timeOf(mine.cartId)).expiresAt).toBe(expiresAt);
+    } finally {
+      await runInDurableObject(cartAgent(mine.cartId), async (a) => {
+        (a as unknown as { env: { PLUGIN_GRANTS?: string } }).env.PLUGIN_GRANTS = grants;
+      });
+    }
+  });
+
+  it('closes at its time even after an expiry alarm from before it was moved on', async () => {
+    const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 2 * H });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    await guestSocket(c.cartId, guest);
+    const { expiresAt } = await timeOf(c.cartId);
+    // An alarm that fires before the cart's time reschedules for it, and cancels nothing.
+    await cartAgent(c.cartId).expire();
+    const t = await timeOf(c.cartId);
+    expect(t.cart.status).toBe('open');
+    expect(t.alarms).toEqual([Math.floor(expiresAt / 1000)]);
+    await atTime(c.cartId, Date.now());
+    await cartAgent(c.cartId).expire();
+    expect((await timeOf(c.cartId)).cart.status).toBe('canceled');
+    // Activity on a closed cart doesn't bring it back.
+    expect((await guestSocket(c.cartId, guest)).status).toBe(410);
   });
 });
 

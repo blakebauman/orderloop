@@ -32,7 +32,9 @@ On the **Punchout** page, add one partner per customer system:
 - **Return hosts**: the host names their system may receive carts on (for example
   `service.ariba.com`). OrderLoop sends a cart back only to an https URL on one of these hosts.
 - **Frame origins** (optional): origins allowed to show the catalog inside their system's page.
-- **Session minutes**: how long a cart stays open if the buyer never sends it back (at most 24 hours).
+- **Idle timeout**: how long a cart stays open after the buyer stops working on it (5 minutes to
+  24 hours). While they add lines, chat or have it open again, the session keeps going, up to 24
+  hours from when it started; the cart page tells them when it ends and warns them near the end.
 
 Adding the partner shows its **secret once**: give it to the customer's procurement admin as the
 cXML `SharedSecret` (or the OCI `PASSWORD`). **Rotate secret** issues a new one and the old one

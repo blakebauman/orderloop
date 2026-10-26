@@ -350,8 +350,9 @@ export interface EngineRpc {
     by: string,
   ): Promise<Refusable<PluginCaseResult[]>>;
   /**
-   * Redeems an external cart's one-time start link: the buyer it admits and when the cart closes,
-   * or null for a link that is unknown, used or expired, or a cart that has ended.
+   * Redeems an external cart's one-time start link: the buyer it admits and until when (the latest
+   * the cart can stay open, `externalCartEnd`), or null for a link that is unknown, used or
+   * expired, or a cart that has ended.
    */
   redeemCartStart(
     cartId: string,

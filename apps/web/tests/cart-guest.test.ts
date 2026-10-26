@@ -146,6 +146,7 @@ const external = {
   pluginId: 'punchout',
   sessionRef: 's1',
   expiresAt: Date.now() + 60_000,
+  idleMs: null,
   returnUrl: 'https://buyer.example/punchout;jsessionid=A',
   frameOrigins: ['https://buyer.example'],
   buyer: { id: 'b1', name: 'Pat Buyer' },

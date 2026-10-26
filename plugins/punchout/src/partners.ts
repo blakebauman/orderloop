@@ -19,6 +19,7 @@ export type Partner = {
   model: string;
   returnHosts: string[];
   frameOrigins: string[];
+  /** The partner's idle timeout: a cart closes this long after its buyer stops working on it. */
   sessionMinutes: number;
   status: 'active' | 'disabled';
 };

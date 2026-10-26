@@ -737,6 +737,7 @@ describe('staff carts over EngineApi (the REST API)', () => {
         pluginId: 'example',
         sessionRef: `s-${Date.now()}`,
         expiresAt: Date.now() + 3_600_000,
+        idleMs: null,
         returnUrl: 'https://buyer.example/return',
         frameOrigins: [],
         buyer: { id: 'buyer@example.com', name: 'Buyer' },

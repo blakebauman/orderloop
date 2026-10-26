@@ -20,6 +20,7 @@ import {
   type CheckoutQuote,
   cartReadyProblem,
   cartShippingOption,
+  externalCartCap,
   isFinalCart,
   isQuoteCurrent,
   MAX_CHAT_BODY,
@@ -40,6 +41,7 @@ import {
 } from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useAgent } from 'agents/react';
@@ -48,7 +50,9 @@ import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
-import { money } from '~/lib/format';
+import { money, until } from '~/lib/format';
+import { useDateTime } from '~/lib/use-date-time';
+import { useNow } from '~/lib/use-now';
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -217,6 +221,7 @@ export function CartView({
       />
       <Body className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="grid min-w-0 content-start gap-4">
+          {cart.external && !final ? <SessionEnds cart={cart} guest={guest} /> : null}
           {error ? (
             <p role="alert" className="rounded-md border border-bad/40 px-3 py-2 text-bad text-sm">
               {error}
@@ -436,6 +441,42 @@ export function CartView({
         </div>
       </Body>
     </>
+  );
+}
+
+/** When the hint turns into a warning. */
+const SESSION_WARN_MS = 10 * 60_000;
+
+/**
+ * When an external cart's session ends. One whose plugin set an idle window stays open while
+ * anyone works on it (the agent moves its time on, and the new time arrives with the cart), so
+ * the buyer is told how to keep it; near the end, or at its cap, it's a warning.
+ */
+function SessionEnds({ cart, guest }: { cart: NonNullable<CartState['cart']>; guest: boolean }) {
+  const now = useNow(30_000);
+  const formatTime = useDateTime();
+  const x = cart.external!;
+  const at = formatTime(x.expiresAt);
+  const near = x.expiresAt - now < SESSION_WARN_MS;
+  const slides = !!x.idleMs && x.expiresAt < externalCartCap(cart);
+  const text = !guest
+    ? `The buyer’s session ends ${at}${slides ? ' unless they keep working on the cart' : ''}.`
+    : !near && slides
+      ? `Your session stays open while you work on the cart. If you step away, it ends ${at}.`
+      : near && slides
+        ? `Your session ends ${at} (${until(x.expiresAt, now)}). Make a change to keep it open, or return the cart to your system.`
+        : `Your session ends ${at}${near ? ` (${until(x.expiresAt, now)})` : ''}. Return the cart to your system before then.`;
+  return (
+    <p
+      role={guest && near ? 'status' : undefined}
+      className={cn(
+        'text-muted-foreground text-sm',
+        near && 'rounded-md border border-wait/40 px-3 py-2 font-medium text-wait',
+      )}
+      suppressHydrationWarning
+    >
+      {text}
+    </p>
   );
 }
 

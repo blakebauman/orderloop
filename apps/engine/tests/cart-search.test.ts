@@ -22,6 +22,7 @@ const external = (): ExternalCart => ({
   pluginId: 'example',
   sessionRef: `s-${crypto.randomUUID()}`,
   expiresAt: Date.now() + 3_600_000,
+  idleMs: null,
   returnUrl: 'https://buyer.example/return',
   frameOrigins: [],
   buyer: { id: 'buyer@example.com', name: 'Buyer' },
