@@ -191,7 +191,9 @@ describe('refused rows on the board', () => {
   it('clears a key that only had refused rows when it is deleted', async () => {
     const a = product();
     const b = product({ variants: [{ sku: a.variants[0]?.sku ?? '', attributes: { size: 'S' } }] });
-    await api.putProducts([a, b], { by });
+    // One after the other: in one call they claim the SKU at once, and either can win.
+    await api.putProducts([a], { by });
+    expect((await api.putProducts([b], { by }))[0]?.status).toBe('rejected');
     expect(await card(b.key)).toBeDefined();
     await api.deleteProducts([b.key], { by });
     expect(await card(b.key)).toBeUndefined();
