@@ -50,3 +50,15 @@ test('Account offers the Home Screen on an iPhone or iPad, until dismissed', asy
   await expect(page.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
   await expect(hint).toHaveCount(0);
 });
+
+test('G then a letter goes to a page, and ? lists the shortcuts', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'a hardware keyboard');
+  await open(page, '/flows');
+  await page.locator('main h1').click();
+  await page.keyboard.press('g');
+  await page.keyboard.press('a');
+  await expect(page).toHaveURL(/\/approvals$/);
+  await page.locator('main h1').click();
+  await page.keyboard.press('Shift+?');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+});

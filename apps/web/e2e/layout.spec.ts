@@ -73,3 +73,25 @@ test('fields are 16px on touch screens, so iOS does not zoom into them', async (
     expect(small, path).toEqual([]);
   }
 });
+
+test('at double text size the top bar folds links into More rather than overlapping', async ({
+  page,
+}, info) => {
+  test.skip(isPhone(info), 'phones have the tab bar');
+  await open(page, '/orders');
+  await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+  const more = page.locator('header nav > button');
+  await expect(more).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const box = document.querySelector('header nav > button')!.getBoundingClientRect();
+        const actions = [...document.querySelectorAll('header > div > div:last-child > *')]
+          .map((el) => el.getBoundingClientRect())
+          .filter((r) => r.width > 0);
+        const overlaps = actions.some((r) => r.left < box.right - 0.5);
+        return { overlaps, sideways: document.documentElement.scrollWidth > window.innerWidth };
+      }),
+    )
+    .toEqual({ overlaps: false, sideways: false });
+});
