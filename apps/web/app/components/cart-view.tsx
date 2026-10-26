@@ -9,6 +9,7 @@ import {
   ATTACHMENT_TYPES,
   attachmentProblem,
   CART_CHAT_BROADCAST,
+  type Cart,
   type CartAttachment,
   type CartChatMessage,
   type CartOp,
@@ -46,6 +47,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
+import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
 import { money } from '~/lib/format';
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -73,15 +75,21 @@ export function CartView({
   const [state, setState] = useState<CartState>(snapshot);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [ticks, setTicks] = useState<CartTicks>(NO_TICKS);
   const cart = state.cart!;
+  const editableAs = (c: Cart) => (guest || canOperate) && c.status === 'open';
 
   const agent = useAgent<CartState>({
     agent: 'cart-agent',
     name: cart.id,
     // The buyer connects as the guest of this cart, whatever else this browser is signed in as.
     ...(guest ? { query: { as: 'guest' } } : {}),
-    onStateUpdate: (s) => setState(s),
+    onStateUpdate: (s) => {
+      setState(s);
+      // Against each state as it arrives, so a line removed and added again (taking the same id)
+      // is seen gone in between and comes back unticked.
+      if (s.cart) setTicks((t) => keepTicks(t, s.cart!.lines, editableAs(s.cart!)));
+    },
   });
 
   /** Calls the agent; a refusal (or a dropped socket) shows above the lines. */
@@ -105,20 +113,12 @@ export function CartView({
   const apply = (op: CartOp) => call<Result>('apply', [op]);
 
   const final = isFinalCart(cart);
-  const editable = (guest || canOperate) && cart.status === 'open';
+  const editable = editableAs(cart);
   const priced = isQuoteCurrent(cart);
   const ready = cartReadyProblem(cart);
   const q = cart.quote;
   const currency = q?.currency ?? 'USD';
-  // Read through the cart's lines, so a line someone else removed drops out of the selection.
-  const chosen = editable ? cart.lines.filter((l) => picked.has(l.id)) : [];
-  const pick = (id: string, on: boolean) =>
-    setPicked((p) => {
-      const next = new Set(p);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  const chosen = editable ? ticked(ticks, cart.lines) : [];
 
   return (
     <>
@@ -226,15 +226,28 @@ export function CartView({
             {editable && cart.lines.length ? (
               <BulkLines
                 chosen={chosen.length}
+                gone={ticks.gone}
                 total={cart.lines.length}
                 busy={busy}
-                onAll={(on) => setPicked(new Set(on ? cart.lines.map((l) => l.id) : []))}
-                onSetQty={(qty) =>
-                  apply({ op: 'set_qtys', lines: chosen.map((l) => ({ lineId: l.id, qty })) })
-                }
+                onAll={(on) => setTicks(tickAll(cart.lines, on))}
+                onSetQty={async (qty) => {
+                  // All or none, as the cart applies it: a ticked line gone since refuses the
+                  // lot here, since its id may already name a line added after it.
+                  if (ticks.gone) {
+                    setError('A line you chose is gone.');
+                    setTicks({ ...ticks, gone: 0 });
+                    return null;
+                  }
+                  const r = await apply({
+                    op: 'set_qtys',
+                    lines: chosen.map((l) => ({ lineId: l.id, qty })),
+                  });
+                  if (r?.ok && qty === 0) setTicks(NO_TICKS);
+                  return r;
+                }}
                 onRemove={async () => {
                   const r = await apply({ op: 'remove', lineIds: chosen.map((l) => l.id) });
-                  if (r?.ok) setPicked(new Set());
+                  if (r?.ok) setTicks(NO_TICKS);
                 }}
               />
             ) : null}
@@ -266,8 +279,10 @@ export function CartView({
                               <label className="hit-area mt-0.5 inline-flex shrink-0">
                                 <input
                                   type="checkbox"
-                                  checked={picked.has(l.id)}
-                                  onChange={(e) => pick(l.id, e.currentTarget.checked)}
+                                  checked={ticks.picked.get(l.id) === l.sku}
+                                  onChange={(e) =>
+                                    setTicks(tick(ticks, l, e.currentTarget.checked))
+                                  }
                                   className="relative z-[1] size-4 accent-primary"
                                 />
                                 <span className="sr-only">Select {l.sku}</span>
@@ -438,6 +453,7 @@ const STATUS_TEXT: Record<CartStatus, string> = {
  */
 function BulkLines({
   chosen,
+  gone,
   total,
   busy,
   onAll,
@@ -445,6 +461,8 @@ function BulkLines({
   onRemove,
 }: {
   chosen: number;
+  /** Ticked lines someone else has removed since: Set quantity refuses until the person chooses again. */
+  gone: number;
   total: number;
   busy: boolean;
   onAll: (on: boolean) => void;
@@ -460,7 +478,10 @@ function BulkLines({
   const n = Number(qty);
   const valid = qty.trim() !== '' && Number.isInteger(n) && n >= 0 && n <= MAX_LINE_QUANTITY;
   return (
-    <div className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm">
+    <fieldset
+      aria-label="Selected lines"
+      className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm"
+    >
       <label className="hit-area inline-flex cursor-pointer items-center gap-2.5">
         <input
           ref={all}
@@ -473,6 +494,12 @@ function BulkLines({
       </label>
       <span className="text-muted-foreground" aria-live="polite">
         {chosen ? `${chosen} of ${total} selected` : null}
+        {gone ? (
+          <span className="text-bad">
+            {chosen ? ' · ' : null}
+            {gone === 1 ? 'A line you chose is gone' : `${gone} lines you chose are gone`}
+          </span>
+        ) : null}
       </span>
       {chosen ? (
         <>
@@ -498,10 +525,12 @@ function BulkLines({
               size="sm"
               variant="outline"
               disabled={busy || !valid}
-              title={n === 0 && valid ? 'A quantity of 0 removes them' : undefined}
               className="hit-area"
             >
-              Set quantity
+              {/* 0 takes the lines off: the button says so, where a thumb sees it (no tooltip). */}
+              {valid && n === 0
+                ? `Set 0, removing ${chosen === 1 ? 'the line' : `${chosen} lines`}`
+                : 'Set quantity'}
             </Button>
           </form>
           <Button
@@ -512,13 +541,15 @@ function BulkLines({
             onClick={() => void onRemove()}
             className="hit-area sm:ml-auto"
           >
-            Remove {chosen === 1 ? 'line' : `${chosen} lines`}
+            {removeLabel(chosen)}
           </Button>
         </>
       ) : null}
-    </div>
+    </fieldset>
   );
 }
+
+const removeLabel = (n: number) => (n === 1 ? 'Remove line' : `Remove ${n} lines`);
 
 /** A quantity that is sent when it changes and the field loses focus or Enter is pressed. */
 function QtyInput({

@@ -134,13 +134,42 @@ test('a cart sets the quantity of several lines at once, and removes them', asyn
     const qty = page.getByRole('textbox', { name: 'Quantity for the selected lines' });
     const size = await qty.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
     expect(size).toBeGreaterThanOrEqual(16);
+    const bulk = await tapTargets(page, '[aria-label="Selected lines"] button');
+    expect(bulk.map((t) => t.name)).toEqual(['Set quantity', 'Remove 2 lines']);
+    expect(bulk.filter((t) => t.height < 44)).toEqual([]);
   }
-  await page.getByRole('checkbox', { name: 'Select GSK-010' }).uncheck();
+  const bulkQty = page.getByRole('textbox', { name: 'Quantity for the selected lines' });
+  // 0 takes the lines off, and the button says so.
+  await bulkQty.fill('0');
+  await expect(page.getByRole('button', { name: 'Set 0, removing 2 lines' })).toBeVisible();
+  await bulkQty.fill('');
+
+  // A ticked line removed and added again (it takes the same id) comes back unticked, and Set
+  // quantity refuses rather than setting only the lines that are left.
+  await page.getByRole('button', { name: 'Remove GSK-010' }).click();
+  await expect(page.getByText('A line you chose is gone')).toBeVisible();
+  await page.getByLabel('Or add by SKU').fill('GSK-010');
+  await page.getByRole('button', { name: 'Add line' }).click();
+  await expect(page.getByRole('textbox', { name: 'Quantity of GSK-010', exact: true })).toHaveValue(
+    '1',
+  );
+  await expect(page.getByLabel('Or add by SKU')).toHaveValue('');
+  await expect(page.getByRole('checkbox', { name: 'Select GSK-010' })).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Select WID-100' })).toBeChecked();
+  await expect(page.getByText('1 of 2 selected')).toBeVisible();
+  await bulkQty.fill('7');
+  await page.getByRole('button', { name: 'Set quantity' }).click();
+  await expect(page.getByRole('alert')).toHaveText('A line you chose is gone.');
+  await expect(page.getByRole('textbox', { name: 'Quantity of WID-100', exact: true })).toHaveValue(
+    '5',
+  );
+
+  // Told once; the choice as it stands now goes through.
   await page.getByRole('button', { name: 'Remove line', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Quantity of WID-100', exact: true })).toHaveCount(
     0,
   );
   await expect(page.getByRole('textbox', { name: 'Quantity of GSK-010', exact: true })).toHaveValue(
-    '5',
+    '1',
   );
 });

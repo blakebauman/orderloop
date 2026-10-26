@@ -329,7 +329,9 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
         qtys.set(e.lineId, e.qty);
       }
       // All or none: a line someone else removed meanwhile refuses the lot, rather than setting
-      // the rest as if the person had chosen only those.
+      // the rest as if the person had chosen only those. Ids only: a removed line's id goes to the
+      // next line added, so the cart's page also drops a tick once it sees its line gone
+      // (`apps/web/app/lib/cart-ticks.ts`).
       if ([...qtys.keys()].some((id) => !cart.lines.some((l) => l.id === id)))
         return fail('A line you chose is gone.');
       const lines = cart.lines

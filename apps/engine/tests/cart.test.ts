@@ -527,7 +527,9 @@ describe('the cart socket', () => {
       changed.filter((s) => s.cart!.quote && s.cart!.quotedVersion === s.cart!.version),
     ).toHaveLength(1);
 
-    // A line gone meanwhile refuses every change, and the cart stays as it was.
+    // A line gone meanwhile refuses every change, and the cart stays as it was. A cart reuses a
+    // removed line's id for the next line added, so this holds only while nothing has taken it.
+    expect(after.lines.map((l) => l.id)).not.toContain(gsk!.id);
     expect(
       (
         await op.call('apply', [
@@ -541,7 +543,9 @@ describe('the cart socket', () => {
         ])
       ).result,
     ).toEqual({ ok: false, error: 'A line you chose is gone.' });
-    expect((await state(id)).cart).toMatchObject({ version: after.version, lines: after.lines });
+    const refused = (await state(id)).cart!;
+    expect(refused.version).toBe(after.version);
+    expect(refused.lines.map((l) => [l.sku, l.qty])).toEqual([['WID-100', 10]]);
     op.close();
   });
 
