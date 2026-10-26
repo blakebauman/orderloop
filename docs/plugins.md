@@ -444,8 +444,8 @@ takes effect at once and a runtime install of the same id never inherits it.
 [Punchout guide](https://docs.orderloop.app/guides/punchout/). Each version of a PO it acted on is a
 `purchase_orders` row, numbered per partner and orderID. A change claims the next version (a unique
 `(partner_id, order_ref, version)`) before it acts, so of two changes sent at once only one acts on
-the version before and the other is told to send again (cXML `409`). An `update` first asks
-`orderStatus` of the order it replaces and is refused (`409`) when that has ended, so no replacement
+the version before and the other is told to send again (cXML `409`). A newly claimed `update` first
+asks `orderStatus` of the order it replaces and is refused (`409`) when that has ended, so no replacement
 starts; otherwise it starts the changed order before it cancels the one it replaces (and withdraws
 the new one when that ended after the check and can't be cancelled), so a change the core refuses leaves the PO's order running; a claim whose action failed
 is deleted, and one that stopped part way is finished by its own resend. A PO whose latest version

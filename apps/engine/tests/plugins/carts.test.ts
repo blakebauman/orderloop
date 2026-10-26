@@ -300,6 +300,12 @@ describe('the plugin host API', () => {
       }),
     ).toEqual(refused);
     expect((await api().snapshot(started.orderId))?.status).not.toBe('cancelled');
+    // It reads the order it started; one that may not start orders reads none.
+    expect(await host.orderStatus({ key })).toMatchObject({ ok: true, orderId: started.orderId });
+    expect(await startOnly(['carts:external'], ['carts:external']).orderStatus({ key })).toEqual({
+      ok: false,
+      error: 'This plugin may not start orders here.',
+    });
     // With both, the same call cancels it.
     expect(await hostFor('example').cancelOrder({ key, reason: 'Buyer withdrew the PO' })).toEqual({
       ok: true,

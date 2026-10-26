@@ -154,6 +154,9 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
   if (mine?.order_id) return xml(statusResponse(HOST, 200, 'OK', mine.order_id));
   if (mine && (mine.order_ref !== po.orderId || mine.type !== po.type))
     return refuse(409, `payloadID ${po.payloadId} was already sent for another change`);
+  // Whether this request claimed its version, rather than resending one whose first try stopped
+  // part way (which may already have started its replacement and cancelled the order before).
+  let fresh = false;
   if (!mine) {
     // The latest version of this orderID, which an update or delete changes.
     const latest = await db
@@ -184,6 +187,7 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
       .run();
     if (!claimed.meta.changes) return busy();
     mine = { key, order_ref: po.orderId, version, type: po.type, order_id: null };
+    fresh = true;
   }
   const before =
     mine.version > 1
@@ -220,10 +224,12 @@ async function cxmlOrder(request: Request, env: Env): Promise<Response> {
   }
 
   // An update to an order that has already ended is refused before a replacement starts, so the
-  // buyer's system never sees two orders for one PO. One that ends after this check is still
-  // caught below, when it can't be cancelled.
-  if (po.type === 'update' && before?.order_id) {
-    const now = await host(env).orderStatus({ key: before.key });
+  // buyer's system never sees two orders for one PO. One that ends after this check, or a resend
+  // whose first try got further, is still caught below, when it can't be cancelled.
+  if (fresh && po.type === 'update' && before?.order_id) {
+    const now = await host(env)
+      .orderStatus({ key: before.key })
+      .catch(() => ({ ok: false as const }));
     if (now.ok && now.ended) {
       await release();
       return ended();

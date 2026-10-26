@@ -349,6 +349,45 @@ describe('changing and cancelling a purchase order', () => {
     expect((await versions()).map((v) => v.type)).toEqual(['new']);
   });
 
+  it('finishes a resent update whose first try started its order and cancelled the one before', async () => {
+    const secret = await partner();
+    await send(po(secret, 'new', 'n1@b'));
+    const partnerId = (await versions())[0]!.key.split(':')[1];
+    const key = `cxml:${partnerId}:u1@b`;
+    // The first try claimed version 2, started its order and cancelled the first, then stopped.
+    await env.DB.prepare(
+      "INSERT INTO purchase_orders (key, partner_id, order_ref, version, type, order_id, created_at) VALUES (?, ?, 'PO-7781', 2, 'update', NULL, 0)",
+    )
+      .bind(key, partnerId)
+      .run();
+    host.started.push({ key } as never);
+    host.cancelled.push(host.started[0]!.key);
+    expect(await statusText(await send(po(secret, 'update', 'u1@b', 7)))).toEqual({
+      code: '200',
+      body: 'ord_2',
+    });
+    expect(host.started).toHaveLength(2);
+    expect((await versions()).map((v) => v.order_id)).toEqual(['ord_1', 'ord_2']);
+  });
+
+  it('withdraws a resent update’s order when the one before ended in between', async () => {
+    const secret = await partner();
+    await send(po(secret, 'new', 'n1@b'));
+    const partnerId = (await versions())[0]!.key.split(':')[1];
+    const key = `cxml:${partnerId}:u1@b`;
+    // The first try started its order and stopped; the order before then completed.
+    await env.DB.prepare(
+      "INSERT INTO purchase_orders (key, partner_id, order_ref, version, type, order_id, created_at) VALUES (?, ?, 'PO-7781', 2, 'update', NULL, 0)",
+    )
+      .bind(key, partnerId)
+      .run();
+    host.started.push({ key } as never);
+    host.finished.add(host.started[0]!.key);
+    expect((await statusText(await send(po(secret, 'update', 'u1@b', 7)))).code).toBe('409');
+    expect(host.cancelled).toEqual([key]);
+    expect((await versions()).map((v) => v.type)).toEqual(['new']);
+  });
+
   it('keeps the order running when the core refuses the change', async () => {
     const secret = await partner();
     await send(po(secret, 'new', 'n1@b'));
