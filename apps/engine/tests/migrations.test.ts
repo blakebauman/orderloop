@@ -210,3 +210,37 @@ describe('0031_invoices_payment_events', () => {
     await expect(event(1)).rejects.toThrow(/UNIQUE|PRIMARY/);
   });
 });
+
+describe('0058_products_search', () => {
+  it('indexes the products there are, and every write after', async () => {
+    const db = testEnv.MIGRATION_DB;
+    const { applied, next } = before('0058_');
+    await applyD1Migrations(db, applied);
+    await db
+      .prepare(
+        "INSERT INTO products (sku, name, price, cost) VALUES ('OLD-1', 'Brass lantern', 9, 4)",
+      )
+      .run();
+    await applyD1Migrations(db, [next]);
+
+    const found = async (q: string) =>
+      (
+        await db
+          .prepare('SELECT sku FROM products_search WHERE products_search MATCH ? ORDER BY sku')
+          .bind(q)
+          .all<{ sku: string }>()
+      ).results.map((r) => r.sku);
+    expect(await found('"lantern"')).toEqual(['OLD-1']);
+    await db.batch([
+      db.prepare(
+        "INSERT INTO products (sku, name, price, cost) VALUES ('NEW-1', 'Storm lantern', 12, 5)",
+      ),
+      db.prepare("UPDATE products SET name = 'Brass kettle' WHERE sku = 'OLD-1'"),
+      db.prepare("UPDATE products SET stock = 3 WHERE sku = 'NEW-1'"),
+    ]);
+    expect(await found('"lantern"')).toEqual(['NEW-1']);
+    expect(await found('"kettle"')).toEqual(['OLD-1']);
+    await db.prepare("DELETE FROM products WHERE sku = 'NEW-1'").run();
+    expect(await found('"lantern"')).toEqual([]);
+  });
+});

@@ -52,7 +52,7 @@ inbound mail ── Email Routing ──email()───────────
 | `startOrder(input)` | Inserts the order row, initialises its `OrderAgent`, creates generation 1 of `OrderLoop`. Honours `idempotencyKey` |
 | `startOrderOnce(input)` | Starts an order at most once per idempotency key (`POST /api/v1/orders` with an `Idempotency-Key`, signed inbound orders and email intake use it); a replay returns the existing order, or `{ mismatch: true }` for a different request |
 | `sendEvent(orderId, event, payload?)` | Delivers a business event to the node waiting for it; returns `{ delivered, nodeId? }`, with `notFound` for an unknown order |
-| `decide(orderId, nodeId, decision, actor, note?)` | Approves or rejects the approval a node waits on. `actor` is a staff `RpcActor` the web app signed for `decide:<orderId>` (`signRpcActor`, the `a1` envelope under `PRINCIPAL_KEY`, 60 seconds; `signedActor` in `principal.server.ts`): its name is what the record carries, its id the principal checked against `orders.started_by` when the workspace's `approval_separation` is `on`. Returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `not_waiting`, `forbidden` for an actor not signed for this call, or `own_order`, with the refusal in `error`). A staff actor below Approver is `forbidden` too. The cart methods (`changeCart`, `submitCart`, `cancelCart`, `attachToCart`) take an actor signed for `cart:<cartId>` the same way, refused without one. These are the calls that act as a person; the binding's other methods (plugin installs, data subjects, `cancel`, `sendEvent`) still trust their caller, which only the web app is |
+| `decide(orderId, nodeId, decision, actor, note?)` | Approves or rejects the approval a node waits on. `actor` is a staff `RpcActor` the web app signed for `decide:<orderId>` (`signRpcActor`, the `a1` envelope under `PRINCIPAL_KEY`, 60 seconds; `signedActor` in `principal.server.ts`): its name is what the record carries, its id the principal checked against `orders.started_by` when the workspace's `approval_separation` is `on`. Returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `not_waiting`, `forbidden` for an actor not signed for this call, or `own_order`, with the refusal in `error`). A staff actor below Approver is `forbidden` too. The cart methods (`changeCart`, `submitCart`, `cancelCart`, `attachToCart`, `searchCartProducts`) take an actor signed for `cart:<cartId>` the same way, refused without one. These are the calls that act as a person; the binding's other methods (plugin installs, data subjects, `cancel`, `sendEvent`) still trust their caller, which only the web app is |
 | `cancel(orderId, reason)` | Terminates the Workflow and compensates; returns `{ ok: true }` or `{ ok: false, reason }` (`not_found`, `finished`) |
 | `snapshot(orderId)` | The agent's `OrderState`, or `null` for an unknown order |
 | `copilot(req)` | Edits or creates a flow graph from a prompt |
@@ -1038,6 +1038,18 @@ the rest is in its SQL, paged by `history`).
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
   cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no
   such step; warnings never block submitting.
+- **Finding products.** The cart page's search (`/carts/<cartId>/products?q=`,
+  `routes/cart-products.ts`, staff or the cart's own buyer by `cartActor`) asks
+  `EngineRpc.searchCartProducts` with the caller signed for `cart:<cartId>`. The engine
+  (`apps/engine/src/cart/search.ts`) answers only someone who may change the cart while it is open
+  and unexpired, with at most `CART_SEARCH_LIMIT` (20) `CartProduct`s (`sku`, `name`, `unitPrice`)
+  and `more`. It searches `products`, the table the quote prices from, through the FTS5 index
+  `products_search` (migration 0058, kept by triggers) with core's `ftsQuery`, a SKU typed exactly
+  first; an empty search lists by SKU. `unitPrice` comes from running the flow's `commerce.price`
+  executor dry on the cart's draft order with one of each result (`unitPrices` in
+  `ucp/quote.ts`, the same draft the quote uses: contract prices and price rules, before
+  promotions, shipping and tax). A flow that prices at cost shows a guest no prices, and a search
+  never returns cost, stock or supplier. The SKU box stays for a SKU the person knows.
 - **Files.** The web app stores an upload (at most 10 MB, `ATTACHMENT_TYPES` only, 20 a cart) at
   `carts/<cartId>/<id>` in `DOCS` and hands it to `EngineRpc.attachToCart`, which the agent
   (`attachAs`) refuses for anyone who may not change the cart, a cart that has ended or a key not

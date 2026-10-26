@@ -12,6 +12,8 @@ import {
   type CartAttachment,
   type CartChatMessage,
   type CartOp,
+  type CartProduct,
+  type CartProductPage,
   type CartState,
   type CartStatus,
   type CheckoutQuote,
@@ -20,6 +22,7 @@ import {
   isFinalCart,
   isQuoteCurrent,
   MAX_CHAT_BODY,
+  MAX_LINE_QUANTITY,
   SHIP_TO_LIMITS,
   type ShipAddress,
 } from '@orderloop/core';
@@ -50,7 +53,6 @@ type Result = { ok: true } | { ok: false; error: string };
 export type CartViewProps = {
   snapshot: CartState;
   customerName: string | null;
-  products: { sku: string; name: string }[];
   /** Staff on the Carts page, or the buyer an external cart was opened for. */
   mode: 'staff' | 'guest';
   /** Who is looking: the signed-in person's id, or the guest's. */
@@ -62,7 +64,6 @@ export type CartViewProps = {
 export function CartView({
   snapshot,
   customerName,
-  products,
   mode,
   meId,
   canOperate = false,
@@ -277,7 +278,7 @@ export function CartView({
               <Empty>No lines yet.</Empty>
             )}
             {editable ? (
-              <AddLine products={products} onAdd={(sku, qty) => apply({ op: 'add', sku, qty })} />
+              <AddLines cartId={cart.id} onAdd={(sku, qty) => apply({ op: 'add', sku, qty })} />
             ) : null}
           </Section>
 
@@ -421,23 +422,199 @@ function QtyInput({
   );
 }
 
-function AddLine({
-  products,
+/**
+ * Finding products to add: a search of what the cart's quote can price (routes/cart-products.ts),
+ * asked once the person pauses typing, each result with its quantity and Add. A price shown is
+ * what the flow charges for one; the quote below says what the cart costs. A SKU the person
+ * already knows can still be typed in and added.
+ */
+function AddLines({
+  cartId,
   onAdd,
 }: {
-  products: { sku: string; name: string }[];
-  onAdd: (sku: string, qty: number) => Promise<unknown>;
+  cartId: string;
+  onAdd: (sku: string, qty: number) => Promise<Result | null>;
 }) {
+  const [q, setQ] = useState('');
+  // Results show from the first focus: an empty search lists the first products by SKU.
+  const [browsing, setBrowsing] = useState(false);
+  const [found, setFound] = useState<CartProductPage | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!browsing) return;
+    const ctrl = new AbortController();
+    const wait = setTimeout(
+      async () => {
+        setSearching(true);
+        try {
+          const res = await fetch(`/carts/${cartId}/products?q=${encodeURIComponent(q.trim())}`, {
+            signal: ctrl.signal,
+          });
+          const body = (await res.json().catch(() => null)) as
+            | (CartProductPage & { error?: string })
+            | null;
+          if (res.ok && body) {
+            setFound(body);
+            setProblem(null);
+          } else {
+            setFound(null);
+            setProblem(body?.error ?? 'The search didn’t answer. Try again.');
+          }
+        } catch {
+          if (!ctrl.signal.aborted) setProblem('The search didn’t answer. Try again.');
+        } finally {
+          if (!ctrl.signal.aborted) setSearching(false);
+        }
+      },
+      q.trim() ? 250 : 0,
+    );
+    return () => {
+      clearTimeout(wait);
+      ctrl.abort();
+    };
+  }, [cartId, q, browsing]);
+
+  const priced = found?.products.some((p) => p.unitPrice !== null);
+  return (
+    <div className="grid gap-2 border-t p-3">
+      <search className="grid gap-1 text-sm">
+        <label htmlFor={`find-${cartId}`} className="caption">
+          Find a product
+        </label>
+        <Input
+          id={`find-${cartId}`}
+          type="search"
+          enterKeyHint="search"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          autoComplete="off"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setBrowsing(true);
+          }}
+          onFocus={() => setBrowsing(true)}
+          placeholder="Name or SKU"
+          aria-controls={`found-${cartId}`}
+          className="h-8 w-full sm:w-80"
+        />
+      </search>
+      {browsing ? (
+        <div id={`found-${cartId}`} className="grid gap-1">
+          <p className="text-muted-foreground text-xs" aria-live="polite">
+            {problem ? (
+              <span role="alert" className="text-bad">
+                {problem}
+              </span>
+            ) : searching && !found ? (
+              'Searching…'
+            ) : found && !found.products.length ? (
+              q.trim() ? (
+                `Nothing matches “${q.trim()}”.`
+              ) : (
+                'There are no products yet.'
+              )
+            ) : found?.more ? (
+              `The first ${found.products.length} shown: add words to narrow it.`
+            ) : null}
+          </p>
+          {found?.products.length ? (
+            <ul
+              aria-label="Products found"
+              aria-busy={searching}
+              className="max-h-80 divide-y overflow-y-auto overscroll-contain rounded-md border"
+            >
+              {found.products.map((p) => (
+                <FoundProduct key={p.sku} product={p} currency={found.currency} onAdd={onAdd} />
+              ))}
+            </ul>
+          ) : null}
+          {priced ? (
+            <p className="text-muted-foreground text-xs">
+              Prices are for one, before promotions, shipping and tax.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <AddBySku onAdd={onAdd} />
+    </div>
+  );
+}
+
+function FoundProduct({
+  product: p,
+  currency,
+  onAdd,
+}: {
+  product: CartProduct;
+  currency: string;
+  onAdd: (sku: string, qty: number) => Promise<Result | null>;
+}) {
+  const [qty, setQty] = useState('1');
+  const [added, setAdded] = useState(false);
+  const n = Number(qty);
+  const valid = Number.isInteger(n) && n >= 1 && n <= MAX_LINE_QUANTITY;
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 text-sm">
+      <div className="min-w-0 flex-1 basis-40">
+        <div className="truncate font-medium">{p.name}</div>
+        <div className="font-mono text-muted-foreground text-xs">{p.sku}</div>
+      </div>
+      {p.unitPrice !== null ? (
+        <div className="text-right tabular-nums">
+          {money(p.unitPrice, currency)}
+          <span className="text-muted-foreground text-xs"> each</span>
+        </div>
+      ) : null}
+      <form
+        className="ml-auto flex items-center gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!valid) return;
+          const r = await onAdd(p.sku, n);
+          if (r?.ok) {
+            setQty('1');
+            setAdded(true);
+          }
+        }}
+      >
+        <Input
+          aria-label={`Quantity of ${p.sku} to add`}
+          inputMode="numeric"
+          value={qty}
+          onChange={(e) => {
+            setQty(e.target.value);
+            setAdded(false);
+          }}
+          aria-invalid={!valid || undefined}
+          className="h-8 w-16 text-right"
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={!valid} className="hit-area">
+          Add<span className="sr-only"> {p.sku}</span>
+        </Button>
+        <span className="w-10 text-muted-foreground text-xs" aria-live="polite">
+          {added ? 'Added' : ''}
+        </span>
+      </form>
+    </li>
+  );
+}
+
+/** A SKU typed in, for one the person already knows. */
+function AddBySku({ onAdd }: { onAdd: (sku: string, qty: number) => Promise<Result | null> }) {
   const [sku, setSku] = useState('');
   const [qty, setQty] = useState('1');
   return (
     <form
-      className="flex flex-wrap items-end gap-2 border-t p-3"
+      className="flex flex-wrap items-end gap-2"
       onSubmit={async (e) => {
         e.preventDefault();
         const n = Number(qty);
         if (!sku.trim() || !Number.isInteger(n) || n < 1) return;
-        const r = (await onAdd(sku.trim(), n)) as Result | null;
+        const r = await onAdd(sku.trim(), n);
         if (r?.ok) {
           setSku('');
           setQty('1');
@@ -446,24 +623,19 @@ function AddLine({
     >
       <div className="grid gap-1 text-sm">
         <label htmlFor="add-sku" className="caption">
-          SKU
+          Or add by SKU
         </label>
         <Input
           id="add-sku"
-          list="cart-skus"
           value={sku}
           onChange={(e) => setSku(e.target.value)}
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
           placeholder="WID-100"
-          className="h-8 w-56"
+          className="h-8 w-44"
           required
         />
-        <datalist id="cart-skus">
-          {products.map((p) => (
-            <option key={p.sku} value={p.sku}>
-              {p.name}
-            </option>
-          ))}
-        </datalist>
       </div>
       <div className="grid gap-1 text-sm">
         <label htmlFor="add-qty" className="caption">
@@ -478,7 +650,7 @@ function AddLine({
           required
         />
       </div>
-      <Button type="submit" size="sm" variant="outline">
+      <Button type="submit" size="sm" variant="outline" className="hit-area">
         Add line
       </Button>
     </form>
