@@ -5,10 +5,13 @@
 
 import {
   BASE_CURRENCY,
+  CART_EVENTS,
   CART_STATUSES,
   cartOpSchema,
   inboundOrderSchema,
+  isCartEvent,
   ORDER_CHANNELS,
+  ORDER_EVENTS,
   ORDER_MODELS,
   ORDER_STATUSES,
   OUTBOUND_EVENTS,
@@ -937,7 +940,11 @@ export function openApiDocument(serverUrl: string) {
               'Signed with the subscription secret (`X-OrderLoop-Signature`, same scheme as inbound). `X-OrderLoop-Delivery` is stable across retries; dedupe on it.',
             requestBody: {
               content: {
-                'application/json': { schema: { $ref: '#/components/schemas/OrderEvent' } },
+                'application/json': {
+                  schema: {
+                    $ref: `#/components/schemas/${isCartEvent(event) ? 'CartEvent' : 'OrderEvent'}`,
+                  },
+                },
               },
             },
             responses: { '2XX': { description: 'Accepted; any other status is retried' } },
@@ -966,7 +973,7 @@ export function openApiDocument(serverUrl: string) {
           type: 'object',
           properties: {
             id: { type: 'string', description: 'Delivery id' },
-            event: { type: 'string', enum: [...OUTBOUND_EVENTS] },
+            event: { type: 'string', enum: [...ORDER_EVENTS] },
             occurredAt: { type: 'integer', description: 'Epoch ms' },
             orderId: { type: 'string' },
             data: {
@@ -976,6 +983,31 @@ export function openApiDocument(serverUrl: string) {
             },
           },
           required: ['id', 'event', 'occurredAt', 'orderId', 'data'],
+        },
+        CartEvent: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Delivery id' },
+            event: { type: 'string', enum: [...CART_EVENTS] },
+            occurredAt: { type: 'integer', description: 'Epoch ms' },
+            cartId: { type: 'string' },
+            orderId: {
+              type: ['string', 'null'],
+              description: 'The order the cart was submitted as; null until it was',
+            },
+            data: {
+              type: 'object',
+              properties: {
+                cart: {
+                  type: 'object',
+                  description:
+                    'The cart as it was: `id`, `title`, `status`, `flowId`, `source` (`staff` or `external`), `pluginId`, `customerId`, `lines` (`sku`, `qty`), `quote` (`currency`, `subtotal`, `shipping`, `tax`, `total`, or null when no quote prices it as it is), `orderId`, `createdAt`, `updatedAt` and `version`. Never its ship-to, chat, files or buyer.',
+                },
+              },
+              required: ['cart'],
+            },
+          },
+          required: ['id', 'event', 'occurredAt', 'cartId', 'orderId', 'data'],
         },
       },
     },

@@ -10,10 +10,20 @@ import {
   signCartGuest,
   signPrincipal,
   subjectTarget,
+  verifyWebhook,
 } from '@orderloop/core';
-import { auditEvents, carts, createDb, orders, sessions, users } from '@orderloop/db';
+import {
+  auditEvents,
+  carts,
+  createDb,
+  orders,
+  sessions,
+  users,
+  webhookDeliveries,
+  webhookSubscriptions,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EngineApi } from '../../src/api';
 import { ensureTemplates } from '../../src/flows';
 import worker from '../../src/index';
@@ -435,6 +445,74 @@ describe('an external cart’s buyer', () => {
         input({ sessionRef: (await hostFor('example').getCart(c.cartId))!.sessionRef }),
       ),
     ).toEqual({ ok: false, error: 'That session’s cart is returned.' });
+  });
+
+  it('is announced once as returned, to subscribers and to a plugin that asked, without the buyer', async () => {
+    const received: { body: string; signature: string | null }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      received.push({
+        body: String(init?.body),
+        signature: new Headers(init?.headers).get('x-orderloop-signature'),
+      });
+      return new Response('ok');
+    });
+    await db().insert(webhookSubscriptions).values({
+      id: 'whs_returns',
+      url: 'https://hooks.example/returns',
+      secret: 'whsec_returns',
+      events: '["cart.returned"]',
+      createdAt: Date.now(),
+    });
+    try {
+      const c = await open({ lines: [{ sku: 'WID-100', qty: 2 }] });
+      const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+      const ws = await guestSocket(c.cartId, guest);
+      if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+      expect((await ws.call<{ ok: boolean }>('transfer')).result).toMatchObject({ ok: true });
+      expect((await ws.call('transfer')).result).toMatchObject({ ok: false });
+
+      const rows = async () =>
+        db().select().from(webhookDeliveries).where(eq(webhookDeliveries.orderId, c.cartId));
+      const end = Date.now() + 30_000;
+      while (Date.now() < end && (await rows()).filter((r) => r.status === 'delivered').length < 2)
+        await new Promise((r) => setTimeout(r, 100));
+      expect((await rows()).map((r) => [r.subscriptionId, r.event, r.status]).sort()).toEqual([
+        ['plugin:example', 'cart.returned', 'delivered'],
+        ['whs_returns', 'cart.returned', 'delivered'],
+      ]);
+      const sent = received.filter((r) => JSON.parse(r.body).cartId === c.cartId);
+      expect(sent).toHaveLength(1);
+      expect(await verifyWebhook('whsec_returns', sent[0]!.body, sent[0]!.signature)).toMatchObject(
+        {
+          ok: true,
+        },
+      );
+      expect(JSON.parse(sent[0]!.body)).toMatchObject({
+        event: 'cart.returned',
+        cartId: c.cartId,
+        orderId: null,
+        data: {
+          cart: {
+            status: 'returned',
+            source: 'external',
+            pluginId: 'example',
+            lines: [{ sku: 'WID-100', qty: 2 }],
+          },
+        },
+      });
+      for (const personal of ['ann@northwind.example', 'Ann Buyer', 'buyer.example'])
+        expect(sent[0]!.body).not.toContain(personal);
+      // The plugin recorded it once, under the cart.
+      const got = await testEnv.EXAMPLE_DB.prepare(
+        'SELECT event, order_id FROM deliveries WHERE order_id = ?',
+      )
+        .bind(c.cartId)
+        .all();
+      expect(got.results).toEqual([{ event: 'cart.returned', order_id: c.cartId }]);
+    } finally {
+      vi.restoreAllMocks();
+      await db().delete(webhookSubscriptions).where(eq(webhookSubscriptions.id, 'whs_returns'));
+    }
   });
 
   it('goes back without a ship-to on a flow that prices shipping: the buyer’s PO says where', async () => {

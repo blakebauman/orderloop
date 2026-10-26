@@ -70,6 +70,12 @@ describe('OpenAPI document', () => {
 
   it('documents every outbound event and leaves signed inbound events unauthenticated', () => {
     expect(Object.keys(doc.webhooks)).toEqual([...OUTBOUND_EVENTS]);
+    const schemaOf = (event: string) =>
+      doc.webhooks[event]!.post.requestBody.content['application/json'].schema.$ref;
+    expect(schemaOf('order.shipped')).toBe('#/components/schemas/OrderEvent');
+    expect(schemaOf('cart.submitted')).toBe('#/components/schemas/CartEvent');
+    expect(doc.components.schemas.CartEvent.required).toContain('cartId');
+    expect(doc.components.schemas.OrderEvent.properties.event.enum).not.toContain('cart.created');
     expect(doc.paths['/api/v1/webhooks/events'].post.security).toEqual([]);
     expect(doc.paths['/api/v1/webhooks/orders'].post.security).toEqual([]);
     // Stripe and Shopify sign with their own headers; EDI comes from an operator token.

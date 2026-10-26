@@ -25,6 +25,7 @@ import {
   type CartReturnRequest,
   type OutboundEvent,
   type OutboundPayload,
+  type PayloadOf,
   PLUGIN_VIEW_TYPE,
   type PluginCompensateRequest,
   type PluginExecRequest,
@@ -154,10 +155,13 @@ export type PluginDefinition<E> = {
   manifest: ManifestInput;
   /** By node name: `stamp` for `example.stamp`. */
   nodes?: Record<string, NodeHandler<E>>;
-  /** By event name. Each runs at least once per delivery: key what it writes by `payload.id`. */
-  events?: Partial<
-    Record<OutboundEvent, (payload: OutboundPayload, env: E) => Promise<void> | void>
-  >;
+  /**
+   * By event name. Each runs at least once per delivery: key what it writes by `payload.id`. A
+   * `cart.*` event's payload names its `cartId`, and its `orderId` only once the cart was submitted.
+   */
+  events?: {
+    [K in OutboundEvent]?: (payload: PayloadOf<K>, env: E) => Promise<void> | void;
+  };
   pages?(request: Request, ctx: PageContext<E>): Response | Promise<Response>;
   providers?: ProviderHandlers<E>;
   /**
@@ -286,7 +290,11 @@ export function definePlugin<E extends PluginEnv>(def: PluginDefinition<E>) {
     }
 
     async deliver(payload: OutboundPayload) {
-      await def.events?.[payload.event]?.(payload, this.env);
+      // Each handler is keyed by the event it takes, so the payload is the one it expects.
+      const handler = def.events?.[payload.event] as
+        | ((p: OutboundPayload, env: E) => Promise<void> | void)
+        | undefined;
+      await handler?.(payload, this.env);
     }
 
     override async fetch(request: Request) {

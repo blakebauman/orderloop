@@ -484,6 +484,62 @@ export function cartView(cart: Cart): CartView {
   return { ...rest, quoteCurrent: isQuoteCurrent(cart), notReady: cartReadyProblem(cart) };
 }
 
+/**
+ * A cart as an outbound `cart.*` event carries it: who it's for by account only, what's on it by
+ * SKU and quantity, and its quote's totals. Never its ship-to, chat, files, promotion codes or the
+ * buyer an external cart was opened for (`external.buyer`), and line titles are left out too,
+ * since the order events carry none either. `quote` is null unless it prices the cart as it is.
+ */
+export type CartSummary = {
+  id: string;
+  title: string;
+  status: CartStatus;
+  flowId: string;
+  /** `external` when a plugin opened it for a buyer outside OrderLoop. */
+  source: 'staff' | 'external';
+  pluginId: string | null;
+  customerId: string | null;
+  lines: { sku: string; qty: number }[];
+  quote: {
+    currency: string;
+    subtotal: number;
+    shipping: number;
+    tax: number;
+    total: number;
+  } | null;
+  orderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+};
+
+export function cartSummary(cart: Cart): CartSummary {
+  const q = isQuoteCurrent(cart) ? cart.quote! : null;
+  return {
+    id: cart.id,
+    title: cart.title,
+    status: cart.status,
+    flowId: cart.flowId,
+    source: cart.external ? 'external' : 'staff',
+    pluginId: cart.external?.pluginId ?? null,
+    customerId: cart.customerId,
+    lines: cart.lines.map(({ sku, qty }) => ({ sku, qty })),
+    quote: q
+      ? {
+          currency: q.currency,
+          subtotal: q.subtotal,
+          shipping: q.shipping,
+          tax: q.tax,
+          total: q.total,
+        }
+      : null,
+    orderId: cart.orderId,
+    createdAt: cart.createdAt,
+    updatedAt: cart.updatedAt,
+    version: cart.version,
+  };
+}
+
 /** Products one cart search answers with, at most: a page to choose from, not a catalog to page. */
 export const CART_SEARCH_LIMIT = 20;
 

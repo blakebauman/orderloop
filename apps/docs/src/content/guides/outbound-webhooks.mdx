@@ -1,12 +1,12 @@
 ---
 title: Outbound webhooks
-description: Subscribe an endpoint to signed order events, verify them, and handle retries and duplicates.
+description: Subscribe an endpoint to signed order and cart events, verify them, and handle retries and duplicates.
 ---
 
 import NodeEvents from '../../components/NodeEvents.astro';
 import Values from '../../components/Values.astro';
 
-OrderLoop POSTs signed order events to the endpoints you subscribe. The events are
+OrderLoop POSTs signed order and cart events to the endpoints you subscribe. The events are
 <Values of="outbound-events" />.
 
 ## Subscribing
@@ -27,7 +27,7 @@ curl -X POST https://orderloop.app/api/v1/webhook-subscriptions \
   subscription at the final URL.
   (A plain `http` URL for `localhost`, `127.0.0.1` or `[::1]` is accepted when subscribing but is
   never reached.)
-- `events` is a list of the event names above, or `["*"]` for every event (the default). An unknown name returns `400`.
+- `events` is a list of the event names above, or `["*"]` for every event (the default), cart events included. An unknown name returns `400`.
 
 The `201` response is `{ "subscription": { … }, "secret": "whsec_…" }`. **The secret is returned
 once**, here; listing subscriptions never shows it. Store it with the receiver.
@@ -54,6 +54,21 @@ The ending events cover every way an order ends:
 | `order.failed` | A node that throws after its retries, so the order fails without reaching an End node |
 | `order.cancelled` | A cancel from the order page, the assistant or `POST /api/v1/orders/:id/cancel` |
 
+### Cart events
+
+A [cart](/guides/carts/) sends an event when it opens and when it ends, once each:
+
+| Event | Sent when |
+|---|---|
+| `cart.created` | A cart is opened, from the Carts page, the API, MCP, the assistant or an integration such as [punchout](/guides/punchout/) |
+| `cart.submitted` | A cart is submitted as an order; `orderId` names the order |
+| `cart.returned` | A cart a customer opened from their own purchasing system is sent back to it |
+| `cart.canceled` | A cart is cancelled, or a customer's cart is closed by their data subject request |
+| `cart.expired` | A cart a customer opened from their own system wasn't sent back before its session ended |
+
+Changing a cart (its lines, quantities, codes, ship-to, a lock) sends nothing: a cart changes on
+every edit while people build it, and what it came to is in the event it ends with.
+
 ## The request
 
 ```http
@@ -79,9 +94,19 @@ x-orderloop-delivery: whd_ord_…_ship_1_whs_…
 - **An End node**: `{ order, outcome, reason }`.
 - **A node that threw**: `{ order, outcome: "failed", reason, node: { id, type, error } }`.
 - **A cancel**: `{ order, outcome: "cancelled", reason }`.
+- **A cart event**: `{ cart }`. The body has `cartId` in place of a required `orderId`, and
+  `orderId` is the order a submitted cart became (`null` before that).
 
 `order` is a summary: `id`, `model`, `channel`, `externalId`, `title`, `customerId`, `currency`, `subtotal`, `shipping`, `tax`, `total`
 (all in `currency`), `fxRate` (units of `currency` per USD) and `baseTotal` (the total in USD).
+
+`cart` is the cart as it was when the event was sent: `id`, `title`, `status`, `flowId`, `source`
+(`staff`, or `external` for one a customer's system opened), `pluginId` (the integration that
+opened an external cart), `customerId`, `lines` (`sku` and `qty`), `quote` (`currency`,
+`subtotal`, `shipping`, `tax`, `total`; `null` while no price is current, as on a cart just
+opened), `orderId`, `createdAt`, `updatedAt` and `version`. It never carries the cart's ship-to,
+chat, files, promotion codes or who its buyer is. A cart's `status` is `canceled` for both
+`cart.canceled` and `cart.expired`.
 
 ## Rotating the secret
 
@@ -122,15 +147,18 @@ Any `2xx` response counts as delivered; anything else, or no response within 10 
 failure.
 
 - **Node and End events, and failures:** retried 5 times with exponential backoff from 10 seconds.
-- **`order.cancelled` on cancel:** retried 5 times, 10 seconds doubling each time.
+- **`order.cancelled` on cancel, and cart events:** retried 5 times, 10 seconds doubling each time.
 
 Each attempt only resends deliveries that haven't succeeded. When retries run out the delivery
 stays `failed` in the deliveries list, and the order carries on: a subscriber being down never
 fails an order.
 
 The delivery id (`X-OrderLoop-Delivery`, and `id` in the body) is derived from the order, the
-step that sent it and the subscription, and stays the same across retries. Use it to dedupe:
+step that sent it and the subscription (for a cart event, the cart, the event and the
+subscription), and stays the same across retries. Use it to dedupe:
 a receiver can see the same delivery more than once.
 
 Each delivery row records `status` (`pending`, `delivered` or `failed`), `attempts`,
-`responseStatus`, `lastError` and `deliveredAt`.
+`responseStatus`, `lastError` and `deliveredAt`. A cart's row has the cart's id in `orderId`.
+When a customer's data subject request erases them from a cart, its deliveries are deleted, sent
+or not, as an erased order's are.

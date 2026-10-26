@@ -144,8 +144,8 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
 - `tests/contract.test.ts` and its own `vitest.config.ts` (see below).
 
 The fixture's `example.stamp` inserts a row keyed by `(order_id, step_key)` with `ON CONFLICT DO
-NOTHING` and its `compensate` deletes it; its `order.completed` handler inserts the delivery id the
-same way. `example.probe` is test-only: it echoes what it is sent, fails, returns too much or a
+NOTHING` and its `compensate` deletes it; its `order.completed` and `cart.returned` handlers insert the delivery id the
+same way (a cart event's `cartId` in `order_id`). `example.probe` is test-only: it echoes what it is sent, fails, returns too much or a
 branch it lacks, or sets variables, as its `behave` field says, so the engine's tests can check what
 it refuses. A real plugin has no use for one. Its page, `/plugins/example/`, is a view of the
 person the web app signed onto the request (and sends headers the web app must strip, for its
@@ -277,7 +277,9 @@ both:
 - Key every write in `execute` by `orderId` and `stepKey` together. `stepKey` is unique within the
   order and the same on every retry of that step (the node's effect key, `effectKey(generation, key)`).
 - Key every write in `compensate` the same way, and make a second call harmless.
-- Key every write in `deliver` by `payload.id`, which is stable across redeliveries.
+- Key every write in `deliver` by `payload.id`, which is stable across redeliveries. A `cart.*`
+  event's payload names `cartId`, and `orderId` only once the cart was submitted (`null` before);
+  `PayloadOf<E>` types each handler's payload by its event.
 
 If the plugin calls an external system, pass that system the same key.
 
@@ -803,7 +805,7 @@ throws when the plugin is gone, since there is nothing to undo it with.
     isn't bound is left out.
 - **Providers**: an executor whose node names a provider calls `provide` instead of its built-in
   connector ([Providers](#providers)).
-- **Events**: `emit` in `apps/engine/src/outbox.ts` adds a delivery for each installed plugin whose
+- **Events**: `emit` (and `emitCart`, for a cart's events) in `apps/engine/src/outbox.ts` adds a delivery for each installed plugin whose
   `events` match, with subscription id `plugin:<id>`, in `webhook_deliveries` (no schema change; see
   [Data model](data-model.md)). `deliverToPlugin` calls `deliver` over the binding with `data`
   passed through `pluginView` (so redacted unless the plugin is granted buyer details) and never

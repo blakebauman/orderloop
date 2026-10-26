@@ -23,10 +23,12 @@ import {
   type CartActor,
   type CartAttachment,
   type CartChatMessage,
+  type CartEvent,
   type CartGuest,
   type CartMember,
   type CartOp,
   type CartState,
+  type CartSummary,
   canChangeMessage,
   canEditCart,
   canReadCart,
@@ -34,6 +36,7 @@ import {
   cartAttachmentKey,
   cartAttachmentPrefix,
   cartReadyProblem,
+  cartSummary,
   chatBody,
   checkCartReturn,
   EMPTY_CART_STATE,
@@ -52,11 +55,12 @@ import {
   quoteNodes,
   storedCart,
 } from '@orderloop/core';
-import { carts, createDb } from '@orderloop/db';
+import { carts, createDb, webhookDeliveries } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
 import { eq } from 'drizzle-orm';
 import { loadFlowVersion } from '../flows';
 import { startOrderOnce } from '../orders';
+import { emitCart } from '../outbox';
 import { pluginStub } from '../plugin-host';
 import { callPlugin, mayUse } from '../plugins';
 import { forwardedGuest, forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
@@ -90,6 +94,8 @@ const EDIT_WINDOW_MS = 10_000;
  */
 export const PROMO_TRIES = 10;
 const PROMO_WINDOW_MS = 60 * 60_000;
+/** Attempts after the first at delivering a cart's event, as OrderAgent's `emitWebhook` makes. */
+const WEBHOOK_RETRIES = 5;
 
 type ChatRow = {
   id: string;
@@ -180,6 +186,35 @@ export class CartAgent extends Agent<Env, CartState> {
       .onConflictDoUpdate({ target: carts.id, set: row });
   }
 
+  /**
+   * Announces `event` with the cart as it is now (`cartSummary`), from this object's schedule so the
+   * delivery outlives the call that changed the cart. Never throws: the change it announces is
+   * already made, and a call must not fail (or undo it) because a webhook couldn't be queued.
+   */
+  private async announce(event: CartEvent) {
+    try {
+      await this.schedule(0, 'emitWebhook', { event, cart: cartSummary(this.cart()), attempt: 0 });
+    } catch (err) {
+      console.error(`announcing ${event} for cart ${this.state.cart?.id}`, err);
+    }
+  }
+
+  /**
+   * Delivers a cart's event (`emitCart`), retried on this object's schedule with the backoff
+   * OrderAgent's `emitWebhook` uses, then left `failed`. Deliveries are keyed by the cart and the
+   * event, so a retry sends only what hasn't arrived.
+   */
+  async emitWebhook(p: { event: CartEvent; cart: CartSummary; attempt: number }) {
+    let pending = 1;
+    try {
+      ({ pending } = await emitCart(this.env, p.cart, p.event));
+    } catch (err) {
+      console.warn('webhook emit', p.event, err);
+    }
+    if (pending && p.attempt < WEBHOOK_RETRIES)
+      await this.schedule(10 * 2 ** p.attempt, 'emitWebhook', { ...p, attempt: p.attempt + 1 });
+  }
+
   /** Deletes every file stored for this cart (its `cartAttachmentPrefix`). Returns how many. */
   private async deleteFiles(): Promise<number> {
     const c = this.state.cart;
@@ -233,7 +268,8 @@ export class CartAgent extends Agent<Env, CartState> {
   async eraseSubject(terms: string[]): Promise<{ messages: number; files: number }> {
     const c = this.state.cart;
     if (!c?.external) return { messages: 0, files: 0 };
-    if (!isFinalCart(c)) await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    const open = !isFinalCart(c);
+    if (open) await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
     const guestId = `guest:${c.external.buyer.id}`;
     const all = erasureTerms([...terms, c.external.buyer.id, c.external.buyer.name]);
     this.tables();
@@ -271,6 +307,12 @@ export class CartAgent extends Agent<Env, CartState> {
     for (const conn of this.getConnections<ConnectionState>())
       if (conn.state?.guest) conn.close(4410, 'Cart closed');
     await this.index(this.cart());
+    // Its events carried the title as it was: they go, sent or not, as an erased order's do, and
+    // the cancel is announced with the title erased.
+    for (const s of this.getSchedules())
+      if (s.callback === 'emitWebhook') await this.cancelSchedule(s.id);
+    await this.db().delete(webhookDeliveries).where(eq(webhookDeliveries.orderId, c.id));
+    if (open) await this.announce('cart.canceled');
     return { messages: theirs, files: files.length };
   }
 
@@ -347,6 +389,8 @@ export class CartAgent extends Agent<Env, CartState> {
     await this.index(init);
     this.setState({ ...this.state, cart: init });
     if (init.external) await this.schedule(new Date(init.external.expiresAt), 'expire');
+    // Before it's priced: a pricing failure must not leave a cart no one heard of.
+    await this.announce('cart.created');
     if (init.lines.length) await this.reprice();
     return this.cart();
   }
@@ -367,6 +411,7 @@ export class CartAgent extends Agent<Env, CartState> {
       return;
     }
     await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    await this.announce('cart.expired');
     for (const conn of this.getConnections()) conn.close(4410, 'Cart expired');
   }
 
@@ -509,6 +554,7 @@ export class CartAgent extends Agent<Env, CartState> {
       this
         .sql`INSERT OR REPLACE INTO cart_return (id, url, fields) VALUES (1, ${returnUrl}, ${JSON.stringify(checked.fields)})`;
       await this.save(finishCart(held, { status: 'returned' }, Date.now()));
+      await this.announce('cart.returned');
       return { ok: true, url: returnUrl, fields: checked.fields };
     } catch (err) {
       this.setState({ ...this.state, cart: held });
@@ -603,6 +649,7 @@ export class CartAgent extends Agent<Env, CartState> {
       await this.save(
         finishCart(held, { status: 'submitted', orderId: started.orderId }, Date.now()),
       );
+      await this.announce('cart.submitted');
       return { ok: true, orderId: started.orderId };
     } catch (err) {
       this.setState({ ...this.state, cart: held });
@@ -663,6 +710,7 @@ export class CartAgent extends Agent<Env, CartState> {
     const c = this.cart();
     if (isFinalCart(c)) return { ok: false, error: `The cart is ${c.status}.` };
     await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    await this.announce('cart.canceled');
     return { ok: true };
   }
 
