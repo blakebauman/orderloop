@@ -97,6 +97,8 @@ export type Cart = {
 export type CartOp =
   | { op: 'add'; sku: string; qty: number }
   | { op: 'set_qty'; lineId: string; qty: number }
+  /** Several lines at once: one version and one quote, all or none. */
+  | { op: 'set_qtys'; lines: { lineId: string; qty: number }[] }
   | { op: 'remove'; lineIds: string[] }
   | { op: 'clear' }
   | { op: 'lock' }
@@ -145,6 +147,19 @@ export const cartOpSchema = z.discriminatedUnion('op', [
     op: z.literal('set_qty'),
     lineId: z.string().min(1).max(100),
     qty: z.number().int().min(0).max(MAX_LINE_QUANTITY).describe('0 removes the line'),
+  }),
+  z.object({
+    op: z.literal('set_qtys'),
+    lines: z
+      .array(
+        z.object({
+          lineId: z.string().min(1).max(100),
+          qty: z.number().int().min(0).max(MAX_LINE_QUANTITY).describe('0 removes the line'),
+        }),
+      )
+      .min(1)
+      .max(MAX_CHECKOUT_LINES)
+      .describe('Each line once; every line must still be on the cart'),
   }),
   z.object({
     op: z.literal('remove'),
@@ -299,6 +314,27 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
         op.qty === 0
           ? cart.lines.filter((l) => l.id !== op.lineId)
           : cart.lines.map((l) => (l.id === op.lineId ? { ...l, qty: op.qty } : l));
+      return done({ lines }, true);
+    }
+    case 'set_qtys': {
+      // Bounded here as well as in `cartOpSchema`: the socket's ops never pass it.
+      const set = Array.isArray(op.lines) ? op.lines : [];
+      if (!set.length || set.length > MAX_CHECKOUT_LINES)
+        return fail(`Choose 1 to ${MAX_CHECKOUT_LINES} lines.`);
+      const qtys = new Map<string, number>();
+      for (const e of set) {
+        if (typeof e?.lineId !== 'string' || !validQty(e.qty))
+          return fail(`A quantity is 0 to ${MAX_LINE_QUANTITY}.`);
+        if (qtys.has(e.lineId)) return fail('Name each line once.');
+        qtys.set(e.lineId, e.qty);
+      }
+      // All or none: a line someone else removed meanwhile refuses the lot, rather than setting
+      // the rest as if the person had chosen only those.
+      if ([...qtys.keys()].some((id) => !cart.lines.some((l) => l.id === id)))
+        return fail('A line you chose is gone.');
+      const lines = cart.lines
+        .filter((l) => qtys.get(l.id) !== 0)
+        .map((l) => (qtys.has(l.id) ? { ...l, qty: qtys.get(l.id)! } : l));
       return done({ lines }, true);
     }
     case 'remove': {

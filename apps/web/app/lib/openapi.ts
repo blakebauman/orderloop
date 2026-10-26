@@ -88,7 +88,7 @@ function cartSchema() {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string', description: 'Name the line in set_qty and remove' },
+            id: { type: 'string', description: 'Name the line in set_qty, set_qtys and remove' },
             sku: { type: 'string' },
             qty: { type: 'integer' },
             title: { type: 'string', description: 'Set by the quote' },
@@ -357,7 +357,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Change a cart, one op at a time (operator)',
           description:
-            "Applied as the caller, as if they made the change on the cart's page: `add` (adds to a line with that SKU), `set_qty` (0 removes the line), `remove`, `clear`, `lock`, `unlock`, `promo_add`, `promo_remove`, `rename`, `set_ship_to` (null clears the address and the option), `set_shipping_option` (an id from the quote's `shippingOptions`, or null to let the flow pick). Lines, codes, the ship-to and the option change only while the cart is open. The response has the cart priced again.",
+            "Applied as the caller, as if they made the change on the cart's page: `add` (adds to a line with that SKU), `set_qty` (0 removes the line), `set_qtys` (several lines at once, all or none: refused if any of them is gone), `remove`, `clear`, `lock`, `unlock`, `promo_add`, `promo_remove`, `rename`, `set_ship_to` (null clears the address and the option), `set_shipping_option` (an id from the quote's `shippingOptions`, or null to let the flow pick). Lines, codes, the ship-to and the option change only while the cart is open. The response has the cart priced again.",
           parameters: [cartId],
           requestBody: {
             required: true,

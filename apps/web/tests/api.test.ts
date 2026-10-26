@@ -394,6 +394,38 @@ describe('carts over REST', () => {
       target: 'cart_1',
       detail: { op: 'set_ship_to', via: 'api' },
     });
+
+    // Several quantities go as one op, bounded before they reach the engine.
+    engine.changeCart.mockClear();
+    for (const lines of [[], [{ lineId: 'li_1', qty: -1 }], [{ lineId: 'li_1' }]])
+      expect((await post('carts/cart_1/ops', { op: 'set_qtys', lines })).status).toBe(400);
+    expect(engine.changeCart).not.toHaveBeenCalled();
+    engine.changeCart.mockResolvedValueOnce({ ok: true, cart: { id: 'cart_1' } });
+    const set = await post('carts/cart_1/ops', {
+      op: 'set_qtys',
+      lines: [
+        { lineId: 'li_1', qty: 4, unitPrice: 0 },
+        { lineId: 'li_2', qty: 0 },
+      ],
+    });
+    expect(set.status).toBe(200);
+    expect(engine.changeCart).toHaveBeenCalledTimes(1);
+    expect(engine.changeCart).toHaveBeenLastCalledWith(
+      'cart_1',
+      {
+        op: 'set_qtys',
+        lines: [
+          { lineId: 'li_1', qty: 4 },
+          { lineId: 'li_2', qty: 0 },
+        ],
+      },
+      expect.any(String),
+    );
+    expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.changed', {
+      actor: operator,
+      target: 'cart_1',
+      detail: { op: 'set_qtys', via: 'api' },
+    });
   });
 
   it('holds a submit to the version the caller read, by ETag or body', async () => {

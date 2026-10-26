@@ -110,6 +110,7 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
     (m: { success: boolean; result?: unknown; error?: string }) => void
   >();
   let last: CartState | null = null;
+  const states: CartState[] = [];
   let closedWith: number | null = null;
   ws.addEventListener('close', (e) => {
     closedWith = e.code;
@@ -118,7 +119,10 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(String(e.data));
     if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
-    if (m.type === 'cf_agent_state') last = m.state as CartState;
+    if (m.type === 'cf_agent_state') {
+      last = m.state as CartState;
+      states.push(last);
+    }
     if (m.type === 'cf_agent_state_error' || m.error) errors.push(String(m.error ?? m.type));
   });
   let n = 0;
@@ -130,6 +134,8 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
         ws.send(JSON.stringify({ type: 'rpc', id, method, args }));
       }),
     seen: () => last,
+    /** Every state broadcast so far, oldest first. */
+    states: () => states,
     closed: () => closedWith,
     errors: () => errors,
     send: (m: unknown) => ws.send(JSON.stringify(m)),
@@ -483,6 +489,59 @@ describe('the cart socket', () => {
     expect(s.members.map((m) => m.name).sort()).toEqual(['opal', 'vee']);
     // A page can't write state; it changes only through methods.
     viewer.close();
+    op.close();
+  });
+
+  it('sets several quantities as one change, priced once, and refuses the lot when a line is gone', async () => {
+    const id = await open();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 1 });
+    await cart(id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 1 });
+    const before = (await state(id)).cart!;
+    const [wid, gsk] = before.lines;
+    const op = await socket(id, await who('operator', 'opal'));
+
+    expect(
+      (
+        await op.call('apply', [
+          {
+            op: 'set_qtys',
+            lines: [
+              { lineId: wid!.id, qty: 10 },
+              { lineId: gsk!.id, qty: 0 },
+            ],
+          },
+        ])
+      ).result,
+    ).toEqual({ ok: true });
+    const after = (await state(id)).cart!;
+    // One version and one quote for the lot, as if one person made one change.
+    expect(after.version).toBe(before.version + 1);
+    expect(isQuoteCurrent(after)).toBe(true);
+    expect(after.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 10 })]);
+    expect(after.quote!.subtotal).toBe(215);
+    // Every version the change made, as the people on the cart saw it: one, priced once.
+    const changed = op.states().filter((s) => s.cart!.version > before.version);
+    expect([...new Set(changed.map((s) => s.cart!.version))]).toEqual([after.version]);
+    expect(
+      changed.filter((s) => s.cart!.quote && s.cart!.quotedVersion === s.cart!.version),
+    ).toHaveLength(1);
+
+    // A line gone meanwhile refuses every change, and the cart stays as it was.
+    expect(
+      (
+        await op.call('apply', [
+          {
+            op: 'set_qtys',
+            lines: [
+              { lineId: wid!.id, qty: 3 },
+              { lineId: gsk!.id, qty: 3 },
+            ],
+          },
+        ])
+      ).result,
+    ).toEqual({ ok: false, error: 'A line you chose is gone.' });
+    expect((await state(id)).cart).toMatchObject({ version: after.version, lines: after.lines });
     op.close();
   });
 

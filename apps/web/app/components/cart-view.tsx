@@ -73,6 +73,7 @@ export function CartView({
   const [state, setState] = useState<CartState>(snapshot);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const cart = state.cart!;
 
   const agent = useAgent<CartState>({
@@ -109,6 +110,15 @@ export function CartView({
   const ready = cartReadyProblem(cart);
   const q = cart.quote;
   const currency = q?.currency ?? 'USD';
+  // Read through the cart's lines, so a line someone else removed drops out of the selection.
+  const chosen = editable ? cart.lines.filter((l) => picked.has(l.id)) : [];
+  const pick = (id: string, on: boolean) =>
+    setPicked((p) => {
+      const next = new Set(p);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   return (
     <>
@@ -213,6 +223,21 @@ export function CartView({
             </p>
           ) : null}
           <Section title="Lines" flush>
+            {editable && cart.lines.length ? (
+              <BulkLines
+                chosen={chosen.length}
+                total={cart.lines.length}
+                busy={busy}
+                onAll={(on) => setPicked(new Set(on ? cart.lines.map((l) => l.id) : []))}
+                onSetQty={(qty) =>
+                  apply({ op: 'set_qtys', lines: chosen.map((l) => ({ lineId: l.id, qty })) })
+                }
+                onRemove={async () => {
+                  const r = await apply({ op: 'remove', lineIds: chosen.map((l) => l.id) });
+                  if (r?.ok) setPicked(new Set());
+                }}
+              />
+            ) : null}
             {cart.lines.length ? (
               <Table stack="cards" caption="Lines">
                 <TableHead>
@@ -236,9 +261,26 @@ export function CartView({
                     return (
                       <Tr key={l.id} className="max-md:items-center">
                         <Td>
-                          <div className="font-medium">{l.title ?? l.sku}</div>
-                          <div className="font-mono text-muted-foreground text-xs">{l.sku}</div>
-                          {issue ? <div className="text-bad text-xs">{issue.content}</div> : null}
+                          <div className="flex items-start gap-2.5">
+                            {editable ? (
+                              <label className="hit-area mt-0.5 inline-flex shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={picked.has(l.id)}
+                                  onChange={(e) => pick(l.id, e.currentTarget.checked)}
+                                  className="relative z-[1] size-4 accent-primary"
+                                />
+                                <span className="sr-only">Select {l.sku}</span>
+                              </label>
+                            ) : null}
+                            <div className="min-w-0">
+                              <div className="font-medium">{l.title ?? l.sku}</div>
+                              <div className="font-mono text-muted-foreground text-xs">{l.sku}</div>
+                              {issue ? (
+                                <div className="text-bad text-xs">{issue.content}</div>
+                              ) : null}
+                            </div>
+                          </div>
                         </Td>
                         <Td numeric label="Qty">
                           {editable ? (
@@ -389,6 +431,94 @@ const STATUS_TEXT: Record<CartStatus, string> = {
   returned: 'Returned to the buyer',
   canceled: 'Canceled',
 };
+
+/**
+ * What to do with the lines ticked below: select them all, set one quantity on every one (a
+ * single change, priced once; 0 removes them) or remove them.
+ */
+function BulkLines({
+  chosen,
+  total,
+  busy,
+  onAll,
+  onSetQty,
+  onRemove,
+}: {
+  chosen: number;
+  total: number;
+  busy: boolean;
+  onAll: (on: boolean) => void;
+  onSetQty: (qty: number) => Promise<Result | null>;
+  onRemove: () => Promise<void>;
+}) {
+  const [qty, setQty] = useState('');
+  const all = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (all.current) all.current.indeterminate = chosen > 0 && chosen < total;
+  }, [chosen, total]);
+  // The box sits above its label's touch target (`hit-area`), so a tap on either toggles it.
+  const n = Number(qty);
+  const valid = qty.trim() !== '' && Number.isInteger(n) && n >= 0 && n <= MAX_LINE_QUANTITY;
+  return (
+    <div className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm">
+      <label className="hit-area inline-flex cursor-pointer items-center gap-2.5">
+        <input
+          ref={all}
+          type="checkbox"
+          checked={chosen > 0 && chosen === total}
+          onChange={(e) => onAll(e.currentTarget.checked)}
+          className="relative z-[1] size-4 accent-primary"
+        />
+        Select all
+      </label>
+      <span className="text-muted-foreground" aria-live="polite">
+        {chosen ? `${chosen} of ${total} selected` : null}
+      </span>
+      {chosen ? (
+        <>
+          <form
+            className="flex items-center gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (valid && (await onSetQty(n))?.ok) setQty('');
+            }}
+          >
+            <Input
+              aria-label="Quantity for the selected lines"
+              inputMode="numeric"
+              enterKeyHint="done"
+              placeholder="Qty"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              aria-invalid={(qty.trim() !== '' && !valid) || undefined}
+              className="h-8 w-20 text-right"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              disabled={busy || !valid}
+              title={n === 0 && valid ? 'A quantity of 0 removes them' : undefined}
+              className="hit-area"
+            >
+              Set quantity
+            </Button>
+          </form>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void onRemove()}
+            className="hit-area sm:ml-auto"
+          >
+            Remove {chosen === 1 ? 'line' : `${chosen} lines`}
+          </Button>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 /** A quantity that is sent when it changes and the field loses focus or Enter is pressed. */
 function QtyInput({

@@ -95,3 +95,52 @@ test('a cart finds a product by name and adds it with a quantity', async ({ page
   expect(adds.length).toBeGreaterThan(0);
   expect(adds.filter((t) => t.height < 44)).toEqual([]);
 });
+
+test('a cart sets the quantity of several lines at once, and removes them', async ({
+  page,
+}, info) => {
+  await open(page, '/carts');
+  await page.getByLabel('Title').fill('Bulk check');
+  await page.getByRole('button', { name: 'New cart' }).click();
+  await expect(page).toHaveURL(/\/carts\/cart_/);
+  await open(page, new URL(page.url()).pathname);
+  for (const sku of ['WID-100', 'GSK-010']) {
+    await page.getByLabel('Or add by SKU').fill(sku);
+    await page.getByRole('button', { name: 'Add line' }).click();
+    await expect(
+      page.getByRole('textbox', { name: `Quantity of ${sku}`, exact: true }),
+    ).toHaveValue('1');
+    // The form empties once the add is answered, which can be after the line shows.
+    await expect(page.getByLabel('Or add by SKU')).toHaveValue('');
+  }
+  await page.getByRole('checkbox', { name: 'Select all' }).check();
+  await expect(page.getByText('2 of 2 selected')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Quantity for the selected lines' }).fill('5');
+  await page.getByRole('button', { name: 'Set quantity' }).click();
+  for (const sku of ['WID-100', 'GSK-010'])
+    await expect(
+      page.getByRole('textbox', { name: `Quantity of ${sku}`, exact: true }),
+    ).toHaveValue('5');
+  const [scroll, width] = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(scroll, `page is ${scroll}px wide in a ${width}px viewport`).toBeLessThanOrEqual(width);
+  if (isTouch(info)) {
+    // Each checkbox and the bulk controls work for a thumb, and iOS doesn't zoom into the field.
+    const boxes = await tapTargets(page, 'label.hit-area:has(input[type="checkbox"])');
+    expect(boxes.length).toBe(3);
+    expect(boxes.filter((t) => t.height < 44 || t.width < 44)).toEqual([]);
+    const qty = page.getByRole('textbox', { name: 'Quantity for the selected lines' });
+    const size = await qty.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+    expect(size).toBeGreaterThanOrEqual(16);
+  }
+  await page.getByRole('checkbox', { name: 'Select GSK-010' }).uncheck();
+  await page.getByRole('button', { name: 'Remove line', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Quantity of WID-100', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('textbox', { name: 'Quantity of GSK-010', exact: true })).toHaveValue(
+    '5',
+  );
+});

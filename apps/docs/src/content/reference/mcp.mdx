@@ -171,7 +171,8 @@ assessment may fetch an `https` image. The other tools set it to `false`.
 
 `list_carts` and `get_cart` read the carts your team opens on the Carts page; a cart a customer
 opened from their own purchasing system is not reached here. `get_cart` gives each line's
-`lineId`, which `change_cart` names in `set_qty` and `remove`, and the `shippingOptions` the
+`lineId`, which `change_cart` names in `set_qty`, `set_qtys` (several lines in one op, all or
+none) and `remove`, and the `shippingOptions` the
 flow offers for the cart's `shipTo`, whose `id` `set_shipping_option` names (`set_ship_to` sets the
 address). `change_cart` takes up to 20 `ops`,
 applied in order as you, each priced again by the cart's flow; it stops at the first one the cart
