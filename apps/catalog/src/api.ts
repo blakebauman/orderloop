@@ -24,9 +24,11 @@ import {
   type DeleteChannelResult,
   type DeleteTypeResult,
   DOC_FORMAT,
+  type EditResult,
   FEED_FORMATS,
   type FeedFormat,
   type FeedStatus,
+  type FieldRef,
   type GapKind,
   LISTING_SEGMENTS,
   PRODUCT_SHARDS,
@@ -34,10 +36,13 @@ import {
   type ProductCatalogRpc,
   type ProductData,
   type ProductInput,
+  type ProductSheet,
   type ProductType,
   type ProductTypeInput,
+  type PublishResult,
   paths,
   productShard,
+  type StageEdit,
   type TypeResult,
   validateProduct,
   type WriteOptions,
@@ -60,6 +65,18 @@ const RUNNING: FeedStatus['state'][] = ['queued', 'splitting', 'applying'];
 const CONFIG_TTL_MS = 2_000;
 
 let cached: { config: CatalogConfig; at: number } | undefined;
+
+/** Item indexes grouped by the shard that owns each item's product. */
+function byShard<T>(items: T[], key: (item: T) => string): Map<number, number[]> {
+  const groups = new Map<number, number[]>();
+  items.forEach((item, i) => {
+    const n = productShard(key(item));
+    const list = groups.get(n) ?? [];
+    list.push(i);
+    groups.set(n, list);
+  });
+  return groups;
+}
 
 export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogRpc {
   private async config(fresh = false): Promise<CatalogConfig> {
@@ -328,6 +345,86 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
       }),
     );
     return { products: counts.reduce((a, b) => a + b, 0) };
+  }
+
+  async getProductSheet(key: string): Promise<ProductSheet | null> {
+    // Typed through the contract, as getProduct is.
+    const stub = shardFor(this.env, key) as unknown as {
+      sheet(key: string): Promise<ProductSheet | null>;
+    };
+    return stub.sheet(key);
+  }
+
+  async stageEdits(edits: StageEdit[], by: string): Promise<EditResult[]> {
+    if (edits.length > MAX_WRITE) throw new RangeError(`at most ${MAX_WRITE} edits per call`);
+    const results: EditResult[] = new Array(edits.length);
+    await Promise.all(
+      [...byShard(edits, (e) => e.key)].map(async ([n, idx]) => {
+        const out = await shard(this.env, n).stageEdits({
+          shard: n,
+          edits: idx.map((i) => edits[i] as StageEdit),
+          by,
+        });
+        out.forEach((r, j) => {
+          results[idx[j] as number] = r as EditResult;
+        });
+      }),
+    );
+    return results;
+  }
+
+  async discardStaged(
+    items: { key: string; ref?: FieldRef }[],
+    _by: string,
+  ): Promise<{ discarded: number }> {
+    if (items.length > MAX_WRITE) throw new RangeError(`at most ${MAX_WRITE} items per call`);
+    const counts = await Promise.all(
+      [...byShard(items, (i) => i.key)].map(([n, idx]) =>
+        shard(this.env, n).discardStaged({
+          shard: n,
+          items: idx.map((i) => items[i] as { key: string; ref?: FieldRef }),
+        }),
+      ),
+    );
+    return { discarded: counts.reduce((a, b) => a + b, 0) };
+  }
+
+  async publishStaged(
+    keys: string[],
+    opts: { by: string; requestId: string; urgent?: boolean },
+  ): Promise<PublishResult[]> {
+    const unique = [...new Set(keys)];
+    if (unique.length > MAX_WRITE) throw new RangeError(`at most ${MAX_WRITE} products per call`);
+    if (!opts.requestId) throw new RangeError('a requestId is needed');
+    const groups = [...byShard(unique, (k) => k)];
+    // Each shard publishes its own products: one that fails leaves only its products staged.
+    const settled = await Promise.allSettled(
+      groups.map(([n, idx]) =>
+        shard(this.env, n).publishStaged({
+          shard: n,
+          keys: idx.map((i) => unique[i] as string),
+          by: opts.by,
+          requestId: opts.requestId,
+          urgent: opts.urgent,
+        }),
+      ),
+    );
+    const byKey = new Map<string, PublishResult>();
+    settled.forEach((s, g) => {
+      const [, idx] = groups[g] as [number, number[]];
+      if (s.status === 'fulfilled') for (const r of s.value) byKey.set(r.key, r);
+      else
+        for (const i of idx) {
+          const key = unique[i] as string;
+          byKey.set(key, {
+            key,
+            status: 'failed',
+            // It may have published before the call failed: the same request id answers that.
+            issues: ['no answer from the catalog; publish again with the same request id'],
+          });
+        }
+    });
+    return unique.map((key) => byKey.get(key) ?? { key, status: 'unchanged' });
   }
 
   /** How many products, across every shard, use a type or are filed in a category. */

@@ -5,6 +5,7 @@ import {
   editIssues,
   fieldId,
   fieldValue,
+  overrideConflict,
   parseFieldId,
 } from '../src/product/content';
 import type { Channel } from '../src/product/model';
@@ -91,6 +92,12 @@ describe('overrides', () => {
     expect(out.media).toEqual(feed.media);
   });
 
+  it('never removes the last title, whatever the feed has dropped since', () => {
+    const one = stored(tee({ title: { fr: 'T-shirt classique' } }));
+    const out = applyOverrides(one, [{ ref: { field: 'title', locale: 'fr' }, value: null }]);
+    expect(out.title).toEqual({ fr: 'T-shirt classique' });
+  });
+
   it('returns the feed as it is when there are no overrides', () => {
     expect(applyOverrides(feed, [])).toBe(feed);
   });
@@ -103,6 +110,35 @@ describe('overrides', () => {
     expect(contentHash(applyOverrides(feed, edits))).toBe(
       contentHash(applyOverrides(feed, [...edits].reverse())),
     );
+  });
+});
+
+describe('override conflicts', () => {
+  const desc = { field: 'description' as const, locale: 'fr' };
+
+  it('holds while the feed keeps the value the override was made against', () => {
+    expect(overrideConflict(feed, { ref: desc, value: 'Coton.', base: null })).toBe(false);
+    expect(
+      overrideConflict(feed, {
+        ref: { field: 'title', locale: 'fr' },
+        value: 'T-shirt',
+        base: 'T-shirt classique',
+      }),
+    ).toBe(false);
+  });
+
+  it('conflicts once the feed changes, adds or drops that value', () => {
+    const changed = stored(tee({ description: { fr: 'Du coton.' } }));
+    expect(overrideConflict(changed, { ref: desc, value: 'Coton.', base: null })).toBe(true);
+    const title = { field: 'title' as const, locale: 'fr' };
+    expect(overrideConflict(feed, { ref: title, value: 'T-shirt', base: 'Vieux titre' })).toBe(
+      true,
+    );
+  });
+
+  it('conflicts when the media it names is gone, even with no alt before', () => {
+    const ref = { field: 'mediaAlt' as const, src: 'old.jpg', locale: 'fr' };
+    expect(overrideConflict(feed, { ref, value: 'Ancien', base: null })).toBe(true);
   });
 });
 
@@ -151,6 +187,18 @@ describe('edit checks', () => {
     expect(issues({ field: 'attribute', code: 'fit', locale: 'en' }, 'x')).toEqual([
       'no attribute fit in apparel@1',
     ]);
+  });
+
+  it('keeps a required attribute in at least one locale', () => {
+    const strict = {
+      ...apparel,
+      attributes: apparel.attributes.map((a) => (a.code === 'care' ? { ...a, required: true } : a)),
+    };
+    const care = { field: 'attribute' as const, code: 'care', locale: 'en' };
+    expect(editIssues(feed, strict, { ref: care, value: null })).toEqual([
+      'care is required in at least one locale',
+    ]);
+    expect(editIssues(feed, apparel, { ref: care, value: null })).toEqual([]);
   });
 
   it('keeps a title in at least one locale', () => {

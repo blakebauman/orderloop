@@ -17,7 +17,10 @@ code, and fold a finished section into [Architecture](architecture.md) and
   so it can't overwrite an overridden field either; it makes a conflict.
 - **Changes are staged.** Edits and accepted assistant drafts collect as pending changes and go live
   only when a person publishes them (up to `MAX_WRITE`, 500 products, at a time) through the shard's
-  transaction and outbox, like every catalog write.
+  transaction and outbox, like every catalog write. A staged edit records the live value it was
+  made against; a product whose value changed since (a feed, another person) is refused and stays
+  staged with why. Resolving a conflict is an edit too: restage the same text to keep it (its base
+  moves to the feed's new value), `clear` to take the feed's, or stage new text.
 - **Gaps are indexed.** Per product: a title missing in a locale of a channel it is visible in;
   a description, localized text attribute or media alt text that has a value in some locale but not
   that one; rows a feed rejected (`missing_required` when the issue was a required attribute, which a
@@ -42,17 +45,16 @@ the same shape, rendered by the unchanged `renderForChannel`.
 |---|---|
 | `feed_rows` | The feed's own version of a product, only while it has overrides (otherwise `products.body` is the feed version) |
 | `overrides` | Live edits: `(key, field, locale)`, the value (`null` removes the feed's), `base` (the feed value it was made against), `conflict` (a newer feed value), source, who and when |
-| `staged` | Pending edits (`set` or `clear`) with the product version the person saw, and a failure reason after a refused publish |
+| `staged` | Pending edits (`set` or `clear`) with the live value the person saw, and a failure reason after a refused publish |
 | `drafts` | Unaccepted assistant drafts, with the product hash they were drafted from (stale when it changes) |
 | `gaps` | `(key, kind, field, locale, channel)`, rewritten in every transaction that changes the product |
 | `rejections` | The last feed row refused for a key, with its issues |
-| `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published), counts and failure |
+| `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published for a day) and counts; staged counts and failures are read from `staged` |
 | `revisions` | Per-field history for the sheet, the last 50 per key |
 
 Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or merged there,
-as `using()` does, so no shard awaits another. A column pages in key order. `gaps`, `rejections`
-and `board` exist now (their columns in [Data model](data-model.md#product-catalog)); the other
-tables come with PRs 3 and 4.
+as `using()` does, so no shard awaits another. A column pages in key order. All but `drafts`
+exist now (their columns in [Data model](data-model.md#product-catalog)); `drafts` comes with PR 4.
 
 ## PRs
 
@@ -60,7 +62,7 @@ tables come with PRs 3 and 4.
 |---|---|---|
 | 1 | Core content model: `packages/core/src/product/content.ts` (`FieldRef`, `fieldId`, `fieldValue`, `applyOverrides`, `editIssues`, `contentGaps`, `GAP_KINDS`), pure, tested in `product-content.test.ts` | Built |
 | 2 | Shard: gap index, keyed feed rejections (a `rejectedKey` R2 object per part, which an older Worker ignores), the board table; RPC `catalogBoard`, `listBoard`, `rebuildGaps`; a channel change has each shard's alarm rebuild its gaps (`markGapsStale`, `GAP_REBUILD_DELAY_MS`). A per-feed gap count (`FeedStatus.gaps`) was left out: the board shows the live total | Built |
-| 3 | Shard: `feed_rows`, `overrides` and `staged` in `apply`; `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet` | Planned |
+| 3 | Shard: `feed_rows`, `overrides`, `staged` and `revisions`, with `apply` applying overrides over feed rows and indexing `conflict`s (`overrideConflict`); `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet`; the board's Staged and Published columns | Built |
 | 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` | Planned |
 | 5 | Web API under `/api/v1/catalog` (board, sheet, edits, publish, drafts, gap rebuild) with audit actions and OpenAPI | Planned |
 | 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Planned |

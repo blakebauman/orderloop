@@ -42,6 +42,9 @@ export type FieldRef = {
 /** An edit as stored: the value it sets, or null to remove the feed's value in that locale. */
 export type Override = { ref: FieldRef; value: string | null };
 
+/** An override as the catalog keeps it: with the feed value it was made against (`base`). */
+export type BasedOverride = Override & { base: string | null };
+
 /** Longest text a localized value may hold (`localizedSchema`). */
 export const TEXT_MAX = 10_000;
 /** Longest slug (`validateProduct`). */
@@ -114,9 +117,12 @@ export function applyOverrides(feed: ProductData, overrides: Override[]): Produc
         if (value && (PRODUCT_STATUSES as readonly string[]).includes(value))
           out.status = value as ProductData['status'];
         break;
-      case 'title':
-        out.title = setLocale(out.title, locale, value) ?? {};
+      case 'title': {
+        // Never the last title: a feed can drop the other locales after the override was made.
+        const next = setLocale(out.title, locale, value);
+        if (next) out.title = next;
         break;
+      }
       case 'description':
         out.description = setLocale(out.description, locale, value);
         if (!out.description) delete out.description;
@@ -142,6 +148,16 @@ export function applyOverrides(feed: ProductData, overrides: Override[]): Produc
     }
   }
   return out;
+}
+
+/**
+ * Whether the feed changed a value under an override since it was made: the feed's value now isn't
+ * the one the override was made against, or the media it names is gone. The override stays live;
+ * the product goes back on the board until someone keeps it, takes the feed's value or writes anew.
+ */
+export function overrideConflict(feed: ProductData, o: BasedOverride): boolean {
+  if (o.ref.field === 'mediaAlt' && !feed.media.some((m) => m.src === o.ref.src)) return true;
+  return fieldValue(feed, o.ref) !== o.base;
 }
 
 /**
@@ -174,6 +190,12 @@ export function editIssues(data: ProductData, type: ProductType, edit: Override)
       if (!a) issues.push(`no attribute ${ref.code ?? ''} in ${type.code}@${type.version}`);
       else if (a.kind !== 'text' || !a.localized || a.scope !== 'product')
         issues.push(`${a.code} isn't product text with a value per locale`);
+      else if (
+        a.required &&
+        value === null &&
+        Object.keys(localized(data.attributes[a.code]) ?? {}).every((l) => l === ref.locale)
+      )
+        issues.push(`${a.code} is required in at least one locale`);
       break;
     }
     case 'mediaAlt':
