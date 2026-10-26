@@ -20,6 +20,7 @@ import {
   startOrderSchema,
   ucpSettingsSchema,
 } from '@orderloop/core';
+import { BOARD_COLUMNS, GAP_KINDS } from '@orderloop/core/product';
 import { z } from 'zod';
 import {
   cancelInput,
@@ -27,7 +28,11 @@ import {
   catalogCategoriesInput,
   catalogChannelInput,
   catalogDeleteInput,
+  catalogDiscardInput,
+  catalogDraftsInput,
+  catalogEditsInput,
   catalogProductsInput,
+  catalogPublishInput,
   catalogTypeInput,
   createCartInput,
   dataSubjectInput,
@@ -743,6 +748,115 @@ export function openApiDocument(serverUrl: string) {
             'Stops a feed that is queued, splitting or applying: no more of its file is read. Parts already handed to the catalog still apply, so some products may have been written. Answers 409 when the feed has already finished.',
           parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
           responses: { '200': ok('{ feed }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/board': {
+        get: {
+          summary: "The product editor's board",
+          description:
+            'Products per column (`gaps`, `drafted`, `staged`, `published` in the last day), gaps and products per gap kind, the latest finished feed and one still running. `indexBuilt` is false until every product stored before the gap index existed has been counted (`POST /api/v1/catalog/gaps/rebuild`).',
+          responses: {
+            '200': ok('{ board: { columns, gapsByKind, lastFeed, runningFeed, indexBuilt } }'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/board/{column}': {
+        get: {
+          summary: "One board column's products, in key order",
+          parameters: [
+            {
+              name: 'column',
+              in: 'path',
+              required: true,
+              schema: { type: 'string', enum: [...BOARD_COLUMNS] },
+            },
+            {
+              name: 'kind',
+              in: 'query',
+              description: 'Only products with a gap of this kind',
+              schema: { type: 'string', enum: [...GAP_KINDS] },
+            },
+            {
+              name: 'cursor',
+              in: 'query',
+              description: 'The `cursor` from the page before',
+              schema: { type: 'string' },
+            },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          ],
+          responses: {
+            '200': ok(
+              '{ items: [{ key, title, column, kinds, rejection, staged, drafts, failure, at }], cursor }',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/products/{key}/sheet': {
+        get: {
+          summary: "A product's editor sheet",
+          description:
+            'The product as it is live and as the last feed sent it, its overrides (each with the feed value it was made against, the feed value now and whether they conflict), staged edits, assistant drafts (stale once the field changed), gaps, the last refused feed row and the last 50 published changes.',
+          parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': ok(
+              '{ sheet: { product, feed, overrides, staged, drafts, gaps, rejection, revisions } }',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/edits': {
+        post: {
+          summary: 'Stage product edits, up to 500 (operator)',
+          description:
+            "Content only: title, description, slug, a product's localized text attributes and media alt text per locale, and status. `set` with a value (null removes the feed's value in that locale), or `clear` to show the feed's value again. Each is checked against the product as it is live and answered per edit; nothing goes live until it is published. Staging a field replaces its earlier staged edit and its draft; send `source: assistant` when accepting a draft.",
+          requestBody: body(catalogEditsInput),
+          responses: { '200': ok('{ results: [{ key, ref, ok, issues? }] }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/edits/discard': {
+        post: {
+          summary: 'Drop staged edits (operator)',
+          requestBody: body(catalogDiscardInput),
+          responses: { '200': ok('{ discarded }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/edits/publish': {
+        post: {
+          summary: "Publish products' staged edits, up to 500 (operator)",
+          description:
+            'Each product publishes all its staged edits or none. One is refused, keeping its edits staged with why, when a value it changes was changed since it was staged, an edit no longer fits, or a slug it sets belongs to another product. An edit stays over later feed imports; when a feed changes the value under it, the product shows a conflict. Send the same `requestId` again to get the first answer without publishing twice (one is made when you send none, and returned).',
+          requestBody: body(catalogPublishInput),
+          responses: {
+            '200': ok('{ requestId, results: [{ key, status, version?, issues? }] }'),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/drafts': {
+        post: {
+          summary: 'Save assistant drafts, up to 500 (operator)',
+          description:
+            'Drafts are text for one field and locale, checked like an edit but never staged or published until a person stages them. Status is not drafted.',
+          requestBody: body(catalogDraftsInput),
+          responses: { '200': ok('{ results: [{ key, ref, ok, issues? }] }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/drafts/discard': {
+        post: {
+          summary: 'Drop assistant drafts (operator)',
+          requestBody: body(catalogDiscardInput),
+          responses: { '200': ok('{ discarded }'), ...errors },
+        },
+      },
+      '/api/v1/catalog/gaps/rebuild': {
+        post: {
+          summary: "Recount every product's content gaps (admin)",
+          description:
+            'Reads every product. Needed once for products stored before the gap index existed; channel changes recount on their own.',
+          responses: { '200': ok('{ products }'), ...errors },
         },
       },
       '/api/v1/catalog/reindex': {

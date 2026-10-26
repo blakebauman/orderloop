@@ -51,6 +51,19 @@ suite('audit vocabulary', () => {
         detail: { status: 'busy' },
       }),
     ).toBe('Updated the product index: skipped, another run was going');
+    const ed = (action: string, detail: Record<string, unknown>) =>
+      describe({ action, actor: 'ann@example.com', target: null, detail });
+    expect(
+      ed('catalog.edits_staged', { staged: 3, refused: 1, products: 1, fromDrafts: 2, via: 'api' }),
+    ).toBe(
+      'Staged catalog edits: 3 edits to 1 product, 2 from drafts, 1 refused, via the REST API',
+    );
+    expect(ed('catalog.edits_published', { published: 1, failed: 0, via: 'api' })).toBe(
+      'Published catalog edits: 1 product, via the REST API',
+    );
+    expect(ed('catalog.drafts_discarded', { discarded: 4 })).toBe(
+      'Discarded assistant drafts: 4 dropped',
+    );
     expect(
       describe({
         action: 'auth.recovery_code_used',
