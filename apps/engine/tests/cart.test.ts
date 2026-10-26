@@ -185,6 +185,123 @@ describe('pricing a cart', () => {
   });
 });
 
+describe('shipping a cart', () => {
+  const berlin = { line1: '1 Hauptstr.', city: 'Berlin', postalCode: '10115', country: 'DE' };
+  async function openShipping() {
+    const made = await api().createCart({
+      title: 'Gaskets',
+      flowId: 'tpl-storefront-order',
+      customerId: 'cus_ada',
+      createdBy: 'usr_cart_ada',
+    });
+    if (!made.ok) throw new Error(made.error);
+    return made.id;
+  }
+
+  it('quotes shipping for the ship-to and option, and needs an address to submit', async () => {
+    const id = await openShipping();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 5 });
+    let c = (await state(id)).cart!;
+    expect(c.quote).toMatchObject({ ships: true, shippingOption: 'standard' });
+    expect(c.quote!.shippingOptions.map((o) => o.id)).toEqual(
+      expect.arrayContaining(['standard', 'express']),
+    );
+    expect(await cart(id).submitAs(ada)).toEqual({
+      ok: false,
+      error: 'Add a complete ship-to address: street, city, postcode and country.',
+    });
+
+    expect(await cart(id).applyAs(ada, { op: 'set_ship_to', address: berlin })).toEqual({
+      ok: true,
+    });
+    expect(await cart(id).applyAs(ada, { op: 'set_shipping_option', option: 'express' })).toEqual({
+      ok: true,
+    });
+    c = (await state(id)).cart!;
+    expect(isQuoteCurrent(c)).toBe(true);
+    expect(c).toMatchObject({ shipTo: berlin, shippingOption: 'express' });
+    // Express is 19.95 + 2.00 a unit, × 2.5 outside the US, as the order's own shipping node charges.
+    expect(c.quote).toMatchObject({
+      shippingOption: 'express',
+      shipping: Math.round((19.95 + 2 * 5) * 2.5 * 100) / 100,
+    });
+    expect(c.quote!.total).toBeCloseTo(c.quote!.subtotal + c.quote!.shipping + c.quote!.tax, 2);
+    expect(await cart(id).applyAs(ada, { op: 'set_shipping_option', option: 'teleport' })).toEqual({
+      ok: false,
+      error: 'The shipping option “teleport” is not offered.',
+    });
+
+    // Clearing the address takes the option with it, and the cart can't be submitted again.
+    await cart(id).applyAs(ada, { op: 'set_ship_to', address: null });
+    c = (await state(id)).cart!;
+    expect(c).toMatchObject({ shipTo: null, shippingOption: null });
+    expect(c.quote!.shippingOption).toBe('standard');
+  });
+
+  it('reports a chosen option the flow doesn’t offer, and keeps it chosen', async () => {
+    const id = await openShipping();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'set_ship_to', address: berlin });
+    // Nothing priced yet, so nothing to check it against until there are lines.
+    await cart(id).applyAs(ada, { op: 'set_shipping_option', option: 'teleport' });
+    await cart(id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 1 });
+    const c = (await state(id)).cart!;
+    expect(c.shippingOption).toBe('teleport');
+    expect(c.issues).toContainEqual(
+      expect.objectContaining({ kind: 'error', code: 'fulfillment_option_unavailable' }),
+    );
+    expect(await cart(id).submitAs(ada)).toEqual({
+      ok: false,
+      error: 'The shipping option “teleport” is not offered.',
+    });
+  });
+
+  it('starts the order with the ship-to and option the cart was quoted for', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const id = await openShipping();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 2 });
+    await cart(id).applyAs(ada, { op: 'set_ship_to', address: berlin });
+    await cart(id).applyAs(ada, { op: 'set_shipping_option', option: 'express' });
+    const done = await cart(id).submitAs(ada);
+    if (!done.ok) throw new Error(done.error);
+    const order = ((await env.ORDER_AGENT.getByName(done.orderId).snapshot()) as OrderState).order!;
+    expect(order.shippingOption).toBe('express');
+    expect(order.meta?.shipTo).toEqual(berlin);
+  });
+
+  it('starts an order with the option the quote charged when none was chosen, and none for a flow without shipping', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const id = await openShipping();
+    const ada = staff(await who('operator', 'ada'));
+    await cart(id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 1 });
+    await cart(id).applyAs(ada, { op: 'set_ship_to', address: berlin });
+    const done = await cart(id).submitAs(ada);
+    if (!done.ok) throw new Error(done.error);
+    const order = ((await env.ORDER_AGENT.getByName(done.orderId).snapshot()) as OrderState).order!;
+    expect(order.shippingOption).toBe('standard');
+
+    // The B2B flow prices no shipping: no address needed, and its order gets none.
+    const b2b = await open();
+    await cart(b2b).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 1 });
+    expect((await state(b2b)).cart!.quote!.shippingOptions).toEqual([]);
+    const plain = await cart(b2b).submitAs(ada);
+    if (!plain.ok) throw new Error(plain.error);
+    const o = ((await env.ORDER_AGENT.getByName(plain.orderId).snapshot()) as OrderState).order!;
+    expect(o.shippingOption).toBeUndefined();
+    expect(o.meta).not.toHaveProperty('shipTo');
+  });
+});
+
 describe('promotion codes on a cart', () => {
   it('takes a code off the price when the cart’s flow applies promotions, and refuses an unknown one', async () => {
     // The built-in B2B flow, which applies promotions between pricing and tax.
@@ -577,11 +694,21 @@ describe('orders started from outside the engine', () => {
 });
 
 describe('cart retention', () => {
-  it('clears an ended cart’s chat and files after the retention, once, and keeps its lines', async () => {
+  it('clears an ended cart’s chat, files and ship-to after the retention, once, and keeps its lines', async () => {
     const id = await open();
     const ada = await who('operator', 'ada');
     const ws = await socket(id, ada);
     await cart(id).applyAs(staff(ada), { op: 'add', sku: 'WID-100', qty: 1 });
+    await cart(id).applyAs(staff(ada), {
+      op: 'set_ship_to',
+      address: {
+        name: 'Ann',
+        line1: '9 Dock Rd',
+        city: 'Leeds',
+        postalCode: 'LS1 4AP',
+        country: 'GB',
+      },
+    });
     await ws.call('say', ['Ann at ann@northwind.example wants these Friday']);
     await env.DOCS.put(`carts/${id}/att_r1`, '%PDF');
     await cartApi.attachToCart(
@@ -599,6 +726,7 @@ describe('cart retention', () => {
     expect(s.chat).toEqual([]);
     expect(s.attachments).toEqual([]);
     expect(s.cart!.lines).toEqual([expect.objectContaining({ sku: 'WID-100', qty: 1 })]);
+    expect(s.cart!.shipTo).toBeNull();
     expect(await env.DOCS.get(`carts/${id}/att_r1`)).toBeNull();
     const row = await db().select().from(carts).where(eq(carts.id, id)).get();
     expect(row?.purgedAt).toEqual(expect.any(Number));

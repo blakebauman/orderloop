@@ -176,7 +176,7 @@ export const ASSISTANT_TOOLS: Record<
     label: 'Changed the cart',
     title: 'Change a cart',
     description:
-      'Change an open cart, op by op in order: add a SKU, set a line’s quantity (0 removes it), remove lines, clear it, add or remove a promo code, lock, unlock or rename it. The cart’s flow prices it again; nothing is ordered.',
+      'Change an open cart, op by op in order: add a SKU, set a line’s quantity (0 removes it), remove lines, clear it, add or remove a promo code, set or clear the ship-to address, choose a shipping option from the quote, lock, unlock or rename it. The cart’s flow prices it again; nothing is ordered.',
   },
   decide_approval: {
     role: 'approver',

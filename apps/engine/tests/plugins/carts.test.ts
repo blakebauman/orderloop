@@ -490,6 +490,17 @@ describe('a punchout buyer’s data subject request', () => {
     const ws = await guestSocket(c.cartId, guest);
     if (!ws.call) throw new Error('socket refused');
     await ws.call('say', ['Please ship to my home, Bea Buyer']);
+    const home = {
+      name: 'Bea Buyer',
+      line1: '4 Elm Row',
+      city: 'Leeds',
+      postalCode: 'LS2 7EY',
+      country: 'GB',
+    };
+    // The buyer sets it on their own page: the socket's op, bounded by the cart itself.
+    expect((await ws.call('apply', [{ op: 'set_ship_to', address: home }])).result).toEqual({
+      ok: true,
+    });
     await env.DOCS.put(`carts/${c.cartId}/att_b1`, '%PDF');
     await api().attachToCart(
       c.cartId,
@@ -510,6 +521,7 @@ describe('a punchout buyer’s data subject request', () => {
       expect.objectContaining({
         id: c.cartId,
         buyer: { id: email.toUpperCase(), name: 'Bea Buyer' },
+        shipTo: home,
         messages: [expect.objectContaining({ body: 'Please ship to my home, Bea Buyer' })],
         files: [expect.objectContaining({ name: 'my-po.pdf' })],
       }),
@@ -520,6 +532,7 @@ describe('a punchout buyer’s data subject request', () => {
     const s = (await api().cartSnapshot(c.cartId))!;
     expect(s.cart).toMatchObject({
       status: 'canceled',
+      shipTo: null,
       external: { buyer: { id: '[erased]', name: '[erased]' } },
     });
     expect(s.chat.map((m) => m.body)).not.toContain('Please ship to my home, Bea Buyer');

@@ -1016,6 +1016,17 @@ the rest is in its SQL, paged by `history`).
   is priced, for the cart's customer (`DraftExtra` in `apps/engine/src/ucp/quote.ts`) with its codes in
   `meta.promoCodes`. A quote that finishes after the cart changed again is dropped, and a cart is
   ready only when its quote is for its current `version` and found no errors (`cartReadyProblem`).
+- **Ship-to and shipping option.** `Cart.shipTo` and `Cart.shippingOption` go into the quote's
+  session as a checkout's do (`set_ship_to`, `set_shipping_option`; `cartShipTo` bounds an address
+  to `SHIP_TO_LIMITS`, since the socket's ops never pass `cartOpSchema`), so `commerce.shipping_rate`
+  and `commerce.tax` price them. Clearing the address clears the option. An option the current
+  quote doesn't offer is refused; one the next quote doesn't offer stays chosen and comes back as
+  the quote's `fulfillment_option_unavailable` error, as on a UCP checkout. When the quote `ships`
+  and offers options, `cartReadyProblem` also wants a complete address (`isCompleteAddress`, the
+  `ADDRESS_FIELDS` `missingInfo` checks). A cart stored before these fields reads them as null
+  (`storedCart`, applied by the agent's `cart()` and `snapshot`). Retention (`purge`) and a buyer's
+  erasure (`eraseSubject`) clear `shipTo`; `subjectExport` includes it. `PluginCart`, and so an
+  external cart's return, doesn't carry them.
 - **Promotion codes.** A cart's codes ride in `meta.promoCodes` on its quote and its order. A
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
   cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no
@@ -1027,13 +1038,15 @@ the rest is in its SQL, paged by `history`).
   deletes it. Downloads (`/carts/<cartId>/attachments/<id>`) go to staff and to the cart's own buyer
   (`cartActor`), as attachments under a sandboxing CSP.
 - **Ops.** `applyCartOp` applies one at a time: add (into the line with that SKU), set quantity
-  (0 removes), remove, clear, promo codes, and, for staff, lock, unlock and rename. Staff need
+  (0 removes), remove, clear, promo codes, ship-to and shipping option, and, for staff, lock,
+  unlock and rename. Staff need
   `viewer` to read and `operator` to edit.
 - **Lock, unlock and rename** keep a current quote current (they bump the version and the quoted
   version together), so a locked cart can be submitted.
 - **Submitting** (`submitAs`, operator) holds the cart locked before its first await, without bumping its version, while
   `startOrderOnce` starts an order of the cart's flow keyed `cart:<id>` (channel `manual`,
-  `externalId` the cart id, lines from the quote, `meta.cart` and `meta.promoCodes`), then marks it
+  `externalId` the cart id, lines from the quote, `meta.cart`, `meta.promoCodes` and `meta.shipTo`,
+  and `shippingOption` the cart's or else the quote's, as `completeCheckout` does), then marks it
   `submitted` with the order id. Approvals happen in that order's flow.
 - **The socket.** A cart's socket sends the whole cart as it opens, so `cartGate`
   (`apps/engine/src/cart/gate.ts`), run by `routeAgents` (`apps/engine/src/agent-routes.ts`)

@@ -6,15 +6,18 @@
  * (`quoteNodes`), the same way a checkout is priced.
  *
  * Nobody sets a price on a cart. A line is a SKU and a quantity; the quote says what it costs, and
- * a quote is current only for the version it was worked out for.
+ * a quote is current only for the version it was worked out for. A cart that ships is quoted for
+ * its ship-to and shipping option, which its order then adopts, as a checkout's does.
  */
 
 import { z } from 'zod';
+import type { ShipAddress } from './address';
 import {
   applyLines,
   type CheckoutIssue,
   type CheckoutLine,
   type CheckoutQuote,
+  isCompleteAddress,
   MAX_CHECKOUT_LINES,
   MAX_LINE_QUANTITY,
 } from './checkout';
@@ -74,6 +77,10 @@ export type Cart = {
   external: ExternalCart | null;
   lines: CheckoutLine[];
   promoCodes: string[];
+  /** Where it ships: priced by the flow's shipping and tax nodes, and the order's `meta.shipTo`. */
+  shipTo: Partial<ShipAddress> | null;
+  /** The option chosen from the quote's `shippingOptions`; null lets the flow pick. */
+  shippingOption: string | null;
   quote: CheckoutQuote | null;
   /** The cart version the quote was worked out for. */
   quotedVersion: number;
@@ -96,7 +103,33 @@ export type CartOp =
   | { op: 'unlock' }
   | { op: 'promo_add'; code: string }
   | { op: 'promo_remove'; code: string }
-  | { op: 'rename'; title: string };
+  | { op: 'rename'; title: string }
+  /** null clears the address, and the option with it. */
+  | { op: 'set_ship_to'; address: Partial<ShipAddress> | null }
+  | { op: 'set_shipping_option'; option: string | null };
+
+/** The longest each ship-to field may be, as an inbound order's address bounds them. */
+export const SHIP_TO_LIMITS: Record<keyof ShipAddress, number> = {
+  name: 120,
+  line1: 200,
+  line2: 200,
+  city: 100,
+  region: 100,
+  postalCode: 20,
+  country: 60,
+};
+export const MAX_SHIPPING_OPTION_ID = 80;
+
+const shipToField = (f: keyof ShipAddress) => z.string().trim().max(SHIP_TO_LIMITS[f]).optional();
+const shipToSchema = z.object({
+  name: shipToField('name'),
+  line1: shipToField('line1'),
+  line2: shipToField('line2'),
+  city: shipToField('city'),
+  region: shipToField('region'),
+  postalCode: shipToField('postalCode'),
+  country: shipToField('country'),
+});
 
 /**
  * A `CartOp` as a caller outside the cart's page sends it (the REST API, MCP, the assistant).
@@ -123,6 +156,22 @@ export const cartOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('promo_add'), code: z.string().min(1).max(40) }),
   z.object({ op: z.literal('promo_remove'), code: z.string().min(1).max(40) }),
   z.object({ op: z.literal('rename'), title: z.string().min(1).max(MAX_CART_TITLE) }),
+  z.object({
+    op: z.literal('set_ship_to'),
+    address: shipToSchema
+      .nullable()
+      .describe('line1, city, postalCode and country make it complete; null clears it'),
+  }),
+  z.object({
+    op: z.literal('set_shipping_option'),
+    option: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_SHIPPING_OPTION_ID)
+      .nullable()
+      .describe("An id from the quote's shippingOptions; null lets the flow pick"),
+  }),
 ]) satisfies z.ZodType<CartOp>;
 
 export type CartOpResult =
@@ -158,6 +207,32 @@ export function normalizePromoCode(raw: string): string | null {
   const code = raw.trim().toUpperCase();
   return PROMO_CODE_RE.test(code) ? code : null;
 }
+
+/**
+ * A ship-to as a cart stores it: known fields only, trimmed, empty ones dropped; null when a field
+ * isn't text or is too long, or nothing is left. The socket's ops never pass `cartOpSchema`, so
+ * the cart bounds them itself.
+ */
+export function cartShipTo(raw: unknown): Partial<ShipAddress> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Partial<ShipAddress> = {};
+  for (const [f, max] of Object.entries(SHIP_TO_LIMITS) as [keyof ShipAddress, number][]) {
+    const v = (raw as Record<string, unknown>)[f];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== 'string') return null;
+    const t = v.trim();
+    if (t.length > max) return null;
+    if (t) out[f] = t;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** A stored cart, with what a cart from before ship-to lacks read as unset. */
+export const storedCart = (c: Cart): Cart => ({
+  ...c,
+  shipTo: c.shipTo ?? null,
+  shippingOption: c.shippingOption ?? null,
+});
 
 const validQty = (qty: number) => Number.isInteger(qty) && qty >= 0 && qty <= MAX_LINE_QUANTITY;
 const validSku = (sku: string) => sku.trim().length > 0 && sku.length <= 120;
@@ -248,12 +323,41 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
       if (!code || !cart.promoCodes.includes(code)) return fail('That code is not applied.');
       return done({ promoCodes: cart.promoCodes.filter((c) => c !== code) }, true);
     }
+    case 'set_ship_to': {
+      if (op.address === null) {
+        if (!cart.shipTo && !cart.shippingOption) return fail('The cart has no ship-to.');
+        // An option is offered for an address; with none, the flow picks again.
+        return done({ shipTo: null, shippingOption: null }, true);
+      }
+      const shipTo = cartShipTo(op.address);
+      if (!shipTo) return fail('Give an address: street, city, postcode and country.');
+      return done({ shipTo }, true);
+    }
+    case 'set_shipping_option': {
+      if (op.option === null) {
+        if (!cart.shippingOption) return fail('No shipping option is chosen.');
+        return done({ shippingOption: null }, true);
+      }
+      const option = typeof op.option === 'string' ? op.option.trim() : '';
+      if (!option || option.length > MAX_SHIPPING_OPTION_ID)
+        return fail('Choose a shipping option.');
+      // Checked against a quote only while it prices the cart; otherwise the next quote says.
+      if (
+        isQuoteCurrent(cart) &&
+        cart.quote!.shippingOptions.length &&
+        !cart.quote!.shippingOptions.some((o) => o.id === option)
+      )
+        return fail(`The shipping option “${option}” is not offered.`);
+      return done({ shippingOption: option }, true);
+    }
   }
 }
 
 /**
  * Why the cart can't be submitted as an order or returned to the buyer's system yet, or null when
- * it can: it has lines, its quote is for this version, and the quote found no errors.
+ * it can: it has lines, its quote is for this version, the quote found no errors, and when it
+ * ships by a flow that offers shipping options, it has a complete ship-to. A cart whose flow
+ * prices no shipping, or that ships nothing, needs no address.
  */
 export function cartReadyProblem(cart: Cart): string | null {
   if (isFinalCart(cart)) return `The cart is ${cart.status}.`;
@@ -261,7 +365,11 @@ export function cartReadyProblem(cart: Cart): string | null {
   if (cart.quotedVersion !== cart.version) return 'The cart is being priced.';
   const error = cart.issues.find((i) => i.kind === 'error');
   if (error) return error.content;
-  return cart.quote ? null : 'The cart could not be priced.';
+  const q = cart.quote;
+  if (!q) return 'The cart could not be priced.';
+  if (q.ships && q.shippingOptions.length && !isCompleteAddress(cart.shipTo))
+    return 'Add a complete ship-to address: street, city, postcode and country.';
+  return null;
 }
 
 /**
@@ -391,6 +499,39 @@ export const canRemoveAttachment = (a: Pick<CartAttachment, 'by'>, actor: CartAc
   a.by.id === actor.id || (actor.kind === 'staff' && atLeast(actor.role, 'operator'));
 
 /** What a staff cart starts with; the engine checks the flow and the customer. */
+/** A cart as it starts: open, unpriced, at version 1, shipping nowhere yet. */
+export function newCart(c: {
+  id: string;
+  title: string;
+  flowId: string;
+  customerId: string | null;
+  external: ExternalCart | null;
+  lines: CheckoutLine[];
+  createdBy: string;
+  now: number;
+}): Cart {
+  return {
+    id: c.id,
+    title: c.title,
+    status: 'open',
+    customerId: c.customerId,
+    flowId: c.flowId,
+    external: c.external,
+    lines: c.lines,
+    promoCodes: [],
+    shipTo: null,
+    shippingOption: null,
+    quote: null,
+    quotedVersion: 0,
+    issues: [],
+    orderId: null,
+    createdBy: c.createdBy,
+    createdAt: c.now,
+    updatedAt: c.now,
+    version: 1,
+  };
+}
+
 export type CreateCartInput = {
   title: string;
   flowId: string;

@@ -166,7 +166,12 @@ export function patchCheckout(s: CheckoutSession, patch: CheckoutPatch): Checkou
   };
 }
 
-const ADDRESS_FIELDS = ['line1', 'city', 'postalCode', 'country'] as const;
+/** What a ship-to needs before anything ships to it; the rest (name, line 2, region) is optional. */
+export const ADDRESS_FIELDS = ['line1', 'city', 'postalCode', 'country'] as const;
+
+/** Whether `a` has every `ADDRESS_FIELDS` field. It says nothing of whether the address is valid. */
+export const isCompleteAddress = (a: Partial<ShipAddress> | null | undefined) =>
+  ADDRESS_FIELDS.every((f) => !!a?.[f]);
 
 /**
  * What the session still lacks before it can be completed, as recoverable errors: lines, an email
@@ -187,11 +192,8 @@ export function missingInfo(s: CheckoutSession): CheckoutIssue[] {
   if (!s.buyer.email) out.push(missing('$.buyer.email', "The buyer's email is required."));
   const q = s.quote;
   if (q?.ships) {
-    for (const f of ADDRESS_FIELDS)
-      if (!s.shipTo?.[f]) {
-        out.push(missing('$.fulfillment', 'A complete shipping address is required.'));
-        break;
-      }
+    if (!isCompleteAddress(s.shipTo))
+      out.push(missing('$.fulfillment', 'A complete shipping address is required.'));
     if (q.shippingOptions.length && !s.shippingOption && !q.shippingOption)
       out.push(missing('$.fulfillment', 'Choose a shipping option.'));
   }

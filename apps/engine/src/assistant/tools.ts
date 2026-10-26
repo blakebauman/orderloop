@@ -150,6 +150,14 @@ const cartOutput = row({
   title: z.string(),
   status: z.string(),
   lines: z.array(row({ lineId: z.string(), sku: z.string(), qty: z.number() })),
+  shipTo: row({}).nullable().describe('Where it ships (set_ship_to); null until set'),
+  shippingOption: z
+    .string()
+    .nullable()
+    .describe('The option chosen, or the one the quote charged when none was'),
+  shippingOptions: z
+    .array(row({ id: z.string(), title: z.string(), price: money }))
+    .describe('What the flow offers for the ship-to; choose one with set_shipping_option'),
   priced: z.boolean().describe('Whether the total prices the cart as it is now'),
   total: money.describe('Formatted in the quote’s currency; empty until priced'),
   notReady: z.string().nullable().describe('Why it can’t be submitted yet; null when it can'),

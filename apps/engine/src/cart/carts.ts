@@ -17,6 +17,7 @@ import {
   externalCartProblem,
   isFinalCart,
   MAX_CART_TITLE,
+  newCart,
   newId,
   type PluginCart,
   quoteNodes,
@@ -55,25 +56,16 @@ export async function createCart(
       .get();
     if (!found) return { ok: false, error: 'No such customer.' };
   }
-  const now = Date.now();
-  const cart: Cart = {
+  const cart = newCart({
     id: newId('cart'),
     title,
-    status: 'open',
-    customerId: input.customerId ?? null,
     flowId: input.flowId,
+    customerId: input.customerId ?? null,
     external,
     lines: applyLines([], lines),
-    promoCodes: [],
-    quote: null,
-    quotedVersion: 0,
-    issues: [],
-    orderId: null,
     createdBy: input.createdBy,
-    createdAt: now,
-    updatedAt: now,
-    version: 1,
-  };
+    now: Date.now(),
+  });
   await cartAgent(env, cart.id).create(cart);
   return { ok: true, id: cart.id };
 }
