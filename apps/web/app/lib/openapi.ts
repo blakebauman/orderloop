@@ -98,10 +98,20 @@ function cartSchema() {
         },
       },
       promoCodes: { type: 'array', items: { type: 'string' } },
+      shipTo: {
+        type: ['object', 'null'],
+        description:
+          'Where it ships: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`. The quote prices shipping and tax for it, and the order adopts it',
+      },
+      shippingOption: {
+        type: ['string', 'null'],
+        description:
+          "The option chosen from the quote's `shippingOptions`; null lets the flow pick (the quote's `shippingOption` says which it charged)",
+      },
       quote: {
         type: ['object', 'null'],
         description:
-          "What the cart costs, worked out by its flow's pricing nodes: `currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`",
+          "What the cart costs, worked out by its flow's pricing nodes: `currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`, `ships`, `shippingOptions` (what ships to the ship-to: `id`, `title`, `carrier`, `amount`, `minDays`, `maxDays`) and `shippingOption`",
       },
       quoteCurrent: {
         type: 'boolean',
@@ -122,7 +132,18 @@ function cartSchema() {
       updatedAt: { type: 'integer', description: 'Epoch ms' },
       version: { type: 'integer', description: 'Bumped on every change' },
     },
-    required: ['id', 'title', 'status', 'flowId', 'lines', 'quote', 'quoteCurrent', 'version'],
+    required: [
+      'id',
+      'title',
+      'status',
+      'flowId',
+      'lines',
+      'shipTo',
+      'shippingOption',
+      'quote',
+      'quoteCurrent',
+      'version',
+    ],
   };
 }
 
@@ -336,7 +357,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: 'Change a cart, one op at a time (operator)',
           description:
-            "Applied as the caller, as if they made the change on the cart's page: `add` (adds to a line with that SKU), `set_qty` (0 removes the line), `remove`, `clear`, `lock`, `unlock`, `promo_add`, `promo_remove`, `rename`. Lines and codes change only while the cart is open. The response has the cart priced again.",
+            "Applied as the caller, as if they made the change on the cart's page: `add` (adds to a line with that SKU), `set_qty` (0 removes the line), `remove`, `clear`, `lock`, `unlock`, `promo_add`, `promo_remove`, `rename`, `set_ship_to` (null clears the address and the option), `set_shipping_option` (an id from the quote's `shippingOptions`, or null to let the flow pick). Lines, codes, the ship-to and the option change only while the cart is open. The response has the cart priced again.",
           parameters: [cartId],
           requestBody: {
             required: true,

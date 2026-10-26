@@ -395,8 +395,9 @@ Orders with `erased_at` set are no longer part of it. A `users` row with the add
 (`truncated` when there were more) with `contact`, `lines` and `meta` read from each agent's state,
 `messages` (to those orders or to the address), `inbound_emails` rows (without `r2_key`) and the
 `documents` list (`key`, `kind`, `contentType`, `createdAt`), and `carts`: each of their external carts
-(`CartAgent.subjectExport`) with its id, title, status, buyer, lines, order, and the messages and file
-names, types and sizes they added.
+(`CartAgent.subjectExport`) with its id, title, status, buyer, lines, ship-to, order, and the messages and file
+names, types and sizes they added, and each staff cart for one of their customer accounts that holds a ship-to
+(`CartAgent.customerExport`: id, title, status, ship-to, order).
 
 **Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
 has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
@@ -416,10 +417,12 @@ the rest of the batch is fully erased (agent state, R2, and the D1 rows below), 
 | `orders` | `contact_email` null, `title` erased (an order no agent holds is erased in D1 with the terms), `erased_at` set |
 
 Each call first erases the subject's external carts (`carts`, counted in `carts`) through
-`CartAgent.eraseSubject`: an open cart is canceled, their messages and files are deleted, the terms
+`CartAgent.eraseSubject`: an open cart is canceled, their messages, files and ship-to are deleted, the terms
 (with the buyer's id and name) are erased from everyone else's messages and the title, the return
 form and start links are dropped, their sockets are closed, and the buyer becomes `[erased]`, which
-clears `buyer_id`. The cart's lines, quote and order stay.
+clears `buyer_id`. The cart's lines, quote and order stay. Staff carts for their customer accounts
+(`carts.customer_id`) lose their ship-to (`CartAgent.eraseShipTo`; an open one is priced again),
+each counted in `carts`.
 
 When no order is left (the last call, `done: true`): `inbound_emails` from that sender that never
 started an order are erased the same way and their R2 `.eml` deleted, `messages` to the address are
@@ -507,7 +510,7 @@ A daily sweep (`sweep` in `apps/engine/src/retention.ts`, run by the engine's `s
 | `ai_usage` | `day` older than 90 days (`pruneUsage`; reported as `aiUsageDays`) |
 | `ucp_idempotency` | `created_at` older than 48 hours (reported as `ucpIdempotency`) |
 | `checkout_sessions` | no `order_id` and `expires_at` older than 30 days (reported as `abandonedCheckouts`) |
-| Cart chat, files and buyers | A cart that ended (`submitted`, `returned` or `canceled`) over 90 days ago and not yet purged, up to 200 a run (`purgeEndedCarts`, `CartAgent.purge`; reported as `cartsPurged`): its chat, return form and start links deleted, its files under `carts/<id>/` deleted, its buyer `[erased]`, and `purged_at` set. Its lines, quote and order, and the `carts` row, are kept |
+| Cart chat, files and buyers | A cart that ended (`submitted`, `returned` or `canceled`) over 90 days ago and not yet purged, up to 200 a run (`purgeEndedCarts`, `CartAgent.purge`; reported as `cartsPurged`): its chat, return form and start links deleted, its files under `carts/<id>/` deleted, its ship-to cleared, its buyer `[erased]`, and `purged_at` set. Its lines, quote and order, and the `carts` row, are kept |
 | (`carts.buyer_id`, backfill) | External carts with no `buyer_id`, from before migration `0050`: each cart's agent writes its row again (`indexCartBuyers`, up to 200 a run; reported as `cartBuyersIndexed`), so a data subject request finds them. A buyer erased before that (a `personal_data.erased` audit event for their address's `subjectTarget`) is erased from the cart as it is indexed. A row with no agent is marked `''`, which no request matches; a cart that can't answer waits for the next run without stopping the sweep |
 
 The sweep also reseals stored secrets (`resealSecrets`, `apps/engine/src/data-key.ts`; reported as `secrets: { resealed, unreadable }`): values stored in plaintext before encryption are encrypted, and values under `DATA_KEY_PREVIOUS` move onto `DATA_KEY`, each written conditionally on the value read so a concurrent rotation isn't undone. A value no key opens is logged and counted in `unreadable`. See [Rotating the data key](operations.md#rotating-the-data-key).

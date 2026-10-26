@@ -238,6 +238,8 @@ describe('carts over REST', () => {
     external: null,
     lines: [{ id: 'l1', sku: 'WID-100', qty: 2 }],
     promoCodes: [],
+    shipTo: null,
+    shippingOption: null,
     quote: null,
     quotedVersion: 2,
     issues: [],
@@ -268,7 +270,7 @@ describe('carts over REST', () => {
     engine.cartSnapshot.mockResolvedValueOnce({
       cart: cart(),
       members: [],
-      chat: [{ body: 'hi' }],
+      chat: [{ body: 'chat-only-words' }],
     });
     const read = await get('carts/cart_1', viewer);
     const body = (await read.json()) as { cart: Record<string, unknown> };
@@ -277,7 +279,7 @@ describe('carts over REST', () => {
       quoteCurrent: false,
       notReady: 'The cart could not be priced.',
     });
-    expect(JSON.stringify(body)).not.toContain('hi');
+    expect(JSON.stringify(body)).not.toContain('chat-only-words');
     engine.cartSnapshot.mockResolvedValueOnce({ cart: cart({ external: {} as Cart['external'] }) });
     expect((await get('carts/cart_1', viewer)).status).toBe(404);
     engine.cartSnapshot.mockResolvedValueOnce(null);
@@ -363,6 +365,35 @@ describe('carts over REST', () => {
     expect((await post('carts/cart_x/ops', { op: 'clear' })).status).toBe(404);
     // Only a change that went in is recorded.
     expect(audit).not.toHaveBeenCalled();
+
+    // A ship-to reaches the engine bounded and trimmed, without fields it doesn't know.
+    expect(
+      (await post('carts/cart_1/ops', { op: 'set_ship_to', address: { line1: 'x'.repeat(201) } }))
+        .status,
+    ).toBe(400);
+    expect((await post('carts/cart_1/ops', { op: 'set_shipping_option', option: '' })).status).toBe(
+      400,
+    );
+    engine.changeCart.mockResolvedValueOnce({ ok: true, cart: { id: 'cart_1' } });
+    const shipped = await post('carts/cart_1/ops', {
+      op: 'set_ship_to',
+      address: { line1: ' 1 Main St ', city: 'Austin', postalCode: '78701', country: 'US', x: 1 },
+    });
+    expect(shipped.status).toBe(200);
+    expect(engine.changeCart).toHaveBeenLastCalledWith(
+      'cart_1',
+      {
+        op: 'set_ship_to',
+        address: { line1: '1 Main St', city: 'Austin', postalCode: '78701', country: 'US' },
+      },
+      expect.any(String),
+    );
+    // The audit names the op, never the address.
+    expect(audit).toHaveBeenLastCalledWith(expect.anything(), 'cart.changed', {
+      actor: operator,
+      target: 'cart_1',
+      detail: { op: 'set_ship_to', via: 'api' },
+    });
   });
 
   it('holds a submit to the version the caller read, by ETag or body', async () => {

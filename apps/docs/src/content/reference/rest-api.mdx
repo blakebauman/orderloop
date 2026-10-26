@@ -214,7 +214,11 @@ exactly as if they made it on the cart's page, and anyone with the cart open see
   50).
 - `GET /api/v1/carts/:id` returns `{ cart }`: `id`, `title`, `status`, `flowId`, `customerId`,
   `lines` (`{ id, sku, qty, title?, unitPrice? }`; the quote sets the title and price), `promoCodes`,
-  `quote` (`currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`, or `null` until priced),
+  `shipTo` (`{ name?, line1?, line2?, city?, region?, postalCode?, country? }`, or `null`),
+  `shippingOption` (the option chosen, or `null` to let the flow pick),
+  `quote` (`currency`, `lines`, `subtotal`, `shipping`, `tax`, `total`, `ships`, `shippingOptions`
+  (`{ id, title, carrier, amount, minDays, maxDays }`, what the flow offers for the ship-to) and
+  `shippingOption` (the one it charged), or `null` until priced),
   `quoteCurrent` (whether the quote prices the cart as it is now), `issues` (what pricing found:
   `{ kind, code, content }`), `notReady` (why it can't be submitted yet, or `null`), `orderId`,
   `createdBy`, `createdAt`, `updatedAt` and `version`, with the version also as the response's
@@ -237,14 +241,22 @@ POST /api/v1/carts/cart_…/ops
 | `promo_add`, `promo_remove` | `code` | Adds or removes a promotion code (up to five) |
 | `lock`, `unlock` | | Stops or allows changes to lines and codes |
 | `rename` | `title` | Renames the cart |
+| `set_ship_to` | `address` (`line1`, `city`, `postalCode` and `country` make it complete; `name`, `line2` and `region` are optional), or `null` | Sets where it ships; `null` clears the address and the option |
+| `set_shipping_option` | `option` (an `id` from `quote.shippingOptions`), or `null` | Chooses how it ships; `null` lets the flow pick |
 
-Lines and codes change only while the cart is open. A change the cart refuses (it is locked or
+Lines, codes, the ship-to and the option change only while the cart is open. An option the
+current quote doesn't offer is refused, as is any option when it offers none; one chosen before
+the cart was priced, or that a new address no longer offers, stays on the cart as an error issue
+until another is chosen. When the flow's shipping step picks the cheapest or fastest whatever was
+chosen, the quote's `shippingOption` is the one charged and a `shipping_option` warning says so. A change the cart refuses (it is locked or
 has ended, the line is gone, the code is already applied, a line would pass 10,000 or the cart
-100 lines) is `409` with the reason; a body that isn't an op is `400`.
+100 lines, an address with nothing in it) is `409` with the reason; a body that isn't an op is `400`.
 
 `POST /api/v1/carts/:id/submit` starts the cart's order on its flow, at its quoted lines and
-customer, started by the caller, and answers `201 { orderId, cartId }`. It needs lines and a
-current quote with no errors (see `notReady`); otherwise, or once the cart has ended, it is `409`.
+customer, ship-to (`meta.shipTo`) and shipping option (`shippingOption`, the one its quote
+charged), started by the caller, and answers `201 { orderId, cartId }`. It needs lines, a
+current quote with no errors and, when the quote ships and offers shipping options, a complete
+`shipTo` (see `notReady`); otherwise, or once the cart has ended, it is `409`.
 A cart is submitted once: a repeat is `409` and starts nothing. To submit only the cart you read,
 send its version, as `{ "version": 7 }` or the header `If-Match: "7"`: if anyone changed the cart
 since, the submit is `412` and starts nothing, so read it again. Both are optional; naming two

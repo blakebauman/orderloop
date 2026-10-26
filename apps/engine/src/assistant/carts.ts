@@ -18,6 +18,7 @@ import {
   type CartOp,
   type CartStatus,
   cartReadyProblem,
+  cartShippingOption,
   isQuoteCurrent,
   type Principal,
   ROLE_LABELS,
@@ -107,8 +108,19 @@ export async function getCart(env: Env, cartId: string) {
       unitPrice: l.unitPrice === undefined ? undefined : money(l.unitPrice, currency),
     })),
     promoCodes: c.promoCodes,
+    shipTo: c.shipTo
+      ? Object.fromEntries(Object.entries(c.shipTo).map(([f, v]) => [f, said(v)]))
+      : null,
+    shippingOption: cartShippingOption(c),
+    shippingOptions: (q?.shippingOptions ?? []).map((o) => ({
+      id: o.id,
+      title: said(o.title) ?? o.id,
+      price: money(o.amount, q?.currency),
+    })),
     priced: isQuoteCurrent(c),
     subtotal: q ? money(q.subtotal, q.currency) : '',
+    shipping: q ? money(q.shipping, q.currency) : '',
+    tax: q ? money(q.tax, q.currency) : '',
     total: q ? money(q.total, q.currency) : '',
     issues: c.issues.map((i) => ({ kind: i.kind, content: said(i.content, 200) ?? '' })),
     notReady: said(cartReadyProblem(c) ?? undefined, 200) ?? null,
@@ -181,6 +193,11 @@ export async function previewSubmit(
   const read = input.cartVersion;
   const q = c.quote;
   const customer = said(await customerName(env, c.customerId), 80);
+  const option = cartShippingOption(c);
+  const where = [c.shipTo?.line1, c.shipTo?.city, c.shipTo?.country].filter(Boolean).join(', ');
+  const shipsTo = where
+    ? `Ships to ${said(where, 120)}${option ? ` by ${said(q?.shippingOptions.find((o) => o.id === option)?.title ?? option, 40)}` : ''}`
+    : null;
   return {
     title: `Submit the cart “${said(c.title, 80) ?? c.id}”`,
     href: `/carts/${c.id}`,
@@ -189,6 +206,7 @@ export async function previewSubmit(
       `Starts an order of ${said(await flowName(env, c.flowId), 80) ?? c.flowId}${customer ? ` for ${customer}` : ''} with these lines`,
       'The order’s flow prices it again when it runs, so its total can differ from this quote',
       ...(c.promoCodes.length ? [`With ${c.promoCodes.join(', ')}`] : []),
+      ...(shipsTo ? [shipsTo] : []),
       'The cart ends: no one can change it afterwards',
     ],
     blocked: !atLeast(p.role, min)

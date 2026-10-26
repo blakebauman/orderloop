@@ -49,6 +49,7 @@ import {
   type PluginCart,
   type ProxiedPrincipal,
   quoteNodes,
+  storedCart,
 } from '@orderloop/core';
 import { carts, createDb } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
@@ -135,7 +136,7 @@ export class CartAgent extends Agent<Env, CartState> {
   private cart(): Cart {
     const c = this.state.cart;
     if (!c) throw new Error('No such cart.');
-    return c;
+    return storedCart(c);
   }
 
   /** Writes the cart and keeps the Carts page's D1 row in step when its title or status changed. */
@@ -194,7 +195,8 @@ export class CartAgent extends Agent<Env, CartState> {
 
   /**
    * Retention: an ended cart keeps its lines, quote and order, and loses what people said and
-   * sent on it: its chat, files, return form, start links and who its buyer was. Safe to repeat.
+   * sent on it: its chat, files, return form, start links, its ship-to (the order keeps its own)
+   * and who its buyer was. Safe to repeat.
    */
   async purge(): Promise<{ purged: boolean; messages: number; files: number }> {
     const c = this.state.cart;
@@ -205,11 +207,12 @@ export class CartAgent extends Agent<Env, CartState> {
     this.sql`DELETE FROM cart_return`;
     this.sql`DELETE FROM cart_starts`;
     const files = await this.deleteFiles();
+    const kept = { ...storedCart(c), shipTo: null };
     this.setState({
       ...this.state,
-      cart: c.external
-        ? { ...c, external: { ...c.external, buyer: { id: ERASED, name: ERASED } } }
-        : c,
+      cart: kept.external
+        ? { ...kept, external: { ...kept.external, buyer: { id: ERASED, name: ERASED } } }
+        : kept,
       chat: [],
       attachments: [],
     });
@@ -221,7 +224,8 @@ export class CartAgent extends Agent<Env, CartState> {
   /**
    * A data subject request for the buyer an external cart was opened for: an open cart is
    * canceled; their messages and files are removed; `terms` (their email and names) are erased
-   * from everyone else's messages and the title; and the cart no longer names them.
+   * from everyone else's messages and the title; and the cart no longer names them or holds the
+   * address they shipped to.
    */
   async eraseSubject(terms: string[]): Promise<{ messages: number; files: number }> {
     const c = this.state.cart;
@@ -254,6 +258,7 @@ export class CartAgent extends Agent<Env, CartState> {
       cart: {
         ...now,
         title: eraseText(now.title, all),
+        shipTo: null,
         external: { ...now.external!, buyer: { id: ERASED, name: ERASED } },
       },
       chat: tail.map(fromRow).reverse(),
@@ -273,6 +278,36 @@ export class CartAgent extends Agent<Env, CartState> {
     return true;
   }
 
+  /**
+   * A staff cart for a customer who made a data subject request: where it ships, which names
+   * them. Null when it holds no address.
+   */
+  async customerExport() {
+    const c = this.state.cart;
+    if (!c?.shipTo) return null;
+    return { id: c.id, title: c.title, status: c.status, shipTo: c.shipTo, orderId: c.orderId };
+  }
+
+  /**
+   * Removes the ship-to from a cart whose customer is being erased; an open cart is priced again
+   * without it. True if there was one to remove.
+   */
+  async eraseShipTo(): Promise<boolean> {
+    if (!this.state.cart?.shipTo) return false;
+    const c = this.cart();
+    const final = isFinalCart(c);
+    await this.save({
+      ...c,
+      shipTo: null,
+      updatedAt: Date.now(),
+      version: c.version + 1,
+      // An ended cart isn't priced again; its quote stays what it was.
+      quotedVersion: final && c.quotedVersion === c.version ? c.version + 1 : c.quotedVersion,
+    });
+    if (!final && !this.submitting) await this.reprice();
+    return true;
+  }
+
   /** What the buyer of this external cart put on it, for a data subject export. */
   async subjectExport() {
     const c = this.state.cart;
@@ -285,6 +320,7 @@ export class CartAgent extends Agent<Env, CartState> {
       status: c.status,
       buyer: c.external.buyer,
       lines: c.lines.map(({ sku, qty, title }) => ({ sku, qty, title })),
+      shipTo: c.shipTo ?? null,
       orderId: c.orderId,
       createdAt: c.createdAt,
       messages: this.sql<ChatRow>`SELECT * FROM cart_chat WHERE author_id = ${guestId} ORDER BY seq`
@@ -422,7 +458,7 @@ export class CartAgent extends Agent<Env, CartState> {
   }
 
   async snapshot(): Promise<CartState | null> {
-    return this.state.cart ? this.state : null;
+    return this.state.cart ? { ...this.state, cart: this.cart() } : null;
   }
 
   /** Applies `op` as `actor`; the socket's `apply` is this with the signed-in caller. */
@@ -455,7 +491,8 @@ export class CartAgent extends Agent<Env, CartState> {
    * Starts the cart's order, once: the cart is held (`locked`, its version kept so the quote stays
    * current) while the order starts, so no op lands between the check and the start, and is
    * `submitted` once the order exists. The idempotency key is the cart's, so a retry after a
-   * failure part-way finds the same order.
+   * failure part-way finds the same order. The order ships where the cart was quoted for, with
+   * the option the quote charged, as a completed checkout's does.
    */
   async submitAs(
     actor: CartActor,
@@ -491,9 +528,12 @@ export class CartAgent extends Agent<Env, CartState> {
           currency: q.currency,
           ...(c.customerId ? { customerId: c.customerId } : {}),
           lines: q.lines.map((l) => ({ sku: l.sku, name: l.title, qty: l.qty })),
+          // What the quote charged, which is what the flow's shipping step will pick again.
+          ...(q.shippingOption ? { shippingOption: q.shippingOption } : {}),
           meta: {
             cart: { id: c.id },
             ...(c.promoCodes.length ? { promoCodes: c.promoCodes } : {}),
+            ...(c.shipTo ? { shipTo: c.shipTo } : {}),
           },
         },
       });
@@ -564,8 +604,11 @@ export class CartAgent extends Agent<Env, CartState> {
   }
 
   /**
-   * Prices the cart as it is now with its flow's pricing nodes. A quote finished after the cart
-   * changed again is dropped: the change that made it stale priced the cart anew.
+   * Prices the cart as it is now with its flow's pricing nodes, for its ship-to and option. A
+   * chosen option the quote doesn't offer stays chosen and is an error on the cart, as on a
+   * checkout, so the person picks another rather than having one picked for them. A quote
+   * finished after the cart changed again is dropped: the change that made it stale priced the
+   * cart anew.
    */
   private async reprice() {
     const c = this.cart();
@@ -587,8 +630,8 @@ export class CartAgent extends Agent<Env, CartState> {
       lines: c.lines,
       buyer: {},
       fulfillment: 'ship',
-      shipTo: null,
-      shippingOption: null,
+      shipTo: c.shipTo,
+      shippingOption: c.shippingOption,
       quote: null,
       issues: [],
       orderId: null,
@@ -614,8 +657,17 @@ export class CartAgent extends Agent<Env, CartState> {
           'This cart’s flow has no Apply promotions step, so its codes don’t change the price.',
         path: '$.promoCodes',
       });
-    const now = this.state.cart;
-    if (!now || now.version !== c.version) return;
+    // A flow whose shipping step picks the cheapest or fastest charges that one, whatever was
+    // chosen: say so rather than show a choice the order won't keep.
+    if (c.shippingOption && quote?.shippingOption && quote.shippingOption !== c.shippingOption)
+      issues.push({
+        kind: 'warning',
+        code: 'shipping_option',
+        content: `This cart’s flow picks its own shipping option (“${quote.shippingOptions.find((o) => o.id === quote.shippingOption)?.title ?? quote.shippingOption}”), not “${c.shippingOption}”.`,
+        path: '$.shippingOption',
+      });
+    if (this.state.cart?.version !== c.version) return;
+    const now = this.cart();
     const lines = quote
       ? now.lines.map((l) => {
           const priced = quote.lines.find((p) => p.id === l.id);

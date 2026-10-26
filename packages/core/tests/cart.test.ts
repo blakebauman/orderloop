@@ -13,6 +13,7 @@ import {
   cartAttachmentKey,
   cartOpSchema,
   cartReadyProblem,
+  cartShippingOption,
   cartView,
   chatBody,
   finishCart,
@@ -23,8 +24,11 @@ import {
   MAX_CHECKOUT_LINES,
   MAX_LINE_QUANTITY,
   MAX_PROMO_CODES,
+  newCart,
   normalizePromoCode,
+  SHIP_TO_LIMITS,
   staffCartActor,
+  storedCart,
 } from '../src';
 
 const cart = (c: Partial<Cart> = {}): Cart => ({
@@ -36,6 +40,8 @@ const cart = (c: Partial<Cart> = {}): Cart => ({
   external: null,
   lines: [{ id: 'li_1', sku: 'SKU-1', qty: 2 }],
   promoCodes: [],
+  shipTo: null,
+  shippingOption: null,
   quote: null,
   quotedVersion: 0,
   issues: [],
@@ -211,6 +217,148 @@ describe('applyCartOp', () => {
   });
 });
 
+describe('ship-to and shipping option', () => {
+  const address = {
+    line1: '1 Main St',
+    city: 'Austin',
+    region: 'TX',
+    postalCode: '78701',
+    country: 'US',
+  };
+  const offering = {
+    ...quote,
+    ships: true,
+    shippingOptions: [
+      { id: 'standard', title: 'Standard', carrier: 'UPS', amount: 7, minDays: 3, maxDays: 5 },
+      { id: 'express', title: 'Express', carrier: 'FedEx', amount: 22, minDays: 1, maxDays: 2 },
+    ],
+    shippingOption: 'standard',
+  };
+
+  it('sets a ship-to, trimmed and without unknown fields, and prices the cart again', () => {
+    const r = apply(cart(), {
+      op: 'set_ship_to',
+      address: { ...address, line1: '  1 Main St ', line2: '  ', lat: 1 } as never,
+    });
+    expect(r.cart.shipTo).toEqual(address);
+    expect(r.reprice).toBe(true);
+    expect(r.cart.version).toBe(2);
+    // The buyer of an external cart may set it too.
+    expect(apply(cart({ external }), { op: 'set_ship_to', address }, guest).cart.shipTo).toEqual(
+      address,
+    );
+  });
+
+  it('refuses an address that is empty, too long or not text', () => {
+    const bad = [
+      {},
+      { line1: '   ' },
+      { line1: 'x'.repeat(SHIP_TO_LIMITS.line1 + 1) },
+      { city: 42 },
+    ];
+    for (const a of bad)
+      expect(refuse(cart(), { op: 'set_ship_to', address: a as never }), JSON.stringify(a)).toMatch(
+        /Give an address/,
+      );
+  });
+
+  it('clears the option with the address, and refuses clearing what is not there', () => {
+    const set = cart({ shipTo: address, shippingOption: 'express' });
+    const r = apply(set, { op: 'set_ship_to', address: null });
+    expect(r.cart).toMatchObject({ shipTo: null, shippingOption: null });
+    expect(r.reprice).toBe(true);
+    expect(refuse(cart(), { op: 'set_ship_to', address: null })).toMatch(/no ship-to/);
+    expect(refuse(cart(), { op: 'set_shipping_option', option: null })).toMatch(/No shipping/);
+  });
+
+  it('chooses an option the current quote offers, and leaves a stale quote to the next one', () => {
+    const priced = cart({ quote: offering, quotedVersion: 1 });
+    const r = apply(priced, { op: 'set_shipping_option', option: 'express' });
+    expect(r.cart.shippingOption).toBe('express');
+    expect(r.reprice).toBe(true);
+    expect(refuse(priced, { op: 'set_shipping_option', option: 'teleport' })).toBe(
+      'The shipping option “teleport” is not offered.',
+    );
+    // Not priced for this version: the reprice reports an option it doesn't offer.
+    expect(
+      apply(cart({ quote: offering }), { op: 'set_shipping_option', option: 'teleport' }).cart
+        .shippingOption,
+    ).toBe('teleport');
+    expect(
+      apply(cart({ shippingOption: 'express' }), { op: 'set_shipping_option', option: null }).cart
+        .shippingOption,
+    ).toBeNull();
+  });
+
+  it('changes only on an open cart, for whoever may edit it', () => {
+    expect(refuse(cart({ status: 'locked' }), { op: 'set_ship_to', address })).toMatch(/locked/);
+    expect(refuse(cart(), { op: 'set_ship_to', address }, viewer)).toMatch(/can't change/);
+    expect(refuse(cart(), { op: 'set_shipping_option', option: 'standard' }, guest)).toMatch(
+      /can't change/,
+    );
+    expect(refuse(cart({ status: 'submitted' }), { op: 'set_ship_to', address })).toMatch(
+      /submitted/,
+    );
+  });
+
+  it('needs a complete address to submit only when the quote ships with options on offer', () => {
+    const priced = (c: Partial<Cart>) => cart({ quotedVersion: 1, ...c });
+    expect(cartReadyProblem(priced({ quote: offering }))).toMatch(/complete ship-to/);
+    expect(
+      cartReadyProblem(priced({ quote: offering, shipTo: { line1: '1 Main St', country: 'US' } })),
+    ).toMatch(/complete ship-to/);
+    expect(cartReadyProblem(priced({ quote: offering, shipTo: address }))).toBeNull();
+    // Nothing ships, or the flow prices no shipping: no address needed.
+    expect(cartReadyProblem(priced({ quote: { ...offering, ships: false } }))).toBeNull();
+    expect(
+      cartReadyProblem(
+        priced({ quote: { ...offering, shippingOptions: [], shippingOption: null } }),
+      ),
+    ).toBeNull();
+    // An external cart goes back to the buyer's system, whose PO says where it ships.
+    expect(cartReadyProblem(priced({ quote: offering, external }))).toBeNull();
+  });
+
+  it('refuses an option while a current quote offers none', () => {
+    expect(
+      refuse(cart({ quote, quotedVersion: 1 }), { op: 'set_shipping_option', option: 'standard' }),
+    ).toBe('This cart’s flow offers no shipping options.');
+  });
+
+  it('ships by what a current quote charged, and by the chosen option until then', () => {
+    // A flow that picks the cheapest charged Standard though Express was chosen.
+    const chosen = { shippingOption: 'express', quote: offering };
+    expect(cartShippingOption(cart({ ...chosen, quotedVersion: 1 }))).toBe('standard');
+    expect(cartShippingOption(cart(chosen))).toBe('express');
+    expect(cartShippingOption(cart())).toBeNull();
+  });
+
+  it('reads a cart stored before ship-to as shipping nowhere, and starts one that way', () => {
+    const { shipTo: _s, shippingOption: _o, ...old } = cart();
+    expect(storedCart(old as Cart)).toMatchObject({ shipTo: null, shippingOption: null });
+    const kept = cart({ shipTo: address, shippingOption: 'express' });
+    expect(storedCart(kept)).toEqual(kept);
+    expect(
+      newCart({
+        id: 'cart_2',
+        title: 'New',
+        flowId: 'flow_1',
+        customerId: null,
+        external: null,
+        lines: [],
+        createdBy: 'usr_1',
+        now: 5,
+      }),
+    ).toMatchObject({
+      status: 'open',
+      shipTo: null,
+      shippingOption: null,
+      version: 1,
+      quotedVersion: 0,
+    });
+  });
+});
+
 describe('normalizePromoCode', () => {
   it('upper-cases and trims, and refuses what cannot be a code', () => {
     expect(normalizePromoCode(' tech-20 ')).toBe('TECH-20');
@@ -330,10 +478,25 @@ describe('carts outside their page', () => {
       { op: 'set_qty', lineId: 'li_1', qty: 1.5 },
       { op: 'remove', lineIds: [] },
       { op: 'rename', title: '' },
+      { op: 'set_ship_to' },
+      { op: 'set_ship_to', address: { line1: 'x'.repeat(201) } },
+      { op: 'set_ship_to', address: { city: 7 } },
+      { op: 'set_shipping_option', option: '' },
+      { op: 'set_shipping_option', option: 'x'.repeat(81) },
       { op: 'explode' },
       { sku: 'SKU-1', qty: 1 },
     ])
       expect(cartOpSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    expect(
+      cartOpSchema.parse({ op: 'set_ship_to', address: { line1: ' 1 Main St ', geo: 'x' } }),
+    ).toEqual({ op: 'set_ship_to', address: { line1: '1 Main St' } });
+    expect(cartOpSchema.parse({ op: 'set_ship_to', address: null })).toEqual({
+      op: 'set_ship_to',
+      address: null,
+    });
+    expect(cartOpSchema.parse({ op: 'set_shipping_option', option: null }).op).toBe(
+      'set_shipping_option',
+    );
     // Unknown keys are dropped, so a body can't smuggle a price onto a line.
     expect(
       cartOpSchema.parse({ op: 'add', sku: 'SKU-1', qty: 1, unitPrice: 0 }),

@@ -39,12 +39,25 @@ describe('OpenAPI document', () => {
     const kinds = (op.oneOf ?? op.anyOf).map(
       (s: { properties: { op: { const: string } } }) => s.properties.op.const,
     );
-    expect(kinds).toEqual(expect.arrayContaining(['add', 'set_qty', 'remove', 'lock', 'rename']));
+    expect(kinds).toEqual(
+      expect.arrayContaining([
+        'add',
+        'set_qty',
+        'remove',
+        'lock',
+        'rename',
+        'set_ship_to',
+        'set_shipping_option',
+      ]),
+    );
     const create = json.paths['/api/v1/carts'].post.requestBody.content['application/json'].schema;
     expect(create.required).toEqual(expect.arrayContaining(['title', 'flowId']));
     // Who opened it is the caller, never the body.
     expect(create.properties).not.toHaveProperty('createdBy');
     expect(json.components.schemas.Cart.properties).not.toHaveProperty('external');
+    expect(json.components.schemas.Cart.required).toEqual(
+      expect.arrayContaining(['shipTo', 'shippingOption']),
+    );
     const submit = json.paths['/api/v1/carts/{id}/submit'].post;
     expect(Object.keys(submit.responses)).toEqual(expect.arrayContaining(['409', '412']));
     expect(submit.parameters.map((x: { name: string }) => x.name)).toContain('If-Match');

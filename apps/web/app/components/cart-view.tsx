@@ -14,10 +14,14 @@ import {
   type CartOp,
   type CartState,
   type CartStatus,
+  type CheckoutQuote,
   cartReadyProblem,
+  cartShippingOption,
   isFinalCart,
   isQuoteCurrent,
   MAX_CHAT_BODY,
+  SHIP_TO_LIMITS,
+  type ShipAddress,
 } from '@orderloop/core';
 import {
   AlertDialog,
@@ -276,6 +280,18 @@ export function CartView({
               <AddLine products={products} onAdd={(sku, qty) => apply({ op: 'add', sku, qty })} />
             ) : null}
           </Section>
+
+          {q?.ships || cart.shipTo ? (
+            <ShipTo
+              address={cart.shipTo ?? null}
+              selected={cartShippingOption(cart)}
+              quote={q}
+              priced={priced}
+              editable={editable}
+              onAddress={(address) => apply({ op: 'set_ship_to', address })}
+              onOption={(option) => apply({ op: 'set_shipping_option', option })}
+            />
+          ) : null}
 
           <Section title="Price">
             {cart.lines.length === 0 ? (
@@ -597,6 +613,144 @@ function Chat({
           Send
         </Button>
       </form>
+    </Section>
+  );
+}
+
+const ADDRESS_FIELDS: {
+  field: keyof ShipAddress;
+  label: string;
+  autoComplete: string;
+  wide?: boolean;
+}[] = [
+  { field: 'name', label: 'Name', autoComplete: 'shipping name', wide: true },
+  { field: 'line1', label: 'Street address', autoComplete: 'shipping address-line1', wide: true },
+  { field: 'line2', label: 'Address line 2', autoComplete: 'shipping address-line2', wide: true },
+  { field: 'city', label: 'City', autoComplete: 'shipping address-level2' },
+  { field: 'region', label: 'State or region', autoComplete: 'shipping address-level1' },
+  { field: 'postalCode', label: 'Postcode', autoComplete: 'shipping postal-code' },
+  { field: 'country', label: 'Country', autoComplete: 'shipping country' },
+];
+
+const blankAddress = (a: Partial<ShipAddress> | null) =>
+  Object.fromEntries(ADDRESS_FIELDS.map(({ field }) => [field, a?.[field] ?? ''])) as Record<
+    keyof ShipAddress,
+    string
+  >;
+
+/**
+ * Where the cart ships and how: the address it is quoted for, and the options the flow offers for
+ * it, each with its price. Saving the address or picking an option prices the cart again.
+ */
+function ShipTo({
+  address,
+  selected,
+  quote,
+  priced,
+  editable,
+  onAddress,
+  onOption,
+}: {
+  address: Partial<ShipAddress> | null;
+  /** What the quote charged once it is current (`cartShippingOption`), not only what was chosen. */
+  selected: string | null;
+  quote: CheckoutQuote | null;
+  /** Whether `quote` prices the cart as it is now; its options can't be picked until it does. */
+  priced: boolean;
+  editable: boolean;
+  onAddress: (a: Partial<ShipAddress> | null) => Promise<Result | null>;
+  onOption: (id: string) => Promise<Result | null>;
+}) {
+  const [draft, setDraft] = useState(() => blankAddress(address));
+  const saved = JSON.stringify(blankAddress(address));
+  // Someone else on the cart changed it: show theirs.
+  useEffect(() => setDraft(JSON.parse(saved)), [saved]);
+  const changed = JSON.stringify(draft) !== saved;
+  const currency = quote?.currency ?? 'USD';
+  return (
+    <Section title="Ship to">
+      {editable ? (
+        <form
+          className="grid gap-3 sm:grid-cols-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const filled = Object.fromEntries(
+              Object.entries(draft).filter(([, v]) => v.trim()),
+            ) as Partial<ShipAddress>;
+            await onAddress(Object.keys(filled).length ? filled : null);
+          }}
+        >
+          {ADDRESS_FIELDS.map(({ field, label, autoComplete, wide }) => (
+            <div key={field} className={`grid gap-1 text-sm ${wide ? 'sm:col-span-2' : ''}`}>
+              <label htmlFor={`ship-${field}`} className="caption">
+                {label}
+              </label>
+              <Input
+                id={`ship-${field}`}
+                autoComplete={autoComplete}
+                value={draft[field]}
+                maxLength={SHIP_TO_LIMITS[field]}
+                onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+                className="h-8"
+              />
+            </div>
+          ))}
+          <div className="flex gap-2 sm:col-span-2">
+            <Button type="submit" size="sm" variant="outline" disabled={!changed}>
+              Save address
+            </Button>
+            {address ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => void onAddress(null)}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
+        </form>
+      ) : address ? (
+        <address className="text-sm not-italic">
+          {[address.name, address.line1, address.line2].filter(Boolean).map((l) => (
+            <div key={l}>{l}</div>
+          ))}
+          <div>{[address.city, address.region, address.postalCode].filter(Boolean).join(' ')}</div>
+          {address.country ? <div>{address.country}</div> : null}
+        </address>
+      ) : (
+        <p className="text-muted-foreground text-sm">No address yet.</p>
+      )}
+
+      {quote?.shippingOptions.length ? (
+        <fieldset className="mt-4 border-t pt-3" disabled={!editable || !priced}>
+          <legend className="caption mb-1.5">Shipping option</legend>
+          <div className="grid gap-2">
+            {quote.shippingOptions.map((o) => (
+              <label
+                key={o.id}
+                className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:disabled]:cursor-default"
+              >
+                <input
+                  type="radio"
+                  name="shipping-option"
+                  value={o.id}
+                  checked={selected === o.id}
+                  onChange={() => void onOption(o.id)}
+                  className="mt-0.5"
+                />
+                <span className="grow">
+                  <span className="font-medium">{o.title}</span>
+                  <span className="block text-muted-foreground text-xs">
+                    {o.carrier} ·{' '}
+                    {o.minDays === o.maxDays ? o.minDays : `${o.minDays}–${o.maxDays}`}{' '}
+                    {o.maxDays === 1 ? 'day' : 'days'}
+                  </span>
+                </span>
+                <span className="tabular-nums">
+                  {o.free || o.amount === 0 ? 'Free' : money(o.amount, currency)}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
     </Section>
   );
 }

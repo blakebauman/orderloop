@@ -435,6 +435,20 @@ describe('an external cart’s buyer', () => {
     ).toEqual({ ok: false, error: 'That session’s cart is returned.' });
   });
 
+  it('goes back without a ship-to on a flow that prices shipping: the buyer’s PO says where', async () => {
+    const c = await open({ flowId: 'tpl-storefront-order', lines: [{ sku: 'GSK-010', qty: 2 }] });
+    const before = (await api().cartSnapshot(c.cartId))!.cart!;
+    expect(before.quote).toMatchObject({ ships: true });
+    expect(before.quote!.shippingOptions.length).toBeGreaterThan(0);
+    expect(before.shipTo).toBeNull();
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    const sent = await ws.call<{ ok: boolean }>('transfer');
+    expect(sent.result).toMatchObject({ ok: true });
+    expect((await api().cartSnapshot(c.cartId))?.cart?.status).toBe('returned');
+  });
+
   it('is the only one who sends it back, and is slowed down when editing in a burst', async () => {
     const c = await open({ lines: [{ sku: 'WID-100', qty: 1 }] });
     const ada = { kind: 'staff' as const, id: 'usr_ada', name: 'Ada', role: 'admin' as const };
@@ -490,6 +504,17 @@ describe('a punchout buyer’s data subject request', () => {
     const ws = await guestSocket(c.cartId, guest);
     if (!ws.call) throw new Error('socket refused');
     await ws.call('say', ['Please ship to my home, Bea Buyer']);
+    const home = {
+      name: 'Bea Buyer',
+      line1: '4 Elm Row',
+      city: 'Leeds',
+      postalCode: 'LS2 7EY',
+      country: 'GB',
+    };
+    // The buyer sets it on their own page: the socket's op, bounded by the cart itself.
+    expect((await ws.call('apply', [{ op: 'set_ship_to', address: home }])).result).toEqual({
+      ok: true,
+    });
     await env.DOCS.put(`carts/${c.cartId}/att_b1`, '%PDF');
     await api().attachToCart(
       c.cartId,
@@ -510,6 +535,7 @@ describe('a punchout buyer’s data subject request', () => {
       expect.objectContaining({
         id: c.cartId,
         buyer: { id: email.toUpperCase(), name: 'Bea Buyer' },
+        shipTo: home,
         messages: [expect.objectContaining({ body: 'Please ship to my home, Bea Buyer' })],
         files: [expect.objectContaining({ name: 'my-po.pdf' })],
       }),
@@ -520,6 +546,7 @@ describe('a punchout buyer’s data subject request', () => {
     const s = (await api().cartSnapshot(c.cartId))!;
     expect(s.cart).toMatchObject({
       status: 'canceled',
+      shipTo: null,
       external: { buyer: { id: '[erased]', name: '[erased]' } },
     });
     expect(s.chat.map((m) => m.body)).not.toContain('Please ship to my home, Bea Buyer');

@@ -66,7 +66,8 @@ text, total, age, and the step each one waits at or stopped at), `get_order` (st
 waits at and since when, steps run, recent activity),
 `assess_order` (typed questions about one order, answered with a probability for every option; up to 4 images),
 `find_products` (stock, reserved, available, reorder points), `list_carts` and `get_cart` (a
-[cart's](/guides/carts/) lines with their ids, its price, promotion codes, the problems its price
+[cart's](/guides/carts/) lines with their ids, its price with shipping and tax, promotion codes,
+its ship-to and the shipping options on offer, the problems its price
 found, and why it can't be submitted yet), `list_flows` and `get_flow` (a saved
 draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a row in the
 conversation. An order's row names the step it waits at or stopped at, and opens that step on the
@@ -89,7 +90,7 @@ sent until you press the confirm button, and declining leaves everything as it w
 The card is not the model's summary. It is resolved against live data when it appears, and states
 the consequence: for a decision, the order, its total and which step it goes on to; for a cancel,
 the effects it will undo and the reason; for a cart, its lines, total, flow and customer, that its
-flow prices the order again when it runs, and that the cart ends; for a publish, what changed since the live version and
+flow prices the order again when it runs, where it ships, and that the cart ends; for a publish, what changed since the live version and
 that unsaved editor changes are not included; for the stock review, which SKUs are at or below
 their reorder point. When the action can't go ahead (already decided, nothing waiting for that
 event, the order has finished, you started the order and the workspace separates approvals, the cart isn't priced or has a problem, the draft has errors, nothing to publish, or your role is too low)
@@ -132,7 +133,8 @@ Creating a flow from a description still happens on the Flows page.
 
 Operators can have the assistant build a [cart](/guides/carts/): `create_cart` opens one (a title,
 a published flow that prices orders, and optionally a customer) and `change_cart` adds SKUs, sets
-or removes lines, clears it, adds or removes promotion codes, locks, unlocks or renames it, a few
+or removes lines, clears it, adds or removes promotion codes, sets or clears the ship-to address,
+chooses a shipping option, locks, unlocks or renames it, a few
 changes at a time, in order. Neither asks first, because nothing is ordered until the cart is
 submitted, and each change is made as you, exactly as on the cart's page: a locked or ended cart
 refuses it, and the reply says how many changes went in before one was refused. The cart is
