@@ -8,7 +8,7 @@
 
 import type { Cart } from './cart';
 import { MAX_CHECKOUT_LINES, MAX_LINE_QUANTITY } from './checkout';
-import type { OrderInputDraft } from './types';
+import type { OrderInputDraft, OrderStatus } from './types';
 
 /** How long an external cart may stay open, at most. */
 export const MAX_EXTERNAL_CART_MS = 24 * 3_600_000;
@@ -72,6 +72,17 @@ export interface PluginHostRpc {
   startOrder(
     req: PluginStartOrder,
   ): Promise<{ ok: true; orderId: string; replayed: boolean } | { ok: false; error: string }>;
+  /**
+   * With `orders:start`: where an order this plugin started is now, by the key it started it under,
+   * and whether it has ended (`TERMINAL_ORDER_STATUSES`), or not found for a key this plugin never
+   * started an order under.
+   */
+  orderStatus(req: {
+    key: string;
+  }): Promise<
+    | { ok: true; orderId: string; status: OrderStatus; ended: boolean }
+    | { ok: false; error: string }
+  >;
   /**
    * With `orders:cancel`: cancels an order this plugin started, by the key it started it under:
    * `cancelled` (also when it already was, or a cancel is already under way), `finished` when it
