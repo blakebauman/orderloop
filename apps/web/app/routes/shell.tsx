@@ -615,6 +615,8 @@ function ShellFrame() {
   const openShortcuts = useCallback(() => setShortcuts(true), []);
   useGoKeys(openShortcuts);
   const phoneNewOrder = operator && NEW_ORDER_FROM.has(path);
+  // The assistant's sheet covers the page, and this button would sit on its send button.
+  const assistantOpen = useAssistant().open;
   const quietNewOrder = QUIET_NEW_ORDER.some((p) => isAt(path, p));
   return (
     <div className="flex min-h-dvh flex-col">
@@ -746,7 +748,7 @@ function ShellFrame() {
         </main>
         {showNav ? <LazyAssistantPanel /> : null}
       </div>
-      {phoneNewOrder ? (
+      {phoneNewOrder && !assistantOpen ? (
         <Link
           to="/orders/new"
           className="fixed right-[max(1rem,var(--safe-right))] bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 inline-flex h-11 items-center gap-1.5 rounded-4xl bg-primary pr-4.5 pl-4 font-medium text-primary-foreground text-sm shadow-float md:hidden"

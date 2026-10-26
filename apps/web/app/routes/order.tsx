@@ -38,6 +38,7 @@ import {
   useFetcher,
   useLoaderData,
   useNavigate,
+  useSearchParams,
 } from 'react-router';
 import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
@@ -91,10 +92,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 export function shouldRevalidate({
   currentParams,
   nextParams,
+  currentUrl,
+  nextUrl,
   formMethod,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   if (currentParams.orderId !== nextParams.orderId) return true;
+  // `?node=` only selects a step on the live order; the socket already keeps it current.
+  if (
+    !formMethod &&
+    currentUrl.pathname === nextUrl.pathname &&
+    currentUrl.search !== nextUrl.search
+  )
+    return false;
   if (formMethod && formMethod !== 'GET') return false;
   return defaultShouldRevalidate;
 }
@@ -249,6 +259,15 @@ function OrderView() {
     setSelected(id);
     setTab('node');
   };
+  // A link to a step (`?node=`, e.g. from the assistant) opens it in the inspector.
+  const [search] = useSearchParams();
+  const linked = search.get('node');
+  useEffect(() => {
+    if (linked && flow.nodes.some((n) => n.id === linked)) {
+      setSelected(linked);
+      setTab('node');
+    }
+  }, [linked, flow.nodes]);
   // Stable, so the canvas doesn't see a new handler on every live update.
   const selectOnCanvas = useCallback((id: string | null) => {
     setSelected(id);

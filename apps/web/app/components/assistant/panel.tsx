@@ -77,15 +77,30 @@ import {
 import { Shimmer } from '~/components/ai-elements/shimmer';
 import { Suggestion, Suggestions } from '~/components/ai-elements/suggestion';
 import { contextLabel, useAssistant } from '~/lib/assistant';
-import { coarse, useMedia, useVisualViewport, WIDE } from '~/lib/device';
+import { coarse, useMedia, useShortcutLabel, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
 import { useMe } from '~/lib/use-me';
-import { ActionCard, PluginDraftCard, type Previewer, ProposalCard, Prose, ReadRow } from './parts';
+import {
+  ActionCard,
+  actionVerb,
+  PluginDraftCard,
+  type Previewer,
+  ProposalCard,
+  Prose,
+  ReadRow,
+  statusWords,
+} from './parts';
 
 /**
  * The docked panel. On wide screens it takes a column beside the page (the page narrows; nothing is
  * covered); below that it is a full-height sheet under the top bar. Mounted on first open only, so
  * nobody connects to an assistant they never opened.
+ *
+ * Both slide, in 200ms with an exponential ease-out: the answer to a press starts fast and settles.
+ * The sheet slides in from the right edge, where the button that opens it sits. The column opens by
+ * its width while its content keeps its own 400px and stays pinned to the right edge, so it slides
+ * out from behind the page's edge rather than being wiped on, and nothing inside rewraps mid-way.
+ * Reduced motion shows and hides both at once.
  */
 export function AssistantPanel() {
   const { open, setOpen } = useAssistant();
@@ -101,16 +116,16 @@ export function AssistantPanel() {
       aria-label="Assistant"
       inert={!open}
       className={cn(
-        'z-30 overflow-hidden bg-card motion-reduce:transition-none',
+        'z-30 overflow-hidden bg-card ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
         // Phones and tablets: a sheet over the page, between the top bar and the phone tab bar.
-        'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200 ease-out',
-        open ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+        'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200',
+        open ? 'opacity-100' : 'pointer-events-none translate-x-full opacity-0',
         // With the keyboard up, it takes exactly the visible area above it, over the bars.
         'in-data-keyboard:z-50 in-data-keyboard:top-[var(--vvtop)] in-data-keyboard:bottom-auto in-data-keyboard:h-[var(--vvh)]',
-        // Wide screens: a column beside the page. It opens without animating its width, which would
-        // reflow the whole page (the graph canvas included) on every frame.
-        'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:translate-y-0 lg:opacity-100 lg:transition-none',
-        open ? 'lg:w-[400px] lg:border-l' : 'lg:w-0',
+        // Wide screens: a column beside the page, its width animated so the page beside it narrows
+        // with it instead of jumping 400px in one frame.
+        'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:flex lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:justify-end lg:translate-x-0 lg:transition-[width,opacity] lg:motion-reduce:transition-none',
+        open ? 'lg:w-[400px] lg:border-l lg:opacity-100' : 'lg:w-0 lg:opacity-0',
       )}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -119,7 +134,7 @@ export function AssistantPanel() {
         }
       }}
     >
-      <div className="flex h-full flex-col lg:w-[400px]">
+      <div className="flex h-full flex-col lg:w-[400px] lg:shrink-0">
         {opened ? (
           <Suspense fallback={<PanelFrame busy />}>
             <Conversation />
@@ -141,39 +156,50 @@ function PanelFrame({ busy }: { busy?: boolean }) {
   );
 }
 
-function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: boolean }) {
-  const { setOpen, page, scope, setScope } = useAssistant();
+/**
+ * What the next question is about. It sits in the composer, beside where the question is written
+ * (and in thumb reach on a phone), not in the header.
+ */
+function ScopeChip() {
+  const { page, scope, setScope } = useAssistant();
   const onPage = page.kind !== 'workspace';
   const current = scope === 'workspace' || !onPage ? 'Everything' : contextLabel(page);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="hit-area flex h-7 min-w-0 max-w-[70%] items-center gap-1 rounded-full border border-input px-2.5 text-[12px] text-muted-foreground hover:text-foreground touch:h-9 touch:px-3"
+        aria-label={`Asking about: ${current}`}
+      >
+        <span className="truncate">{current}</span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-60">
+        <DropdownMenuLabel className="caption">Ask about</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={onPage ? scope : 'workspace'}
+          onValueChange={(v) => setScope(v as 'page' | 'workspace')}
+        >
+          <DropdownMenuRadioItem value="page" disabled={!onPage}>
+            <span className="truncate">
+              {onPage
+                ? `${page.kind === 'order' ? 'This order' : 'This flow'}: ${contextLabel(page)}`
+                : 'This page (nothing open)'}
+            </span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="workspace">Everything</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: boolean }) {
+  const { setOpen } = useAssistant();
+  const shortcut = useShortcutLabel('J');
   const [clearing, setClearing] = useState(false);
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <h2 className="font-semibold text-[15px] tracking-title">Assistant</h2>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className="hit-area flex h-6 min-w-0 max-w-[60%] items-center gap-1 rounded-sm border border-input px-1.5 text-[12px] text-muted-foreground hover:text-foreground"
-          aria-label={`Asking about: ${current}`}
-        >
-          <span className="truncate">{current}</span>
-          <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel className="caption">Ask about</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={onPage ? scope : 'workspace'}
-            onValueChange={(v) => setScope(v as 'page' | 'workspace')}
-          >
-            <DropdownMenuRadioItem value="page" disabled={!onPage}>
-              <span className="truncate">
-                {onPage
-                  ? `${page.kind === 'order' ? 'This order' : 'This flow'}: ${contextLabel(page)}`
-                  : 'This page (nothing open)'}
-              </span>
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="workspace">Everything</DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
       <div className="ml-auto flex items-center">
         {onClear ? (
           <DropdownMenu>
@@ -185,7 +211,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem disabled={!canClear} onSelect={() => setClearing(true)}>
-                Start a new conversation
+                New conversation
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
@@ -204,8 +230,8 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
           type="button"
           onClick={() => setOpen(false)}
           className="hit-area grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Close the assistant (⌘J)"
-          title="Close (⌘J)"
+          aria-label={`Close the assistant (${shortcut})`}
+          title={`Close (${shortcut})`}
         >
           <X className="size-4" />
         </button>
@@ -222,7 +248,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
               <AlertDialogFooter>
                 <AlertDialogCancel>Keep it</AlertDialogCancel>
                 <AlertDialogAction variant="destructive" onClick={onClear}>
-                  Start over
+                  New conversation
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -336,6 +362,9 @@ function Conversation() {
   const thinking =
     status === 'submitted' || (busy && last?.role === 'user') || (busy && last?.parts.length === 0);
 
+  const { pending, replaced } = waitingActions(messages);
+  const announcement = useAnnouncement(messages, busy, pending);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader onClear={clearHistory} canClear={messages.length > 0 && !busy} />
@@ -346,12 +375,14 @@ function Conversation() {
           <span aria-hidden="true" className="ol-dots" />
         </p>
       ) : null}
-      <ConversationLog className="ol-scroll min-h-0">
+      {/* Not live: streamed text would be read out a fragment at a time. A finished reply, and an
+          action that needs an answer, are announced once each instead (`useAnnouncement`). */}
+      <ConversationLog className="ol-scroll min-h-0" aria-live="off">
         <ConversationContent>
           {messages.length === 0 ? (
             <FirstRun onAsk={send} />
           ) : (
-            <ol className="space-y-3" aria-live="polite" aria-relevant="additions">
+            <ol className="space-y-3">
               {messages.map((m, i) => (
                 <li key={m.id}>
                   {m.role === 'user' ? (
@@ -362,6 +393,7 @@ function Conversation() {
                       streaming={busy && i === messages.length - 1}
                       preview={preview}
                       respond={respond}
+                      replaced={replaced}
                       // Only the latest reply can be asked again, and not while one is running.
                       onRegenerate={
                         i === lastAssistant &&
@@ -398,6 +430,10 @@ function Conversation() {
         </ConversationContent>
         <ConversationScrollButton />
       </ConversationLog>
+      <p className="sr-only" role="status">
+        {announcement}
+      </p>
+      {pending.length ? <WaitingBar pending={pending} /> : null}
       {held.length ? (
         <HeldMessages
           held={held}
@@ -514,17 +550,119 @@ const ACTION = new Set(
 const hasAction = (m: Message) =>
   m.parts.some((p) => isToolUIPart(p) && ACTION.has(getToolName(p)));
 
+type Waiting = { key: string; name: string; input: unknown };
+
+/**
+ * Names one action part in the conversation. Not its tool call id: a model may number its calls
+ * afresh each turn, so the same id can turn up in several messages.
+ */
+const actionKey = (messageId: string, index: number) => `${messageId}:${index}`;
+
+/**
+ * The actions waiting for the person's answer, oldest first. The conversation is one per person and
+ * live on every device they use, so the same action can be prepared twice (asked again here, or on
+ * the phone). Only the newest of identical requests asks; the older ones are `replaced`.
+ */
+function waitingActions(messages: Message[]) {
+  const asking: Waiting[] = [];
+  for (const m of messages)
+    m.parts.forEach((p, i) => {
+      if (isToolUIPart(p) && p.state === 'approval-requested' && ACTION.has(getToolName(p)))
+        asking.push({ key: actionKey(m.id, i), name: getToolName(p), input: p.input });
+    });
+  const newest = new Map<string, string>();
+  for (const w of asking) newest.set(`${w.name} ${JSON.stringify(w.input)}`, w.key);
+  const live = new Set(newest.values());
+  return {
+    pending: asking.filter((w) => live.has(w.key)),
+    replaced: new Set(
+      asking.filter((w) => !live.has(w.key)).map((w) => w.key),
+    ) as ReadonlySet<string>,
+  };
+}
+
+const actionLabel = (w: Waiting) => {
+  const verb = actionVerb(w.name, w.input);
+  return verb === 'Confirm' && isAssistantTool(w.name) ? ASSISTANT_TOOLS[w.name].label : verb;
+};
+
+/**
+ * What a screen reader hears: a reply once it has finished (not each streamed fragment), and an
+ * action once it starts waiting for an answer.
+ */
+function useAnnouncement(messages: Message[], busy: boolean, pending: Waiting[]) {
+  const [said, setSaid] = useState('');
+  const wasBusy = useRef(busy);
+  const known = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (wasBusy.current && !busy) {
+      const last = messages.at(-1);
+      const text = last?.role === 'assistant' ? textOf(last) : '';
+      if (text) setSaid(text.length > 300 ? `${text.slice(0, 300)}…` : text);
+    }
+    wasBusy.current = busy;
+  }, [busy, messages]);
+  useEffect(() => {
+    // The first render only learns what is already waiting; it announces nothing.
+    const ids = new Set(pending.map((w) => w.key));
+    const fresh = known.current ? pending.filter((w) => !known.current!.has(w.key)) : [];
+    known.current = ids;
+    if (fresh.length) setSaid(`Waiting for your answer: ${fresh.map(actionLabel).join(', ')}`);
+  }, [pending]);
+  return said;
+}
+
+/**
+ * Pinned above the composer while an action waits for the person, so it can't scroll out of mind
+ * under newer turns. The conversation goes on; pressing it brings the card back, focused on the safe
+ * choice.
+ */
+function WaitingBar({ pending }: { pending: Waiting[] }) {
+  const newest = pending.at(-1)!;
+  const show = () => {
+    const card = document.querySelector<HTMLElement>(`[data-action="${CSS.escape(newest.key)}"]`);
+    if (!card) return;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    card.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
+    card.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
+  };
+  return (
+    <button
+      type="button"
+      onClick={show}
+      className="mx-3 mt-2 flex min-h-9 items-center gap-2 rounded-full border border-wait/30 bg-wait/10 px-3 text-left text-[12.5px] hover:bg-wait/15"
+    >
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-wait" />
+      <span className="min-w-0 flex-1 truncate">
+        {pending.length === 1 ? (
+          <>
+            <span className="font-medium text-foreground">Waiting for you:</span>{' '}
+            <span className="text-muted-foreground">{actionLabel(newest)}</span>
+          </>
+        ) : (
+          <span className="font-medium text-foreground">
+            {pending.length} actions waiting for you
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 font-medium text-foreground">Show</span>
+    </button>
+  );
+}
+
 function AssistantMessage({
   m,
   streaming,
   preview,
   respond,
+  replaced,
   onRegenerate,
 }: {
   m: Message;
   streaming: boolean;
   preview: Previewer;
   respond: (approvalId: string, approved: boolean) => void;
+  replaced: ReadonlySet<string>;
   onRegenerate?: () => void;
 }) {
   const parts = m.parts;
@@ -541,7 +679,16 @@ function AssistantMessage({
           if (isToolUIPart(p)) {
             const name = getToolName(p);
             if (ACTION.has(name))
-              return <ActionCard key={p.toolCallId} part={p} preview={preview} respond={respond} />;
+              return (
+                <ActionCard
+                  key={actionKey(m.id, i)}
+                  part={p}
+                  preview={preview}
+                  respond={respond}
+                  actionKey={actionKey(m.id, i)}
+                  replaced={replaced.has(actionKey(m.id, i))}
+                />
+              );
             if (name === 'propose_flow_change') return <ProposalCard key={p.toolCallId} part={p} />;
             if (name === 'draft_plugin') return <PluginDraftCard key={p.toolCallId} part={p} />;
             if (isAssistantTool(name)) return <ReadRow key={p.toolCallId} part={p} />;
@@ -638,7 +785,7 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
         {/* The overview's words, with the window: the overview counts every such order, this line
             only the last 3 days (`attention` in the engine), so it says so. */}
         {failedN ? (
-          <span className="text-bad">{failedN} failed or rolled back in 3 days</span>
+          <span className="text-bad">{failedN} failed or rolled back, last 3 days</span>
         ) : null}
         {stalled ? (
           <span className="text-muted-foreground">{stalled} waiting on events</span>
@@ -670,7 +817,9 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
               key={x.id}
               to={`/orders/${x.id}`}
               tone="bad"
-              what={`${x.title || 'Order'} ${x.status.replace('_', ' ')}`}
+              what={
+                x.title ? `${x.title} ${statusWords(x.status)}` : capital(statusWords(x.status))
+              }
               id={x.id}
             />
           ))}
@@ -695,6 +844,8 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
     </div>
   );
 }
+
+const capital = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 function AttentionItem({
   to,
@@ -748,7 +899,11 @@ function FirstRun({ onAsk }: { onAsk: (text: string) => void }) {
             ...(operator ? ['Add a risk score after the credit check'] : []),
             'What could make an order stall here?',
           ]
-        : ['What needs me?', 'Waiting orders over $10k this week', 'Which SKUs are low on stock?'];
+        : [
+            'What needs me?',
+            'The largest waiting orders this week',
+            'Which SKUs are low on stock?',
+          ];
   return (
     <div className="space-y-4">
       <div className="space-y-1.5 text-[13.5px] leading-relaxed">
@@ -812,6 +967,7 @@ function Composer({
   onStop: () => void;
 }) {
   const { focusToken } = useAssistant();
+  const shortcut = useShortcutLabel('J');
   const [text, setText] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -832,12 +988,12 @@ function Composer({
           onChange={(e) => setText(e.target.value)}
           // On a touch screen Return is a new line and the button sends; ⌘/Ctrl+Enter always sends.
           sendOnEnter={(e) => !coarse() || e.metaKey || e.ctrlKey}
-          placeholder={
-            busy ? 'Write the next message; it sends when this reply ends' : 'Ask the assistant'
-          }
+          placeholder={busy ? 'Next message, sent after this reply' : 'Ask the assistant'}
           aria-label="Message the assistant"
         />
-        <PromptInputFooter className="justify-end gap-1.5 pt-0">
+        <PromptInputFooter className="gap-1.5 pt-0">
+          <ScopeChip />
+          <span className="flex-1" />
           {/* While a reply runs, stop sits beside send, which queues the next message. */}
           {busy ? (
             <PromptInputSubmit status="streaming" onStop={onStop} className="touch:size-9" />
@@ -846,7 +1002,7 @@ function Composer({
         </PromptInputFooter>
       </PromptInput>
       <p className="mt-1.5 hidden px-1 text-muted-foreground text-xs fine:block">
-        Enter sends · Shift+Enter for a new line · ⌘J opens and closes
+        Enter sends · Shift+Enter for a new line · {shortcut} opens and closes
       </p>
     </div>
   );

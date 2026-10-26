@@ -47,7 +47,8 @@ export type MessageActionsProps = ComponentProps<'div'>;
 export const MessageActions = ({ className, children, ...props }: MessageActionsProps) => (
   <div
     className={cn(
-      'flex items-center gap-0.5 fine:opacity-0 fine:transition-opacity fine:group-hover:opacity-100 fine:focus-within:opacity-100',
+      // On touch, apart enough that each one's 44px touch area is its own.
+      'flex items-center gap-0.5 touch:gap-5 fine:opacity-0 fine:transition-opacity fine:group-hover:opacity-100 fine:focus-within:opacity-100',
       className,
     )}
     {...props}

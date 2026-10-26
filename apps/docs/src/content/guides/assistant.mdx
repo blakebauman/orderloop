@@ -33,7 +33,7 @@ show them):
 - **Answer again** on the latest reply asks for a new answer to the same question, in place of the
   old one.
 
-**Start a new conversation** (in the panel's **⋯** menu) asks first, then deletes the conversation;
+**New conversation** (in the panel's **⋯** menu) asks first, then deletes the conversation;
 actions you confirmed stay done and stay in the audit log.
 
 Editing and asking again never reach back past an action the assistant prepared for you to
@@ -45,7 +45,7 @@ reply again.
 
 ### The context chip
 
-The chip in the panel's header says what "this" means: the order or flow open on the page, or
+The chip beside the send button says what "this" means: the order or flow open on the page, or
 **Everything** when you are elsewhere. Open the chip to switch between the page and the whole
 workspace. The page's context travels with each message you send. In the flow editor it includes
 the graph on screen, unsaved changes included.
@@ -62,13 +62,15 @@ after each reply, with links to each item:
 ## What it can read
 
 Every role can read. The tools are `needs_attention`, `find_orders` (by status, model, channel, customer,
-text, total, age), `get_order` (status, what it waits on, steps run, recent activity),
+text, total, age, and the step each one waits at or stopped at), `get_order` (status, the step it
+waits at and since when, steps run, recent activity),
 `assess_order` (typed questions about one order, answered with a probability for every option; up to 4 images),
 `find_products` (stock, reserved, available, reorder points), `list_carts` and `get_cart` (a
 [cart's](/guides/carts/) lines with their ids, its price, promotion codes, the problems its price
 found, and why it can't be submitted yet), `list_flows` and `get_flow` (a saved
 draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a row in the
-conversation.
+conversation. An order's row names the step it waits at or stopped at, and opens that step on the
+order's graph; answers about an order say the same.
 
 ## Actions that ask first
 
@@ -92,6 +94,12 @@ that unsaved editor changes are not included; for the stock review, which SKUs a
 their reorder point. When the action can't go ahead (already decided, nothing waiting for that
 event, the order has finished, you started the order and the workspace separates approvals, the cart isn't priced or has a problem, the draft has errors, nothing to publish, or your role is too low)
 the card says why and offers no confirm.
+
+While a card waits for your answer, a bar above the prompt says so (**Waiting for you**) and
+**Show** brings the card back into view, however far the conversation has moved on. You can keep
+asking meanwhile. The conversation is the same on every device you're signed in on, so a card can
+be answered from any of them, once. If the same action is prepared again, only the newest card asks;
+the older one says it was replaced. Escape never declines a card: declining is always **Not now**.
 
 Confirming runs the action as you, after the engine re-checks your role and the order or flow
 again. The state can have changed since the card appeared, in which case the action is refused with
