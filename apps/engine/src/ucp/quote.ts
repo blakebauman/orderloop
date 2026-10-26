@@ -15,6 +15,7 @@ import {
   type CheckoutSession,
   checkAddress,
   type FlowVersion,
+  isBuySide,
   type Order,
   type OrderChannel,
   quoteNodes,
@@ -217,4 +218,49 @@ export async function quoteCheckout(
     },
     issues,
   };
+}
+
+/**
+ * What the flow's Price lines step charges for one of each SKU on the session's draft order: its
+ * customer's contract prices and price rules, in its currency, before promotions, shipping and tax.
+ * Run in process as a quote runs it, with the same draft, so a search shows what the quote then
+ * charges for a line of one. Only the Price lines step runs: the one quote step before it
+ * (validate) names and checks lines without pricing them (tests/cart-search.test.ts pins the two
+ * prices together). `atCost` when the step prices at cost (basis `cost`, or `auto` on a
+ * buy-side flow), for the caller to decide who may see a cost. Null when the flow has no Price
+ * lines step or it can't price now (no exchange rate, say): the search then shows no prices.
+ */
+export async function unitPrices(
+  env: Env,
+  flow: FlowVersion,
+  s: CheckoutSession,
+  skus: string[],
+  extra: DraftExtra = {},
+): Promise<{ prices: Map<string, number>; atCost: boolean } | null> {
+  const node = quoteNodes(flow).find((n) => n.type === 'commerce.price');
+  const exec = EXECUTORS['commerce.price'];
+  if (!node || !exec || !skus.length) return null;
+  const config = withDefaults(node.type, node.config);
+  const atCost = config.basis === 'cost' || (config.basis === 'auto' && isBuySide(flow.model));
+  const order = {
+    ...draftOrder(flow, s, true, extra),
+    lines: skus.map((sku) => ({ sku, qty: 1 })),
+  };
+  try {
+    const r = await exec({
+      env,
+      node,
+      config,
+      ctx: { order, nodes: {}, vars: {}, input: {}, now: Date.now(), ref: s.id },
+      stepKey: `quote#${node.id}`,
+      dryRun: true,
+    });
+    const prices = new Map<string, number>();
+    for (const l of r.order?.lines ?? [])
+      if (l.unitPrice !== undefined) prices.set(l.sku, l.unitPrice);
+    return { prices, atCost };
+  } catch (err) {
+    console.warn(`unit prices for ${s.id}`, err);
+    return null;
+  }
 }

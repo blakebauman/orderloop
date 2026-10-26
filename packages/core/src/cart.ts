@@ -397,6 +397,20 @@ export function cartView(cart: Cart): CartView {
   return { ...rest, quoteCurrent: isQuoteCurrent(cart), notReady: cartReadyProblem(cart) };
 }
 
+/** Products one cart search answers with, at most: a page to choose from, not a catalog to page. */
+export const CART_SEARCH_LIMIT = 20;
+
+/**
+ * A product a cart search found, from the products the cart's quote prices. `unitPrice` is what
+ * the cart's Price lines step charges for one, before promotions, shipping and tax, or null when
+ * it isn't shown (see `searchCartProducts` in the engine). A guide only: the quote says what the
+ * cart costs, and a line is still just a SKU and a quantity.
+ */
+export type CartProduct = { sku: string; name: string; unitPrice: number | null };
+
+/** One page of a cart search, in the cart's currency; `more` when the words matched more. */
+export type CartProductPage = { products: CartProduct[]; currency: string; more: boolean };
+
 /** Ends the cart: `submitted` (staff, into an order) or `returned` (external, to the buyer's system). */
 export function finishCart(
   cart: Cart,

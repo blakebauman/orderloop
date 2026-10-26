@@ -34,6 +34,7 @@ import {
   redeemCartStart,
   submitCart,
 } from './cart/carts';
+import { searchCartProducts } from './cart/search';
 import { handleMcp, MCP_PATH } from './mcp';
 import { a2aAgent, cartAgent, orderAgent } from './namespaces';
 import { fromOutside, startOrder, startOrderOnce } from './orders';
@@ -288,5 +289,11 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     if (!(await cartSnapshot(this.env, cartId)))
       return { ok: false as const, error: 'No such cart.' };
     return cartAgent(this.env, cartId).attachAs(actor, attachment);
+  }
+
+  async searchCartProducts(cartId: string, q: string, signed: SignedActor) {
+    const actor = await this.cartActor(cartId, signed);
+    if (!actor) return UNSIGNED;
+    return searchCartProducts(this.env, cartId, actor, typeof q === 'string' ? q : '');
   }
 }

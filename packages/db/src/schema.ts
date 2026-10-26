@@ -172,6 +172,10 @@ export const products = sqliteTable('products', {
   heightCm: real('height_cm'),
 });
 
+// `products_search` (migration 0058): an FTS5 index over each product's SKU and name, its rowid the
+// product row's, kept current by triggers on `products`. Drizzle can't declare a virtual table, so
+// it exists only in the migration; it's read in SQL (`apps/engine/src/cart/search.ts`).
+
 /**
  * What the product index (Vectorize) holds for each SKU, and the name its embedding was made from:
  * the engine's reindex (`apps/engine/src/product-index.ts`) diffs it against `products`.

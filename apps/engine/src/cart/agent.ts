@@ -16,7 +16,6 @@ import {
   atLeast,
   attachmentName,
   attachmentProblem,
-  BASE_CURRENCY,
   CART_CHANGED_SINCE_CONFIRM,
   CART_CHAT_BROADCAST,
   CART_START_TTL_MS,
@@ -28,7 +27,6 @@ import {
   type CartMember,
   type CartOp,
   type CartState,
-  type CheckoutSession,
   canChangeMessage,
   canEditCart,
   canReadCart,
@@ -60,6 +58,7 @@ import { pluginStub } from '../plugin-host';
 import { callPlugin, mayUse } from '../plugins';
 import { forwardedGuest, forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
 import { quoteCheckout } from '../ucp/quote';
+import { cartDraftExtra, cartSession } from './session';
 
 /**
  * Per-connection state: who opened the socket (a staff principal, or the buyer an external cart was
@@ -622,30 +621,8 @@ export class CartAgent extends Agent<Env, CartState> {
       });
       return;
     }
-    const session: CheckoutSession = {
-      id: c.id,
-      ownerId: c.createdBy,
-      status: 'incomplete',
-      currency: BASE_CURRENCY,
-      lines: c.lines,
-      buyer: {},
-      fulfillment: 'ship',
-      shipTo: c.shipTo,
-      shippingOption: c.shippingOption,
-      quote: null,
-      issues: [],
-      orderId: null,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      expiresAt: c.external?.expiresAt ?? Number.MAX_SAFE_INTEGER,
-      version: c.version,
-    };
     const { quote, issues: found } = c.lines.length
-      ? await quoteCheckout(this.env, flow, session, {
-          channel: 'manual',
-          ...(c.customerId ? { customerId: c.customerId } : {}),
-          meta: c.promoCodes.length ? { promoCodes: c.promoCodes } : {},
-        })
+      ? await quoteCheckout(this.env, flow, cartSession(c), cartDraftExtra(c))
       : { quote: null, issues: [] };
     const issues = [...found];
     // Codes on a cart whose flow never applies them would otherwise just sit there.

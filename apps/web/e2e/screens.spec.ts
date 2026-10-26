@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installKeyboard, isNarrow, keyboard, open } from './helpers';
+import { installKeyboard, isNarrow, isTouch, keyboard, open, tapTargets } from './helpers';
 
 test('below lg the flow editor is review-only', async ({ page }, info) => {
   test.skip(!isNarrow(info), 'below lg');
@@ -63,4 +63,35 @@ test('the assistant composer stays above the on-screen keyboard', async ({ page 
   await expect(box).toHaveValue('one\ntwo');
   await keyboard(page, null);
   await expect(page.locator('html[data-keyboard]')).toHaveCount(0);
+});
+
+test('a cart finds a product by name and adds it with a quantity', async ({ page }, info) => {
+  await open(page, '/carts');
+  await page.getByLabel('Title').fill('Search check');
+  await page.getByRole('button', { name: 'New cart' }).click();
+  await expect(page).toHaveURL(/\/carts\/cart_/);
+  await open(page, new URL(page.url()).pathname);
+  const find = page.getByRole('searchbox', { name: 'Find a product' });
+  await find.fill('widget');
+  const results = page.getByRole('list', { name: 'Products found' });
+  const row = results.getByRole('listitem').filter({ hasText: 'WID-100' });
+  await expect(row).toBeVisible();
+  await row.getByRole('textbox', { name: 'Quantity of WID-100 to add' }).fill('3');
+  await row.getByRole('button', { name: 'Add WID-100' }).click();
+  // The cart's own line, with the quantity it was added with.
+  await expect(page.getByRole('textbox', { name: 'Quantity of WID-100', exact: true })).toHaveValue(
+    '3',
+  );
+  const [scroll, width] = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(scroll, `page is ${scroll}px wide in a ${width}px viewport`).toBeLessThanOrEqual(width);
+  if (!isTouch(info)) return;
+  // The search, each quantity and each Add work for a thumb, and iOS doesn't zoom into them.
+  const size = await find.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+  expect(size).toBeGreaterThanOrEqual(16);
+  const adds = await tapTargets(page, '[aria-label="Products found"] button');
+  expect(adds.length).toBeGreaterThan(0);
+  expect(adds.filter((t) => t.height < 44)).toEqual([]);
 });

@@ -4,7 +4,14 @@
  * `EngineRpc` rather than importing engine source.
  */
 
-import type { CartAttachment, CartOp, CartState, CartView, CreateCartInput } from './cart';
+import type {
+  CartAttachment,
+  CartOp,
+  CartProductPage,
+  CartState,
+  CartView,
+  CreateCartInput,
+} from './cart';
 import type { ErasureResult, SubjectExport } from './erasure';
 import type { EdgeState, GraphIssue } from './graph';
 import type { HealthReport } from './health';
@@ -360,6 +367,17 @@ export interface EngineRpc {
     /** Staff or the cart's buyer, signed for `cart:<cartId>`. */
     actor: SignedActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Finds products to add to a cart by SKU or name (`CART_SEARCH_LIMIT` at most), among those its
+   * quote can price, with the unit price its flow charges where that is shown. Only for someone
+   * who may change the cart while it is open; an empty `q` lists the first products by SKU.
+   */
+  searchCartProducts(
+    cartId: string,
+    q: string,
+    /** Staff or the cart's buyer, signed for `cart:<cartId>`. */
+    actor: SignedActor,
+  ): Promise<CartAnswer<CartProductPage>>;
   /**
    * Forgets every A2A push config a person (or token) registered, and what is still queued for
    * them, when their connected apps end: a client that can no longer call /a2a stops hearing too.

@@ -7,7 +7,7 @@ import { data, type ShouldRevalidateFunctionArgs, useLoaderData } from 'react-ro
 import { CartView } from '~/components/cart-view';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { commerceData, customerNames } from '~/lib/orders.server';
+import { customerNames } from '~/lib/orders.server';
 import { useCan, useMe } from '~/lib/use-me';
 import type { Route } from './+types/cart';
 
@@ -19,14 +19,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   await requireUser(request);
   const snapshot = await engine().cartSnapshot(params.cartId);
   if (!snapshot?.cart) throw data('Cart not found', { status: 404 });
-  const [office, names] = await Promise.all([
-    commerceData(),
-    customerNames([snapshot.cart.customerId]),
-  ]);
+  const names = await customerNames([snapshot.cart.customerId]);
   return {
     snapshot,
     customerName: snapshot.cart.customerId ? (names[snapshot.cart.customerId] ?? null) : null,
-    products: office.products.map(({ sku, name }) => ({ sku, name })),
   };
 }
 
@@ -36,7 +32,7 @@ export function shouldRevalidate({ currentParams, nextParams }: ShouldRevalidate
 }
 
 export default function CartPage() {
-  const { snapshot, customerName, products } = useLoaderData<typeof loader>();
+  const { snapshot, customerName } = useLoaderData<typeof loader>();
   const canOperate = useCan('operator');
   const me = useMe();
   return (
@@ -44,7 +40,6 @@ export default function CartPage() {
       key={snapshot.cart!.id}
       snapshot={snapshot}
       customerName={customerName}
-      products={products}
       mode="staff"
       meId={me?.id ?? null}
       canOperate={canOperate}

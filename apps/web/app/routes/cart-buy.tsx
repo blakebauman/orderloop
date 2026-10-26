@@ -7,13 +7,12 @@
  */
 
 import { isCartExpired, isFinalCart } from '@orderloop/core';
-import { products } from '@orderloop/db';
 import { data, type ShouldRevalidateFunctionArgs, useLoaderData } from 'react-router';
 import { CartRefusal } from '~/components/cart-refusal';
 import { CartView } from '~/components/cart-view';
 import { cartGuest, cartRefusal } from '~/lib/cart-guest.server';
 import { EMBED_HEADER } from '~/lib/csp';
-import { db, engine } from '~/lib/env.server';
+import { engine } from '~/lib/env.server';
 import { customerNames } from '~/lib/orders.server';
 import type { Route } from './+types/cart-buy';
 
@@ -35,16 +34,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       'This cart has closed. Go back to your purchasing system and open the catalog again.',
       410,
     );
-  const [names, catalog] = await Promise.all([
-    customerNames([cart.customerId]),
-    db().select({ sku: products.sku, name: products.name }).from(products).orderBy(products.sku),
-  ]);
+  const names = await customerNames([cart.customerId]);
   return data(
     {
       snapshot,
       guest,
       customerName: cart.customerId ? (names[cart.customerId] ?? null) : null,
-      products: catalog,
     },
     {
       headers: {
@@ -69,14 +64,13 @@ export function shouldRevalidate({ currentParams, nextParams }: ShouldRevalidate
 }
 
 export default function CartBuyPage() {
-  const { snapshot, guest, customerName, products } = useLoaderData<typeof loader>();
+  const { snapshot, guest, customerName } = useLoaderData<typeof loader>();
   return (
     <main id="main" className="min-h-dvh bg-background">
       <CartView
         key={snapshot.cart!.id}
         snapshot={snapshot}
         customerName={customerName}
-        products={products}
         mode="guest"
         meId={guest.id}
       />
