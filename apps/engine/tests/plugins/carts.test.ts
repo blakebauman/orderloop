@@ -435,6 +435,20 @@ describe('an external cart’s buyer', () => {
     ).toEqual({ ok: false, error: 'That session’s cart is returned.' });
   });
 
+  it('goes back without a ship-to on a flow that prices shipping: the buyer’s PO says where', async () => {
+    const c = await open({ flowId: 'tpl-storefront-order', lines: [{ sku: 'GSK-010', qty: 2 }] });
+    const before = (await api().cartSnapshot(c.cartId))!.cart!;
+    expect(before.quote).toMatchObject({ ships: true });
+    expect(before.quote!.shippingOptions.length).toBeGreaterThan(0);
+    expect(before.shipTo).toBeNull();
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const ws = await guestSocket(c.cartId, guest);
+    if (!ws.call) throw new Error(`socket refused: ${ws.status}`);
+    const sent = await ws.call<{ ok: boolean }>('transfer');
+    expect(sent.result).toMatchObject({ ok: true });
+    expect((await api().cartSnapshot(c.cartId))?.cart?.status).toBe('returned');
+  });
+
   it('is the only one who sends it back, and is slowed down when editing in a burst', async () => {
     const c = await open({ lines: [{ sku: 'WID-100', qty: 1 }] });
     const ada = { kind: 'staff' as const, id: 'usr_ada', name: 'Ada', role: 'admin' as const };

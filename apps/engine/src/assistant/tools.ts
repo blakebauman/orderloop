@@ -154,7 +154,7 @@ const cartOutput = row({
   shippingOption: z
     .string()
     .nullable()
-    .describe('The option chosen, or the one the quote charged when none was'),
+    .describe('The option it ships by: what the current quote charged, else the one chosen'),
   shippingOptions: z
     .array(row({ id: z.string(), title: z.string(), price: money }))
     .describe('What the flow offers for the ship-to; choose one with set_shipping_option'),

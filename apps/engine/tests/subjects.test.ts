@@ -4,6 +4,7 @@ import { type OrderInput, type OrderState, TERMINAL_ORDER_STATUSES } from '@orde
 import { createDb, customers, documents, inboundEmails, messages, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createCart } from '../src/cart/carts';
 import { storeDocument } from '../src/connectors';
 import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
@@ -158,6 +159,43 @@ describe('data subject requests', () => {
     // Nothing is left to find.
     expect(await eraseDataSubject(env, 'erin@example.com')).toMatchObject({ ok: true, orders: 0 });
     expect((await exportDataSubject(env, 'erin@example.com')).orders).toEqual([]);
+  });
+
+  it('exports and removes the ship-to on their account’s staff carts', async () => {
+    const id = `cus_ship_${crypto.randomUUID().slice(0, 6)}`;
+    const email = `${id}@example.com`;
+    await db().insert(customers).values({ id, name: 'Shipping Example', email });
+    const made = await createCart(env, {
+      title: 'Restock',
+      flowId: 'tpl-storefront-order',
+      customerId: id,
+      createdBy: 'usr_1',
+    });
+    if (!made.ok) throw new Error(made.error);
+    const cart = env.CART_AGENT.getByName(made.id);
+    const ops = { kind: 'staff' as const, id: 'usr_1', name: 'Ops', role: 'operator' as const };
+    const home = {
+      name: 'Sam',
+      line1: '2 Mill Ln',
+      city: 'York',
+      postalCode: 'YO1 7HH',
+      country: 'GB',
+    };
+    await cart.applyAs(ops, { op: 'add', sku: 'GSK-010', qty: 1 });
+    expect(await cart.applyAs(ops, { op: 'set_ship_to', address: home })).toEqual({ ok: true });
+
+    const exported = await exportDataSubject(env, email);
+    expect(exported.carts).toEqual([expect.objectContaining({ id: made.id, shipTo: home })]);
+
+    const erased = await eraseDataSubject(env, email);
+    expect(erased).toMatchObject({ ok: true, carts: 1 });
+    const after = (await cart.snapshot())!.cart!;
+    expect(after.shipTo).toBeNull();
+    // Still open, and priced again without it.
+    expect(after).toMatchObject({ status: 'open', quotedVersion: after.version });
+    expect((await exportDataSubject(env, email)).carts).toEqual([]);
+    // Nothing left to remove: a repeat counts no cart.
+    expect(await eraseDataSubject(env, email)).toMatchObject({ ok: true, carts: 0 });
   });
 
   it('refuses while one of their orders is still running', async () => {

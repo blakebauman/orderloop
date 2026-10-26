@@ -5,11 +5,13 @@ import {
   type CartActor,
   type CartOp,
   type CartState,
+  cartShippingOption,
   isQuoteCurrent,
   type OrderState,
   PRINCIPAL_HEADER,
   type Principal,
   type ProxiedPrincipal,
+  storefrontOrderFlow,
 } from '@orderloop/core';
 import { carts, createDb, orders, promotions, publishFlow, sessions, users } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
@@ -275,6 +277,49 @@ describe('shipping a cart', () => {
     expect(order.meta?.shipTo).toEqual(berlin);
   });
 
+  it('ships by what the quote charged when the flow picks its own option, and says so', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    // The storefront flow, with a shipping step that always takes the cheapest option.
+    const base = storefrontOrderFlow();
+    const flow = {
+      ...base,
+      id: 'test-cart-cheapest',
+      nodes: base.nodes.map((n) =>
+        n.id === 'shipping' ? { ...n, config: { ...n.config, select: 'cheapest' } } : n,
+      ),
+    };
+    await publishFlow(db(), flow);
+    const made = await api().createCart({
+      title: 'Cheapest',
+      flowId: flow.id,
+      customerId: 'cus_ada',
+      createdBy: 'usr_cart_ada',
+    });
+    if (!made.ok) throw new Error(made.error);
+    const ada = staff(await who('operator', 'ada'));
+    await cart(made.id).applyAs(ada, { op: 'add', sku: 'GSK-010', qty: 1 });
+    await cart(made.id).applyAs(ada, { op: 'set_ship_to', address: berlin });
+    expect(
+      await cart(made.id).applyAs(ada, { op: 'set_shipping_option', option: 'express' }),
+    ).toEqual({ ok: true });
+    const c = (await state(made.id)).cart!;
+    expect(c.shippingOption).toBe('express');
+    expect(c.quote!.shippingOption).toBe('standard');
+    expect(cartShippingOption(c)).toBe('standard');
+    expect(c.issues).toContainEqual(
+      expect.objectContaining({ kind: 'warning', code: 'shipping_option' }),
+    );
+    // A warning: it still submits, with the option it was charged for.
+    const done = await cart(made.id).submitAs(ada);
+    if (!done.ok) throw new Error(done.error);
+    const order = ((await env.ORDER_AGENT.getByName(done.orderId).snapshot()) as OrderState).order!;
+    expect(order.shippingOption).toBe('standard');
+  });
+
   it('starts an order with the option the quote charged when none was chosen, and none for a flow without shipping', async () => {
     introspector = await introspectWorkflow(env.ORDER_LOOP);
     await introspector.modifyAll(async (m) => {
@@ -294,6 +339,9 @@ describe('shipping a cart', () => {
     const b2b = await open();
     await cart(b2b).applyAs(ada, { op: 'add', sku: 'WID-100', qty: 1 });
     expect((await state(b2b)).cart!.quote!.shippingOptions).toEqual([]);
+    expect(await cart(b2b).applyAs(ada, { op: 'set_shipping_option', option: 'standard' })).toEqual(
+      { ok: false, error: 'This cart’s flow offers no shipping options.' },
+    );
     const plain = await cart(b2b).submitAs(ada);
     if (!plain.ok) throw new Error(plain.error);
     const o = ((await env.ORDER_AGENT.getByName(plain.orderId).snapshot()) as OrderState).order!;

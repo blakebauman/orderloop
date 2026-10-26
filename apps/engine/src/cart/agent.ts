@@ -278,6 +278,36 @@ export class CartAgent extends Agent<Env, CartState> {
     return true;
   }
 
+  /**
+   * A staff cart for a customer who made a data subject request: where it ships, which names
+   * them. Null when it holds no address.
+   */
+  async customerExport() {
+    const c = this.state.cart;
+    if (!c?.shipTo) return null;
+    return { id: c.id, title: c.title, status: c.status, shipTo: c.shipTo, orderId: c.orderId };
+  }
+
+  /**
+   * Removes the ship-to from a cart whose customer is being erased; an open cart is priced again
+   * without it. True if there was one to remove.
+   */
+  async eraseShipTo(): Promise<boolean> {
+    if (!this.state.cart?.shipTo) return false;
+    const c = this.cart();
+    const final = isFinalCart(c);
+    await this.save({
+      ...c,
+      shipTo: null,
+      updatedAt: Date.now(),
+      version: c.version + 1,
+      // An ended cart isn't priced again; its quote stays what it was.
+      quotedVersion: final && c.quotedVersion === c.version ? c.version + 1 : c.quotedVersion,
+    });
+    if (!final && !this.submitting) await this.reprice();
+    return true;
+  }
+
   /** What the buyer of this external cart put on it, for a data subject export. */
   async subjectExport() {
     const c = this.state.cart;
@@ -498,9 +528,8 @@ export class CartAgent extends Agent<Env, CartState> {
           currency: q.currency,
           ...(c.customerId ? { customerId: c.customerId } : {}),
           lines: q.lines.map((l) => ({ sku: l.sku, name: l.title, qty: l.qty })),
-          ...((c.shippingOption ?? q.shippingOption)
-            ? { shippingOption: (c.shippingOption ?? q.shippingOption)! }
-            : {}),
+          // What the quote charged, which is what the flow's shipping step will pick again.
+          ...(q.shippingOption ? { shippingOption: q.shippingOption } : {}),
           meta: {
             cart: { id: c.id },
             ...(c.promoCodes.length ? { promoCodes: c.promoCodes } : {}),
@@ -627,6 +656,15 @@ export class CartAgent extends Agent<Env, CartState> {
         content:
           'This cart’s flow has no Apply promotions step, so its codes don’t change the price.',
         path: '$.promoCodes',
+      });
+    // A flow whose shipping step picks the cheapest or fastest charges that one, whatever was
+    // chosen: say so rather than show a choice the order won't keep.
+    if (c.shippingOption && quote?.shippingOption && quote.shippingOption !== c.shippingOption)
+      issues.push({
+        kind: 'warning',
+        code: 'shipping_option',
+        content: `This cart’s flow picks its own shipping option (“${quote.shippingOptions.find((o) => o.id === quote.shippingOption)?.title ?? quote.shippingOption}”), not “${c.shippingOption}”.`,
+        path: '$.shippingOption',
       });
     if (this.state.cart?.version !== c.version) return;
     const now = this.cart();

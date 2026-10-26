@@ -18,6 +18,7 @@ import {
   type CartOp,
   type CartStatus,
   cartReadyProblem,
+  cartShippingOption,
   isQuoteCurrent,
   type Principal,
   ROLE_LABELS,
@@ -110,7 +111,7 @@ export async function getCart(env: Env, cartId: string) {
     shipTo: c.shipTo
       ? Object.fromEntries(Object.entries(c.shipTo).map(([f, v]) => [f, said(v)]))
       : null,
-    shippingOption: c.shippingOption ?? q?.shippingOption ?? null,
+    shippingOption: cartShippingOption(c),
     shippingOptions: (q?.shippingOptions ?? []).map((o) => ({
       id: o.id,
       title: said(o.title) ?? o.id,
@@ -192,7 +193,7 @@ export async function previewSubmit(
   const read = input.cartVersion;
   const q = c.quote;
   const customer = said(await customerName(env, c.customerId), 80);
-  const option = c.shippingOption ?? q?.shippingOption;
+  const option = cartShippingOption(c);
   const where = [c.shipTo?.line1, c.shipTo?.city, c.shipTo?.country].filter(Boolean).join(', ');
   const shipsTo = where
     ? `Ships to ${said(where, 120)}${option ? ` by ${said(q?.shippingOptions.find((o) => o.id === option)?.title ?? option, 40)}` : ''}`

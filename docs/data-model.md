@@ -396,7 +396,8 @@ Orders with `erased_at` set are no longer part of it. A `users` row with the add
 `messages` (to those orders or to the address), `inbound_emails` rows (without `r2_key`) and the
 `documents` list (`key`, `kind`, `contentType`, `createdAt`), and `carts`: each of their external carts
 (`CartAgent.subjectExport`) with its id, title, status, buyer, lines, ship-to, order, and the messages and file
-names, types and sizes they added.
+names, types and sizes they added, and each staff cart for one of their customer accounts that holds a ship-to
+(`CartAgent.customerExport`: id, title, status, ship-to, order).
 
 **Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
 has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
@@ -419,7 +420,9 @@ Each call first erases the subject's external carts (`carts`, counted in `carts`
 `CartAgent.eraseSubject`: an open cart is canceled, their messages, files and ship-to are deleted, the terms
 (with the buyer's id and name) are erased from everyone else's messages and the title, the return
 form and start links are dropped, their sockets are closed, and the buyer becomes `[erased]`, which
-clears `buyer_id`. The cart's lines, quote and order stay.
+clears `buyer_id`. The cart's lines, quote and order stay. Staff carts for their customer accounts
+(`carts.customer_id`) lose their ship-to (`CartAgent.eraseShipTo`; an open one is priced again),
+each counted in `carts`.
 
 When no order is left (the last call, `done: true`): `inbound_emails` from that sender that never
 started an order are erased the same way and their R2 `.eml` deleted, `messages` to the address are

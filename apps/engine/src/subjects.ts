@@ -147,9 +147,15 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
       }),
     ),
     carts: (
-      await Promise.all(
-        (await cartsOf(env, s.email)).map((id) => cartAgent(env, id).subjectExport()),
-      )
+      await Promise.all([
+        ...(await cartsOf(env, s.email)).map((id) => cartAgent(env, id).subjectExport()),
+        ...(
+          await customerCartsOf(
+            env,
+            s.accounts.map((c) => c.id),
+          )
+        ).map((id) => cartAgent(env, id).customerExport()),
+      ])
     )
       .filter((c) => c !== null)
       // Plain data, not the RPC result it came in.
@@ -169,6 +175,20 @@ async function cartsOf(env: Env, email: string) {
     .where(eq(carts.buyerId, email))
     .limit(EXPORT_MAX);
   return rows.map((r) => r.id);
+}
+
+/** Staff carts for the subject's customer accounts (`carts.customer_id`), which may hold their address. */
+async function customerCartsOf(env: Env, customerIds: string[]) {
+  const rows = await Promise.all(
+    chunks(customerIds).map((c) =>
+      createDb(env.DB)
+        .select({ id: carts.id })
+        .from(carts)
+        .where(and(inArray(carts.customerId, c), isNull(carts.pluginId)))
+        .limit(EXPORT_MAX),
+    ),
+  );
+  return rows.flat().map((r) => r.id);
 }
 
 /**
@@ -225,6 +245,12 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     await cartAgent(env, id).eraseSubject(s.terms);
     result.carts++;
   }
+  // Staff carts for their accounts: each loses the address it would ship to.
+  for (const id of await customerCartsOf(
+    env,
+    s.accounts.map((c) => c.id),
+  ))
+    if (await cartAgent(env, id).eraseShipTo()) result.carts++;
 
   const erased = await eraseOrders(env, list, s.terms);
   if (erased.refused.length) return { ok: false, reason: 'active_orders', orders: erased.refused };

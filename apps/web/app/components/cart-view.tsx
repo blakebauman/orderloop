@@ -16,6 +16,7 @@ import {
   type CartStatus,
   type CheckoutQuote,
   cartReadyProblem,
+  cartShippingOption,
   isFinalCart,
   isQuoteCurrent,
   MAX_CHAT_BODY,
@@ -283,7 +284,7 @@ export function CartView({
           {q?.ships || cart.shipTo ? (
             <ShipTo
               address={cart.shipTo ?? null}
-              chosen={cart.shippingOption ?? null}
+              selected={cartShippingOption(cart)}
               quote={q}
               priced={priced}
               editable={editable}
@@ -643,7 +644,7 @@ const blankAddress = (a: Partial<ShipAddress> | null) =>
  */
 function ShipTo({
   address,
-  chosen,
+  selected,
   quote,
   priced,
   editable,
@@ -651,7 +652,8 @@ function ShipTo({
   onOption,
 }: {
   address: Partial<ShipAddress> | null;
-  chosen: string | null;
+  /** What the quote charged once it is current (`cartShippingOption`), not only what was chosen. */
+  selected: string | null;
   quote: CheckoutQuote | null;
   /** Whether `quote` prices the cart as it is now; its options can't be picked until it does. */
   priced: boolean;
@@ -664,7 +666,6 @@ function ShipTo({
   // Someone else on the cart changed it: show theirs.
   useEffect(() => setDraft(JSON.parse(saved)), [saved]);
   const changed = JSON.stringify(draft) !== saved;
-  const selected = chosen ?? quote?.shippingOption ?? null;
   const currency = quote?.currency ?? 'USD';
   return (
     <Section title="Ship to">

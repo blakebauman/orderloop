@@ -13,6 +13,7 @@ import {
   cartAttachmentKey,
   cartOpSchema,
   cartReadyProblem,
+  cartShippingOption,
   cartView,
   chatBody,
   finishCart,
@@ -314,6 +315,22 @@ describe('ship-to and shipping option', () => {
         priced({ quote: { ...offering, shippingOptions: [], shippingOption: null } }),
       ),
     ).toBeNull();
+    // An external cart goes back to the buyer's system, whose PO says where it ships.
+    expect(cartReadyProblem(priced({ quote: offering, external }))).toBeNull();
+  });
+
+  it('refuses an option while a current quote offers none', () => {
+    expect(
+      refuse(cart({ quote, quotedVersion: 1 }), { op: 'set_shipping_option', option: 'standard' }),
+    ).toBe('This cart’s flow offers no shipping options.');
+  });
+
+  it('ships by what a current quote charged, and by the chosen option until then', () => {
+    // A flow that picks the cheapest charged Standard though Express was chosen.
+    const chosen = { shippingOption: 'express', quote: offering };
+    expect(cartShippingOption(cart({ ...chosen, quotedVersion: 1 }))).toBe('standard');
+    expect(cartShippingOption(cart(chosen))).toBe('express');
+    expect(cartShippingOption(cart())).toBeNull();
   });
 
   it('reads a cart stored before ship-to as shipping nowhere, and starts one that way', () => {

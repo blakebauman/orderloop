@@ -42,11 +42,14 @@ and, once priced, the shipping options the cart's flow offers for it, each with 
 delivery time. Saving the address or picking an option prices the cart again, so shipping and
 any tax that depends on where it goes show in the price before there is an order. Until you pick
 an option, the flow picks one (the cheapest, unless its shipping step says otherwise), and the
-price shows that one.
+price shows that one. A flow whose shipping step always picks the cheapest or fastest charges
+that one whatever you pick: the cart shows the one it charged as selected, says so under the
+price, and the order ships by it. A flow that prices no shipping offers no options to pick.
 
 - If the cart's flow offers shipping options and the cart has goods that ship, it can't be
   submitted without a complete address. A cart of digital goods, or on a flow that prices no
-  shipping, needs none.
+  shipping, needs none, and neither does a cart going back to a buyer's purchasing system, whose
+  purchase order says where it ships.
 - An option the flow no longer offers (after the address changed, say) stays chosen and shows
   under the price as a problem, and the cart can't be submitted until you pick another.
 - **Clear** removes the address and the option with it.
@@ -68,7 +71,8 @@ added a file, or an operator, can remove it, which deletes it.
 deleted, and a buyer's name is removed from it. The cart's lines, price and order (which keeps its
 own copy of the address) stay. A buyer from a purchasing system who asks to have their personal
 data erased loses their messages, files and ship-to address from their carts straight away (an
-open one is canceled).
+open one is canceled), and a customer who does loses the ship-to address from the carts your team
+opened for them.
 
 ## Working on a cart together
 
@@ -90,8 +94,7 @@ within about 30 seconds.
 again. A locked cart can still be submitted.
 
 **Submit as order** starts an order on the cart's flow with the cart's lines, customer, ship-to
-address and shipping option (the one the price charged, if you didn't pick one), and the cart then
-links to it. The order is priced again by its flow and goes through
+address and the shipping option its price charged, and the cart then links to it. The order is priced again by its flow and goes through
 whatever the flow does next, approvals included: a cart is not approved on its own. A cart can be
 submitted only once its price is current and shows no problems, and only once: after that, and
 after **Cancel cart**, nothing changes it.

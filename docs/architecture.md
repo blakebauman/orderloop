@@ -1020,12 +1020,19 @@ the rest is in its SQL, paged by `history`).
   session as a checkout's do (`set_ship_to`, `set_shipping_option`; `cartShipTo` bounds an address
   to `SHIP_TO_LIMITS`, since the socket's ops never pass `cartOpSchema`), so `commerce.shipping_rate`
   and `commerce.tax` price them. Clearing the address clears the option. An option the current
-  quote doesn't offer is refused; one the next quote doesn't offer stays chosen and comes back as
-  the quote's `fulfillment_option_unavailable` error, as on a UCP checkout. When the quote `ships`
-  and offers options, `cartReadyProblem` also wants a complete address (`isCompleteAddress`, the
-  `ADDRESS_FIELDS` `missingInfo` checks). A cart stored before these fields reads them as null
+  quote doesn't offer is refused (any option, when it offers none); one the next quote doesn't
+  offer stays chosen and comes back as the quote's `fulfillment_option_unavailable` error, as on a
+  UCP checkout. A shipping step that selects `cheapest` or `fastest` ignores the chosen option
+  (`pickOption`), so `reprice` adds a `shipping_option` warning when the quote charged another, and
+  everything that says how the cart ships (the page, `get_cart`, the submit preview and the order)
+  uses `cartShippingOption`: the current quote's `shippingOption`, else the chosen one. When the
+  quote `ships` and offers options, `cartReadyProblem` also wants a complete address
+  (`isCompleteAddress`, the `ADDRESS_FIELDS` `missingInfo` checks), except on an external cart,
+  whose buyer's PO carries it. A cart stored before these fields reads them as null
   (`storedCart`, applied by the agent's `cart()` and `snapshot`). Retention (`purge`) and a buyer's
-  erasure (`eraseSubject`) clear `shipTo`; `subjectExport` includes it. `PluginCart`, and so an
+  erasure (`eraseSubject`) clear `shipTo`; `subjectExport` includes it. A customer's data subject
+  request also reaches the staff carts for their accounts (`carts.customer_id`): the export lists
+  their ship-to (`customerExport`) and erasure removes it (`eraseShipTo`, repricing an open cart). `PluginCart`, and so an
   external cart's return, doesn't carry them.
 - **Promotion codes.** A cart's codes ride in `meta.promoCodes` on its quote and its order. A
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
@@ -1046,7 +1053,7 @@ the rest is in its SQL, paged by `history`).
 - **Submitting** (`submitAs`, operator) holds the cart locked before its first await, without bumping its version, while
   `startOrderOnce` starts an order of the cart's flow keyed `cart:<id>` (channel `manual`,
   `externalId` the cart id, lines from the quote, `meta.cart`, `meta.promoCodes` and `meta.shipTo`,
-  and `shippingOption` the cart's or else the quote's, as `completeCheckout` does), then marks it
+  and `shippingOption` the one the quote charged), then marks it
   `submitted` with the order id. Approvals happen in that order's flow.
 - **The socket.** A cart's socket sends the whole cart as it opens, so `cartGate`
   (`apps/engine/src/cart/gate.ts`), run by `routeAgents` (`apps/engine/src/agent-routes.ts`)

@@ -342,12 +342,12 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
       if (!option || option.length > MAX_SHIPPING_OPTION_ID)
         return fail('Choose a shipping option.');
       // Checked against a quote only while it prices the cart; otherwise the next quote says.
-      if (
-        isQuoteCurrent(cart) &&
-        cart.quote!.shippingOptions.length &&
-        !cart.quote!.shippingOptions.some((o) => o.id === option)
-      )
-        return fail(`The shipping option “${option}” is not offered.`);
+      if (isQuoteCurrent(cart)) {
+        const offered = cart.quote!.shippingOptions;
+        if (!offered.length) return fail('This cart’s flow offers no shipping options.');
+        if (!offered.some((o) => o.id === option))
+          return fail(`The shipping option “${option}” is not offered.`);
+      }
       return done({ shippingOption: option }, true);
     }
   }
@@ -357,7 +357,7 @@ export function applyCartOp(cart: Cart, op: CartOp, actor: CartActor, now: numbe
  * Why the cart can't be submitted as an order or returned to the buyer's system yet, or null when
  * it can: it has lines, its quote is for this version, the quote found no errors, and when it
  * ships by a flow that offers shipping options, it has a complete ship-to. A cart whose flow
- * prices no shipping, or that ships nothing, needs no address.
+ * prices no shipping, that ships nothing, or that goes back to a buyer's system needs no address.
  */
 export function cartReadyProblem(cart: Cart): string | null {
   if (isFinalCart(cart)) return `The cart is ${cart.status}.`;
@@ -367,10 +367,19 @@ export function cartReadyProblem(cart: Cart): string | null {
   if (error) return error.content;
   const q = cart.quote;
   if (!q) return 'The cart could not be priced.';
-  if (q.ships && q.shippingOptions.length && !isCompleteAddress(cart.shipTo))
+  // An external cart goes back to the buyer's system without its address: their purchase order
+  // says where it ships.
+  if (!cart.external && q.ships && q.shippingOptions.length && !isCompleteAddress(cart.shipTo))
     return 'Add a complete ship-to address: street, city, postcode and country.';
   return null;
 }
+
+/**
+ * The option the cart ships by: while its quote is current, the one the quote charged (the flow's
+ * shipping step may pick the cheapest or fastest whatever was chosen); before that, the chosen one.
+ */
+export const cartShippingOption = (cart: Cart): string | null =>
+  isQuoteCurrent(cart) ? cart.quote!.shippingOption : (cart.shippingOption ?? null);
 
 /**
  * A staff cart as the REST API and MCP show it: its lines, quote and problems, without its chat,
