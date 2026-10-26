@@ -410,6 +410,11 @@ to answer again and loads the page once more. On CI the suite runs one test at a
 retries, and a failing run keeps its traces as the `device-test-traces` artifact (open one with
 `pnpm --filter @orderloop/web exec playwright show-trace <trace.zip>`).
 
+The WebKit download (`~/.cache/ms-playwright`) is cached with `actions/cache`, keyed on the installed
+Playwright version, and fetched only on a miss. Its system libraries still come from apt on every run;
+that step has a 5 minute timeout and one retry (6 minutes), so a slow Ubuntu mirror costs minutes, not
+the job's 25 minute budget.
+
 Playwright can't emulate safe-area insets or the on-screen keyboard, so the helpers fake them:
 `fakeSafeArea` sets the `--safe-*` variables (why app.css reads the insets through them, never
 `env()` directly), and `installKeyboard` replaces `visualViewport` and `innerHeight` with ones a
