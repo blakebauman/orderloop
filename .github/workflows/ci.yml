@@ -79,8 +79,32 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install WebKit
-        run: pnpm --filter @orderloop/web exec playwright install --with-deps webkit
+      # The browser download is cached by Playwright version, so it is fetched only on a miss. The
+      # system libraries come from apt, which the runner's Ubuntu mirror sometimes serves very
+      # slowly (two runs spent all 25 minutes there), so that step has its own short timeout and
+      # one retry instead of the job's whole budget.
+      - name: Resolve the Playwright version
+        id: playwright
+        run: echo "version=$(pnpm --filter @orderloop/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache WebKit
+        id: webkit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Download WebKit
+        if: ${{ steps.webkit.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        run: pnpm --filter @orderloop/web exec playwright install webkit
+      - name: Install WebKit system dependencies
+        id: deps
+        continue-on-error: true
+        timeout-minutes: 5
+        run: pnpm --filter @orderloop/web exec playwright install-deps webkit
+      - name: Install WebKit system dependencies (retry)
+        if: ${{ steps.deps.outcome == 'failure' }}
+        timeout-minutes: 6
+        run: pnpm --filter @orderloop/web exec playwright install-deps webkit
       - name: Device tests
         run: pnpm --filter @orderloop/web e2e
       # A failure's traces (DOM, network, console at each step): open with `playwright show-trace`.
