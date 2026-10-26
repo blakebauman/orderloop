@@ -21,7 +21,7 @@ import {
   promptId,
 } from '@orderloop/core';
 import { createAI, type GatewayOptions, type WorkersAIModelId } from 'agents/models/ai-sdk';
-import { gatewayOptions } from '../ai';
+import { gatewayOptions, NO_LOG_PAYLOAD } from '../ai';
 import { orderRef } from './data';
 
 /** Matches the AI nodes: a slow model must not hold a person hostage either. */
@@ -93,7 +93,7 @@ export async function assistantGateway(
       retries: { maxAttempts: 3, retryDelayMs: 500, backoff: 'exponential' },
       requestTimeoutMs: ATTEMPT_TIMEOUT_MS,
     },
-    headers: { 'cf-aig-collect-log-payload': 'false' },
+    headers: { ...NO_LOG_PAYLOAD },
   };
 }
 

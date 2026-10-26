@@ -108,11 +108,12 @@ describe('model calls in an order step', () => {
     });
   });
 
-  it('tag the gateway log with the prompt and order, and nothing personal', async () => {
+  it('tag the gateway log with the prompt and order, keep no payload, and nothing personal', async () => {
     const m = model(() => ({ response: { ok: true } }), { AI_GATEWAY_ID: 'gw' });
     await ask(m.env, { orderId: 'ord_1' });
     expect(m.calls[0]!.options).toEqual({
       gateway: { id: 'gw', collectLog: LOGS, metadata: { prompt: 'risk@1', orderId: 'ord_1' } },
+      extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
     });
     const a = model(() => ({ answers: {} }), { AI_GATEWAY_ID: 'gw' });
     await assess(a.env, { state: {}, questions: {} }, { orderId: 'ord_2' });
