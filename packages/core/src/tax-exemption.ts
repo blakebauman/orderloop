@@ -229,9 +229,10 @@ export const taxExemptNote = (c: { number?: string }) =>
 
 /**
  * Where `meta[CUSTOMER_MATCHED_BY]` says an order's customer was guessed rather than named by a
- * trusted caller: `email` (a storefront order whose buyer email matched the account) or `name` (a
- * name read from a document). Anyone can type an email or a company name, so such an order gets
- * none of the customer's exemptions.
+ * trusted caller: `email` (a storefront order whose buyer email matched the account),
+ * `unauthenticated_email` (email intake from the account's address with the sender check off) or
+ * `name` (a name read from a document). Anyone can type an email or a company name, or send as an
+ * address nothing checks, so such an order gets none of the customer's exemptions.
  */
 export const CUSTOMER_MATCHED_BY = 'customerMatchedBy';
 

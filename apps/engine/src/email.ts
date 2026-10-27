@@ -12,6 +12,7 @@
 
 import {
   authenticated,
+  CUSTOMER_MATCHED_BY,
   composeDocument,
   flowForMailbox,
   htmlToText,
@@ -76,10 +77,8 @@ export async function receiveEmail(
   const flowId = flowForMailbox(message.to, parseMailboxes(env.INTAKE_MAILBOXES));
   if (!flowId) return reject(`No mailbox ${mailbox.local}@ here`);
   if (message.rawSize > MAX_INTAKE_BYTES) return reject('Message too large');
-  if (
-    String(env.INTAKE_REQUIRE_AUTH) !== 'false' &&
-    !authenticated(message.headers.get('authentication-results'), message.from)
-  ) {
+  const checked = String(env.INTAKE_REQUIRE_AUTH) !== 'false';
+  if (checked && !authenticated(message.headers.get('authentication-results'), message.from)) {
     return reject('Message failed SPF, DKIM and DMARC');
   }
   // Only customers the sender could be: this exact address, or another at the same domain.
@@ -126,6 +125,10 @@ export async function receiveEmail(
         messageId,
         senderMatch: sender.via,
         attachments: attachments.map((a) => a.filename),
+        // Unchecked, anyone can send as the customer: no exemptions (`customerTrusted`).
+        ...(sender.customerId && !checked
+          ? { [CUSTOMER_MATCHED_BY]: 'unauthenticated_email' }
+          : {}),
       },
     },
   });
