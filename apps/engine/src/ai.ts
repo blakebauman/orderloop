@@ -10,6 +10,7 @@
  */
 
 import {
+  type AiFeedback,
   type AiPrompt,
   type AiProvenance,
   autoLayout,
@@ -116,6 +117,46 @@ export const callOptions = (env: Env, prompt: string, orderId?: string) => {
   return gateway ? { gateway, extraHeaders: NO_LOG_PAYLOAD } : undefined;
 };
 
+/**
+ * Marks a model call's gateway log entry with a person's verdict on it (`aiGateFeedback`), for
+ * evaluating models and prompts. The entry must carry this order and prompt in its metadata, so a
+ * log id read from the binding after another call in the isolate is never marked. Never throws:
+ * feedback is best effort and must not fail the decision it follows.
+ */
+export async function sendAiFeedback(env: Env, orderId: string, fb: AiFeedback): Promise<void> {
+  const gateway = gatewayOptions(env);
+  if (!gateway?.collectLog) return;
+  try {
+    const gw = env.AI.gateway(gateway.id);
+    const log = await gw.getLog(fb.logId);
+    if (log.metadata?.orderId !== orderId || log.metadata?.prompt !== fb.prompt) {
+      console.warn(
+        JSON.stringify({ type: 'ai_feedback', orderId, nodeId: fb.nodeId, skipped: 'other call' }),
+      );
+      return;
+    }
+    await gw.patchLog(fb.logId, { feedback: fb.feedback });
+    console.log(
+      JSON.stringify({
+        type: 'ai_feedback',
+        orderId,
+        nodeId: fb.nodeId,
+        prompt: fb.prompt,
+        feedback: fb.feedback,
+      }),
+    );
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        type: 'ai_feedback',
+        orderId,
+        nodeId: fb.nodeId,
+        failed: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
 /** A failed call in a step with attempts left: logged like a fallback, then thrown to retry. */
 export function retryModelCall(prompt: string, model: string, ms: number, reason: string): never {
   console.warn(
@@ -159,6 +200,7 @@ export async function runJson<T>(
   };
   if (String(env.AI_MODE) === 'mock') return heuristic('mock');
   let res: ModelAnswer;
+  let logId: string | undefined;
   try {
     res = (await withTimeout(
       env.AI.run(
@@ -174,6 +216,9 @@ export async function runJson<T>(
       ),
       opts.timeoutMs ?? AI_TIMEOUT_MS,
     )) as ModelAnswer;
+    // Read at once: the binding holds only its latest call's id, and another call in this isolate
+    // could replace it. `sendAiFeedback` checks the entry is this order's before marking it.
+    logId = gatewayOptions(env)?.collectLog ? (env.AI.aiGatewayLogId ?? undefined) : undefined;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     if (opts.retry) retryModelCall(id, model, Date.now() - started, reason);
@@ -190,7 +235,7 @@ export async function runJson<T>(
     const value = (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
     if (value === undefined || value === null) throw new Error('empty response');
     if (!conforms(value, schema)) throw new Error('response does not match the schema');
-    const p: AiProvenance = { source: 'model', model, prompt: id };
+    const p: AiProvenance = { source: 'model', model, prompt: id, ...(logId ? { logId } : {}) };
     logAiCall(p, Date.now() - started, used);
     return { value, ...p, ...(tokens !== undefined ? { tokens } : {}) };
   } catch (err) {

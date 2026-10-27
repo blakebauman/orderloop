@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { FlowNode, Order, RunContext } from '@orderloop/core';
 import { describe, expect, it, vi } from 'vitest';
-import { COPILOT_MAX_TOKENS, copilot, runJson } from '../src/ai';
+import { COPILOT_MAX_TOKENS, copilot, runJson, sendAiFeedback } from '../src/ai';
 import { assess } from '../src/clef';
 import { EXECUTORS, type ExecInput } from '../src/nodes';
 
@@ -214,5 +214,52 @@ describe('risk and router fail closed without the model', () => {
     );
     expect(router.branches).toEqual(['auto_approve']);
     expect(router.summary).toBe('→ auto_approve');
+  });
+});
+
+describe('feedback on a gate’s model call', () => {
+  /** A model through gateway `gw` whose calls get log ids, and a gateway holding `entry`. */
+  function gated(logs: string, entry?: Record<string, unknown> | Error) {
+    const patched: unknown[][] = [];
+    const m = model(() => ({ response: { ok: true } }), {
+      AI_GATEWAY_ID: 'gw',
+      AI_GATEWAY_LOGS: logs,
+    });
+    const ai = m.env.AI as unknown as Record<string, unknown>;
+    ai.aiGatewayLogId = 'log_1';
+    ai.gateway = () => ({
+      getLog: async () => {
+        if (entry instanceof Error) throw entry;
+        return { metadata: entry };
+      },
+      patchLog: async (...args: unknown[]) => {
+        patched.push(args);
+      },
+    });
+    return { env: m.env, patched };
+  }
+  const fb = { nodeId: 'risk', prompt: 'risk@1', logId: 'log_1', feedback: -1 as const };
+
+  it('keeps the call’s log id only while gateway logs are on', async () => {
+    expect((await ask(gated('true').env, { orderId: 'ord_1' })).logId).toBe('log_1');
+    expect((await ask(gated('false').env, { orderId: 'ord_1' })).logId).toBeUndefined();
+  });
+
+  it('marks the entry when it is this order’s call, and nothing otherwise', async () => {
+    const ok = gated('true', { prompt: 'risk@1', orderId: 'ord_1' });
+    await sendAiFeedback(ok.env, 'ord_1', fb);
+    expect(ok.patched).toEqual([['log_1', { feedback: -1 }]]);
+
+    const other = gated('true', { prompt: 'risk@1', orderId: 'ord_2' });
+    await sendAiFeedback(other.env, 'ord_1', fb);
+    expect(other.patched).toEqual([]);
+
+    const off = gated('false', { prompt: 'risk@1', orderId: 'ord_1' });
+    await sendAiFeedback(off.env, 'ord_1', fb);
+    expect(off.patched).toEqual([]);
+
+    // A gateway error never reaches the decision.
+    const down = gated('true', new Error('log not found'));
+    await expect(sendAiFeedback(down.env, 'ord_1', fb)).resolves.toBeUndefined();
   });
 });

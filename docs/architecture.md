@@ -1258,6 +1258,20 @@ instructions or answer schema change) and `fallback` (`mock`, the error or timeo
 malformed answer, or the forecast's `nothing to reorder` / `no usable lines in the answer`). Assess
 and the assistant's `assess_order` record it too.
 
+With gateway logs on (`aiGatewayLogs`), a `runJson` answer from the model also carries `logId`, its
+AI Gateway log entry (`env.AI.aiGatewayLogId`, read as soon as the call returns). When a person
+decides an approval (`OrderAgent.decide`, which every route to a decision goes through),
+`aiGateFeedback` (`packages/core/src/provenance.ts`) finds the AI gate (`AI_GATES`: risk score,
+router, assess) whose taken branch led there, directly or through earlier approvals that escalated,
+and `sendAiFeedback` marks that call's entry: `feedback: 1` when the reviewer rejected (the gate was
+right to stop the order), `-1` when they approved (the review wasn't needed). It runs after the
+decision (`waitUntil`) and never fails it. Before marking, it reads the entry and requires its
+metadata to name this order and prompt, since the binding's log id is only its latest call's. A
+heuristic or unchecked answer, a timed-out review, and a review something else sent the order to
+(credit limit, budget, a condition) mark nothing. Each mark logs `{"type":"ai_feedback",…}`. In
+the dashboard, filter the gateway's logs by feedback and metadata `prompt` to build evaluation
+datasets per prompt.
+
 Each model call (`runJson`, `clef.assess`, each assistant and A2A chat turn) logs one JSON line,
 `{"type":"ai_call", source, model, prompt, fallback?, ms, tokens?}` (`logAiCall`); a fallback other
 than `mock` is a warning. This is the way to read the fallback rate until metrics exist (plan item
