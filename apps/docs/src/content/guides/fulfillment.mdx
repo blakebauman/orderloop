@@ -221,6 +221,45 @@ a match on country and region wins, then the country alone, then the node's own 
 `carrier` set to `from_order` (as on the built-in flows) books the charged option's carrier, or UPS
 when no shipping-rate node ran.
 
+### Tax exemption
+
+A business customer that doesn't pay sales tax (a reseller, a charity) holds a **tax exemption
+certificate**. Open the customer from **Customers** on the Commerce page; its **Tax exemption
+certificates** list shows each certificate's number, where it applies, its last day and whether it
+exempts orders now. An operator adds one with its number, where it applies (countries, or regions of
+them, such as `US-CA, US-NV`; `US` alone is every state; a state, province or territory the address
+checks don't know, such as `US-CAL`, is refused), an optional last day, and optionally the
+certificate itself as a PDF or image of up to 10 MB (a file that isn't really one is refused). A new
+certificate exempts nothing until someone checks it with the issuer and presses **Verify**; when the
+workspace keeps people from [approving their own orders](/guides/team-and-roles/#approvals), whoever
+added it can't verify it. **Revoke** stops it exempting orders; it stays in the list, marked
+revoked, as the record of which orders it exempted. Buyers can't add or claim a certificate. Every
+add, verification and revocation is in the [audit log](/guides/team-and-roles/#audit-log).
+
+When the order's customer holds a certificate that covers the ship-to and was in force when the
+order was placed (verified by then, not yet revoked, and not past its last day, the end of that day
+in UTC), `commerce.tax` charges no tax. Everything is judged as of the order's start: verifying a
+certificate later doesn't exempt an order already placed, and revoking it or its expiry later
+doesn't tax one. Its step reads "Tax exempt (certificate on file)" and its output has
+`exemption` (`certificateId` and `exempted`); the order keeps the certificate's id, never its
+number. A certificate for a state or province covers only an order whose ship-to names that region;
+with no region on the ship-to, only a certificate for the whole country applies; and an order with no
+ship-to country (a digital order without an address) is taxed as usual. A flow that should tax every
+order turns the node's **Honor exemptions** off.
+
+Only a customer named by someone the workspace trusts brings their exemptions: staff, an API token,
+a cart, a punchout or EDI partner, or an email from the customer's address that passed the sender
+checks (SPF, DKIM, DMARC). A Shopify order matched to a customer by the buyer's email, an order whose
+customer was recognized by a name in its document, and an email order taken while your workspace has
+the sender checks turned off are taxed as usual, since anyone can type an email or a company name, or
+send as an address nothing checks.
+
+Carts are priced by the same step, so an exempt customer's cart shows no tax and says which
+certificate exempts it ("Tax exempt (certificate RS-1234)"). With a tax [provider](#providers),
+OrderLoop doesn't zero the tax itself: it sends the provider where the certificate applies (and its
+number, if the provider may have buyer details), charges what the provider returns, and says the
+order is exempt only when the provider says it exempted it.
+
 ### Live carriers
 
 Each live carrier is sent a `POST` to its `url` with
@@ -260,7 +299,7 @@ The node keeps its fields, outputs and events; the plugin supplies the part a re
 |---|---|
 | `commerce.shipping_rate` | Quotes shipping options. If it fails or offers nothing, the node falls back to the live carriers, then the configured services, and its summary says the provider was unavailable |
 | `commerce.ship`, `commerce.return_label` | Creates a label and tracking number per package, and voids it on rollback or cancel (a label it can't void is kept and tried again daily) |
-| `commerce.tax` | Returns the tax amount; more than half of what is taxable fails the node |
+| `commerce.tax` | Returns the tax amount, told of the customer's [exemption certificate](#tax-exemption) when one applies, and whether it exempted the order; more than half of what is taxable fails the node |
 | `commerce.address_validate` | Reports `valid`, `corrected` or `invalid` |
 
 OrderLoop still checks what comes back, applies free thresholds and currency conversion, computes

@@ -21,6 +21,7 @@ import {
   type SignedActor,
   type StartOrderInput,
   type StartOrderOnceInput,
+  type TaxCertificateInput,
   UCP_PATH,
 } from '@orderloop/core';
 import { A2A_PATH, a2aCaller, handleA2A } from './a2a/route';
@@ -47,6 +48,12 @@ import { rpcActor } from './principal';
 import { reindexProducts } from './product-index';
 import { separationRefusal } from './separation';
 import { eraseDataSubject, exportDataSubject } from './subjects';
+import {
+  addTaxCertificate,
+  listTaxCertificates,
+  revokeTaxCertificate,
+  verifyTaxCertificate,
+} from './tax-certificates';
 import { ucpProfile } from './ucp/config';
 import { handleUcp } from './ucp/rest';
 
@@ -303,5 +310,33 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async keepCartOpen(cartId: string, signed: SignedActor) {
     const actor = await this.cartActor(cartId, signed);
     if (actor) await keepCartOpen(this.env, cartId, actor);
+  }
+
+  taxCertificates(customerId: string) {
+    return listTaxCertificates(this.env, customerId);
+  }
+
+  async addTaxCertificate(customerId: string, input: TaxCertificateInput, signed: SignedActor) {
+    const actor = await this.certificateActor(customerId, signed);
+    return 'error' in actor ? actor : addTaxCertificate(this.env, customerId, input, actor);
+  }
+
+  async verifyTaxCertificate(customerId: string, id: string, signed: SignedActor) {
+    const actor = await this.certificateActor(customerId, signed);
+    return 'error' in actor ? actor : verifyTaxCertificate(this.env, customerId, id, actor);
+  }
+
+  async revokeTaxCertificate(customerId: string, id: string, signed: SignedActor) {
+    const actor = await this.certificateActor(customerId, signed);
+    return 'error' in actor ? actor : revokeTaxCertificate(this.env, customerId, id, actor);
+  }
+
+  /** Staff, Operator or above, signed for this customer's certificates; else why not. */
+  private async certificateActor(customerId: string, signed: SignedActor) {
+    const actor = await rpcActor(this.env, signed, `tax-certificates:${customerId}`);
+    if (actor?.kind !== 'staff') return UNSIGNED;
+    if (!atLeast(actor.role, 'operator'))
+      return { ok: false as const, error: 'This needs the Operator role.' };
+    return actor;
   }
 }

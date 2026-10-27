@@ -128,6 +128,7 @@ suite('audit vocabulary', () => {
       'webhook',
       'stock',
       'promotion',
+      'tax_certificate',
       'catalog',
       'plugin',
       'personal_data',

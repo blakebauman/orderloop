@@ -37,6 +37,8 @@ export default [
       route('flows/:flowId', 'routes/flow-editor.tsx'),
       route('approvals', 'routes/approvals.tsx'),
       route('commerce', 'routes/commerce.tsx'),
+      // A customer and its tax exemption certificates (lib/customers.server.ts).
+      route('customers/:customerId', 'routes/customer.tsx'),
       // Revenue, endings, payments and step timings over 7, 30 or 90 days (lib/metrics.server.ts).
       route('performance', 'routes/performance.tsx'),
       route('promotions', 'routes/promotions.tsx'),
@@ -53,5 +55,6 @@ export default [
   route('flows/:flowId/action', 'routes/flow-action.ts'),
   route('orders/:orderId/action', 'routes/order-action.ts'),
   route('orders/:orderId/records', 'routes/order-records.ts'),
+  route('customers/:customerId/tax-certificates/:certificateId', 'routes/tax-certificate-file.ts'),
   route('account/passkeys', 'routes/account-passkeys.ts'),
 ] satisfies RouteConfig;

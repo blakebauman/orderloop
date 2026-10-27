@@ -146,6 +146,38 @@ export const customers = sqliteTable(
   ],
 );
 
+/**
+ * A customer's tax exemption certificates (`TaxCertificate` in core). `regions` is JSON
+ * (`TaxPlace[]`); revoked rows stay for the record; erasing the customer deletes them.
+ */
+export const taxCertificates = sqliteTable(
+  'tax_certificates',
+  {
+    id: text('id').primaryKey(),
+    customerId: text('customer_id').notNull(),
+    number: text('number').notNull(),
+    regions: text('regions').notNull(),
+    /** The end of its last day (ms, UTC); null when it doesn't expire. */
+    expiresAt: integer('expires_at'),
+    /** In the documents bucket at `taxCertificateKey`. */
+    fileKey: text('file_key'),
+    fileName: text('file_name'),
+    fileType: text('file_type'),
+    fileSize: integer('file_size'),
+    /** active | revoked. */
+    status: text('status').notNull().default('active'),
+    createdBy: text('created_by').notNull(),
+    /** The adder's principal id: with approval separation on, someone else verifies it. */
+    createdById: text('created_by_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    verifiedBy: text('verified_by'),
+    verifiedAt: integer('verified_at'),
+    revokedBy: text('revoked_by'),
+    revokedAt: integer('revoked_at'),
+  },
+  (t) => [index('tax_certificates_customer').on(t.customerId, t.createdAt)],
+);
+
 export const products = sqliteTable('products', {
   sku: text('sku').primaryKey(),
   name: text('name').notNull(),

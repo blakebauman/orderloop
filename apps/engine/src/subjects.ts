@@ -16,6 +16,7 @@ import {
   subjectEmail,
   subjectTarget,
   TERMINAL_ORDER_STATUSES,
+  taxCertificatePrefix,
 } from '@orderloop/core';
 import {
   auditEvents,
@@ -26,6 +27,7 @@ import {
   inboundEmails,
   messages,
   orders,
+  taxCertificates,
   users,
   webhookDeliveries,
 } from '@orderloop/db';
@@ -115,11 +117,16 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
   );
   const byOrder = <T>(column: Parameters<typeof inArray>[0], q: (where: SQL) => Promise<T[]>) =>
     Promise.all(chunks(orderIds).map((c) => q(inArray(column, c)))).then((r) => r.flat());
-  const [msgs, sentTo, docs, inbound] = await Promise.all([
+  const [msgs, sentTo, docs, inbound, certificates] = await Promise.all([
     byOrder(messages.orderId, (w) => s.db.select().from(messages).where(w)),
     s.db.select().from(messages).where(lower(messages.recipient, s.email)),
     byOrder(documents.orderId, (w) => s.db.select().from(documents).where(w)),
     s.db.select().from(inboundEmails).where(lower(inboundEmails.sender, s.email)),
+    Promise.all(
+      chunks(s.accounts.map((c) => c.id)).map((c) =>
+        s.db.select().from(taxCertificates).where(inArray(taxCertificates.customerId, c)),
+      ),
+    ).then((r) => r.flat()),
   ]);
   const uniqueMessages = [...new Map([...msgs, ...sentTo].map((m) => [m.id, m])).values()];
   return {
@@ -160,6 +167,10 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
       .filter((c) => c !== null)
       // Plain data, not the RPC result it came in.
       .map((c) => JSON.parse(JSON.stringify(c)) as Record<string, unknown>),
+    taxCertificates: certificates.map(({ regions, ...c }) => ({
+      ...c,
+      regions: JSON.parse(regions) as unknown,
+    })),
     truncated: rows.length > EXPORT_MAX,
     teamMember: s.teamMember,
   };
@@ -237,6 +248,7 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     messages: 0,
     inboundEmails: 0,
     carts: 0,
+    taxCertificates: 0,
     teamMember: s.teamMember,
   };
 
@@ -288,6 +300,15 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
   ).length;
   await deleteCheckoutsOf(env, s.email);
   for (const c of s.accounts) {
+    // Their tax certificates go whole, files and rows: a certificate names the business and its
+    // registration, and no order needs it once the orders it exempted are written.
+    await deletePrefix(env, taxCertificatePrefix(c.id));
+    result.taxCertificates += (
+      await s.db
+        .delete(taxCertificates)
+        .where(eq(taxCertificates.customerId, c.id))
+        .returning({ id: taxCertificates.id })
+    ).length;
     await s.db
       .update(customers)
       .set({

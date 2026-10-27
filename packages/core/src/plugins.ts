@@ -28,6 +28,7 @@ import { conforms } from './json-schema';
 import type { CartReturn, CartReturnRequest } from './plugin-host';
 import { maskPersonalText, modelOrder, PERSONAL_DATA_MODES, scrubPersonal } from './redact';
 import { ROLES } from './roles';
+import type { TaxExemption } from './tax-exemption';
 import type { Order } from './types';
 import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
 
@@ -562,6 +563,19 @@ export function pluginOrder(manifest: Privacy, order: Order): Order | RedactedOr
   } as RedactedOrder;
 }
 
+/**
+ * A provider request as plugin `manifest` is sent it: the order through `pluginOrder`, and a tax
+ * exemption's certificate number only when the plugin may have buyer details (the number names the
+ * business); otherwise just where the certificate applies.
+ */
+export function providerRequest(manifest: Privacy, req: ProvideRequest): ProvideRequest {
+  const sent = 'order' in req ? { ...req, order: pluginOrder(manifest, req.order as Order) } : req;
+  if (sent.surface !== 'tax' || !sent.input.exemption || manifest.personalData === 'send')
+    return sent as ProvideRequest;
+  const { certificate: _number, ...exemption } = sent.input.exemption;
+  return { ...sent, input: { ...sent.input, exemption } } as ProvideRequest;
+}
+
 export type PluginCompensateRequest = {
   type: string;
   nodeId: string;
@@ -625,7 +639,19 @@ export type ProvideRequest = {
       surface: 'tax';
       op: 'calculate';
       order: Order | RedactedOrder;
-      input: { subtotal: number; shipping: number; includeShipping: boolean; currency: string };
+      input: {
+        subtotal: number;
+        shipping: number;
+        includeShipping: boolean;
+        currency: string;
+        /**
+         * The customer's exemption certificate in force where the order ships, verified by staff
+         * (`exemptingCertificate`), when there is one and the node applies exemptions: where it
+         * applies, and its number when the plugin may have buyer details. The provider decides
+         * what it exempts, says so with `exempted`, and the engine charges what it returns.
+         */
+        exemption?: TaxExemption;
+      };
     }
   | {
       surface: 'address';
@@ -681,7 +707,11 @@ export const PROVIDE_RESULT_SCHEMAS = {
     void: z.object({ summary: z.string().transform(clip).optional() }),
   },
   tax: {
-    calculate: z.object({ amount: z.number().nonnegative().finite() }),
+    // `exempted`: the request's exemption certificate took tax off, so the order may say so.
+    calculate: z.object({
+      amount: z.number().nonnegative().finite(),
+      exempted: z.boolean().optional(),
+    }),
   },
   address: {
     // `ShipAddress`'s keys only, so redaction (which goes by key) knows every field.

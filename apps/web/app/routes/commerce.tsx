@@ -572,11 +572,7 @@ export default function Commerce() {
                   return (
                     <Tr key={c.id}>
                       <Td>
-                        <Link
-                          to={`/orders?q=${encodeURIComponent(c.name)}`}
-                          className="hover:underline"
-                          title={`Orders for ${c.name}`}
-                        >
+                        <Link to={`/customers/${c.id}`} className="hover:underline">
                           {c.name}
                         </Link>
                         <div className="text-muted-foreground text-xs">

@@ -56,7 +56,13 @@ test('controls take a 44px tap on touch screens', async ({ page }, info) => {
 
 test('fields are 16px on touch screens, so iOS does not zoom into them', async ({ page }, info) => {
   test.skip(!isTouch(info), 'touch screens only');
-  for (const path of ['/orders', '/commerce', '/flows', '/orders/new']) {
+  for (const path of [
+    '/orders',
+    '/commerce',
+    '/customers/cus_northwind',
+    '/flows',
+    '/orders/new',
+  ]) {
     await open(page, path);
     await expect(page.locator('h1').first()).toBeAttached();
     const small = await page.$$eval(

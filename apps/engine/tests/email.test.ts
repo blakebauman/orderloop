@@ -1,11 +1,12 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import type { OrderState } from '@orderloop/core';
-import { createDb, inboundEmails } from '@orderloop/db';
+import { type OrderState, withDefaults } from '@orderloop/core';
+import { createDb, customers, inboundEmails, taxCertificates } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readAttachments, receiveEmail } from '../src/email';
 import { ensureTemplates } from '../src/flows';
+import { EXECUTORS } from '../src/nodes';
 
 type Sent = { reject?: string; replies: unknown[] };
 
@@ -207,6 +208,102 @@ describe('email intake', () => {
     const s = await state((out as { orderId: string }).orderId);
     expect(s.order).toMatchObject({ model: 'procurement', customerId: undefined });
     expect(s.order!.meta).toMatchObject({ senderMatch: 'allowlist' });
+  });
+});
+
+describe('email intake and tax exemptions', () => {
+  const shipTo = {
+    line1: '1 Main St',
+    city: 'Oakland',
+    region: 'CA',
+    postalCode: '94607',
+    country: 'US',
+  };
+  /** A customer at its own domain with a verified certificate for all of the US. */
+  async function exemptCustomer() {
+    const id = `cus_mail_${crypto.randomUUID().slice(0, 8)}`;
+    const email = `ap@${id.replace(/_/g, '-')}.example`;
+    await db()
+      .insert(customers)
+      .values({ id, name: `Mail ${id}`, email, kind: 'business' });
+    const at = Date.now() - 60_000;
+    await db()
+      .insert(taxCertificates)
+      .values({
+        id: `txc_${id.replace(/\W/g, '')}`,
+        customerId: id,
+        number: 'RS-MAIL',
+        regions: JSON.stringify([{ country: 'US' }]),
+        createdBy: 'ops@example.com',
+        createdById: 'usr_ops',
+        createdAt: at,
+        verifiedBy: 'checker@example.com',
+        verifiedAt: at,
+      });
+    return { id, email };
+  }
+  /** What the tax node charges the order the email started, shipped to California. */
+  async function taxOn(orderId: string) {
+    const o = (await state(orderId)).order!;
+    const r = await EXECUTORS['commerce.tax']!({
+      env,
+      node: { id: 'tax', type: 'commerce.tax', label: 'Tax', config: {}, position: { x: 0, y: 0 } },
+      config: withDefaults('commerce.tax', { rate: 0.1 }),
+      ctx: {
+        order: {
+          ...o,
+          lines: [{ sku: 'WID-100', qty: 1, unitPrice: 100 }],
+          subtotal: 100,
+          meta: { ...o.meta, shipTo },
+        },
+        nodes: {},
+        vars: {},
+        input: {},
+        now: Date.now(),
+        ref: o.id,
+      },
+      stepKey: 'tax#1',
+    });
+    return r.order!.tax;
+  }
+
+  it('taxes an order from the customer’s address when the sender check is off', async () => {
+    const { id, email } = await exemptCustomer();
+    const mail = inbound({
+      from: email,
+      to: 'orders@orderloop.app',
+      subject: 'PO 1',
+      messageId: `<${id}-off@example>`,
+      body: '1 x WID-100',
+      auth: 'mx.cloudflare.net; dkim=fail; spf=fail',
+    });
+    const out = await receiveEmail(mail.message, {
+      ...env,
+      INTAKE_REQUIRE_AUTH: 'false',
+    } as unknown as Env);
+    expect(out).toMatchObject({ status: 'accepted' });
+    const orderId = (out as { orderId: string }).orderId;
+    expect((await state(orderId)).order).toMatchObject({
+      customerId: id,
+      meta: { customerMatchedBy: 'unauthenticated_email' },
+    });
+    expect(await taxOn(orderId)).toBe(10);
+  });
+
+  it('exempts it when the sender is authenticated', async () => {
+    const { id, email } = await exemptCustomer();
+    const mail = inbound({
+      from: email,
+      to: 'orders@orderloop.app',
+      subject: 'PO 2',
+      messageId: `<${id}-on@example>`,
+      body: '1 x WID-100',
+    });
+    const out = await receiveEmail(mail.message, env);
+    expect(out).toMatchObject({ status: 'accepted' });
+    const orderId = (out as { orderId: string }).orderId;
+    expect((await state(orderId)).order!.meta).not.toHaveProperty('customerMatchedBy');
+    expect(await taxOn(orderId)).toBe(0);
   });
 });
 

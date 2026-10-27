@@ -10,7 +10,7 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 |---|---|
 | `viewer` | See orders, flows, approvals and the Commerce page; use the [assistant](/guides/assistant/) to read |
 | `approver` | Also approve and reject approvals, including through the assistant |
-| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, write the [product catalog](/guides/product-catalog/) (deleting a channel needs `admin`), and have the assistant do those and draft flow changes |
+| `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, add, verify and revoke customers' [tax exemption certificates](/guides/fulfillment/#tax-exemption), write the [product catalog](/guides/product-catalog/) (deleting a channel needs `admin`), and have the assistant do those and draft flow changes |
 | `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, republish the catalog, update the product index (**Update product index** under Inventory on the Commerce page), read the audit log, and install and manage plugins at **Plugins** (under **More**, Workspace) ([Installing a plugin](/guides/installing-plugins/)) |
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
@@ -285,6 +285,9 @@ The rule holds wherever a decision is made: the order page, the approvals inbox,
 someone else must decide its approvals." Turning it on applies to decisions made from then on,
 including on orders already waiting.
 
+The same setting keeps whoever added a customer's [tax exemption certificate](/guides/fulfillment/#tax-exemption)
+from verifying it: with **Can't approve it**, someone else must press **Verify**.
+
 ## API tokens
 
 Systems that call the [REST API](/reference/rest-api/) use a token:
@@ -336,6 +339,7 @@ Each event records when, who acted, what they acted on, details and the address:
 | Flows | `flow.saved` (a draft saved on purpose: **Save** or ⌘S, a new flow, or a duplicate with the flow it came `from`; not an autosave), `flow.published` (name and version), `flow.archived` and `flow.restored` (a never-published draft set aside or brought back) |
 | Webhooks | `webhook.subscribed` (the subscription's id and events), `webhook.rotated`, `webhook.unsubscribed` |
 | Stock review | `stock.review_run` (the Workflow instance) |
+| Tax certificates | `tax_certificate.added`, `tax_certificate.verified`, `tax_certificate.revoked` (the target is the customer id; the detail has the certificate id) |
 | Catalog | `catalog.products_written` (counts of created, updated, unchanged and rejected products, and `urgent`), `catalog.products_deleted`, `catalog.type_saved` (the target is the type's code; the detail has its version), `catalog.channel_saved`, `catalog.categories_saved`, `catalog.type_deleted`, `catalog.channel_deleted`, `catalog.categories_deleted`, `catalog.feed_started` (the target is the feed id), `catalog.feed_cancelled` (the target is the feed id), `catalog.reindexed`, `catalog.edits_staged` (how many edits to how many products, how many were accepted drafts and how many were refused), `catalog.edits_discarded`, `catalog.edits_published` (counts of published, failed and unchanged products, the first 50 published keys and the request id), `catalog.drafts_saved`, `catalog.drafts_discarded`, `catalog.gaps_rebuilt` (how many products were read), `catalog.products_indexed` (an admin updated the product index: how many products were added or renamed and removed, and whether more were waiting; or that it was skipped because another update was running or the workspace has none) |
 | Plugins | `plugin.uploaded` (version and publisher), `plugin.drafted` (the assistant drafted a version; the detail has how many cases pass), `plugin.draft_refused` (a draft the assistant couldn't use, with the reason), `plugin.cases_run` (a draft's cases were run), `plugin.approved` (also notes when buyer details were granted), `plugin.secret_set` (the secret's name, never its value), `plugin.disabled`, `plugin.enabled`, `plugin.rolled_back`, `plugin.uninstalled`, `plugin.refused` (the reason). See [Installing a plugin](/guides/installing-plugins/) |
 | Personal data | `personal_data.exported`, `personal_data.erased` (the counts; the target is `subject:` and a hash of the person's address, so the log doesn't keep it) |

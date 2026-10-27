@@ -16,13 +16,16 @@ import {
   assessQuestionsSchema,
   BASE_CURRENCY,
   billableKg,
+  CUSTOMER_MATCHED_BY,
   checkAddress,
   choosePromotions,
   computeTotals,
+  customerTrusted,
   describeAnswers,
   durationMs,
   evaluate,
   evaluatePolicy,
+  exemptingCertificate,
   type FlowNode,
   FULFILLMENT_METHOD_LABELS,
   type FulfillmentMethod,
@@ -51,6 +54,7 @@ import {
   shipToCountry,
   stockLines,
   stringList,
+  taxExemptNote,
   taxRegionsSchema,
   toBase,
   truthy,
@@ -62,6 +66,7 @@ import * as clef from './clef';
 import * as cx from './connectors';
 import { extractCatalog } from './product-index';
 import { provide } from './providers';
+import { customerTaxCertificates } from './tax-certificates';
 
 export type NodeResult = {
   branches?: string[];
@@ -403,21 +408,38 @@ export const EXECUTORS: Record<string, Exec> = {
     };
   },
 
-  'commerce.tax': async ({ env, ctx, config, node, stepKey }) => {
+  'commerce.tax': async ({ env, ctx, config, node, stepKey, dryRun }) => {
     const taxShipping = config.includeShipping !== false;
     const by = providerOf(config);
     const regions = taxRegionsSchema.safeParse(config.regions ?? []);
     const shipTo = checkAddress(ctx.order.meta?.shipTo).address;
-    let rate = regionalTaxRate(
-      regions.success ? regions.data : [],
-      shipToCountry(ctx.order),
-      shipTo?.region,
-      num(config.rate, 0.08),
-    );
+    const country = shipToCountry(ctx.order);
+    // The customer's certificate in force where the order ships when the order was placed (the
+    // run's `now`, not the clock): verifying, revoking or expiry later doesn't change this order.
+    // With no ship-to country, none; nor for a customer matched from what a buyer typed.
+    const cert =
+      config.exemptions !== false && customerTrusted(ctx.order)
+        ? exemptingCertificate(
+            await customerTaxCertificates(env, ctx.order.customerId),
+            country,
+            shipTo?.region,
+            ctx.now,
+          )
+        : null;
+    // A provider is told of the certificate and decides what it exempts; built in, it exempts all.
+    let exempted = !!cert && !by;
+    let rate = exempted
+      ? 0
+      : regionalTaxRate(
+          regions.success ? regions.data : [],
+          country,
+          shipTo?.region,
+          num(config.rate, 0.08),
+        );
     if (by) {
       // What computeTotals will tax: the lines' subtotal and rounded shipping, not stored totals.
       const { subtotal, shipping } = computeTotals({ ...ctx.order, taxRate: 0 });
-      const { amount } = await provide(env, by, {
+      const answer = await provide(env, by, {
         surface: 'tax',
         op: 'calculate',
         nodeId: node.id,
@@ -425,8 +447,17 @@ export const EXECUTORS: Record<string, Exec> = {
         orderId: ctx.order.id,
         config,
         order: ctx.order,
-        input: { subtotal, shipping, includeShipping: taxShipping, currency: ctx.order.currency },
+        input: {
+          subtotal,
+          shipping,
+          includeShipping: taxShipping,
+          currency: ctx.order.currency,
+          ...(cert ? { exemption: { certificate: cert.number, regions: cert.regions } } : {}),
+        },
       });
+      const { amount } = answer;
+      // Only the provider can say its amount reflects the certificate.
+      exempted = !!cert && answer.exempted === true;
       // Kept as the rate it works out to, so later nodes that recompute totals keep the same tax.
       const taxable = subtotal + (taxShipping ? shipping : 0);
       if (amount > 0 && taxable <= 0)
@@ -438,10 +469,23 @@ export const EXECUTORS: Record<string, Exec> = {
       rate = taxable > 0 ? amount / taxable : 0;
     }
     const t = computeTotals({ ...ctx.order, taxRate: rate, taxShipping });
+    // An order keeps the certificate's id, not its number, which names the business and would
+    // outlive the customer's erasure in step outputs; a quote (never stored as a step) shows it.
+    const exemption = cert
+      ? { certificateId: cert.id, exempted, ...(dryRun ? { certificate: cert.number } : {}) }
+      : null;
     return {
       order: { ...t, taxRate: rate, taxShipping },
-      output: { rate, taxShipping, ...t, ...(by ? { provider: by } : {}) },
-      summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}${by ? ` (${by})` : ''}`,
+      output: {
+        rate,
+        taxShipping,
+        ...t,
+        ...(by ? { provider: by } : {}),
+        ...(exemption ? { exemption } : {}),
+      },
+      summary: exempted
+        ? `${taxExemptNote({})} · total ${cash(t.total, ctx)}${by ? ` (${by})` : ''}`
+        : `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}${by ? ` (${by})` : ''}`,
     };
   },
 
@@ -957,7 +1001,13 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       order: {
         ...(lines.length ? { lines } : {}),
-        ...(customer ? { customerId: customer.id } : {}),
+        // A name read from a document anyone can send: the account's exemptions don't follow it.
+        ...(customer
+          ? {
+              customerId: customer.id,
+              meta: { ...ctx.order.meta, [CUSTOMER_MATCHED_BY]: 'name' },
+            }
+          : {}),
         ...(value.poNumber
           ? {
               title: `${['b2b', 'procurement'].includes(ctx.order.model) ? 'PO' : 'Ref'} ${value.poNumber}`,

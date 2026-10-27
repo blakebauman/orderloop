@@ -218,6 +218,7 @@ export const RESERVED_PATH_SEGMENTS = new Set([
   'cart',
   'carts',
   'commerce',
+  'customers',
   'docs',
   'flows',
   'health',

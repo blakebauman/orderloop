@@ -5,6 +5,7 @@
  */
 
 import type { InboundOrder } from '../inbound';
+import { CUSTOMER_MATCHED_BY } from '../tax-exemption';
 import type { OrderChannel } from '../types';
 import { constantTimeEqual } from '../webhooks';
 
@@ -99,7 +100,11 @@ export function shopifyToInbound(
       ...(shipTo ? { shipTo } : {}),
       // Shopify took the money at checkout: authorize and capture only record it.
       payment: { provider: 'external', reference: String(order.id) },
-      meta: { shopify: { id: order.id, name: order.name ?? null } },
+      meta: {
+        shopify: { id: order.id, name: order.name ?? null },
+        // Matched by the buyer's email, which anyone can type: no exemptions (`customerTrusted`).
+        ...(opts.customerId ? { [CUSTOMER_MATCHED_BY]: 'email' } : {}),
+      },
     },
   };
 }

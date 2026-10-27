@@ -14,7 +14,7 @@ import {
   type ProvideOutcome,
   type ProvideRequest,
   type ProviderSurface,
-  pluginOrder,
+  providerRequest,
   scrubCredentials,
 } from '@orderloop/core';
 import { knownSecretValues } from './plugin-host';
@@ -72,9 +72,7 @@ export async function provide<R extends Ask>(
   if (!manifest) throw fromProvider(new Error(`${what} is not answering`), id);
   if (!manifest.provides.includes(req.surface))
     throw fromProvider(new NonRetryableError(`${what} doesn't provide ${req.surface}`), id);
-  const sent = (
-    'order' in req ? { ...req, order: pluginOrder(manifest, req.order as Order) } : req
-  ) as ProvideRequest;
+  const sent = providerRequest(manifest, req as ProvideRequest);
   const quoting = req.stepKey.startsWith('quote#');
   let result: unknown;
   try {

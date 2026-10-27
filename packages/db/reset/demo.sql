@@ -35,6 +35,7 @@ DELETE FROM location_stock;
 DELETE FROM products;
 DELETE FROM sellers;
 DELETE FROM locations;
+DELETE FROM tax_certificates;
 DELETE FROM customers WHERE id <> 'cus_internal';
 UPDATE customers SET balance = 0 WHERE id = 'cus_internal';
 DELETE FROM fx_rates WHERE currency <> 'USD';

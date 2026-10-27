@@ -148,15 +148,19 @@ export function shipToCountry(order: Pick<Order, 'meta'>): string | undefined {
   return c && /^[A-Z]{2}$/.test(c) ? c : undefined;
 }
 
+/**
+ * A place tax is charged by: a country, or a region within it. `commerce.tax`'s rates and a tax
+ * exemption certificate's coverage both name places this way.
+ */
+export const taxPlaceSchema = z.object({
+  country: z.string().regex(/^[A-Z]{2}$/, 'A two-letter country code'),
+  region: z.string().min(1).max(10).optional(),
+});
+export type TaxPlace = z.infer<typeof taxPlaceSchema>;
+
 /** Tax rates by ship-to place, for `commerce.tax`. */
 export const taxRegionsSchema = z
-  .array(
-    z.object({
-      country: z.string().regex(/^[A-Z]{2}$/, 'A two-letter country code'),
-      region: z.string().min(1).max(10).optional(),
-      rate: z.number().min(0).max(0.5),
-    }),
-  )
+  .array(taxPlaceSchema.extend({ rate: z.number().min(0).max(0.5) }))
   .max(200);
 export type TaxRegion = z.infer<typeof taxRegionsSchema>[number];
 
