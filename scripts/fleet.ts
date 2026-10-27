@@ -719,8 +719,12 @@ export function renderEngine(base: Config, d: Deployment): Config {
       ...v,
       index_name: names(d).productIndex,
     }));
-  const plugins = pluginServices(d);
-  if (plugins.length) config.services = [...(config.services ?? []), ...plugins];
+  config.services = [
+    ...config.services.map((s: Config) =>
+      s.binding === 'CATALOG' ? { ...s, service: names(d).catalog } : s,
+    ),
+    ...pluginServices(d),
+  ];
   const grants = pluginGrants(d);
   // Always set, so a deployment that grants nothing doesn't keep the base config's grants.
   config.vars = { ...config.vars, PLUGIN_GRANTS: grants };
