@@ -20,20 +20,12 @@
  * deletes exactly those. The same `--seed` gives the same data relative to today.
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { type Flow, TEMPLATES } from '@orderloop/core';
 import { createDb, seedFlows } from '@orderloop/db';
-import { getPlatformProxy } from 'wrangler';
+import { DAY, failWith, HOUR, inserts, localEnv, MIN, rng, run } from './seed-lib';
 
-const DAY = 86_400_000;
-const HOUR = 3_600_000;
-const MIN = 60_000;
 /** Days of orders before the window, so it opens in a steady state. */
 const LEAD_IN_DAYS = 30;
-/** Bytes per INSERT statement, under D1's 100 KB statement limit. */
-const STATEMENT_BYTES = 90_000;
 
 function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(`--${name}`);
@@ -47,44 +39,7 @@ function flag(name: string): string | undefined {
   return i < 0 ? undefined : process.argv[i + 1];
 }
 
-function fail(message: string): never {
-  console.error(`seed-volume: ${message}`);
-  process.exit(1);
-}
-
-const WEB = new URL('..', import.meta.url).pathname;
-/** Statements per D1 batch (each batch is one transaction). */
-const BATCH = 50;
-
-/**
- * The local D1 the dev server uses (`apps/web/.wrangler/state`), through wrangler's platform proxy
- * with a config that binds only that database: nothing remote is bound, so nothing here can reach
- * a deployed workspace.
- */
-async function localDb() {
-  const id = readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').match(
-    /"binding":\s*"DB",[^}]*?"database_id":\s*"([^"]+)"/s,
-  )?.[1];
-  if (!id) fail('no DB binding in apps/web/wrangler.jsonc');
-  const config = join(mkdtempSync(join(tmpdir(), 'orderloop-volume-')), 'wrangler.json');
-  writeFileSync(
-    config,
-    JSON.stringify({
-      name: 'seed-volume',
-      compatibility_date: '2026-01-01',
-      d1_databases: [{ binding: 'DB', database_name: 'orderloop', database_id: id }],
-    }),
-  );
-  return getPlatformProxy<{ DB: D1Database }>({
-    configPath: config,
-    persist: { path: join(WEB, '.wrangler/state/v3') },
-  });
-}
-
-async function run(db: D1Database, statements: string[]) {
-  for (let i = 0; i < statements.length; i += BATCH)
-    await db.batch(statements.slice(i, i + BATCH).map((s) => db.prepare(s)));
-}
+const fail: (message: string) => never = failWith('seed-volume');
 
 const CLEANUP = [
   `DELETE FROM node_runs WHERE order_id LIKE 'ord\\_bench\\_%' ESCAPE '\\';`,
@@ -101,65 +56,6 @@ const CLEANUP = [
 
 /** What a run can fill; customers come with every run, since the rest refer to them. */
 const SECTIONS = ['products', 'orders', 'carts'] as const;
-
-/** mulberry32: small, fast and the same everywhere for a seed. */
-function rng(seed: number) {
-  let a = seed >>> 0;
-  const next = () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-  return {
-    next,
-    int: (lo: number, hi: number) => lo + Math.floor(next() * (hi - lo + 1)),
-    pick: <T>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)] as T,
-    chance: (p: number) => next() < p,
-    /** A weighted choice from [value, weight] pairs. */
-    weighted: <T>(pairs: readonly (readonly [T, number])[]): T => {
-      let r = next() * pairs.reduce((s, [, w]) => s + w, 0);
-      for (const [v, w] of pairs) {
-        r -= w;
-        if (r <= 0) return v;
-      }
-      return pairs.at(-1)![0];
-    },
-    /** Log-normal around `median`, for durations: most near it, a long slow tail. */
-    around: (median: number, spread = 0.8) => {
-      const u = Math.max(next(), 1e-9);
-      const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * next());
-      return Math.max(1, Math.round(median * Math.exp(z * spread)));
-    },
-  };
-}
-
-const q = (v: unknown) =>
-  v === null || v === undefined
-    ? 'NULL'
-    : typeof v === 'number'
-      ? String(v)
-      : `'${String(v).replaceAll("'", "''")}'`;
-
-function inserts(table: string, cols: string[], rows: unknown[][]): string[] {
-  const head = `INSERT INTO ${table} (${cols.join(', ')}) VALUES\n`;
-  const out: string[] = [];
-  let batch: string[] = [];
-  let size = head.length;
-  for (const r of rows) {
-    const row = `(${r.map(q).join(', ')})`;
-    if (batch.length && size + row.length + 2 > STATEMENT_BYTES) {
-      out.push(`${head}${batch.join(',\n')};`);
-      batch = [];
-      size = head.length;
-    }
-    batch.push(row);
-    size += row.length + 2;
-  }
-  if (batch.length) out.push(`${head}${batch.join(',\n')};`);
-  return out;
-}
 
 // How much of the volume each built-in flow carries, and what its orders are worth (USD).
 const MIX: Record<string, { weight: number; total: [number, number]; ends: [number, number] }> = {
@@ -323,7 +219,7 @@ const BUSINESS_MODELS = new Set(['b2b', 'procurement', 'replenishment']);
 type FlowRow = { id: string; name: string; published_version: number | null };
 
 async function main() {
-  const proxy = await localDb();
+  const proxy = await localEnv();
   const db = proxy.env.DB;
   try {
     if (process.argv.includes('--cleanup')) {

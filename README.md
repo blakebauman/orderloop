@@ -67,7 +67,7 @@ pnpm install
 pnpm db:migrate:local
 pnpm db:seed:local      # demo customers, catalog, stores and rates (migrations seed none)
 pnpm db:seed:volume     # optional: 20,000 generated orders, products and carts (docs/local-development.md)
-pnpm db:seed:catalog    # optional, with web:dev running: a demo shop for the Catalog page
+pnpm db:seed:all        # optional, with web:dev running: data on every page, a dev admin to sign in as
 pnpm web:dev            # web, engine and catalog in one Vite session (auxiliary Workers)
 pnpm test               # core planner tests, engine Workflow e2e (workerd), web tests
 pnpm lint && pnpm check-types

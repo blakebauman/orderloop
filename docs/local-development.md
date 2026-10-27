@@ -68,6 +68,57 @@ Some orders stop at an approval or wait for an event. Decide approvals from the 
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
 [REST API](https://docs.orderloop.app/reference/rest-api/) or a [signed webhook](https://docs.orderloop.app/guides/approvals-and-events/).
 
+## Seed everything
+
+To see every page with data on it, seed the lot in one go. Start `pnpm web:dev` first, so the parts
+that need the engine run too:
+
+```bash
+pnpm web:dev                                      # in one terminal
+pnpm db:seed:all                                  # in another (the dev server at http://localhost:5173)
+pnpm db:seed:all --url http://localhost:5298 --orders 5000 --days 30
+```
+
+`apps/web/scripts/seed-all.ts` runs, in order:
+
+1. `pnpm db:migrate:local` and `pnpm db:seed:local` (the demo data);
+2. `pnpm db:seed:volume` (generated orders, products and carts; see [Volume data](#volume-data));
+   `--orders` and `--days` pass through;
+3. `pnpm db:seed:records`, which writes straight to the local D1 and the `DOCS` bucket:
+   - a team: a **dev admin** you sign in as, admins, operators, approvers, a viewer who must
+     change their password, two people from single sign-on, a disabled operator; API tokens (one
+     revoked, one expiring); two SCIM groups with role mappings; two-factor set to not required and
+     approvals separated;
+   - eight promotions (percentage, fixed amount, free shipping, one paused, one for a single
+     customer, one not started) and their redemptions on generated orders;
+   - tax certificates on business customers (the demo companies first), most with a PDF to
+     download, some revoked or expired;
+   - 60 emails to the intake mailboxes, accepted, duplicate and refused;
+   - three months of audit history;
+   - on the most recent 3,000 generated orders (`--orders` to change), what the engine would have
+     recorded: invoices, shipments (labels, pickups, returns), stock holds, seller orders and
+     payouts, messages, and invoice and purchase order documents, for Commerce's **Records** tabs;
+4. `pnpm db:seed:live`, only if the dev server answers: it starts each of the 15 demo scenarios as
+   a real order through `POST /api/v1/orders` (so an order's page has its graph and timeline,
+   **Approvals** its context and Commerce its outside events), makes five carts through the engine
+   (open, locked, submitted and canceled), and runs the catalog demo (below).
+
+Adding people turns sign-in on: once `pnpm db:seed:records` has run, `/login` asks for the dev
+admin, `dev-admin@example.com`, whose password and an API token (used by `db:seed:live` and
+`db:seed:catalog`) are in `.secrets/local-dev-login.json` (gitignored). Each run reuses them, and
+keeps the people already there, so you stay signed in. The other people have random passwords no
+one knows.
+
+Everything can be re-run. `pnpm db:seed:records --cleanup` removes what it wrote, people included;
+with no one else added, sign-in turns off once `pnpm web:dev` restarts (the server remembers people
+existed until then). Audit events stay: the audit log refuses deletes of events younger than 90
+days. To start completely fresh, delete `apps/web/.wrangler/state` and seed again.
+
+What still needs a hand: the Plugins page lists only plugins the dev server runs
+(`ORDERLOOP_DEV_PLUGINS=example pnpm web:dev`), and **Connected apps** on the Account page fills
+when an MCP or A2A client signs in. The generated orders (`ord_bench_…`) have no OrderAgent behind
+them, so their own pages answer 404; open the scenario orders instead.
+
 ## Volume data
 
 The demo scenarios give a handful of orders. To see the overview, the orders list, approvals,
@@ -106,14 +157,14 @@ which asks each order's agent what it waits for, lists none of them.
 ## Catalog demo data
 
 The catalog starts empty, so the Catalog page has nothing on it. To see the board with a card in
-every column, start `pnpm web:dev` and, while it runs, seed a small demo shop through the catalog API:
+every column, start `pnpm web:dev` and, while it runs, seed a small demo shop through the catalog API (`pnpm db:seed:all` does this for you):
 
 ```bash
 pnpm db:seed:catalog                          # the dev server at http://localhost:5173
 pnpm db:seed:catalog http://localhost:5298    # or wherever Vite is serving
 ```
 
-It needs the API open, so run it before **Set up sign-in**: once people are added, the API wants a token.
+With people added, it sends `ORDERLOOP_API_TOKEN`, or the dev admin's token that `pnpm db:seed:records` writes.
 `apps/web/scripts/seed-catalog.ts` writes an `apparel` type, `web` (en, fr, de) and `stores` (en, es)
 channels, `tops` and `bags` categories and 16 synthetic products, some missing French, German or
 Spanish text or alt text, then:
