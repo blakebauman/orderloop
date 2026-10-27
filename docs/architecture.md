@@ -520,6 +520,7 @@ A refused delete is `404 { error: 'Not found', issues }` when the catalog answer
 | `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
 | `GET board`, `GET board/:column` | `catalogBoard`, `listBoard` | `viewer`. `{ board }`; a column answers `{ items, cursor }`, `404` for an unknown column and `400` for an unknown `kind`; `limit` is passed as a number and clamped by the catalog |
 | `GET products/:key/sheet` | `getProductSheet` | `viewer`; `{ sheet }`, `404` when there's no product |
+| `POST products/:key/draft` | `getProduct`, then the engine's `draftProductContent` | `operator`; `{ fields?, instruction? }` (`catalogDraftContentInput`; no body drafts the gaps, a body that isn't JSON is `400`), `404` when there's no product; the caller signed for `draft-product:<key>`; `{ key, title, drafted, refused, more, model }` (drafts saved as the signed name), `422 { error }` when the engine refuses (no gaps left to draft, the day's tokens spent, the model failed). `catalog.drafts_saved` (target the key; `saved`, `refused`, `model`) when it saved any |
 | `POST edits` | `stageEdits` | `operator`; `{ edits }`, 1 to 500 (`catalogEditsInput`: `set` with a value up to 10,000 characters or null, or `clear`; `source` `person` or `assistant`); `{ results }` per edit. `catalog.edits_staged` (`staged`, `refused`, `products`, `fromDrafts`) |
 | `POST edits/discard` | `discardStaged` | `operator`; `{ items }` (`catalogDiscardInput`); `{ discarded }`; `catalog.edits_discarded` |
 | `POST edits/publish` | `publishStaged` | `operator`; `{ keys, requestId?, urgent? }` (`catalogPublishInput`); a missing `requestId` is made with `crypto.randomUUID()`; `{ requestId, results }`. `catalog.edits_published` (counts, up to 50 published keys, `requestId`, `urgent`) |
@@ -1214,7 +1215,14 @@ directly, as do `create_cart` and `change_cart` (a cart orders nothing until it 
 `apps/engine/src/principal.ts`, shared with `OrderAgent`). `propose_flow_change` drafts a graph
 with the copilot and never saves. `draft_plugin` (admins, with `ASSISTANT_PLUGINS` on) drafts a
 business-rule plugin and stages it pending, for an admin to review and approve on the Plugins page
-([Plugins](plugins.md#assistant-drafted-plugins)). The model (`assistantModel` in `assistant/model.ts`) is `createAI` from
+([Plugins](plugins.md#assistant-drafted-plugins)). `draft_product_content` (operators;
+`assistant/product-draft.ts`) reads a catalog product's sheet over the engine's `CATALOG` binding,
+drafts its draftable gaps without a draft or staged edit waiting, titles first, or the fields named (`draftTargets`, at most `MAX_DRAFT_FIELDS`, `more` counting the rest; `draftRefIssue` refuses status and refs missing a locale, code or src) with
+`ASSISTANT_MODEL` through `runJson` (prompt `product_draft`, the product's text in a `dataBlock`, an
+image named by its position so its feed-written `src` stays in the block, the person's tokens counted), keeps only the fields asked for (`boundDrafts`) and saves them with
+`putDrafts`; mock mode drafts marked copies, and a failed model call is refused. It audits
+`catalog.drafts_saved` with its `via`; `EngineRpc.draftProductContent` (operators signed for
+`draft-product:<key>`) leaves that to the web route ([Product editor](product-editor.md)). The model (`assistantModel` in `assistant/model.ts`) is `createAI` from
 `agents/models/ai-sdk` over `ASSISTANT_MODEL`, with `ASSISTANT_FALLBACK_MODEL`
 (`@cf/zai-org/glm-4.7-flash`) as its `fallback` (tried when the first fails before any output), and
 `withFallback` putting the deterministic heuristic model behind both: the heuristic answers when

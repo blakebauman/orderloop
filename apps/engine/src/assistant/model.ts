@@ -232,6 +232,16 @@ type Step = { tool: AssistantTool; input: Record<string, unknown> } | { text: st
 const ORDER_REF = /(?:#|\bord_)([a-z0-9]{4,})\b/i;
 const EVENT = /\b([a-z]+\.[a-z_]+)\b/;
 const CART_REF = /\bcart_[a-z0-9]+\b/i;
+/**
+ * A catalog product named by its key: "product tee-blue". A key has a digit or a hyphen, so "a
+ * product description" names none; the last one named counts.
+ */
+const PRODUCT_REF = /\bproduct\s+([a-z0-9][\w.-]*[a-z0-9])\b/gi;
+const productKey = (text: string) =>
+  [...text.matchAll(PRODUCT_REF)]
+    .map((m) => m[1]!)
+    .filter((k) => /[\d-]/.test(k))
+    .at(-1);
 
 function lastUserText(prompt: LanguageModelV4Prompt) {
   for (let i = prompt.length - 1; i >= 0; i--) {
@@ -285,6 +295,9 @@ export function heuristicStep(text: string, context: AssistantContext, tools: Se
     return pick('run_stock_review', {});
   if (flowId && /\b(add|insert|remove|delete|replace|change|move|rename|connect)\b/.test(t))
     return pick('propose_flow_change', { flowId, instruction: text });
+  const product = productKey(text);
+  if (product && /\b(draft|write|translate|fill)\b/.test(t))
+    return pick('draft_product_content', { key: product });
   if (/\b(draft|write|make|build|create)\b.*\b(plugin|rule)\b/.test(t))
     return pick('draft_plugin', { instruction: text });
   if (/\b(needs? me|attention|waiting on|triage|stuck|overdue|what.*(should|do i|to do))\b/.test(t))
@@ -462,6 +475,11 @@ export function describeResult(tool: string, output: unknown): string {
     case 'draft_plugin': {
       const cases = (o.cases ?? {}) as { total?: number; passed?: number };
       return `Drafted [${plain(o.name)} version ${plain(o.version)}](${o.href}): ${plain(o.explanation)} ${cases.passed ?? 0} of ${cases.total ?? 0} test cases pass. Nothing runs until an admin reviews and approves it on the Plugins page.`;
+    }
+    case 'draft_product_content': {
+      const drafted = list(o.drafted).length;
+      const refused = list(o.refused).length;
+      return `Drafted ${drafted} field${drafted === 1 ? '' : 's'} for ${plain(o.title)}${refused ? `; ${refused} couldn’t be drafted` : ''}. Nothing goes live until someone accepts the drafts and publishes them.`;
     }
     default:
       return o.done ? `${o.done}.` : 'Done.';

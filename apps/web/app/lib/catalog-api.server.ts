@@ -23,6 +23,8 @@
  *   GET  /api/v1/catalog/board                   counts per column and gap kind, latest feeds
  *   GET  /api/v1/catalog/board/:column?kind=&cursor=&limit=   one column's cards
  *   GET  /api/v1/catalog/products/:key/sheet     live and feed versions, edits, drafts, history
+ *   POST /api/v1/catalog/products/:key/draft     { fields?, instruction? }  the assistant drafts
+ *                                                its missing text (or these fields) as drafts
  *   POST /api/v1/catalog/edits                   { edits }   stage, at most 500
  *   POST /api/v1/catalog/edits/discard           { items }   drop staged edits
  *   POST /api/v1/catalog/edits/publish           { keys, requestId?, urgent? }   at most 500
@@ -45,16 +47,18 @@ import {
   catalogChannelInput,
   catalogDeleteInput,
   catalogDiscardInput,
+  catalogDraftContentInput,
   catalogDraftsInput,
   catalogEditsInput,
   catalogProductsInput,
   catalogPublishInput,
   catalogTypeInput,
 } from './api-schemas';
-import { audit } from './audit.server';
+import { actorName, audit } from './audit.server';
 import { forbidden } from './auth.server';
 import { readText } from './body';
-import { afterResponse, catalog } from './env.server';
+import { afterResponse, catalog, engine } from './env.server';
+import { signedActor } from './principal.server';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 /** Up to 500 products a call: allow a few kilobytes each. */
@@ -102,6 +106,42 @@ export async function handleCatalog(
       if (blocked) return blocked;
       const product = await c.getProduct(id);
       return product ? json({ product }) : json({ error: 'Not found' }, 404);
+    }
+    if (post && id && sub === 'draft') {
+      const blocked = need('operator');
+      if (blocked) return blocked;
+      // No body drafts the product's gaps; a body that isn't JSON is refused.
+      const text = await readText(request);
+      let body: unknown = {};
+      try {
+        if (text.trim()) body = JSON.parse(text);
+      } catch {
+        return invalid('draft request', [{ message: 'not JSON' }]);
+      }
+      const parsed = catalogDraftContentInput.safeParse(body);
+      if (!parsed.success) return invalid('draft request', parsed.error.issues);
+      if (!(await c.getProduct(id))) return json({ error: 'Not found' }, 404);
+      const r = await engine().draftProductContent(
+        id,
+        parsed.data,
+        await signedActor(
+          { kind: 'staff', id: caller.id, name: actorName(caller), role: caller.role },
+          `draft-product:${id}`,
+        ),
+      );
+      if (!r.ok) return json({ error: r.error }, 422);
+      if (r.value.drafted.length)
+        await audit(request, 'catalog.drafts_saved', {
+          actor: caller,
+          target: id,
+          detail: {
+            saved: r.value.drafted.length,
+            refused: r.value.refused.length,
+            model: r.value.model,
+            via: 'api',
+          },
+        });
+      return json(r.value);
     }
     if (post && !id) {
       const blocked = need('operator');

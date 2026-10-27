@@ -22,6 +22,7 @@ import type {
   PluginStatus,
   PluginUsage,
 } from './plugins';
+import type { ProductDraftRequest, ProductDraftResult } from './product/api';
 import type { CartGuest, SignedActor } from './roles';
 import type { TaxCertificate, TaxCertificateChange, TaxCertificateInput } from './tax-exemption';
 import type {
@@ -268,6 +269,16 @@ export interface EngineRpc {
    * `actor` is an admin signed for `reindex-products`; anyone else is refused.
    */
   reindexProducts(actor: SignedActor): Promise<Refusable<ProductReindex>>;
+  /**
+   * The assistant drafts a catalog product's missing text (`draft_product_content`) and saves the
+   * drafts on the product for a person to accept. `actor` is an operator or above signed for
+   * `draft-product:<key>`; anyone else is refused, as is a product the catalog doesn't have.
+   */
+  draftProductContent(
+    key: string,
+    request: ProductDraftRequest,
+    actor: SignedActor,
+  ): Promise<Refusable<ProductDraftResult>>;
   /** Deep health: the engine's own D1 and R2 bindings answer. */
   health(): Promise<HealthReport>;
   /**

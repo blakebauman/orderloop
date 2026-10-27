@@ -4,6 +4,8 @@
  * override over the feed's version of the product (`applyOverrides`), so the next import doesn't
  * wipe it; the catalog shard stores both and re-applies the overrides on every write. Pure.
  */
+
+import { z } from 'zod';
 import {
   type Channel,
   type Localized,
@@ -38,6 +40,14 @@ export type FieldRef = {
   /** Every field but `status`. */
   locale?: string;
 };
+
+/** A `FieldRef` as a request sends it. Shape only: the catalog checks it against the product. */
+export const fieldRefSchema = z.object({
+  field: z.enum(EDITABLE_FIELDS),
+  code: z.string().min(1).max(128).optional().describe('`attribute` only: the attribute’s code'),
+  src: z.string().min(1).max(2048).optional().describe('`mediaAlt` only: the image’s src'),
+  locale: z.string().min(1).max(35).optional().describe('Every field but `status`, e.g. fr-CA'),
+});
 
 /** An edit as stored: the value it sets, or null to remove the feed's value in that locale. */
 export type Override = { ref: FieldRef; value: string | null };
@@ -270,4 +280,81 @@ export function contentGaps(data: ProductData, type: ProductType, channels: Chan
   const order = (g: Gap) =>
     `${g.channel}\u0000${g.locale}\u0000${GAP_KINDS.indexOf(g.kind)}\u0000${g.field}`;
   return gaps.sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0));
+}
+
+/** The gaps the assistant drafts: text a product lacks in a locale. Rejections and conflicts need a person. */
+export const DRAFTABLE_GAPS: readonly GapKind[] = [
+  'missing_title',
+  'missing_description',
+  'missing_attribute',
+  'missing_alt',
+];
+
+/** The most fields and locales one draft request writes. */
+export const MAX_DRAFT_FIELDS = 20;
+
+/** The longest guidance a person may add to a draft request. */
+export const PRODUCT_DRAFT_INSTRUCTION_MAX = 1000;
+
+/** Why a named field can't be drafted, or null when it can. */
+export function draftRefIssue(ref: FieldRef): string | null {
+  if (ref.field === 'status') return 'status is not drafted';
+  if (!ref.locale) return 'needs a locale';
+  if (ref.field === 'attribute' && !ref.code) return 'needs the attribute’s code';
+  if (ref.field === 'mediaAlt' && !ref.src) return 'needs the image’s src';
+  return null;
+}
+
+const refKey = (r: FieldRef) => `${fieldId(r)}\u0000${r.locale ?? ''}`;
+
+/**
+ * What a draft request fills, at most `MAX_DRAFT_FIELDS`, each field and locale once: the fields
+ * asked for that can be drafted (`draftRefIssue`), else the product's draftable gaps that have no
+ * draft or staged edit yet (`pending`), in `DRAFTABLE_GAPS` order, so titles come before alt text.
+ * `more` counts the gaps left for another request.
+ */
+export function draftTargets(
+  gaps: readonly Gap[],
+  asked?: readonly FieldRef[],
+  pending: readonly FieldRef[] = [],
+): { targets: FieldRef[]; more: number } {
+  const skip = new Set(asked?.length ? [] : pending.map(refKey));
+  const refs: FieldRef[] = asked?.length
+    ? asked.filter((r) => !draftRefIssue(r))
+    : [...gaps]
+        .filter((g) => DRAFTABLE_GAPS.includes(g.kind))
+        .sort((a, b) => DRAFTABLE_GAPS.indexOf(a.kind) - DRAFTABLE_GAPS.indexOf(b.kind))
+        .flatMap((g) => {
+          const f = parseFieldId(g.field);
+          return f ? [{ ...f, locale: g.locale }] : [];
+        });
+  const seen = new Set<string>();
+  const unique = refs.filter((r) => {
+    const k = refKey(r);
+    if (seen.has(k) || skip.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return {
+    targets: unique.slice(0, MAX_DRAFT_FIELDS),
+    more: asked?.length ? 0 : Math.max(0, unique.length - MAX_DRAFT_FIELDS),
+  };
+}
+
+/** A field's values in every locale it has one (status has none). */
+export function fieldLocales(data: ProductData, ref: Omit<FieldRef, 'locale'>): Localized {
+  switch (ref.field) {
+    case 'title':
+      return { ...data.title };
+    case 'description':
+      return { ...data.description };
+    case 'slug':
+      return { ...data.slug };
+    case 'attribute':
+      return { ...localized(data.attributes[ref.code ?? '']) };
+    case 'mediaAlt':
+      return { ...data.media.find((m) => m.src === ref.src)?.alt };
+    default:
+      return {};
+  }
 }

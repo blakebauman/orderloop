@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import type { Gap, GapKind } from '../src/product/content';
 import {
   applyOverrides,
   contentGaps,
+  draftRefIssue,
+  draftTargets,
   editIssues,
   fieldId,
+  fieldLocales,
   fieldValue,
+  MAX_DRAFT_FIELDS,
   overrideConflict,
   parseFieldId,
 } from '../src/product/content';
@@ -268,5 +273,92 @@ describe('content gaps', () => {
       { ref: { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'fr' }, value: 'Un t-shirt' },
     ]);
     expect(contentGaps(p, apparel, [web])).toEqual([]);
+  });
+});
+
+describe('draft targets', () => {
+  const gap = (kind: GapKind, field: string, locale = 'fr', channel = 'web'): Gap => ({
+    kind,
+    field,
+    locale,
+    channel,
+  });
+
+  it("are a product's text gaps, once each, titles first, without what needs a person", () => {
+    expect(
+      draftTargets([
+        gap('missing_alt', 'alt:media/tee.jpg'),
+        gap('missing_attribute', 'attr:care', 'de'),
+        gap('missing_title', 'title'),
+        gap('missing_title', 'title', 'fr', 'pos'),
+        gap('conflict', 'description'),
+        gap('rejected', 'title', 'en'),
+        gap('missing_required', 'attr:size', 'en'),
+      ]),
+    ).toEqual({
+      targets: [
+        { field: 'title', locale: 'fr' },
+        { field: 'attribute', code: 'care', locale: 'de' },
+        { field: 'mediaAlt', src: 'media/tee.jpg', locale: 'fr' },
+      ],
+      more: 0,
+    });
+  });
+
+  it('skip gaps with a draft or staged edit waiting, and count what is left past the limit', () => {
+    const gaps = Array.from({ length: 25 }, (_, i) => gap('missing_alt', `alt:m${i}.jpg`));
+    const { targets, more } = draftTargets(
+      [...gaps, gap('missing_title', 'title'), gap('missing_description', 'description')],
+      undefined,
+      [{ field: 'title', locale: 'fr' }],
+    );
+    expect(targets[0]).toEqual({ field: 'description', locale: 'fr' });
+    expect(targets).toHaveLength(MAX_DRAFT_FIELDS);
+    expect(more).toBe(6);
+  });
+
+  it('are the fields asked for instead, even with a draft waiting, if they can be drafted', () => {
+    expect(
+      draftTargets(
+        [gap('missing_title', 'title')],
+        [
+          { field: 'slug', locale: 'fr' },
+          { field: 'slug', locale: 'fr' },
+          { field: 'status' },
+          { field: 'description' },
+          { field: 'attribute', locale: 'fr' },
+        ],
+        [{ field: 'slug', locale: 'fr' }],
+      ),
+    ).toEqual({ targets: [{ field: 'slug', locale: 'fr' }], more: 0 });
+    expect(
+      [
+        { field: 'status' as const },
+        { field: 'title' as const },
+        { field: 'attribute' as const, locale: 'fr' },
+        { field: 'mediaAlt' as const, locale: 'fr' },
+        { field: 'title' as const, locale: 'fr' },
+      ].map(draftRefIssue),
+    ).toEqual([
+      'status is not drafted',
+      'needs a locale',
+      'needs the attribute’s code',
+      'needs the image’s src',
+      null,
+    ]);
+  });
+
+  it(`stop at ${MAX_DRAFT_FIELDS}`, () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      field: 'title' as const,
+      locale: `l${i}`,
+    }));
+    expect(draftTargets([], many).targets).toHaveLength(MAX_DRAFT_FIELDS);
+  });
+
+  it("read a field's text in every locale it has", () => {
+    expect(fieldLocales(feed, { field: 'attribute', code: 'care' })).toEqual(feed.attributes.care);
+    expect(fieldLocales(feed, { field: 'mediaAlt', src: 'nope' })).toEqual({});
+    expect(fieldLocales(feed, { field: 'status' })).toEqual({});
   });
 });

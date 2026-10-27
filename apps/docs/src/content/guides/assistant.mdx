@@ -155,13 +155,26 @@ outside hosts, secrets or storage. To revise a draft, ask again naming the plugi
 drafts its next version. If the workspace hasn't had this turned on by OrderLoop, the assistant says
 it can't.
 
+## Product content
+
+Operators can have the assistant write a catalog product's missing text: "draft the French
+description for product TEE-100", or just "fill in what TEE-100 is missing". The
+`draft_product_content` tool (`operator`) writes each title, description, text attribute and image
+alt text the product lacks in a locale, from what it says in its other locales, or the fields you
+name, and saves them as drafts on the product. It skips text that already has a draft or an edit
+waiting, and writes up to 20 fields a request, titles and descriptions first; ask again for the
+rest. It keeps product names, brands and numbers as they
+are and adds nothing the product doesn't say; a field it can't write from the product is listed as
+not drafted. It runs directly, with no confirm card, because nothing goes live until someone accepts
+a draft and publishes it (see [Editing content](/guides/product-catalog/#editing-content)).
+
 ## Daily allowance
 
 Each person can use up to 1,000,000 model tokens a day in the assistant, counted from midnight UTC.
 When it is spent, the assistant says "You've used today's assistant allowance. It resets at
 midnight UTC; your OrderLoop contact can raise it." and answers again the next day. A
-[plugin draft](#plugin-drafts) counts against the allowance of the admin who asked for it, and is
-refused once it is spent. Answers from the fixed rules below cost nothing. Your OrderLoop administrator can raise the limit or remove it.
+[plugin draft](#plugin-drafts) or [product draft](#product-content) counts against the allowance of
+the person who asked for it, and is refused once it is spent. Answers from the fixed rules below cost nothing. Your OrderLoop administrator can raise the limit or remove it.
 MCP clients bring their own model, so they aren't counted.
 
 ## Without the model
@@ -175,7 +188,7 @@ the same confirm cards.
 
 A reply from the fallback is labelled **Answered without the language model, from fixed rules**.
 It understands plain requests ("what needs attention", "add a risk score after
-credit check"), not open questions.
+credit check", "fill in what product TEE-100 is missing"), not open questions.
 
 ## Over MCP
 

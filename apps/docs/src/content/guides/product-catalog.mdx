@@ -220,7 +220,18 @@ edit remembers the feed's value when it was published; when a later import chang
 edit stays live and the product goes back on **gaps** with a `conflict`, until someone keeps the
 edit (stage the same text again), takes the feed's value (`clear`) or writes new text.
 
-**Drafts.** The assistant drafts text for a field and locale; drafts are saved with
+**Drafts.** The assistant drafts a product's missing text: `POST /api/v1/catalog/products/:key/draft`
+writes, from what the product says in its other locales, each title, description, text attribute
+and image alt text the product lacks in a locale of a channel it is listed in, and saves them as
+drafts. It skips a gap that already has a draft or a staged edit waiting, and writes up to 20 at a
+time, titles and descriptions first; `more` in the answer counts the gaps left for another request.
+Send `{ "fields": [{ "field", "locale", ... }] }` to draft those fields instead, drafts waiting or
+not, and `instruction` for your own guidance (tone, length, terms to keep). The answer lists what was
+`drafted` and what was `refused` and why (a field that can't be drafted, such as `status` or one
+without a locale, is refused there); nothing changes on the product. It answers `422` when the
+product has no gaps left to draft, your [assistant allowance](/guides/assistant/#daily-allowance) for
+the day is spent, or the model couldn't answer. The [assistant](/guides/assistant/#product-content) and MCP
+clients draft the same way with `draft_product_content`. Drafts written elsewhere are saved with
 `POST /api/v1/catalog/drafts` (`{ "drafts": [{ "key", "ref", "value", "model"? }] }`, up to 500) and
 never change the product. A draft is accepted by staging it with `"source": "assistant"`, so the
 published change records where it came from; staging any edit to the field uses up its draft. The

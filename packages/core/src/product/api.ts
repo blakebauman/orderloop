@@ -177,6 +177,25 @@ export type Draft = {
   at: number;
 };
 
+/**
+ * What to draft for one product (`draft_product_content`): these fields and locales, or with none
+ * its draftable gaps; `instruction` is the person's own guidance (tone, length, terms to keep).
+ */
+export type ProductDraftRequest = { fields?: FieldRef[]; instruction?: string };
+
+/** What a draft request saved, and what it couldn't, field by field. */
+export type ProductDraftResult = {
+  key: string;
+  /** The product's title, in the first locale it has one. */
+  title: string;
+  drafted: { ref: FieldRef; value: string }[];
+  refused: { ref: FieldRef; issues: string[] }[];
+  /** Gaps left for another request: more than `MAX_DRAFT_FIELDS` were open. */
+  more: number;
+  /** The model that wrote them; null when the offline heuristic did (mock mode). */
+  model: string | null;
+};
+
 /** A live override, with the feed value it was made against and the feed's value now. */
 export type FieldOverride = {
   ref: FieldRef;

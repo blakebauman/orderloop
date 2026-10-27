@@ -24,9 +24,12 @@ import {
   type TaxCertificateInput,
   UCP_PATH,
 } from '@orderloop/core';
+import type { ProductDraftRequest } from '@orderloop/core/product';
 import { A2A_PATH, a2aCaller, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
+import { Refused } from './assistant/data';
+import { draftProductContent } from './assistant/product-draft';
 import {
   cancelCart,
   cartSnapshot,
@@ -172,6 +175,21 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     if (!atLeast(actor.role, 'admin'))
       return { ok: false as const, error: 'This needs the Admin role.' };
     return { ok: true as const, value: await reindexProducts(this.env) };
+  }
+
+  async draftProductContent(key: string, request: ProductDraftRequest, signed: SignedActor) {
+    const actor = await rpcActor(this.env, signed, `draft-product:${key}`);
+    if (actor?.kind !== 'staff') return UNSIGNED;
+    if (!atLeast(actor.role, 'operator'))
+      return { ok: false as const, error: 'This needs the Operator role.' };
+    const p = { kind: 'user' as const, id: actor.id, name: actor.name, role: actor.role };
+    try {
+      const value = await draftProductContent(this.env, p, key, request ?? {});
+      return { ok: true as const, value };
+    } catch (err) {
+      if (err instanceof Refused) return { ok: false as const, error: err.message };
+      throw err;
+    }
   }
 
   async health() {
