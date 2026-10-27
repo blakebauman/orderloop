@@ -26,7 +26,7 @@ import {
   statusResponse,
 } from './cxml';
 import manifest from './manifest';
-import { ociControl, ociFields, parseOciSetup } from './oci';
+import { ociFields, parseOciSetup, storedOciControl } from './oci';
 import { adminPages } from './pages';
 import {
   cartInput,
@@ -368,7 +368,7 @@ export default definePlugin<Env>({
             ref: l.aux,
           })),
           // Checked again on the way out: the column is ours, but what's echoed is SAP's.
-          ociControl(session.oci_control ? JSON.parse(session.oci_control) : undefined),
+          storedOciControl(session.oci_control),
         ),
       };
     return {

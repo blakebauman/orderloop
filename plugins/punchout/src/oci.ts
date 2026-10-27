@@ -29,6 +29,17 @@ export function ociControl(sent: { okCode?: unknown; caller?: unknown; target?: 
   } satisfies OciControl;
 }
 
+/** A session's stored control fields (`sessions.oci_control`), checked; the defaults if unreadable. */
+export function storedOciControl(raw: string | null): OciControl {
+  let sent: unknown;
+  try {
+    sent = raw ? JSON.parse(raw) : undefined;
+  } catch {
+    sent = undefined;
+  }
+  return ociControl(sent && typeof sent === 'object' ? sent : undefined);
+}
+
 export function parseOciSetup(params: URLSearchParams): OciSetup | null {
   const get = (k: string) => params.get(k) ?? params.get(k.toLowerCase()) ?? '';
   const username = get('USERNAME');
@@ -36,9 +47,11 @@ export function parseOciSetup(params: URLSearchParams): OciSetup | null {
   const hookUrl = get('HOOK_URL');
   if (!username || !password || !hookUrl) return null;
   // SAP spells these `~OkCode`, `~TARGET` and `~CALLER`, but systems differ in case.
+  // The last one sent wins, as for the other fields: a POST's body comes after its query string.
   const tilde = (name: string) => {
-    for (const [k, v] of params) if (k.toLowerCase() === name) return v;
-    return undefined;
+    let found: string | undefined;
+    for (const [k, v] of params) if (k.toLowerCase() === name) found = v;
+    return found;
   };
   return {
     username,

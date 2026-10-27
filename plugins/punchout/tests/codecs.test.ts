@@ -6,7 +6,7 @@ import {
   setupResponse,
   statusResponse,
 } from '../src/cxml';
-import { ociControl, ociFields, parseOciSetup } from '../src/oci';
+import { ociControl, ociFields, parseOciSetup, storedOciControl } from '../src/oci';
 import { at, parseXml, XmlError } from '../src/xml';
 import orderXml from './fixtures/order-request.xml?raw';
 import setupXml from './fixtures/setup-request.xml?raw';
@@ -192,6 +192,14 @@ describe('OCI', () => {
     expect(ociControl({ okCode: 7, target: { name: '_top' } })).toEqual({
       okCode: 'ADDI',
       caller: 'CTLG',
+    });
+    // A stored value that isn't an object of them: the defaults, never a throw.
+    for (const raw of [null, '', 'not json', 'null', '"ADDI"', '42'])
+      expect(storedOciControl(raw)).toEqual({ okCode: 'ADDI', caller: 'CTLG' });
+    expect(storedOciControl('{"okCode":"ADDI","target":"_top","caller":"CTLG"}')).toEqual({
+      okCode: 'ADDI',
+      caller: 'CTLG',
+      target: '_top',
     });
     const q = new URLSearchParams({ USERNAME: 'a', PASSWORD: 'b', HOOK_URL: 'c' });
     q.set('~OkCode', 'ADDI;DROP');

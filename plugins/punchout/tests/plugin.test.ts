@@ -627,6 +627,22 @@ describe('OCI punchout', () => {
     expect((await plugin.renderReturn({ cart: ociCart('cart_1') })).fields).toMatchObject(control);
   });
 
+  it('takes a POST body’s control field over the query string’s, whatever its case', async () => {
+    const secret = await ociPartner();
+    const q = setup(secret, { '~TARGET': 'from_query', '~OkCode': 'QUERY' });
+    const res = await plugin.fetch(
+      new Request(`https://plugin/plugins/punchout/oci/setup?${q}`, {
+        method: 'POST',
+        body: new URLSearchParams({ '~target': 'from_body', '~OKCODE': 'ADDI' }),
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect((await plugin.renderReturn({ cart: ociCart('cart_1') })).fields).toMatchObject({
+      '~OkCode': 'ADDI',
+      '~TARGET': 'from_body',
+    });
+  });
+
   it('drops a control value that isn’t a short plain word, and never echoes it', async () => {
     const secret = await ociPartner();
     const res = await plugin.fetch(
@@ -659,7 +675,13 @@ describe('OCI punchout', () => {
       ),
     );
     // As a row written by the code before migration 0003 (or one a later edit left odd) reads.
-    for (const stored of [null, '{"okCode":"<b>","target":"_top\\" onload=x"}']) {
+    for (const stored of [
+      null,
+      '{"okCode":"<b>","target":"_top\\" onload=x"}',
+      'not json',
+      'null',
+      '"ADDI"',
+    ]) {
       await env.DB.prepare('UPDATE sessions SET oci_control = ? WHERE cart_id = ?')
         .bind(stored, 'cart_1')
         .run();
