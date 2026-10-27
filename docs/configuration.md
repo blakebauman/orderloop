@@ -194,7 +194,11 @@ The catalog Worker turns `observability` on at the default sampling and sets `li
 and traces on); lower the rate once traffic makes the volume or cost matter. All four (web, engine,
 catalog, catalog-edge) turn on Workers Issues (`observability.issues.enabled`), which groups
 uncaught exceptions, failed invocations, `5xx` responses and error-level logs into issues and is
-what the account's alerting watches; see [Alerting](operations.md#alerting). `limits.cpu_ms` stops a
+what the account's alerting watches; see [Alerting](operations.md#alerting). All four also set
+`observability.redact_query_string`, so OAuth codes and states and other query strings stay out of
+logs and traces. Each Workflow (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`)
+sets `default_retention`: finished instances are kept 7 days, errored ones 30, the most Workflows
+keeps. `limits.cpu_ms` stops a
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O
 waits, such as model calls, don't count against it. Both app Workers set `placement.mode` to `smart`: the web
 app runs near D1 and the engine rather than near the visitor, and the engine runs near D1 rather

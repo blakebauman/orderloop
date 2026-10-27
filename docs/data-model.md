@@ -467,7 +467,7 @@ target `subject:` and the first 16 hex characters of the SHA-256 of the normalis
 
 Not reached: messages on staff carts or other buyers' carts that name the subject (until those carts'
 retention clears them), and an external cart opened before `buyer_id` was recorded (migration `0050`)
-until the retention sweep has indexed it (`indexCartBuyers`, 200 a run); the Workflow instance's params and step outputs, which Cloudflare Workflows retains; the
+until the retention sweep has indexed it (`indexCartBuyers`, 200 a run); the Workflow instance's params and step outputs, which Cloudflare Workflows retains (7 days after it finishes, 30 after it errors: `default_retention`); the
 Stripe customer at Stripe (only the ids here are cleared); AI Gateway and Workers logs, which follow
 their own retention; the R2 audit archives (`audit/…`, which expire only after the deployment's `auditArchiveDays`, if set); `sellers`; and `orders.external_id` and
 `customer_id`, which stay on an erased order.

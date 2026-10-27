@@ -13,10 +13,14 @@ import { canonical, parse } from './routes';
 
 export { Delivery } from './delivery';
 
-const CORS = {
+// On every response: readable from any origin (the catalog is public and read-only), never
+// sniffed as anything but its content type, and only ever over HTTPS.
+const PUBLIC = {
   'access-control-allow-origin': '*',
   'access-control-expose-headers': 'etag, cf-cache-status',
   'timing-allow-origin': '*',
+  'x-content-type-options': 'nosniff',
+  'strict-transport-security': 'max-age=31536000',
 };
 
 type Exports = { Delivery: Service<Delivery> };
@@ -99,7 +103,7 @@ export default {
       return new Response(null, {
         status: 204,
         headers: {
-          ...CORS,
+          ...PUBLIC,
           'access-control-allow-methods': 'GET, HEAD',
           'access-control-allow-headers': 'if-none-match',
           'access-control-max-age': '86400',
@@ -108,13 +112,13 @@ export default {
     if (request.method !== 'GET' && request.method !== 'HEAD')
       return new Response(JSON.stringify({ error: 'read only' }), {
         status: 405,
-        headers: { ...CORS, allow: 'GET, HEAD, OPTIONS', 'content-type': 'application/json' },
+        headers: { ...PUBLIC, allow: 'GET, HEAD, OPTIONS', 'content-type': 'application/json' },
       });
     const parsed = parse(url);
     if (!parsed.ok)
       return new Response(JSON.stringify({ error: parsed.error }), {
         status: parsed.status,
-        headers: { ...CORS, 'content-type': 'application/json' },
+        headers: { ...PUBLIC, 'content-type': 'application/json' },
       });
 
     // Only the canonical URL and a validator reach the cache: no cookies, no client headers.
@@ -126,7 +130,7 @@ export default {
       new Request(canonical(parsed.route), { headers }),
     );
     const response = new Response(request.method === 'HEAD' ? null : upstream.body, upstream);
-    for (const [k, v] of Object.entries(CORS)) response.headers.set(k, v);
+    for (const [k, v] of Object.entries(PUBLIC)) response.headers.set(k, v);
 
     env.ANALYTICS?.writeDataPoint({
       blobs: [
