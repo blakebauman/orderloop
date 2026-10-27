@@ -673,10 +673,11 @@ describe('typing on a cart', () => {
     await ann.call('typing');
     expect((await ann.call('say', ['Friday works'])).result).toMatchObject({ ok: true });
     await vi.waitFor(() => expect(ben.typings()).toHaveLength(2));
+    // A stop names no one: the page needs only the id.
     expect(ben.typings()[1]).toEqual({
       type: 'cart_typing',
       memberId: 'usr_cart_ann',
-      name: 'ann',
+      name: '',
       until: 0,
     });
     // Sending resets the limit, so the next message's typing shows straight away.
@@ -687,9 +688,35 @@ describe('typing on a cart', () => {
     await vi.waitFor(() => expect(ben.typings()).toHaveLength(4));
     expect(ben.typings().slice(2)).toEqual([
       expect.objectContaining({ memberId: 'usr_cart_ann', until: expect.any(Number) }),
-      expect.objectContaining({ memberId: 'usr_cart_ann', until: 0 }),
+      expect.objectContaining({ memberId: 'usr_cart_ann', name: '', until: 0 }),
     ]);
     expect(ann.typings()).toEqual([]);
+    ben.close();
+  });
+
+  it('sends nothing for a call still being checked when its message went', async () => {
+    const id = await open();
+    const ann = await socket(id, await who('operator', 'ann'));
+    const ben = await socket(id, await who('viewer', 'ben'));
+    // Hold the typing call's check of who is calling (a D1 read for staff) while the message goes.
+    await runInDurableObject(cart(id), (agent) => {
+      const a = agent as unknown as { caller: (o?: object) => Promise<unknown> };
+      const caller = a.caller.bind(agent);
+      vi.spyOn(a, 'caller').mockImplementationOnce(async (o) => {
+        await new Promise((r) => setTimeout(r, 300));
+        return caller(o);
+      });
+    });
+    const typing = ann.call('typing');
+    expect((await ann.call('say', ['Sent before the check finished'])).result).toMatchObject({
+      ok: true,
+    });
+    expect((await typing).result).toBe(false);
+    await ben.call('whoami');
+    expect(ben.typings()).toEqual([]);
+    // And it left nothing behind: the next call goes out at once.
+    expect((await ann.call('typing')).result).toBe(true);
+    ann.close();
     ben.close();
   });
 

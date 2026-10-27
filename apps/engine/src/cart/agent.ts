@@ -840,7 +840,7 @@ export class CartAgent extends Agent<Env, CartState> {
 
   override async onClose(connection: Connection<ConnectionState>) {
     const member = connection.state?.member;
-    if (member) this.stopTyping(connection.id, member);
+    if (member) this.stopTyping(connection.id, member.id);
     else this.typed.delete(connection.id);
     this.syncMembers(connection.id);
   }
@@ -1006,7 +1006,7 @@ export class CartAgent extends Agent<Env, CartState> {
     this
       .sql`INSERT INTO cart_chat (id, author_id, author_name, body, at) VALUES (${m.id}, ${m.authorId}, ${m.authorName}, ${m.body}, ${m.at})`;
     this.setState({ ...this.state, chat: [...this.state.chat, m].slice(-CART_CHAT_BROADCAST) });
-    this.stopTyping(getCurrentAgent().connection!.id, a);
+    this.stopTyping(getCurrentAgent().connection!.id, a.id);
     return { ok: true, id: m.id };
   }
 
@@ -1029,9 +1029,12 @@ export class CartAgent extends Agent<Env, CartState> {
     const now = Date.now();
     const last = this.typed.get(connection.id);
     if (last && now - last.at < CART_TYPING_EVERY_MS) return false;
-    this.typed.set(connection.id, { at: now, sent: false });
+    const mark = { at: now, sent: false };
+    this.typed.set(connection.id, mark);
     const a = await this.caller({ keepOpen: false });
-    this.typed.set(connection.id, { at: now, sent: true });
+    // Sent the message or left while the caller was checked: that ended this notice already.
+    if (this.typed.get(connection.id) !== mark) return false;
+    mark.sent = true;
     this.sendTyping({
       type: 'cart_typing',
       memberId: a.id,
@@ -1041,12 +1044,15 @@ export class CartAgent extends Agent<Env, CartState> {
     return true;
   }
 
-  /** Ends a socket's typing notice, if it sent one that may still show: it posted, or left. */
-  private stopTyping(connectionId: string, who: { id: string; name: string }) {
+  /**
+   * Ends a socket's typing notice, if it sent one that may still show: it posted, or left. With no
+   * name: the page needs only the id, and an erased buyer's socket closing mustn't send theirs.
+   */
+  private stopTyping(connectionId: string, memberId: string) {
     const last = this.typed.get(connectionId);
     this.typed.delete(connectionId);
     if (last?.sent && Date.now() - last.at < CART_TYPING_MS)
-      this.sendTyping({ type: 'cart_typing', memberId: who.id, name: who.name, until: 0 });
+      this.sendTyping({ type: 'cart_typing', memberId, name: '', until: 0 });
   }
 
   /**

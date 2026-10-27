@@ -614,7 +614,8 @@ export const CART_TYPING_EVERY_MS = 2_000;
 
 /**
  * Sent over the cart's socket, outside `CartState`, to the others on a cart while one of its
- * members writes a message. Never stored. `until` 0 means they stopped: they sent it, or left.
+ * members writes a message. Never stored. `until` 0 means they stopped (they sent it, or left),
+ * and carries no name.
  */
 export type CartTyping = { type: 'cart_typing'; memberId: string; name: string; until: number };
 

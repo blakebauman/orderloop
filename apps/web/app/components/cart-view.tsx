@@ -120,8 +120,9 @@ export function CartView({
   useEffect(() => {
     const end = nextTypingEnd(typists);
     if (end === null) return;
+    // At least `end`: a clock stepped back would otherwise drop nothing and never look again.
     const t = window.setTimeout(
-      () => setTypists((x) => typingAt(x, Date.now())),
+      () => setTypists((x) => typingAt(x, Math.max(Date.now(), end))),
       Math.max(0, end - Date.now()),
     );
     return () => window.clearTimeout(t);
@@ -463,8 +464,11 @@ export function CartView({
             messages={state.chat}
             myId={meId}
             typing={typingLabel(typists)}
-            // Best effort: a notice that doesn't go out isn't worth an error over the lines.
-            onTyping={() => void agent.call('typing').catch(() => {})}
+            // Best effort, and only on an open socket: `useAgent` queues a call made while it is
+            // down and sends it on reconnecting, by when the typing it announces is long over.
+            onTyping={() => {
+              if (agent.readyState === WebSocket.OPEN) void agent.call('typing').catch(() => {});
+            }}
             onSay={(body) => call<{ ok: true; id: string }>('say', [body])}
             onEdit={(id, body) => call<Result>('edit', [id, body])}
             onDelete={(id) => call<Result>('unsay', [id])}

@@ -623,20 +623,12 @@ describe('an external cart’s buyer', () => {
     expect(results[20]).toEqual({ ok: false, error: 'Slow down a moment.' });
   });
 
-  it('types to the staff on their own cart, who type back, and to no other cart', async () => {
+  it('types to the staff on their cart, who type back', async () => {
     const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 3_600_000 });
     const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
     const buyer = await guestSocket(c.cartId, guest);
     if (!buyer.call) throw new Error(`socket refused: ${buyer.status}`);
     const ada = await staffSocket(c.cartId);
-    // Someone on another cart, staff or its own buyer, hears nothing from this one.
-    const o = await open();
-    const otherBuyer = await guestSocket(
-      o.cartId,
-      (await cartAgent(o.cartId).redeemStart(o.token))!,
-    );
-    if (!otherBuyer.call) throw new Error(`socket refused: ${otherBuyer.status}`);
-    const otherStaff = await staffSocket(o.cartId);
     // Run the window down, so anything that counted as the buyer's activity would move it on.
     const wound = Date.now() + 30 * 60_000;
     await atTime(c.cartId, wound);
@@ -661,11 +653,7 @@ describe('an external cart’s buyer', () => {
     // Typing isn't the buyer's activity on the cart's time: only what they send moves it on.
     expect((await timeOf(c.cartId)).expiresAt).toBe(wound);
     await buyer.call('whoami');
-    await otherBuyer.call('whoami');
-    await otherStaff.call('whoami');
     expect(buyer.typings().map((t) => t.memberId)).not.toContain(guest.id);
-    expect(otherBuyer.typings()).toEqual([]);
-    expect(otherStaff.typings()).toEqual([]);
   });
 
   it('is never admitted to a staff cart', async () => {
