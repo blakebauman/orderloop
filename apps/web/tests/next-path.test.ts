@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextPath } from '../app/lib/next-path';
+import { nextPath, withNext } from '../app/lib/next-path';
 
 const at = (next: string) =>
   nextPath(new Request(`https://orderloop.app/login?next=${encodeURIComponent(next)}`));
@@ -19,5 +19,17 @@ describe('nextPath', () => {
       'orders',
     ])
       expect(at(next)).toBe('/');
+  });
+});
+
+describe('withNext', () => {
+  it('carries a path other than the home page', () => {
+    expect(withNext('/login', '/orders/ord_1?tab=timeline')).toBe(
+      '/login?next=%2Forders%2Ford_1%3Ftab%3Dtimeline',
+    );
+  });
+
+  it('leaves off the home page, where sign-in goes anyway', () => {
+    expect(withNext('/login', '/')).toBe('/login');
   });
 });

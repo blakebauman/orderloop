@@ -21,7 +21,7 @@ import {
   Throttled,
 } from '~/lib/auth.server';
 import { isDemo } from '~/lib/demo.server';
-import { nextPath } from '~/lib/next-path';
+import { nextPath, withNext } from '~/lib/next-path';
 import { oauthApi } from '~/lib/oauth.server';
 import { ssoOnlyInEffect } from '~/lib/settings.server';
 import { ssoConfig } from '~/lib/sso.server';
@@ -81,7 +81,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
   if (!result) return { error: 'That email and password don’t match an active account.' };
   const next = nextPath(request);
-  return redirect(result.twoFactor ? `/login/two-factor?next=${encodeURIComponent(next)}` : next, {
+  return redirect(result.twoFactor ? withNext('/login/two-factor', next) : next, {
     headers: { 'set-cookie': result.cookie },
   });
 }

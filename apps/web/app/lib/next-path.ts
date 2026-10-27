@@ -13,3 +13,8 @@ export function nextPath(request: Request): string {
     return '/';
   }
 }
+
+/** `path` carrying `next`, left off when it's `/`, where sign-in goes anyway. */
+export function withNext(path: string, next: string): string {
+  return next === '/' ? path : `${path}?next=${encodeURIComponent(next)}`;
+}
