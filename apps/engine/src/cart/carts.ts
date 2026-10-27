@@ -156,17 +156,19 @@ function externalInputProblem(env: Env, input: ExternalCartInput): string | null
 /**
  * What `openExternalCart` would make of `input`, checked as it checks it (the input, then the flow
  * and customer `createCart` needs), reading only: no cart is opened, found or woken. The flow and
- * customer are looked up whenever they are well-formed ids, so one call reports every problem.
+ * customer are looked up only for an input that is otherwise acceptable, so a probe with a bad
+ * input learns nothing about which ids exist.
  */
 export async function checkExternalCart(
   env: Env,
   input: ExternalCartInput,
 ): Promise<ExternalCartProblems> {
-  const id = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 100;
+  const problem = externalInputProblem(env, input);
+  if (problem) return { input: problem, flow: null, customer: null };
   return {
-    input: externalInputProblem(env, input),
-    flow: id(input.flowId) ? await cartFlowProblem(env, input.flowId) : 'A flow is required.',
-    customer: id(input.customerId) ? await customerProblem(env, input.customerId!) : null,
+    input: null,
+    flow: await cartFlowProblem(env, input.flowId),
+    customer: input.customerId ? await customerProblem(env, input.customerId) : null,
   };
 }
 

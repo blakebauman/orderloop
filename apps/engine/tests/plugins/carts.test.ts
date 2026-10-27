@@ -174,24 +174,37 @@ describe('the plugin host API', () => {
       ok: true,
       problems: { input: null, flow: null, customer: null },
     });
-    // Every problem at once, each as opening the cart would refuse it.
-    expect(
-      await checked({
-        flowId: 'flow_nope',
-        customerId: 'cus_nope',
-        returnUrl: 'https://app.orderloop.test/x',
-      }),
-    ).toEqual({
+    // An unknown flow and customer, each as opening the cart would refuse it.
+    expect(await checked({ flowId: 'flow_nope', customerId: 'cus_nope' })).toEqual({
       ok: true,
       problems: {
-        input: 'returnUrl must be the buyer’s system, not this one',
+        input: null,
         flow: 'That flow has no published version.',
         customer: 'No such customer.',
       },
     });
     expect(await checked({ customerId: null })).toMatchObject({ problems: { customer: null } });
-    expect(await checked({ flowId: 7 as unknown as string })).toMatchObject({
-      problems: { input: 'title and flowId are strings', flow: 'A flow is required.' },
+    // An input that couldn't open a cart is reported alone: its ids aren't looked up, so a probe
+    // with a bad input learns nothing about which exist.
+    const bads: Partial<ExternalCartInput>[] = [
+      { returnUrl: 'https://app.orderloop.test/x' },
+      { flowId: 7 as unknown as string },
+      { expiresAt: 0 },
+    ];
+    for (const bad of bads)
+      expect(await checked({ flowId: 'flow_nope', customerId: 'cus_nope', ...bad })).toEqual({
+        ok: true,
+        problems: { input: expect.any(String), flow: null, customer: null },
+      });
+    expect(
+      await checked({ returnUrl: 'https://app.orderloop.test/x', customerId: 'cus_nope' }),
+    ).toEqual({
+      ok: true,
+      problems: {
+        input: 'returnUrl must be the buyer’s system, not this one',
+        flow: null,
+        customer: null,
+      },
     });
     // The session it names is never opened, so opening it later makes a new cart.
     const sessionRef = `cookie-${crypto.randomUUID()}`;

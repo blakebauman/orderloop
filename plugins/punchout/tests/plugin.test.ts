@@ -49,13 +49,21 @@ function fakeHost() {
       if (this.checks === 'refused')
         return { ok: false as const, error: 'This plugin may not open carts here.' };
       this.checked.push(input);
-      // As the core answers: its own host refused, an unknown flow or customer reported.
+      // As the core answers: its own host refused (and then nothing else looked up), an unknown
+      // flow or customer reported.
+      if (new URL(input.returnUrl).hostname.endsWith('orderloop.test'))
+        return {
+          ok: true as const,
+          problems: {
+            input: 'returnUrl must be the buyer’s system, not this one',
+            flow: null,
+            customer: null,
+          },
+        };
       return {
         ok: true as const,
         problems: {
-          input: new URL(input.returnUrl).hostname.endsWith('orderloop.test')
-            ? 'returnUrl must be the buyer’s system, not this one'
-            : null,
+          input: null,
           flow: input.flowId === 'flow_nope' ? 'That flow has no published version.' : null,
           customer: input.customerId === 'cus_nope' ? 'No such customer.' : null,
         },
@@ -773,6 +781,33 @@ describe('the partner self-test and setup notes', () => {
       pass: false,
       detail: 'returnUrl must be the buyer’s system, not this one',
     });
+    // Still asked about the flow by the host that would open a cart.
+    expect(checks.Flow).toMatchObject({
+      pass: false,
+      detail: expect.stringMatching(/^flow_nope:/),
+    });
+    // Every host the deployment's own: the flow and customer go unchecked, and fail.
+    await stored(id, 'return_hosts = ?', JSON.stringify(['app.orderloop.test']));
+    ({ checks } = await test(id));
+    expect(checks.Flow).toEqual({
+      pass: false,
+      detail: 'Not checked: OrderLoop wouldn’t open the cart (see Cart).',
+    });
+    expect(checks.Customer?.pass).toBe(false);
+    // Once per distinct host, and no more than ten.
+    const many = Array.from({ length: 12 }, (_, i) => `h${i}.buyer.example`);
+    await stored(
+      id,
+      'return_hosts = ?',
+      JSON.stringify(['buyer.example', 'buyer.example', ...many]),
+    );
+    host.checked.length = 0;
+    ({ checks } = await test(id));
+    expect(host.checked.map((c) => c.returnUrl)).toEqual([
+      'https://buyer.example/',
+      ...many.slice(0, 9).map((h) => `https://${h}/`),
+    ]);
+    expect(checks.Cart?.detail).toMatch(/the first 10; 3 more not asked/);
     // No return host: nothing for the core to check.
     await stored(id, "return_hosts = '[]'");
     host.checked.length = 0;

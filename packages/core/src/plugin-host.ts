@@ -74,7 +74,8 @@ export type PluginStartOrder = {
 
 /**
  * Why `openExternalCart` would refuse an input, by what it is about (null where nothing is wrong):
- * the input itself (`externalCartProblem`), its flow, and its customer.
+ * the input itself (`externalCartProblem`), its flow, and its customer. The flow and customer are
+ * looked up only when the input has no problem; otherwise both are null, unchecked.
  */
 export type ExternalCartProblems = {
   input: string | null;

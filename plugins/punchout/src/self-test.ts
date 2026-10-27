@@ -94,12 +94,17 @@ function recordChecks(p: Partner): Check[] {
   ];
 }
 
+/** The most return hosts a test asks the core about; past it the rest are checked here alone. */
+export const MAX_CHECKED_HOSTS = 10;
+
 /** What the core says of the carts it would open, one check each for the cart, flow and customer. */
 async function coreChecks(env: Env, p: Partner): Promise<Check[]> {
   const labels = ['Cart', 'Flow', 'Customer'];
   const all = (detail: string) => labels.map((label) => ({ label, ok: false, detail }));
-  // One cart per return host, as a session returning to it would ask for one.
-  const hosts = p.returnHosts.filter(hostName).slice(0, 20);
+  // The core's answer differs between hosts only where a host is its own (it never sends a cart
+  // back to itself), so it is asked once per distinct host, up to a cap.
+  const usable = [...new Set(p.returnHosts.filter(hostName))];
+  const hosts = usable.slice(0, MAX_CHECKED_HOSTS);
   if (!hosts.length) return all('Not checked: the partner has no usable return host.');
   const ungranted = all(
     'Not checked: this deployment doesn’t let Punchout open carts. Ask whoever runs it to grant it.',
@@ -121,33 +126,41 @@ async function coreChecks(env: Env, p: Partner): Promise<Check[]> {
   } catch {
     return all('Not checked: OrderLoop couldn’t be reached. Try again.');
   }
-  const refused = answers.find((a) => !a.ok);
-  if (refused || !answers[0]?.ok) return ungranted;
   const problems = answers.flatMap((a) => (a.ok ? [a.problems] : []));
+  if (problems.length < answers.length) return ungranted;
   const inputProblems = [...new Set(problems.map((x) => x.input).filter((x) => x !== null))];
-  const { flow, customer } = problems[0]!;
+  // The core looks the flow and customer up only for a cart it would open: any host's will do.
+  const clean = problems.find((x) => x.input === null);
+  const unchecked = 'Not checked: OrderLoop wouldn’t open the cart (see Cart).';
+  const skipped = usable.length - hosts.length;
   return [
     {
       label: 'Cart',
       ok: !inputProblems.length,
       detail: inputProblems.length
         ? inputProblems.join(' ')
-        : 'OrderLoop accepts the cart a session would open, returning to each host.',
+        : `OrderLoop accepts the cart a session would open, returning to each host${skipped ? ` (the first ${MAX_CHECKED_HOSTS}; ${skipped} more not asked)` : ''}.`,
     },
-    {
-      label: 'Flow',
-      ok: !flow,
-      detail: flow ? `${p.flowId}: ${flow}` : `${p.flowId} is published and prices its carts.`,
-    },
-    {
-      label: 'Customer',
-      ok: !customer,
-      detail: customer
-        ? `${p.customerId}: ${customer}`
-        : p.customerId
-          ? `Carts and orders are for ${p.customerId}, at its contract prices.`
-          : 'None: its carts and orders aren’t for a customer.',
-    },
+    !clean
+      ? { label: 'Flow', ok: false, detail: unchecked }
+      : {
+          label: 'Flow',
+          ok: !clean.flow,
+          detail: clean.flow
+            ? `${p.flowId}: ${clean.flow}`
+            : `${p.flowId} is published and prices its carts.`,
+        },
+    !clean
+      ? { label: 'Customer', ok: false, detail: unchecked }
+      : {
+          label: 'Customer',
+          ok: !clean.customer,
+          detail: clean.customer
+            ? `${p.customerId}: ${clean.customer}`
+            : p.customerId
+              ? `Carts and orders are for ${p.customerId}, at its contract prices.`
+              : 'None: its carts and orders aren’t for a customer.',
+        },
   ];
 }
 
