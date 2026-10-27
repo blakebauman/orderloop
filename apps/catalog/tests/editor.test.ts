@@ -42,6 +42,31 @@ async function gappy(over: Partial<ProductInput> = {}) {
 }
 
 describe('staging and publishing', () => {
+  it('keeps a publish in Published today even with gaps left, then puts it back on Gaps', async () => {
+    // Missing French in its description and its title.
+    const p = await gappy({ title: { en: 'Tee' } });
+    await api.stageEdits([set(p.key, titleFr, 'T-shirt')], ed);
+    const [r] = await publish([p.key]);
+    expect(r?.status).toBe('published');
+    expect(await card('published', p.key)).toMatchObject({ kinds: { missing_description: 1 } });
+    expect(await card('gaps', p.key)).toBeUndefined();
+    // A day later it reads as Gaps at once, and the alarm moves its row for good.
+    const stub = env.SHARD.getByName(`shard-${productShard(p.key)}`);
+    await runInDurableObject(stub, (_, state) => {
+      state.storage.sql.exec('UPDATE board SET at = 0 WHERE key = ?', p.key);
+      state.storage.sql.exec('UPDATE revisions SET at = 0 WHERE key = ?', p.key);
+    });
+    expect(await card('published', p.key)).toBeUndefined();
+    expect(await card('gaps', p.key)).toMatchObject({ kinds: { missing_description: 1 } });
+    await runInDurableObject(stub, async (shard) => {
+      await (shard as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const col = await runInDurableObject(stub, (_, state) =>
+      state.storage.sql.exec<{ col: string }>('SELECT col FROM board WHERE key = ?', p.key).one(),
+    );
+    expect(col.col).toBe('gaps');
+  });
+
   it('stages an edit without changing the product, then publishes it and moves the card', async () => {
     const p = await gappy();
     expect(await card('gaps', p.key)).toBeDefined();
@@ -49,9 +74,15 @@ describe('staging and publishing', () => {
     expect(await api.stageEdits([set(p.key, descFr, 'Un t-shirt en coton.')], ed)).toEqual([
       { key: p.key, ref: descFr, ok: true },
     ]);
-    // Staged only: nothing live has changed, and the gap stands until it is published.
+    // Staged only: nothing live has changed, and the gap stands until it is published; the card
+    // moves to Staged, still counting it.
     expect((await api.getProduct(p.key))?.description).toEqual({ en: 'A cotton tee.' });
-    expect(await card('gaps', p.key)).toMatchObject({ staged: 1, failure: null });
+    expect(await card('staged', p.key)).toMatchObject({
+      staged: 1,
+      failure: null,
+      kinds: { missing_description: 1 },
+    });
+    expect(await card('gaps', p.key)).toBeUndefined();
 
     const [r] = await publish([p.key]);
     expect(r).toMatchObject({ key: p.key, status: 'published', version: 2 });

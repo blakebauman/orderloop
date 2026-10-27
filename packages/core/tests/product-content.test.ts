@@ -9,6 +9,7 @@ import {
   fieldId,
   fieldLocales,
   fieldValue,
+  gapGroup,
   MAX_DRAFT_FIELDS,
   overrideConflict,
   parseFieldId,
@@ -360,5 +361,15 @@ describe('draft targets', () => {
     expect(fieldLocales(feed, { field: 'attribute', code: 'care' })).toEqual(feed.attributes.care);
     expect(fieldLocales(feed, { field: 'mediaAlt', src: 'nope' })).toEqual({});
     expect(fieldLocales(feed, { field: 'status' })).toEqual({});
+  });
+});
+
+describe('gap groups', () => {
+  it('put a product in the first group that applies, what needs a person first', () => {
+    expect(gapGroup({ conflict: 1, rejected: 1, missing_title: 2 })).toBe('conflict');
+    expect(gapGroup({ rejected: 1, missing_required: 1 })).toBe('rejected');
+    expect(gapGroup({ missing_required: 1, missing_alt: 1 })).toBe('missing_required');
+    expect(gapGroup({ missing_alt: 1 })).toBe('missing');
+    expect(gapGroup({})).toBe('missing');
   });
 });

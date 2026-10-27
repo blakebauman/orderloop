@@ -3,7 +3,7 @@
  * Worker's `CatalogApi` entrypoint over a service binding. Callers never import catalog source.
  */
 
-import type { FieldRef, Gap, GapKind } from './content';
+import type { FieldRef, Gap, GapGroup, GapKind } from './content';
 import type {
   Category,
   CategoryInput,
@@ -118,6 +118,8 @@ export type BoardCard = {
   /** Its gaps by kind. */
   kinds: Partial<Record<GapKind, number>>;
   rejection: Rejection | null;
+  /** The locales it lacks text in (its missing title, description, attribute and alt gaps), sorted. */
+  locales: string[];
   /** Edits staged for it, in any column. */
   staged: number;
   /** Assistant drafts waiting for review, in any column. */
@@ -250,6 +252,8 @@ export type BoardSummary = {
   /** Products in each column. */
   columns: Record<BoardColumn, number>;
   /** Gaps of each kind, and how many products have one. */
+  /** Products in the Gaps column by group (`gapGroup`): each product counts once. */
+  gapGroups: Record<GapGroup, number>;
   gapsByKind: Partial<Record<GapKind, { gaps: number; products: number }>>;
   /** The most recent finished feed, and one still running. */
   lastFeed: FeedStatus | null;

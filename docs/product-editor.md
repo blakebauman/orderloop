@@ -51,7 +51,7 @@ the same shape, rendered by the unchanged `renderForChannel`.
 | `drafts` | Unaccepted assistant drafts, with the field's live value they were drafted against (stale when it changes) |
 | `gaps` | `(key, kind, field, locale, channel)`, rewritten in every transaction that changes the product |
 | `rejections` | The last feed row refused for a key, with its issues |
-| `board` | One row per product on the board: its column (conflicts and gaps → Gaps, then Staged, Drafted, Published for a day) and counts; staged counts and failures are read from `staged` |
+| `board` | One row per product on the board: its column (work in flight first, so a card moves right as it is worked on: staged edits → Staged, then drafts → Drafted, then Published for a day after a publish (with only missing text left; a conflict, refused row or missing required attribute goes to Gaps at once), then gaps → Gaps; a publish over a day old reads as Gaps if gaps are left, and the alarm moves its row) and counts; staged counts and failures are read from `staged` |
 | `revisions` | Per-field history for the sheet, the last 50 per key |
 
 Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or merged there,
@@ -71,7 +71,21 @@ exist now (their columns in [Data model](data-model.md#product-catalog)).
 | 7 | `draft_product_content`: core tool (`ASSISTANT_TOOLS`, operator, no confirm; `draftTargets`, `MAX_DRAFT_FIELDS`), engine executor (`assistant/product-draft.ts`) through `runJson` with the product in a `dataBlock`, saving with `putDrafts` over `CATALOG`; `EngineRpc.draftProductContent`; the web route `POST /api/v1/catalog/products/:key/draft`. The engine saves the drafts on every path (the tool, MCP, A2A, the RPC); the web route audits its own calls, the engine the others | Built |
 | 8 | Backfill without a manual step: a shard holding products from before the gap index (no `gaps_built`) queues the alarm's resumable rebuild for itself as it wakes (`CatalogShard.backfillGaps`), so it ships through CI; `POST /api/v1/catalog/gaps/rebuild` stays for recounting now | Built |
 
-The board UI follows PRs 5 and 7. Its design brief is the surface brief for `app/routes/catalog.tsx`.
+## The Catalog page
+
+`/catalog` (under More; `apps/web/app/routes/catalog.tsx`, design brief in the surface brief for that
+file) draws the board: a line on the last feed, then Gaps, Drafted, Staged (Publish at its head, for
+the ticked products) and Published today. Gaps groups each product once, in the first group that
+applies: Conflicts, Rejected rows, Missing required, Missing text (`groupOf` in
+`components/catalog/labels.ts`); "Draft these" on Missing text has the assistant draft the products
+shown, one after another. A card opens the product's sheet (`?product=<key>`,
+`components/catalog/sheet.tsx`): every editable field in every locale side by side, each marked from
+feed, edited here, draft, staged, conflict or missing, opened on the field that put it on the board.
+Writes go to `/catalog/action` (`routes/catalog-action.ts`) as the signed-in operator, audited
+`via: 'app'` (`lib/catalog-board.server.ts`); more cards come from `/catalog/cards`. Below `lg` the
+columns are a segmented control, and editing and publishing say they need a larger screen; drafts can
+be accepted or dropped anywhere. Keys: J/K move, Enter opens, D drafts, A accepts, X ticks, ⌘Enter
+publishes. Cards glide to their new column (a FLIP, 200ms), at once with reduced motion.
 
 ## Decisions
 

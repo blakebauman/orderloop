@@ -6,7 +6,7 @@ Order Loop is an agent loop for the commerce order lifecycle on Cloudflare. It's
 
 ```bash
 pnpm install
-pnpm web:dev                 # web + engine together (engine is a Vite auxiliary Worker)
+pnpm web:dev                 # web, engine and catalog together (engine and catalog are Vite auxiliary Workers)
 pnpm test                    # turbo → vitest (core in node, engine and catalog e2e in workerd, web in node)
 pnpm lint                    # turbo → biome check
 pnpm check-types             # turbo → tsc --noEmit (web runs react-router typegen first)

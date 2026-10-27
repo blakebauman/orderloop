@@ -155,6 +155,15 @@ const asOverride = (o: OverrideRow): BasedOverride => ({
 
 /** How long a product stays in the board's Published column. */
 const PUBLISHED_FOR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A board row's column as it stands now (`cutoff` is the SQL for now minus PUBLISHED_FOR_MS): a
+ * product published over a day ago is back on Gaps if it has gaps left, and off the board if not.
+ * The alarm moves such rows for good (`refreshBoard`); reads don't wait for it.
+ */
+const liveCol = (a: string, cutoff: string) =>
+  `(CASE WHEN ${a}col = 'published' AND ${a}at <= ${cutoff}
+     THEN CASE WHEN ${a}kinds != '{}' THEN 'gaps' END ELSE ${a}col END)`;
 /** Published changes kept per product for the sheet's history. */
 const REVISIONS_KEPT = 50;
 
@@ -834,14 +843,19 @@ export class CatalogShard extends DurableObject<Env> {
       this.sql
         .exec<{ at: number | null }>('SELECT MAX(at) AS at FROM revisions WHERE key = ?', key)
         .one().at ?? 0;
-    const col: BoardColumn | null = Object.keys(kinds).length
-      ? 'gaps'
-      : staged
-        ? 'staged'
-        : drafted
-          ? 'drafted'
-          : published > now - PUBLISHED_FOR_MS
-            ? 'published'
+    // Work in flight first, so a card moves right as it is worked on: staged edits, then drafts,
+    // then what went live today, then gaps. A product published with only missing text left stays
+    // in Published today, counting it, and goes back to Gaps when its day is up (`liveCol`); one
+    // that needs a person (a conflict, a refused row, a missing required attribute) goes at once.
+    const needsPerson = !!(kinds.conflict || kinds.rejected || kinds.missing_required);
+    const col: BoardColumn | null = staged
+      ? 'staged'
+      : drafted
+        ? 'drafted'
+        : published > now - PUBLISHED_FOR_MS && !needsPerson
+          ? 'published'
+          : Object.keys(kinds).length
+            ? 'gaps'
             : null;
     if (!col) {
       this.sql.exec('DELETE FROM board WHERE key = ?', key);
@@ -873,18 +887,33 @@ export class CatalogShard extends DurableObject<Env> {
   /** This shard's board: products per column, gaps per kind, and whether its index is built. */
   boardCounts(): {
     columns: Record<string, number>;
+    groups: Record<string, number>;
     kinds: Record<string, { gaps: number; products: number }>;
     built: boolean;
   } {
     const columns = Object.fromEntries(
       this.sql
         .exec<{ col: string; n: number }>(
-          `SELECT col, COUNT(*) AS n FROM board WHERE col != 'published' OR at > ? GROUP BY col`,
+          `SELECT col, COUNT(*) AS n FROM (SELECT ${liveCol('', '?')} AS col FROM board)
+           WHERE col IS NOT NULL GROUP BY col`,
           Date.now() - PUBLISHED_FOR_MS,
         )
         .toArray()
         .map((r) => [r.col, r.n]),
     );
+    // Each product in Gaps once, in the first group that applies (`gapGroup`).
+    const groups = this.sql
+      .exec<Record<string, number>>(
+        `SELECT COALESCE(SUM(c), 0) AS conflict, COALESCE(SUM(NOT c AND r), 0) AS rejected,
+           COALESCE(SUM(NOT c AND NOT r AND q), 0) AS missing_required,
+           COALESCE(SUM(NOT c AND NOT r AND NOT q), 0) AS missing
+         FROM (SELECT json_type(kinds, '$.conflict') IS NOT NULL AS c,
+                 json_type(kinds, '$.rejected') IS NOT NULL AS r,
+                 json_type(kinds, '$.missing_required') IS NOT NULL AS q
+               FROM board WHERE ${liveCol('', '?')} = 'gaps')`,
+        Date.now() - PUBLISHED_FOR_MS,
+      )
+      .one();
     const kinds = Object.fromEntries(
       this.sql
         .exec<{ kind: string; gaps: number; products: number }>(
@@ -896,7 +925,7 @@ export class CatalogShard extends DurableObject<Env> {
     const built =
       this.setting('gaps_built') === 1 ||
       !this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e;
-    return { columns, kinds, built };
+    return { columns, groups, kinds, built };
   }
 
   /** Up to `limit` cards of a column after `cursor`, in key order, optionally with a gap kind. */
@@ -920,15 +949,17 @@ export class CatalogShard extends DurableObject<Env> {
         staged: number;
         drafts: number;
         failure: string | null;
+        locales: string;
       }>(
-        `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at,
+        `SELECT b.key, ${liveCol('b.', '?5')} AS col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at,
            (SELECT COUNT(*) FROM staged s WHERE s.key = b.key) AS staged,
            (SELECT MAX(failure) FROM staged s WHERE s.key = b.key) AS failure,
-           (SELECT COUNT(*) FROM drafts d WHERE d.key = b.key) AS drafts
+           (SELECT COUNT(*) FROM drafts d WHERE d.key = b.key) AS drafts,
+           (SELECT json_group_array(DISTINCT g.locale) FROM gaps g
+              WHERE g.key = b.key AND g.kind IN ('missing_title', 'missing_description', 'missing_attribute', 'missing_alt')) AS locales
          FROM board b LEFT JOIN rejections r ON r.key = b.key
-         WHERE b.col = ?1 AND b.key > ?2
+         WHERE ${liveCol('b.', '?5')} = ?1 AND b.key > ?2
            AND (?3 IS NULL OR EXISTS (SELECT 1 FROM gaps g WHERE g.key = b.key AND g.kind = ?3))
-           AND (b.col != 'published' OR b.at > ?5)
          ORDER BY b.key LIMIT ?4`,
         q.column,
         q.cursor ?? '',
@@ -951,6 +982,7 @@ export class CatalogShard extends DurableObject<Env> {
                 issues: JSON.parse(r.issues) as Issue[],
                 at: r.rejected_at ?? 0,
               },
+        locales: (JSON.parse(r.locales) as string[]).sort(),
         staged: r.staged,
         drafts: r.drafts,
         failure: r.failure,
@@ -1669,10 +1701,15 @@ export class CatalogShard extends DurableObject<Env> {
    */
   override async alarm() {
     this.sql.exec('DELETE FROM applied WHERE at < ?', Date.now() - APPLIED_TTL_MS);
-    this.sql.exec(
-      `DELETE FROM board WHERE col = 'published' AND at <= ?`,
-      Date.now() - PUBLISHED_FOR_MS,
-    );
+    // A day after a publish: back to Gaps if the product has gaps left, else off the board.
+    const now = Date.now();
+    for (const { key } of this.sql
+      .exec<{ key: string }>(
+        `SELECT key FROM board WHERE col = 'published' AND at <= ?`,
+        now - PUBLISHED_FOR_MS,
+      )
+      .toArray())
+      this.refreshBoard(key, now);
     const deadline = Date.now() + ALARM_WINDOW_MS;
     const inFlight = new Set<string>();
     const running = new Set<Promise<void>>();

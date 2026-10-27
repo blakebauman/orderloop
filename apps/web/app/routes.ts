@@ -37,6 +37,9 @@ export default [
       route('flows/:flowId', 'routes/flow-editor.tsx'),
       route('approvals', 'routes/approvals.tsx'),
       route('commerce', 'routes/commerce.tsx'),
+      // The product editor: what the last feed left, the assistant's drafts, staged edits, and
+      // publishing them (lib/catalog-board.server.ts, docs/product-editor.md).
+      route('catalog', 'routes/catalog.tsx'),
       // A customer and its tax exemption certificates (lib/customers.server.ts).
       route('customers/:customerId', 'routes/customer.tsx'),
       // Revenue, endings, payments and step timings over 7, 30 or 90 days (lib/metrics.server.ts).
@@ -53,6 +56,8 @@ export default [
   ]),
   // Resource routes the editor and order page post to.
   route('flows/:flowId/action', 'routes/flow-action.ts'),
+  route('catalog/action', 'routes/catalog-action.ts'),
+  route('catalog/cards', 'routes/catalog-cards.ts'),
   route('orders/:orderId/action', 'routes/order-action.ts'),
   route('orders/:orderId/records', 'routes/order-records.ts'),
   route('customers/:customerId/tax-certificates/:certificateId', 'routes/tax-certificate-file.ts'),
