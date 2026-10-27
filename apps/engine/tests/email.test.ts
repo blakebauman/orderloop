@@ -4,7 +4,7 @@ import type { OrderState } from '@orderloop/core';
 import { createDb, inboundEmails } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { receiveEmail } from '../src/email';
+import { readAttachments, receiveEmail } from '../src/email';
 import { ensureTemplates } from '../src/flows';
 
 type Sent = { reject?: string; replies: unknown[] };
@@ -207,5 +207,34 @@ describe('email intake', () => {
     const s = await state((out as { orderId: string }).orderId);
     expect(s.order).toMatchObject({ model: 'procurement', customerId: undefined });
     expect(s.order!.meta).toMatchObject({ senderMatch: 'allowlist' });
+  });
+});
+
+describe('attachment conversion', () => {
+  it('goes through the gateway, keeping no payload in its log', async () => {
+    const sent: unknown[] = [];
+    const e = {
+      ...env,
+      AI_MODE: 'model',
+      AI_GATEWAY_ID: 'gw',
+      AI: {
+        toMarkdown: async (_file: unknown, options: unknown) => {
+          sent.push(options);
+          return { format: 'markdown', data: '| SKU | Qty |' };
+        },
+      },
+    } as unknown as Env;
+    const out = await readAttachments(e, [
+      { filename: 'po.pdf', mimeType: 'application/pdf', content: new ArrayBuffer(8) },
+    ] as never);
+    expect(out).toEqual([{ filename: 'po.pdf', text: '| SKU | Qty |' }]);
+    expect(sent[0]).toEqual({
+      gateway: {
+        id: 'gw',
+        collectLog: String(env.AI_GATEWAY_LOGS) === 'true',
+        metadata: { prompt: 'attachment' },
+      },
+      extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
+    });
   });
 });
