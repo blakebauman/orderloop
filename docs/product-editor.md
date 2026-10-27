@@ -67,7 +67,7 @@ exist now (their columns in [Data model](data-model.md#product-catalog)).
 | 3 | Shard: `feed_rows`, `overrides`, `staged` and `revisions`, with `apply` applying overrides over feed rows and indexing `conflict`s (`overrideConflict`); `stageEdits`, `discardStaged`, `publishStaged` (idempotent per request, `Promise.allSettled` across shards so one shard's failure leaves only its products staged), `getProductSheet`; the board's Staged and Published columns | Built |
 | 4 | Drafts: `putDrafts`, `discardDrafts`, accepting through `stageEdits` (which consumes the field's draft); the board's Drafted column and `drafts` counts; drafts on the sheet | Built |
 | 5 | Web API under `/api/v1/catalog` (`board`, `board/:column`, `products/:key/sheet`, `edits`, `edits/discard`, `edits/publish`, `drafts`, `drafts/discard`, `gaps/rebuild`) with audit actions (`catalog.edits_*`, `catalog.drafts_*`, `catalog.gaps_rebuilt`) and OpenAPI | Built |
-| 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Planned |
+| 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Built |
 | 7 | `draft_product_content` (core tool, engine executor through `runJson` with the product in a `dataBlock`, `EngineRpc.draftProductContent`, the web route that saves drafts) | Planned |
 | 8 | Backfill: `POST /api/v1/catalog/gaps/rebuild` once per deployment after PR 2 | Planned |
 

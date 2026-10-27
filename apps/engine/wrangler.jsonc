@@ -75,6 +75,11 @@
     }
   ],
   "r2_buckets": [{ "binding": "DOCS", "bucket_name": "orderloop-docs" }],
+  // The product catalog, for the assistant's product content drafts (docs/product-editor.md). The
+  // catalog deploys before the engine. The engine's tests stub it (vitest.config.ts).
+  "services": [
+    { "binding": "CATALOG", "service": "orderloop-catalog", "entrypoint": "CatalogApi" }
+  ],
   // The product index: an embedding of each SKU's name (@cf/baai/bge-base-en-v1.5, 768 dimensions,
   // cosine), which ai.extract queries to find the catalog entries a document means
   // (src/product-index.ts). Optional in code: without it, extraction ranks by words alone.

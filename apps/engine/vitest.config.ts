@@ -133,15 +133,18 @@ export default defineConfig(async () => {
               : {}),
           },
           ...extra,
-          ...(plugins.length
-            ? {
-                workers: plugins,
-                serviceBindings: {
+          ...(plugins.length ? { workers: plugins } : {}),
+          serviceBindings: {
+            // The catalog isn't run here: a stub stands in for the binding, which workerd needs
+            // defined to start.
+            CATALOG: () => new Response('no catalog in the engine tests', { status: 503 }),
+            ...(plugins.length
+              ? {
                   PLUGIN_EXAMPLE: 'orderloop-plugin-example',
                   PLUGIN_FIXTURE_CARRIER: 'orderloop-plugin-fixture-carrier',
-                },
-              }
-            : {}),
+                }
+              : {}),
+          },
         },
       }),
     ],

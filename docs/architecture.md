@@ -21,7 +21,8 @@ browser ──► orderloop-web (apps/web, React Router on Workers)
                                                     ├─ OrderLoop      Workflow, one instance per generation
                                                     ├─ Replenish      Workflow, daily cron
 inbound mail ── Email Routing ──email()────────────►├─ receiveEmail   email intake (email.ts)
-                                                    └─ Workers AI, D1, R2
+                                                    ├─ Workers AI, D1, R2
+                                                    └─ CATALOG ──RPC──► orderloop-catalog (CatalogApi)
 ```
 
 ## Packages

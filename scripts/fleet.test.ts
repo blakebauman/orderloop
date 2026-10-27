@@ -65,6 +65,11 @@ test('the engine config carries the deployment everywhere a name is account-wide
   assert.deepEqual(c.vectorize, [
     { binding: 'PRODUCT_VECTORS', index_name: 'orderloop-products-acme' },
   ]);
+  assert.deepEqual(c.services[0], {
+    binding: 'CATALOG',
+    service: 'orderloop-catalog-acme',
+    entrypoint: 'CatalogApi',
+  });
   assert.equal(c.workers_dev, false);
 });
 
@@ -416,8 +421,8 @@ const withLedger = toDeployment({
 test('no plugins changes nothing in the engine and web configs', () => {
   const none = toDeployment({ id: 'acme', ring: 'canary', slot: 2, d1Id: 'd1-acme' });
   assert.deepEqual(none.plugins, {});
-  assert.deepEqual(renderEngine(base('engine'), none).services, base('engine').services);
   const bindings = (c: { services: { binding: string }[] }) => c.services.map((s) => s.binding);
+  assert.deepEqual(bindings(renderEngine(base('engine'), none)), bindings(base('engine')));
   assert.deepEqual(bindings(renderWeb(base('web'), none)), bindings(base('web')));
 });
 
