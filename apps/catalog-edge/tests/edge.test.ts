@@ -44,6 +44,8 @@ describe('documents', () => {
     expect(r.headers.get('cache-control')).toBe(FRESH);
     expect(r.headers.get('etag')).toMatch(/^"[0-9a-f]+"$/);
     expect(r.headers.get('access-control-allow-origin')).toBe('*');
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(r.headers.get('strict-transport-security')).toBe('max-age=31536000');
   });
 
   it('answers 304 when the ETag still matches, which is how the cache revalidates', async () => {

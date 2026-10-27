@@ -6,7 +6,8 @@ on:
   pull_request:
 
 # A new push to a pull request supersedes its last run; a push to main never cancels one that
-# is already on its way to production.
+# has started. A run still waiting behind one is replaced by a newer push, which ships the same
+# commits and more.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

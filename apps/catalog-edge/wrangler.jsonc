@@ -10,7 +10,12 @@
   "preview_urls": false,
   // Logs from a 5% sample of requests: the edge serves every shopper read, and per-request detail
   // is in Analytics Engine.
-  "observability": { "enabled": true, "head_sampling_rate": 0.05, "issues": { "enabled": true } },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.05,
+    "redact_query_string": true,
+    "issues": { "enabled": true }
+  },
   "upload_source_maps": true,
   // Workers Caching: tiered, collapses concurrent misses, revalidates in the background. Kept across
   // deploys (paths carry the document format), so a deploy doesn't start from a cold cache.

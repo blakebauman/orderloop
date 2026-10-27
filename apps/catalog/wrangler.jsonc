@@ -8,7 +8,7 @@
   // routes.
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true, "issues": { "enabled": true } },
+  "observability": { "enabled": true, "redact_query_string": true, "issues": { "enabled": true } },
   "upload_source_maps": true,
   "durable_objects": {
     "bindings": [
@@ -39,7 +39,9 @@
       "name": "orderloop-catalog-feed",
       "binding": "FEED_IMPORT",
       "class_name": "FeedImport",
-      "limits": { "steps": 10000 }
+      "limits": { "steps": 10000 },
+      // As the engine's Workflows: a week for finished imports, a month for failed ones.
+      "default_retention": { "success_retention": "7 days", "error_retention": "30 days" }
     }
   ],
   "queues": {

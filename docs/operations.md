@@ -20,7 +20,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 |---|---|---|
 | `id` | required | Lowercase letters, digits and dashes; matches the file name. Names that would read as part of OrderLoop (`api`, `app`, `docs`, `www`, `staging` and the rest of `RESERVED` in `scripts/fleet.ts`) are refused unless the entry sets `domain` |
 | `ring` | required | `staging`, `internal`, `canary` or `general`: when CI deploys it (see [Rings](#rings)) |
-| `slot` | required | A number from 1 to 999, unique across the fleet. Rate-limit namespaces are per account, so the web Worker's are `<slot>001` and `<slot>002` |
+| `slot` | required | A number from 1 to 999, unique across the fleet. Rate-limit namespaces are per account, so the web Worker's are `<slot>001` through `<slot>005` (slot 1: `1001` to `1005`) |
 | `domain` | `<id>.orderloop.app` | The web app's custom domain |
 | `catalogDomain` | `catalog.<domain>` | The public catalog API's custom domain, served by `orderloop-catalog-edge` (a host name; anything else is refused). Rendered into its `routes`, and into the deploy's `CATALOG_DOMAIN`, which the smoke test requests |
 | `suffix` | `-<id>` | Added to every resource name. `orderloop` uses `""`, so its resources keep the base names |

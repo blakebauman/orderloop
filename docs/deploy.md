@@ -2,7 +2,7 @@
 
 Provision D1, R2 and KV, apply migrations, set secrets and deploy the catalog, engine and web Workers, plus the docs site.
 
-OrderLoop deploys as four Workers in one Cloudflare account:
+OrderLoop deploys as four Workers in the deployment's Cloudflare account, plus the docs site (`orderloop-docs`, on the deployments with `docs`) and a Worker for each plugin it runs as its own (`runtime: worker`, [plugins](plugins.md)):
 
 | Worker | Config | Role |
 |---|---|---|
@@ -69,7 +69,8 @@ Use a subdomain (for example `orders.example.com`) if the apex already receives 
    A literal rule matches one address, so add a rule for every address you want to receive,
    including any `+tag` variants. The defaults are `orders@`, `po@` and `purchasing@`; change the
    mapping with `INTAKE_MAILBOXES` ([Configuration](configuration.md#engine-variables)).
-4. Set the catch-all to **Drop**, so mail to other addresses is never accepted.
+4. Leave the catch-all disabled (orderloop.app's is), or set it to **Drop**, so mail to other
+   addresses never reaches a Worker or an inbox.
 5. Optionally, set the allowed senders:
    `pnpm --filter @orderloop/engine exec wrangler secret put INTAKE_ALLOWLIST`.
 
@@ -213,7 +214,9 @@ for a customer; add a required reviewer there to gate its releases). It needs
 them it fails rather than skipping. The environment must have `PRINCIPAL_KEY`, the key that signs the principal header the web Worker forwards and the engine checks: `fleet.ts secrets` fails the deploy, before it migrates anything, when it is missing (`provision.sh` generates one, including for an environment that already runs). It also fails a deployment the registry says takes payments through Stripe when the environment has no `STRIPE_SECRET_KEY`, or one in the other mode (test or live) from its `stripePublishableKey`. It must also have `DATA_KEY`, which encrypts the secrets both Workers store (two-factor, webhook and integration secrets, A2A push credentials): `fleet.ts secrets` fails the deploy before it migrates when it is missing too, and `provision.sh` generates it beside `PRINCIPAL_KEY`. `deploy.yml` passes both to the web and engine Workers. `PRINCIPAL_KEY_PREVIOUS` and `DATA_KEY_PREVIOUS` are set only during a rotation ([principal key](operations.md#rotating-the-principal-key), [data key](operations.md#rotating-the-data-key)). The environment's `SETUP_TOKEN`,
 `SHOPIFY_WEBHOOK_SECRET`, `PASSWORD_PEPPER` (made by `provision.sh`; never change it), `STRIPE_WEBHOOK_SECRET`, `OIDC_CLIENT_SECRET` (single sign-on; see [operations](operations.md#single-sign-on)), `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH` and `STRIPE_SECRET_KEY`, when set, go to the Workers with each deploy. The workflow's token is read-only
 (`permissions: contents: read`), actions are pinned to commit SHAs (Dependabot updates them), and a
-push to `main` never cancels a run already on its way to production.
+push to `main` never cancels a run that has started. A run still waiting for one ahead of it is
+replaced by a newer push (GitHub keeps one waiting run per concurrency group), which deploys
+everything the replaced run would have.
 
 Each deploy step runs through a small `retry` helper (three attempts, 15 then 30 seconds apart),
 because the Cloudflare API occasionally fails a request outright (codes `7403`, `10013`) and every
