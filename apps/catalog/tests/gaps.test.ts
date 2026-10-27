@@ -256,6 +256,55 @@ describe('rebuilding the index', () => {
     expect(await card(p.key)).toMatchObject({ kinds: { missing_title: 1 } });
   });
 
+  it('backfills a shard that held products before the index, once, from its own alarm', async () => {
+    const p = product({ title: { en: 'Old tee' } });
+    await api.putProducts([p], { by });
+    const stub = env.SHARD.getByName(`shard-${productShard(p.key)}`);
+    type Backfill = { backfillGaps(): Promise<void> };
+    // As the shard was before the index: products, but no gaps, board rows or `gaps_built`.
+    await runInDurableObject(stub, async (shard, state) => {
+      state.storage.sql.exec(`DELETE FROM settings WHERE k = 'gaps_built'`);
+      state.storage.sql.exec('DELETE FROM gap_rebuild');
+      state.storage.sql.exec('DELETE FROM gaps');
+      state.storage.sql.exec('DELETE FROM board');
+      // What the shard runs as it wakes on a Worker with the index.
+      await (shard as unknown as Backfill).backfillGaps();
+    });
+    expect(await card(p.key)).toBeUndefined();
+    expect((await api.catalogBoard()).indexBuilt).toBe(false);
+    // Queued once: waking again changes nothing.
+    const job = () =>
+      runInDurableObject(stub, async (shard, state) => {
+        await (shard as unknown as Backfill).backfillGaps();
+        return state.storage.sql.exec('SELECT requested FROM gap_rebuild').toArray();
+      });
+    const queued = await job();
+    expect(queued).toHaveLength(1);
+    expect(await job()).toEqual(queued);
+    expect(await runInDurableObject(stub, (_, state) => state.storage.getAlarm())).not.toBeNull();
+    // GAP_REBUILD_DELAY_MS holds it back in tests: make it due, then run the alarm.
+    await runInDurableObject(stub, (_, state) => {
+      state.storage.sql.exec('UPDATE gap_rebuild SET due = 0');
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await card(p.key)).toMatchObject({ kinds: { missing_title: 1 } });
+    expect((await api.catalogBoard()).indexBuilt).toBe(true);
+  });
+
+  it("doesn't backfill a shard whose index is built, or one that doesn't know its number", async () => {
+    const stub = env.SHARD.getByName('shard-backfill-unnumbered');
+    const rebuilds = await runInDurableObject(stub, async (shard, state) => {
+      const sql = state.storage.sql;
+      sql.exec(`DELETE FROM settings WHERE k = 'gaps_built'`);
+      await (shard as unknown as { backfillGaps(): Promise<void> }).backfillGaps();
+      const unnumbered = sql.exec('SELECT * FROM gap_rebuild').toArray().length;
+      sql.exec(`INSERT OR REPLACE INTO settings VALUES ('shard', 3), ('gaps_built', 1)`);
+      await (shard as unknown as { backfillGaps(): Promise<void> }).backfillGaps();
+      return [unnumbered, sql.exec('SELECT * FROM gap_rebuild').toArray().length];
+    });
+    expect(rebuilds).toEqual([0, 0]);
+  });
+
   it('refuses a column that does not exist', async () => {
     // Settled with then: expect().rejects would read properties off the RPC promise, and each
     // read pipelines another call that rejects unhandled.

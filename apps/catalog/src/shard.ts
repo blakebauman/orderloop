@@ -255,12 +255,29 @@ export class CatalogShard extends DurableObject<Env> {
     if (!columns.has('forced'))
       this.sql.exec('ALTER TABLE outbox ADD COLUMN forced INTEGER NOT NULL DEFAULT 0');
     // Every write keeps the gap index from here on: a shard with no products yet is complete.
-    // One that held products before the index existed is complete once `refreshGaps` has run.
+    // One that held products before the index existed is complete once `refreshGaps` has run,
+    // which it queues for itself (`backfillGaps`).
     if (
       this.setting('gaps_built') === undefined &&
       !this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e
     )
       this.sql.exec(`INSERT INTO settings VALUES ('gaps_built', 1)`);
+    void ctx.blockConcurrencyWhile(() => this.backfillGaps());
+  }
+
+  /**
+   * A shard that held products before the gap index existed (it has no `gaps_built`) queues the
+   * rebuild a channel change does, once, the first time it wakes on a Worker with the index, so no
+   * deployment needs `rebuildGaps` run by hand. Until it finishes the board says the index isn't
+   * built. A shard that has never been told its number waits for `rebuildGaps`, which tells it.
+   */
+  private async backfillGaps() {
+    if (this.setting('gaps_built') !== undefined || this.setting('shard') === undefined) return;
+    const now = Date.now();
+    const due = now + (Number(this.env.GAP_REBUILD_DELAY_MS) || 0);
+    this.sql.exec('INSERT OR REPLACE INTO gap_rebuild VALUES (1, ?, ?, NULL)', now, due);
+    this.sql.exec(`INSERT INTO settings VALUES ('gaps_built', 0)`);
+    await this.scheduleAt(due);
   }
 
   private setting(k: string): number | undefined {

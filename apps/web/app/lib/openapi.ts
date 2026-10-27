@@ -755,7 +755,7 @@ export function openApiDocument(serverUrl: string) {
         get: {
           summary: "The product editor's board",
           description:
-            'Products per column (`gaps`, `drafted`, `staged`, `published` in the last day), gaps and products per gap kind, the latest finished feed and one still running. `indexBuilt` is false until every product stored before the gap index existed has been counted (`POST /api/v1/catalog/gaps/rebuild`).',
+            'Products per column (`gaps`, `drafted`, `staged`, `published` in the last day), gaps and products per gap kind, the latest finished feed and one still running. `indexBuilt` is false until every product stored before the gap index existed has been counted, which the catalog does on its own shortly after it is updated, and while a channel change is being recounted.',
           responses: {
             '200': ok('{ board: { columns, gapsByKind, lastFeed, runningFeed, indexBuilt } }'),
             ...errors,
@@ -875,7 +875,7 @@ export function openApiDocument(serverUrl: string) {
         post: {
           summary: "Recount every product's content gaps (admin)",
           description:
-            'Reads every product. Needed once for products stored before the gap index existed; channel changes recount on their own.',
+            'Reads every product. Products stored before the gap index existed and channel changes are recounted on their own; this recounts now.',
           responses: { '200': ok('{ products }'), ...errors },
         },
       },
