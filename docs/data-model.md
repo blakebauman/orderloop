@@ -352,7 +352,9 @@ The daily catalog backups and what a point-in-time restore keeps share the bucke
 | `backups/<yyyy-mm-dd>/<object>/<table>-<n>.ndjson` | Up to 1,000 rows of one table of `meta` or `shard-<n>`, a row a line (a JSON object keyed by column name); custom metadata `last` (the last rowid it holds), `rows` and `columns`. `meta` copies `types`, `channels`, `categories` and `settings`; a shard copies `products`, `aliases`, `settings`, `feed_rows`, `overrides`, `staged`, `revisions`, `drafts`, `rejections`, `gaps` and `board` (`BACKUP_TABLES` in `apps/catalog/src/backup.ts`) |
 | `backups/<yyyy-mm-dd>/<object>/bookmark.json` | `{ "bookmark" }`: the object's point-in-time-recovery bookmark when its copy started (also its custom metadata) |
 | `backups/<yyyy-mm-dd>/manifest.json` | Written once every object is copied: `format` (`1`), `date`, `finishedAt`, `docFormat`, `shards`, and `objects`, per object its `bookmark` and per table `{ rows, chunks, columns }` |
-| `restores/<instance id>/shard-<n>/published-<n>.ndjson` | A point-in-time restore's copy of a shard's `published` rows from before it rewound |
+| `restores/<instance id>/before.json` | `{ rev, channels, undo }`: the catalog before that restore (or before the earliest run it merges); `undo` maps each object to its bookmark |
+| `restores/<instance id>/shard-<n>/published-<n>.ndjson` | A point-in-time restore's copy of a shard's `published` rows, made in the same call that set its rewind |
+| `restores/<instance id>/<object>/undo.json` | `{ "undo" }` (also its custom metadata): the bookmark that undoes the object's rewind, written just before it restarts |
 
 `backups/` expires after the deployment's `catalogBackupDays` (default 90; lifecycle rule
 `backups`) and is locked for as long (bucket lock rule `catalog-backups`), so nothing overwrites or

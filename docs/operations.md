@@ -346,13 +346,25 @@ trigger` with the deployment's own Workflow name (`orderloop-catalog-restore` fo
 `orderloop-catalog-restore-acme` for acme). Pause feeds and product edits while it runs: a write
 that lands mid-restore may be lost.
 
-Every mode ends the same way: the channels the restore removed are taken down (as deleting a
-channel does), the category trees republished, the config revision moved past every one served
-before, and every product, and every key published before, republished in full, so catalog-edge,
-listings, search and the order prices in D1 follow the restored catalog and nothing it removed
-stays published. Watch it with `wrangler workflows instances describe
-orderloop-catalog-restore<suffix> <instance id>`. Its output is `{ mode, undo, rev, republished,
-channelsRemoved }`; `undo` maps each object to its bookmark from before. Keep it.
+Every mode ends the same way: every channel still published somewhere (in the shards' records
+or R2's documents) that the restored config lacks is taken down (as deleting a channel does), the
+category trees republished, the config revision moved past every one served before, and every
+product, and every key published before, republished in full, so catalog-edge, listings, search
+and the order prices in D1 follow the restored catalog and nothing it removed stays published.
+Watch it with `wrangler workflows instances describe orderloop-catalog-restore<suffix> <instance
+id>`. Its output is `{ mode, undo, rev, republished, channelsRemoved }`; `undo` maps each object to
+its bookmark from before the restore, also kept at `restores/<instance id>/before.json` (expired
+after 30 days). Keep it.
+
+**If a restore fails**, its error says so and names that instance: what it changed stays changed.
+Run the same restore again with `"merge": ["<failed instance id>"]` added to finish it (list several
+earliest first); the new run takes the failed one's `before`, so its `undo` is still the catalog
+from before either, and joins the `published` copies the failed one made. Or restore the `undo`
+bookmarks in its `before.json` to take it back:
+
+```bash
+wrangler r2 object get orderloop-catalog<suffix>/restores/<instance id>/before.json --remote --pipe | jq .undo
+```
 
 **To a time in the last 30 days** (point-in-time recovery; milliseconds or ISO 8601):
 
@@ -360,10 +372,11 @@ channelsRemoved }`; `undo` maps each object to its bookmark from before. Keep it
 wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"at": "2026-10-27T09:30:00Z"}'
 ```
 
-Every object's bookmark for that time is found first, so a time out of reach changes nothing. Each
-shard's `published` table is copied to `restores/<instance id>/` (expired after 30 days), every
-object is rewound and restarted, and the copies are joined back, so the republish takes down what
-the rewound products no longer publish.
+Every object's bookmark for that time is found first, so a time out of reach changes nothing. Then
+each object in turn copies its `published` table to `restores/<instance id>/` and sets its rewind
+in one call, with nothing able to publish in between, and restarts on the restored storage; the
+step checks that it did restart before going on. The copy is joined back, so the republish takes
+down what the rewound products no longer publish.
 
 **Undo a restore** by restoring the bookmarks in its output's `undo` (any of `meta` and
 `shard-<n>`):
@@ -372,21 +385,20 @@ the rewound products no longer publish.
 wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"bookmarks": {"meta": "…", "shard-0": "…"}}'
 ```
 
-If a point-in-time or bookmark restore fails after some objects were rewound, run it again with
-`"merge": ["<failed instance id>"]` added, so the published state that instance copied is joined
-too.
-
 **From a backup** (any day still kept, older than 30 days included):
 
 ```bash
 wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"backup": "2026-10-20"}'
 ```
 
-It reads that day's manifest (refused when there is none, or it has another format or shard count),
-then replaces each object's tables with the backup's rows, one step per object (a retried step
-clears and loads again). Shards keep their `published` table, so the republish takes down what the
-backup doesn't have, and their product id counter never goes back. Its `undo` bookmarks rewind the
-objects to just before the load, while that is within 30 days.
+It first checks the whole backup without changing anything: the manifest (its format and shard
+count), every table in it with columns the tables still have, and every chunk there with the rows
+the manifest counts. A backup that fails that is refused, naming what is wrong. Then it replaces
+each object's tables with the backup's rows, one step per object (a retried step clears and loads
+again); nothing publishes until every object is loaded. Shards keep their `published` table, so
+the republish takes down what the backup doesn't have, and their product id counter never goes
+back. Its `undo` bookmarks rewind the objects to just before the load, while that is within 30
+days.
 
 ## Bucket locks
 

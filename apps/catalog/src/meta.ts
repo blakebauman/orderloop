@@ -29,11 +29,15 @@ import {
   currentBookmark,
   insertRows,
   readPage,
+  rewindInPlace,
+  tableColumns,
 } from './backup';
 import type { CatalogConfig } from './config';
 
 export class CatalogMeta extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /** New on every start: a restore compares it to see that a rewind restarted the object. */
+  private readonly sessionId = crypto.randomUUID();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -242,13 +246,29 @@ export class CatalogMeta extends DurableObject<Env> {
     return this.ctx.storage.getBookmarkForTime(at);
   }
 
-  /** Restores `bookmark` when the object next starts (`reset`); returns the bookmark to undo it. */
-  rewind(bookmark: string): Promise<string> {
-    return this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+  session(): string {
+    return this.sessionId;
   }
 
-  reset(): void {
-    this.ctx.abort('restoring a bookmark');
+  /** Restarts on `bookmark`'s storage (`rewindInPlace`); the call itself fails as it aborts. */
+  async rewindTo(bookmark: string, prefix: string): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(() =>
+      rewindInPlace(
+        {
+          sql: this.sql,
+          storage: this.ctx.storage,
+          abort: (r) => this.ctx.abort(r),
+          bucket: this.env.PUBLISHED,
+        },
+        bookmark,
+        prefix,
+        false,
+      ),
+    );
+  }
+
+  backupColumns(): Record<string, string[]> {
+    return tableColumns(this.sql, BACKUP_TABLES.meta);
   }
 
   /**

@@ -66,8 +66,10 @@ export interface Backupable {
   backupPage(table: string, after: number, limit: number): Promise<BackupPage>;
   bookmark(): Promise<string | null>;
   bookmarkFor(at: number): Promise<string>;
-  rewind(bookmark: string): Promise<string>;
-  reset(): Promise<void>;
+  /** Changes whenever the object restarts: how a restore sees that a rewind took effect. */
+  session(): Promise<string>;
+  rewindTo(bookmark: string, prefix: string): Promise<void>;
+  backupColumns(): Promise<Record<string, string[]>>;
 }
 
 /** Every object backed up, by name: `meta`, then `shard-0` … `shard-63`. */
@@ -165,6 +167,55 @@ export async function currentBookmark(storage: DurableObjectStorage): Promise<st
   } catch {
     return null;
   }
+}
+
+/** The columns each of `tables` has now, for a restore to check a backup against. */
+export function tableColumns(sql: SqlStorage, tables: readonly string[]): Record<string, string[]> {
+  return Object.fromEntries(
+    tables.map((t) => [
+      t,
+      sql
+        .exec<{ name: string }>('SELECT name FROM pragma_table_info(?)', t)
+        .toArray()
+        .map((c) => c.name),
+    ]),
+  );
+}
+
+/** Where a rewind leaves the bookmark that undoes it: its mark that the rewind was set. */
+export const undoKey = (prefix: string) => `${prefix}undo.json`;
+
+/**
+ * An object's half of a point-in-time restore, run under `blockConcurrencyWhile` so nothing (a
+ * request, the alarm's publishing) runs between its steps: copies `published` to `prefix` when
+ * `capture` (R2 only, never another object), sets the bookmark to restore on the next start, keeps
+ * the undo bookmark that answers beside the copy, and aborts, which restarts the object on the
+ * restored storage. A rewind left with no `published` copy would forget what it published since.
+ */
+export async function rewindInPlace(
+  o: {
+    sql: SqlStorage;
+    storage: Pick<DurableObjectStorage, 'onNextSessionRestoreBookmark'>;
+    abort: (reason: string) => void;
+    bucket: R2Bucket;
+  },
+  bookmark: string,
+  prefix: string,
+  capture: boolean,
+): Promise<void> {
+  if (capture)
+    await copyTables(
+      o.bucket,
+      prefix,
+      {
+        backupPage: async (_t, after, limit) =>
+          readPage(o.sql, ['published'], 'published', after, limit),
+      },
+      ['published'],
+    );
+  const undo = await o.storage.onNextSessionRestoreBookmark(bookmark);
+  await putOnce(o.bucket, undoKey(prefix), JSON.stringify({ undo }), { undo });
+  o.abort('restoring a bookmark');
 }
 
 // --- In the Workflow ---

@@ -67,6 +67,8 @@ import {
   currentBookmark,
   insertRows,
   readPage,
+  rewindInPlace,
+  tableColumns,
 } from './backup';
 import { type CatalogConfig, meta, shard, typeResolver } from './config';
 import { type ListingChange, sendChanges } from './listings';
@@ -203,6 +205,8 @@ const APPLIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class CatalogShard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /** New on every start: a restore compares it to see that a rewind restarted the object. */
+  private readonly sessionId = crypto.randomUUID();
   private config: CatalogConfig | undefined;
   private configAt = 0;
 
@@ -750,11 +754,6 @@ export class CatalogShard extends DurableObject<Env> {
     return readPage(this.sql, BACKUP_TABLES.shard, table, after, limit);
   }
 
-  /** Pages of `published`, which only a point-in-time restore copies (to keep across it). */
-  publishedPage(after: number, limit: number): BackupPage {
-    return readPage(this.sql, ['published'], 'published', after, limit);
-  }
-
   bookmark(): Promise<string | null> {
     return currentBookmark(this.ctx.storage);
   }
@@ -763,22 +762,51 @@ export class CatalogShard extends DurableObject<Env> {
     return this.ctx.storage.getBookmarkForTime(at);
   }
 
-  /** Restores `bookmark` when the object next starts (`reset`); returns the bookmark to undo it. */
-  rewind(bookmark: string): Promise<string> {
-    return this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+  session(): string {
+    return this.sessionId;
   }
 
-  reset(): void {
-    this.ctx.abort('restoring a bookmark');
+  /**
+   * Copies `published` to `prefix` and restarts on `bookmark`'s storage (`rewindInPlace`), with no
+   * request or alarm between the two: a product published in between would be in neither the copy
+   * nor the rewound table, and stay published. The call itself fails as it aborts.
+   */
+  async rewindTo(bookmark: string, prefix: string): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(() =>
+      rewindInPlace(
+        {
+          sql: this.sql,
+          storage: this.ctx.storage,
+          abort: (r) => this.ctx.abort(r),
+          bucket: this.env.PUBLISHED,
+        },
+        bookmark,
+        prefix,
+        true,
+      ),
+    );
+  }
+
+  backupColumns(): Record<string, string[]> {
+    return tableColumns(this.sql, BACKUP_TABLES.shard);
+  }
+
+  /** The channels this shard has published into, whether or not the config still has them. */
+  publishedChannels(): string[] {
+    return this.sql
+      .exec<{ channel: string }>('SELECT DISTINCT channel FROM published')
+      .toArray()
+      .map((r) => r.channel);
   }
 
   /**
    * Empties what a backup replaces, before its rows load. Kept: `published` (what is in R2 now,
    * so `afterRestore` can take down what the backup doesn't have), `applied` and `settings`
-   * (merged). The outbox goes too: `afterRestore` queues every product, and until then the alarm
-   * has nothing to take down.
+   * (merged). The outbox and the alarm go too: nothing publishes until `afterRestore` queues every
+   * product and sets the alarm again, so the edge never serves a product whose overrides haven't
+   * loaded yet.
    */
-  restoreBegin(n: number): void {
+  async restoreBegin(n: number): Promise<void> {
     this.shardNumber(n);
     this.config = undefined;
     this.ctx.storage.transactionSync(() => {
@@ -786,14 +814,15 @@ export class CatalogShard extends DurableObject<Env> {
       this.sql.exec('DELETE FROM outbox');
       this.sql.exec('DELETE FROM gap_rebuild');
     });
+    await this.ctx.storage.deleteAlarm();
   }
 
   /**
    * Loads one chunk of a backup's rows. Products queue to publish in the same transaction, as any
-   * write does. The product id counter (`seq`) never goes back, so a new product can't take the uid
+   * write does, and publish once `afterRestore` sets the alarm. The product id counter (`seq`) never goes back, so a new product can't take the uid
    * of one the restore removes while that one's cards are still published.
    */
-  async restoreRows(table: string, rows: BackupRow[]): Promise<number> {
+  restoreRows(table: string, rows: BackupRow[]): number {
     let loaded = 0;
     this.ctx.storage.transactionSync(() => {
       loaded = insertRows(
@@ -809,7 +838,6 @@ export class CatalogShard extends DurableObject<Env> {
         for (const r of rows)
           this.sql.exec('INSERT INTO outbox (key, urgent, forced) VALUES (?, 0, 1)', r.key);
     });
-    if (table === 'products' && loaded) await this.schedulePublish();
     return loaded;
   }
 
