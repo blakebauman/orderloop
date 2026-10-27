@@ -103,6 +103,31 @@ relative to today. Only the index tables are written, with no OrderAgent or Work
 order, so a generated order's page has no graph or timeline, and Commerce's **Outside events**,
 which asks each order's agent what it waits for, lists none of them.
 
+## Catalog demo data
+
+The catalog starts empty, so the Catalog page has nothing on it. To see the board with a card in
+every column, start `pnpm web:dev` and, while it runs, seed a small demo shop through the catalog API:
+
+```bash
+pnpm db:seed:catalog                          # the dev server at http://localhost:5173
+pnpm db:seed:catalog http://localhost:5298    # or wherever Vite is serving
+```
+
+It needs the API open, so run it before **Set up sign-in**: once people are added, the API wants a token.
+`apps/web/scripts/seed-catalog.ts` writes an `apparel` type, `web` (en, fr, de) and `stores` (en, es)
+channels, `tops` and `bags` categories and 16 synthetic products, some missing French, German or
+Spanish text or alt text, then:
+
+- a feed with refused rows (an invalid key, products with no variants);
+- the assistant's drafts on two products, for Drafted;
+- staged edits on three, for Staged;
+- two products published, for Published today, one of which the feed then contradicts, so it shows
+  under Conflicts.
+
+The drafts are written directly, so seeding needs no AI; **Draft** on a card calls Workers AI as
+usual. Re-running it sends the same products again; the board then depends on what you did with the
+cards since.
+
 ## Start an order over the API
 
 ```bash
@@ -144,8 +169,8 @@ After changing a `wrangler.jsonc`, regenerate that app's binding types with
 `pnpm --filter @orderloop/engine types`, `pnpm --filter @orderloop/web types`,
 `pnpm --filter @orderloop/catalog types` or `pnpm --filter @orderloop/catalog-edge types`.
 
-`pnpm web:dev` doesn't start the catalog Worker, so `/api/v1/catalog/*` fails locally unless it is running (the web app's `CATALOG` service binding resolves to it by name). Run it on its own with
-`pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
+`pnpm web:dev` runs the catalog Worker inside the Vite session, as it does the engine. To run it on its
+own, without the web app, use `pnpm --filter @orderloop/catalog dev` (port 8789); its tests run in `pnpm test` with local R2, KV and
 Durable Objects (including the changes queue and the listing indexers; a test runs an indexer's alarm itself instead of waiting out the 15 second debounce).
 
 `pnpm web:dev` doesn't start catalog-edge either. Run it with `pnpm --filter @orderloop/catalog-edge dev`
