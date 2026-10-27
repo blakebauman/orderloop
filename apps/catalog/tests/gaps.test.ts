@@ -305,6 +305,16 @@ describe('rebuilding the index', () => {
     expect(rebuilds).toEqual([0, 0]);
   });
 
+  it('counts each product in Gaps once by group, and names the locales a card lacks text in', async () => {
+    const before = (await api.catalogBoard()).gapGroups;
+    const p = product({ description: { en: 'A cotton tee.' } });
+    await api.putProducts([p], { by });
+    const after = (await api.catalogBoard()).gapGroups;
+    expect(after.missing).toBe(before.missing + 1);
+    expect(after.conflict).toBe(before.conflict);
+    expect(await card(p.key)).toMatchObject({ locales: ['fr'] });
+  });
+
   it('refuses a column that does not exist', async () => {
     // Settled with then: expect().rejects would read properties off the RPC promise, and each
     // read pipelines another call that rejects unhandled.

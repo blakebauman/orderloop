@@ -757,7 +757,9 @@ export function openApiDocument(serverUrl: string) {
           description:
             'Products per column (`gaps`, `drafted`, `staged`, `published` in the last day), gaps and products per gap kind, the latest finished feed and one still running. `indexBuilt` is false until every product stored before the gap index existed has been counted, which the catalog does on its own shortly after it is updated, and while a channel change is being recounted.',
           responses: {
-            '200': ok('{ board: { columns, gapsByKind, lastFeed, runningFeed, indexBuilt } }'),
+            '200': ok(
+              '{ board: { columns, gapGroups, gapsByKind, lastFeed, runningFeed, indexBuilt } }',
+            ),
             ...errors,
           },
         },

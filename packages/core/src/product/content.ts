@@ -282,6 +282,20 @@ export function contentGaps(data: ProductData, type: ProductType, channels: Chan
   return gaps.sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0));
 }
 
+/**
+ * How the board's Gaps column groups a product, what needs a person first: the first group that
+ * applies, so each product is in one.
+ */
+export const GAP_GROUPS = ['conflict', 'rejected', 'missing_required', 'missing'] as const;
+export type GapGroup = (typeof GAP_GROUPS)[number];
+
+export function gapGroup(kinds: Partial<Record<GapKind, number>>): GapGroup {
+  if (kinds.conflict) return 'conflict';
+  if (kinds.rejected) return 'rejected';
+  if (kinds.missing_required) return 'missing_required';
+  return 'missing';
+}
+
 /** The gaps the assistant drafts: text a product lacks in a locale. Rejections and conflicts need a person. */
 export const DRAFTABLE_GAPS: readonly GapKind[] = [
   'missing_title',

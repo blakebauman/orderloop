@@ -175,15 +175,30 @@ undoing it. The editable fields are <Values of="editable-fields" />: the title, 
 per locale, a product's own localized text attributes, an image's alt text, and the status. Variants,
 prices, channels, categories and images stay with the feed.
 
+**The Catalog page** (under **More**) is this board for people. Gaps groups each product once:
+conflicts first, then rejected rows, missing required attributes and missing text. **Draft these**
+on the missing text has the assistant draft the products shown, one by one; **Accept** on a drafted
+card stages its drafts; **Publish** heads Staged and publishes the ticked products. A card opens the
+product's sheet: each field in each locale side by side, marked as from the feed, edited here, a
+draft, staged, a conflict or missing, opened on the field that put it on the board. On a phone or an
+upright iPad you can review and accept or drop drafts; editing and publishing need a larger screen.
+With a keyboard, J and K move between cards, Enter opens one, D drafts it, A accepts its drafts, X
+ticks it and ⌘Enter (Ctrl+Enter) publishes what is ticked. Viewers can look; operators make changes.
+
+The same board is in the REST API:
+
 **The board.** `GET /api/v1/catalog/board` counts products in each column (<Values of="board-columns" />)
 and the gaps of each kind (<Values of="gap-kinds" />), and returns the latest finished feed and one
-still running. A product is on **gaps** while something is missing: a title in a locale of a channel
-it is listed in; a description, text attribute or alt text it has in some locales but not that one; a
-feed row the catalog refused for its key; or a conflict (below). Otherwise it is on **staged** while it
-has edits waiting to publish, **drafted** while the assistant has drafts for it to review, and
-**published** for a day after its edits went live. `GET /api/v1/catalog/board/:column` lists a column
+still running. A product moves right as it is worked on: it is on **staged** while it has edits
+waiting to publish, else **drafted** while the assistant has drafts for it to review, else **gaps**
+while something is missing (a title in a locale of a channel it is listed in; a description, text
+attribute or alt text it has in some locales but not that one; a feed row the catalog refused for its
+key; or a conflict, below), else **published** for a day after its edits went live. Its card still
+counts the gaps it has left, so a product published with gaps remaining goes back to **gaps**. `GET /api/v1/catalog/board/:column` lists a column
 in key order, 50 at a time by default (`limit` up to 100), optionally only products with one `kind` of
-gap; pass the answer's `cursor` for the next page. Each card counts its gaps by kind, its staged edits
+gap; pass the answer's `cursor` for the next page. The board also counts the products on **gaps** by
+group (`gapGroups`: conflicts, then rejected rows, missing required, missing text; each product once).
+Each card names the locales it lacks text in (`locales`), counts its gaps by kind, its staged edits
 and drafts, and says why its edits didn't publish last time, if they didn't.
 
 `GET /api/v1/catalog/products/:key/sheet` returns everything about one product: as it is live and as

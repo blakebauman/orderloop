@@ -30,6 +30,8 @@ import {
   type FeedFormat,
   type FeedStatus,
   type FieldRef,
+  GAP_GROUPS,
+  type GapGroup,
   type GapKind,
   LISTING_SEGMENTS,
   PRODUCT_SHARDS,
@@ -276,8 +278,10 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
       number
     >;
     const gapsByKind: BoardSummary['gapsByKind'] = {};
+    const gapGroups = Object.fromEntries(GAP_GROUPS.map((g) => [g, 0])) as Record<GapGroup, number>;
     for (const p of parts) {
       for (const [c, n] of Object.entries(p.columns)) columns[c as BoardColumn] += n;
+      for (const g of GAP_GROUPS) gapGroups[g] += Number(p.groups[g] ?? 0);
       for (const [k, v] of Object.entries(p.kinds)) {
         const sum = gapsByKind[k as GapKind] ?? { gaps: 0, products: 0 };
         sum.gaps += v.gaps;
@@ -287,6 +291,7 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     }
     return {
       columns,
+      gapGroups,
       gapsByKind,
       lastFeed: recent.find((f) => f.state === 'done') ?? null,
       runningFeed: recent.find((f) => RUNNING.includes(f.state)) ?? null,

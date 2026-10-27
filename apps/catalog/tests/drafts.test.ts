@@ -48,12 +48,19 @@ describe('assistant drafts', () => {
     expect((await api.catalogBoard()).columns.drafted).toBeGreaterThan(0);
   });
 
-  it('keeps a product with gaps on Gaps, counting its drafts', async () => {
+  it('moves a product with gaps to Drafted, where its card still counts the gaps', async () => {
     const p = product({ description: { en: 'A cotton tee.' } });
     await api.putProducts([p], { by });
+    expect(await card('gaps', p.key)).toBeDefined();
     await api.putDrafts([draft(p.key, descFr, 'Un t-shirt en coton.')], ed);
-    expect(await card('gaps', p.key)).toMatchObject({ drafts: 1 });
-    expect(await card('drafted', p.key)).toBeUndefined();
+    expect(await card('drafted', p.key)).toMatchObject({
+      drafts: 1,
+      kinds: { missing_description: 1 },
+    });
+    expect(await card('gaps', p.key)).toBeUndefined();
+    // Dropping the draft puts it back where its gaps are.
+    await api.discardDrafts([{ key: p.key }], ed);
+    expect(await card('gaps', p.key)).toMatchObject({ drafts: 0 });
   });
 
   it('is accepted by staging it as the assistant, and publishes as an assistant edit', async () => {

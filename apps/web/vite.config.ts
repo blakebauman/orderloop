@@ -122,6 +122,9 @@ export default defineConfig(async () => {
             }),
             devOnly: true,
           },
+          // The product catalog, so the Catalog page, /api/v1/catalog and the engine's CATALOG
+          // binding work locally. It deploys on its own.
+          { configPath: '../catalog/wrangler.jsonc', devOnly: true },
           ...devPlugins.map((p) => ({
             configPath: `../../plugins/${p}/wrangler.jsonc`,
             // Its own key, as scripts/fleet.ts derives it: never the principal key.

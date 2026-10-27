@@ -1,10 +1,11 @@
 # Local development
 
-Install the monorepo, apply the D1 migrations and demo data locally, run the web app and engine together, and start a scenario.
+Install the monorepo, apply the D1 migrations and demo data locally, run the web app, engine and catalog together, and start a scenario.
 
-OrderLoop is a pnpm + Turborepo monorepo. Local development runs both Workers in one Vite session:
-the web app, and the engine as a Vite auxiliary Worker, so the `ENGINE` service binding, the
-OrderAgent Durable Objects and both Workflows all work on your machine.
+OrderLoop is a pnpm + Turborepo monorepo. Local development runs the Workers in one Vite session:
+the web app, and the engine and the product catalog as Vite auxiliary Workers, so the `ENGINE` and
+`CATALOG` service bindings, the OrderAgent Durable Objects, both Workflows and the catalog's shards
+all work on your machine (the Catalog page and `/api/v1/catalog` included; the catalog starts empty).
 
 ## Requirements
 
@@ -23,7 +24,7 @@ cd orderloop
 pnpm install
 pnpm db:migrate:local      # applies packages/db/migrations to the local D1
 pnpm db:seed:local         # loads the demo data from packages/db/seed (optional, safe to re-run)
-pnpm web:dev               # web + engine in one Vite session
+pnpm web:dev               # web, engine and catalog in one Vite session
 ```
 
 Open the URL Vite prints (`http://localhost:5173` by default). With no people added, the dashboard and the API are

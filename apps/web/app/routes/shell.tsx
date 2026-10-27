@@ -157,6 +157,7 @@ const NAV: NavItem[] = [
   { to: '/carts', label: 'Carts' },
   { to: '/flows', label: 'Flows', group: true },
   { to: '/commerce', label: 'Commerce', more: true },
+  { to: '/catalog', label: 'Catalog', more: true },
   { to: '/performance', label: 'Performance', more: true },
 ];
 

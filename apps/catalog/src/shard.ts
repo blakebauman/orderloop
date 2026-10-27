@@ -834,12 +834,14 @@ export class CatalogShard extends DurableObject<Env> {
       this.sql
         .exec<{ at: number | null }>('SELECT MAX(at) AS at FROM revisions WHERE key = ?', key)
         .one().at ?? 0;
-    const col: BoardColumn | null = Object.keys(kinds).length
-      ? 'gaps'
-      : staged
-        ? 'staged'
-        : drafted
-          ? 'drafted'
+    // Work in flight first, so a card moves right as it is worked on: staged edits, then drafts,
+    // then gaps. The card still counts the gaps it has left.
+    const col: BoardColumn | null = staged
+      ? 'staged'
+      : drafted
+        ? 'drafted'
+        : Object.keys(kinds).length
+          ? 'gaps'
           : published > now - PUBLISHED_FOR_MS
             ? 'published'
             : null;
@@ -873,6 +875,7 @@ export class CatalogShard extends DurableObject<Env> {
   /** This shard's board: products per column, gaps per kind, and whether its index is built. */
   boardCounts(): {
     columns: Record<string, number>;
+    groups: Record<string, number>;
     kinds: Record<string, { gaps: number; products: number }>;
     built: boolean;
   } {
@@ -885,6 +888,18 @@ export class CatalogShard extends DurableObject<Env> {
         .toArray()
         .map((r) => [r.col, r.n]),
     );
+    // Each product in Gaps once, in the first group that applies (`gapGroup`).
+    const groups = this.sql
+      .exec<Record<string, number>>(
+        `SELECT COALESCE(SUM(c), 0) AS conflict, COALESCE(SUM(NOT c AND r), 0) AS rejected,
+           COALESCE(SUM(NOT c AND NOT r AND q), 0) AS missing_required,
+           COALESCE(SUM(NOT c AND NOT r AND NOT q), 0) AS missing
+         FROM (SELECT json_type(kinds, '$.conflict') IS NOT NULL AS c,
+                 json_type(kinds, '$.rejected') IS NOT NULL AS r,
+                 json_type(kinds, '$.missing_required') IS NOT NULL AS q
+               FROM board WHERE col = 'gaps')`,
+      )
+      .one();
     const kinds = Object.fromEntries(
       this.sql
         .exec<{ kind: string; gaps: number; products: number }>(
@@ -896,7 +911,7 @@ export class CatalogShard extends DurableObject<Env> {
     const built =
       this.setting('gaps_built') === 1 ||
       !this.sql.exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM products) AS e').one().e;
-    return { columns, kinds, built };
+    return { columns, groups, kinds, built };
   }
 
   /** Up to `limit` cards of a column after `cursor`, in key order, optionally with a gap kind. */
@@ -920,11 +935,14 @@ export class CatalogShard extends DurableObject<Env> {
         staged: number;
         drafts: number;
         failure: string | null;
+        locales: string;
       }>(
         `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at,
            (SELECT COUNT(*) FROM staged s WHERE s.key = b.key) AS staged,
            (SELECT MAX(failure) FROM staged s WHERE s.key = b.key) AS failure,
-           (SELECT COUNT(*) FROM drafts d WHERE d.key = b.key) AS drafts
+           (SELECT COUNT(*) FROM drafts d WHERE d.key = b.key) AS drafts,
+           (SELECT json_group_array(DISTINCT g.locale) FROM gaps g
+              WHERE g.key = b.key AND g.kind IN ('missing_title', 'missing_description', 'missing_attribute', 'missing_alt')) AS locales
          FROM board b LEFT JOIN rejections r ON r.key = b.key
          WHERE b.col = ?1 AND b.key > ?2
            AND (?3 IS NULL OR EXISTS (SELECT 1 FROM gaps g WHERE g.key = b.key AND g.kind = ?3))
@@ -951,6 +969,7 @@ export class CatalogShard extends DurableObject<Env> {
                 issues: JSON.parse(r.issues) as Issue[],
                 at: r.rejected_at ?? 0,
               },
+        locales: (JSON.parse(r.locales) as string[]).sort(),
         staged: r.staged,
         drafts: r.drafts,
         failure: r.failure,

@@ -49,9 +49,15 @@ describe('staging and publishing', () => {
     expect(await api.stageEdits([set(p.key, descFr, 'Un t-shirt en coton.')], ed)).toEqual([
       { key: p.key, ref: descFr, ok: true },
     ]);
-    // Staged only: nothing live has changed, and the gap stands until it is published.
+    // Staged only: nothing live has changed, and the gap stands until it is published; the card
+    // moves to Staged, still counting it.
     expect((await api.getProduct(p.key))?.description).toEqual({ en: 'A cotton tee.' });
-    expect(await card('gaps', p.key)).toMatchObject({ staged: 1, failure: null });
+    expect(await card('staged', p.key)).toMatchObject({
+      staged: 1,
+      failure: null,
+      kinds: { missing_description: 1 },
+    });
+    expect(await card('gaps', p.key)).toBeUndefined();
 
     const [r] = await publish([p.key]);
     expect(r).toMatchObject({ key: p.key, status: 'published', version: 2 });

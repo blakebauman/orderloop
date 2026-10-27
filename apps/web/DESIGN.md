@@ -303,6 +303,12 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
 - **Tables:** below md, `table-stack` makes each row a card: its first cell on a line of its own,
   the others wrapping beneath it, each named by its `data-label`. A table that already fits keeps
   its rows.
+- **Catalog board** (`routes/catalog.tsx`): at lg, four column cards side by side in a grid
+  (`minmax(0,1.5fr)` then three `minmax(0,1fr)`), Gaps widest on the left. Below lg the columns
+  become a segmented control (each label with its count; Published today reads "Today"), one
+  column shows at a time, and its header is visually hidden but stays for screen readers. Below lg
+  the board reviews and accepts drafts only; drafting from a card, ticking and publishing are for
+  lg, said in place.
 
 ## Elevation & Depth
 
@@ -349,6 +355,35 @@ for code and data blocks only.
   inside, with its corners rounded at the top; from the side otherwise. It pads for the safe areas.
 - **Share** (`components/share-button.tsx`): the system share sheet where there is one, else Copy
   link.
+- **Board column** (`ColumnShell` in `routes/catalog.tsx`): a card per state, headed by a section
+  title, a 0.5rem status dot before it (`wait` for Gaps, `ai` for Drafted, an ink ring at 60% for
+  Staged, which is not a status, `ok` for Published today) and its count in muted tabular figures.
+  A column's one action sits at the right of its header (Publish heads Staged). Gaps groups its
+  products into collapsible sections, each headed by a caption button (a chevron that turns 90°,
+  the group's name and `· count`); each product appears in one group only. Longer lists end in a
+  link-blue "Show more".
+- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded 2xl,
+  muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
+  size) is the link, stretched over the whole row; the product key is mono 2xs muted under it, then
+  a muted reason line clamped to two lines, locales in mono. Its actions sit at the right, above the
+  link: a ghost Draft (with the `ai` dot) that shows on hover or focus (always on touch), an outline
+  Accept; Staged rows lead with a checkbox ticked for publishing. A row that didn't publish turns its
+  reason `bad`. Keyboard: J and K (or the arrows, once a card has focus) move between cards, Enter
+  opens one, D drafts, A accepts, X ticks, ⌘Enter (Ctrl+Enter) publishes what's ticked; each is also
+  a button, and the hints show only with `fine:` at lg. Cards glide to their new place after a
+  change (measured before and after, moved with the Web Animations API in 200ms on
+  `cubic-bezier(0.16,1,0.3,1)`); reduced motion moves them at once.
+- **Product sheet** (`components/catalog/sheet.tsx`): the side sheet from sm, 42rem wide and 56rem
+  from xl; below sm the bottom sheet. Its content is a flush `Table`: fields as rows, locales as
+  columns (mono, not uppercase, the most-filled first), the field-name column sticky on the left
+  with the sheet's background; the strip scrolls sideways. Below sm each field lists its locales
+  stacked, a mono locale beside each value. The field that put the product on the board is tinted
+  muted at 60% with a `ring` at 40%, scrolled into view and its first action focused. Groups inside
+  are headed by captions.
+- **Source marker** (in the sheet): every value is labelled 2xs/500 muted, with a 0.375rem dot where
+  it isn't plain feed data: From feed (no dot), Edited here and Staged (ink), Draft (`ai`), Draft
+  with its field changed since, Conflict and Missing (`wait`), Didn't publish (`bad`). A field with
+  no value and no gap is a muted dash, "Empty" to screen readers.
 - **Install hint** (`components/install-hint.tsx`): on Account only, on an iPhone or iPad in
   Safari, until it's dismissed. iOS never offers Add to Home Screen itself.
 
