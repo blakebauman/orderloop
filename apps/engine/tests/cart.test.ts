@@ -1,10 +1,12 @@
-import { introspectWorkflow } from 'cloudflare:test';
+import { introspectWorkflow, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
   b2bOrderFlow,
+  CART_TYPING_MS,
   type CartActor,
   type CartOp,
   type CartState,
+  type CartTyping,
   cartShippingOption,
   isQuoteCurrent,
   type OrderState,
@@ -15,7 +17,7 @@ import {
 } from '@orderloop/core';
 import { carts, createDb, orders, promotions, publishFlow, sessions, users } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EngineApi } from '../src/api';
 import { PROMO_TRIES } from '../src/cart/agent';
 import { createCart } from '../src/cart/carts';
@@ -111,6 +113,7 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
   >();
   let last: CartState | null = null;
   const states: CartState[] = [];
+  const typings: CartTyping[] = [];
   let closedWith: number | null = null;
   ws.addEventListener('close', (e) => {
     closedWith = e.code;
@@ -123,6 +126,7 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
       last = m.state as CartState;
       states.push(last);
     }
+    if (m.type === 'cart_typing') typings.push(m as CartTyping);
     if (m.type === 'cf_agent_state_error' || m.error) errors.push(String(m.error ?? m.type));
   });
   let n = 0;
@@ -136,6 +140,8 @@ async function socket(cartId: string, principal: ProxiedPrincipal) {
     seen: () => last,
     /** Every state broadcast so far, oldest first. */
     states: () => states,
+    /** Every typing notice so far, oldest first. */
+    typings: () => typings,
     closed: () => closedWith,
     errors: () => errors,
     send: (m: unknown) => ws.send(JSON.stringify(m)),
@@ -568,6 +574,166 @@ describe('the cart socket', () => {
     expect((await state(id)).chat).toEqual([]);
     a.close();
     b.close();
+  });
+});
+
+/**
+ * Records what the cart's agent writes from here on (SQL that changes something, storage puts and
+ * deletes, and `setState`) until `stop` puts it back.
+ */
+async function watchWrites(id: string) {
+  const writes: string[] = [];
+  const spies = await runInDurableObject(cart(id), (agent, ctx) => {
+    const sql = ctx.storage.sql;
+    const exec = sql.exec.bind(sql);
+    return [
+      vi.spyOn(sql, 'exec').mockImplementation(((q: string, ...b: unknown[]) => {
+        if (/^\s*(insert|update|delete|replace|create|drop|alter)\b/i.test(q)) writes.push(q);
+        return exec(q, ...b);
+      }) as typeof sql.exec),
+      vi.spyOn(ctx.storage, 'put').mockImplementation((async () => {
+        writes.push('put');
+      }) as never),
+      vi.spyOn(ctx.storage, 'delete').mockImplementation((async () => {
+        writes.push('delete');
+        return false;
+      }) as never),
+      vi.spyOn(agent, 'setState').mockImplementation(() => {
+        writes.push('setState');
+      }),
+    ];
+  });
+  return {
+    writes,
+    stop: () =>
+      runInDurableObject(cart(id), () => {
+        for (const s of spies) s.mockRestore();
+      }),
+  };
+}
+
+describe('typing on a cart', () => {
+  it('tells the others who is typing, as they signed in, and never stores it', async () => {
+    const id = await open();
+    const ann = await socket(id, await who('operator', 'ann'));
+    const ben = await socket(id, await who('viewer', 'ben'));
+    // Both have the state their opening sent before anything is counted.
+    await ann.call('whoami');
+    await ben.call('whoami');
+    const statesBefore = ben.states().length;
+    const watched = await watchWrites(id);
+    const before = Date.now();
+    // Whatever a page passes, the notice names the socket's own person.
+    expect((await ann.call('typing', ['Mallory', 'usr_cart_ben'])).result).toBe(true);
+    await vi.waitFor(() => expect(ben.typings()).toHaveLength(1));
+    expect(ben.typings()[0]).toEqual({
+      type: 'cart_typing',
+      memberId: 'usr_cart_ann',
+      name: 'ann',
+      until: expect.any(Number),
+    });
+    expect(ben.typings()[0]!.until).toBeGreaterThanOrEqual(before + CART_TYPING_MS);
+    // A viewer may chat, so may say they are writing; neither hears their own.
+    expect((await ben.call('typing')).result).toBe(true);
+    await vi.waitFor(() => expect(ann.typings()).toHaveLength(1));
+    expect(ann.typings()[0]).toMatchObject({ memberId: 'usr_cart_ben', name: 'ben' });
+    await ann.call('whoami');
+    await ben.call('whoami');
+    expect(ann.typings().map((t) => t.memberId)).not.toContain('usr_cart_ann');
+    expect(ben.typings().map((t) => t.memberId)).not.toContain('usr_cart_ben');
+
+    // Sent, not stored: no SQL write, no storage, no state broadcast.
+    await watched.stop();
+    expect(watched.writes).toEqual([]);
+    expect(ben.states()).toHaveLength(statesBefore);
+    expect((await state(id)).chat).toEqual([]);
+    ann.close();
+    ben.close();
+  });
+
+  it('ignores a socket that says so again within the limit', async () => {
+    const id = await open();
+    const ann = await socket(id, await who('operator', 'ann'));
+    const ben = await socket(id, await who('viewer', 'ben'));
+    expect((await ann.call('typing')).result).toBe(true);
+    for (let i = 0; i < 5; i++) expect((await ann.call('typing')).result).toBe(false);
+    await ben.call('whoami');
+    expect(ben.typings()).toHaveLength(1);
+    // Another of the same person's tabs is its own socket, with its own limit.
+    const again = await socket(id, await who('operator', 'ann'));
+    expect((await again.call('typing')).result).toBe(true);
+    await vi.waitFor(() => expect(ben.typings()).toHaveLength(2));
+    for (const s of [ann, ben, again]) s.close();
+  });
+
+  it('ends when they send the message or leave', async () => {
+    const id = await open();
+    const ann = await socket(id, await who('operator', 'ann'));
+    const ben = await socket(id, await who('viewer', 'ben'));
+    await ann.call('typing');
+    expect((await ann.call('say', ['Friday works'])).result).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(ben.typings()).toHaveLength(2));
+    // A stop names no one: the page needs only the id.
+    expect(ben.typings()[1]).toEqual({
+      type: 'cart_typing',
+      memberId: 'usr_cart_ann',
+      name: '',
+      until: 0,
+    });
+    // Sending resets the limit, so the next message's typing shows straight away.
+    expect((await ann.call('typing')).result).toBe(true);
+    // A message with no typing before it ends nothing.
+    await ben.call('say', ['ok']);
+    ann.close();
+    await vi.waitFor(() => expect(ben.typings()).toHaveLength(4));
+    expect(ben.typings().slice(2)).toEqual([
+      expect.objectContaining({ memberId: 'usr_cart_ann', until: expect.any(Number) }),
+      expect.objectContaining({ memberId: 'usr_cart_ann', name: '', until: 0 }),
+    ]);
+    expect(ann.typings()).toEqual([]);
+    ben.close();
+  });
+
+  it('sends nothing for a call still being checked when its message went', async () => {
+    const id = await open();
+    const ann = await socket(id, await who('operator', 'ann'));
+    const ben = await socket(id, await who('viewer', 'ben'));
+    // Hold the typing call's check of who is calling (a D1 read for staff) while the message goes.
+    await runInDurableObject(cart(id), (agent) => {
+      const a = agent as unknown as { caller: (o?: object) => Promise<unknown> };
+      const caller = a.caller.bind(agent);
+      vi.spyOn(a, 'caller').mockImplementationOnce(async (o) => {
+        await new Promise((r) => setTimeout(r, 300));
+        return caller(o);
+      });
+    });
+    const typing = ann.call('typing');
+    expect((await ann.call('say', ['Sent before the check finished'])).result).toMatchObject({
+      ok: true,
+    });
+    expect((await typing).result).toBe(false);
+    await ben.call('whoami');
+    expect(ben.typings()).toEqual([]);
+    // And it left nothing behind: the next call goes out at once.
+    expect((await ann.call('typing')).result).toBe(true);
+    ann.close();
+    ben.close();
+  });
+
+  it('refuses a socket whose sign-in ended, and tells no one', async () => {
+    const id = await open();
+    const vee = await who('viewer', 'vee3');
+    const viewer = await socket(id, vee);
+    const op = await socket(id, await who('operator', 'opal'));
+    await db().delete(sessions).where(eq(sessions.tokenHash, vee.session!));
+    const r = await viewer.call('typing');
+    expect(r.success).toBe(false);
+    // Nor when its socket closes: it never said it was typing.
+    viewer.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await op.call('whoami');
+    expect(op.typings()).toEqual([]);
+    op.close();
   });
 });
 

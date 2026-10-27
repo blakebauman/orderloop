@@ -1058,6 +1058,15 @@ the rest is in its SQL, paged by `history`).
   the state change, before the D1 index; it retries for about a day; erasures (`dropEvents`, from
   `eraseSubject` and `eraseFromEvents`) delete the cart's deliveries and drop what's queued. Edits send none: they come
   on every keystroke-sized op, and the ending event carries what the cart came to.
+- **Typing.** The chat's composer calls `typing()` as its person writes, at most every
+  `CART_TYPING_EVERY_MS` (2 s, `apps/web/app/lib/cart-typing.ts`); the agent ignores a socket's
+  call sooner than that before checking anything, then checks the caller as `say` does (anyone who
+  may post chat) and sends a `CartTyping` (`{ type: 'cart_typing', memberId, name, until }`, five
+  seconds on) to every other socket with a member, the same sockets the state reaches. The id and
+  name are the caller's, never arguments. It is never stored: no SQL, no `setState`, and a buyer's
+  typing doesn't move their cart's time on (`caller({ keepOpen: false })`). Sending the message,
+  or closing the socket, sends one with `until` 0, which ends it; the page also drops a notice at
+  its `until`, kept within five seconds of when it arrived.
 - **Promotion codes.** A cart's codes ride in `meta.promoCodes` on its quote and its order. A
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
   cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no

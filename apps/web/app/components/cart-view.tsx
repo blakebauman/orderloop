@@ -17,6 +17,7 @@ import {
   type CartProductPage,
   type CartState,
   type CartStatus,
+  type CartTyping,
   type CheckoutQuote,
   cartReadyProblem,
   cartShippingOption,
@@ -50,6 +51,15 @@ import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
+import {
+  NO_TYPISTS,
+  nextTypingEnd,
+  type Typists,
+  typingAt,
+  typingDue,
+  typingLabel,
+  typingSeen,
+} from '~/lib/cart-typing';
 import { money, until } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
@@ -80,6 +90,7 @@ export function CartView({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ticks, setTicks] = useState<CartTicks>(NO_TICKS);
+  const [typists, setTypists] = useState<Typists>(NO_TYPISTS);
   const cart = state.cart!;
   const editableAs = (c: Cart) => (guest || canOperate) && c.status === 'open';
 
@@ -94,7 +105,28 @@ export function CartView({
       // is seen gone in between and comes back unticked.
       if (s.cart) setTicks((t) => keepTicks(t, s.cart!.lines, editableAs(s.cart!)));
     },
+    // Who else is writing: sent beside the state, never in it.
+    onMessage: (e) => {
+      let m: Partial<CartTyping> | null = null;
+      try {
+        m = typeof e.data === 'string' ? JSON.parse(e.data) : null;
+      } catch {}
+      if (m?.type === 'cart_typing')
+        setTypists((t) => typingSeen(t, m as CartTyping, meId, Date.now()));
+    },
   });
+
+  // Drop each notice when it ends: look again at the soonest end, not on a clock.
+  useEffect(() => {
+    const end = nextTypingEnd(typists);
+    if (end === null) return;
+    // At least `end`: a clock stepped back would otherwise drop nothing and never look again.
+    const t = window.setTimeout(
+      () => setTypists((x) => typingAt(x, Math.max(Date.now(), end))),
+      Math.max(0, end - Date.now()),
+    );
+    return () => window.clearTimeout(t);
+  }, [typists]);
 
   /** Calls the agent; a refusal (or a dropped socket) shows above the lines. */
   async function call<T extends Result | { ok: true; [k: string]: unknown }>(
@@ -431,6 +463,12 @@ export function CartView({
             }
             messages={state.chat}
             myId={meId}
+            typing={typingLabel(typists)}
+            // Best effort, and only on an open socket: `useAgent` queues a call made while it is
+            // down and sends it on reconnecting, by when the typing it announces is long over.
+            onTyping={() => {
+              if (agent.readyState === WebSocket.OPEN) void agent.call('typing').catch(() => {});
+            }}
             onSay={(body) => call<{ ok: true; id: string }>('say', [body])}
             onEdit={(id, body) => call<Result>('edit', [id, body])}
             onDelete={(id) => call<Result>('unsay', [id])}
@@ -863,6 +901,8 @@ function Chat({
   title,
   messages,
   myId,
+  typing,
+  onTyping,
   onSay,
   onEdit,
   onDelete,
@@ -872,6 +912,10 @@ function Chat({
   title: string;
   messages: CartChatMessage[];
   myId: string | null;
+  /** Who else is writing (`typingLabel`), or ''. */
+  typing: string;
+  /** Tells the others this person is writing; the composer calls it at most every 2 seconds. */
+  onTyping: () => void;
   onSay: (body: string) => Promise<{ ok: true; id: string } | { ok: false; error: string } | null>;
   onEdit: (id: string, body: string) => Promise<Result | null>;
   onDelete: (id: string) => Promise<Result | null>;
@@ -882,6 +926,7 @@ function Chat({
   const [noMore, setNoMore] = useState(false);
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
   const end = useRef<HTMLLIElement>(null);
+  const toldAt = useRef<number | null>(null);
   const shown = [...older.filter((o) => !messages.some((m) => m.id === o.id)), ...messages];
   const last = messages.at(-1)?.id;
   useEffect(() => {
@@ -966,14 +1011,29 @@ function Chat({
         className="grid gap-2 border-t p-3"
         onSubmit={async (e) => {
           e.preventDefault();
-          if ((await onSay(draft))?.ok) setDraft('');
+          if ((await onSay(draft))?.ok) {
+            setDraft('');
+            // Sending ended this notice on the cart: the next message's writing says so at once.
+            toldAt.current = null;
+          }
         }}
       >
+        {/* Always there and polite, so only a change in who is writing is read out. */}
+        <p aria-live="polite" className="min-h-4 truncate text-muted-foreground text-xs">
+          {typing}
+        </p>
         <Textarea
           aria-label="Message"
           value={draft}
           maxLength={MAX_CHAT_BODY}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            const now = Date.now();
+            if (e.target.value.trim() && typingDue(toldAt.current, now)) {
+              toldAt.current = now;
+              onTyping();
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
