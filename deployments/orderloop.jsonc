@@ -24,5 +24,9 @@
   // Admins may ask the assistant to draft business-rule plugins (docs/plugins.md, "Assistant-drafted
   // plugins"): logic only, run sandboxed, and live only once an admin approves one with a step-up
   // and every case passes. No publishers yet, so no signed uploads.
-  "pluginInstalls": { "assistant": true }
+  "pluginInstalls": { "assistant": true },
+  // AI Gateway request logs: one entry per model call with model, tokens, cost and metadata, never
+  // the prompt or answer (every call sends cf-aig-collect-log-payload: false). Reviewers' verdicts
+  // on AI gates are recorded on these entries as feedback, for evaluating models and prompts.
+  "aiGatewayLogs": true
 }
