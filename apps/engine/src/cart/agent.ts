@@ -20,6 +20,8 @@ import {
   CART_CHAT_BROADCAST,
   CART_EVENT_RETRIES,
   CART_START_TTL_MS,
+  CART_TYPING_EVERY_MS,
+  CART_TYPING_MS,
   type Cart,
   type CartActor,
   type CartAttachment,
@@ -30,6 +32,7 @@ import {
   type CartOp,
   type CartState,
   type CartSummary,
+  type CartTyping,
   canChangeMessage,
   canEditCart,
   canReadCart,
@@ -835,7 +838,10 @@ export class CartAgent extends Agent<Env, CartState> {
     if (member?.kind === 'guest') await this.keepOpen();
   }
 
-  override async onClose(connection: Connection) {
+  override async onClose(connection: Connection<ConnectionState>) {
+    const member = connection.state?.member;
+    if (member) this.stopTyping(connection.id, member);
+    else this.typed.delete(connection.id);
     this.syncMembers(connection.id);
   }
 
@@ -898,8 +904,11 @@ export class CartAgent extends Agent<Env, CartState> {
     if (key(members) !== key(this.state.members)) this.setState({ ...this.state, members });
   }
 
-  /** The socket's caller as they are now, or throws (and closes a socket whose sign-in ended). */
-  private async caller(): Promise<CartActor> {
+  /**
+   * The socket's caller as they are now, or throws (and closes a socket whose sign-in ended). A
+   * buyer's call moves their cart's time on, except where `keepOpen` is false: that writes state.
+   */
+  private async caller({ keepOpen = true } = {}): Promise<CartActor> {
     const { connection } = getCurrentAgent();
     if (!connection) throw new Error('Call this over the cart’s socket.');
     const state = connection.state as ConnectionState | null;
@@ -909,7 +918,7 @@ export class CartAgent extends Agent<Env, CartState> {
       if (guest.cartId !== c.id || !c.external) throw new Error('This isn’t your cart.');
       if (!guestCartOpen({ status: c.status, expiresAt: c.external.expiresAt }, Date.now()))
         throw new Error('This cart has closed.');
-      await this.keepOpen();
+      if (keepOpen) await this.keepOpen();
       return { kind: 'guest', id: guest.id, name: guest.name };
     }
     const stored = state?.principal ?? null;
@@ -997,7 +1006,60 @@ export class CartAgent extends Agent<Env, CartState> {
     this
       .sql`INSERT INTO cart_chat (id, author_id, author_name, body, at) VALUES (${m.id}, ${m.authorId}, ${m.authorName}, ${m.body}, ${m.at})`;
     this.setState({ ...this.state, chat: [...this.state.chat, m].slice(-CART_CHAT_BROADCAST) });
+    this.stopTyping(getCurrentAgent().connection!.id, a);
     return { ok: true, id: m.id };
+  }
+
+  /**
+   * When each socket last asked to say its person was typing, and whether that went out (a
+   * refused caller's didn't): memory only, gone with the socket.
+   */
+  private typed = new Map<string, { at: number; sent: boolean }>();
+
+  /**
+   * Tells the others on the cart that the caller is writing a message, at most once every
+   * `CART_TYPING_EVERY_MS` per socket (a call sooner is ignored, before anything is checked).
+   * Whoever may post chat may say so, as `say` decides. It is sent, never stored: no state, no SQL,
+   * and a buyer's typing doesn't move their cart's time on (their message will).
+   */
+  @callable()
+  async typing(): Promise<boolean> {
+    const { connection } = getCurrentAgent();
+    if (!connection) throw new Error('Call this over the cart’s socket.');
+    const now = Date.now();
+    const last = this.typed.get(connection.id);
+    if (last && now - last.at < CART_TYPING_EVERY_MS) return false;
+    this.typed.set(connection.id, { at: now, sent: false });
+    const a = await this.caller({ keepOpen: false });
+    this.typed.set(connection.id, { at: now, sent: true });
+    this.sendTyping({
+      type: 'cart_typing',
+      memberId: a.id,
+      name: a.name,
+      until: now + CART_TYPING_MS,
+    });
+    return true;
+  }
+
+  /** Ends a socket's typing notice, if it sent one that may still show: it posted, or left. */
+  private stopTyping(connectionId: string, who: { id: string; name: string }) {
+    const last = this.typed.get(connectionId);
+    this.typed.delete(connectionId);
+    if (last?.sent && Date.now() - last.at < CART_TYPING_MS)
+      this.sendTyping({ type: 'cart_typing', memberId: who.id, name: who.name, until: 0 });
+  }
+
+  /**
+   * To every socket the cart's state reaches (one with a member: staff the gate let in, or this
+   * cart's buyer, each closed by `recheckConnections` once they may no longer read it), except the
+   * typist's own. A buyer sees the same people in `members`, so a notice tells no one anything new.
+   */
+  private sendTyping(t: CartTyping) {
+    const msg = JSON.stringify(t);
+    for (const c of this.getConnections<ConnectionState>()) {
+      const m = c.state?.member;
+      if (m && m.id !== t.memberId) c.send(msg);
+    }
   }
 
   private message(id: string): CartChatMessage | null {

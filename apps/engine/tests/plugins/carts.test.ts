@@ -4,6 +4,7 @@ import type { D1Migration } from '@cloudflare/vitest-plugin';
 import {
   type CartGuest,
   type CartState,
+  type CartTyping,
   type ExternalCartInput,
   MAX_EXTERNAL_CART_MS,
   PRINCIPAL_HEADER,
@@ -90,13 +91,16 @@ async function guestSocket(
   if (!ws) return { status: res.status } as { status: number; call?: undefined };
   ws.accept();
   const pending = new Map<string, (m: { result?: unknown; error?: string }) => void>();
+  const typings: CartTyping[] = [];
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(String(e.data));
     if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
+    if (m.type === 'cart_typing') typings.push(m);
   });
   let n = 0;
   return {
     status: 101,
+    typings: () => typings,
     call: <T = unknown>(method: string, args: unknown[] = []) =>
       new Promise<{ result?: T; error?: string }>((resolve) => {
         const id = `c${++n}`;
@@ -619,6 +623,51 @@ describe('an external cart’s buyer', () => {
     expect(results[20]).toEqual({ ok: false, error: 'Slow down a moment.' });
   });
 
+  it('types to the staff on their own cart, who type back, and to no other cart', async () => {
+    const c = await open({ expiresAt: Date.now() + 10 * 60_000, idleMs: 3_600_000 });
+    const guest = (await cartAgent(c.cartId).redeemStart(c.token))!;
+    const buyer = await guestSocket(c.cartId, guest);
+    if (!buyer.call) throw new Error(`socket refused: ${buyer.status}`);
+    const ada = await staffSocket(c.cartId);
+    // Someone on another cart, staff or its own buyer, hears nothing from this one.
+    const o = await open();
+    const otherBuyer = await guestSocket(
+      o.cartId,
+      (await cartAgent(o.cartId).redeemStart(o.token))!,
+    );
+    if (!otherBuyer.call) throw new Error(`socket refused: ${otherBuyer.status}`);
+    const otherStaff = await staffSocket(o.cartId);
+    // Run the window down, so anything that counted as the buyer's activity would move it on.
+    const wound = Date.now() + 30 * 60_000;
+    await atTime(c.cartId, wound);
+
+    // The buyer's name is the one their start link carried, whatever the page sends.
+    expect((await buyer.call('typing', ['Ada'])).result).toBe(true);
+    await vi.waitFor(() => expect(ada.typings()).toHaveLength(1));
+    expect(ada.typings()[0]).toMatchObject({ memberId: guest.id, name: 'Ann Buyer' });
+    // Staff typing back: the buyer sees them in `members` already, and learns nothing more.
+    expect((await ada.call('typing')).result).toBe(true);
+    await vi.waitFor(() => expect(buyer.typings()).toHaveLength(1));
+    const members = (await api().cartSnapshot(c.cartId))!.members;
+    expect(buyer.typings()[0]).toEqual({
+      type: 'cart_typing',
+      memberId: 'usr_keepopen_ada',
+      name: 'Ada',
+      until: expect.any(Number),
+    });
+    expect(members).toContainEqual(
+      expect.objectContaining({ id: 'usr_keepopen_ada', name: 'Ada' }),
+    );
+    // Typing isn't the buyer's activity on the cart's time: only what they send moves it on.
+    expect((await timeOf(c.cartId)).expiresAt).toBe(wound);
+    await buyer.call('whoami');
+    await otherBuyer.call('whoami');
+    await otherStaff.call('whoami');
+    expect(buyer.typings().map((t) => t.memberId)).not.toContain(guest.id);
+    expect(otherBuyer.typings()).toEqual([]);
+    expect(otherStaff.typings()).toEqual([]);
+  });
+
   it('is never admitted to a staff cart', async () => {
     const staff = await api().createCart({
       title: 'Staff cart',
@@ -732,12 +781,15 @@ async function staffSocket(cartId: string) {
   if (!ws) throw new Error(`socket refused: ${res.status}`);
   ws.accept();
   const pending = new Map<string, (m: { result?: unknown }) => void>();
+  const typings: CartTyping[] = [];
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(String(e.data));
     if (m.type === 'rpc' && pending.has(m.id)) pending.get(m.id)!(m);
+    if (m.type === 'cart_typing') typings.push(m);
   });
   let n = 0;
   return {
+    typings: () => typings,
     call: (method: string, args: unknown[] = []) =>
       new Promise<{ result?: unknown }>((resolve) => {
         const rid = `s${++n}`;
