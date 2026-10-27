@@ -12,6 +12,8 @@ import type { OrderInputDraft, OrderStatus } from './types';
 
 /** How long an external cart may stay open, at most. */
 export const MAX_EXTERNAL_CART_MS = 24 * 3_600_000;
+/** The shortest idle window a cart that stays open while its buyer works may have. */
+export const MIN_EXTERNAL_CART_IDLE_MS = 5 * 60_000;
 /** How long a start link works, once. */
 export const CART_START_TTL_MS = 5 * 60_000;
 /** Origins that may frame an external cart's pages (the buyer's procurement system). */
@@ -34,6 +36,12 @@ export type ExternalCartInput = {
   frameOrigins?: string[];
   /** When the cart closes if it hasn't gone back, at most `MAX_EXTERNAL_CART_MS` from now. */
   expiresAt: number;
+  /**
+   * How long the buyer may be away (the partner's idle timeout): set, the cart stays open while
+   * they work on it, closing `idleMs` after their last activity, never later than
+   * `MAX_EXTERNAL_CART_MS` from when it opened. Unset, it closes at `expiresAt` whatever they do.
+   */
+  idleMs?: number;
   /** Lines to start with (a punchout `edit` session, say). */
   lines?: { sku: string; qty: number }[];
 };
@@ -136,6 +144,13 @@ export function externalCartProblem(
     input.expiresAt - now > MAX_EXTERNAL_CART_MS
   )
     return 'expiresAt must be in the next 24 hours';
+  if (
+    input.idleMs != null &&
+    (!Number.isInteger(input.idleMs) ||
+      input.idleMs < MIN_EXTERNAL_CART_IDLE_MS ||
+      input.idleMs > MAX_EXTERNAL_CART_MS)
+  )
+    return 'idleMs must be a whole number of milliseconds from 5 minutes to 24 hours';
   const lines = input.lines ?? [];
   if (!Array.isArray(lines) || lines.length > MAX_CHECKOUT_LINES)
     return `At most ${MAX_CHECKOUT_LINES} lines`;

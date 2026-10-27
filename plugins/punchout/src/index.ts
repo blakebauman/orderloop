@@ -63,6 +63,7 @@ async function openCart(
     lines?: { sku: string; qty: number }[];
   },
 ) {
+  const idleMs = Math.min(p.sessionMinutes, 24 * 60) * 60_000;
   return host(env).openExternalCart({
     sessionRef: s.sessionRef,
     title: `${p.name} punchout`,
@@ -71,7 +72,10 @@ async function openCart(
     buyer: s.buyer,
     returnUrl: s.returnUrl,
     frameOrigins: p.frameOrigins,
-    expiresAt: Date.now() + Math.min(p.sessionMinutes, 24 * 60) * 60_000,
+    // The partner's session timeout is an idle timeout: the cart stays open while the buyer works
+    // on it, and closes that long after they stop (24 hours from opening at most, the core's cap).
+    expiresAt: Date.now() + idleMs,
+    idleMs,
     ...(s.lines?.length ? { lines: s.lines } : {}),
   });
 }

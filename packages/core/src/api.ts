@@ -350,8 +350,9 @@ export interface EngineRpc {
     by: string,
   ): Promise<Refusable<PluginCaseResult[]>>;
   /**
-   * Redeems an external cart's one-time start link: the buyer it admits and when the cart closes,
-   * or null for a link that is unknown, used or expired, or a cart that has ended.
+   * Redeems an external cart's one-time start link: the buyer it admits and until when (the latest
+   * the cart can stay open, `externalCartEnd`), or null for a link that is unknown, used or
+   * expired, or a cart that has ended.
    */
   redeemCartStart(
     cartId: string,
@@ -367,6 +368,15 @@ export interface EngineRpc {
     /** Staff or the cart's buyer, signed for `cart:<cartId>`. */
     actor: SignedActor,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Counts a request from an external cart's buyer (a file download, say) as activity on it, so a
+   * cart with an idle window stays open (`extendedCartExpiry`). Anyone else is ignored.
+   */
+  keepCartOpen(
+    cartId: string,
+    /** The cart's buyer, signed for `cart:<cartId>`. */
+    actor: SignedActor,
+  ): Promise<void>;
   /**
    * Finds products to add to a cart by SKU or name (`CART_SEARCH_LIMIT` at most), among those its
    * quote can price, with the unit price its flow charges where that is shown. Only for someone

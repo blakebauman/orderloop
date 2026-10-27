@@ -37,7 +37,7 @@ function partnerFrom(f: FormData): PartnerInput | string {
     return 'Frame origins are https origins, e.g. https://service.ariba.com.';
   const minutes = Number(s('sessionMinutes') || 120);
   if (!Number.isInteger(minutes) || minutes < 5 || minutes > 24 * 60)
-    return 'A session lasts 5 minutes to 24 hours.';
+    return 'An idle timeout is 5 minutes to 24 hours.';
   if (!s('name') || !s('identity') || !s('flowId')) return 'Name, identity and flow are required.';
   if (protocol === 'cxml' && !s('fromDomain')) return 'A cXML partner needs its From domain.';
   return {
@@ -193,7 +193,12 @@ function list(partners: Partner[], origin: string, notice: Notice = {}): Respons
                 label: 'Origins that may frame the catalog (optional)',
                 placeholder: 'https://service.ariba.com',
               },
-              { name: 'sessionMinutes', label: 'Session minutes', kind: 'number', value: 120 },
+              {
+                name: 'sessionMinutes',
+                label: 'Idle timeout in minutes (a cart closes this long after its buyer stops)',
+                kind: 'number',
+                value: 120,
+              },
             ],
           },
         ],

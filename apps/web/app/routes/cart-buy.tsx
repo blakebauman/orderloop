@@ -6,7 +6,7 @@
  * to the cart's return URL (`EMBED_HEADER`, folded into the CSP by entry.server.tsx).
  */
 
-import { isCartExpired, isFinalCart } from '@orderloop/core';
+import { guestCartOpen } from '@orderloop/core';
 import { data, type ShouldRevalidateFunctionArgs, useLoaderData } from 'react-router';
 import { CartRefusal } from '~/components/cart-refusal';
 import { CartView } from '~/components/cart-view';
@@ -28,8 +28,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const external = cart?.external;
   if (!snapshot || !cart || !external) throw cartRefusal('This cart doesn’t exist.', 404);
   // The cart's socket refuses the buyer once it closes (the engine's cartGate); say so here
-  // rather than render a cart that can't connect. A returned cart stays, to post it again.
-  if (cart.status !== 'returned' && (isFinalCart(cart) || isCartExpired(cart, Date.now())))
+  // rather than render a cart that can't connect. A returned cart stays until its time, to post
+  // it again.
+  if (!guestCartOpen({ status: cart.status, expiresAt: external.expiresAt }, Date.now()))
     throw cartRefusal(
       'This cart has closed. Go back to your purchasing system and open the catalog again.',
       410,

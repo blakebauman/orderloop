@@ -155,6 +155,27 @@ describe('cXML punchout', () => {
     expect(host.opened[0]!.sessionRef).toMatch(/:34234234ADFSDF234234$/);
   });
 
+  it('passes the partner’s idle timeout, so the cart stays open while its buyer works', async () => {
+    const secret = await partner({ sessionMinutes: '30' });
+    const before = Date.now();
+    await post('/plugins/punchout/cxml/setup', setupXml.replace('SECRET', secret));
+    const opened = host.opened[0]!;
+    expect(opened.idleMs).toBe(30 * 60_000);
+    expect(opened.expiresAt).toBeGreaterThanOrEqual(before + 30 * 60_000);
+    expect(opened.expiresAt).toBeLessThanOrEqual(Date.now() + 30 * 60_000);
+    // A day at most, as the core caps it; a partner can't be given longer.
+    const res = await admin('/plugins/punchout/partners', {
+      name: 'Too long',
+      protocol: 'oci',
+      identity: 'longer',
+      flowId: 'tpl-b2b-order',
+      returnHosts: 'buyer.example',
+      sessionMinutes: String(24 * 60 + 1),
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/idle timeout is 5 minutes to 24 hours/);
+  });
+
   it('refuses a wrong secret, an unknown buyer and a return to a host not theirs', async () => {
     const secret = await partner();
     const wrong = await post('/plugins/punchout/cxml/setup', setupXml.replace('SECRET', 'nope'));

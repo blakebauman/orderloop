@@ -31,6 +31,7 @@ import {
   cartSnapshot,
   changeCart,
   createCart,
+  keepCartOpen,
   redeemCartStart,
   submitCart,
 } from './cart/carts';
@@ -294,6 +295,13 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
   async searchCartProducts(cartId: string, q: string, signed: SignedActor) {
     const actor = await this.cartActor(cartId, signed);
     if (!actor) return UNSIGNED;
-    return searchCartProducts(this.env, cartId, actor, typeof q === 'string' ? q : '');
+    const page = await searchCartProducts(this.env, cartId, actor, typeof q === 'string' ? q : '');
+    if (page.ok) await cartAgent(this.env, cartId).keepOpenFor(actor);
+    return page;
+  }
+
+  async keepCartOpen(cartId: string, signed: SignedActor) {
+    const actor = await this.cartActor(cartId, signed);
+    if (actor) await keepCartOpen(this.env, cartId, actor);
   }
 }

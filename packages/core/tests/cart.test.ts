@@ -3,6 +3,7 @@ import {
   applyCartOp,
   attachmentName,
   attachmentProblem,
+  CART_EXTEND_STEP_MS,
   type Cart,
   type CartActor,
   type CartOp,
@@ -16,14 +17,22 @@ import {
   cartShippingOption,
   cartView,
   chatBody,
+  type ExternalCartInput,
+  extendedCartExpiry,
+  externalCartCap,
+  externalCartEnd,
+  externalCartProblem,
   finishCart,
+  guestCartOpen,
   isCartExpired,
   isQuoteCurrent,
   MAX_CART_ATTACHMENTS,
   MAX_CHAT_BODY,
   MAX_CHECKOUT_LINES,
+  MAX_EXTERNAL_CART_MS,
   MAX_LINE_QUANTITY,
   MAX_PROMO_CODES,
+  MIN_EXTERNAL_CART_IDLE_MS,
   newCart,
   normalizePromoCode,
   SHIP_TO_LIMITS,
@@ -57,6 +66,7 @@ const external = {
   pluginId: 'punchout',
   sessionRef: 'cookie-1',
   expiresAt: 1_000,
+  idleMs: null,
   returnUrl: 'https://buyer.example/return',
   frameOrigins: [],
   buyer: { id: 'b1', name: 'Cy' },
@@ -507,6 +517,110 @@ describe('cart readiness', () => {
     expect(isCartExpired(cart({ external }), 999)).toBe(false);
     expect(isCartExpired(cart(), 10_000)).toBe(false);
     expect(isCartExpired(cart({ external, status: 'returned' }), 10_000)).toBe(false);
+  });
+});
+
+describe('an external cart that stays open while its buyer works', () => {
+  const H = 3_600_000;
+  const MIN = 60_000;
+  // Opened at 1h for two hours, and two hours from the buyer's last activity.
+  const open = (o: Partial<Cart['external'] & object> = {}, c: Partial<Cart> = {}) =>
+    cart({ createdAt: H, external: { ...external, expiresAt: 3 * H, idleMs: 2 * H, ...o }, ...c });
+
+  it('moves its time to the idle window from now', () => {
+    expect(extendedCartExpiry(open(), 2 * H)).toBe(4 * H);
+    expect(externalCartCap(open())).toBe(H + MAX_EXTERNAL_CART_MS);
+  });
+
+  it('moves it at most once a minute, but always the last step to its cap', () => {
+    expect(extendedCartExpiry(open(), H + CART_EXTEND_STEP_MS - 1)).toBeNull();
+    expect(extendedCartExpiry(open(), H + CART_EXTEND_STEP_MS)).toBe(3 * H + MIN);
+    const cap = externalCartCap(open());
+    // Half a minute on is too little, unless it's the last half minute before the cap.
+    expect(
+      extendedCartExpiry(open({ expiresAt: cap - 5 * MIN }), cap - 2 * H - 4.5 * MIN),
+    ).toBeNull();
+    expect(extendedCartExpiry(open({ expiresAt: cap - 30_000 }), cap - 2 * H + 10_000)).toBe(cap);
+    expect(extendedCartExpiry(open({ expiresAt: cap }), cap - MIN)).toBeNull();
+  });
+
+  it('never moves it past 24 hours from when it opened', () => {
+    expect(extendedCartExpiry(open({ idleMs: MAX_EXTERNAL_CART_MS }), 2 * H)).toBe(
+      H + MAX_EXTERNAL_CART_MS,
+    );
+    // Kept open to 24h, the buyer active half an hour before: two more hours would pass the cap.
+    expect(extendedCartExpiry(open({ expiresAt: 24 * H }), 23.5 * H)).toBe(
+      H + MAX_EXTERNAL_CART_MS,
+    );
+  });
+
+  it('leaves a fixed time, a staff cart, an ended or a closed cart as they are', () => {
+    expect(extendedCartExpiry(open({ idleMs: null }), 2 * H)).toBeNull();
+    // A cart stored before idle windows has none at all.
+    const { idleMs: _, ...old } = open().external!;
+    expect(extendedCartExpiry(cart({ external: old as never }), 2 * H)).toBeNull();
+    expect(storedCart(cart({ external: old as never })).external?.idleMs).toBeNull();
+    expect(extendedCartExpiry(cart(), 2 * H)).toBeNull();
+    expect(extendedCartExpiry(open({}, { status: 'returned' }), 2 * H)).toBeNull();
+    expect(extendedCartExpiry(open({}, { status: 'canceled' }), 2 * H)).toBeNull();
+    // Activity after its time doesn't bring it back.
+    expect(extendedCartExpiry(open(), 3 * H)).toBeNull();
+    // A locked cart is still open: its buyer is waiting on staff, not gone.
+    expect(extendedCartExpiry(open({}, { status: 'locked' }), 2 * H)).toBe(4 * H);
+  });
+
+  it('is its buyer’s while open or returned before its time, never once submitted or canceled', () => {
+    expect(guestCartOpen({ status: 'open', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'locked', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'returned', expiresAt: 10 }, 9)).toBe(true);
+    expect(guestCartOpen({ status: 'returned', expiresAt: 10 }, 10)).toBe(false);
+    expect(guestCartOpen({ status: 'open', expiresAt: 10 }, 10)).toBe(false);
+    expect(guestCartOpen({ status: 'canceled', expiresAt: 10 }, 9)).toBe(false);
+    expect(guestCartOpen({ status: 'submitted', expiresAt: 10 }, 9)).toBe(false);
+  });
+
+  it('lets its buyer in for as long as it could stay open', () => {
+    expect(externalCartEnd(open())).toBe(H + MAX_EXTERNAL_CART_MS);
+    expect(externalCartEnd(open({ idleMs: null }))).toBe(3 * H);
+    expect(externalCartEnd(cart())).toBeNull();
+  });
+});
+
+describe('what a plugin may open an external cart with', () => {
+  const now = 1_000_000;
+  const input = (o: Partial<ExternalCartInput> = {}): ExternalCartInput => ({
+    sessionRef: 's1',
+    title: 'Punchout',
+    flowId: 'flow_1',
+    buyer: { id: 'b1', name: 'Cy' },
+    returnUrl: 'https://buyer.example/return',
+    expiresAt: now + 3_600_000,
+    ...o,
+  });
+
+  it('takes an idle window from 5 minutes to 24 hours, or none', () => {
+    expect(externalCartProblem(input(), now)).toBeNull();
+    expect(externalCartProblem(input({ idleMs: MIN_EXTERNAL_CART_IDLE_MS }), now)).toBeNull();
+    expect(externalCartProblem(input({ idleMs: MAX_EXTERNAL_CART_MS }), now)).toBeNull();
+    for (const idleMs of [
+      MIN_EXTERNAL_CART_IDLE_MS - 1,
+      MAX_EXTERNAL_CART_MS + 1,
+      0,
+      -60_000,
+      600_000.5,
+      Number.NaN,
+      '600000' as never,
+    ])
+      expect(externalCartProblem(input({ idleMs }), now)).toMatch(/idleMs/);
+  });
+
+  it('still opens it for 24 hours at most', () => {
+    expect(
+      externalCartProblem(
+        input({ expiresAt: now + MAX_EXTERNAL_CART_MS + 1, idleMs: 600_000 }),
+        now,
+      ),
+    ).toMatch(/24 hours/);
   });
 });
 
