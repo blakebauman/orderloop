@@ -1249,7 +1249,8 @@ score and Agent router fail closed on a heuristic answer outside mock mode (`unc
 them. Every call sets AI Gateway metadata `{ prompt, orderId? }` (`callOptions`; no personal
 data) alongside the registry's `aiGatewayLogs` as `collectLog` (`gatewayOptions`), so with logs off
 the gateway keeps no entry, metadata included, and sends `cf-aig-collect-log-payload: false`
-(`NO_LOG_PAYLOAD`, also on Assess and the product index's embeddings), so with logs on an entry
+(`NO_LOG_PAYLOAD`, also on Assess, the product index's embeddings and email intake's attachment
+conversions, `toMarkdown` with metadata `{ prompt: "attachment" }`), so with logs on an entry
 still keeps no prompt or answer. Every answer
 carries `AiProvenance` (`packages/core/src/provenance.ts`): `source`, `model` (null for the
 heuristic), `prompt` (`router@1`, from `AI_PROMPTS`; bump a prompt's version whenever its

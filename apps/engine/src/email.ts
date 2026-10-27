@@ -24,7 +24,7 @@ import {
 import { createDb, customers, documents, endsWith, inboundEmails } from '@orderloop/db';
 import { or, sql } from 'drizzle-orm';
 import PostalMime, { type Attachment } from 'postal-mime';
-import { withTimeout } from './ai';
+import { callOptions, withTimeout } from './ai';
 import { loadFlowVersion } from './flows';
 import { startOrderOnce } from './orders';
 
@@ -186,7 +186,12 @@ export async function receiveEmail(
   return { status: 'accepted', orderId: result.orderId, replayed: false };
 }
 
-async function readAttachments(env: Env, atts: Attachment[]): Promise<IntakeAttachment[]> {
+/**
+ * The attachments an order's extraction reads. Conversions go through the AI Gateway like any
+ * model call (counted, rate limited, metadata `{ prompt: "attachment" }`) and never leave the
+ * document in its logs: it is the buyer's own PO.
+ */
+export async function readAttachments(env: Env, atts: Attachment[]): Promise<IntakeAttachment[]> {
   const out: IntakeAttachment[] = [];
   for (const a of atts.slice(0, MAX_ATTACHMENTS)) {
     const filename = a.filename || 'attachment';
@@ -200,7 +205,10 @@ async function readAttachments(env: Env, atts: Attachment[]): Promise<IntakeAtta
     } else if (CONVERT_TYPES.test(a.mimeType) && String(env.AI_MODE) !== 'mock') {
       try {
         const res = await withTimeout(
-          env.AI.toMarkdown({ name: filename, blob: new Blob([bytes], { type: a.mimeType }) }),
+          env.AI.toMarkdown(
+            { name: filename, blob: new Blob([bytes], { type: a.mimeType }) },
+            callOptions(env, 'attachment'),
+          ),
           CONVERT_TIMEOUT_MS,
         );
         if (res.format !== 'error') out.push({ filename, text: res.data });
