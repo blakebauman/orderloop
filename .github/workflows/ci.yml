@@ -101,10 +101,17 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: pnpm --filter @orderloop/web exec playwright install-deps webkit
+      # A timed-out first attempt kills pnpm but can leave its apt-get running with the dpkg lock
+      # held; wait for it to finish (it often completes the install) before trying again.
       - name: Install WebKit system dependencies (retry)
         if: ${{ steps.deps.outcome == 'failure' }}
-        timeout-minutes: 6
-        run: pnpm --filter @orderloop/web exec playwright install-deps webkit
+        timeout-minutes: 10
+        run: |
+          while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do
+            echo "Waiting for the first attempt's apt-get to release the dpkg lock"
+            sleep 5
+          done
+          pnpm --filter @orderloop/web exec playwright install-deps webkit
       - name: Device tests
         run: pnpm --filter @orderloop/web e2e
       # A failure's traces (DOM, network, console at each step): open with `playwright show-trace`.
