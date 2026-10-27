@@ -18,22 +18,27 @@ import {
   attachmentProblem,
   CART_CHANGED_SINCE_CONFIRM,
   CART_CHAT_BROADCAST,
+  CART_EVENT_RETRIES,
   CART_START_TTL_MS,
   type Cart,
   type CartActor,
   type CartAttachment,
   type CartChatMessage,
+  type CartEvent,
   type CartGuest,
   type CartMember,
   type CartOp,
   type CartState,
+  type CartSummary,
   canChangeMessage,
   canEditCart,
   canReadCart,
   canRemoveAttachment,
   cartAttachmentKey,
   cartAttachmentPrefix,
+  cartEventRetryDelaySec,
   cartReadyProblem,
+  cartSummary,
   chatBody,
   checkCartReturn,
   EMPTY_CART_STATE,
@@ -52,11 +57,12 @@ import {
   quoteNodes,
   storedCart,
 } from '@orderloop/core';
-import { carts, createDb } from '@orderloop/db';
+import { carts, createDb, webhookDeliveries } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { loadFlowVersion } from '../flows';
 import { startOrderOnce } from '../orders';
+import { emitCart } from '../outbox';
 import { pluginStub } from '../plugin-host';
 import { callPlugin, mayUse } from '../plugins';
 import { forwardedGuest, forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
@@ -141,10 +147,14 @@ export class CartAgent extends Agent<Env, CartState> {
     return storedCart(c);
   }
 
-  /** Writes the cart and keeps the Carts page's D1 row in step when its title or status changed. */
-  private async save(next: Cart) {
+  /**
+   * Writes the cart and keeps the Carts page's D1 row in step when its title or status changed.
+   * `event` is queued with the change, before the D1 write, so a failed write can't lose it.
+   */
+  private async save(next: Cart, event?: CartEvent) {
     const before = this.state.cart;
     this.setState({ ...this.state, cart: next });
+    if (event) await this.announce(event);
     if (!before || before.title !== next.title || before.status !== next.status)
       await this.index(next);
   }
@@ -178,6 +188,84 @@ export class CartAgent extends Agent<Env, CartState> {
         ...row,
       })
       .onConflictDoUpdate({ target: carts.id, set: row });
+  }
+
+  /** Bumped by every erasure: an event queued before one carries what it erased, and is dropped. */
+  private erasures(): number {
+    return this.ctx.storage.kv.get<number>('cart_erasures') ?? 0;
+  }
+
+  /**
+   * Announces `event` with the cart as it is now (`cartSummary`), from this object's schedule so the
+   * delivery outlives the call that changed the cart. A schedule that can't be written throws, so
+   * the call fails rather than ending the cart unannounced.
+   */
+  private async announce(event: CartEvent) {
+    await this.schedule(0, 'emitWebhook', {
+      event,
+      cart: cartSummary(this.cart()),
+      attempt: 0,
+      erasure: this.erasures(),
+    });
+  }
+
+  /**
+   * Delivers a cart's event (`emitCart`), retried on this object's schedule for about a day
+   * (`cartEventRetryDelaySec`), then left `failed` in its delivery rows, where the subscription's
+   * deliveries and the Plugins page show it. Deliveries are keyed by the cart and the event, so a
+   * retry sends only what hasn't arrived. One queued before an erasure is dropped, and one that was
+   * on its way while an erasure ran takes back what it wrote.
+   */
+  async emitWebhook(p: { event: CartEvent; cart: CartSummary; attempt: number; erasure?: number }) {
+    const erasure = p.erasure ?? 0;
+    if (erasure !== this.erasures()) return;
+    let pending = 1;
+    try {
+      ({ pending } = await emitCart(this.env, p.cart, p.event));
+    } catch (err) {
+      console.warn('webhook emit', p.event, err);
+    }
+    if (erasure !== this.erasures()) {
+      await this.db()
+        .delete(webhookDeliveries)
+        .where(and(eq(webhookDeliveries.orderId, p.cart.id), eq(webhookDeliveries.event, p.event)));
+      return;
+    }
+    if (!pending) return;
+    if (p.attempt < CART_EVENT_RETRIES)
+      await this.schedule(cartEventRetryDelaySec(p.attempt), 'emitWebhook', {
+        ...p,
+        attempt: p.attempt + 1,
+      });
+    else console.warn('webhook delivery gave up', p.event, p.cart.id);
+  }
+
+  /**
+   * Forgets the cart's events after an erasure: they carried its title as it was. Undelivered ones
+   * aren't retried, and every delivery row goes, sent or not, as an erased order's do.
+   */
+  private async dropEvents() {
+    this.ctx.storage.kv.put('cart_erasures', this.erasures() + 1);
+    for (const s of this.getSchedules())
+      if (s.callback === 'emitWebhook') await this.cancelSchedule(s.id);
+    const id = this.state.cart?.id;
+    if (id) await this.db().delete(webhookDeliveries).where(eq(webhookDeliveries.orderId, id));
+  }
+
+  /**
+   * A customer's erasure reaching a staff cart (one for their account, or one that became their
+   * order): `terms` leave its title, and its events, which carried the title, go.
+   */
+  async eraseFromEvents(terms: string[]): Promise<boolean> {
+    const c = this.state.cart;
+    if (!c) return false;
+    await this.dropEvents();
+    const title = eraseText(c.title, erasureTerms(terms));
+    if (title !== c.title) {
+      this.setState({ ...this.state, cart: { ...this.cart(), title } });
+      await this.index(this.cart());
+    }
+    return true;
   }
 
   /** Deletes every file stored for this cart (its `cartAttachmentPrefix`). Returns how many. */
@@ -233,7 +321,10 @@ export class CartAgent extends Agent<Env, CartState> {
   async eraseSubject(terms: string[]): Promise<{ messages: number; files: number }> {
     const c = this.state.cart;
     if (!c?.external) return { messages: 0, files: 0 };
-    if (!isFinalCart(c)) await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    const open = !isFinalCart(c);
+    // Closed at once, so no one changes it meanwhile; indexed and announced once it's erased.
+    if (open)
+      this.setState({ ...this.state, cart: finishCart(c, { status: 'canceled' }, Date.now()) });
     const guestId = `guest:${c.external.buyer.id}`;
     const all = erasureTerms([...terms, c.external.buyer.id, c.external.buyer.name]);
     this.tables();
@@ -270,6 +361,9 @@ export class CartAgent extends Agent<Env, CartState> {
     });
     for (const conn of this.getConnections<ConnectionState>())
       if (conn.state?.guest) conn.close(4410, 'Cart closed');
+    await this.dropEvents();
+    // The cancel is announced with the title erased.
+    if (open) await this.announce('cart.canceled');
     await this.index(this.cart());
     return { messages: theirs, files: files.length };
   }
@@ -347,6 +441,8 @@ export class CartAgent extends Agent<Env, CartState> {
     await this.index(init);
     this.setState({ ...this.state, cart: init });
     if (init.external) await this.schedule(new Date(init.external.expiresAt), 'expire');
+    // Before it's priced: a pricing failure must not leave a cart no one heard of.
+    await this.announce('cart.created');
     if (init.lines.length) await this.reprice();
     return this.cart();
   }
@@ -366,7 +462,7 @@ export class CartAgent extends Agent<Env, CartState> {
       await this.schedule(10, 'expire');
       return;
     }
-    await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    await this.save(finishCart(c, { status: 'canceled' }, Date.now()), 'cart.expired');
     for (const conn of this.getConnections()) conn.close(4410, 'Cart expired');
   }
 
@@ -508,7 +604,7 @@ export class CartAgent extends Agent<Env, CartState> {
       this.tables();
       this
         .sql`INSERT OR REPLACE INTO cart_return (id, url, fields) VALUES (1, ${returnUrl}, ${JSON.stringify(checked.fields)})`;
-      await this.save(finishCart(held, { status: 'returned' }, Date.now()));
+      await this.save(finishCart(held, { status: 'returned' }, Date.now()), 'cart.returned');
       return { ok: true, url: returnUrl, fields: checked.fields };
     } catch (err) {
       this.setState({ ...this.state, cart: held });
@@ -602,6 +698,7 @@ export class CartAgent extends Agent<Env, CartState> {
       if ('mismatch' in started) throw new Error('This cart already started a different order.');
       await this.save(
         finishCart(held, { status: 'submitted', orderId: started.orderId }, Date.now()),
+        'cart.submitted',
       );
       return { ok: true, orderId: started.orderId };
     } catch (err) {
@@ -662,7 +759,7 @@ export class CartAgent extends Agent<Env, CartState> {
     if (this.submitting) return { ok: false, error: 'The cart is being submitted.' };
     const c = this.cart();
     if (isFinalCart(c)) return { ok: false, error: `The cart is ${c.status}.` };
-    await this.save(finishCart(c, { status: 'canceled' }, Date.now()));
+    await this.save(finishCart(c, { status: 'canceled' }, Date.now()), 'cart.canceled');
     return { ok: true };
   }
 

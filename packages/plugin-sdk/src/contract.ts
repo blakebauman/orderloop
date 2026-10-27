@@ -18,7 +18,9 @@
 import {
   checkPluginView,
   checkProvideResult,
+  isCartEvent,
   type Order,
+  type OrderEvent,
   type OutboundPayload,
   PLUGIN_VIEW_TYPE,
   type PluginManifest,
@@ -244,13 +246,10 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
   if (event) {
     if (!cases.deliveries) problems.push('events: pass deliveries() to check redelivery');
     else {
-      const payload: OutboundPayload = {
-        id: 'whd_contract_1',
-        event: event as OutboundPayload['event'],
-        occurredAt: 0,
-        orderId: 'ord_contract_events',
-        data: {},
-      };
+      const base = { id: 'whd_contract_1', occurredAt: 0, data: {} };
+      const payload: OutboundPayload = isCartEvent(event)
+        ? { ...base, event, cartId: 'cart_contract_events', orderId: null }
+        : { ...base, event: event as OrderEvent, orderId: 'ord_contract_events' };
       try {
         await stub.deliver(payload);
         await stub.deliver(payload);

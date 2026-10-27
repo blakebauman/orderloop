@@ -1,6 +1,7 @@
 import {
   ASSISTANT_PUBLISHER,
   CATEGORY_LABELS,
+  isCartEvent,
   PLUGIN_CAPABILITY_LABELS,
   type PluginCaseResult,
   type PluginInstallView,
@@ -737,8 +738,9 @@ function Deliveries({ deliveries }: { deliveries: Plugin['deliveries'] }) {
             <li key={d.id} className="flex flex-wrap items-baseline gap-x-2">
               <StatusDot status={d.status === 'delivered' ? 'completed' : 'failed'} />
               <span>{d.event}</span>
+              {/* A cart event's delivery is recorded under its cart. */}
               <Link
-                to={`/orders/${d.orderId}`}
+                to={`/${isCartEvent(d.event) ? 'carts' : 'orders'}/${d.orderId}`}
                 className="hit-area text-link text-xs hover:underline"
               >
                 {d.orderId}

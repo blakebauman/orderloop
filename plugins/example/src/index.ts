@@ -95,14 +95,9 @@ export default definePlugin<Env>({
     },
   }),
   events: {
-    async 'order.completed'(payload, env) {
-      await pluginDb(env)
-        .prepare(
-          'INSERT INTO deliveries (id, event, order_id, received_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
-        )
-        .bind(payload.id, payload.event, payload.orderId, Date.now())
-        .run();
-    },
+    'order.completed': (payload, env) => received(env, payload.id, payload.event, payload.orderId),
+    // A cart event is about its cart, which goes where an order event's order does.
+    'cart.returned': (payload, env) => received(env, payload.id, payload.event, payload.cartId),
   },
 
   async pages(request, { principal, env }) {
@@ -134,3 +129,13 @@ export default definePlugin<Env>({
     );
   },
 });
+
+/** Records a delivery once per delivery id, however often it arrives. */
+async function received(env: Env, id: string, event: string, subject: string) {
+  await pluginDb(env)
+    .prepare(
+      'INSERT INTO deliveries (id, event, order_id, received_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
+    )
+    .bind(id, event, subject, Date.now())
+    .run();
+}

@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CART_EVENT_RETRIES,
+  CART_EVENTS,
+  cartEventRetryDelaySec,
   constantTimeEqual,
+  isCartEvent,
   isWebhookUrl,
+  NODE_EVENTS,
+  ORDER_EVENTS,
+  OUTBOUND_EVENTS,
+  pluginManifestSchema,
   signWebhook,
   verifyStripeSignature,
   verifyWebhook,
@@ -135,5 +143,42 @@ describe('where a webhook may go', () => {
       'https://localhost./',
     ])
       expect(isWebhookUrl(url), url).toBe(false);
+  });
+});
+
+describe('outbound events', () => {
+  it('are the order events and then the cart lifecycle, without a cart change event', () => {
+    expect(OUTBOUND_EVENTS).toEqual([...ORDER_EVENTS, ...CART_EVENTS]);
+    expect(CART_EVENTS).toEqual([
+      'cart.created',
+      'cart.submitted',
+      'cart.returned',
+      'cart.canceled',
+      'cart.expired',
+    ]);
+    expect(new Set(OUTBOUND_EVENTS).size).toBe(OUTBOUND_EVENTS.length);
+    expect(OUTBOUND_EVENTS).not.toContain('cart.changed');
+    expect(CART_EVENTS.every(isCartEvent)).toBe(true);
+    expect(ORDER_EVENTS.some(isCartEvent)).toBe(false);
+    // Nodes announce only order events; carts announce their own.
+    expect(Object.values(NODE_EVENTS).every((e) => !isCartEvent(e.event))).toBe(true);
+  });
+
+  it('can be subscribed to by a plugin, cart events included', () => {
+    const base = { apiVersion: 1, id: 'acme', name: 'Acme', version: '1' };
+    expect(pluginManifestSchema.parse({ ...base, events: ['cart.submitted'] }).events).toEqual([
+      'cart.submitted',
+    ]);
+    expect(() => pluginManifestSchema.parse({ ...base, events: ['cart.changed'] })).toThrow();
+  });
+
+  it('retry a cart event for about a day, from ten seconds doubling to an hour', () => {
+    expect([0, 1, 5, 8, 9, 20].map(cartEventRetryDelaySec)).toEqual([
+      10, 20, 320, 2560, 3600, 3600,
+    ]);
+    let total = 0;
+    for (let n = 0; n < CART_EVENT_RETRIES; n++) total += cartEventRetryDelaySec(n);
+    expect(total / 3600).toBeGreaterThan(23);
+    expect(total / 3600).toBeLessThan(25);
   });
 });

@@ -540,6 +540,7 @@ export const webhookDeliveries = sqliteTable(
   {
     id: text('id').primaryKey(),
     subscriptionId: text('subscription_id').notNull(),
+    /** The order the event is about, or for a `cart.*` event the cart (`cart_…`). */
     orderId: text('order_id').notNull(),
     event: text('event').notNull(),
     payload: text('payload').notNull(),

@@ -28,8 +28,8 @@ import {
   NODE_EVENTS,
   type NodeRegistry,
   type Order,
+  type OrderEvent,
   type OrderStatus,
-  type OutboundEvent,
   orderReference,
   type PendingWait,
   type PlanState,
@@ -494,7 +494,7 @@ async function emitStep(
   key: string,
   fx: string,
   orderId: string,
-  event: OutboundEvent,
+  event: OrderEvent,
   data: Record<string, unknown>,
 ) {
   try {

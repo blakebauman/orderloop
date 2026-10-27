@@ -15,9 +15,9 @@ import {
   type NodeRun,
   newId,
   type Order,
+  type OrderEvent,
   type OrderState,
   type OrderStatus,
-  type OutboundEvent,
   type PendingWait,
   type PlanNode,
   type Principal,
@@ -797,7 +797,7 @@ export class OrderAgent extends Agent<Env, State> {
    */
   async emitWebhook(p: {
     key: string;
-    event: OutboundEvent;
+    event: OrderEvent;
     data: Record<string, unknown>;
     attempt: number;
   }) {

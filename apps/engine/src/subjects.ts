@@ -245,12 +245,16 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     await cartAgent(env, id).eraseSubject(s.terms);
     result.carts++;
   }
-  // Staff carts for their accounts: each loses the address it would ship to.
+  // Staff carts for their accounts: each loses the address it would ship to, their words from its
+  // title, and its events, which carried that title.
   for (const id of await customerCartsOf(
     env,
     s.accounts.map((c) => c.id),
-  ))
-    if (await cartAgent(env, id).eraseShipTo()) result.carts++;
+  )) {
+    const shipTo = await cartAgent(env, id).eraseShipTo();
+    await cartAgent(env, id).eraseFromEvents(s.terms);
+    if (shipTo) result.carts++;
+  }
 
   const erased = await eraseOrders(env, list, s.terms);
   if (erased.refused.length) return { ok: false, reason: 'active_orders', orders: erased.refused };
@@ -349,6 +353,9 @@ export async function eraseOrders(
     await scrubCheckouts(env, c);
     await db.delete(documents).where(inArray(documents.orderId, c));
     await db.delete(webhookDeliveries).where(inArray(webhookDeliveries.orderId, c));
+    // A cart submitted as one of these orders: its events carried the title the order took.
+    for (const r of await db.select({ id: carts.id }).from(carts).where(inArray(carts.orderId, c)))
+      await cartAgent(env, r.id).eraseFromEvents(terms);
     result.messages += (
       await db
         .update(messages)

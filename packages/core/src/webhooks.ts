@@ -155,13 +155,14 @@ export function verifyStripeSignature(
 // ── Outbound ───────────────────────────────────────────────────────────────
 
 /**
- * Order events sent to webhook subscribers, signed with each subscription's own secret using the
- * same header scheme. `X-OrderLoop-Delivery` is stable across retries so receivers can dedupe.
+ * Order and cart events sent to webhook subscribers, signed with each subscription's own secret
+ * using the same header scheme. `X-OrderLoop-Delivery` is stable across retries so receivers can
+ * dedupe.
  */
 export const EVENT_HEADER = 'x-orderloop-event';
 export const DELIVERY_HEADER = 'x-orderloop-delivery';
 
-export const OUTBOUND_EVENTS = [
+export const ORDER_EVENTS = [
   'order.paid',
   'order.invoiced',
   'order.shipped',
@@ -174,10 +175,38 @@ export const OUTBOUND_EVENTS = [
   'order.cancelled',
   'order.failed',
 ] as const;
-export type OutboundEvent = (typeof OUTBOUND_EVENTS)[number];
+export type OrderEvent = (typeof ORDER_EVENTS)[number];
+
+/**
+ * A cart's opening and its ending, sent by its CartAgent. A cart's edits send nothing: it changes
+ * on every line, quantity and code while people build it, and what it came to is in the ending
+ * event (`cart.submitted` with its order, `cart.returned` to the buyer's system).
+ */
+export const CART_EVENTS = [
+  'cart.created',
+  'cart.submitted',
+  'cart.returned',
+  'cart.canceled',
+  'cart.expired',
+] as const;
+export type CartEvent = (typeof CART_EVENTS)[number];
+
+export const OUTBOUND_EVENTS = [...ORDER_EVENTS, ...CART_EVENTS] as const;
+export type OutboundEvent = OrderEvent | CartEvent;
+
+export const isCartEvent = (event: string): event is CartEvent =>
+  (CART_EVENTS as readonly string[]).includes(event);
+
+/**
+ * How often a cart's event is retried after its first attempt, from its CartAgent's schedule: 10
+ * seconds doubling to an hour (`cartEventRetryDelaySec`), then hourly, about a day in all, so a
+ * receiver down overnight still gets it. The delivery then stays `failed`.
+ */
+export const CART_EVENT_RETRIES = 32;
+export const cartEventRetryDelaySec = (attempt: number) => Math.min(10 * 2 ** attempt, 3600);
 
 /** Nodes that emit an event when they finish, and the branch that counts as success. */
-export const NODE_EVENTS: Record<string, { event: OutboundEvent; branch?: string }> = {
+export const NODE_EVENTS: Record<string, { event: OrderEvent; branch?: string }> = {
   'commerce.capture_payment': { event: 'order.paid', branch: 'ok' },
   'commerce.charge': { event: 'order.paid', branch: 'ok' },
   'commerce.invoice': { event: 'order.invoiced' },
@@ -189,13 +218,23 @@ export const NODE_EVENTS: Record<string, { event: OutboundEvent; branch?: string
   'commerce.payout': { event: 'order.payout_scheduled' },
 };
 
-export type OutboundPayload = {
-  id: string;
-  event: OutboundEvent;
-  occurredAt: number;
-  orderId: string;
-  data: Record<string, unknown>;
+type PayloadBase = { id: string; occurredAt: number; data: Record<string, unknown> };
+
+export type OrderEventPayload = PayloadBase & { event: OrderEvent; orderId: string };
+
+/** `orderId` is the order the cart was submitted as, once it was. */
+export type CartEventPayload = PayloadBase & {
+  event: CartEvent;
+  cartId: string;
+  orderId: string | null;
 };
+
+export type OutboundPayload = OrderEventPayload | CartEventPayload;
+
+/** The payload an event of type `E` arrives with. */
+export type PayloadOf<E extends OutboundEvent> = E extends CartEvent
+  ? CartEventPayload
+  : OrderEventPayload;
 
 /** A subscription's event filter: exact names, or "*" for everything. */
 export function subscribedTo(events: readonly string[], event: string): boolean {

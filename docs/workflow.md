@@ -146,7 +146,13 @@ matching subscription, keyed `whd_${orderId}_${stepKey}_${subscriptionId}`, then
 for that key not yet `delivered`. The step throws while any are pending, so Workflows retries it;
 when retries run out the error is swallowed, the rows stay `failed`, and the order carries on.
 
-Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`; see
+Which nodes emit is `NODE_EVENTS` in `packages/core/src/webhooks.ts`. Cart events (`CART_EVENTS`)
+don't come from a Workflow: `CartAgent` (`apps/engine/src/cart/agent.ts`) schedules its own
+`emitWebhook` when a cart opens or ends (`announce`), which calls `emitCart` with the cart's
+`cartSummary`, keyed `whd_${cartId}_${event}_${subscriptionId}`. The schedule is written with the
+state change, before the `carts` row, and retries for about a day (`CART_EVENT_RETRIES`,
+`cartEventRetryDelaySec`). An erasure bumps the agent's `cart_erasures` count: a queued event from
+before it is dropped, and one in flight deletes the rows it wrote. See
 [Outbound webhooks](https://docs.orderloop.app/guides/outbound-webhooks/).
 
 ## Continue as new

@@ -1,6 +1,7 @@
 /**
  * Outbound webhooks. `emit` records one delivery per matching subscription, keyed by the step that
- * emitted it, then attempts every delivery for that key that hasn't succeeded yet. Installed
+ * emitted it, then attempts every delivery for that key that hasn't succeeded yet. `emitCart` does
+ * the same for a cart's events, keyed by the cart and the event (each happens once per cart). Installed
  * plugins that subscribe to the event get a delivery too (subscription id `plugin:<id>`), sent
  * over their binding instead of HTTP, with the same ids and retries. It never throws:
  * the caller's step throws on `pending > 0` so Workflows retries with backoff, and the interpreter
@@ -8,9 +9,12 @@
  */
 
 import {
+  type CartEvent,
+  type CartSummary,
   DELIVERY_HEADER,
   EVENT_HEADER,
   type Order,
+  type OrderEvent,
   type OutboundEvent,
   type OutboundPayload,
   SIGNATURE_HEADER,
@@ -29,12 +33,48 @@ const TIMEOUT_MS = 10_000;
 /** The subscription id of a plugin's deliveries: `plugin:<id>`. */
 export const PLUGIN_SUBSCRIPTION = 'plugin:';
 
-export async function emit(
+export function emit(
   env: Env,
   stepKey: string,
   orderId: string,
-  event: OutboundEvent,
+  event: OrderEvent,
   data: Record<string, unknown>,
+) {
+  return record(env, stepKey, orderId, event, (id, occurredAt) => ({
+    id,
+    event,
+    occurredAt,
+    orderId,
+    data,
+  }));
+}
+
+/**
+ * A cart's event, with the cart as it was then (`cartSummary`: nothing that names the buyer). Its
+ * deliveries are recorded under the cart's id where an order's go under the order's
+ * (`webhook_deliveries.order_id`), keyed by the event, so a retried emit delivers once.
+ */
+export function emitCart(env: Env, cart: CartSummary, event: CartEvent) {
+  return record(env, event, cart.id, event, (id, occurredAt) => ({
+    id,
+    event,
+    occurredAt,
+    cartId: cart.id,
+    orderId: cart.orderId,
+    data: { cart },
+  }));
+}
+
+/**
+ * Records and attempts the deliveries of one event. `subject` is the order (or cart) it is about,
+ * which with `stepKey` and the subscription makes each delivery's id.
+ */
+async function record(
+  env: Env,
+  stepKey: string,
+  subject: string,
+  event: OutboundEvent,
+  payloadOf: (id: string, occurredAt: number) => OutboundPayload,
 ) {
   const d = createDb(env.DB);
   const subs = (
@@ -47,16 +87,16 @@ export async function emit(
   if (!targets.length && !(await hasPlugins(env))) return { delivered: 0, pending: 0 };
 
   const secrets = new Map(subs.map((s) => [s.id, s]));
-  const ids = targets.map((s) => `whd_${orderId}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
+  const ids = targets.map((s) => `whd_${subject}_${stepKey}_${s.id}`.replace(/[^\w-]/g, '_'));
   const now = Date.now();
   const inserts = targets.map((s, i) => {
-    const payload: OutboundPayload = { id: ids[i]!, event, occurredAt: now, orderId, data };
+    const payload = payloadOf(ids[i]!, now);
     return d
       .insert(webhookDeliveries)
       .values({
         id: ids[i]!,
         subscriptionId: s.id,
-        orderId,
+        orderId: subject,
         event,
         payload: JSON.stringify(payload),
         createdAt: now,
@@ -68,7 +108,7 @@ export async function emit(
 
   // Also any plugin delivery recorded for this step by an earlier attempt, though the plugin isn't
   // among the targets now (it didn't answer this time): it stays pending until it's delivered.
-  const earlier = `${`whd_${orderId}_${stepKey}_`.replace(/[^\w-]/g, '_').replace(/[\\%_]/g, '\\$&')}%`;
+  const earlier = `${`whd_${subject}_${stepKey}_`.replace(/[^\w-]/g, '_').replace(/[\\%_]/g, '\\$&')}%`;
   const open = await d
     .select()
     .from(webhookDeliveries)
@@ -78,7 +118,7 @@ export async function emit(
         or(
           inArray(webhookDeliveries.id, ids),
           and(
-            eq(webhookDeliveries.orderId, orderId),
+            eq(webhookDeliveries.orderId, subject),
             sql`${webhookDeliveries.id} LIKE ${earlier} ESCAPE '\\'`,
             sql`${webhookDeliveries.subscriptionId} LIKE 'plugin:%'`,
           ),

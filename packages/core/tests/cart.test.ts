@@ -15,6 +15,7 @@ import {
   cartOpSchema,
   cartReadyProblem,
   cartShippingOption,
+  cartSummary,
   cartView,
   chatBody,
   type ExternalCartInput,
@@ -735,6 +736,56 @@ describe('carts outside their page', () => {
     expect(cartView(cart({ lines: [] }))).toMatchObject({
       quoteCurrent: false,
       notReady: 'Add at least one line.',
+    });
+  });
+});
+
+describe('a cart in its events', () => {
+  it('carries what is on it and its totals, never who the buyer is or where it ships', () => {
+    const c = cart({
+      external,
+      customerId: 'cus_1',
+      lines: [{ id: 'li_1', sku: 'SKU-1', qty: 2, title: 'Widget', unitPrice: 5 }],
+      promoCodes: ['SAVE10'],
+      shipTo: { name: 'Cy Buyer', line1: '1 Main St', city: 'Springfield', country: 'US' },
+      quote,
+      quotedVersion: 1,
+      orderId: null,
+    });
+    const s = cartSummary(c);
+    expect(s).toEqual({
+      id: 'cart_1',
+      title: 'Q4 restock',
+      status: 'open',
+      flowId: 'flow_1',
+      source: 'external',
+      pluginId: 'punchout',
+      customerId: 'cus_1',
+      lines: [{ sku: 'SKU-1', qty: 2 }],
+      quote: { currency: 'USD', subtotal: 10, shipping: 0, tax: 0, total: 10 },
+      orderId: null,
+      createdAt: 0,
+      updatedAt: 0,
+      version: 1,
+    });
+    const json = JSON.stringify(s);
+    for (const personal of ['Cy', 'b1', 'Main St', 'Springfield', 'cookie-1', 'buyer.example'])
+      expect(json).not.toContain(personal);
+  });
+
+  it('shows no quote that prices the cart as it was, and the order a submitted one became', () => {
+    expect(cartSummary(cart({ quote, quotedVersion: 0 })).quote).toBeNull();
+    const done = finishCart(
+      cart({ quote, quotedVersion: 1 }),
+      { status: 'submitted', orderId: 'ord_9' },
+      5,
+    );
+    expect(cartSummary(done)).toMatchObject({
+      source: 'staff',
+      pluginId: null,
+      status: 'submitted',
+      orderId: 'ord_9',
+      quote: { total: 10 },
     });
   });
 });

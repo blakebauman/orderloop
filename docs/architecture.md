@@ -1046,6 +1046,16 @@ the rest is in its SQL, paged by `history`).
   request also reaches the staff carts for their accounts (`carts.customer_id`): the export lists
   their ship-to (`customerExport`) and erasure removes it (`eraseShipTo`, repricing an open cart). `PluginCart`, and so an
   external cart's return, doesn't carry them.
+- **Events.** The agent announces a cart's opening and its ending as outbound webhooks
+  (`CART_EVENTS` in `packages/core/src/webhooks.ts`: `cart.created` from `create`, then one of
+  `cart.submitted`, `cart.returned`, `cart.canceled` or `cart.expired` from `submitAs`, `transferAs`,
+  `cancelAs` or `eraseSubject`, and `expire`). `announce` schedules `emitWebhook` with the cart's
+  `cartSummary` (no ship-to, chat, files, codes or buyer), which calls `emitCart`
+  (`apps/engine/src/outbox.ts`): the same subscriptions, plugin deliveries, signing and retries as
+  an order's events, keyed by cart and event so each is delivered once. The schedule is written with
+  the state change, before the D1 index; it retries for about a day; erasures (`dropEvents`, from
+  `eraseSubject` and `eraseFromEvents`) delete the cart's deliveries and drop what's queued. Edits send none: they come
+  on every keystroke-sized op, and the ending event carries what the cart came to.
 - **Promotion codes.** A cart's codes ride in `meta.promoCodes` on its quote and its order. A
   code the flow's `commerce.discount` step leaves out comes back as a `promotion` warning on the
   cart (`quoteCheckout` reads the step's `promotionsRefused`), and so does a cart whose flow has no

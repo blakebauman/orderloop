@@ -111,6 +111,10 @@ after **Cancel cart**, nothing changes it.
 
 Orders started from a cart have the **Manual** channel, and their external id is the cart's id.
 
+Opening, submitting, returning, cancelling and expiring a cart each send a signed
+[outbound webhook](/guides/outbound-webhooks/#cart-events) (`cart.created`, `cart.submitted` and so
+on) to the endpoints subscribed to it. Changing a cart's lines sends none.
+
 ## From the API, MCP and the assistant
 
 Carts your team opens can also be built without the page: through the
