@@ -10,7 +10,7 @@ import {
   Throttled,
   verifySecondFactor,
 } from '~/lib/auth.server';
-import { nextPath } from '~/lib/next-path';
+import { nextPath, withNext } from '~/lib/next-path';
 import type { Route } from './+types/login-two-factor';
 
 export const meta = () => [{ title: 'Two-factor sign-in · OrderLoop' }];
@@ -19,7 +19,7 @@ export const meta = () => [{ title: 'Two-factor sign-in · OrderLoop' }];
 export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
 
 const backToSignIn = (request: Request) =>
-  redirect(`/login?next=${encodeURIComponent(nextPath(request))}`, {
+  redirect(withNext('/login', nextPath(request)), {
     headers: { 'set-cookie': clearChallengeCookie },
   });
 

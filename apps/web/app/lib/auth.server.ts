@@ -51,6 +51,7 @@ import {
 import { openSecret } from './data-key.server';
 import { DEMO_USER, isDemo } from './demo.server';
 import { afterResponse, db, passwordPepper } from './env.server';
+import { withNext } from './next-path';
 import { isLocalHost } from './origin';
 import { ssoOnlyInEffect, twoFactorRequirement } from './settings.server';
 import { blockedFor, retryText, signInKeys, throttleKey, WINDOW_MS } from './throttle';
@@ -400,7 +401,7 @@ const SETUP_PATH = '/account';
 export async function requireUser(request: Request, min: Role = 'viewer'): Promise<Caller> {
   const p = await principal(request);
   const url = new URL(request.url);
-  if (!p) throw redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
+  if (!p) throw redirect(withNext('/login', url.pathname + url.search));
   // Client navigations fetch loader data from `<path>.data`.
   if ((p.twoFactorDue || p.passwordChangeDue) && url.pathname.replace(/\.data$/, '') !== SETUP_PATH)
     throw redirect(SETUP_PATH);
