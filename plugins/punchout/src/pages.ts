@@ -5,8 +5,10 @@
  */
 
 import { type PluginView, viewResponse } from '@orderloop/plugin-sdk';
+import { sampleSetupRequest } from './cxml';
 import {
   addPartner,
+  getPartner,
   listPartners,
   type Partner,
   type PartnerInput,
@@ -15,6 +17,7 @@ import {
   rotateSecret,
   setStatus,
 } from './partners';
+import { type Check, testPartner } from './self-test';
 
 const BASE = '/plugins/punchout/';
 
@@ -98,6 +101,7 @@ function list(partners: Partner[], origin: string, notice: Notice = {}): Respons
               cells: {
                 partner: {
                   text: `${p.name} · ${p.protocol === 'cxml' ? `${p.fromDomain} / ${p.identity}` : `USERNAME ${p.identity}`}`,
+                  href: `partners/${p.id}`,
                 },
                 protocol: p.protocol.toUpperCase(),
                 flow: {
@@ -108,6 +112,7 @@ function list(partners: Partner[], origin: string, notice: Notice = {}): Respons
                 status: { text: status(p), tone: p.status === 'active' ? 'ok' : 'muted' },
               },
               actions: [
+                testForm(p),
                 {
                   type: 'form' as const,
                   action: `partners/${p.id}/rotate`,
@@ -138,6 +143,7 @@ function list(partners: Partner[], origin: string, notice: Notice = {}): Respons
               `cXML order URL: ${origin}cxml/order (OrderRequest: new, update and delete)`,
               `OCI URL: ${origin}oci/setup with USERNAME, PASSWORD (the secret) and HOOK_URL, by GET or POST`,
               'A cXML buyer is found by its From credential and proves itself with the Sender’s SharedSecret.',
+              'Open a partner for what to give its procurement admin, and Test to check it.',
             ],
           },
         ],
@@ -207,15 +213,187 @@ function list(partners: Partner[], origin: string, notice: Notice = {}): Respons
   };
   return viewResponse(view, notice.error ? { status: 400 } : {});
 }
-export async function adminPages(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  // The app's address isn't forwarded to plugins; the page names the paths on it, under the
-  // deployment's alias for the plugin when it has one (`/punchout/`), else its own.
+
+const testForm = (p: Partner) => ({
+  type: 'form' as const,
+  action: `partners/${p.id}/test`,
+  fields: [],
+  submit: 'Test',
+});
+
+/** A string for a POSIX shell, in single quotes. */
+const sh = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** A block a section may hold. */
+type Leaf = Exclude<PluginView['blocks'][number], { type: 'section' }>;
+
+/** What to give the partner's procurement admin, for its protocol. */
+function setupNotes(p: Partner, base: string): Leaf[] {
+  const returnTo = `https://${p.returnHosts[0] ?? 'their-system.example'}/`;
+  const common = [
+    `Return hosts: ${p.returnHosts.join(', ') || 'none'} (the cart goes back only over https to these)`,
+    `Frame origins: ${p.frameOrigins.join(', ') || 'none (the catalog can’t be shown inside their system’s page)'}`,
+    `Idle timeout: ${p.sessionMinutes} minutes`,
+  ];
+  if (p.protocol === 'oci') {
+    const setup = `${base}oci/setup`;
+    return [
+      {
+        type: 'list',
+        items: [
+          `Catalog URL: ${setup} (GET, or a form POST)`,
+          `USERNAME: ${p.identity}`,
+          'PASSWORD: the partner’s secret, shown once when it was added or rotated. Rotate it to issue a new one.',
+          'HOOK_URL: set by their system for each session; it must be on a return host.',
+          'The cart goes back to HOOK_URL as NEW_ITEM-DESCRIPTION, -QUANTITY, -UNIT, -PRICE, -PRICEUNIT, -CURRENCY, -VENDORMAT (the SKU) and -EXT_PRODUCT_ID (the cart line) fields, numbered from [1].',
+          'Purchase orders don’t come back through OCI: they arrive through the customer’s usual channel.',
+          ...common,
+        ],
+      },
+      {
+        type: 'code',
+        label: 'Catalog call parameters (SECRET is the partner’s secret)',
+        text: `USERNAME=${p.identity}\nPASSWORD=SECRET\nHOOK_URL=${returnTo}`,
+      },
+      {
+        type: 'code',
+        label:
+          'Try it: answers 302 to a one-time cart link (the cart closes unused after the idle timeout)',
+        text: [
+          `curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\\n' ${sh(setup)} \\`,
+          `  --data-urlencode ${sh(`USERNAME=${p.identity}`)} \\`,
+          `  --data-urlencode 'PASSWORD=SECRET' \\`,
+          `  --data-urlencode ${sh(`HOOK_URL=${returnTo}`)}`,
+        ].join('\n'),
+      },
+    ];
+  }
+  const setup = `${base}cxml/setup`;
+  return [
+    {
+      type: 'list',
+      items: [
+        `Setup URL: ${setup} (PunchOutSetupRequest)`,
+        `Order URL: ${base}cxml/order (OrderRequest: new, update and delete)`,
+        `From (their credential): domain ${p.fromDomain}, identity ${p.identity}`,
+        `To (ours, and the From of each cart sent back): domain ${p.supplierDomain}, identity ${p.supplierIdentity}`,
+        'Sender: their system’s credential, with the partner’s secret as its SharedSecret. The secret is shown once when the partner is added or rotated; rotate it to issue a new one.',
+        'BrowserFormPost: set by their system for each session; it must be on a return host.',
+        ...common,
+      ],
+    },
+    {
+      type: 'code',
+      label: 'Sample PunchOutSetupRequest (SECRET is the partner’s secret)',
+      text: sampleSetupRequest({
+        from: { domain: p.fromDomain, identity: p.identity },
+        to: { domain: p.supplierDomain, identity: p.supplierIdentity },
+        browserFormPost: returnTo,
+        setupUrl: setup,
+      }),
+    },
+    {
+      type: 'code',
+      label:
+        'Try it: saved as setup.xml with the secret in place, answers Status 200 and a StartPage (the cart closes unused after the idle timeout)',
+      text: `curl -sS -H 'Content-Type: text/xml' --data-binary @setup.xml ${sh(setup)}`,
+    },
+  ];
+}
+
+/** One partner's page: what to give its procurement admin, and its self-test when one ran. */
+function partnerPage(p: Partner, base: string, checks?: Check[]): Response {
+  const failed = checks?.filter((c) => !c.ok).length ?? 0;
+  const view: PluginView = {
+    title: p.name,
+    description: `${p.protocol.toUpperCase()} partner · ${p.status === 'active' ? 'Active' : 'Disabled'}`,
+    actions: [{ label: 'All partners', href: BASE }],
+    blocks: [
+      ...(checks
+        ? [
+            failed
+              ? {
+                  type: 'alert' as const,
+                  tone: 'error' as const,
+                  title: `${failed} of ${checks.length} checks fail`,
+                  text: 'A session from this partner would be refused, or its orders would. Fix what fails and test again.',
+                }
+              : {
+                  type: 'alert' as const,
+                  tone: 'success' as const,
+                  title: 'All checks pass',
+                  text: 'This partner can open a session once its system has the details below and its secret. The test opened no cart.',
+                },
+            {
+              type: 'section' as const,
+              title: 'Test',
+              blocks: [
+                {
+                  type: 'table' as const,
+                  columns: [
+                    { key: 'check', label: 'Check' },
+                    { key: 'result', label: 'Result' },
+                    { key: 'detail', label: 'Detail' },
+                  ],
+                  rows: checks.map((c) => ({
+                    cells: {
+                      check: c.label,
+                      result: {
+                        text: c.ok ? 'Pass' : 'Fail',
+                        tone: c.ok ? ('ok' as const) : ('bad' as const),
+                      },
+                      detail: c.detail,
+                    },
+                  })),
+                },
+              ],
+            },
+          ]
+        : []),
+      {
+        type: 'section',
+        title: 'Give the customer’s procurement admin',
+        description:
+          'Their system needs these and the partner’s secret. Send the secret apart from the rest.',
+        blocks: [
+          ...setupNotes(p, base),
+          { ...testForm(p), submit: checks ? 'Test again' : 'Test' },
+        ],
+      },
+    ],
+  };
+  return viewResponse(view);
+}
+
+/**
+ * Where the page says the plugin answers: the app's origin (`x-orderloop-origin`, set by the web
+ * Worker only) under the deployment's alias for the plugin when it has one (`/punchout/`), else
+ * its own path. Without an origin, a placeholder the admin fills in.
+ */
+function publicBase(request: Request): string {
   const alias = request.headers.get('x-orderloop-alias');
   const mount = alias && /^\/[a-z][a-z0-9-]{1,30}\/$/.test(alias) ? alias : BASE;
-  const origin = `https://<your OrderLoop address>${mount}`;
+  const origin = request.headers.get('x-orderloop-origin');
+  const app =
+    origin && /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/.test(origin)
+      ? origin
+      : 'https://<your OrderLoop address>';
+  return `${app}${mount}`;
+}
+
+export async function adminPages(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const origin = publicBase(request);
   const path = url.pathname;
   if (request.method === 'GET' && path === BASE) return list(await listPartners(env), origin);
+  const one = /^\/plugins\/punchout\/partners\/(ptn_[a-z0-9]+)(\/test)?$/.exec(path);
+  if (one && (request.method === 'GET') === !one[2]) {
+    const p = await getPartner(env, one[1]!);
+    if (!p)
+      return list(await listPartners(env), origin, { error: 'That partner no longer exists.' });
+    // The test reads only, so it answers on the partner's page rather than redirecting.
+    return partnerPage(p, origin, one[2] ? await testPartner(env, p) : undefined);
+  }
   if (request.method !== 'POST') return new Response('Not found', { status: 404 });
   if (path === `${BASE}partners`) {
     const input = partnerFrom(await request.formData());

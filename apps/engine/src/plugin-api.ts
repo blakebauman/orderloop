@@ -21,7 +21,7 @@ import {
 import { createDb, fxRates, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { recordAudit } from './audit';
-import { openExternalCart, pluginCart } from './cart/carts';
+import { checkExternalCart, openExternalCart, pluginCart } from './cart/carts';
 import { orderAgent } from './namespaces';
 import { startOrderOnce } from './orders';
 import { mayUse } from './plugins';
@@ -37,6 +37,14 @@ export class PluginHost extends WorkerEntrypoint<Env, { id: string }> implements
     const id = await this.#allowed('carts:external');
     if (!id) return { ok: false as const, error: 'This plugin may not open carts here.' };
     return openExternalCart(this.env, id, input);
+  }
+
+  async checkExternalCart(input: ExternalCartInput) {
+    const id = await this.#allowed('carts:external');
+    if (!id) return { ok: false as const, error: 'This plugin may not open carts here.' };
+    if (!input || typeof input !== 'object')
+      return { ok: false as const, error: 'That is not a cart to check.' };
+    return { ok: true as const, problems: await checkExternalCart(this.env, input) };
   }
 
   async getCart(cartId: string): Promise<PluginCart | null> {

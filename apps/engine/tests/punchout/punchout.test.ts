@@ -207,3 +207,58 @@ describe('a purchase order changed or cancelled by the buyer', () => {
     );
   });
 });
+
+describe('a partner’s self-test', () => {
+  /** The partner's id off the admin page, and its test's checks by label. */
+  async function testOf(identity: string) {
+    const list = await (await plugin('/plugins/punchout/', {}, true)).text();
+    const id = new RegExp(`${identity}[^]*?partners/(ptn_[a-z0-9]+)`).exec(list)?.[1];
+    const res = await plugin(`/plugins/punchout/partners/${id}/test`, { method: 'POST' }, true);
+    type Row = { cells: { check: string; result: { text: string }; detail: string } };
+    type Block = { type: string; title?: string; blocks?: Block[]; rows?: Row[] };
+    const view = (await res.json()) as { blocks: Block[] };
+    const rows = view.blocks.find((b) => b.title === 'Test')!.blocks![0]!.rows!;
+    return Object.fromEntries(
+      rows.map((r) => [
+        r.cells.check,
+        { pass: r.cells.result.text === 'Pass', detail: r.cells.detail },
+      ]),
+    );
+  }
+  const cartCount = async () =>
+    (await env.DB.prepare("SELECT COUNT(*) AS n FROM carts WHERE plugin_id = 'punchout'").first<{
+      n: number;
+    }>())!.n;
+
+  it('asks the real host about its flow and customer, and opens no cart', async () => {
+    await addPartner();
+    const before = await cartCount();
+    const checks = await testOf('AN01000000001');
+    for (const [label, c] of Object.entries(checks)) expect(c.pass, label).toBe(true);
+    // One that names a flow and a customer the deployment doesn't have.
+    await plugin(
+      '/plugins/punchout/partners',
+      {
+        method: 'POST',
+        body: new URLSearchParams({
+          name: 'Stale Coupa',
+          protocol: 'cxml',
+          fromDomain: 'DUNS',
+          identity: 'stale-coupa',
+          customerId: 'cus_nope',
+          flowId: 'flow_nope',
+          returnHosts: 'buyer.example',
+        }),
+      },
+      true,
+    );
+    const stale = await testOf('stale-coupa');
+    expect(stale.Flow).toEqual({
+      pass: false,
+      detail: 'flow_nope: That flow has no published version.',
+    });
+    expect(stale.Customer).toEqual({ pass: false, detail: 'cus_nope: No such customer.' });
+    expect(stale.Cart?.pass).toBe(true);
+    expect(await cartCount()).toBe(before);
+  });
+});

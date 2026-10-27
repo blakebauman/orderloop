@@ -41,6 +41,34 @@ function fakeHost() {
         },
       };
     },
+    checked: [] as ExternalCartInput[],
+    /** How the host answers a check: as granted, refused (no `carts:external`) or unreachable. */
+    checks: 'granted' as 'granted' | 'refused' | 'down',
+    async checkExternalCart(input: ExternalCartInput) {
+      if (this.checks === 'down') throw new Error('D1_ERROR: internal detail');
+      if (this.checks === 'refused')
+        return { ok: false as const, error: 'This plugin may not open carts here.' };
+      this.checked.push(input);
+      // As the core answers: its own host refused (and then nothing else looked up), an unknown
+      // flow or customer reported.
+      if (new URL(input.returnUrl).hostname.endsWith('orderloop.test'))
+        return {
+          ok: true as const,
+          problems: {
+            input: 'returnUrl must be the buyer’s system, not this one',
+            flow: null,
+            customer: null,
+          },
+        };
+      return {
+        ok: true as const,
+        problems: {
+          input: null,
+          flow: input.flowId === 'flow_nope' ? 'That flow has no published version.' : null,
+          customer: input.customerId === 'cus_nope' ? 'No such customer.' : null,
+        },
+      };
+    },
     async getCart() {
       return null;
     },
@@ -619,6 +647,302 @@ describe('the admin page', () => {
     });
     expect(res.status).toBe(400);
     expect(await res.text()).toContain('List the host names');
+  });
+});
+
+describe('the partner self-test and setup notes', () => {
+  /** The partner's id, off the admin page's list. */
+  async function partnerId(name = 'Northwind Ariba') {
+    const view = (await (await admin('/plugins/punchout/')).json()) as PluginView;
+    const rows = JSON.stringify(view);
+    const at = rows.indexOf(name);
+    return /partners\/(ptn_[a-z0-9]+)/.exec(rows.slice(at))![1]!;
+  }
+
+  /** The partner's test, as an admin posts it from the page: its checks by label. */
+  async function test(id: string) {
+    const res = await admin(`/plugins/punchout/partners/${id}/test`, {});
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(checkPluginView(raw).ok).toBe(true);
+    const view = JSON.parse(raw) as PluginView;
+    type Table = Extract<PluginView['blocks'][number], { type: 'table' }>;
+    const section = view.blocks.find(
+      (b): b is Extract<typeof b, { type: 'section' }> =>
+        b.type === 'section' && b.title === 'Test',
+    )!;
+    const table = section.blocks.find((b): b is Table => b.type === 'table')!;
+    const checks = Object.fromEntries(
+      table.rows.map((r) => {
+        const result = r.cells.result as { text: string };
+        return [
+          String(r.cells.check),
+          { pass: result.text === 'Pass', detail: String(r.cells.detail) },
+        ];
+      }),
+    );
+    return { checks, view, raw };
+  }
+
+  /** The text of each code block on the page, in order. */
+  const codesIn = (view: PluginView) =>
+    view.blocks
+      .flatMap((b) => (b.type === 'section' ? b.blocks : [b]))
+      .flatMap((b) => (b.type === 'code' ? [b.text] : []));
+
+  /** Changes the stored partner, as no form on the page could. */
+  const stored = (id: string, set: string, ...values: unknown[]) =>
+    env.DB.prepare(`UPDATE partners SET ${set} WHERE id = ?`)
+      .bind(...values, id)
+      .run();
+
+  it('passes a partner a session would let in, opening no cart', async () => {
+    const secret = await partner();
+    const id = await partnerId();
+    const { checks, view, raw } = await test(id);
+    expect(Object.keys(checks)).toEqual([
+      'Partner record',
+      'Return hosts',
+      'Frame origins',
+      'Status',
+      'Commerce model',
+      'Cart',
+      'Flow',
+      'Customer',
+    ]);
+    for (const [label, c] of Object.entries(checks)) expect(c.pass, label).toBe(true);
+    expect(JSON.stringify(view.blocks[0])).toContain('All checks pass');
+    // The core was asked what it would make of the cart a session opens, and opened nothing.
+    expect(host.checked).toHaveLength(1);
+    expect(host.checked[0]).toMatchObject({
+      flowId: 'tpl-b2b-order',
+      customerId: 'cus_northwind',
+      returnUrl: 'https://buyer.example/',
+      frameOrigins: ['https://buyer.example'],
+      idleMs: 120 * 60_000,
+    });
+    expect(host.opened).toEqual([]);
+    expect(host.started).toEqual([]);
+    const sessions = await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions').first<{
+      n: number;
+    }>();
+    expect(sessions?.n).toBe(0);
+    // Never the secret, nor its hash.
+    expect(raw).not.toContain(secret);
+    const { hash } = (await env.DB.prepare('SELECT secret_hash AS hash FROM partners').first<{
+      hash: string;
+    }>())!;
+    expect(raw).not.toContain(hash);
+  });
+
+  it('fails each check a session or its order would fail', async () => {
+    await partner({ flowId: 'flow_nope', customerId: 'cus_nope', model: 'wholesale' });
+    const id = await partnerId();
+    let { checks, view } = await test(id);
+    expect(checks.Flow).toEqual({
+      pass: false,
+      detail: 'flow_nope: That flow has no published version.',
+    });
+    expect(checks.Customer).toEqual({ pass: false, detail: 'cus_nope: No such customer.' });
+    expect(checks['Commerce model']?.pass).toBe(false);
+    expect(JSON.stringify(view.blocks[0])).toContain('3 of 8 checks fail');
+
+    await admin(`/plugins/punchout/partners/${id}/disable`, {});
+    expect((await test(id)).checks.Status).toMatchObject({ pass: false });
+
+    // A record the form wouldn't take, as an older version or a hand edit might have left it.
+    await stored(
+      id,
+      "from_domain = '', secret_hash = 'x', return_hosts = ?, frame_origins = ?",
+      JSON.stringify(['buyer.example', 'Bad Host', 'evil.example:8443']),
+      JSON.stringify(['http://buyer.example', 'https://buyer.example/path', 'https://ok.example']),
+    );
+    ({ checks } = await test(id));
+    expect(checks['Partner record']).toMatchObject({ pass: false });
+    expect(checks['Partner record']?.detail).toMatch(/From domain, secret/);
+    expect(checks['Return hosts']).toEqual({
+      pass: false,
+      detail: 'Not host names: Bad Host, evil.example:8443.',
+    });
+    expect(checks['Frame origins']).toEqual({
+      pass: false,
+      detail: 'Not https origins: http://buyer.example, https://buyer.example/path.',
+    });
+
+    // A return host on the deployment itself, which the core refuses to post a cart back to.
+    await stored(id, 'return_hosts = ?', JSON.stringify(['buyer.example', 'app.orderloop.test']));
+    host.checked.length = 0;
+    ({ checks } = await test(id));
+    expect(host.checked.map((c) => c.returnUrl)).toEqual([
+      'https://buyer.example/',
+      'https://app.orderloop.test/',
+    ]);
+    expect(checks.Cart).toEqual({
+      pass: false,
+      detail: 'returnUrl must be the buyer’s system, not this one',
+    });
+    // Still asked about the flow by the host that would open a cart.
+    expect(checks.Flow).toMatchObject({
+      pass: false,
+      detail: expect.stringMatching(/^flow_nope:/),
+    });
+    // Every host the deployment's own: the flow and customer go unchecked, and fail.
+    await stored(id, 'return_hosts = ?', JSON.stringify(['app.orderloop.test']));
+    ({ checks } = await test(id));
+    expect(checks.Flow).toEqual({
+      pass: false,
+      detail: 'Not checked: OrderLoop wouldn’t open the cart (see Cart).',
+    });
+    expect(checks.Customer?.pass).toBe(false);
+    // Once per distinct host, and no more than ten.
+    const many = Array.from({ length: 12 }, (_, i) => `h${i}.buyer.example`);
+    await stored(
+      id,
+      'return_hosts = ?',
+      JSON.stringify(['buyer.example', 'buyer.example', ...many]),
+    );
+    host.checked.length = 0;
+    ({ checks } = await test(id));
+    expect(host.checked.map((c) => c.returnUrl)).toEqual([
+      'https://buyer.example/',
+      ...many.slice(0, 9).map((h) => `https://${h}/`),
+    ]);
+    expect(checks.Cart?.detail).toMatch(/the first 10; 3 more not asked/);
+    // No return host: nothing for the core to check.
+    await stored(id, "return_hosts = '[]'");
+    host.checked.length = 0;
+    ({ checks } = await test(id));
+    expect(host.checked).toEqual([]);
+    expect(checks.Flow?.detail).toMatch(/no usable return host/);
+    expect(host.opened).toEqual([]);
+  });
+
+  it('says so when the core can’t be asked, without its error', async () => {
+    await partner();
+    const id = await partnerId();
+    host.checks = 'refused';
+    let { checks } = await test(id);
+    for (const label of ['Cart', 'Flow', 'Customer'])
+      expect(checks[label]?.detail).toMatch(/doesn’t let Punchout open carts/);
+    host.checks = 'down';
+    const down = await test(id);
+    expect(down.checks.Flow?.detail).toMatch(/couldn’t be reached/);
+    expect(down.raw).not.toContain('D1_ERROR');
+    // With no host API bound at all.
+    plugin = new PunchoutPlugin(ctx, { ...env, ORDERLOOP: undefined } as never);
+    ({ checks } = await test(id));
+    expect(checks.Customer?.detail).toMatch(/doesn’t let Punchout open carts/);
+    expect(host.opened).toEqual([]);
+  });
+
+  it('is an admin’s POST, as rotating a secret is', async () => {
+    await partner();
+    const id = await partnerId();
+    const path = `/plugins/punchout/partners/${id}/test`;
+    const as = async (role: string, method: string, signedFor = path) =>
+      (
+        await plugin.fetch(
+          new Request(`https://plugin${path}`, {
+            method,
+            headers: {
+              [PRINCIPAL_HEADER]: await signPrincipal(
+                KEY,
+                { kind: 'user', id: 'usr_1', name: 'Ada', role: role as 'operator' },
+                signedFor,
+              ),
+            },
+          }),
+        )
+      ).status;
+    const unsigned = (method: string, to = path) =>
+      plugin.fetch(new Request(`https://plugin${to}`, { method })).then((r) => r.status);
+    const rotate = `/plugins/punchout/partners/${id}/rotate`;
+    // The same answers as rotate: no principal, one signed for another path, a role below admin.
+    expect(await unsigned('POST')).toBe(await unsigned('POST', rotate));
+    expect(await unsigned('POST')).toBe(401);
+    expect(await as('admin', 'POST', '/plugins/punchout/')).toBe(401);
+    expect(await as('operator', 'POST')).toBe(403);
+    expect(await as('admin', 'POST')).toBe(200);
+    // A test is posted; a GET of it is nothing.
+    expect(await as('admin', 'GET')).toBe(404);
+    expect(host.checked).toHaveLength(1);
+    // An id with no partner says so on the page.
+    const gone = await admin('/plugins/punchout/partners/ptn_0000000000000000/test', {});
+    expect(gone.status).toBe(400);
+    expect(await gone.text()).toContain('That partner no longer exists');
+  });
+
+  it('gives a cXML partner’s admin its URLs, credentials and a request that opens a session', async () => {
+    const secret = await partner();
+    const id = await partnerId();
+    const path = `/plugins/punchout/partners/${id}`;
+    const res = await plugin.fetch(
+      new Request(`https://plugin${path}`, {
+        headers: {
+          'x-orderloop-origin': 'https://shop.example',
+          'x-orderloop-alias': '/punchout/',
+          [PRINCIPAL_HEADER]: await signPrincipal(
+            KEY,
+            { kind: 'user', id: 'usr_admin', name: 'Admin', role: 'admin' },
+            path,
+          ),
+        },
+      }),
+    );
+    const raw = await res.text();
+    expect(checkPluginView(raw).ok).toBe(true);
+    expect(raw).not.toContain(secret);
+    expect(raw).toContain('Setup URL: https://shop.example/punchout/cxml/setup');
+    expect(raw).toContain('Order URL: https://shop.example/punchout/cxml/order');
+    expect(raw).toContain('From (their credential): domain NetworkID, identity AN01000000001');
+    expect(raw).toContain('domain NetworkID, identity orderloop');
+    expect(raw).toContain(`partners/${id}/test`);
+    const view = JSON.parse(raw) as PluginView;
+    const codes = codesIn(view);
+    const sample = codes.find((c) => c.includes('PunchOutSetupRequest'))!;
+    expect(sample).toContain('<SharedSecret>SECRET</SharedSecret>');
+    expect(codes.find((c) => c.startsWith('curl'))).toBe(
+      "curl -sS -H 'Content-Type: text/xml' --data-binary @setup.xml 'https://shop.example/punchout/cxml/setup'",
+    );
+    // The sample, with the secret in place, is a request the plugin lets in.
+    const opened = await post('/plugins/punchout/cxml/setup', sample.replace('SECRET', secret));
+    expect(await status(opened)).toBe('200');
+    expect(host.opened[0]).toMatchObject({ returnUrl: 'https://buyer.example/' });
+  });
+
+  it('gives an OCI partner’s admin its catalog call, and names no secret', async () => {
+    const secret = await partner({
+      name: 'Contoso SAP',
+      protocol: 'oci',
+      identity: "sap-user's",
+      fromDomain: '',
+    });
+    const id = await partnerId('Contoso SAP');
+    const raw = await (await admin(`/plugins/punchout/partners/${id}`)).text();
+    expect(checkPluginView(raw).ok).toBe(true);
+    expect(raw).not.toContain(secret);
+    // No origin forwarded: the placeholder, as the list shows it.
+    expect(raw).toContain(
+      'Catalog URL: https://<your OrderLoop address>/plugins/punchout/oci/setup',
+    );
+    expect(raw).toContain('USERNAME: sap-user');
+    expect(raw).not.toContain('cxml/order');
+    const view = JSON.parse(raw) as PluginView;
+    const texts = codesIn(view);
+    expect(texts[0]).toBe("USERNAME=sap-user's\nPASSWORD=SECRET\nHOOK_URL=https://buyer.example/");
+    // Quoted for the shell, whatever the USERNAME holds.
+    expect(texts[1]).toContain(`--data-urlencode 'USERNAME=sap-user'\\''s'`);
+    // The parameters, with the secret in place, open a session.
+    const q = new URLSearchParams(
+      Object.fromEntries(texts[0]!.split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2))),
+    );
+    q.set('PASSWORD', secret);
+    const res = await plugin.fetch(
+      new Request('https://plugin/plugins/punchout/oci/setup', { method: 'POST', body: q }),
+    );
+    expect(res.status).toBe(302);
+    // Its test checks the same, and OCI needs no From domain.
+    expect((await test(id)).checks['Partner record']).toMatchObject({ pass: true });
   });
 });
 

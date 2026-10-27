@@ -15,6 +15,7 @@ import {
   type ExternalCart,
   type ExternalCartInput,
   type ExternalCartOpened,
+  type ExternalCartProblems,
   externalCartProblem,
   isFinalCart,
   MAX_CART_TITLE,
@@ -38,6 +39,16 @@ export async function cartFlowProblem(env: Env, flowId: string): Promise<string 
   return null;
 }
 
+/** Why a cart can't be for `customerId`, or null: the customer must exist. */
+async function customerProblem(env: Env, customerId: string): Promise<string | null> {
+  const found = await createDb(env.DB)
+    .select({ id: customers.id })
+    .from(customers)
+    .where(eq(customers.id, customerId))
+    .get();
+  return found ? null : 'No such customer.';
+}
+
 export async function createCart(
   env: Env,
   input: CreateCartInput,
@@ -47,16 +58,10 @@ export async function createCart(
   const title = input.title.trim();
   if (!title || title.length > MAX_CART_TITLE)
     return { ok: false, error: `A title is 1 to ${MAX_CART_TITLE} characters.` };
-  const problem = await cartFlowProblem(env, input.flowId);
+  const problem =
+    (await cartFlowProblem(env, input.flowId)) ??
+    (input.customerId ? await customerProblem(env, input.customerId) : null);
   if (problem) return { ok: false, error: problem };
-  if (input.customerId) {
-    const found = await createDb(env.DB)
-      .select({ id: customers.id })
-      .from(customers)
-      .where(eq(customers.id, input.customerId))
-      .get();
-    if (!found) return { ok: false, error: 'No such customer.' };
-  }
   const cart = newCart({
     id: newId('cart'),
     title,
@@ -134,6 +139,39 @@ export async function cancelCart(
   return { ok: true, cart: cartView((await staffCart(env, id))!) };
 }
 
+/** Why `input` can't open an external cart, before its flow and customer are looked up. */
+function externalInputProblem(env: Env, input: ExternalCartInput): string | null {
+  const own = String(env.OWN_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  const problem = externalCartProblem(input, Date.now(), own);
+  if (problem) return problem;
+  const title = input.title.trim();
+  return title && title.length <= MAX_CART_TITLE
+    ? null
+    : `A title is 1 to ${MAX_CART_TITLE} characters.`;
+}
+
+/**
+ * What `openExternalCart` would make of `input`, checked as it checks it (the input, then the flow
+ * and customer `createCart` needs), reading only: no cart is opened, found or woken. The flow and
+ * customer are looked up only for an input that is otherwise acceptable, so a probe with a bad
+ * input learns nothing about which ids exist.
+ */
+export async function checkExternalCart(
+  env: Env,
+  input: ExternalCartInput,
+): Promise<ExternalCartProblems> {
+  const problem = externalInputProblem(env, input);
+  if (problem) return { input: problem, flow: null, customer: null };
+  return {
+    input: null,
+    flow: await cartFlowProblem(env, input.flowId),
+    customer: input.customerId ? await customerProblem(env, input.customerId) : null,
+  };
+}
+
 /**
  * Opens (or finds) the external cart for a plugin's session and a fresh start link for its buyer.
  * The same `sessionRef` finds the same cart, so a buyer's system asking again gets them back to it.
@@ -143,16 +181,9 @@ export async function openExternalCart(
   pluginId: string,
   input: ExternalCartInput,
 ): Promise<{ ok: true; cart: ExternalCartOpened } | { ok: false; error: string }> {
-  const now = Date.now();
-  const own = String(env.OWN_HOSTS ?? '')
-    .split(',')
-    .map((h) => h.trim())
-    .filter(Boolean);
-  const problem = externalCartProblem(input, now, own);
+  const problem = externalInputProblem(env, input);
   if (problem) return { ok: false, error: problem };
-  const title = String(input.title ?? '').trim();
-  if (!title || title.length > MAX_CART_TITLE)
-    return { ok: false, error: `A title is 1 to ${MAX_CART_TITLE} characters.` };
+  const title = input.title.trim();
   const db = createDb(env.DB);
   const existing = () =>
     db

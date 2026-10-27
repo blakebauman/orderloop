@@ -242,3 +242,48 @@ export function orderMessage(o: {
     `<Header><From>${credential(o.from)}</From><To>${credential(o.to)}</To><Sender>${credential(o.from)}<UserAgent>OrderLoop</UserAgent></Sender></Header><Message><PunchOutOrderMessage><BuyerCookie>${esc(o.buyerCookie)}</BuyerCookie><PunchOutOrderMessageHeader operationAllowed="edit"><Total><Money currency="${esc(o.currency)}">${amount(o.total)}</Money></Total></PunchOutOrderMessageHeader>${items}</PunchOutOrderMessage></Message>`,
   );
 }
+
+/**
+ * A PunchOutSetupRequest as the partner's system would send it, for its admin to try: `SECRET` in
+ * place of the shared secret, which is never shown again once issued.
+ */
+export function sampleSetupRequest(o: {
+  from: Credential;
+  to: Credential;
+  browserFormPost: string;
+  setupUrl: string;
+}): string {
+  const cred = (c: Credential, secret = '') =>
+    `<Credential domain="${esc(c.domain)}">
+        <Identity>${esc(c.identity)}</Identity>${secret ? `\n        <SharedSecret>${secret}</SharedSecret>` : ''}
+      </Credential>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+${CXML_DOCTYPE}
+<cXML payloadID="setup-test@${esc(o.from.identity)}" timestamp="${stamp()}" xml:lang="en-US">
+  <Header>
+    <From>
+      ${cred(o.from)}
+    </From>
+    <To>
+      ${cred(o.to)}
+    </To>
+    <Sender>
+      ${cred(o.from, 'SECRET')}
+      <UserAgent>Setup test</UserAgent>
+    </Sender>
+  </Header>
+  <Request>
+    <PunchOutSetupRequest operation="create">
+      <BuyerCookie>setup-test</BuyerCookie>
+      <Extrinsic name="UserEmail">buyer@example.com</Extrinsic>
+      <BrowserFormPost>
+        <URL>${esc(o.browserFormPost)}</URL>
+      </BrowserFormPost>
+      <SupplierSetup>
+        <URL>${esc(o.setupUrl)}</URL>
+      </SupplierSetup>
+    </PunchOutSetupRequest>
+  </Request>
+</cXML>
+`;
+}
