@@ -305,7 +305,9 @@ It writes them with `wrangler r2 bucket lock set`, which replaces the bucket's w
 configuration in one call: a re-run changes the audit retention without a moment unlocked, and a
 lock rule added to this bucket by hand is dropped (add it to the script instead). Nothing in the
 engine deletes under either prefix: erasure deletes `orders/<id>/` and inbound mail, never the
-audit archive. Shortening `auditArchiveDays` shortens both rules on the next run. List the rules
+audit archive. Nothing overwrites under them either, since a locked object can't be written again:
+the sweep and the deploy name each object by what it holds (an archive by its first event and
+count, a bundle by its sha) and skip one that is already there. Shortening `auditArchiveDays` shortens both rules on the next run. List the rules
 with `wrangler r2 bucket lock list orderloop-docs<suffix>`.
 
 ## The demo
