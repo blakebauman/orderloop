@@ -115,6 +115,9 @@ export function keysProblem(env: Record<string, string | undefined>): string | n
     : null;
 }
 
+/** Days a deployment keeps its catalog backups when its registry doesn't say. */
+export const CATALOG_BACKUP_DAYS = 90;
+
 export type Deployment = {
   id: string;
   ring: Ring;
@@ -151,6 +154,11 @@ export type Deployment = {
   personalDataRetentionDays?: number;
   /** Days the R2 archive keeps audit events past the database's retention; unset keeps them. */
   auditArchiveDays?: number;
+  /**
+   * Days the catalog's daily backups are kept, and locked against deletion (at least 31, so a
+   * backup outlives Durable Objects' 30 days of point-in-time recovery). Default 90.
+   */
+  catalogBackupDays: number;
   /** Model tokens a person's assistant may use a day (0: no limit); unset keeps the base. */
   assistantDailyTokens?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
@@ -351,6 +359,9 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   const archive = raw.auditArchiveDays;
   if (archive !== undefined && (!Number.isInteger(archive) || (archive as number) < 1))
     throw new Error(`${file}: auditArchiveDays must be a whole number of days`);
+  const backupDays = raw.catalogBackupDays;
+  if (backupDays !== undefined && (!Number.isInteger(backupDays) || (backupDays as number) < 31))
+    throw new Error(`${file}: catalogBackupDays must be a whole number of days, at least 31`);
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
@@ -516,6 +527,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(personal !== undefined ? { personalDataRetentionDays: personal as number } : {}),
     ...(tokens !== undefined ? { assistantDailyTokens: tokens as number } : {}),
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
+    catalogBackupDays: backupDays === undefined ? CATALOG_BACKUP_DAYS : (backupDays as number),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs === true,
     ...(sso
@@ -1115,10 +1127,10 @@ function pluginSecrets(out: string, plugin: string | undefined, id?: string) {
   console.log(`plugin ${plugin}: ${Object.keys(values).join(', ')}`);
 }
 
-function shellNames(id: string | undefined) {
-  const d = byId(id);
+/** What provision.sh reads (`names`): a deployment's resource names and settings. */
+export function shellVars(d: Deployment): Record<string, string> {
   const n = names(d);
-  const vars = {
+  return {
     WEB: n.web,
     D1: n.d1,
     R2: n.r2,
@@ -1139,6 +1151,8 @@ function shellNames(id: string | undefined) {
     JURISDICTION: d.jurisdiction ?? '',
     AI_GATEWAY_LOGS: String(d.aiGatewayLogs),
     AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
+    // How long catalog backups (backups/ in CATALOG_R2) are kept, and locked.
+    CATALOG_BACKUP_DAYS: String(d.catalogBackupDays),
     // Space-separated plugin ids; each one's D1 database is named orderloop-plugin-<id><suffix>.
     PLUGINS: workerPlugins(d).join(' '),
     // The deployment's own Secrets Store (own Cloudflare account), when its registry names one.
@@ -1147,7 +1161,10 @@ function shellNames(id: string | undefined) {
     SANDBOXED_PLUGINS: sandboxedPlugins(d).join(' '),
     SUFFIX: d.suffix,
   };
-  for (const [k, v] of Object.entries(vars)) console.log(`${k}='${v}'`);
+}
+
+function shellNames(id: string | undefined) {
+  for (const [k, v] of Object.entries(shellVars(byId(id)))) console.log(`${k}='${v}'`);
 }
 
 /** Writes one field into deployments/<id>.jsonc, keeping its comments. */

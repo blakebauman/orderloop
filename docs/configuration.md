@@ -131,12 +131,14 @@ created through the API and stored in D1; they are not configuration.
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite-backed, migration `v1`), one, named `meta` |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite-backed, migration `v2`), one, named `feeds` |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed` (class `FeedImport`), up to 10,000 steps per instance |
+| `CATALOG_BACKUP` | catalog | Workflow `orderloop-catalog-backup` (class `CatalogBackup`), started daily at 02:45 UTC by its `schedules`: copies every table of record of `CatalogMeta` and the shards to `PUBLISHED` under `backups/` ([Operations](operations.md#catalog-backups)) |
+| `CATALOG_RESTORE` | catalog | Workflow `orderloop-catalog-restore` (class `CatalogRestore`): restores the catalog to a time, bookmarks or a backup, then republishes; started only by an operator with `wrangler workflows trigger` ([Operations](operations.md#restoring-the-catalog)). The binding exists for the tests; nothing in the Worker calls it |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite-backed, migration `v3`), one per channel, category and listing segment, named `<channel>:<category>:<segment>` |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite-backed, migration `v4`), 16 shards named `search-<n>` |
 | `PUBLISHERS` | catalog | Durable Object `CatalogPublisher` (SQLite-backed, migration `v5`), `PUBLISH_FANOUT` (32) per shard named `pub-<shard>-<n>`: does the storage writes of a shard's publishes |
 | `FEED_PARTS` | catalog | Queue `orderloop-catalog-feed-parts`, produced and consumed by the catalog Worker (batches of 10, 1 second, `max_retries` 4, `retry_delay` 30 seconds when the handler throws, dead-letter queue `orderloop-catalog-feed-parts-dlq`) |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes`: the shards' alarms send each publish's listing changes, packed up to 64 KB a message, and the catalog Worker consumes them (`max_batch_size` 100 messages, `max_batch_timeout` 2 seconds, `max_retries` 10, `retry_delay` 30, dead-letter queue `orderloop-catalog-changes-dlq`). The consumer also takes the three dead-letter queues, `orderloop-catalog-feed-parts-dlq`, `orderloop-catalog-changes-dlq` and catalog-edge's `orderloop-catalog-purge-dlq` (`max_batch_size` 100, `max_batch_timeout` 5, `max_retries` 10, `retry_delay` 60, no dead-letter queue), and keeps each message in `PUBLISHED` under `dlq/` ([Operations](operations.md#dead-letters)) |
-| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`) and feed files (`feeds/`). Strongly consistent, so a purge is never undone by a stale read |
+| `PUBLISHED` | catalog | R2 bucket `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes (`idx/`), feed files (`feeds/`), dead letters (`dlq/`) and backups (`backups/`, and `restores/`). Strongly consistent, so a purge is never undone by a stale read |
 | `PURGE` | catalog | Queue producer for `orderloop-catalog-purge`: the alarm sends the cache tags (`PurgeMessage`) of urgent products after publishing them |
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries. `wrangler.jsonc` holds `orderloop`'s id; a customer's is the registry's `catalogKvId`, rendered at deploy |
 | `PUBLISHED` | catalog-edge | The same R2 bucket, `orderloop-catalog`, read |
@@ -196,7 +198,8 @@ catalog, catalog-edge) turn on Workers Issues (`observability.issues.enabled`), 
 uncaught exceptions, failed invocations, `5xx` responses and error-level logs into issues and is
 what the account's alerting watches; see [Alerting](operations.md#alerting). All four also set
 `observability.redact_query_string`, so OAuth codes and states and other query strings stay out of
-logs and traces. Each Workflow (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`)
+logs and traces. Each Workflow (`orderloop-order`, `orderloop-replenish`, `orderloop-catalog-feed`,
+`orderloop-catalog-backup`, `orderloop-catalog-restore`)
 sets `default_retention`: finished instances are kept 7 days, errored ones 30, the most Workflows
 keeps. `limits.cpu_ms` stops a
 runaway invocation: 5,000 for the web app, 10,000 for the engine (the platform default is 30,000). I/O

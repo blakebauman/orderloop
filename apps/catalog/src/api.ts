@@ -81,6 +81,37 @@ function byShard<T>(items: T[], key: (item: T) => string): Map<number, number[]>
   return groups;
 }
 
+/** Deletes every R2 object under `prefix`, a listing page at a time. */
+async function sweep(bucket: R2Bucket, prefix: string): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix, cursor, limit: 1000 });
+    if (page.objects.length) await bucket.delete(page.objects.map((o) => o.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+/**
+ * Takes down everything a channel no longer in the config published: every shard's documents,
+ * pointers and cards for it (`forgetChannel`), its listing indexes, and anything a crashed publish
+ * left behind. Returns how many products it took down; safe to run again.
+ */
+export async function takeDownChannel(env: Env, code: string): Promise<number> {
+  const taken = await Promise.all(
+    Array.from({ length: PRODUCT_SHARDS }, async (_, n) => {
+      let total = 0;
+      for (;;) {
+        const k = await shard(env, n).forgetChannel(code, 500);
+        if (!k) return total;
+        total += k;
+      }
+    }),
+  );
+  await sweep(env.PUBLISHED, `idx/${DOC_FORMAT}/${code}/`);
+  await sweep(env.PUBLISHED, `docs/${DOC_FORMAT}/${code}/`);
+  return taken.reduce((a, b) => a + b, 0);
+}
+
 export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogRpc {
   private async config(fresh = false): Promise<CatalogConfig> {
     if (!fresh && cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.config;
@@ -475,16 +506,6 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     return counts.reduce((a, b) => a + b, 0);
   }
 
-  /** Deletes every R2 object under `prefix`, a listing page at a time. */
-  private async sweep(prefix: string): Promise<void> {
-    let cursor: string | undefined;
-    do {
-      const page = await this.env.PUBLISHED.list({ prefix, cursor, limit: 1000 });
-      if (page.objects.length) await this.env.PUBLISHED.delete(page.objects.map((o) => o.key));
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor);
-  }
-
   async deleteType(code: string, _by: string): Promise<DeleteTypeResult> {
     const n = await this.using({ type: code });
     if (n) return { ok: false, issues: [`${n} products use ${code}: delete or move them first`] };
@@ -499,22 +520,9 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     // A channel already gone still gets the takedown: that's how a delete cut short is finished.
     const channel = await meta(this.env).deleteChannel(code);
     cached = undefined;
-    const taken = await Promise.all(
-      Array.from({ length: PRODUCT_SHARDS }, async (_, n) => {
-        let total = 0;
-        for (;;) {
-          const k = await shard(this.env, n).forgetChannel(code, 500);
-          if (!k) return total;
-          total += k;
-        }
-      }),
-    );
-    // Listing indexes, and anything a crashed publish left behind.
-    await this.sweep(`idx/${DOC_FORMAT}/${code}/`);
-    await this.sweep(`docs/${DOC_FORMAT}/${code}/`);
+    const unpublished = await takeDownChannel(this.env, code);
     // Its locales no longer count: every shard recounts its gaps.
     await this.markGapsStale();
-    const unpublished = taken.reduce((a, b) => a + b, 0);
     if (!channel && !unpublished)
       return { ok: false, issues: [`${code}: unknown channel`], notFound: true };
     return { ok: true, code, unpublished };

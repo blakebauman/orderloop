@@ -111,3 +111,16 @@ export async function alias(a: string) {
   const o = await env.PUBLISHED.get(paths.alias(DOC_FORMAT, 'web', a));
   return o ? ((await o.json()) as { key: string }) : null;
 }
+
+/** Runs a Workflow instance to its end; its output, or its error thrown. */
+export async function finish<T>(binding: Workflow, params?: unknown): Promise<T> {
+  const instance = await binding.create(params === undefined ? undefined : { params });
+  for (let i = 0; i < 1200; i++) {
+    const s = await instance.status();
+    if (s.status === 'complete') return s.output as T;
+    if (s.status === 'errored' || s.status === 'terminated')
+      throw new Error(`${s.status}: ${s.error?.message ?? ''}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the instance never finished');
+}

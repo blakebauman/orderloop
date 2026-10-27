@@ -42,6 +42,23 @@
       "limits": { "steps": 10000 },
       // As the engine's Workflows: a week for finished imports, a month for failed ones.
       "default_retention": { "success_retention": "7 days", "error_retention": "30 days" }
+    },
+    {
+      // Copies the catalog's Durable Objects (CatalogMeta and every shard) to PUBLISHED under
+      // backups/<date>/, one step per object (backup.ts). Daily, clear of the engine's crons.
+      "name": "orderloop-catalog-backup",
+      "binding": "CATALOG_BACKUP",
+      "class_name": "CatalogBackup",
+      "schedules": ["45 2 * * *"],
+      "default_retention": { "success_retention": "7 days", "error_retention": "30 days" }
+    },
+    {
+      // Operator-only: rewinds the objects to a time or bookmarks, or loads a backup, then
+      // republishes (restore.ts). Started with `wrangler workflows trigger`; nothing routes to it.
+      "name": "orderloop-catalog-restore",
+      "binding": "CATALOG_RESTORE",
+      "class_name": "CatalogRestore",
+      "default_retention": { "success_retention": "7 days", "error_retention": "30 days" }
     }
   ],
   "queues": {

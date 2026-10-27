@@ -60,6 +60,16 @@ import {
   tags,
   type WriteResult,
 } from '@orderloop/core/product';
+import {
+  BACKUP_TABLES,
+  type BackupPage,
+  type BackupRow,
+  currentBookmark,
+  insertRows,
+  readPage,
+  rewindInPlace,
+  tableColumns,
+} from './backup';
 import { type CatalogConfig, meta, shard, typeResolver } from './config';
 import { type ListingChange, sendChanges } from './listings';
 import { publishKeys } from './publish';
@@ -195,6 +205,8 @@ const APPLIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class CatalogShard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /** New on every start: a restore compares it to see that a rewind restarted the object. */
+  private readonly sessionId = crypto.randomUUID();
   private config: CatalogConfig | undefined;
   private configAt = 0;
 
@@ -734,6 +746,165 @@ export class CatalogShard extends DurableObject<Env> {
     this.sql.exec('UPDATE outbox SET forced = 1');
     await this.schedulePublish();
     return count;
+  }
+
+  // --- Backup and restore (backup.ts, restore.ts) ---
+
+  backupPage(table: string, after: number, limit: number): BackupPage {
+    return readPage(this.sql, BACKUP_TABLES.shard, table, after, limit);
+  }
+
+  bookmark(): Promise<string | null> {
+    return currentBookmark(this.ctx.storage);
+  }
+
+  bookmarkFor(at: number): Promise<string> {
+    return this.ctx.storage.getBookmarkForTime(at);
+  }
+
+  session(): string {
+    return this.sessionId;
+  }
+
+  /**
+   * Copies `published` to `prefix` and restarts on `bookmark`'s storage (`rewindInPlace`), with no
+   * request or alarm between the two: a product published in between would be in neither the copy
+   * nor the rewound table, and stay published. The call itself fails as it aborts.
+   */
+  async rewindTo(bookmark: string, prefix: string): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(() =>
+      rewindInPlace(
+        {
+          sql: this.sql,
+          storage: this.ctx.storage,
+          abort: (r) => this.ctx.abort(r),
+          bucket: this.env.PUBLISHED,
+        },
+        bookmark,
+        prefix,
+        true,
+      ),
+    );
+  }
+
+  backupColumns(): Record<string, string[]> {
+    return tableColumns(this.sql, BACKUP_TABLES.shard);
+  }
+
+  /** The channels this shard has published into, whether or not the config still has them. */
+  publishedChannels(): string[] {
+    return this.sql
+      .exec<{ channel: string }>('SELECT DISTINCT channel FROM published')
+      .toArray()
+      .map((r) => r.channel);
+  }
+
+  /**
+   * Empties what a backup replaces, before its rows load. Kept: `published` (what is in R2 now,
+   * so `afterRestore` can take down what the backup doesn't have), `applied` and `settings`
+   * (merged). The outbox and the alarm go too: nothing publishes until `afterRestore` queues every
+   * product and sets the alarm again, so the edge never serves a product whose overrides haven't
+   * loaded yet.
+   */
+  async restoreBegin(n: number): Promise<void> {
+    this.shardNumber(n);
+    this.config = undefined;
+    this.ctx.storage.transactionSync(() => {
+      for (const t of BACKUP_TABLES.shard) if (t !== 'settings') this.sql.exec(`DELETE FROM ${t}`);
+      this.sql.exec('DELETE FROM outbox');
+      this.sql.exec('DELETE FROM gap_rebuild');
+    });
+    await this.ctx.storage.deleteAlarm();
+  }
+
+  /**
+   * Loads one chunk of a backup's rows. Products queue to publish in the same transaction, as any
+   * write does, and publish once `afterRestore` sets the alarm. The product id counter (`seq`) never goes back, so a new product can't take the uid
+   * of one the restore removes while that one's cards are still published.
+   */
+  restoreRows(table: string, rows: BackupRow[]): number {
+    let loaded = 0;
+    this.ctx.storage.transactionSync(() => {
+      loaded = insertRows(
+        this.sql,
+        BACKUP_TABLES.shard,
+        table,
+        rows,
+        table === 'settings'
+          ? `ON CONFLICT (k) DO UPDATE SET v = CASE WHEN k = 'seq' THEN MAX(v, excluded.v) ELSE excluded.v END`
+          : undefined,
+      );
+      if (table === 'products')
+        for (const r of rows)
+          this.sql.exec('INSERT INTO outbox (key, urgent, forced) VALUES (?, 0, 1)', r.key);
+    });
+    return loaded;
+  }
+
+  /**
+   * Puts back what was published before a point-in-time restore rewound this table, joined with
+   * what the restored one holds: everything either says may be in R2, so the republish after it
+   * takes down whatever the restored products no longer publish. Cards are found by the uid they
+   * were written under, the one from before.
+   */
+  mergePublished(rows: BackupRow[]): number {
+    this.ctx.storage.transactionSync(() => {
+      for (const r of rows) {
+        const key = String(r.key);
+        const channel = String(r.channel);
+        const now = this.sql
+          .exec<{ locales: string; aliases: string }>(
+            'SELECT locales, aliases FROM published WHERE key = ? AND channel = ?',
+            key,
+            channel,
+          )
+          .toArray()[0];
+        type State = { uid: number; aliases: string[]; categories?: string[] };
+        const before = JSON.parse(String(r.aliases)) as State;
+        const after = now ? (JSON.parse(now.aliases) as State) : undefined;
+        const union = (a: string[] = [], b: string[] = []) => [...new Set([...a, ...b])];
+        this.sql.exec(
+          'INSERT OR REPLACE INTO published VALUES (?, ?, ?, ?)',
+          key,
+          channel,
+          JSON.stringify(
+            union(
+              JSON.parse(String(r.locales)) as string[],
+              now ? (JSON.parse(now.locales) as string[]) : [],
+            ),
+          ),
+          JSON.stringify({
+            uid: before.uid,
+            aliases: union(before.aliases, after?.aliases),
+            categories: union(before.categories, after?.categories),
+          }),
+        );
+      }
+    });
+    return rows.length;
+  }
+
+  /**
+   * Ends a restore: queues every product, and every key published before it, for a full republish
+   * (as `republishAll` does), so R2, KV, listings, search and the order prices follow the restored
+   * products and nothing the restore removed stays published. Returns how many keys it queued.
+   */
+  async afterRestore(n: number): Promise<number> {
+    this.shardNumber(n);
+    this.config = undefined;
+    const queued = this.sql
+      .exec<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM (SELECT key FROM products UNION SELECT key FROM published)',
+      )
+      .one().n;
+    this.sql.exec(
+      `INSERT INTO outbox (key, urgent, forced)
+       SELECT key, 0, 1 FROM (SELECT key FROM products UNION SELECT key FROM published)
+       WHERE key NOT IN (SELECT key FROM outbox)`,
+    );
+    this.sql.exec('UPDATE outbox SET forced = 1');
+    if (queued) await this.schedulePublish();
+    return queued;
   }
 
   get(key: string): Product | null {

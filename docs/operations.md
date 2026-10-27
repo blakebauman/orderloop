@@ -32,6 +32,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `auditRetentionDays` | `400` | Whole days audit events are kept before the daily sweep archives them to the R2 bucket and deletes them; at least 90 (refused below). Rendered into the engine's `AUDIT_RETENTION_DAYS` |
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
 | `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset. It also locks `audit/` for the same number of days, or indefinitely when unset ([Bucket locks](#bucket-locks)) |
+| `catalogBackupDays` | `90` | Whole days (at least 31, so a backup outlives Durable Objects' 30 days of point-in-time recovery; refused below or fractional) the catalog's daily backups are kept. `provision.sh` replaces the catalog bucket's lifecycle rule `backups` (prefix `backups/`) with that expiry, and its lock rule `catalog-backups` with the same age, on every run ([Catalog backups](#catalog-backups), [Bucket locks](#bucket-locks)) |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `payments` | `mock` | `mock` or `stripe` (anything else is refused; a demo can't be `stripe`). `stripe` takes payments through Stripe with the environment's `STRIPE_SECRET_KEY`, and a deploy without that secret stops before it migrates anything. Rendered into the engine's `PAYMENTS_MODE` |
 | `stripePublishableKey` | none | The Stripe publishable key (`pk_test_…` or `pk_live_…`) of the same account and mode as `STRIPE_SECRET_KEY`; only with `payments` `stripe`, and a deploy whose secret key is in the other mode stops. Agentic checkout gives it to platforms to tokenize cards with. Rendered into the engine's `STRIPE_PUBLISHABLE_KEY` |
@@ -52,10 +53,10 @@ With the suffix, deployment `acme` gets these resource names:
 | Engine Worker | `orderloop-engine-acme` (the web Worker's `ENGINE` binding points at it) |
 | Catalog Worker | `orderloop-catalog-acme` |
 | Catalog edge Worker | `orderloop-catalog-edge-acme`, at `catalog.acme.orderloop.app` |
-| Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme` (Workflow names are unique per account) |
+| Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme`, `orderloop-catalog-backup-acme`, `orderloop-catalog-restore-acme` (Workflow names are unique per account) |
 | Plugin Worker and D1 | `orderloop-plugin-<id>-acme` for each installed plugin (the Worker and its database share the name) |
 | D1 | `orderloop-acme` (bound by the engine, web and catalog Workers; the catalog writes variant names and prices into `products`) |
-| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents and feed files) |
+| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents, feed files and backups) |
 | Queues | `orderloop-catalog-feed-parts-acme` and its dead-letter queue `orderloop-catalog-feed-parts-dlq-acme`; the purge queue `orderloop-catalog-purge-acme` and its dead-letter queue `orderloop-catalog-purge-dlq-acme`; the listing-changes queue `orderloop-catalog-changes-acme` and its dead-letter queue `orderloop-catalog-changes-dlq-acme` (queue names are unique per account) |
 | Analytics Engine | dataset `orderloop_catalog_edge_acme` (dashes in the suffix become underscores) |
 | Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
@@ -81,7 +82,11 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    120 requests a minute, no cache, authentication on, request logs only when `aiGatewayLogs` is `true`), and the GitHub environment. For a gateway that already exists, it compares the gateway's default log setting with `aiGatewayLogs` and prints a warning if they differ; it doesn't change the gateway. The engine sends the setting on every call either way, so the default matters only for calls made outside it; match it in the dashboard (**AI** > **AI Gateway** > the gateway > **Settings**), where logs kept so far are deleted too.
    It creates the product index, Vectorize `orderloop-products<suffix>` (768 dimensions, cosine, fixed at creation), unless the deployment is a demo; a deploy fails while the engine's binding names an index that doesn't exist. The engine's hourly cron fills it, up to 3,000 SKUs a run, so a large catalog's first backfill takes several hours. An admin can start a run now, after a big import say, with **Update product index** under Inventory on the Commerce page (`EngineRpc.reindexProducts`); it is the same run, so it also takes at most 3,000. A run holds the lease in `product_index_lease` for up to 15 minutes, so one that overlaps the cron's (or a second click) answers that the index is already being updated and does nothing; a run that dies leaves the lease to lapse.
    For each plugin in the file's `plugins` it creates the D1 database `orderloop-plugin-<plugin><suffix>` and writes its id as `plugins.<plugin>.d1Id` (see [Plugins](plugins.md#installing)).
-   It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist; one that exists is kept) and sets every one of them to keep messages 14 days (`--message-retention-period-secs 1209600`, the most Queues allows), existing ones too. It replaces two lifecycle rules on the catalog bucket: `feeds`, which expires `feeds/` (uploaded feed files and their parts) after 30 days, and `dlq`, which expires `dlq/` ([Dead letters](#dead-letters)) after 30 days.
+   It creates the catalog's two feed queues, the two purge queues and the two changes queues (a deploy fails while a consumer's queue doesn't exist; one that exists is kept) and sets every one of them to keep messages 14 days (`--message-retention-period-secs 1209600`, the most Queues allows), existing ones too. It replaces two lifecycle rules on the catalog bucket: `feeds`, which expires `feeds/` (uploaded feed files and their parts) after 30 days, and `dlq`, which expires `dlq/` ([Dead letters](#dead-letters)) after 30 days; and two for
+   [catalog backups](#catalog-backups): `backups`, which expires `backups/` after
+   `catalogBackupDays`, and `restores`, which expires `restores/` after 30 days. It sets the catalog
+   bucket's lock rule `catalog-backups` on `backups/` for `catalogBackupDays` days
+   ([Bucket locks](#bucket-locks)).
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset, and the docs bucket's lock rules ([Bucket locks](#bucket-locks)); re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY`, `DATA_KEY` and `PASSWORD_PEPPER` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without the first two. It never replaces a `DATA_KEY` or `PASSWORD_PEPPER` the web Worker already holds: when the environment has lost one, it stops and asks for the deployment's own value, since a new one would leave every secret sealed under the old key, or every password hashed with the old pepper, unreadable. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
@@ -290,16 +295,123 @@ page in the dashboard (**Queues** > the queue). What each needs:
 
 Delete a dead letter's object once it is handled, or leave it to expire.
 
+## Catalog backups
+
+The catalog's source of truth is the SQLite storage of its Durable Objects: `CatalogMeta` (types,
+channels, categories) and the 64 `CatalogShard`s (products, alias claims, and the product editor's
+feed rows, overrides, staged edits, drafts, history, refused rows, gap index and board). Durable
+Objects keep 30 days of point-in-time recovery; the backup Workflow keeps a copy past that, and is
+the catalog's export.
+
+**What and when.** `orderloop-catalog-backup<suffix>` runs daily at 02:45 UTC (its `schedules`). It
+copies every table of record of `meta` and `shard-0` … `shard-63`, one step per object, into the
+catalog bucket (`apps/catalog/src/backup.ts`):
+
+| Key | Holds |
+|---|---|
+| `backups/<yyyy-mm-dd>/<object>/<table>-<n>.ndjson` | Up to 1,000 rows (about 8 MB) of one table, a JSON object a line, keyed by column name |
+| `backups/<yyyy-mm-dd>/<object>/bookmark.json` | The object's point-in-time-recovery bookmark when its copy started |
+| `backups/<yyyy-mm-dd>/manifest.json` | Written last: `format`, `date`, `finishedAt`, `docFormat`, `shards`, and per object its `bookmark` and per table `rows`, `chunks` and `columns`. A day without one is a backup that hasn't finished |
+
+Not copied: a shard's `outbox`, `applied`, `published` and `gap_rebuild` (transient, or a record of
+what is in R2 now, which a restore keeps), and the objects that hold nothing of record:
+`ListingIndexer` and `SearchShard` (rebuilt by the republish a restore ends with),
+`CatalogPublisher` (stores nothing) and `CatalogFeeds` (the history of past imports, whose files
+expire after 30 days anyway). Rows are read a page at a time while writes go on, so a backup isn't
+one instant across pages; its bookmarks are exact points. A second run on a day that has a
+manifest copies nothing; a run that failed resumes where its chunks stop (each records the last
+row it holds), and every write skips a key that exists, since the lock refuses an overwrite.
+
+**Retention.** Backups expire after `catalogBackupDays` (default 90; the lifecycle rule `backups`)
+and are locked for as long (`catalog-backups`, [Bucket locks](#bucket-locks)), so nothing deletes
+or overwrites one before then.
+
+**Check the latest.** In the dashboard, **Workflows** > `orderloop-catalog-backup<suffix>` lists
+each day's instance. Or read a day's manifest (add `--jurisdiction eu` for an EU deployment):
+
+```bash
+wrangler r2 object get orderloop-catalog<suffix>/backups/<yyyy-mm-dd>/manifest.json --remote --pipe \
+  | jq '.finishedAt, ([.objects[].tables.products.rows] | add)'
+```
+
+To take one now (an export before removing a customer), run `wrangler workflows trigger
+orderloop-catalog-backup<suffix>`; it is named by the UTC date it starts on, so on a day that
+already has one it copies nothing.
+
+### Restoring the catalog
+
+Restores run as the operator-only Workflow `orderloop-catalog-restore<suffix>`
+(`apps/catalog/src/restore.ts`): nothing routes to it, and it starts only from `wrangler workflows
+trigger` with the deployment's own Workflow name (`orderloop-catalog-restore` for orderloop,
+`orderloop-catalog-restore-acme` for acme). Pause feeds and product edits while it runs: a write
+that lands mid-restore may be lost.
+
+Every mode ends the same way: every channel still published somewhere (in the shards' records
+or R2's documents) that the restored config lacks is taken down (as deleting a channel does), the
+category trees republished, the config revision moved past every one served before, and every
+product, and every key published before, republished in full, so catalog-edge, listings, search
+and the order prices in D1 follow the restored catalog and nothing it removed stays published.
+Watch it with `wrangler workflows instances describe orderloop-catalog-restore<suffix> <instance
+id>`. Its output is `{ mode, undo, rev, republished, channelsRemoved }`; `undo` maps each object to
+its bookmark from before the restore, also kept at `restores/<instance id>/before.json` (expired
+after 30 days). Keep it.
+
+**If a restore fails**, its error says so and names that instance: what it changed stays changed.
+Run the same restore again with `"merge": ["<failed instance id>"]` added to finish it (list several
+earliest first); the new run takes the failed one's `before`, so its `undo` is still the catalog
+from before either, and joins the `published` copies the failed one made. Or restore the `undo`
+bookmarks in its `before.json` to take it back:
+
+```bash
+wrangler r2 object get orderloop-catalog<suffix>/restores/<instance id>/before.json --remote --pipe | jq .undo
+```
+
+**To a time in the last 30 days** (point-in-time recovery; milliseconds or ISO 8601):
+
+```bash
+wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"at": "2026-10-27T09:30:00Z"}'
+```
+
+Every object's bookmark for that time is found first, so a time out of reach changes nothing. Then
+each object in turn copies its `published` table to `restores/<instance id>/` and sets its rewind
+in one call, with nothing able to publish in between, and restarts on the restored storage; the
+step checks that it did restart before going on. The copy is joined back, so the republish takes
+down what the rewound products no longer publish.
+
+**Undo a restore** by restoring the bookmarks in its output's `undo` (any of `meta` and
+`shard-<n>`):
+
+```bash
+wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"bookmarks": {"meta": "…", "shard-0": "…"}}'
+```
+
+**From a backup** (any day still kept, older than 30 days included):
+
+```bash
+wrangler workflows trigger orderloop-catalog-restore<suffix> --params '{"backup": "2026-10-20"}'
+```
+
+It first checks the whole backup without changing anything: the manifest (its format and shard
+count), every table in it with columns the tables still have, and every chunk there with the rows
+the manifest counts. A backup that fails that is refused, naming what is wrong. Then it replaces
+each object's tables with the backup's rows, one step per object (a retried step clears and loads
+again); nothing publishes until every object is loaded. Shards keep their `published` table, so
+the republish takes down what the backup doesn't have, and their product id counter never goes
+back. Its `undo` bookmarks rewind the objects to just before the load, while that is within 30
+days.
+
 ## Bucket locks
 
 `provision.sh` sets two R2 bucket lock rules on the deployment's docs bucket
-(`orderloop-docs<suffix>`, in its jurisdiction), so nothing (a person, a script, a compromised
-token) can delete what audits and rollbacks rely on:
+(`orderloop-docs<suffix>`, in its jurisdiction) and one on its catalog bucket
+(`orderloop-catalog<suffix>`), so nothing (a person, a script, a compromised token) can delete what
+audits, rollbacks and restores rely on:
 
-| Rule | Prefix | Retention |
-|---|---|---|
-| `audit-archive` | `audit/` | `auditArchiveDays` days from each object's creation, the same as the lifecycle rule of that name, so the lifecycle rule deletes an archive only once its lock has lapsed; indefinitely when `auditArchiveDays` is unset (and then there is no lifecycle rule) |
-| `plugin-bundles` | `plugins/` | Indefinitely: a pinned sandboxed-plugin bundle is what a rollback loads again |
+| Bucket | Rule | Prefix | Retention |
+|---|---|---|---|
+| docs | `audit-archive` | `audit/` | `auditArchiveDays` days from each object's creation, the same as the lifecycle rule of that name, so the lifecycle rule deletes an archive only once its lock has lapsed; indefinitely when `auditArchiveDays` is unset (and then there is no lifecycle rule) |
+| docs | `plugin-bundles` | `plugins/` | Indefinitely: a pinned sandboxed-plugin bundle is what a rollback loads again |
+| catalog | `catalog-backups` | `backups/` | `catalogBackupDays` days, the same as the lifecycle rule `backups` ([Catalog backups](#catalog-backups)) |
 
 It writes them with `wrangler r2 bucket lock set`, which replaces the bucket's whole lock
 configuration in one call: a re-run changes the audit retention without a moment unlocked, and a
@@ -307,8 +419,11 @@ lock rule added to this bucket by hand is dropped (add it to the script instead)
 engine deletes under either prefix: erasure deletes `orders/<id>/` and inbound mail, never the
 audit archive. Nothing overwrites under them either, since a locked object can't be written again:
 the sweep and the deploy name each object by what it holds (an archive by its first event and
-count, a bundle by its sha) and skip one that is already there. Shortening `auditArchiveDays` shortens both rules on the next run. List the rules
-with `wrangler r2 bucket lock list orderloop-docs<suffix>`.
+count, a bundle by its sha) and skip one that is already there; the catalog's backup Workflow
+looks before every write the same way. Shortening `auditArchiveDays` or `catalogBackupDays`
+shortens its rules on the next run. Each bucket's `lock set` replaces that bucket's whole
+configuration, so a rule added by hand is dropped. List the rules with
+`wrangler r2 bucket lock list orderloop-docs<suffix>` (or `orderloop-catalog<suffix>`).
 
 ## The demo
 
@@ -440,7 +555,7 @@ needed. The setup code is the last resort.
 A deployment holds only that customer's data, so removing it is the erasure:
 
 1. Export what the contract requires first (a D1 export with
-   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects, which have no export yet; its published documents in `orderloop-catalog-<id>` are a rendered copy.
+   `wrangler d1 export orderloop-<id> --remote --output <file>`, and the R2 bucket's documents, including the audit archive under `audit/`: events past `auditRetentionDays` live only there, as NDJSON with their hashes). The catalog's products live in its Durable Objects; their export is a [catalog backup](#catalog-backups), `backups/<date>/` in `orderloop-catalog-<id>` (NDJSON per table, with `manifest.json`; trigger one first for the latest state); its published documents there are a rendered copy.
    D1 can't export a database that has a virtual table (Cloudflare's D1 import and export docs,
    "Known limitations"), and `products_search` (migration 0058, the products' keyword index) is
    one. Drop it and its triggers first, in one `wrangler d1 execute orderloop-<id> --remote
@@ -455,5 +570,5 @@ A deployment holds only that customer's data, so removing it is the erasure:
    `INSERT INTO products_search(products_search) VALUES('rebuild')`.
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>` and `orderloop-plugin-<plugin>-<id>` for each plugin, which removes their Durable
-   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first, and before emptying `orderloop-docs-<id>` remove its [bucket locks](#bucket-locks), `wrangler r2 bucket lock remove orderloop-docs-<id> --name audit-archive` and `--name plugin-bundles` (with `--jurisdiction` as provisioned), since a locked object can't be deleted and so neither can the bucket), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
+   Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first, and before emptying `orderloop-docs-<id>` remove its [bucket locks](#bucket-locks), `wrangler r2 bucket lock remove orderloop-docs-<id> --name audit-archive` and `--name plugin-bundles`, and before emptying `orderloop-catalog-<id>` its `--name catalog-backups` (with `--jurisdiction` as provisioned), since a locked object can't be deleted and so neither can the bucket), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
    Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.
