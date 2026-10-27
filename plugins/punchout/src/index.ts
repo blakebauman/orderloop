@@ -9,7 +9,8 @@
  *   The PO then arrives as an OrderRequest at `/plugins/punchout/cxml/order`, which starts the
  *   order once per payload id (`startOrder`).
  * - OCI: the system opens `/plugins/punchout/oci/setup?USERNAME=…&PASSWORD=…&HOOK_URL=…`; the
- *   cart goes back to HOOK_URL as OCI fields.
+ *   cart goes back to HOOK_URL as OCI fields, with the `~OkCode`, `~TARGET` and `~CALLER` the
+ *   setup sent (src/oci.ts).
  *
  * Partners and their secrets are kept here (src/partners.ts) and managed on the plugin's admin page.
  */
@@ -25,7 +26,7 @@ import {
   statusResponse,
 } from './cxml';
 import manifest from './manifest';
-import { ociFields, parseOciSetup } from './oci';
+import { ociControl, ociFields, parseOciSetup } from './oci';
 import { adminPages } from './pages';
 import {
   cartInput,
@@ -318,6 +319,7 @@ async function ociSetup(request: Request, env: Env): Promise<Response> {
     partnerId: partner.id,
     buyerCookie: '',
     operation: 'create',
+    ociControl: setup.control,
   });
   // To the cart's start link: the one place off its own pages a plugin may redirect, so a system
   // that frames the catalog lands on the cart's page, which the partner's frame origins may frame.
@@ -365,6 +367,8 @@ export default definePlugin<Env>({
             currency: p.currency,
             ref: l.aux,
           })),
+          // Checked again on the way out: the column is ours, but what's echoed is SAP's.
+          ociControl(session.oci_control ? JSON.parse(session.oci_control) : undefined),
         ),
       };
     return {

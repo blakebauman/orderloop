@@ -2,6 +2,7 @@
 
 import type { ExternalCartInput } from '@orderloop/core';
 import { type PluginDatabase, pluginDb } from '@orderloop/plugin-sdk';
+import type { OciControl } from './oci';
 
 export const PROTOCOLS = ['cxml', 'oci'] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
@@ -150,22 +151,39 @@ export async function setStatus(env: object, id: string, status: 'active' | 'dis
 
 export async function recordSession(
   env: object,
-  s: { cartId: string; partnerId: string; buyerCookie: string; operation: string },
+  s: {
+    cartId: string;
+    partnerId: string;
+    buyerCookie: string;
+    operation: string;
+    /** An OCI session's control fields, checked (`parseOciSetup`), to echo in its return. */
+    ociControl?: OciControl;
+  },
 ) {
   await db(env)
     .prepare(
-      `INSERT INTO sessions (cart_id, partner_id, buyer_cookie, operation, created_at) VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO sessions (cart_id, partner_id, buyer_cookie, operation, oci_control, created_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (cart_id) DO UPDATE SET operation = excluded.operation`,
     )
-    .bind(s.cartId, s.partnerId, s.buyerCookie, s.operation, Date.now())
+    .bind(
+      s.cartId,
+      s.partnerId,
+      s.buyerCookie,
+      s.operation,
+      s.ociControl ? JSON.stringify(s.ociControl) : null,
+      Date.now(),
+    )
     .run();
 }
 
 export async function sessionOf(env: object, cartId: string) {
-  return db(env)
-    .prepare('SELECT * FROM sessions WHERE cart_id = ?')
-    .bind(cartId)
-    .first<{ cart_id: string; partner_id: string; buyer_cookie: string; operation: string }>();
+  return db(env).prepare('SELECT * FROM sessions WHERE cart_id = ?').bind(cartId).first<{
+    cart_id: string;
+    partner_id: string;
+    buyer_cookie: string;
+    operation: string;
+    oci_control: string | null;
+  }>();
 }
 
 /** Whether a return or HOOK_URL goes to one of the partner's hosts, over https. */

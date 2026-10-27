@@ -131,7 +131,10 @@ punchout configuration.
 - Add the partner as **OCI**. Its identity is the `USERNAME` their catalog call sends.
 - In the catalog's call settings, their admin adds `USERNAME` and `PASSWORD` (the partner's secret)
   as fixed parameters, and `HOOK_URL` as the return URL their system fills in for each session.
-  Other parameters their system adds are ignored.
+  The `~OkCode`, `~TARGET` and `~CALLER` their system sends are echoed back with the cart, when
+  each is a short word of letters, digits, `_` and `-` (up to 20 characters); any other value is
+  dropped. Without them, the cart goes back with `~OkCode=ADDI` and `~CALLER=CTLG`, as SAP's OCI
+  specification describes, and no `~TARGET`. Other parameters their system adds are ignored.
 - Add the SAP system's host (the host of `HOOK_URL`) as a return host, and its https origin as a
   frame origin if it shows the catalog inside its own page.
 - The cart goes back as `NEW_ITEM-…` fields, one set per line numbered from `[1]`: description,

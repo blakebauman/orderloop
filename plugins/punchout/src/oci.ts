@@ -2,16 +2,54 @@
  * SAP OCI 4.0 (Open Catalog Interface): the buyer's system opens the catalog with its user, password
  * and HOOK_URL, and the cart goes back as form fields posted to HOOK_URL, one set per line, indexed
  * from 1: `NEW_ITEM-DESCRIPTION[1]`, `NEW_ITEM-QUANTITY[1]`, ….
+ *
+ * SAP also sends control fields it expects back with the cart: `~OkCode` (what to do with it,
+ * `ADDI` to add the items), `~TARGET` (the frame to post into, `_top` say) and `~CALLER` (`CTLG`,
+ * a catalog). They're echoed as sent, when they're short and plain; `~OkCode` and `~CALLER`
+ * otherwise fall back to the spec's values, and `~TARGET` is left out.
  */
 
-export type OciSetup = { username: string; password: string; hookUrl: string };
+/** The control fields a return echoes. */
+export type OciControl = { okCode: string; caller: string; target?: string };
+
+export type OciSetup = { username: string; password: string; hookUrl: string; control: OciControl };
+
+// A control value is echoed into the buyer's system, so only a short word passes: anything else is
+// dropped rather than cleaned up.
+const CONTROL_VALUE = /^[A-Za-z0-9_-]{1,20}$/;
+const control = (v: unknown) => (typeof v === 'string' && CONTROL_VALUE.test(v) ? v : undefined);
+
+/** The control fields to echo, from what SAP sent (or, for a session that kept none, the defaults). */
+export function ociControl(sent: { okCode?: unknown; caller?: unknown; target?: unknown } = {}) {
+  const target = control(sent.target);
+  return {
+    okCode: control(sent.okCode) ?? 'ADDI',
+    caller: control(sent.caller) ?? 'CTLG',
+    ...(target ? { target } : {}),
+  } satisfies OciControl;
+}
 
 export function parseOciSetup(params: URLSearchParams): OciSetup | null {
   const get = (k: string) => params.get(k) ?? params.get(k.toLowerCase()) ?? '';
   const username = get('USERNAME');
   const password = get('PASSWORD');
   const hookUrl = get('HOOK_URL');
-  return username && password && hookUrl ? { username, password, hookUrl } : null;
+  if (!username || !password || !hookUrl) return null;
+  // SAP spells these `~OkCode`, `~TARGET` and `~CALLER`, but systems differ in case.
+  const tilde = (name: string) => {
+    for (const [k, v] of params) if (k.toLowerCase() === name) return v;
+    return undefined;
+  };
+  return {
+    username,
+    password,
+    hookUrl,
+    control: ociControl({
+      okCode: tilde('~okcode'),
+      caller: tilde('~caller'),
+      target: tilde('~target'),
+    }),
+  };
 }
 
 export type OciLine = {
@@ -27,8 +65,12 @@ export type OciLine = {
 
 const amount = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
-export function ociFields(lines: OciLine[]): Record<string, string> {
-  const out: Record<string, string> = {};
+export function ociFields(lines: OciLine[], ctl: OciControl): Record<string, string> {
+  const out: Record<string, string> = {
+    '~OkCode': ctl.okCode,
+    ...(ctl.target ? { '~TARGET': ctl.target } : {}),
+    '~CALLER': ctl.caller,
+  };
   lines.forEach((l, i) => {
     const n = i + 1;
     const set = (k: string, v: string) => {
