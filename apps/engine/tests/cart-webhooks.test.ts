@@ -122,14 +122,15 @@ async function staffCart() {
   return made.id;
 }
 
-async function externalCart(title = 'Punchout') {
+async function externalCart(title = 'Punchout', expiresAt = Date.now() + 3_600_000) {
   const made = await createCart(
     env,
     { title, flowId: 'tpl-b2b-order', customerId: 'cus_northwind', createdBy: 'plugin:example' },
     {
       pluginId: 'example',
       sessionRef: `s-${crypto.randomUUID()}`,
-      expiresAt: Date.now() + 3_600_000,
+      expiresAt,
+      idleMs: null,
       returnUrl: 'https://buyer.example/return',
       frameOrigins: [],
       buyer: { id: 'bee@buyer.example', name: 'Bee Buyer' },
@@ -221,7 +222,8 @@ describe('cart events', () => {
   it('announces an external cart that expires as expired, without its buyer', async () => {
     const received = receiver();
     await subscribe('ends', ['cart.expired', 'cart.canceled']);
-    const id = await externalCart();
+    // Already past its time, so the expiry alarm (or this call) cancels it.
+    const id = await externalCart('Punchout', Date.now() - 1);
     await cart(id).expire();
     // Expiring twice ends nothing more.
     await cart(id).expire();
