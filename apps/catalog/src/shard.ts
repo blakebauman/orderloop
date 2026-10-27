@@ -29,6 +29,8 @@ import {
   contentGaps,
   contentHash,
   DOC_FORMAT,
+  type Draft,
+  type DraftInput,
   type EditResult,
   type EditSource,
   editIssues,
@@ -235,6 +237,10 @@ export class CatalogShard extends DurableObject<Env> {
         locale TEXT NOT NULL, op TEXT NOT NULL, value TEXT, previous TEXT, source TEXT NOT NULL,
         who TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS revisions_key ON revisions (key, seq);
+      CREATE TABLE IF NOT EXISTS drafts (
+        key TEXT NOT NULL, field TEXT NOT NULL, locale TEXT NOT NULL, value TEXT NOT NULL,
+        seen TEXT, model TEXT, who TEXT NOT NULL, at INTEGER NOT NULL,
+        PRIMARY KEY (key, field, locale));
     `);
     // Added later, so shards created before them gain them here. `rev`: the config revision a write
     // was validated against (null: unknown, so the alarm fetches the latest). `forced`: a reindex,
@@ -383,9 +389,9 @@ export class CatalogShard extends DurableObject<Env> {
     else this.sql.exec('DELETE FROM feed_rows WHERE key = ?', key);
   }
 
-  /** Drops a product's editor state: its feed row, overrides, staged edits and history. */
+  /** Drops a product's editor state: its feed row, overrides, staged edits, drafts and history. */
   private forgetEdits(key: string) {
-    for (const t of ['feed_rows', 'overrides', 'staged', 'revisions'])
+    for (const t of ['feed_rows', 'overrides', 'staged', 'drafts', 'revisions'])
       this.sql.exec(`DELETE FROM ${t} WHERE key = ?`, key);
   }
 
@@ -788,8 +794,8 @@ export class CatalogShard extends DurableObject<Env> {
 
   /**
    * The product's card on the board: on Gaps while it has any (conflicts and refused rows count),
-   * else on Staged while it has staged edits, else on Published for a day after its edits went
-   * live, else off the board. A card keeps the time it joined its column.
+   * else on Staged while it has staged edits, else on Drafted while it has drafts to review, else on
+   * Published for a day after its edits went live, else off the board. A card keeps the time it joined its column.
    */
   private refreshBoard(key: string, now: number) {
     const kinds = Object.fromEntries(
@@ -804,6 +810,9 @@ export class CatalogShard extends DurableObject<Env> {
     const staged = this.sql
       .exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM staged WHERE key = ?) AS e', key)
       .one().e;
+    const drafted = this.sql
+      .exec<{ e: number }>('SELECT EXISTS (SELECT 1 FROM drafts WHERE key = ?) AS e', key)
+      .one().e;
     const published =
       this.sql
         .exec<{ at: number | null }>('SELECT MAX(at) AS at FROM revisions WHERE key = ?', key)
@@ -812,9 +821,11 @@ export class CatalogShard extends DurableObject<Env> {
       ? 'gaps'
       : staged
         ? 'staged'
-        : published > now - PUBLISHED_FOR_MS
-          ? 'published'
-          : null;
+        : drafted
+          ? 'drafted'
+          : published > now - PUBLISHED_FOR_MS
+            ? 'published'
+            : null;
     if (!col) {
       this.sql.exec('DELETE FROM board WHERE key = ?', key);
       return;
@@ -890,11 +901,13 @@ export class CatalogShard extends DurableObject<Env> {
         issues: string | null;
         rejected_at: number | null;
         staged: number;
+        drafts: number;
         failure: string | null;
       }>(
         `SELECT b.key, b.col, b.title, b.kinds, b.at, r.feed, r.row, r.issues, r.at AS rejected_at,
            (SELECT COUNT(*) FROM staged s WHERE s.key = b.key) AS staged,
-           (SELECT MAX(failure) FROM staged s WHERE s.key = b.key) AS failure
+           (SELECT MAX(failure) FROM staged s WHERE s.key = b.key) AS failure,
+           (SELECT COUNT(*) FROM drafts d WHERE d.key = b.key) AS drafts
          FROM board b LEFT JOIN rejections r ON r.key = b.key
          WHERE b.col = ?1 AND b.key > ?2
            AND (?3 IS NULL OR EXISTS (SELECT 1 FROM gaps g WHERE g.key = b.key AND g.kind = ?3))
@@ -922,6 +935,7 @@ export class CatalogShard extends DurableObject<Env> {
                 at: r.rejected_at ?? 0,
               },
         staged: r.staged,
+        drafts: r.drafts,
         failure: r.failure,
         at: r.at,
       }));
@@ -1090,6 +1104,13 @@ export class CatalogShard extends DurableObject<Env> {
           input.by,
           now,
         );
+        // Accepted, or written over: either way the draft is done with.
+        this.sql.exec(
+          'DELETE FROM drafts WHERE key = ? AND field = ? AND locale = ?',
+          e.key,
+          at.field,
+          at.locale,
+        );
         touched.add(e.key);
         results.push({ key: e.key, ref: at.ref, ok: true });
       }
@@ -1101,26 +1122,102 @@ export class CatalogShard extends DurableObject<Env> {
   /** Drops staged edits: one field's, or with no `ref` all of a product's. Returns how many. */
   discardStaged(input: { shard: number; items: { key: string; ref?: FieldRef }[] }): number {
     this.shardNumber(input.shard);
+    return this.discard('staged', input.items);
+  }
+
+  /** Drops drafts: one field's, or with no `ref` all of a product's. Returns how many. */
+  discardDrafts(input: { shard: number; items: { key: string; ref?: FieldRef }[] }): number {
+    this.shardNumber(input.shard);
+    return this.discard('drafts', input.items);
+  }
+
+  private discard(table: 'staged' | 'drafts', items: { key: string; ref?: FieldRef }[]): number {
     const now = Date.now();
     let discarded = 0;
     this.ctx.storage.transactionSync(() => {
       const touched = new Set<string>();
-      for (const { key, ref } of input.items) {
+      for (const { key, ref } of items) {
         const at = ref ? fieldKey(ref) : undefined;
         if (at === null) continue;
         discarded += at
           ? this.sql.exec(
-              'DELETE FROM staged WHERE key = ? AND field = ? AND locale = ?',
+              `DELETE FROM ${table} WHERE key = ? AND field = ? AND locale = ?`,
               key,
               at.field,
               at.locale,
             ).rowsWritten
-          : this.sql.exec('DELETE FROM staged WHERE key = ?', key).rowsWritten;
+          : this.sql.exec(`DELETE FROM ${table} WHERE key = ?`, key).rowsWritten;
         touched.add(key);
       }
       for (const key of touched) this.refreshBoard(key, now);
     });
     return discarded;
+  }
+
+  /**
+   * Stores assistant drafts, each checked like an edit against the product as it is live, with the
+   * live value it was drafted against. Status isn't drafted. Nothing is staged.
+   */
+  async putDrafts(input: {
+    shard: number;
+    drafts: DraftInput[];
+    by: string;
+  }): Promise<EditResult[]> {
+    this.shardNumber(input.shard);
+    const resolve = typeResolver(await this.loadConfig());
+    const now = Date.now();
+    const results: EditResult[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const touched = new Set<string>();
+      for (const d of input.drafts) {
+        const fail = (...issues: string[]) =>
+          results.push({ key: d.key, ref: d.ref, ok: false, issues });
+        const at = fieldKey(d.ref);
+        if (!at) {
+          fail('not an editable field');
+          continue;
+        }
+        if (at.ref.field === 'status') {
+          fail('status is not drafted');
+          continue;
+        }
+        if (typeof d.value !== 'string') {
+          fail('a draft is text');
+          continue;
+        }
+        const body = this.sql
+          .exec<{ body: string }>('SELECT body FROM products WHERE key = ?', d.key)
+          .toArray()[0]?.body;
+        if (!body) {
+          fail('no such product');
+          continue;
+        }
+        const live = JSON.parse(body) as ProductData;
+        const type = resolve(live.type, live.typeVersion);
+        const issues = type
+          ? editIssues(live, type, { ref: at.ref, value: d.value })
+          : [`type ${live.type}@${live.typeVersion} is gone`];
+        if (issues.length) {
+          fail(...issues);
+          continue;
+        }
+        this.sql.exec(
+          'INSERT OR REPLACE INTO drafts VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          d.key,
+          at.field,
+          at.locale,
+          d.value,
+          fieldValue(live, at.ref),
+          typeof d.model === 'string' ? d.model.slice(0, 200) : null,
+          input.by,
+          now,
+        );
+        touched.add(d.key);
+        results.push({ key: d.key, ref: at.ref, ok: true });
+      }
+      for (const key of touched) this.refreshBoard(key, now);
+    });
+    return results;
   }
 
   /**
@@ -1413,7 +1510,33 @@ export class CatalogShard extends DurableObject<Env> {
         by: v.who,
         at: v.at,
       }));
-    return { product, feed, overrides, staged, gaps, rejection, revisions };
+    const drafts: Draft[] = this.sql
+      .exec<{
+        field: string;
+        locale: string;
+        value: string;
+        seen: string | null;
+        model: string | null;
+        who: string;
+        at: number;
+      }>(
+        'SELECT field, locale, value, seen, model, who, at FROM drafts WHERE key = ? ORDER BY field, locale',
+        key,
+      )
+      .toArray()
+      .map((d) => {
+        const ref = refOf(d.field, d.locale);
+        return {
+          ref,
+          value: d.value,
+          seen: d.seen,
+          stale: fieldValue(product, ref) !== d.seen,
+          model: d.model,
+          by: d.who,
+          at: d.at,
+        };
+      });
+    return { product, feed, overrides, staged, drafts, gaps, rejection, revisions };
   }
 
   // --- Alias claims (this shard as the alias owner) ---
