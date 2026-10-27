@@ -165,6 +165,66 @@ describe('the plugin host API', () => {
     ).toMatch(/buyer/);
   });
 
+  it('checks a cart as opening it would, without opening, finding or waking one', async () => {
+    const count = async () => (await db().select({ id: carts.id }).from(carts).all()).length;
+    const before = await count();
+    const checked = (o: Partial<ExternalCartInput>) =>
+      hostFor('example').checkExternalCart(input(o));
+    expect(await checked({})).toEqual({
+      ok: true,
+      problems: { input: null, flow: null, customer: null },
+    });
+    // Every problem at once, each as opening the cart would refuse it.
+    expect(
+      await checked({
+        flowId: 'flow_nope',
+        customerId: 'cus_nope',
+        returnUrl: 'https://app.orderloop.test/x',
+      }),
+    ).toEqual({
+      ok: true,
+      problems: {
+        input: 'returnUrl must be the buyer’s system, not this one',
+        flow: 'That flow has no published version.',
+        customer: 'No such customer.',
+      },
+    });
+    expect(await checked({ customerId: null })).toMatchObject({ problems: { customer: null } });
+    expect(await checked({ flowId: 7 as unknown as string })).toMatchObject({
+      problems: { input: 'title and flowId are strings', flow: 'A flow is required.' },
+    });
+    // The session it names is never opened, so opening it later makes a new cart.
+    const sessionRef = `cookie-${crypto.randomUUID()}`;
+    await checked({ sessionRef });
+    expect(await count()).toBe(before);
+    expect(
+      await db().select().from(carts).where(eq(carts.sessionRef, sessionRef)).get(),
+    ).toBeUndefined();
+    // Not without the capability, and nothing that isn't an input.
+    expect(await hostFor('fixture-carrier').checkExternalCart(input())).toEqual({
+      ok: false,
+      error: 'This plugin may not open carts here.',
+    });
+    expect(await hostFor(undefined).checkExternalCart(input())).toMatchObject({ ok: false });
+    expect(
+      await hostFor('example').checkExternalCart(null as unknown as ExternalCartInput),
+    ).toEqual({ ok: false, error: 'That is not a cart to check.' });
+    const real = (await pluginStatuses(env, true)).find((p) => p.id === 'example')!.manifest!;
+    const withdrawn = new PluginHost(
+      { waitUntil() {}, passThroughOnException() {}, props: { id: 'example' } } as never,
+      {
+        ...env,
+        PLUGIN_EXAMPLE: { fetch() {}, manifest: async () => real },
+        PLUGIN_GRANTS: JSON.stringify({ example: { capabilities: ['orders:start'] } }),
+      } as unknown as Env,
+    );
+    expect(await withdrawn.checkExternalCart(input())).toEqual({
+      ok: false,
+      error: 'This plugin may not open carts here.',
+    });
+    expect(await count()).toBe(before);
+  });
+
   it('shows a plugin only the carts it opened', async () => {
     const staff = await api().createCart({
       title: 'Staff cart',

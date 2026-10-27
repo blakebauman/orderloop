@@ -260,6 +260,9 @@ export async function pluginFetch(request: Request): Promise<Response> {
   // Where its pages also answer, so a page can show the shorter address (its own paths still work).
   const alias = Object.entries(pluginAliases()).find(([, p]) => p === id)?.[0];
   if (alias) headers.set('x-orderloop-alias', alias);
+  // And the app's own origin, so a page can name its public URLs in full (the plugin is reached at
+  // `https://plugin`, never at the app's address).
+  headers.set('x-orderloop-origin', url.origin);
   const forwarded = new Request(`https://plugin${url.pathname}${url.search}`, {
     method: request.method,
     headers,

@@ -435,6 +435,7 @@ takes effect at once and a runtime install of the same id never inherits it.
 | Method | Needs | Does |
 |---|---|---|
 | `openExternalCart(input)` | `carts:external` | Opens a [cart](architecture.md#carts) for a buyer the plugin has authenticated (`ExternalCartInput`: `sessionRef`, `title`, `flowId`, `customerId`, `buyer`, an https `returnUrl`, https `frameOrigins`, `expiresAt` within 24 hours, an optional `idleMs` from 5 minutes to 24 hours (`MIN_EXTERNAL_CART_IDLE_MS`, `MAX_EXTERNAL_CART_MS`: the cart then stays open while its buyer works on it, closing `idleMs` after their last activity (their socket, searches and files; staff activity doesn't count) and never later than 24 hours from opening; without it the cart closes at `expiresAt`), optional starting `lines`), checked by `externalCartProblem` (types too, and a `returnUrl` on none of the deployment's `OWN_HOSTS`) and like a staff cart (a flow that prices, an existing customer). The same `sessionRef` finds the same cart (unique `(plugin_id, session_ref)` in `carts`). Answers the cart id, a one-time `startPath` (`/cart/start/<cartId>/<token>`, `CART_START_TTL_MS`, 5 minutes) and the same as `startUrl` on `APP_ORIGIN`; a session whose cart has ended or expired is refused |
+| `checkExternalCart(input)` | `carts:external` | What `openExternalCart` would make of the same input, read-only (`checkExternalCart` in `apps/engine/src/cart/carts.ts`): `{ ok: true, problems: { input, flow, customer } }` (`ExternalCartProblems`), each null or the message opening the cart would refuse it with (`externalCartProblem` and the title; a flow with no published version or no Price lines step; no such customer). The flow and customer are looked up whenever they are well-formed ids, so one call reports every problem. It opens, finds and wakes no cart, issues no start link and sends no event; punchout's partner self-test uses it |
 | `getCart(cartId)` | `carts:external` | The cart as `PluginCart`, or null for one another plugin (or a person) opened |
 | `orderStatus({ key })` | `orders:start` | Where an order this plugin started is now, found by the key it started it under as `cancelOrder` finds it: its `status` (read from the order's agent, not the index row) and `ended` (one of `TERMINAL_ORDER_STATUSES`) |
 | `cancelOrder({ key, reason })` | `orders:cancel` | Cancels an order this plugin started, found by the key it started it under (`plugin:<id>:<key>`; another plugin's never matches): `cancelled` (also when it already was, or another cancel of it is under way) or `finished` when it ended some other way, audited as `order.cancelled` by `plugin:<id>` |
@@ -445,7 +446,15 @@ takes effect at once and a runtime install of the same id never inherits it.
 `"runtime": "sandboxed"`). Its partners and their secret hashes are in its own database; see the
 [Punchout guide](https://docs.orderloop.app/guides/punchout/). It opens each cart with the partner's
 idle timeout (`session_minutes`, labelled so on its admin page) as both `idleMs` and the first
-`expiresAt`. Each version of a PO it acted on is a
+`expiresAt` (`cartInput` in `src/partners.ts`). Each partner has its own page (`partners/<id>`)
+with what to give its procurement admin: the setup and order URLs (or OCI catalog URL and
+parameters) on the app's origin and alias, its credentials, a sample `PunchOutSetupRequest` (or
+OCI parameters) with `SECRET` in place of the secret, and a `curl` line. Its **Test** (a POST to
+`partners/<id>/test`, `src/self-test.ts`) checks the record (complete, return hosts that are host
+names, https frame origins, active, a known commerce model) and asks `checkExternalCart` about the
+cart a session to each return host would open; it opens no cart, starts no order, writes nothing
+and never needs the secret, and a host it can't reach or that refuses it is reported without the
+error's text. Each version of a PO it acted on is a
 `purchase_orders` row, numbered per partner and orderID. A change claims the next version (a unique
 `(partner_id, order_ref, version)`) before it acts, so of two changes sent at once only one acts on
 the version before and the other is told to send again (cXML `409`). A newly claimed `update` first
@@ -484,7 +493,9 @@ The web Worker checks aliases last, after every path it serves itself (`unalias`
 `pluginFetch` like any plugin request: the same sign-in, page role, public paths, rate limits,
 allowed headers, CSP and redirect rules, and the principal is signed for the `/plugins/<id>/` path.
 The plugin is told its alias in the `x-orderloop-alias` header (set by the web Worker only), so a
-page can show the shorter address; its own paths keep working.
+page can show the shorter address; its own paths keep working. Every forwarded request also carries
+the app's origin in `x-orderloop-origin` (the web Worker's own, never the caller's), since a plugin
+is reached at `https://plugin` and a page that names its public URLs in full needs it.
 
 ## Runtimes
 

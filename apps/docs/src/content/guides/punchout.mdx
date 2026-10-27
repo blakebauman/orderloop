@@ -43,15 +43,115 @@ stops working at once. **Disable** refuses new sessions and orders from that par
 
 ## What to give the customer's procurement admin
 
-Your workspace may give punchout a shorter address, such as `/punchout/` in place of
-`/plugins/punchout/`; the **Punchout** page shows the URLs to use. Both work.
+Open a partner on the **Punchout** page for its setup notes: everything its procurement admin
+needs except the secret, which you send them separately. The URLs are in full, on your OrderLoop
+address. Your workspace may give punchout a shorter address, such as `/punchout/` in place of
+`/plugins/punchout/`; the notes use it when it has one, and both work.
 
-- cXML setup URL: `https://<your OrderLoop address>/plugins/punchout/cxml/setup`
-- cXML order URL: `https://<your OrderLoop address>/plugins/punchout/cxml/order`
-- Your supplier credential (domain and identity) as entered on the partner, and their secret.
-- For OCI: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET` or a
-  form `POST` and the parameters `USERNAME`, `PASSWORD` and `HOOK_URL`. OCI sends the secret in the URL, where browsers and proxies
-  may keep it, so rotate an OCI partner's secret regularly.
+For a **cXML** partner:
+
+- **Setup URL**: `https://<your OrderLoop address>/plugins/punchout/cxml/setup`, where their system
+  posts the `PunchOutSetupRequest`.
+- **Order URL**: `https://<your OrderLoop address>/plugins/punchout/cxml/order`, where it posts
+  each `OrderRequest`.
+- **From**: their credential, the domain and identity entered on the partner. OrderLoop finds the
+  partner by it.
+- **To**: your supplier credential, as entered on the partner (`NetworkID` / `orderloop` unless you
+  changed it). Carts sent back carry it as their `From`.
+- **Sender**: their system's credential, with the partner's secret as its `SharedSecret`.
+- **BrowserFormPost**: chosen by their system for each session; it must be an https URL on one of
+  the partner's return hosts.
+- A sample `PunchOutSetupRequest` with `SECRET` in place of the secret, and a `curl` command that
+  sends it. Saved as `setup.xml` with the real secret in place, it should be answered with status
+  `200` and a `StartPage` URL.
+
+For an **OCI** partner:
+
+- **Catalog URL**: `https://<your OrderLoop address>/plugins/punchout/oci/setup`, opened with `GET`
+  or a form `POST`.
+- **Parameters**: `USERNAME` (the identity entered on the partner), `PASSWORD` (its secret) and
+  `HOOK_URL` (set by their system for each session, on one of the partner's return hosts).
+- The fields the cart comes back with, a sample of the parameters with `SECRET` in place of the
+  secret, and a `curl` command that should be answered with a `302` to a one-time cart link.
+
+OCI sends the secret in the URL, where browsers and proxies may keep it, so rotate an OCI partner's
+secret regularly.
+
+A sample request that's let in opens a real cart session, which closes unused after the partner's
+idle timeout.
+
+## Testing a partner
+
+**Test**, on the partner's row or its page, checks that a session from that partner would be let in
+and could open a cart, without opening one, starting an order or sending any event. It doesn't need
+the secret. Each check passes or fails with what to fix:
+
+| Check | Passes when |
+|---|---|
+| Partner record | It has its name, credentials, flow, return hosts, a secret and an idle timeout |
+| Return hosts | Each is a plain host name; carts go back only over https to them |
+| Frame origins | Each is an https origin (none is fine: the catalog then can't be shown inside their system's page) |
+| Status | The partner is active |
+| Commerce model | It's one of OrderLoop's [commerce models](/guides/commerce-models/), so its orders can start |
+| Cart | OrderLoop would open the cart a session asks for, returning to each of the return hosts (never your OrderLoop address itself) |
+| Flow | The flow is published and has a Price lines step |
+| Customer | The customer exists, or none is set |
+
+Test checks your side only. The secret, and the URLs and credentials in their system, are tested
+by sending the sample request from the partner's page, or by a buyer punching out.
+
+## Platform notes
+
+Every procurement system names its settings differently; what follows is what OrderLoop expects of
+each. Where a setting lives in the system is for its admin to find, usually in its supplier or
+punchout configuration.
+
+### SAP Ariba (cXML)
+
+- Add the partner as **cXML**. Requests through Ariba Network usually carry the buyer's Ariba
+  Network ID (`AN…`) as the `From` identity, in the `NetworkID` domain.
+- The `SharedSecret` must be the partner's secret. On Ariba Network the shared secret belongs to
+  your supplier account's cXML setup, so confirm with the customer's Ariba admin which secret their
+  requests carry before you hand it over.
+- Ask their admin for the host of their `BrowserFormPost` URL and add it as a return host.
+- Set the setup URL as your punchout URL and the order URL as where cXML orders are sent.
+
+### Coupa (cXML)
+
+- Add the partner as **cXML**, with the `From` domain and identity their Coupa instance sends.
+- In the supplier's punchout configuration in Coupa, their admin enters the setup URL, the
+  credentials and the partner's secret as the shared secret.
+- Carts usually go back to their Coupa instance, such as `northwind.coupahost.com`; add that host
+  as a return host.
+- For orders to arrive, the supplier's purchase orders must be sent as cXML to the order URL, with
+  the same credentials and secret.
+
+### SAP SRM and S/4HANA (OCI)
+
+- Add the partner as **OCI**. Its identity is the `USERNAME` their catalog call sends.
+- In the catalog's call settings, their admin adds `USERNAME` and `PASSWORD` (the partner's secret)
+  as fixed parameters, and `HOOK_URL` as the return URL their system fills in for each session.
+  Other parameters their system adds are ignored.
+- Add the SAP system's host (the host of `HOOK_URL`) as a return host, and its https origin as a
+  frame origin if it shows the catalog inside its own page.
+- The cart goes back as `NEW_ITEM-…` fields, one set per line numbered from `[1]`: description,
+  quantity, unit (`EA`), price, price unit (`1`), currency, the SKU as `VENDORMAT` and the cart line
+  as `EXT_PRODUCT_ID`. OCI has no order channel: purchase orders arrive through your SAP integration
+  as before.
+
+### Any other cXML system
+
+- OrderLoop speaks cXML 1.2. A setup request may be `create`, `edit` or `inspect`; an `edit` or
+  `inspect` opens the cart with the lines their system sent.
+- The buyer is named from the request's `UserEmail` (or `Email`), `UniqueName` or `UserId`, and
+  `UserFullName` or `UserPrintableName` extrinsics, so the cart shows who it's for.
+- Every answer is HTTP `200` with a cXML `Status`: `401` for an unknown identity or wrong secret,
+  `403` for a return URL on a host not listed, `409` for a change that can't be applied yet or at
+  all.
+- An `OrderRequest` is found by its `From` and `SharedSecret` like a setup request, and acted on
+  once per `payloadID`: send a changed PO under a new one, as type `update` or `delete`.
+- Each returned line carries its cart and line in `SupplierPartAuxiliaryID`; keep it on the PO's
+  lines so the order can be traced to the cart.
 
 ## What happens in a session
 

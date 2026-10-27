@@ -117,13 +117,20 @@ describe('plugin pages on the web Worker', () => {
         authorization: 'Bearer x',
         'x-forwarded-for': '10.0.0.1',
         'cf-connecting-ip': '203.0.113.7',
+        'x-orderloop-origin': 'https://evil.example',
         accept: 'text/html',
       },
     });
     expect(res.status).toBe(200);
     const req = sent();
     expect(new URL(req.url).pathname).toBe('/plugins/example/');
-    expect([...req.headers.keys()].sort()).toEqual(['accept', PRINCIPAL_HEADER]);
+    expect([...req.headers.keys()].sort()).toEqual([
+      'accept',
+      'x-orderloop-origin',
+      PRINCIPAL_HEADER,
+    ]);
+    // The app's own origin, never one the caller sent.
+    expect(req.headers.get('x-orderloop-origin')).toBe('https://shop.example');
     const header = req.headers.get(PRINCIPAL_HEADER);
     // Signed with the plugin's own key, which the engine (the principal key) doesn't accept.
     const p = await verifyPrincipal(
@@ -183,7 +190,11 @@ describe('plugin pages on the web Worker', () => {
     expect(enginePluginFetch).toHaveBeenCalledTimes(1);
     const [id, req] = enginePluginFetch.mock.calls[0]!;
     expect(id).toBe('sbx');
-    expect([...req.headers.keys()].sort()).toEqual(['accept', PRINCIPAL_HEADER]);
+    expect([...req.headers.keys()].sort()).toEqual([
+      'accept',
+      'x-orderloop-origin',
+      PRINCIPAL_HEADER,
+    ]);
     const p = await verifyPrincipal(
       [await pluginKey('web-test-key', 'sbx')],
       req.headers.get(PRINCIPAL_HEADER),

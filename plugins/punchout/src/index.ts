@@ -28,6 +28,7 @@ import manifest from './manifest';
 import { ociFields, parseOciSetup } from './oci';
 import { adminPages } from './pages';
 import {
+  cartInput,
   findPartner,
   getPartner,
   type Partner,
@@ -53,31 +54,8 @@ function buyerOf(extrinsics: Record<string, string>, fallback: string) {
   return { id: id.slice(0, 200), name: name.slice(0, 120) };
 }
 
-async function openCart(
-  env: Env,
-  p: Partner,
-  s: {
-    sessionRef: string;
-    buyer: { id: string; name: string };
-    returnUrl: string;
-    lines?: { sku: string; qty: number }[];
-  },
-) {
-  const idleMs = Math.min(p.sessionMinutes, 24 * 60) * 60_000;
-  return host(env).openExternalCart({
-    sessionRef: s.sessionRef,
-    title: `${p.name} punchout`,
-    flowId: p.flowId,
-    customerId: p.customerId,
-    buyer: s.buyer,
-    returnUrl: s.returnUrl,
-    frameOrigins: p.frameOrigins,
-    // The partner's session timeout is an idle timeout: the cart stays open while the buyer works
-    // on it, and closes that long after they stop (24 hours from opening at most, the core's cap).
-    expiresAt: Date.now() + idleMs,
-    idleMs,
-    ...(s.lines?.length ? { lines: s.lines } : {}),
-  });
+async function openCart(env: Env, p: Partner, s: Parameters<typeof cartInput>[1]) {
+  return host(env).openExternalCart(cartInput(p, s));
 }
 
 async function cxmlSetup(request: Request, env: Env): Promise<Response> {

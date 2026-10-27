@@ -1,5 +1,6 @@
 /** Punchout partners in the plugin's own database (migrations/0001_init.sql). */
 
+import type { ExternalCartInput } from '@orderloop/core';
 import { type PluginDatabase, pluginDb } from '@orderloop/plugin-sdk';
 
 export const PROTOCOLS = ['cxml', 'oci'] as const;
@@ -177,4 +178,31 @@ export function returnAllowed(p: Partner, raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The cart the partner's session opens, as `openExternalCart` is asked for it. */
+export function cartInput(
+  p: Partner,
+  s: {
+    sessionRef: string;
+    buyer: { id: string; name: string };
+    returnUrl: string;
+    lines?: { sku: string; qty: number }[];
+  },
+): ExternalCartInput {
+  const idleMs = Math.min(p.sessionMinutes, 24 * 60) * 60_000;
+  return {
+    sessionRef: s.sessionRef,
+    title: `${p.name} punchout`,
+    flowId: p.flowId,
+    customerId: p.customerId,
+    buyer: s.buyer,
+    returnUrl: s.returnUrl,
+    frameOrigins: p.frameOrigins,
+    // The partner's session timeout is an idle timeout: the cart stays open while the buyer works
+    // on it, and closes that long after they stop (24 hours from opening at most, the core's cap).
+    expiresAt: Date.now() + idleMs,
+    idleMs,
+    ...(s.lines?.length ? { lines: s.lines } : {}),
+  };
 }

@@ -72,10 +72,27 @@ export type PluginStartOrder = {
   input: OrderInputDraft;
 };
 
+/**
+ * Why `openExternalCart` would refuse an input, by what it is about (null where nothing is wrong):
+ * the input itself (`externalCartProblem`), its flow, and its customer.
+ */
+export type ExternalCartProblems = {
+  input: string | null;
+  flow: string | null;
+  customer: string | null;
+};
+
 export interface PluginHostRpc {
   openExternalCart(
     input: ExternalCartInput,
   ): Promise<{ ok: true; cart: ExternalCartOpened } | { ok: false; error: string }>;
+  /**
+   * With `carts:external`: what `openExternalCart` would make of `input`, checked the same way,
+   * without opening, finding or waking a cart (a partner's self-test, say).
+   */
+  checkExternalCart(
+    input: ExternalCartInput,
+  ): Promise<{ ok: true; problems: ExternalCartProblems } | { ok: false; error: string }>;
   getCart(cartId: string): Promise<PluginCart | null>;
   startOrder(
     req: PluginStartOrder,
