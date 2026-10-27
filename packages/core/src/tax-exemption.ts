@@ -3,10 +3,13 @@
  * certificate, say) that it pays no sales tax in the places the certificate covers. Staff add,
  * verify and revoke them on the customer's page; a buyer never claims one. `commerce.tax` charges
  * no tax on an order whose customer holds one that is in force where the order ships
- * (`exemptingCertificate`), or hands it to the tax provider to decide.
+ * (`exemptingCertificate`), or hands it to the tax provider to decide. Everything is judged as of
+ * the order's start (the run's `now`): a certificate verified, revoked or expiring after the order
+ * was placed doesn't change that order.
  */
 
 import { z } from 'zod';
+import { regionCodes } from './address';
 import { type TaxPlace, taxPlaceSchema } from './shipping';
 
 export const TAX_CERTIFICATE_STATUSES = ['active', 'revoked'] as const;
@@ -27,7 +30,9 @@ export type TaxCertificate = {
   file: TaxCertificateFile | null;
   /** Revoking keeps the row, for the record of which orders it exempted. */
   status: TaxCertificateStatus;
+  /** Who added it, as the record names them, and their principal id (for separation of duties). */
   createdBy: string;
+  createdById: string;
   createdAt: number;
   /** Who checked it against the issuing authority; unverified exempts nothing. */
   verifiedBy: string | null;
@@ -35,6 +40,9 @@ export type TaxCertificate = {
   revokedBy: string | null;
   revokedAt: number | null;
 };
+
+/** A change staff asked for, and whether it changed anything (a repeat doesn't, and isn't audited). */
+export type TaxCertificateChange = { certificate: TaxCertificate; changed: boolean };
 
 /** What staff give to add one; the engine sets who and when. */
 export type TaxCertificateInput = {
@@ -65,6 +73,28 @@ export const taxCertificateKey = (customerId: string, id: string) =>
 export const taxCertificatePrefix = (customerId: string) =>
   `customers/${customerId}/tax-certificates/`;
 
+/** A certificate id as the web app mints it (`newId('txc')`), safe in a bucket key. */
+export const isTaxCertificateId = (id: unknown): id is string =>
+  typeof id === 'string' && /^txc_[a-z0-9]{1,40}$/.test(id);
+
+/** The first bytes each certificate file type starts with. */
+const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
+  'application/pdf': (b) => ascii(b, 0, '%PDF-'),
+  'image/png': (b) => [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => b[i] === x),
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/webp': (b) => ascii(b, 0, 'RIFF') && ascii(b, 8, 'WEBP'),
+};
+
+const ascii = (b: Uint8Array, at: number, text: string) =>
+  [...text].every((ch, i) => b[at + i] === ch.charCodeAt(0));
+
+/**
+ * True when a file's first bytes are what its declared type starts with, so a page or script
+ * renamed `.pdf` isn't stored as a certificate.
+ */
+export const taxCertificateFileMatches = (type: string, head: Uint8Array) =>
+  SIGNATURES[type]?.(head) ?? false;
+
 /** Why a file can't be a certificate's, or null. */
 export function taxCertificateFileProblem(f: { type: string; size: number }): string | null {
   if (!(f.type in TAX_CERTIFICATE_FILE_TYPES)) return 'Attach a PDF or an image (PNG, JPEG, WebP).';
@@ -82,7 +112,7 @@ const certificateNumberSchema = z
   .regex(/^[A-Za-z0-9 ./#-]+$/, 'A certificate number is letters, digits, spaces and . / # -');
 
 export const taxCertificateInputSchema = z.object({
-  id: z.string().regex(/^txc_[a-z0-9]{1,40}$/),
+  id: z.string().refine(isTaxCertificateId, 'Not a certificate id.'),
   number: certificateNumberSchema,
   regions: z
     .array(taxPlaceSchema)
@@ -120,6 +150,17 @@ export function checkTaxCertificateInput(
     country: p.country,
     ...(p.region ? { region: p.region.toUpperCase() } : {}),
   }));
+  // A country whose addresses name a region (US, CA, AU) takes only one of its regions, so a
+  // certificate for "US-CAL" can't sit there matching nothing.
+  const unknown = regions.find((p) => {
+    const codes = p.region ? regionCodes(p.country) : null;
+    return !!codes && !codes.includes(p.region!);
+  });
+  if (unknown)
+    return {
+      ok: false,
+      error: `${unknown.country}-${unknown.region} isn’t a region of ${unknown.country}.`,
+    };
   return { ok: true, value: { ...c, regions } };
 }
 
@@ -142,24 +183,28 @@ export function coversPlace(
 
 export type TaxCertificateState = 'active' | 'unverified' | 'expired' | 'revoked';
 
-/** Whether a certificate is in force at `now`, and if not, why not. */
+/**
+ * Whether a certificate was in force at `now`, and if not, why not. Revoking and verifying count
+ * from when they happened: one revoked after `now` was still in force then, and one verified after
+ * it wasn't yet.
+ */
 export function taxCertificateState(
-  c: Pick<TaxCertificate, 'status' | 'verifiedAt' | 'expiresAt'>,
+  c: Pick<TaxCertificate, 'status' | 'verifiedAt' | 'expiresAt' | 'revokedAt'>,
   now: number,
 ): TaxCertificateState {
-  if (c.status === 'revoked') return 'revoked';
+  if (c.status === 'revoked' && (c.revokedAt === null || c.revokedAt <= now)) return 'revoked';
   if (c.expiresAt !== null && now > c.expiresAt) return 'expired';
-  if (c.verifiedAt === null) return 'unverified';
+  if (c.verifiedAt === null || c.verifiedAt > now) return 'unverified';
   return 'active';
 }
 
 /**
- * The certificate that exempts a sale to `country` and `region` at `now`: active, verified,
- * unexpired and covering the place. The first in `certs`' order (oldest first), so a replay picks
- * the same one. Null when none does.
+ * The certificate that exempts a sale to `country` and `region` placed at `now`: verified, not
+ * revoked and unexpired then, and covering the place. The first in `certs`' order (oldest first).
+ * Null when none does.
  */
 export function exemptingCertificate<
-  C extends Pick<TaxCertificate, 'status' | 'verifiedAt' | 'expiresAt' | 'regions'>,
+  C extends Pick<TaxCertificate, 'status' | 'verifiedAt' | 'expiresAt' | 'revokedAt' | 'regions'>,
 >(certs: readonly C[], country: string | undefined, region: string | undefined, now: number) {
   return (
     certs.find(
@@ -168,9 +213,28 @@ export function exemptingCertificate<
   );
 }
 
-/** What a tax provider is told of a certificate that exempts the order: its number and coverage. */
-export type TaxExemption = { certificate: string; regions: TaxPlace[] };
+/**
+ * What a tax provider is told of a certificate that exempts the order: where it applies, and its
+ * number only for a provider that may have buyer details (`providerRequest`).
+ */
+export type TaxExemption = { certificate?: string; regions: TaxPlace[] };
 
-/** What a quote says when a certificate exempted it: "Tax exempt (certificate RS-1234)". */
-export const taxExemptNote = (c: Pick<TaxCertificate, 'number'>) =>
-  `Tax exempt (certificate ${c.number})`;
+/**
+ * What a cart's quote says when a certificate exempted it: "Tax exempt (certificate RS-1234)". An
+ * order's step says "certificate on file" instead: the number names the business, and an order
+ * keeps its steps' summaries long after a customer may be erased.
+ */
+export const taxExemptNote = (c: { number?: string }) =>
+  `Tax exempt (certificate ${c.number ?? 'on file'})`;
+
+/**
+ * Where `meta[CUSTOMER_MATCHED_BY]` says an order's customer was guessed rather than named by a
+ * trusted caller: `email` (a storefront order whose buyer email matched the account) or `name` (a
+ * name read from a document). Anyone can type an email or a company name, so such an order gets
+ * none of the customer's exemptions.
+ */
+export const CUSTOMER_MATCHED_BY = 'customerMatchedBy';
+
+/** False for an order whose customer was matched from what a buyer typed (`CUSTOMER_MATCHED_BY`). */
+export const customerTrusted = (order: { meta?: Record<string, unknown> }) =>
+  order.meta?.[CUSTOMER_MATCHED_BY] === undefined;

@@ -23,7 +23,7 @@ import type {
   PluginUsage,
 } from './plugins';
 import type { CartGuest, SignedActor } from './roles';
-import type { TaxCertificate, TaxCertificateInput } from './tax-exemption';
+import type { TaxCertificate, TaxCertificateChange, TaxCertificateInput } from './tax-exemption';
 import type {
   FlowGraph,
   FlowVersion,
@@ -397,25 +397,29 @@ export interface EngineRpc {
   /**
    * Adds a certificate to a customer, unverified (it exempts nothing until verified), with the file
    * the web app stored at `taxCertificateKey`, if any. The certificate calls take staff at least
-   * Operator, signed for `tax-certificates:<customerId>`; anyone else is refused.
+   * Operator, signed for `tax-certificates:<customerId>`; anyone else is refused. Each says whether
+   * it changed anything: adding an id already there, or verifying or revoking again, doesn't.
    */
   addTaxCertificate(
     customerId: string,
     input: TaxCertificateInput,
     actor: SignedActor,
-  ): Promise<Refusable<TaxCertificate>>;
-  /** Records that `actor` checked an active certificate with its issuer: from now it exempts. */
+  ): Promise<Refusable<TaxCertificateChange>>;
+  /**
+   * Records that `actor` checked an active certificate with its issuer: orders placed from now are
+   * exempt. With approval separation on, refused to whoever added it.
+   */
   verifyTaxCertificate(
     customerId: string,
     id: string,
     actor: SignedActor,
-  ): Promise<Refusable<TaxCertificate>>;
-  /** Stops a certificate exempting anything. The row stays, revoked, for the record. */
+  ): Promise<Refusable<TaxCertificateChange>>;
+  /** Stops a certificate exempting orders placed from now. The row stays, revoked, for the record. */
   revokeTaxCertificate(
     customerId: string,
     id: string,
     actor: SignedActor,
-  ): Promise<Refusable<TaxCertificate>>;
+  ): Promise<Refusable<TaxCertificateChange>>;
   /**
    * Forgets every A2A push config a person (or token) registered, and what is still queued for
    * them, when their connected apps end: a client that can no longer call /a2a stops hearing too.

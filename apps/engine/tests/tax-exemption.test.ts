@@ -1,15 +1,24 @@
 import { env } from 'cloudflare:workers';
 import {
+  APPROVAL_SEPARATION_KEY,
   type CartActor,
   type Order,
   type Role,
   type RpcActor,
   type RunContext,
+  shopifyToInbound,
   type TaxCertificateInput,
   taxCertificateKey,
+  toStartRequest,
   withDefaults,
 } from '@orderloop/core';
-import { createDb, customers, publishFlow, taxCertificates } from '@orderloop/db';
+import {
+  createDb,
+  customers,
+  publishFlow,
+  taxCertificates,
+  workspaceSettings,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
@@ -39,6 +48,7 @@ const staff = (role: Role) => ({
   role,
 });
 const operator = staff('operator');
+const checker = { ...staff('operator'), id: 'usr_tax_checker', name: 'checker@example.com' };
 const as = (customerId: string, a: RpcActor = operator) =>
   signedActor(a, `tax-certificates:${customerId}`);
 
@@ -60,16 +70,24 @@ const input = (over: Partial<TaxCertificateInput> = {}): TaxCertificateInput => 
   ...over,
 });
 
-/** Adds a certificate as an operator, verified unless told not to. */
+/** Adds a certificate as an operator, verified by another unless told not to. */
 async function certify(customerId: string, over: Partial<TaxCertificateInput> = {}, verify = true) {
   const added = await api().addTaxCertificate(customerId, input(over), await as(customerId));
   if (!added.ok) throw new Error(added.error);
   if (verify) {
-    const v = await api().verifyTaxCertificate(customerId, added.value.id, await as(customerId));
+    const v = await api().verifyTaxCertificate(
+      customerId,
+      added.value.certificate.id,
+      await as(customerId, checker),
+    );
     if (!v.ok) throw new Error(v.error);
   }
-  return added.value;
+  return added.value.certificate;
 }
+
+/** Moves when a customer's certificates were verified or revoked, as if it happened at `at`. */
+const happened = (customerId: string, at: Partial<typeof taxCertificates.$inferInsert>) =>
+  db().update(taxCertificates).set(at).where(eq(taxCertificates.customerId, customerId));
 
 const order = (customerId: string, o: Partial<Order> = {}): Order => ({
   id: `ord_tax_${crypto.randomUUID().slice(0, 8)}`,
@@ -105,16 +123,17 @@ beforeAll(async () => {
 });
 
 describe('commerce.tax with an exemption certificate', () => {
-  it('charges no tax, and names the certificate in its output and summary', async () => {
+  it('charges no tax, and records the certificate by id, not its number', async () => {
     const id = await customer();
     const c = await certify(id);
     const r = await tax(order(id));
     expect(r.order).toMatchObject({ tax: 0, taxRate: 0, total: 110 });
     expect(r.output).toMatchObject({
       rate: 0,
-      exemption: { certificateId: c.id, certificate: 'RS-1234' },
+      exemption: { certificateId: c.id, exempted: true },
     });
-    expect(r.summary).toBe('Tax exempt (certificate RS-1234) · total $110.00');
+    expect(JSON.stringify(r)).not.toContain('RS-1234');
+    expect(r.summary).toBe('Tax exempt (certificate on file) · total $110.00');
   });
 
   it('exempts a whole country’s certificate in any of its regions', async () => {
@@ -135,7 +154,10 @@ describe('commerce.tax with an exemption certificate', () => {
     const r = await certify(revoked);
     expect(await api().revokeTaxCertificate(revoked, r.id, await as(revoked))).toMatchObject({
       ok: true,
-      value: { status: 'revoked', revokedBy: 'operator@example.com' },
+      value: {
+        certificate: { status: 'revoked', revokedBy: 'operator@example.com' },
+        changed: true,
+      },
     });
     const unverified = await customer();
     await certify(unverified, {}, false);
@@ -150,14 +172,70 @@ describe('commerce.tax with an exemption certificate', () => {
     }
   });
 
-  it('judges expiry at the run’s time, so a replay decides the same', async () => {
+  it('judges expiry as of when the order was placed (the run’s now), not the clock', async () => {
     const id = await customer();
     const expiresAt = Date.now() - DAY;
     await certify(id, { expiresAt: Date.now() + DAY });
-    // Expired by the clock now, but in force when the run priced the order.
-    await db().update(taxCertificates).set({ expiresAt }).where(eq(taxCertificates.customerId, id));
+    // Expired by the clock now, but verified and in force when the order was placed.
+    await happened(id, { expiresAt, verifiedAt: expiresAt - 3 * DAY });
     expect((await tax(order(id), {}, expiresAt - DAY)).order).toMatchObject({ tax: 0 });
     expect((await tax(order(id))).order).toMatchObject({ tax: 11 });
+  });
+
+  it('judges revoking and verifying as of when the order was placed', async () => {
+    const id = await customer();
+    const c = await certify(id);
+    await api().revokeTaxCertificate(id, c.id, await as(id));
+    const placed = Date.now() - DAY;
+    // Revoked after the order was placed: it was still in force for that order.
+    await happened(id, { verifiedAt: placed - DAY, revokedAt: placed + 1 });
+    expect((await tax(order(id), {}, placed)).order).toMatchObject({ tax: 0 });
+    // Revoked before it: not.
+    await happened(id, { revokedAt: placed - 1 });
+    expect((await tax(order(id), {}, placed)).order).toMatchObject({ tax: 11 });
+
+    // Verified only after the order was placed: that order isn't exempt.
+    const later = await customer();
+    await certify(later);
+    expect((await tax(order(later), {}, placed)).order).toMatchObject({ tax: 11 });
+    expect((await tax(order(later))).order).toMatchObject({ tax: 0 });
+  });
+
+  it('gives nothing to a customer matched from a Shopify buyer’s email, or a name in a document', async () => {
+    const id = await customer();
+    await certify(id);
+    // What the Shopify webhook starts when a guest's email matches the exempt account.
+    const mapped = shopifyToInbound(
+      {
+        id: 4501,
+        email: `${id}@example.com`,
+        currency: 'USD',
+        line_items: [{ sku: 'WID-100', title: 'Widget', quantity: 2, price: '50.00' }],
+        shipping_address: {
+          address1: '1 Main St',
+          city: 'Oakland',
+          zip: '94607',
+          province_code: 'CA',
+          country_code: 'US',
+        },
+      },
+      { customerId: id },
+    );
+    if (!mapped.ok) throw new Error(mapped.error);
+    const { input: started } = toStartRequest(
+      { ...mapped.order, channel: 'web', externalId: '4501' } as never,
+      'tpl-storefront-order',
+    );
+    expect(started.customerId).toBe(id);
+    const fromShopify = await tax(order(id, { meta: started.meta }));
+    expect(fromShopify.order).toMatchObject({ tax: 11 });
+    expect(fromShopify.output).not.toHaveProperty('exemption');
+    const byName = await tax(
+      order(id, { meta: { shipTo: california, customerMatchedBy: 'name' } }),
+    );
+    expect(byName.order).toMatchObject({ tax: 11 });
+    // Named by a trusted caller, the same customer is exempt.
+    expect((await tax(order(id))).order).toMatchObject({ tax: 0 });
   });
 
   it('needs a region on the ship-to for a region’s certificate, and a ship-to at all', async () => {
@@ -209,11 +287,17 @@ describe('commerce.tax with an exemption certificate', () => {
     expect(done.order).toMatchObject({ tax: 0 });
     expect(done.order!.total).toBe(done.order!.subtotal);
     expect(done.nodes.tax).toMatchObject({
-      summary: expect.stringMatching(/^Tax exempt \(certificate RS-1234\)/),
-      output: expect.objectContaining({
-        exemption: { certificateId: c.id, certificate: 'RS-1234' },
-      }),
+      summary: expect.stringMatching(/^Tax exempt \(certificate on file\)/),
+      output: expect.objectContaining({ exemption: { certificateId: c.id, exempted: true } }),
     });
+
+    // Erased afterwards, the order holds nothing of the certificate's number.
+    expect(await eraseDataSubject(env, `${id}@example.com`)).toMatchObject({
+      ok: true,
+      taxCertificates: 1,
+    });
+    const erased = await env.ORDER_AGENT.getByName(orderId).snapshot();
+    expect(JSON.stringify(erased)).not.toContain('RS-1234');
   });
 });
 
@@ -245,6 +329,28 @@ describe('a cart for an exempt customer', () => {
   });
 });
 
+describe('erasing a customer with an exempt cart', () => {
+  it('drops the note naming the certificate from the cart', async () => {
+    const id = await customer();
+    await certify(id, { number: 'CA-RESALE-7' });
+    const made = await createCart(env, {
+      title: 'Exempt order',
+      flowId: 'tpl-storefront-order',
+      customerId: id,
+      createdBy: 'usr_tax_operator',
+    });
+    if (!made.ok) throw new Error(made.error);
+    const cart = env.CART_AGENT.getByName(made.id);
+    await cart.applyAs(operator, { op: 'add', sku: 'GSK-010', qty: 1 });
+    await cart.applyAs(operator, { op: 'set_ship_to', address: california });
+    expect(JSON.stringify((await api().cartSnapshot(made.id))!.cart)).toContain('CA-RESALE-7');
+    expect(await eraseDataSubject(env, `${id}@example.com`)).toMatchObject({ ok: true });
+    const after = (await api().cartSnapshot(made.id))!.cart!;
+    expect(after.issues.map((i) => i.code)).not.toContain('tax_exempt');
+    expect(JSON.stringify(after)).not.toContain('CA-RESALE-7');
+  });
+});
+
 describe('certificate calls', () => {
   it('take an operator signed for that customer, and refuse anyone else', async () => {
     const id = await customer();
@@ -266,10 +372,25 @@ describe('certificate calls', () => {
     const added = await api().addTaxCertificate(id, first, await as(id, staff('admin')));
     expect(added).toMatchObject({
       ok: true,
-      value: { id: first.id, status: 'active', verifiedAt: null, createdBy: 'admin@example.com' },
+      value: {
+        certificate: {
+          id: first.id,
+          status: 'active',
+          verifiedAt: null,
+          createdBy: 'admin@example.com',
+          createdById: 'usr_tax_admin',
+        },
+        changed: true,
+      },
     });
-    // A retried add answers with the same certificate rather than a second.
-    expect(await api().addTaxCertificate(id, first, await as(id))).toEqual(added);
+    // A retried add answers with the same certificate rather than a second, and says so.
+    expect(await api().addTaxCertificate(id, first, await as(id))).toEqual({
+      ok: true,
+      value: {
+        certificate: (added as { value: { certificate: unknown } }).value.certificate,
+        changed: false,
+      },
+    });
     expect(await api().taxCertificates(id)).toHaveLength(1);
     expect(await api().taxCertificates('cus_nobody')).toBeNull();
     // Another customer's certificate isn't found through this one.
@@ -302,6 +423,14 @@ describe('certificate calls', () => {
       error: 'No such customer.',
     });
 
+    expect(
+      await api().addTaxCertificate(
+        id,
+        input({ regions: [{ country: 'US', region: 'CAL' }] }),
+        await as(id),
+      ),
+    ).toEqual({ ok: false, error: 'US-CAL isn’t a region of US.' });
+
     const old = await certify(id, { expiresAt: Date.now() - DAY }, false);
     expect(await api().verifyTaxCertificate(id, old.id, await as(id))).toEqual({
       ok: false,
@@ -309,12 +438,18 @@ describe('certificate calls', () => {
     });
     const c = await certify(id);
     const again = await api().verifyTaxCertificate(id, c.id, await as(id, staff('admin')));
-    // Verifying twice keeps the first verifier.
-    expect(again).toMatchObject({ ok: true, value: { verifiedBy: 'operator@example.com' } });
+    // Verifying twice keeps the first verifier, and changes nothing.
+    expect(again).toMatchObject({
+      ok: true,
+      value: { certificate: { verifiedBy: 'checker@example.com' }, changed: false },
+    });
     await api().revokeTaxCertificate(id, c.id, await as(id));
     expect(await api().revokeTaxCertificate(id, c.id, await as(id))).toMatchObject({
       ok: true,
-      value: { status: 'revoked', revokedBy: 'operator@example.com' },
+      value: {
+        certificate: { status: 'revoked', revokedBy: 'operator@example.com' },
+        changed: false,
+      },
     });
     expect(await api().verifyTaxCertificate(id, c.id, await as(id))).toEqual({
       ok: false,
@@ -325,6 +460,39 @@ describe('certificate calls', () => {
       [old.id, 'active'],
       [c.id, 'revoked'],
     ]);
+  });
+});
+
+describe('separation of duties', () => {
+  it('lets whoever added a certificate verify it only while approval separation is off', async () => {
+    const id = await customer();
+    const a = await certify(id, {}, false);
+    expect(await api().verifyTaxCertificate(id, a.id, await as(id))).toMatchObject({
+      ok: true,
+      value: { changed: true },
+    });
+
+    const b = await certify(id, {}, false);
+    await db().insert(workspaceSettings).values({
+      key: APPROVAL_SEPARATION_KEY,
+      value: 'on',
+      updatedAt: Date.now(),
+      updatedBy: 'test',
+    });
+    try {
+      expect(await api().verifyTaxCertificate(id, b.id, await as(id))).toEqual({
+        ok: false,
+        error: 'Someone other than whoever added the certificate must verify it.',
+      });
+      expect(await api().verifyTaxCertificate(id, b.id, await as(id, checker))).toMatchObject({
+        ok: true,
+        value: { certificate: { verifiedBy: 'checker@example.com' }, changed: true },
+      });
+    } finally {
+      await db()
+        .delete(workspaceSettings)
+        .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY));
+    }
   });
 });
 

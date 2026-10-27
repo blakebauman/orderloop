@@ -132,6 +132,12 @@ const REGIONS: Record<string, Record<string, string>> = {
   AU: AU_STATES,
 };
 
+/** The region codes a country's addresses use (`US` → `AL`, `AK`, …), or null when it has none listed. */
+export function regionCodes(country: string): string[] | null {
+  const names = REGIONS[country];
+  return names ? [...new Set(Object.values(names))] : null;
+}
+
 /** Returns the formatted postcode, or null when it isn't valid for the country. */
 function postcode(country: string, raw: string): string | null {
   const compact = raw.toUpperCase().replace(/\s+/g, '');

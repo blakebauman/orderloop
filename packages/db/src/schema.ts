@@ -167,6 +167,8 @@ export const taxCertificates = sqliteTable(
     /** active | revoked. */
     status: text('status').notNull().default('active'),
     createdBy: text('created_by').notNull(),
+    /** The adder's principal id: with approval separation on, someone else verifies it. */
+    createdById: text('created_by_id').notNull(),
     createdAt: integer('created_at').notNull(),
     verifiedBy: text('verified_by'),
     verifiedAt: integer('verified_at'),

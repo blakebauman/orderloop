@@ -120,22 +120,23 @@ describe('a plugin as provider', () => {
     expect(await labels(orderId)).toEqual([{ ref: rows[0]!.id, kind: 'shipment', voided: 0 }]);
   });
 
-  it('tells the tax provider of the customer’s exemption certificate, and charges what it returns', async () => {
+  it('tells the tax provider of the customer’s exemption certificate, and says exempt only when it does', async () => {
     const customerId = `cus_exempt_${crypto.randomUUID().slice(0, 6)}`;
     await db()
       .insert(customers)
       .values({ id: customerId, name: 'Exempt Co', email: `${customerId}@example.com` });
-    const now = Date.now();
+    const now = Date.now() - 60_000;
     await db()
       .insert(taxCertificates)
       .values({
-        id: `txc_${customerId}`,
+        id: `txc_${customerId.replace(/\W/g, '')}`,
         customerId,
         number: 'US-EXEMPT-1',
         regions: JSON.stringify([{ country: 'US' }]),
         createdBy: 'ops@example.com',
+        createdById: 'usr_ops',
         createdAt: now,
-        verifiedBy: 'ops@example.com',
+        verifiedBy: 'checker@example.com',
         verifiedAt: now,
       });
     const { done } = await run('test-providers', { customerId });
@@ -143,12 +144,21 @@ describe('a plugin as provider', () => {
     // The carrier taxes a US ship-to 10%, unless the certificate it was sent covers it.
     expect(done.order!.tax).toBe(0);
     expect(done.nodes.tax!.summary).toMatch(
-      /^Tax \$0\.00 · total .* \(fixture-carrier, certificate US-EXEMPT-1\)$/,
+      /^Tax exempt \(certificate on file\) · total .* \(fixture-carrier\)$/,
     );
     expect(done.nodes.tax!.output).toMatchObject({
       provider: CARRIER,
-      exemption: { certificateId: `txc_${customerId}`, certificate: 'US-EXEMPT-1' },
+      exemption: { certificateId: `txc_${customerId.replace(/\W/g, '')}`, exempted: true },
     });
+
+    // A provider that charges tax anyway: the order is taxed, and says nothing of an exemption.
+    const ignored = await run('test-providers', {
+      customerId,
+      meta: { shipTo, simulate: 'ignore_exemption' },
+    });
+    expect(ignored.done.order!.tax).toBe(Math.round((ignored.done.order!.subtotal + 5) * 10) / 100);
+    expect(ignored.done.nodes.tax!.summary).toMatch(/^Tax \$.* \(fixture-carrier\)$/);
+    expect(ignored.done.nodes.tax!.output).toMatchObject({ exemption: { exempted: false } });
   });
 
   it('voids the label when the order fails after it', async () => {

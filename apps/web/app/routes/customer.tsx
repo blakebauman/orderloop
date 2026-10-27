@@ -5,7 +5,7 @@
  * (`commerce.tax`). Buyers never claim one.
  */
 
-import { taxCertificateState } from '@orderloop/core';
+import { newId, taxCertificateState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
@@ -35,7 +35,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   ]);
   if (!customer || !certificates) throw data('Customer not found', { status: 404 });
   const { stripeCustomerId: _c, stripePaymentMethodId: _pm, ...shown } = customer;
-  return { customer: shown, certificates };
+  // The next certificate's id, minted here so a form sent twice adds it once.
+  return { customer: shown, certificates, nextId: newId('txc') };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -48,20 +49,22 @@ export async function action({ request, params }: Route.ActionArgs) {
       ? await changeCertificate(customerId, String(f.get('id') ?? ''), intent, me)
       : await addCertificate(customerId, me, f);
   if (!r.ok) return { intent: String(intent ?? 'add'), error: r.error };
-  await audit(
-    request,
-    intent === 'verify'
-      ? 'tax_certificate.verified'
-      : intent === 'revoke'
-        ? 'tax_certificate.revoked'
-        : 'tax_certificate.added',
-    { actor: me, target: customerId, detail: { certificate: r.id, via: 'app' } },
-  );
+  // A repeat (a form sent twice, verifying what's verified) did nothing to record.
+  if (r.changed)
+    await audit(
+      request,
+      intent === 'verify'
+        ? 'tax_certificate.verified'
+        : intent === 'revoke'
+          ? 'tax_certificate.revoked'
+          : 'tax_certificate.added',
+      { actor: me, target: customerId, detail: { certificate: r.id, via: 'app' } },
+    );
   return { intent: String(intent ?? 'add'), ok: true as const };
 }
 
 export default function CustomerPage() {
-  const { customer: c, certificates } = useLoaderData<typeof loader>();
+  const { customer: c, certificates, nextId } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state === 'submitting';
   const canOperate = useCan('operator');
@@ -171,7 +174,7 @@ export default function CustomerPage() {
         </Section>
         {canOperate ? (
           <Section title="Add a certificate">
-            {/* Keyed by the count, so the fields clear once a certificate is added. */}
+            {/* Keyed by the count, so the fields clear once a certificate is added (not on a refusal). */}
             <Form
               key={certificates.length}
               method="post"
@@ -179,6 +182,7 @@ export default function CustomerPage() {
               className="grid max-w-xl gap-3 text-sm"
             >
               <input type="hidden" name="intent" value="add" />
+              <input type="hidden" name="id" value={nextId} />
               <div className="grid gap-1">
                 <label htmlFor="cert-number" className="caption">
                   Certificate number

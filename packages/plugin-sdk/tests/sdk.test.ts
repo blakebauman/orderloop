@@ -414,6 +414,23 @@ describe('providers', () => {
     ]);
   });
 
+  it('catches a tax provider that says it exempted an order with no exemption certificate', async () => {
+    const taxer = (always: boolean) =>
+      definePlugin<CEnv>({
+        manifest: { ...carrierManifest, provides: ['tax'] },
+        providers: {
+          tax: {
+            calculate: ({ req }) =>
+              req.input.exemption || always ? { amount: 0, exempted: true } : { amount: 1 },
+          },
+        },
+      });
+    expect(await run(taxer(false))).toEqual([]);
+    expect(await run(taxer(true))).toEqual([
+      'tax: calculate said exempted with no exemption in the request',
+    ]);
+  });
+
   it('refuses an op the plugin does not provide', async () => {
     const env: CEnv = { PLUGIN_KEY: KEY, labels: new Map() };
     const plugin = new (carrier())({} as never, env);

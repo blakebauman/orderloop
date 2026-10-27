@@ -389,8 +389,8 @@ export class CartAgent extends Agent<Env, CartState> {
   }
 
   /**
-   * Removes the ship-to from a cart whose customer is being erased; an open cart is priced again
-   * without it. True if there was one to remove.
+   * Removes the ship-to from a cart whose customer is being erased, and its tax exemption note; an
+   * open cart is priced again without them. True if there was a ship-to to remove.
    */
   async eraseShipTo(): Promise<boolean> {
     if (!this.state.cart?.shipTo) return false;
@@ -399,6 +399,9 @@ export class CartAgent extends Agent<Env, CartState> {
     await this.save({
       ...c,
       shipTo: null,
+      // The note names the customer's certificate, which their erasure deletes; an open cart is
+      // priced again below, without the ship-to the certificate covered.
+      issues: c.issues.filter((i) => i.code !== 'tax_exempt'),
       updatedAt: Date.now(),
       version: c.version + 1,
       // An ended cart isn't priced again; its quote stays what it was.

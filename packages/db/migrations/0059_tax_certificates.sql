@@ -5,7 +5,8 @@
 -- expire. The file, when there is one, is in the documents bucket at `file_key`
 -- (`customers/<customer_id>/tax-certificates/<id>`). Revoking sets `status` to 'revoked' and keeps
 -- the row, for the record of which orders it exempted; erasing the customer deletes the rows and
--- their files. A new table: no existing row or reader changes.
+-- their files. `created_by_id` is the adder's principal id: with approval separation on, someone
+-- else must verify it. A new table: no existing row or reader changes.
 CREATE TABLE tax_certificates (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL,
@@ -18,6 +19,7 @@ CREATE TABLE tax_certificates (
   file_size INTEGER,
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
+  created_by_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   verified_by TEXT,
   verified_at INTEGER,

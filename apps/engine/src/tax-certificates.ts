@@ -5,14 +5,16 @@
  */
 
 import {
+  APPROVAL_SEPARATION_KEY,
   checkTaxCertificateInput,
   MAX_TAX_CERTIFICATES,
   type Refusable,
   type RpcActor,
   type TaxCertificate,
+  type TaxCertificateChange,
   type TaxPlace,
 } from '@orderloop/core';
-import { createDb, customers, taxCertificates } from '@orderloop/db';
+import { createDb, customers, taxCertificates, workspaceSettings } from '@orderloop/db';
 import { and, asc, count, eq } from 'drizzle-orm';
 
 type Row = typeof taxCertificates.$inferSelect;
@@ -30,6 +32,7 @@ function certificateOf(r: Row): TaxCertificate {
         : null,
     status: r.status === 'revoked' ? 'revoked' : 'active',
     createdBy: r.createdBy,
+    createdById: r.createdById,
     createdAt: r.createdAt,
     verifiedBy: r.verifiedBy,
     verifiedAt: r.verifiedAt,
@@ -70,6 +73,10 @@ export async function listTaxCertificates(env: Env, customerId: string) {
 }
 
 const refuse = (error: string) => ({ ok: false as const, error });
+const done = (certificate: TaxCertificate, changed: boolean) => ({
+  ok: true as const,
+  value: { certificate, changed },
+});
 
 async function find(env: Env, customerId: string, id: string) {
   const row = await createDb(env.DB)
@@ -90,14 +97,14 @@ export async function addTaxCertificate(
   raw: unknown,
   actor: RpcActor,
   now = Date.now(),
-): Promise<Refusable<TaxCertificate>> {
+): Promise<Refusable<TaxCertificateChange>> {
   if (!(await customerExists(env, customerId))) return refuse('No such customer.');
   const checked = checkTaxCertificateInput(customerId, raw);
   if (!checked.ok) return checked;
   const c = checked.value;
   const db = createDb(env.DB);
   const already = await find(env, customerId, c.id);
-  if (already) return { ok: true, value: already };
+  if (already) return done(already, false);
   const held = await db
     .select({ n: count() })
     .from(taxCertificates)
@@ -119,32 +126,39 @@ export async function addTaxCertificate(
       fileSize: c.file?.size ?? null,
       status: 'active',
       createdBy: actor.name,
+      createdById: actor.id,
       createdAt: now,
     })
     .onConflictDoNothing();
   const added = await find(env, customerId, c.id);
-  return added ? { ok: true, value: added } : refuse('That certificate id is taken.');
+  return added ? done(added, true) : refuse('That certificate id is taken.');
 }
 
-/** Marks an active, unexpired certificate verified by `actor`. Verifying it again changes nothing. */
+/**
+ * Marks an active, unexpired certificate verified by `actor`. Verifying it again changes nothing.
+ * With the workspace's approval separation on, whoever added it can't verify it: the same setting
+ * that keeps a person from approving their own order keeps them from vouching for their own entry.
+ */
 export async function verifyTaxCertificate(
   env: Env,
   customerId: string,
   id: string,
   actor: RpcActor,
   now = Date.now(),
-): Promise<Refusable<TaxCertificate>> {
+): Promise<Refusable<TaxCertificateChange>> {
   const c = await find(env, customerId, id);
   if (!c) return refuse('No such certificate.');
   if (c.status === 'revoked') return refuse('The certificate was revoked; add a new one.');
-  if (c.verifiedAt !== null) return { ok: true, value: c };
+  if (c.verifiedAt !== null) return done(c, false);
   if (c.expiresAt !== null && now > c.expiresAt)
     return refuse('The certificate has expired; add the renewed one.');
+  if (c.createdById === actor.id && (await separated(env)))
+    return refuse('Someone other than whoever added the certificate must verify it.');
   await createDb(env.DB)
     .update(taxCertificates)
     .set({ verifiedBy: actor.name, verifiedAt: now })
     .where(and(eq(taxCertificates.id, id), eq(taxCertificates.customerId, customerId)));
-  return { ok: true, value: { ...c, verifiedBy: actor.name, verifiedAt: now } };
+  return done({ ...c, verifiedBy: actor.name, verifiedAt: now }, true);
 }
 
 /** Revokes a certificate, keeping it. Revoking it again changes nothing. */
@@ -154,16 +168,23 @@ export async function revokeTaxCertificate(
   id: string,
   actor: RpcActor,
   now = Date.now(),
-): Promise<Refusable<TaxCertificate>> {
+): Promise<Refusable<TaxCertificateChange>> {
   const c = await find(env, customerId, id);
   if (!c) return refuse('No such certificate.');
-  if (c.status === 'revoked') return { ok: true, value: c };
+  if (c.status === 'revoked') return done(c, false);
   await createDb(env.DB)
     .update(taxCertificates)
     .set({ status: 'revoked', revokedBy: actor.name, revokedAt: now })
     .where(and(eq(taxCertificates.id, id), eq(taxCertificates.customerId, customerId)));
-  return {
-    ok: true,
-    value: { ...c, status: 'revoked', revokedBy: actor.name, revokedAt: now },
-  };
+  return done({ ...c, status: 'revoked', revokedBy: actor.name, revokedAt: now }, true);
+}
+
+/** The workspace's `approval_separation` setting is on. */
+async function separated(env: Env) {
+  const row = await createDb(env.DB)
+    .select({ value: workspaceSettings.value })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY))
+    .get();
+  return row?.value === 'on';
 }

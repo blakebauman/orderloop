@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUSTOMER_MATCHED_BY,
   checkTaxCertificateInput,
   coversPlace,
+  customerTrusted,
   exemptingCertificate,
+  type Order,
+  type ProvideRequest,
+  providerRequest,
+  shopifyToInbound,
   type TaxCertificate,
+  taxCertificateFileMatches,
   taxCertificateFileProblem,
   taxCertificateKey,
   taxCertificateState,
@@ -24,6 +31,7 @@ const cert = (c: Partial<TaxCertificate> = {}): TaxCertificate => ({
   file: null,
   status: 'active',
   createdBy: 'ann@example.com',
+  createdById: 'usr_ann',
   createdAt: 0,
   verifiedBy: 'ann@example.com',
   verifiedAt: 1,
@@ -71,6 +79,17 @@ describe('a certificate in force', () => {
     expect(taxCertificateState(cert({ expiresAt: NOW }), NOW)).toBe('active');
   });
 
+  it('counts verifying and revoking from when they happened', () => {
+    // Revoked after the order was placed: still in force for it.
+    expect(taxCertificateState(cert({ status: 'revoked', revokedAt: NOW + 1 }), NOW)).toBe(
+      'active',
+    );
+    expect(taxCertificateState(cert({ status: 'revoked', revokedAt: NOW }), NOW)).toBe('revoked');
+    // Verified after it: not yet.
+    expect(taxCertificateState(cert({ verifiedAt: NOW + 1 }), NOW)).toBe('unverified');
+    expect(taxCertificateState(cert({ verifiedAt: NOW }), NOW)).toBe('active');
+  });
+
   it('exempts with the first that is in force and covers the place', () => {
     const certs = [
       cert({ id: 'old', expiresAt: NOW - DAY }),
@@ -88,8 +107,9 @@ describe('a certificate in force', () => {
     expect(exemptingCertificate(certs, 'US', 'CA', NOW - 7 * DAY)?.id).toBe('old');
   });
 
-  it('says so on a quote', () => {
+  it('says so on a quote, and only “on file” without the number', () => {
     expect(taxExemptNote(cert())).toBe('Tax exempt (certificate RS-1)');
+    expect(taxExemptNote({})).toBe('Tax exempt (certificate on file)');
   });
 });
 
@@ -135,6 +155,34 @@ describe('adding a certificate', () => {
     ).toEqual({ ok: false, error: 'Attach a PDF or an image (PNG, JPEG, WebP).' });
   });
 
+  it('refuses a region its country doesn’t have, and takes any for a country with none listed', () => {
+    expect(
+      checkTaxCertificateInput('cus_1', { ...input, regions: [{ country: 'US', region: 'CAL' }] }),
+    ).toEqual({ ok: false, error: 'US-CAL isn’t a region of US.' });
+    expect(
+      checkTaxCertificateInput('cus_1', { ...input, regions: [{ country: 'CA', region: 'on' }] }),
+    ).toMatchObject({ ok: true, value: { regions: [{ country: 'CA', region: 'ON' }] } });
+    expect(
+      checkTaxCertificateInput('cus_1', { ...input, regions: [{ country: 'DE', region: 'BY' }] }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('checks a file starts as its type does', () => {
+    const bytes = (...b: (number | string)[]) =>
+      new Uint8Array(
+        b.flatMap((x) => (typeof x === 'string' ? [...x].map((c) => c.charCodeAt(0)) : [x])),
+      );
+    expect(taxCertificateFileMatches('application/pdf', bytes('%PDF-1.7'))).toBe(true);
+    expect(taxCertificateFileMatches('application/pdf', bytes('<html>'))).toBe(false);
+    expect(taxCertificateFileMatches('image/png', bytes(0x89, 'PNG', 0x0d, 0x0a, 0x1a, 0x0a))).toBe(
+      true,
+    );
+    expect(taxCertificateFileMatches('image/jpeg', bytes(0xff, 0xd8, 0xff, 0xe0))).toBe(true);
+    expect(taxCertificateFileMatches('image/webp', bytes('RIFF', 0, 0, 0, 0, 'WEBP'))).toBe(true);
+    expect(taxCertificateFileMatches('image/webp', bytes('RIFF', 0, 0, 0, 0, 'AVI '))).toBe(false);
+    expect(taxCertificateFileMatches('text/html', bytes('%PDF-'))).toBe(false);
+  });
+
   it('takes a PDF or an image up to 10 MB', () => {
     expect(taxCertificateFileProblem({ type: 'application/pdf', size: 1 })).toBeNull();
     expect(taxCertificateFileProblem({ type: 'image/jpeg', size: 10 * 1024 * 1024 })).toBeNull();
@@ -142,5 +190,62 @@ describe('adding a certificate', () => {
       'A file is at most 10 MB.',
     );
     expect(taxCertificateFileProblem({ type: 'image/svg+xml', size: 1 })).not.toBeNull();
+  });
+});
+
+describe('whose customer may be exempt', () => {
+  it('not one matched from a Shopify buyer’s email', () => {
+    const mapped = shopifyToInbound(
+      {
+        id: 1,
+        currency: 'USD',
+        email: 'a@b.example',
+        line_items: [{ sku: 'X', title: 'X', quantity: 1, price: '1' }],
+      },
+      { customerId: 'cus_1' },
+    );
+    expect(mapped).toMatchObject({ ok: true, order: { meta: { [CUSTOMER_MATCHED_BY]: 'email' } } });
+    expect(customerTrusted((mapped as { order: { meta: Record<string, unknown> } }).order)).toBe(
+      false,
+    );
+    // No match, no flag.
+    const guest = shopifyToInbound({ id: 2, currency: 'USD', line_items: [] });
+    expect((guest as { order: { meta: Record<string, unknown> } }).order.meta).not.toHaveProperty(
+      CUSTOMER_MATCHED_BY,
+    );
+    expect(customerTrusted({ meta: {} })).toBe(true);
+  });
+});
+
+describe('a tax provider’s request', () => {
+  const order = {
+    id: 'ord_1',
+    lines: [],
+    meta: { shipTo: { name: 'Ann' } },
+  } as unknown as Order;
+  const req: ProvideRequest = {
+    surface: 'tax',
+    op: 'calculate',
+    nodeId: 'tax',
+    stepKey: 'tax#1',
+    orderId: 'ord_1',
+    config: {},
+    order,
+    input: {
+      subtotal: 10,
+      shipping: 0,
+      includeShipping: true,
+      currency: 'USD',
+      exemption: { certificate: 'RS-1', regions: [{ country: 'US' }] },
+    },
+  };
+
+  it('carries the certificate number only to a plugin granted buyer details', () => {
+    expect(providerRequest({ personalData: 'send' }, req)).toMatchObject({
+      input: { exemption: { certificate: 'RS-1', regions: [{ country: 'US' }] } },
+    });
+    const redacted = providerRequest({ personalData: 'redact' }, req);
+    expect(redacted).toMatchObject({ input: { exemption: { regions: [{ country: 'US' }] } } });
+    expect(JSON.stringify(redacted)).not.toContain('RS-1');
   });
 });

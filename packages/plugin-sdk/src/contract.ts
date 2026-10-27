@@ -8,8 +8,8 @@
  * contract version; running a node twice for the same order and step key gives the same result and
  * no second effect; undoing it twice is harmless and leaves what was there before; delivering the
  * same event twice records it once; a provider's results have its surface's shape (tax with and
- * without an exemption certificate), rates, tax and address checks write nothing (they also run while pricing a checkout), and a label created
- * twice for one key is created once and voided twice harmlessly; a page refuses a request
+ * without an exemption certificate, `exempted` only with one), rates, tax and address checks write
+ * nothing (they also run while pricing a checkout), and a label created twice for one key is created once and voided twice harmlessly; a page refuses a request
  * without a signed-in person, or from one below the manifest's `pageRole`; and every page it
  * declares that answers with a view answers one the web app can draw (`checkPluginView`), so a bad
  * view fails the plugin's own tests rather than a page in production. HTML pages stay legal.
@@ -230,9 +230,12 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
                   input: { subtotal: 10, shipping: 5, includeShipping: true, currency: 'USD' },
                 } as const)
               : ({ ...base, surface, op: 'validate', input: { address: SHIP_TO } } as const);
-        await call(req);
-        // A tax request may carry the customer's exemption certificate; the answer keeps its shape.
-        if (req.surface === 'tax')
+        const answer = await call(req);
+        // A tax request may carry the customer's exemption certificate; the answer keeps its shape,
+        // and says `exempted` only when there was one to exempt by.
+        if (req.surface === 'tax') {
+          if ((answer as { exempted?: boolean }).exempted)
+            problems.push(`${surface}: calculate said exempted with no exemption in the request`);
           await call({
             ...req,
             input: {
@@ -240,6 +243,7 @@ export async function pluginContract(stub: ContractStub, cases: ContractCases): 
               exemption: { certificate: 'EX-1', regions: [{ country: 'US' }] },
             },
           });
+        }
         if ((await cases.effects(orderId)) !== before)
           problems.push(
             `${surface}: ${req.op} wrote something; it also runs while pricing checkouts, so it must not`,
