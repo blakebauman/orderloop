@@ -22,6 +22,14 @@ import {
   type TypeResult,
   typeChangeIssues,
 } from '@orderloop/core/product';
+import {
+  BACKUP_TABLES,
+  type BackupPage,
+  type BackupRow,
+  currentBookmark,
+  insertRows,
+  readPage,
+} from './backup';
 import type { CatalogConfig } from './config';
 
 export class CatalogMeta extends DurableObject<Env> {
@@ -218,6 +226,60 @@ export class CatalogMeta extends DurableObject<Env> {
       .toArray()
       .map((r) => JSON.parse(r.body) as Category)
       .sort((a, b) => a.position - b.position || (a.code < b.code ? -1 : 1));
+  }
+
+  // --- Backup and restore (backup.ts, restore.ts) ---
+
+  backupPage(table: string, after: number, limit: number): BackupPage {
+    return readPage(this.sql, BACKUP_TABLES.meta, table, after, limit);
+  }
+
+  bookmark(): Promise<string | null> {
+    return currentBookmark(this.ctx.storage);
+  }
+
+  bookmarkFor(at: number): Promise<string> {
+    return this.ctx.storage.getBookmarkForTime(at);
+  }
+
+  /** Restores `bookmark` when the object next starts (`reset`); returns the bookmark to undo it. */
+  rewind(bookmark: string): Promise<string> {
+    return this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+  }
+
+  reset(): void {
+    this.ctx.abort('restoring a bookmark');
+  }
+
+  /**
+   * Replaces types, channels and categories with a backup's, in one transaction: a shard that
+   * loads the config meanwhile sees the old one or the new one, never a catalog without types
+   * (which would take its products down). `rev` only grows (`afterRestore` moves it on).
+   */
+  restoreAll(tables: Record<string, BackupRow[]>): number {
+    let rows = 0;
+    this.ctx.storage.transactionSync(() => {
+      for (const t of ['types', 'channels', 'categories']) this.sql.exec(`DELETE FROM ${t}`);
+      for (const t of BACKUP_TABLES.meta)
+        rows += insertRows(
+          this.sql,
+          BACKUP_TABLES.meta,
+          t,
+          tables[t] ?? [],
+          t === 'settings' ? 'ON CONFLICT (k) DO UPDATE SET v = MAX(v, excluded.v)' : undefined,
+        );
+    });
+    return rows;
+  }
+
+  /**
+   * After a restore: a revision past every one served before it (`before`), so every cached config
+   * is refreshed, and the category trees republished.
+   */
+  async afterRestore(before: number): Promise<number> {
+    this.sql.exec(`UPDATE settings SET v = MAX(v, ?) + 1 WHERE k = 'rev'`, before);
+    await this.publishCategories(this.channels());
+    return this.sql.exec<{ v: number }>(`SELECT v FROM settings WHERE k = 'rev'`).one().v;
   }
 
   /** One flat, ordered tree document per channel and locale, names in that locale. */

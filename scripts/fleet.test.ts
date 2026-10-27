@@ -20,6 +20,7 @@ import {
   renderWeb,
   sandboxedPlugins,
   secretsProblem,
+  shellVars,
   toDeployment,
   workerPlugins,
 } from './fleet.ts';
@@ -84,8 +85,14 @@ test('the catalog config has its own name, bucket, card namespace and jurisdicti
   assert.deepEqual(c.kv_namespaces[0], { binding: 'CARDS', id: 'a'.repeat(32) });
   assert.deepEqual(
     c.workflows.map((w: { name: string }) => w.name),
-    ['orderloop-catalog-feed-acme'],
+    [
+      'orderloop-catalog-feed-acme',
+      'orderloop-catalog-backup-acme',
+      'orderloop-catalog-restore-acme',
+    ],
   );
+  // The backup keeps its daily schedule under its suffixed name.
+  assert.deepEqual(c.workflows[1].schedules, ['45 2 * * *']);
   assert.equal(c.queues.producers[0].queue, 'orderloop-catalog-feed-parts-acme');
   assert.equal(c.queues.consumers[0].queue, 'orderloop-catalog-feed-parts-acme');
   assert.equal(c.queues.consumers[0].dead_letter_queue, 'orderloop-catalog-feed-parts-dlq-acme');
@@ -319,6 +326,18 @@ test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days"
   );
   assert.throws(() => toDeployment({ ...acme, personalDataRetentionDays: 7 }), /at least 30/);
   assert.throws(() => toDeployment({ ...acme, auditArchiveDays: 0 }), /auditArchiveDays/);
+});
+
+test('catalogBackupDays sets how long provision.sh keeps and locks catalog backups, at least 31', () => {
+  assert.equal(toDeployment(acme).catalogBackupDays, 90);
+  assert.equal(shellVars(toDeployment(acme)).CATALOG_BACKUP_DAYS, '90');
+  const year = toDeployment({ ...acme, catalogBackupDays: 365 });
+  assert.equal(shellVars(year).CATALOG_BACKUP_DAYS, '365');
+  assert.equal(toDeployment({ ...acme, catalogBackupDays: 31 }).catalogBackupDays, 31);
+  // Shorter than Durable Objects' 30 days of point-in-time recovery adds nothing.
+  assert.throws(() => toDeployment({ ...acme, catalogBackupDays: 30 }), /at least 31/);
+  assert.throws(() => toDeployment({ ...acme, catalogBackupDays: 45.5 }), /catalogBackupDays/);
+  assert.throws(() => toDeployment({ ...acme, catalogBackupDays: '90' }), /catalogBackupDays/);
 });
 
 test("an EU customer's Durable Objects are in the EU, like their D1 and R2", () => {

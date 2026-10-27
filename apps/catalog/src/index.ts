@@ -10,11 +10,13 @@ import { applyOrders } from './orders';
 import { applySearch } from './search';
 
 export { CatalogApi } from './api';
+export { CatalogBackup } from './backup';
 export { FeedImport } from './feed-import';
 export { CatalogFeeds } from './feeds';
 export { ListingIndexer } from './listings';
 export { CatalogMeta } from './meta';
 export { CatalogPublisher } from './publisher';
+export { CatalogRestore } from './restore';
 export { SearchApi, SearchShard } from './search';
 export { CatalogShard } from './shard';
 

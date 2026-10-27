@@ -75,6 +75,24 @@ wrangler r2 bucket lifecycle add "$CATALOG_R2" feeds feeds/ --expire-days 30 --f
 # (docs/operations.md, "Dead letters"); a month is long enough to act on one. Replaced each run.
 wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name dlq ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
 wrangler r2 bucket lifecycle add "$CATALOG_R2" dlq dlq/ --expire-days 30 --force ${j[@]+"${j[@]}"}
+# The catalog's daily backups (backups/<date>/, docs/operations.md "Catalog backups") expire after
+# catalogBackupDays, and the copies a point-in-time restore keeps of what was published
+# (restores/<instance>/) after 30 days. Replaced each run, so a changed number takes effect.
+wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name backups ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$CATALOG_R2" backups backups/ --expire-days "$CATALOG_BACKUP_DAYS" \
+  --force ${j[@]+"${j[@]}"}
+wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name restores ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$CATALOG_R2" restores restores/ --expire-days 30 --force ${j[@]+"${j[@]}"}
+# And nothing deletes or overwrites a backup before then: a lock of the same age, so the lifecycle
+# rule and the lock never disagree. The backup Workflow skips a key that exists, as the lock needs.
+# `lock set` replaces the bucket's whole lock configuration: this is the catalog bucket's only rule.
+catalog_locks=$(mktemp)
+jq -n --argjson d "$CATALOG_BACKUP_DAYS" '{rules: [
+  {id: "catalog-backups", enabled: true, prefix: "backups/", condition: {type: "Age", maxAgeSeconds: ($d * 86400)}}
+]}' >"$catalog_locks"
+wrangler r2 bucket lock set "$CATALOG_R2" --file "$catalog_locks" --force ${j[@]+"${j[@]}"}
+rm -f "$catalog_locks"
+echo "Catalog backups in $CATALOG_R2 kept and locked $CATALOG_BACKUP_DAYS days"
 # The queues feed parts, urgent purges and listing changes go through, and their dead-letter queues. A deploy fails if
 # the consumer's queue is missing, so a queue that can't be created or found stops provisioning.
 # Each keeps messages 14 days (the most Queues allows), set on existing queues too, so a consumer

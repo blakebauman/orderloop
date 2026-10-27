@@ -752,6 +752,46 @@ them is in [Operations](operations.md#dead-letters).
 at most 100 `errors` (`FEED_ERRORS`, by row). Rejected rows come from validation (the Workflow) or
 from a shard (`already used by <key>`).
 
+**Backups and restores.** The `CatalogBackup` Workflow (`orderloop-catalog-backup`,
+`apps/catalog/src/backup.ts`) runs daily at 02:45 UTC (`schedules`). After a `check` step (a day
+with a `manifest.json` is done), one step per object, `copy meta` then `copy shard-<n>`, records the
+object's bookmark (`getCurrentBookmark`, null where storage has none) in `bookmark.json` and pages
+each table of record through the object's `backupPage(table, after, limit)` (by rowid, up to 1,000
+rows or about 8 MB), writing a chunk per page under `backups/<date>/<object>/`; the step returns
+only counts. A last `manifest` step writes `backups/<date>/manifest.json`. Every write goes through
+`putOnce`, which heads the key first and keeps what is there: `backups/` is under a bucket lock,
+which refuses an overwrite, and a retried step resumes after the last rowid of the chunks already
+stored (their custom metadata) rather than writing them again. Excluded, and why, in
+[Operations](operations.md#catalog-backups).
+
+The `CatalogRestore` Workflow (`orderloop-catalog-restore`, `restore.ts`) is started only by an
+operator with `wrangler workflows trigger`; no route or RPC reaches it. `parseRestore` takes exactly
+one of `at` (within `PITR_DAYS`, 30), `bookmarks` (object → bookmark) or `backup` (a date), and
+`merge` (earlier instances' captures) with the first two; anything else fails the instance before a
+step runs. A `before` step records the config revision, the channels and every object's bookmark.
+Then:
+
+- `at` / `bookmarks`: `find bookmarks` (`getBookmarkForTime` on every object, so a time out of reach
+  fails before anything moves), `capture shard-<n>` (the shard's `published` rows to
+  `restores/<instance>/`), `rewind <object>` (`rewindObject`: `onNextSessionRestoreBookmark`, whose
+  answer is the undo bookmark, then `reset`, which calls `ctx.abort()`, so that call fails and the
+  next starts on the restored storage), `merge shard-<n>` (`mergePublished`: the captured rows
+  joined with the restored ones, locales, aliases and categories unioned, the captured uid kept).
+- `backup`: `manifest` (refused unless it exists with format `BACKUP_FORMAT` and `PRODUCT_SHARDS`
+  shards), `load meta` (`CatalogMeta.restoreAll`: types, channels and categories replaced in one
+  transaction, so a shard never loads a config without types), `load shard-<n>` (`restoreBegin`
+  clears the restored tables, the outbox and `gap_rebuild` but keeps `published`, `applied` and
+  `settings`; `restoreRows` loads a chunk in a transaction, queuing loaded products in the outbox
+  as any write does, merging `settings` so `seq` never goes back).
+
+Both end with `channels after`, `take down <channel>` for each channel the restore removed
+(`takeDownChannel`, shared with `deleteChannel`, and its category trees), `republish meta`
+(`afterRestore`: `rev` moved past the one before, category trees republished) and `republish
+shard-<n>` (`afterRestore`: every key in `products` or `published` queued, forced, like
+`republishAll`). Its output is `{ mode, undo, rev, republished, channelsRemoved }`. workerd has no
+point-in-time recovery (`getBookmarkForTime` throws), so the tests cover the rewind with a stand-in
+object and show the Workflow failing before it moves anything.
+
 The Durable Object namespaces are reached only through `apps/catalog/src/config.ts` (`meta`,
 `shard`, `shardFor`, `feeds`, `indexer`, `searcher`), which applies the deployment's `DATA_JURISDICTION` (`eu`, `fedramp`, or empty;
 any other value throws). See [Data residency](data-model.md#data-residency).
@@ -876,13 +916,15 @@ Bundle: about 10 KiB gzipped (segmented listings added about 1 KiB to the 9.4 it
 | `META` | catalog | Durable Object `CatalogMeta` (SQLite, migration tag `v1`), one |
 | `FEEDS` | catalog | Durable Object `CatalogFeeds` (SQLite, migration tag `v2`), one |
 | `FEED_IMPORT` | catalog | Workflow `orderloop-catalog-feed`, class `FeedImport`, `limits.steps: 10000` |
+| `CATALOG_BACKUP` | catalog | Workflow `orderloop-catalog-backup`, class `CatalogBackup`, `schedules: ["45 2 * * *"]` |
+| `CATALOG_RESTORE` | catalog | Workflow `orderloop-catalog-restore`, class `CatalogRestore`, started only by `wrangler workflows trigger` |
 | `LISTINGS` | catalog | Durable Object `ListingIndexer` (SQLite, migration tag `v3`), one per channel, category and listing segment |
 | `SEARCH` | catalog | Durable Object `SearchShard` (SQLite, migration tag `v4`), 16 of them named `search-<n>` |
 | `PUBLISHERS` | catalog | Durable Object `CatalogPublisher` (SQLite, migration tag `v5`), `PUBLISH_FANOUT` per shard named `pub-<shard>-<n>`: the shards' storage writes |
 | `FEED_PARTS` | catalog | Queue producer for `orderloop-catalog-feed-parts`; the Worker consumes it |
 | `CHANGES` | catalog | Queue `orderloop-catalog-changes` (dead-letter queue `orderloop-catalog-changes-dlq`); producer and consumer are the catalog Worker |
 | `DB` | catalog | D1 `orderloop` (the web app's database): the catalog writes `products.name`, `price`, `catalog_at` and the weight and size columns ([Order Loop's products](#order-loops-products)) |
-| `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes |
+| `PUBLISHED` | catalog | R2 `orderloop-catalog`: product documents, alias pointers, category trees, listing indexes, and the backups (`backups/`) |
 | `PURGE` | catalog | Queue producer for `orderloop-catalog-purge` (`{ tags }` messages) |
 | `CARDS` | catalog | KV namespace of listing cards and `u:f1:<key>` uid entries; created by `provision.sh` |
 | `PUBLISHED` | catalog-edge | R2 `orderloop-catalog`, read |
