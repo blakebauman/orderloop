@@ -149,8 +149,9 @@ changed the cart in between (a `change_cart`, someone on the cart's page), the c
 refused with "The cart changed since you confirmed; preview it again" and nothing is submitted.
 The same holds when the person confirms through an eliciting client.
 
-Reads, `propose_flow_change`, `draft_plugin`, `create_cart` and `change_cart` do not take a code:
-a cart is only a draft of an order until `submit_cart`. Over [A2A](/reference/a2a/), typed skills
+Reads, `propose_flow_change`, `draft_plugin`, `draft_product_content`, `create_cart` and
+`change_cart` do not take a code: a cart is only a draft of an order until `submit_cart`, and a
+product draft changes nothing until a person publishes it. Over [A2A](/reference/a2a/), typed skills
 (and `place_order`) run directly, as REST calls do, and `chat` already asks for `{ "confirm": true }`.
 
 Annotations also tell a client when to confirm:
@@ -158,7 +159,7 @@ Annotations also tell a client when to confirm:
 | Tools | Hints |
 |---|---|
 | Reads and `propose_flow_change` | `readOnlyHint: true` |
-| `draft_plugin`, `create_cart`, `change_cart` | save a draft (nothing runs until an admin approves the plugin or someone submits the cart): not read-only, not destructive, not idempotent |
+| `draft_plugin`, `draft_product_content`, `create_cart`, `change_cart` | save a draft (nothing runs until an admin approves the plugin, someone publishes the product's drafts or submits the cart): not read-only, not destructive, not idempotent |
 | `decide_approval`, `cancel_order`, `submit_cart`, `publish_flow` | `destructiveHint: true`; all but `publish_flow` are also `idempotentHint: true` |
 | `deliver_event`, `run_stock_review` | writes, not destructive |
 

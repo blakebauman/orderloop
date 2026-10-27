@@ -29,6 +29,7 @@ import {
   catalogChannelInput,
   catalogDeleteInput,
   catalogDiscardInput,
+  catalogDraftContentInput,
   catalogDraftsInput,
   catalogEditsInput,
   catalogProductsInput,
@@ -802,6 +803,25 @@ export function openApiDocument(serverUrl: string) {
           responses: {
             '200': ok(
               '{ sheet: { product, feed, overrides, staged, drafts, gaps, rejection, revisions } }',
+            ),
+            ...errors,
+          },
+        },
+      },
+      '/api/v1/catalog/products/{key}/draft': {
+        post: {
+          summary: "Have the assistant draft a product's missing text (operator)",
+          description:
+            'The assistant writes the text the product is missing (a title, description, text attribute or image alt text in a locale it lacks, skipping one with a draft or staged edit waiting; up to 20, titles first, with `more` counting the rest), or the `fields` you name, from what the product says in its other locales, and saves each as a draft on the product. Nothing goes live until a person stages a draft and publishes it. `instruction` is your own guidance: tone, length, terms to keep.',
+          parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: body(catalogDraftContentInput),
+          responses: {
+            '200': ok(
+              '{ key, title, drafted: [{ ref, value }], refused: [{ ref, issues }], more, model }',
+            ),
+            '422': ok(
+              "Nothing to draft, the assistant allowance is spent or the model couldn't answer",
+              '#/components/schemas/Error',
             ),
             ...errors,
           },

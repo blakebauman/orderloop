@@ -30,17 +30,25 @@ const catalog = {
   putDrafts: vi.fn(),
   discardDrafts: vi.fn(),
 };
+const engine = { draftProductContent: vi.fn() };
 vi.mock('cloudflare:workers', () => ({ env: {} }));
 vi.mock('~/lib/env.server', () => ({
   catalog: () => catalog,
-  engine: () => ({}),
+  engine: () => engine,
   db: () => ({}),
   afterResponse: () => {},
 }));
 vi.mock('~/lib/flows.server', () => ({ ensureSeeded: async () => {}, listFlows: async () => [] }));
 vi.mock('~/lib/orders.server', () => ({ currencies: async () => [], listOrders: async () => [] }));
 const audit = vi.fn();
-vi.mock('~/lib/audit.server', () => ({ audit, listAudit: async () => [] }));
+vi.mock('~/lib/audit.server', () => ({
+  audit,
+  actorName: (a: Principal) => a.name,
+  listAudit: async () => [],
+}));
+vi.mock('~/lib/principal.server', () => ({
+  signedActor: async (a: unknown, call: string) => JSON.stringify({ a, call }),
+}));
 vi.mock('~/lib/auth.server', () => ({
   actor: () => 'ops@example.com',
   forbidden: () => 'Forbidden',
@@ -76,7 +84,7 @@ const product = {
 };
 
 beforeEach(() => {
-  for (const fn of Object.values(catalog)) fn.mockReset();
+  for (const fn of [...Object.values(catalog), ...Object.values(engine)]) fn.mockReset();
   audit.mockReset();
 });
 
@@ -448,5 +456,66 @@ describe('the product editor over REST', () => {
       actor: admin,
       detail: { products: 1200, via: 'api' },
     });
+  });
+});
+
+describe('assistant drafts of a product over REST', () => {
+  const titleFr = { field: 'title', locale: 'fr' };
+  const drafted = {
+    key: 'tee',
+    title: 'Tee',
+    drafted: [{ ref: titleFr, value: 'T-shirt' }],
+    refused: [{ ref: { field: 'status' }, issues: ['status is not drafted'] }],
+    model: 'm',
+  };
+
+  it("has the engine draft a product's gaps as the caller, and audits what it saved", async () => {
+    catalog.getProduct.mockResolvedValue(product);
+    engine.draftProductContent.mockResolvedValue({ ok: true, value: drafted });
+    const res = await call('POST', 'products/tee/draft', operator);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(drafted);
+    expect(engine.draftProductContent).toHaveBeenCalledWith(
+      'tee',
+      {},
+      JSON.stringify({
+        a: { kind: 'staff', id: 'tok_o', name: 'reader', role: 'operator' },
+        call: 'draft-product:tee',
+      }),
+    );
+    expect(audit).toHaveBeenCalledWith(expect.anything(), 'catalog.drafts_saved', {
+      actor: operator,
+      target: 'tee',
+      detail: { saved: 1, refused: 1, model: 'm', via: 'api' },
+    });
+  });
+
+  it('passes the fields and guidance asked for, and checks their shape', async () => {
+    catalog.getProduct.mockResolvedValue(product);
+    engine.draftProductContent.mockResolvedValue({ ok: true, value: { ...drafted, drafted: [] } });
+    const body = { fields: [titleFr], instruction: 'Short.' };
+    expect((await call('POST', 'products/tee/draft', operator, JSON.stringify(body))).status).toBe(
+      200,
+    );
+    expect(engine.draftProductContent).toHaveBeenCalledWith('tee', body, expect.any(String));
+    // Nothing saved, nothing audited.
+    expect(audit).not.toHaveBeenCalled();
+    expect((await call('POST', 'products/tee/draft', operator, '{oops')).status).toBe(400);
+    const bad = { fields: [{ field: 'price', locale: 'fr' }] };
+    expect((await call('POST', 'products/tee/draft', operator, JSON.stringify(bad))).status).toBe(
+      400,
+    );
+  });
+
+  it('needs an operator and a product, and answers a refusal with 422', async () => {
+    expect((await call('POST', 'products/tee/draft', viewer)).status).toBe(403);
+    catalog.getProduct.mockResolvedValue(null);
+    expect((await call('POST', 'products/nope/draft', operator)).status).toBe(404);
+    catalog.getProduct.mockResolvedValue(product);
+    engine.draftProductContent.mockResolvedValue({ ok: false, error: 'Tee has no missing text' });
+    const res = await call('POST', 'products/tee/draft', operator);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'Tee has no missing text' });
+    expect(audit).not.toHaveBeenCalled();
   });
 });

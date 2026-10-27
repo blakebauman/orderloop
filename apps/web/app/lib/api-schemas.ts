@@ -13,7 +13,9 @@ import {
   categorySchema,
   channelSchema,
   EDIT_SOURCES,
-  EDITABLE_FIELDS,
+  fieldRefSchema as fieldRef,
+  MAX_DRAFT_FIELDS,
+  PRODUCT_DRAFT_INSTRUCTION_MAX,
   productInputSchema,
   productTypeSchema,
   TEXT_MAX,
@@ -109,15 +111,6 @@ export { channelSchema as catalogChannelInput, productTypeSchema as catalogTypeI
 // The product editor (/api/v1/catalog/edits, /drafts). Shapes only: the catalog checks each edit
 // against the product and its type and answers per edit.
 const productKey = z.string().min(1).max(128);
-const fieldRef = z.object({
-  field: z.enum(EDITABLE_FIELDS),
-  /** `attribute` only: the attribute's code. */
-  code: z.string().min(1).max(128).optional(),
-  /** `mediaAlt` only: the media's `src`. */
-  src: z.string().min(1).max(2048).optional(),
-  /** Every field but `status`. */
-  locale: z.string().min(1).max(35).optional(),
-});
 const editTarget = {
   key: productKey,
   ref: fieldRef,
@@ -168,4 +161,10 @@ export const catalogDraftsInput = z.object({
     )
     .min(1)
     .max(500),
+});
+
+/** POST /api/v1/catalog/products/:key/draft: what the assistant drafts (its gaps when no fields). */
+export const catalogDraftContentInput = z.object({
+  fields: z.array(fieldRef).min(1).max(MAX_DRAFT_FIELDS).optional(),
+  instruction: z.string().max(PRODUCT_DRAFT_INSTRUCTION_MAX).optional(),
 });

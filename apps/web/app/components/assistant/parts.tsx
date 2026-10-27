@@ -92,6 +92,7 @@ const ICONS: Record<string, LucideIcon> = {
   get_flow: Workflow,
   propose_flow_change: PenLine,
   draft_plugin: Puzzle,
+  draft_product_content: PenLine,
 };
 
 const RUNNING: Record<string, string> = {
@@ -107,6 +108,7 @@ const RUNNING: Record<string, string> = {
   get_flow: 'Reading the flow',
   propose_flow_change: 'Drafting a flow change',
   draft_plugin: 'Drafting a plugin',
+  draft_product_content: 'Drafting product content',
 };
 
 const n = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -138,6 +140,8 @@ function found(name: string, out: Record<string, unknown>): string | null {
       return `${n(out.flows)} flows`;
     case 'get_flow':
       return typeof out.name === 'string' ? out.name : null;
+    case 'draft_product_content':
+      return `${out.title} · ${n(out.drafted)} drafted${n(out.refused) ? ` · ${n(out.refused)} not` : ''}`;
     default:
       return null;
   }

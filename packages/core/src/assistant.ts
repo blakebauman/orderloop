@@ -56,6 +56,7 @@ export type AssistantTool =
   | 'get_flow'
   | 'propose_flow_change'
   | 'draft_plugin'
+  | 'draft_product_content'
   | 'create_cart'
   | 'change_cart'
   | 'decide_approval'
@@ -162,6 +163,14 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Draft a plugin of business-rule flow steps from an instruction (e.g. “hold orders over $5,000 shipping outside the US”), with test cases. Nothing runs: an admin reviews it on the Plugins page, runs its cases and approves it there. Give pluginId to revise a drafted plugin.',
   },
+  draft_product_content: {
+    role: 'operator',
+    confirm: false,
+    label: 'Drafted product content',
+    title: 'Draft product content',
+    description:
+      'Draft a catalog product’s missing text (titles, descriptions, text attributes and image alt text, locale by locale) from what it says in its other locales. Name fields and locales to draft those instead. The drafts are saved on the product; nothing goes live until a person accepts and publishes them.',
+  },
   create_cart: {
     role: 'operator',
     confirm: false,
@@ -229,10 +238,11 @@ export const isAssistantTool = (name: string): name is AssistantTool => name in 
 
 /**
  * Tools that save something without a confirm: nothing they save runs until someone approves it
- * (a plugin draft) or submits it (a cart).
+ * (a plugin draft), publishes it (a product draft) or submits it (a cart).
  */
 export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
   'draft_plugin',
+  'draft_product_content',
   'create_cart',
   'change_cart',
 ];

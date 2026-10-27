@@ -9,6 +9,7 @@
 import {
   type AssistantContext,
   type AssistantTool,
+  type AuditVia,
   assessQuestionsSchema,
   CART_STATUSES,
   cartOpSchema,
@@ -18,6 +19,11 @@ import {
   ORDER_STATUSES,
   type Principal,
 } from '@orderloop/core';
+import {
+  fieldRefSchema,
+  MAX_DRAFT_FIELDS,
+  PRODUCT_DRAFT_INSTRUCTION_MAX,
+} from '@orderloop/core/product';
 import { z } from 'zod';
 import { changeCart, getCart, listCarts, openCart } from './carts';
 import {
@@ -37,6 +43,10 @@ import {
   runAction,
 } from './data';
 import { draftPlugin } from './plugin-draft';
+import { draftProductContent } from './product-draft';
+
+const auditVia = (via: Channel): AuditVia =>
+  via === 'MCP' ? 'mcp' : via === 'A2A' ? 'a2a' : 'assistant';
 
 const orderId = z.string().describe('The order id (ord_…) or its #reference, e.g. #k3x9q2');
 const cartId = z.string().max(100).describe('The cart id (cart_…)');
@@ -88,6 +98,20 @@ export const TOOL_INPUTS = {
       .string()
       .optional()
       .describe('A plugin the assistant drafted (ai-…), to revise as its next version'),
+  }),
+  draft_product_content: z.object({
+    key: z.string().min(1).max(128).describe('The catalog product’s key'),
+    fields: z
+      .array(fieldRefSchema)
+      .min(1)
+      .max(MAX_DRAFT_FIELDS)
+      .optional()
+      .describe('Fields and locales to draft; omit to draft the text the product is missing'),
+    instruction: z
+      .string()
+      .max(PRODUCT_DRAFT_INSTRUCTION_MAX)
+      .optional()
+      .describe('Guidance from the person: tone, length, terms to keep'),
   }),
   create_cart: z.object({
     title: z.string().min(1).max(MAX_CART_TITLE),
@@ -262,6 +286,13 @@ export const TOOL_OUTPUTS = {
     cases: row({ total: z.number(), passed: z.number() }),
     href: href.describe('Where an admin reviews, tests and approves it'),
   }),
+  draft_product_content: row({
+    key: z.string(),
+    title: z.string(),
+    drafted: z.array(row({ ref: row({ field: z.string() }), value: z.string() })),
+    refused: z.array(row({ ref: row({ field: z.string() }), issues: z.array(z.string()) })),
+    model: z.string().nullable().describe('The model that wrote them'),
+  }),
   create_cart: cartOutput,
   change_cart: cartOutput.extend({ applied: z.number().describe('Ops applied') }),
   decide_approval: actionOutput,
@@ -336,10 +367,11 @@ export async function runTool<T extends AssistantTool>(
     }
     case 'draft_plugin': {
       const i = input as ToolInput<'draft_plugin'>;
-      return draftPlugin(env, p, i.instruction, {
-        pluginId: i.pluginId,
-        via: opts.via === 'MCP' ? 'mcp' : opts.via === 'A2A' ? 'a2a' : 'assistant',
-      });
+      return draftPlugin(env, p, i.instruction, { pluginId: i.pluginId, via: auditVia(opts.via) });
+    }
+    case 'draft_product_content': {
+      const { key, ...request } = input as ToolInput<'draft_product_content'>;
+      return draftProductContent(env, p, key, request, auditVia(opts.via));
     }
   }
   throw new Error(`Unknown tool: ${name}`);
