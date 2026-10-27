@@ -247,9 +247,20 @@ jobs:
             sha=$(awk -v p="$p" '$1 == p { print $2 }' "$RUNNER_TEMP/plugins/bundles")
             # The name is the content's hash: checked again here, so the pin names these bytes.
             [ "$(sha256sum "$bundle" | cut -d' ' -f1)" = "$sha" ] || { echo "::error::$p bundle doesn't hash to $sha"; exit 1; }
+            # A bundle already published under this sha is left as it is: the bucket locks plugins/
+            # (provision.sh), so it can't be overwritten, and the same name means the same bytes.
+            # Those bytes are checked too, so a pin never names anything else.
+            stored="$RUNNER_TEMP/plugins/stored-$p.json"
             # shellcheck disable=SC2086 # the jurisdiction flag is two words, or none
-            retry pnpm --filter @orderloop/engine exec wrangler r2 object put "$R2/plugins/$p/$sha.json" \
-              --file "$bundle" --content-type application/json --remote ${JURISDICTION:+--jurisdiction $JURISDICTION}
+            if pnpm --filter @orderloop/engine exec wrangler r2 object get "$R2/plugins/$p/$sha.json" \
+              --file "$stored" --remote ${JURISDICTION:+--jurisdiction $JURISDICTION} >/dev/null 2>&1; then
+              [ "$(sha256sum "$stored" | cut -d' ' -f1)" = "$sha" ] || { echo "::error::The stored $p bundle doesn't hash to $sha"; exit 1; }
+              echo "$p bundle $sha is already published"
+            else
+              # shellcheck disable=SC2086
+              retry pnpm --filter @orderloop/engine exec wrangler r2 object put "$R2/plugins/$p/$sha.json" \
+                --file "$bundle" --content-type application/json --remote ${JURISDICTION:+--jurisdiction $JURISDICTION}
+            fi
             pins=$(jq -c --arg p "$p" --arg s "$sha" '. + {($p): $s}' <<<"$pins")
           done
           config="apps/engine/$CONFIG"

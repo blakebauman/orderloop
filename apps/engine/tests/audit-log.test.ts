@@ -5,7 +5,7 @@ import { auditRow, sealAuditRow, verifyAuditChain } from '@orderloop/core';
 import { appendAudit, auditEvents, createDb } from '@orderloop/db';
 import { asc } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { archiveAudit } from '../src/retention';
+import { archiveAudit, auditArchiveKey } from '../src/retention';
 
 const testEnv = env as Env & { TEST_MIGRATIONS: D1Migration[]; AUDIT_DB: D1Database };
 const auditEnv = { ...testEnv, DB: testEnv.AUDIT_DB, AUDIT_RETENTION_DAYS: '400' } as Env;
@@ -86,5 +86,31 @@ describe('the audit log', () => {
     });
 
     expect(await archiveAudit(auditEnv, now)).toBe(0);
+  });
+
+  it('deletes a batch already archived without writing its object again, which the lock refuses', async () => {
+    const at = now - 700 * DAY;
+    for (const id of ['aud_retry_a', 'aud_retry_b'])
+      await testEnv.AUDIT_DB.prepare(
+        `INSERT INTO audit_events (id, at, action) VALUES (?, ?, 'auth.sign_in')`,
+      )
+        .bind(id, at)
+        .run();
+    // A sweep wrote this batch's object, then stopped before deleting its events.
+    const key = auditArchiveKey({ at, id: 'aud_retry_a' }, 2);
+    await testEnv.DOCS.put(key, 'written before\n');
+    // As the bucket lock does: an object under audit/ can't be overwritten.
+    const docs = testEnv.DOCS;
+    const locked = Object.assign(Object.create(docs), {
+      head: docs.head.bind(docs),
+      put: async (k: string, ...rest: unknown[]) => {
+        if (await docs.head(k)) throw new Error('The object is locked by the bucket policy.');
+        return (docs.put as (...a: unknown[]) => unknown)(k, ...rest);
+      },
+    }) as R2Bucket;
+
+    expect(await archiveAudit({ ...auditEnv, DOCS: locked } as Env, now)).toBe(2);
+    expect((await chain()).map((r) => r.id)).toEqual(['aud_recent', 'aud_late_old']);
+    expect(await (await docs.get(key))!.text()).toBe('written before\n');
   });
 });

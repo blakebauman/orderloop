@@ -199,25 +199,33 @@ export async function indexCartBuyers(env: Env) {
 const ARCHIVE_BATCH = 1000;
 const ARCHIVE_MAX = 50_000;
 
-/** Where an archive of audit events goes in the R2 bucket. */
-export const auditArchiveKey = (first: { at: number; id: string }) =>
-  `audit/${new Date(first.at).toISOString().slice(0, 10)}/${first.at}-${first.id}.ndjson`;
+/**
+ * Where an archive of audit events goes in the R2 bucket: named by its first event and how many
+ * it holds, which together name the same events, since a batch is read in a fixed order.
+ */
+export const auditArchiveKey = (first: { at: number; id: string }, count: number) =>
+  `audit/${new Date(first.at).toISOString().slice(0, 10)}/${first.at}-${first.id}-${count}.ndjson`;
 
 /**
  * Moves audit events past the retention to R2, one NDJSON object (one event a line, hashes and
  * all) per batch, deleting each batch only once its object is written. Sealed events go in chain
  * order and stop at the first one still inside the retention, so what stays is an unbroken chain;
- * events from before the chain go by time. Returns how many moved.
+ * events from before the chain go by time. A batch whose object is already there (written by a
+ * sweep that stopped before its delete) is only deleted: the bucket locks audit/ (provision.sh),
+ * so that object can't be written again. Returns how many moved.
  */
 export async function archiveAudit(env: Env, now = Date.now()) {
   const db = createDb(env.DB);
   const cutoff = now - auditRetentionDays(env.AUDIT_RETENTION_DAYS) * DAY;
   let moved = 0;
-  const put = (rows: (typeof auditEvents.$inferSelect)[]) =>
-    env.DOCS.put(auditArchiveKey(rows[0]!), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`, {
+  const put = async (rows: (typeof auditEvents.$inferSelect)[]) => {
+    const key = auditArchiveKey(rows[0]!, rows.length);
+    if (await env.DOCS.head(key)) return;
+    await env.DOCS.put(key, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`, {
       httpMetadata: { contentType: 'application/x-ndjson' },
       customMetadata: { events: String(rows.length) },
     });
+  };
 
   while (moved < ARCHIVE_MAX) {
     const rows = await db
