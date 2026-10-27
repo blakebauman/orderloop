@@ -190,11 +190,13 @@ The same board is in the REST API:
 **The board.** `GET /api/v1/catalog/board` counts products in each column (<Values of="board-columns" />)
 and the gaps of each kind (<Values of="gap-kinds" />), and returns the latest finished feed and one
 still running. A product moves right as it is worked on: it is on **staged** while it has edits
-waiting to publish, else **drafted** while the assistant has drafts for it to review, else **gaps**
-while something is missing (a title in a locale of a channel it is listed in; a description, text
-attribute or alt text it has in some locales but not that one; a feed row the catalog refused for its
-key; or a conflict, below), else **published** for a day after its edits went live. Its card still
-counts the gaps it has left, so a product published with gaps remaining goes back to **gaps**. `GET /api/v1/catalog/board/:column` lists a column
+waiting to publish, else **drafted** while the assistant has drafts for it to review, else
+**published** for a day after its edits went live, else **gaps** while something is missing (a title
+in a locale of a channel it is listed in; a description, text attribute or alt text it has in some
+locales but not that one; a feed row the catalog refused for its key; or a conflict, below). Its card
+still counts the text it lacks, and a product published with text still missing goes back to **gaps**
+when its day is up. One that needs a person (a conflict, a refused row or a missing required
+attribute) goes to **gaps** at once. `GET /api/v1/catalog/board/:column` lists a column
 in key order, 50 at a time by default (`limit` up to 100), optionally only products with one `kind` of
 gap; pass the answer's `cursor` for the next page. The board also counts the products on **gaps** by
 group (`gapGroups`: conflicts, then rejected rows, missing required, missing text; each product once).

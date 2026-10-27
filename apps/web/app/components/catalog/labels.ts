@@ -33,6 +33,14 @@ export const draftable = (c: Pick<BoardCard, 'kinds'>) =>
 // A non-breaking space, so "×6" never wraps away from what it counts.
 const times = (n: number | undefined) => (n && n > 1 ? `\u00a0×${n}` : '');
 
+/** The text a card lacks, by kind: "title ×2, alt text"; empty when it lacks none. */
+export function missingText(c: Pick<BoardCard, 'kinds'>): string {
+  return (['missing_title', 'missing_description', 'missing_attribute', 'missing_alt'] as const)
+    .filter((k) => c.kinds[k])
+    .map((k) => `${GAP_LABEL[k].short}${times(c.kinds[k])}`)
+    .join(', ');
+}
+
 /** What put a card where it is, in one line: "Missing title ×2, alt text". */
 export function cardReason(c: BoardCard): string {
   switch (c.column) {
@@ -48,12 +56,8 @@ export function cardReason(c: BoardCard): string {
           }`,
         );
       else if (c.kinds.rejected) parts.push('Feed row refused');
-      const missing = (
-        ['missing_title', 'missing_description', 'missing_attribute', 'missing_alt'] as const
-      )
-        .filter((k) => c.kinds[k])
-        .map((k) => `${GAP_LABEL[k].short}${times(c.kinds[k])}`);
-      if (missing.length) parts.push(`Missing ${missing.join(', ')}`);
+      const missing = missingText(c);
+      if (missing) parts.push(`Missing ${missing}`);
       if (c.kinds.missing_required) parts.push('Required attribute missing');
       return parts.join(' · ') || 'Needs a look';
     }

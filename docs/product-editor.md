@@ -51,7 +51,7 @@ the same shape, rendered by the unchanged `renderForChannel`.
 | `drafts` | Unaccepted assistant drafts, with the field's live value they were drafted against (stale when it changes) |
 | `gaps` | `(key, kind, field, locale, channel)`, rewritten in every transaction that changes the product |
 | `rejections` | The last feed row refused for a key, with its issues |
-| `board` | One row per product on the board: its column (work in flight first, so a card moves right as it is worked on: staged edits → Staged, then drafts → Drafted, then conflicts and gaps → Gaps, then Published for a day) and counts; staged counts and failures are read from `staged` |
+| `board` | One row per product on the board: its column (work in flight first, so a card moves right as it is worked on: staged edits → Staged, then drafts → Drafted, then Published for a day after a publish (with only missing text left; a conflict, refused row or missing required attribute goes to Gaps at once), then gaps → Gaps; a publish over a day old reads as Gaps if gaps are left, and the alarm moves its row) and counts; staged counts and failures are read from `staged` |
 | `revisions` | Per-field history for the sheet, the last 50 per key |
 
 Board counts and pages fan out from `CatalogApi` to the 64 shards and are summed or merged there,

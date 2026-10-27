@@ -20,7 +20,13 @@ import { ChevronRight } from 'lucide-react';
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
 import { Ago } from '~/components/ago';
-import { COLUMN_LABEL, cardReason, draftable, GROUP_LABEL } from '~/components/catalog/labels';
+import {
+  COLUMN_LABEL,
+  cardReason,
+  draftable,
+  GROUP_LABEL,
+  missingText,
+} from '~/components/catalog/labels';
 import { ProductSheetView } from '~/components/catalog/sheet';
 import { CATALOG_ACTION, refusal, useCatalogAction } from '~/components/catalog/use-action';
 import { Body, Empty, PageHeader } from '~/components/page';
@@ -682,17 +688,18 @@ function CardRow({
             />
           ) : null}
           {cardReason(c)}
-          {c.column === 'gaps' && c.locales.length ? (
-            <span className="whitespace-nowrap">
-              {' in '}
-              <span className="font-mono">{c.locales.join(' ')}</span>
-            </span>
-          ) : null}
           {c.column === 'published' ? (
             <>
               {' '}
               <Ago ms={c.at} />
+              {missingText(c) ? ` · still missing ${missingText(c)}` : ''}
             </>
+          ) : null}
+          {(c.column === 'gaps' || c.column === 'published') && c.locales.length ? (
+            <span className="whitespace-nowrap">
+              {' in '}
+              <span className="font-mono">{c.locales.join(' ')}</span>
+            </span>
           ) : null}
           {c.column === 'gaps' && (c.drafts || c.staged) ? (
             <span className="text-muted-foreground">
