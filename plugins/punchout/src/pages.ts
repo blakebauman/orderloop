@@ -246,6 +246,7 @@ function setupNotes(p: Partner, base: string): Leaf[] {
           'PASSWORD: the partner’s secret, shown once when it was added or rotated. Rotate it to issue a new one.',
           'HOOK_URL: set by their system for each session; it must be on a return host.',
           'The cart goes back to HOOK_URL as NEW_ITEM-DESCRIPTION, -QUANTITY, -UNIT, -PRICE, -PRICEUNIT, -CURRENCY, -VENDORMAT (the SKU) and -EXT_PRODUCT_ID (the cart line) fields, numbered from [1].',
+          'It also echoes the ~OkCode, ~TARGET and ~CALLER their system sent (letters, digits, _ and -, up to 20 characters; anything else is dropped). Without them it sends ~OkCode=ADDI and ~CALLER=CTLG, and no ~TARGET. Other parameters are ignored.',
           'Purchase orders don’t come back through OCI: they arrive through the customer’s usual channel.',
           ...common,
         ],

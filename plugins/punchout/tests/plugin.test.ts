@@ -533,18 +533,40 @@ describe('changing and cancelling a purchase order', () => {
 });
 
 describe('OCI punchout', () => {
-  it('opens a cart from the setup GET and returns OCI fields', async () => {
-    const secret = await partner({
-      protocol: 'oci',
-      fromDomain: '',
-      identity: 'sap-user',
-      returnHosts: 'sap.example',
-    });
-    const q = new URLSearchParams({
+  /** A priced cart the plugin opened, as the core hands it to `renderReturn`. */
+  const ociCart = (id: string): PluginCart => ({
+    id,
+    title: 'x',
+    status: 'locked',
+    customerId: null,
+    lines: [],
+    quote: {
+      currency: 'EUR',
+      lines: [{ id: 'li_1', sku: 'A-1', title: 'Thing', qty: 2, unitPrice: 3, ships: true }],
+      subtotal: 6,
+      shipping: 0,
+      tax: 0,
+      total: 6,
+      shippingOptions: [],
+      shippingOption: null,
+      ships: true,
+    },
+    orderId: null,
+    updatedAt: 0,
+    sessionRef: 'x',
+  });
+  const ociPartner = () =>
+    partner({ protocol: 'oci', fromDomain: '', identity: 'sap-user', returnHosts: 'sap.example' });
+  const setup = (secret: string, extra: Record<string, string> = {}) =>
+    new URLSearchParams({
       USERNAME: 'sap-user',
       PASSWORD: secret,
       HOOK_URL: 'https://sap.example/sap/bc/hook',
+      ...extra,
     });
+
+  it('opens a cart from the setup GET and returns OCI fields', async () => {
+    const q = setup(await ociPartner());
     const res = await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`));
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/cart/start/cart_1/tok');
@@ -566,35 +588,108 @@ describe('OCI punchout', () => {
     expect(
       (await plugin.fetch(new Request(`https://plugin/plugins/punchout/oci/setup?${q}`))).status,
     ).toBe(401);
-    const { fields } = await plugin.renderReturn({
-      cart: {
-        id: 'cart_1',
-        title: 'x',
-        status: 'locked',
-        customerId: null,
-        lines: [],
-        quote: {
-          currency: 'EUR',
-          lines: [{ id: 'li_1', sku: 'A-1', title: 'Thing', qty: 2, unitPrice: 3, ships: true }],
-          subtotal: 6,
-          shipping: 0,
-          tax: 0,
-          total: 6,
-          shippingOptions: [],
-          shippingOption: null,
-          ships: true,
-        },
-        orderId: null,
-        updatedAt: 0,
-        sessionRef: 'x',
-      },
-    });
-    expect(fields).toMatchObject({
-      'NEW_ITEM-VENDORMAT[1]': 'A-1',
+    const { fields } = await plugin.renderReturn({ cart: ociCart('cart_1') });
+    // SAP sent no control fields: the spec's ~OkCode and ~CALLER, and no ~TARGET.
+    expect(fields).toEqual({
+      '~OkCode': 'ADDI',
+      '~CALLER': 'CTLG',
+      'NEW_ITEM-DESCRIPTION[1]': 'Thing',
       'NEW_ITEM-QUANTITY[1]': '2',
+      'NEW_ITEM-UNIT[1]': 'EA',
       'NEW_ITEM-PRICE[1]': '3.00',
+      'NEW_ITEM-PRICEUNIT[1]': '1',
       'NEW_ITEM-CURRENCY[1]': 'EUR',
+      'NEW_ITEM-VENDORMAT[1]': 'A-1',
+      'NEW_ITEM-EXT_PRODUCT_ID[1]': 'cart_1:li_1',
     });
+  });
+
+  it('echoes the ~OkCode, ~TARGET and ~CALLER the setup sent, GET or POST', async () => {
+    const secret = await ociPartner();
+    const control = { '~OkCode': 'ADDI', '~TARGET': '_top', '~CALLER': 'CTLG' };
+    const got = await plugin.fetch(
+      new Request(`https://plugin/plugins/punchout/oci/setup?${setup(secret, control)}`),
+    );
+    expect(got.status).toBe(302);
+    const posted = await plugin.fetch(
+      new Request('https://plugin/plugins/punchout/oci/setup', {
+        method: 'POST',
+        body: setup(secret, { ...control, '~TARGET': 'catalog_frame' }),
+      }),
+    );
+    expect(posted.status).toBe(302);
+    expect((await plugin.renderReturn({ cart: ociCart('cart_1') })).fields).toMatchObject(control);
+    expect((await plugin.renderReturn({ cart: ociCart('cart_2') })).fields).toMatchObject({
+      ...control,
+      '~TARGET': 'catalog_frame',
+    });
+    // Sent again (the buyer's page posts the fields again if it was closed), the same.
+    expect((await plugin.renderReturn({ cart: ociCart('cart_1') })).fields).toMatchObject(control);
+  });
+
+  it('takes a POST body’s control field over the query string’s, whatever its case', async () => {
+    const secret = await ociPartner();
+    const q = setup(secret, { '~TARGET': 'from_query', '~OkCode': 'QUERY' });
+    const res = await plugin.fetch(
+      new Request(`https://plugin/plugins/punchout/oci/setup?${q}`, {
+        method: 'POST',
+        body: new URLSearchParams({ '~target': 'from_body', '~OKCODE': 'ADDI' }),
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect((await plugin.renderReturn({ cart: ociCart('cart_1') })).fields).toMatchObject({
+      '~OkCode': 'ADDI',
+      '~TARGET': 'from_body',
+    });
+  });
+
+  it('drops a control value that isn’t a short plain word, and never echoes it', async () => {
+    const secret = await ociPartner();
+    const res = await plugin.fetch(
+      new Request('https://plugin/plugins/punchout/oci/setup', {
+        method: 'POST',
+        body: setup(secret, {
+          '~OkCode': 'ADDI"><script>',
+          '~TARGET': 'javascript:alert(1)',
+          '~CALLER': 'x'.repeat(200),
+        }),
+      }),
+    );
+    expect(res.status).toBe(302);
+    const row = await env.DB.prepare('SELECT oci_control FROM sessions WHERE cart_id = ?')
+      .bind('cart_1')
+      .first<{ oci_control: string }>();
+    expect(JSON.parse(row!.oci_control)).toEqual({ okCode: 'ADDI', caller: 'CTLG' });
+    const { fields } = await plugin.renderReturn({ cart: ociCart('cart_1') });
+    expect(fields['~OkCode']).toBe('ADDI');
+    expect(fields['~CALLER']).toBe('CTLG');
+    expect(fields).not.toHaveProperty('~TARGET');
+    expect(JSON.stringify(fields)).not.toMatch(/script|javascript|xxxx/);
+  });
+
+  it('returns a session opened before the control fields were kept with the defaults', async () => {
+    const secret = await ociPartner();
+    await plugin.fetch(
+      new Request(
+        `https://plugin/plugins/punchout/oci/setup?${setup(secret, { '~TARGET': '_top' })}`,
+      ),
+    );
+    // As a row written by the code before migration 0003 (or one a later edit left odd) reads.
+    for (const stored of [
+      null,
+      '{"okCode":"<b>","target":"_top\\" onload=x"}',
+      'not json',
+      'null',
+      '"ADDI"',
+    ]) {
+      await env.DB.prepare('UPDATE sessions SET oci_control = ? WHERE cart_id = ?')
+        .bind(stored, 'cart_1')
+        .run();
+      const { fields } = await plugin.renderReturn({ cart: ociCart('cart_1') });
+      expect(fields['~OkCode']).toBe('ADDI');
+      expect(fields['~CALLER']).toBe('CTLG');
+      expect(fields).not.toHaveProperty('~TARGET');
+    }
   });
 });
 
@@ -926,6 +1021,7 @@ describe('the partner self-test and setup notes', () => {
       'Catalog URL: https://<your OrderLoop address>/plugins/punchout/oci/setup',
     );
     expect(raw).toContain('USERNAME: sap-user');
+    expect(raw).toContain('Without them it sends ~OkCode=ADDI and ~CALLER=CTLG, and no ~TARGET.');
     expect(raw).not.toContain('cxml/order');
     const view = JSON.parse(raw) as PluginView;
     const texts = codesIn(view);

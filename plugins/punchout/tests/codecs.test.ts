@@ -6,7 +6,7 @@ import {
   setupResponse,
   statusResponse,
 } from '../src/cxml';
-import { ociFields, parseOciSetup } from '../src/oci';
+import { ociControl, ociFields, parseOciSetup, storedOciControl } from '../src/oci';
 import { at, parseXml, XmlError } from '../src/xml';
 import orderXml from './fixtures/order-request.xml?raw';
 import setupXml from './fixtures/setup-request.xml?raw';
@@ -146,28 +146,86 @@ describe('OCI', () => {
       parseOciSetup(
         new URLSearchParams('USERNAME=sap1&PASSWORD=pw&HOOK_URL=https%3A%2F%2Fsap.example%2Fhook'),
       ),
-    ).toEqual({ username: 'sap1', password: 'pw', hookUrl: 'https://sap.example/hook' });
+    ).toEqual({
+      username: 'sap1',
+      password: 'pw',
+      hookUrl: 'https://sap.example/hook',
+      control: { okCode: 'ADDI', caller: 'CTLG' },
+    });
     expect(parseOciSetup(new URLSearchParams('username=a&password=b&hook_url=c'))).toEqual({
       username: 'a',
       password: 'b',
       hookUrl: 'c',
+      control: { okCode: 'ADDI', caller: 'CTLG' },
     });
     expect(parseOciSetup(new URLSearchParams('USERNAME=a'))).toBeNull();
   });
 
+  it('keeps the control fields SAP sent, in any case', () => {
+    const sent = (q: string) =>
+      parseOciSetup(new URLSearchParams(`USERNAME=a&PASSWORD=b&HOOK_URL=c&${q}`))?.control;
+    expect(sent('~OkCode=ADDI&~TARGET=_top&~CALLER=CTLG')).toEqual({
+      okCode: 'ADDI',
+      caller: 'CTLG',
+      target: '_top',
+    });
+    expect(sent('%7EOKCODE=ADDI&%7Etarget=catalog_frame&%7Ecaller=DLGT')).toEqual({
+      okCode: 'ADDI',
+      caller: 'DLGT',
+      target: 'catalog_frame',
+    });
+  });
+
+  it('drops a control value that isn’t a short plain word', () => {
+    for (const bad of [
+      '"><script>alert(1)</script>',
+      'a b',
+      'https://evil.example/',
+      'x'.repeat(21),
+      '',
+      'ADDI\n',
+    ])
+      expect(ociControl({ okCode: bad, caller: bad, target: bad })).toEqual({
+        okCode: 'ADDI',
+        caller: 'CTLG',
+      });
+    expect(ociControl({ okCode: 7, target: { name: '_top' } })).toEqual({
+      okCode: 'ADDI',
+      caller: 'CTLG',
+    });
+    // A stored value that isn't an object of them: the defaults, never a throw.
+    for (const raw of [null, '', 'not json', 'null', '"ADDI"', '42'])
+      expect(storedOciControl(raw)).toEqual({ okCode: 'ADDI', caller: 'CTLG' });
+    expect(storedOciControl('{"okCode":"ADDI","target":"_top","caller":"CTLG"}')).toEqual({
+      okCode: 'ADDI',
+      caller: 'CTLG',
+      target: '_top',
+    });
+    const q = new URLSearchParams({ USERNAME: 'a', PASSWORD: 'b', HOOK_URL: 'c' });
+    q.set('~OkCode', 'ADDI;DROP');
+    q.set('~TARGET', '<x>');
+    expect(parseOciSetup(q)?.control).toEqual({ okCode: 'ADDI', caller: 'CTLG' });
+  });
+
   it('writes OCI 4.0 fields per line, indexed from 1', () => {
     expect(
-      ociFields([
-        {
-          sku: 'WID-100',
-          description: 'Industrial widget',
-          qty: 5,
-          unitPrice: 21.5,
-          currency: 'USD',
-          ref: 'cart_1:li_1',
-        },
-      ]),
+      ociFields(
+        [
+          {
+            sku: 'WID-100',
+            description: 'Industrial widget',
+            qty: 5,
+            unitPrice: 21.5,
+            currency: 'USD',
+            ref: 'cart_1:li_1',
+          },
+        ],
+        { okCode: 'ADDI', caller: 'CTLG', target: '_top' },
+      ),
     ).toEqual({
+      '~OkCode': 'ADDI',
+      '~TARGET': '_top',
+      '~CALLER': 'CTLG',
       'NEW_ITEM-DESCRIPTION[1]': 'Industrial widget',
       'NEW_ITEM-QUANTITY[1]': '5',
       'NEW_ITEM-UNIT[1]': 'EA',
@@ -176,6 +234,11 @@ describe('OCI', () => {
       'NEW_ITEM-CURRENCY[1]': 'USD',
       'NEW_ITEM-VENDORMAT[1]': 'WID-100',
       'NEW_ITEM-EXT_PRODUCT_ID[1]': 'cart_1:li_1',
+    });
+    // No ~TARGET is made up when SAP sent none.
+    expect(ociFields([], { okCode: 'ADDI', caller: 'CTLG' })).toEqual({
+      '~OkCode': 'ADDI',
+      '~CALLER': 'CTLG',
     });
   });
 });
