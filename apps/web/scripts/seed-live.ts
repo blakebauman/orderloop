@@ -25,10 +25,11 @@ async function api<T = Record<string, unknown>>(
   method: string,
   path: string,
   body?: unknown,
+  headers: Record<string, string> = {},
 ): Promise<{ ok: boolean; status: number; body: T }> {
   const res = await fetch(`${origin}/api/v1/${path}`, {
     method,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -43,16 +44,21 @@ if (ping.status === 401)
   fail('the API refused the token; run `pnpm db:seed:records` again to restore it');
 
 // Every scenario once: some finish, some wait at an approval or an event, some fail on purpose.
+// Each has its own Idempotency-Key, so a re-run finds the order it started before.
 let started = 0;
+let kept = 0;
 for (const s of SCENARIOS) {
-  const r = await api<{ orderId?: string; error?: string }>('POST', 'orders', {
-    flowId: s.flowId,
-    input: s.input,
-  });
-  if (r.ok) started++;
+  const r = await api<{ orderId?: string; replayed?: boolean; error?: string }>(
+    'POST',
+    'orders',
+    { flowId: s.flowId, input: s.input },
+    { 'idempotency-key': `seed-live:${s.id}` },
+  );
+  if (r.ok && r.body?.replayed) kept++;
+  else if (r.ok) started++;
   else console.log(`order ${s.id}: ${r.status} ${r.body?.error ?? ''}`);
 }
-console.log(`seed-live: started ${started} of ${SCENARIOS.length} scenario orders`);
+console.log(`seed-live: started ${started} scenario orders, ${kept} already there`);
 
 // Carts on the flows that price them, in each state the Carts page shows.
 type Cart = { cart?: { id: string; version?: number }; error?: string };
@@ -117,8 +123,19 @@ const SHIP_TO = {
   postalCode: '94607',
   country: 'US',
 };
+// Carts already made by an earlier run (by title) are left as they are.
+const existing = new Set(
+  ((await api<{ carts?: { title: string }[] }>('GET', 'carts?limit=200')).body?.carts ?? []).map(
+    (c) => c.title,
+  ),
+);
 let carts = 0;
+let skipped = 0;
 for (const c of CARTS) {
+  if (existing.has(c.title)) {
+    skipped++;
+    continue;
+  }
   const made = await api<Cart>('POST', 'carts', {
     title: c.title,
     flowId: c.flowId,
@@ -139,7 +156,7 @@ for (const c of CARTS) {
       : await api('POST', `carts/${id}/${c.end}`, {});
   if (!r.ok) console.log(`cart "${c.title}" ${c.end}: ${r.status} ${JSON.stringify(r.body)}`);
 }
-console.log(`seed-live: made ${carts} carts`);
+console.log(`seed-live: made ${carts} carts, ${skipped} already there`);
 
 // The catalog's demo shop, as the same admin.
 process.env.ORDERLOOP_API_TOKEN = token;
