@@ -69,7 +69,7 @@ exist now (their columns in [Data model](data-model.md#product-catalog)).
 | 5 | Web API under `/api/v1/catalog` (`board`, `board/:column`, `products/:key/sheet`, `edits`, `edits/discard`, `edits/publish`, `drafts`, `drafts/discard`, `gaps/rebuild`) with audit actions (`catalog.edits_*`, `catalog.drafts_*`, `catalog.gaps_rebuilt`) and OpenAPI | Built |
 | 6 | A `CATALOG` service binding for the engine (`apps/engine/wrangler.jsonc`, `renderEngine` in `scripts/fleet.ts`); the catalog deploys before the engine | Built |
 | 7 | `draft_product_content`: core tool (`ASSISTANT_TOOLS`, operator, no confirm; `draftTargets`, `MAX_DRAFT_FIELDS`), engine executor (`assistant/product-draft.ts`) through `runJson` with the product in a `dataBlock`, saving with `putDrafts` over `CATALOG`; `EngineRpc.draftProductContent`; the web route `POST /api/v1/catalog/products/:key/draft`. The engine saves the drafts on every path (the tool, MCP, A2A, the RPC); the web route audits its own calls, the engine the others | Built |
-| 8 | Backfill: `POST /api/v1/catalog/gaps/rebuild` once per deployment after PR 2 | Planned |
+| 8 | Backfill without a manual step: a shard holding products from before the gap index (no `gaps_built`) queues the alarm's resumable rebuild for itself as it wakes (`CatalogShard.backfillGaps`), so it ships through CI; `POST /api/v1/catalog/gaps/rebuild` stays for recounting now | Built |
 
 The board UI follows PRs 5 and 7. Its design brief is the surface brief for `app/routes/catalog.tsx`.
 

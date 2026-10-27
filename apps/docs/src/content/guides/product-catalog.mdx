@@ -239,8 +239,9 @@ sheet marks a draft **stale** once the field has changed since it was drafted.
 `POST /api/v1/catalog/drafts/discard` drops drafts. Status is never drafted.
 
 Reading the board and sheets needs `viewer`; staging, publishing and drafts need `operator`. Products
-stored before the gap index existed are counted by `POST /api/v1/catalog/gaps/rebuild` (`admin`),
-once; until then the board's `indexBuilt` is `false`.
+stored before the gap index existed are counted on their own, shortly after the catalog is updated;
+until then the board's `indexBuilt` is `false`. `POST /api/v1/catalog/gaps/rebuild` (`admin`)
+recounts every product now, if you'd rather not wait.
 
 ## Reading from the storefront
 

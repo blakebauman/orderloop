@@ -256,7 +256,8 @@ export type BoardSummary = {
   runningFeed: FeedStatus | null;
   /**
    * False until every shard has indexed the gaps of the products it held before the index existed
-   * (`rebuildGaps`); until then the board can miss some.
+   * (each queues that itself, `CatalogShard.backfillGaps`, or `rebuildGaps` does it now) and while a
+   * channel change is being recounted; until then the board can miss some.
    */
   indexBuilt: boolean;
 };
