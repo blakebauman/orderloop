@@ -266,7 +266,7 @@ export const NODE_SPECS = [
     category: 'commerce',
     label: 'Calculate tax',
     description:
-      'Computes tax on the subtotal, and on shipping unless told not to (mock tax engine).',
+      'Computes tax on the subtotal, and on shipping unless told not to (mock tax engine); none when the customer holds an exemption certificate covering the ship-to.',
     icon: 'Percent',
     fields: [
       { key: 'rate', label: 'Rate', kind: 'number', default: 0.08 },
@@ -284,6 +284,13 @@ export const NODE_SPECS = [
         kind: 'boolean',
         default: true,
         hint: 'Off taxes the subtotal only',
+      },
+      {
+        key: 'exemptions',
+        label: 'Honor exemptions',
+        kind: 'boolean',
+        default: true,
+        hint: 'On charges no tax when the customer holds a verified, unexpired exemption certificate covering the ship-to (a provider is told of it instead); off taxes every order',
       },
       providerField('tax'),
     ],

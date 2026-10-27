@@ -28,6 +28,7 @@ import { conforms } from './json-schema';
 import type { CartReturn, CartReturnRequest } from './plugin-host';
 import { maskPersonalText, modelOrder, PERSONAL_DATA_MODES, scrubPersonal } from './redact';
 import { ROLES } from './roles';
+import type { TaxExemption } from './tax-exemption';
 import type { Order } from './types';
 import { OUTBOUND_EVENTS, type OutboundPayload } from './webhooks';
 
@@ -625,7 +626,18 @@ export type ProvideRequest = {
       surface: 'tax';
       op: 'calculate';
       order: Order | RedactedOrder;
-      input: { subtotal: number; shipping: number; includeShipping: boolean; currency: string };
+      input: {
+        subtotal: number;
+        shipping: number;
+        includeShipping: boolean;
+        currency: string;
+        /**
+         * The customer's exemption certificate in force where the order ships, verified by staff
+         * (`exemptingCertificate`), when there is one and the node applies exemptions. The
+         * provider decides what it exempts; the engine charges what it returns.
+         */
+        exemption?: TaxExemption;
+      };
     }
   | {
       surface: 'address';

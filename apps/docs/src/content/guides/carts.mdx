@@ -50,7 +50,10 @@ When a cart has goods that ship, or already has an address, it shows **Ship to**
 (street, city, postcode and country, with an optional name, second line and state or region)
 and, once priced, the shipping options the cart's flow offers for it, each with its price and
 delivery time. Saving the address or picking an option prices the cart again, so shipping and
-any tax that depends on where it goes show in the price before there is an order. Until you pick
+any tax that depends on where it goes show in the price before there is an order. When the
+cart's customer holds a verified [tax exemption certificate](/guides/fulfillment/#tax-exemption)
+covering the address, the price charges no tax and says so under it: "Tax exempt (certificate
+…)". Until you pick
 an option, the flow picks one (the cheapest, unless its shipping step says otherwise), and the
 price shows that one. A flow whose shipping step always picks the cheapest or fastest charges
 that one whatever you pick: the cart shows the one it charged as selected, says so under the

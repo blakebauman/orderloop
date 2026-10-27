@@ -76,6 +76,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0056_product_vectors.sql` | `product_vectors`: what the product index (Vectorize) holds per SKU; empty until the engine's first reindex |
 | `0057_product_index_lease.sql` | `product_index_lease`: the one lease a product index reindex holds while it runs |
 | `0058_products_search.sql` | `products_search`: an external-content FTS5 index over `products.sku` and `name`, built from the rows there (`rebuild`) and kept by triggers on `products` |
+| `0059_tax_certificates.sql` | `tax_certificates` and its index `tax_certificates_customer (customer_id, created_at)`: customers' tax exemption certificates |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -130,6 +131,7 @@ writes embeds its step key.
 | Table | Purpose |
 |---|---|
 | `customers` | `kind` (`business`, `consumer` or `internal`), `tier`, `credit_limit`, `balance` (open receivables, raised by invoicing an unpaid business order, once per step through `balance_entries`), payment `terms`; `stripe_customer_id` (unique when set; created once per account, idempotency key `cust_${customerId}`) and `stripe_payment_method_id` (the card a `verify` authorization saved, which `commerce.charge` uses off-session) |
+| `tax_certificates` | A customer's tax exemption certificates (`apps/engine/src/tax-certificates.ts`), id `txc_…` (the web app makes it, so the file's key can carry it): `customer_id`, `number` (as printed, at most 64 characters), `regions` (JSON `[{ country, region? }]`, the shape of `commerce.tax`'s `regions` without a rate; no region is the whole country), `expires_at` (ms, the end of the certificate's last day in UTC, or null), the scan's `file_key`, `file_name`, `file_type` and `file_size` (all null without one), `status` (`active` or `revoked`), `created_by` and `created_at`, `verified_by` and `verified_at` (null until an operator verifies it), `revoked_by` and `revoked_at`. Added, verified and revoked only through `EngineRpc` by staff Operator or above; revoking keeps the row. `commerce.tax` reads a customer's rows oldest first inside its step and exempts the order with the first that is active, verified, unexpired at the run's `now` and covers the ship-to (`exemptingCertificate`). Erasing the customer deletes the rows and their files |
 | `products` | Primary key `sku`; `price`, `cost`, `stock`, `reserved` (central stock), `reorder_point`, `reorder_qty`, `supplier`, `seller_id` (null means the operator sells it), `kind` (`physical` or `digital`; digital products hold no stock), `catalog_at` (ms; when the product catalog last set the row's `name` and `price`, null for rows it never wrote; see [Product catalog](#product-catalog)), `weight_kg`, `length_cm`, `width_cm`, `height_cm` (per-unit shipping weight and size, null when unknown; read by `commerce.shipping_rate` under the `weight` and `dim_weight` bases) |
 | `products_search` | FTS5 virtual table (`sku`, `name`; `unicode61`, diacritics removed), its rowid the `products` row's. Triggers on insert, delete and an update that changes `sku` or `name` (`WHEN old.sku IS NOT new.sku OR old.name IS NOT new.name`, so the catalog's price upserts, which always set the name, leave it alone) keep it current whichever writer changes `products` (stock and reservation writes don't touch it). External content (`content='products'`): it stores only the terms and reads `sku` and `name` from `products` by rowid, so `INSERT INTO products_search(products_search) VALUES('rebuild')` remakes it. Ranked by `bm25(8.0, 10.0)` (SKU, name), set once as its `rank`; prefix indexes for 2 and 3 characters. Not in `schema.ts`, which can't declare a virtual table. Read by a cart's product search (`apps/engine/src/cart/search.ts`), which ranks and limits inside FTS5 and joins only that page to `products`. D1 can't export a database with a virtual table: drop it (and its triggers) before `wrangler d1 export`, and recreate it after ([Removing a customer](operations.md#removing-a-customer)) |
 | `product_vectors` | Primary key `sku`; `name` (the name its vector was embedded from), `indexed_at` (ms). One row per SKU the product index (Vectorize `PRODUCT_VECTORS`) holds, written after the vector is. The engine's hourly reindex (`apps/engine/src/product-index.ts`) embeds the `products` rows missing here or renamed since, and deletes the vectors and rows of SKUs no longer in `products`, so it catches every writer of `products` (the catalog, seeds, the demo reset) without hooking them. An admin's **Update product index** (Commerce page) runs the same reindex now |
@@ -259,6 +261,13 @@ type and, as custom metadata, the cart id and name. They're listed in the cart's
 (`CartState.attachments`), not in `documents`, and served at `/carts/<cartId>/attachments/<id>` to
 staff and to that cart's buyer. Removing one deletes it. A cart that ended 90 days ago loses its
 files with its chat ([retention](#retention)), and a buyer's data subject request removes theirs.
+
+A customer's tax exemption certificate scans are at `customers/<customerId>/tax-certificates/<certificateId>`
+(`taxCertificateKey`; `taxCertificatePrefix` lists a customer's), a PDF, PNG, JPEG or WebP of at most 10 MB,
+written by the web app (`apps/web/app/lib/customers.server.ts`) before the engine adds the certificate and
+deleted again if it refuses. They're listed in `tax_certificates`, not in `documents`, and served at
+`/customers/<customerId>/tax-certificates/<certificateId>` to signed-in users. Revoking keeps the file; erasing
+the customer deletes it.
 
 ## Product catalog
 
@@ -409,7 +418,8 @@ Orders with `erased_at` set are no longer part of it. A `users` row with the add
 `documents` list (`key`, `kind`, `contentType`, `createdAt`), and `carts`: each of their external carts
 (`CartAgent.subjectExport`) with its id, title, status, buyer, lines, ship-to, order, and the messages and file
 names, types and sizes they added, and each staff cart for one of their customer accounts that holds a ship-to
-(`CartAgent.customerExport`: id, title, status, ship-to, order).
+(`CartAgent.customerExport`: id, title, status, ship-to, order). `taxCertificates` lists their accounts'
+`tax_certificates` rows (with `file_key`, not the file).
 
 **Erase** is refused with `409` `active_orders` (up to 20 ids) while any of the subject's un-erased orders
 has a status outside `TERMINAL_ORDER_STATUSES`; the agent checks again (`erasePersonalData` returns
@@ -441,7 +451,9 @@ each counted in `carts`.
 
 When no order is left (the last call, `done: true`): `inbound_emails` from that sender that never
 started an order are erased the same way and their R2 `.eml` deleted, `messages` to the address are
-erased, and each `customers` row becomes `name` `Erased customer`, `email`
+erased, each account's `tax_certificates` rows and their files are deleted (counted in `taxCertificates`;
+an exemption an order already took stays in its node's output, as the certificate's id and number), and each
+`customers` row becomes `name` `Erased customer`, `email`
 `erased-<id>@erased.invalid` and `stripe_customer_id` and `stripe_payment_method_id` null. Lines, amounts,
 `payments`, `shipments`, `invoices` and the ledgers are kept.
 

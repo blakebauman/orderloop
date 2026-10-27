@@ -94,6 +94,7 @@ export const AUDIT_GROUPS = {
   webhook: 'Webhooks',
   stock: 'Stock review',
   promotion: 'Promotions',
+  tax_certificate: 'Tax certificates',
   catalog: 'Catalog',
   plugin: 'Plugins',
   personal_data: 'Personal data',

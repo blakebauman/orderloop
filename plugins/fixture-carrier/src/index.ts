@@ -8,12 +8,14 @@
  *   them voided. `effects` in its tests count the order's labels not voided. For tests, an order
  *   whose `meta.simulate` is "void_fails" gets labels it can't void (until `fail_void` is
  *   cleared), and "label_wrong_ref" gets labels for packages it wasn't asked about.
- * - Tax: 10% of what is taxable, for a US ship-to; none elsewhere.
+ * - Tax: 10% of what is taxable, for a US ship-to; none elsewhere, or when the order's exemption
+ *   certificate covers the ship-to.
  * - Address: upper-cases the city ("corrected" when that changed it); no postcode is "invalid".
  *
  * Labels, tax and the address need the buyer's address, so it asks for buyer details.
  */
 
+import { coversPlace } from '@orderloop/core';
 import { definePlugin, pluginDb } from '@orderloop/plugin-sdk';
 import manifest from './manifest';
 
@@ -98,8 +100,11 @@ export default definePlugin<Env>({
 
     tax: {
       calculate({ req }) {
-        if (shipTo(req.order).country !== 'US') return { amount: 0 };
-        const { subtotal, shipping, includeShipping } = req.input;
+        const to = shipTo(req.order);
+        if (to.country !== 'US') return { amount: 0 };
+        const { subtotal, shipping, includeShipping, exemption } = req.input;
+        const region = typeof to.region === 'string' ? to.region : undefined;
+        if (exemption && coversPlace(exemption.regions, to.country, region)) return { amount: 0 };
         const taxable = subtotal + (includeShipping ? shipping : 0);
         return { amount: Math.round(taxable * 10) / 100 };
       },

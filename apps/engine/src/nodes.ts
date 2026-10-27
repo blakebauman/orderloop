@@ -23,6 +23,7 @@ import {
   durationMs,
   evaluate,
   evaluatePolicy,
+  exemptingCertificate,
   type FlowNode,
   FULFILLMENT_METHOD_LABELS,
   type FulfillmentMethod,
@@ -51,6 +52,7 @@ import {
   shipToCountry,
   stockLines,
   stringList,
+  taxExemptNote,
   taxRegionsSchema,
   toBase,
   truthy,
@@ -62,6 +64,7 @@ import * as clef from './clef';
 import * as cx from './connectors';
 import { extractCatalog } from './product-index';
 import { provide } from './providers';
+import { customerTaxCertificates } from './tax-certificates';
 
 export type NodeResult = {
   branches?: string[];
@@ -408,12 +411,29 @@ export const EXECUTORS: Record<string, Exec> = {
     const by = providerOf(config);
     const regions = taxRegionsSchema.safeParse(config.regions ?? []);
     const shipTo = checkAddress(ctx.order.meta?.shipTo).address;
-    let rate = regionalTaxRate(
-      regions.success ? regions.data : [],
-      shipToCountry(ctx.order),
-      shipTo?.region,
-      num(config.rate, 0.08),
-    );
+    const country = shipToCountry(ctx.order);
+    // The customer's certificate in force where the order ships, as of the run's time (not the
+    // clock's), so a replay of this step judges expiry the same. With no ship-to country, none.
+    const cert =
+      config.exemptions !== false
+        ? exemptingCertificate(
+            await customerTaxCertificates(env, ctx.order.customerId),
+            country,
+            shipTo?.region,
+            ctx.now,
+          )
+        : null;
+    const exemption = cert ? { certificateId: cert.id, certificate: cert.number } : null;
+    // A provider is told of the certificate and decides what it exempts; built in, it exempts all.
+    let rate =
+      cert && !by
+        ? 0
+        : regionalTaxRate(
+            regions.success ? regions.data : [],
+            country,
+            shipTo?.region,
+            num(config.rate, 0.08),
+          );
     if (by) {
       // What computeTotals will tax: the lines' subtotal and rounded shipping, not stored totals.
       const { subtotal, shipping } = computeTotals({ ...ctx.order, taxRate: 0 });
@@ -425,7 +445,13 @@ export const EXECUTORS: Record<string, Exec> = {
         orderId: ctx.order.id,
         config,
         order: ctx.order,
-        input: { subtotal, shipping, includeShipping: taxShipping, currency: ctx.order.currency },
+        input: {
+          subtotal,
+          shipping,
+          includeShipping: taxShipping,
+          currency: ctx.order.currency,
+          ...(cert ? { exemption: { certificate: cert.number, regions: cert.regions } } : {}),
+        },
       });
       // Kept as the rate it works out to, so later nodes that recompute totals keep the same tax.
       const taxable = subtotal + (taxShipping ? shipping : 0);
@@ -438,10 +464,20 @@ export const EXECUTORS: Record<string, Exec> = {
       rate = taxable > 0 ? amount / taxable : 0;
     }
     const t = computeTotals({ ...ctx.order, taxRate: rate, taxShipping });
+    const named = [by, cert ? `certificate ${cert.number}` : null].filter(Boolean).join(', ');
     return {
       order: { ...t, taxRate: rate, taxShipping },
-      output: { rate, taxShipping, ...t, ...(by ? { provider: by } : {}) },
-      summary: `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}${by ? ` (${by})` : ''}`,
+      output: {
+        rate,
+        taxShipping,
+        ...t,
+        ...(by ? { provider: by } : {}),
+        ...(exemption ? { exemption } : {}),
+      },
+      summary:
+        cert && !by
+          ? `${taxExemptNote(cert)} · total ${cash(t.total, ctx)}`
+          : `Tax ${cash(t.tax, ctx)} · total ${cash(t.total, ctx)}${named ? ` (${named})` : ''}`,
     };
   },
 

@@ -21,6 +21,7 @@ import {
   quoteNodes,
   type RunContext,
   type ShippingOption,
+  taxExemptNote,
   withDefaults,
 } from '@orderloop/core';
 import { getProducts } from '../connectors';
@@ -163,6 +164,15 @@ export async function quoteCheckout(
             content: reason,
             path: '$.promoCodes',
           });
+      // Why the quote charges no tax: the customer's certificate (a cart's; UCP buyers have none).
+      // A tax provider told of it may still charge some, and then there's nothing to explain.
+      const exempt = (r.output as { exemption?: { certificate: string } } | undefined)?.exemption;
+      if (node.type === 'commerce.tax' && exempt && !r.order?.tax)
+        issues.push({
+          kind: 'info',
+          code: 'tax_exempt',
+          content: taxExemptNote({ number: exempt.certificate }),
+        });
       if (node.type === 'commerce.shipping_rate') {
         const out = (r.output ?? {}) as {
           options?: ShippingOption[];

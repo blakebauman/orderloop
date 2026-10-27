@@ -23,6 +23,7 @@ import type {
   PluginUsage,
 } from './plugins';
 import type { CartGuest, SignedActor } from './roles';
+import type { TaxCertificate, TaxCertificateInput } from './tax-exemption';
 import type {
   FlowGraph,
   FlowVersion,
@@ -388,6 +389,33 @@ export interface EngineRpc {
     /** Staff or the cart's buyer, signed for `cart:<cartId>`. */
     actor: SignedActor,
   ): Promise<CartAnswer<CartProductPage>>;
+  /**
+   * A customer's tax exemption certificates, oldest first, revoked ones included; null for an id
+   * no customer has.
+   */
+  taxCertificates(customerId: string): Promise<TaxCertificate[] | null>;
+  /**
+   * Adds a certificate to a customer, unverified (it exempts nothing until verified), with the file
+   * the web app stored at `taxCertificateKey`, if any. The certificate calls take staff at least
+   * Operator, signed for `tax-certificates:<customerId>`; anyone else is refused.
+   */
+  addTaxCertificate(
+    customerId: string,
+    input: TaxCertificateInput,
+    actor: SignedActor,
+  ): Promise<Refusable<TaxCertificate>>;
+  /** Records that `actor` checked an active certificate with its issuer: from now it exempts. */
+  verifyTaxCertificate(
+    customerId: string,
+    id: string,
+    actor: SignedActor,
+  ): Promise<Refusable<TaxCertificate>>;
+  /** Stops a certificate exempting anything. The row stays, revoked, for the record. */
+  revokeTaxCertificate(
+    customerId: string,
+    id: string,
+    actor: SignedActor,
+  ): Promise<Refusable<TaxCertificate>>;
   /**
    * Forgets every A2A push config a person (or token) registered, and what is still queued for
    * them, when their connected apps end: a client that can no longer call /a2a stops hearing too.

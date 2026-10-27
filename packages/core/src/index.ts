@@ -36,6 +36,7 @@ export * from './provenance';
 export * from './redact';
 export * from './roles';
 export * from './shipping';
+export * from './tax-exemption';
 export * from './templates';
 export * from './types';
 export * from './ucp';

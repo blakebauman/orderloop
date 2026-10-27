@@ -7,7 +7,14 @@ import {
   staticRegistry,
   validateGraph,
 } from '@orderloop/core';
-import { createDb, publishFlow, reservations, shipments } from '@orderloop/db';
+import {
+  createDb,
+  customers,
+  publishFlow,
+  reservations,
+  shipments,
+  taxCertificates,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { compensateOrder, retryLabelVoids } from '../../src/connectors';
@@ -111,6 +118,37 @@ describe('a plugin as provider', () => {
     ]);
     expect(rows[0]!.externalId).toMatch(/^fx_/);
     expect(await labels(orderId)).toEqual([{ ref: rows[0]!.id, kind: 'shipment', voided: 0 }]);
+  });
+
+  it('tells the tax provider of the customer’s exemption certificate, and charges what it returns', async () => {
+    const customerId = `cus_exempt_${crypto.randomUUID().slice(0, 6)}`;
+    await db()
+      .insert(customers)
+      .values({ id: customerId, name: 'Exempt Co', email: `${customerId}@example.com` });
+    const now = Date.now();
+    await db()
+      .insert(taxCertificates)
+      .values({
+        id: `txc_${customerId}`,
+        customerId,
+        number: 'US-EXEMPT-1',
+        regions: JSON.stringify([{ country: 'US' }]),
+        createdBy: 'ops@example.com',
+        createdAt: now,
+        verifiedBy: 'ops@example.com',
+        verifiedAt: now,
+      });
+    const { done } = await run('test-providers', { customerId });
+    expect(done.status).toBe('completed');
+    // The carrier taxes a US ship-to 10%, unless the certificate it was sent covers it.
+    expect(done.order!.tax).toBe(0);
+    expect(done.nodes.tax!.summary).toMatch(
+      /^Tax \$0\.00 · total .* \(fixture-carrier, certificate US-EXEMPT-1\)$/,
+    );
+    expect(done.nodes.tax!.output).toMatchObject({
+      provider: CARRIER,
+      exemption: { certificateId: `txc_${customerId}`, certificate: 'US-EXEMPT-1' },
+    });
   });
 
   it('voids the label when the order fails after it', async () => {
