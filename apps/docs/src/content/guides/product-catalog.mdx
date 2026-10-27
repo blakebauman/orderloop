@@ -168,6 +168,69 @@ TEE-100,tee,tees,Everyday tee,18.00,TEE-100-M,m,cotton
 TEE-100,,,,,TEE-100-L,l,
 ```
 
+## Editing content
+
+Feeds own a product's data, but its content can be fixed in Order Loop without the next import
+undoing it. The editable fields are <Values of="editable-fields" />: the title, description and slug
+per locale, a product's own localized text attributes, an image's alt text, and the status. Variants,
+prices, channels, categories and images stay with the feed.
+
+**The board.** `GET /api/v1/catalog/board` counts products in each column (<Values of="board-columns" />)
+and the gaps of each kind (<Values of="gap-kinds" />), and returns the latest finished feed and one
+still running. A product is on **gaps** while something is missing: a title in a locale of a channel
+it is listed in; a description, text attribute or alt text it has in some locales but not that one; a
+feed row the catalog refused for its key; or a conflict (below). Otherwise it is on **staged** while it
+has edits waiting to publish, **drafted** while the assistant has drafts for it to review, and
+**published** for a day after its edits went live. `GET /api/v1/catalog/board/:column` lists a column
+in key order, 50 at a time by default (`limit` up to 100), optionally only products with one `kind` of
+gap; pass the answer's `cursor` for the next page. Each card counts its gaps by kind, its staged edits
+and drafts, and says why its edits didn't publish last time, if they didn't.
+
+`GET /api/v1/catalog/products/:key/sheet` returns everything about one product: as it is live and as
+the last feed sent it, its edits, staged edits, drafts, gaps, the last refused feed row and its last
+50 published changes.
+
+**Staging.** `POST /api/v1/catalog/edits` takes `{ "edits": [...] }`, up to 500, each naming the
+product `key`, the field (`ref`: `field`, `locale`, and `code` for an attribute or `src` for an image)
+and either `"op": "set"` with a `value` (`null` removes the feed's value in that locale) or
+`"op": "clear"` to show the feed's value again. Each is checked against the product and answered
+`ok`, or with `issues`. Nothing changes until it is published; a later edit to the same field
+replaces the earlier one. `POST /api/v1/catalog/edits/discard` with `{ "items": [{ "key", "ref"? }] }`
+drops one field's staged edit, or all of a product's.
+
+```json
+{
+  "edits": [
+    { "key": "TEE-100", "ref": { "field": "description", "locale": "fr" }, "op": "set", "value": "Un t-shirt en coton." },
+    { "key": "TEE-100", "ref": { "field": "attribute", "code": "care", "locale": "fr" }, "op": "set", "value": "Lavage à froid" }
+  ]
+}
+```
+
+**Publishing.** `POST /api/v1/catalog/edits/publish` with `{ "keys": [...], "requestId"?, "urgent"? }`
+publishes up to 500 products' staged edits, each product's all or none, and answers each `published`
+(with its new version), `failed` (with why; its edits stay staged) or `unchanged` (nothing was
+staged). A product is refused when a value it changes was changed by someone else since it was
+staged (stage it again against what is there now), when an edit no longer fits, or when a slug it sets
+belongs to another product. Send the same `requestId` again, after a timeout for example, to get the
+first answer without publishing twice; the answer includes the one used.
+
+**Edits and feeds.** A published edit stays over later imports and API writes of the product. Each
+edit remembers the feed's value when it was published; when a later import changes that value, the
+edit stays live and the product goes back on **gaps** with a `conflict`, until someone keeps the
+edit (stage the same text again), takes the feed's value (`clear`) or writes new text.
+
+**Drafts.** The assistant drafts text for a field and locale; drafts are saved with
+`POST /api/v1/catalog/drafts` (`{ "drafts": [{ "key", "ref", "value", "model"? }] }`, up to 500) and
+never change the product. A draft is accepted by staging it with `"source": "assistant"`, so the
+published change records where it came from; staging any edit to the field uses up its draft. The
+sheet marks a draft **stale** once the field has changed since it was drafted.
+`POST /api/v1/catalog/drafts/discard` drops drafts. Status is never drafted.
+
+Reading the board and sheets needs `viewer`; staging, publishing and drafts need `operator`. Products
+stored before the gap index existed are counted by `POST /api/v1/catalog/gaps/rebuild` (`admin`),
+once; until then the board's `indexBuilt` is `false`.
+
 ## Reading from the storefront
 
 Shoppers' reads don't go through `/api/v1`. The catalog is served read-only and without credentials

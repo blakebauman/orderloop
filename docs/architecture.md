@@ -516,6 +516,14 @@ A refused delete is `404 { error: 'Not found', issues }` when the catalog answer
 | `POST feeds/:id/cancel` | `cancelFeed` | `operator`; `{ feed }`, `404` when unknown, `409 { error, feed }` when the feed had already finished (`done` or `failed`); `catalog.feed_cancelled` (target the feed id) |
 | `GET feeds`, `GET feeds/:id` | `listFeeds(limit)`, `feedStatus` | `limit` defaults to 20 |
 | `POST reindex` | `reindex` | `202 { queued }`; `catalog.reindexed` |
+| `GET board`, `GET board/:column` | `catalogBoard`, `listBoard` | `viewer`. `{ board }`; a column answers `{ items, cursor }`, `404` for an unknown column and `400` for an unknown `kind`; `limit` is passed as a number and clamped by the catalog |
+| `GET products/:key/sheet` | `getProductSheet` | `viewer`; `{ sheet }`, `404` when there's no product |
+| `POST edits` | `stageEdits` | `operator`; `{ edits }`, 1 to 500 (`catalogEditsInput`: `set` with a value up to 10,000 characters or null, or `clear`; `source` `person` or `assistant`); `{ results }` per edit. `catalog.edits_staged` (`staged`, `refused`, `products`, `fromDrafts`) |
+| `POST edits/discard` | `discardStaged` | `operator`; `{ items }` (`catalogDiscardInput`); `{ discarded }`; `catalog.edits_discarded` |
+| `POST edits/publish` | `publishStaged` | `operator`; `{ keys, requestId?, urgent? }` (`catalogPublishInput`); a missing `requestId` is made with `crypto.randomUUID()`; `{ requestId, results }`. `catalog.edits_published` (counts, up to 50 published keys, `requestId`, `urgent`) |
+| `POST drafts` | `putDrafts` | `operator`; `{ drafts }`, 1 to 500 (`catalogDraftsInput`); `{ results }`; `catalog.drafts_saved` (`saved`, `refused`) |
+| `POST drafts/discard` | `discardDrafts` | `operator`; `{ items }`; `{ discarded }`; `catalog.drafts_discarded` |
+| `POST gaps/rebuild` | `rebuildGaps` | `admin`, since it reads every product; `{ products }`; `catalog.gaps_rebuilt` |
 
 The `catalog.*` actions are in `BUSINESS_AUDIT_ACTIONS` (`packages/core/src/audit.ts`) and the web
 audit filter group is `catalog` (`AUDIT_GROUPS` in `apps/web/app/lib/audit.ts`, label "Catalog"). The

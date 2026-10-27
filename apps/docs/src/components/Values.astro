@@ -16,8 +16,11 @@ import {
 } from '@orderloop/core';
 import {
   ATTRIBUTE_KINDS,
+  BOARD_COLUMNS,
+  EDITABLE_FIELDS,
   FEED_FORMATS,
   FEED_STATES,
+  GAP_KINDS,
   NUMERIC_KINDS,
   PRODUCT_STATUSES,
   TERM_KINDS,
@@ -39,6 +42,9 @@ const SOURCES = {
   'numeric-kinds': NUMERIC_KINDS,
   'feed-formats': FEED_FORMATS,
   'feed-states': FEED_STATES,
+  'board-columns': BOARD_COLUMNS,
+  'gap-kinds': GAP_KINDS,
+  'editable-fields': EDITABLE_FIELDS,
 } as const;
 
 interface Props {

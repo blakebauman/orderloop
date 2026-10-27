@@ -162,6 +162,22 @@ export function describe(e: AuditEvent): string {
     else if (d.status === 'busy') parts.push('skipped, another run was going');
     else if (d.status === 'no_index') parts.push('skipped, no index');
   }
+  const n = (v: unknown, one: string, many = `${one}s`) => `${v} ${v === 1 ? one : many}`;
+  if (e.action === 'catalog.edits_staged' && typeof d.staged === 'number')
+    parts.push(
+      `${n(d.staged, 'edit')} to ${n(d.products, 'product')}${d.fromDrafts ? `, ${d.fromDrafts} from drafts` : ''}${d.refused ? `, ${d.refused} refused` : ''}`,
+    );
+  if (e.action === 'catalog.edits_published' && typeof d.published === 'number')
+    parts.push(`${n(d.published, 'product')}${d.failed ? `, ${d.failed} refused` : ''}`);
+  if (e.action === 'catalog.drafts_saved' && typeof d.saved === 'number')
+    parts.push(`${n(d.saved, 'draft')}${d.refused ? `, ${d.refused} refused` : ''}`);
+  if (
+    (e.action === 'catalog.edits_discarded' || e.action === 'catalog.drafts_discarded') &&
+    typeof d.discarded === 'number'
+  )
+    parts.push(`${d.discarded} dropped`);
+  if (e.action === 'catalog.gaps_rebuilt' && typeof d.products === 'number')
+    parts.push(`${n(d.products, 'product')} read`);
   if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))
     parts.push(`via ${AUDIT_VIA[d.via as AuditVia]}`);
   return parts.length ? `${label}: ${parts.join(', ')}` : label;

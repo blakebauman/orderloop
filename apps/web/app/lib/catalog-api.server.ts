@@ -18,15 +18,37 @@
  *   GET  /api/v1/catalog/feeds                   recent feeds;  GET …/feeds/:id  one feed
  *   POST /api/v1/catalog/feeds/:id/cancel        stops a feed; 409 once it has finished
  *   POST /api/v1/catalog/reindex                 republish everything (admin)
+ *
+ * The product editor (docs/product-editor.md):
+ *   GET  /api/v1/catalog/board                   counts per column and gap kind, latest feeds
+ *   GET  /api/v1/catalog/board/:column?kind=&cursor=&limit=   one column's cards
+ *   GET  /api/v1/catalog/products/:key/sheet     live and feed versions, edits, drafts, history
+ *   POST /api/v1/catalog/edits                   { edits }   stage, at most 500
+ *   POST /api/v1/catalog/edits/discard           { items }   drop staged edits
+ *   POST /api/v1/catalog/edits/publish           { keys, requestId?, urgent? }   at most 500
+ *   POST /api/v1/catalog/drafts                  { drafts }  assistant drafts, at most 500
+ *   POST /api/v1/catalog/drafts/discard          { items }
+ *   POST /api/v1/catalog/gaps/rebuild            recount every product's gaps (admin)
  */
 import { atLeast, type Principal, type Role } from '@orderloop/core';
-import { FEED_FORMATS, type FeedFormat } from '@orderloop/core/product';
+import {
+  BOARD_COLUMNS,
+  type BoardColumn,
+  FEED_FORMATS,
+  type FeedFormat,
+  GAP_KINDS,
+  type GapKind,
+} from '@orderloop/core/product';
 import {
   catalogCategoriesDeleteInput,
   catalogCategoriesInput,
   catalogChannelInput,
   catalogDeleteInput,
+  catalogDiscardInput,
+  catalogDraftsInput,
+  catalogEditsInput,
   catalogProductsInput,
+  catalogPublishInput,
   catalogTypeInput,
 } from './api-schemas';
 import { audit } from './audit.server';
@@ -69,6 +91,12 @@ export async function handleCatalog(
   const post = request.method === 'POST';
 
   if (section === 'products') {
+    if (get && id && sub === 'sheet') {
+      const blocked = need('viewer');
+      if (blocked) return blocked;
+      const sheet = await c.getProductSheet(id);
+      return sheet ? json({ sheet }) : json({ error: 'Not found' }, 404);
+    }
     if (get && id && !sub) {
       const blocked = need('viewer');
       if (blocked) return blocked;
@@ -275,6 +303,125 @@ export async function handleCatalog(
       }
       return json({ feed }, 202);
     }
+  }
+
+  if (section === 'board' && get && !sub) {
+    const blocked = need('viewer');
+    if (blocked) return blocked;
+    if (!id) return json({ board: await c.catalogBoard() });
+    if (!(BOARD_COLUMNS as readonly string[]).includes(id))
+      return json({ error: `No column ${id}: one of ${BOARD_COLUMNS.join(', ')}` }, 404);
+    const q = new URL(request.url).searchParams;
+    const kind = q.get('kind');
+    if (kind && !(GAP_KINDS as readonly string[]).includes(kind))
+      return json({ error: `kind must be one of ${GAP_KINDS.join(', ')}` }, 400);
+    const limit = q.get('limit');
+    return json(
+      await c.listBoard({
+        column: id as BoardColumn,
+        kind: (kind as GapKind | null) ?? undefined,
+        cursor: q.get('cursor') ?? undefined,
+        limit: limit === null ? undefined : Number(limit),
+      }),
+    );
+  }
+
+  if (section === 'edits' && post && !sub) {
+    const blocked = need('operator');
+    if (blocked) return blocked;
+    if (!id) {
+      const parsed = catalogEditsInput.safeParse(await readJson(request));
+      if (!parsed.success) return invalid('edits', parsed.error.issues);
+      const results = await c.stageEdits(parsed.data.edits, by);
+      const staged = results.filter((r) => r.ok);
+      await audit(request, 'catalog.edits_staged', {
+        actor: caller,
+        detail: {
+          staged: staged.length,
+          refused: results.length - staged.length,
+          products: new Set(staged.map((r) => r.key)).size,
+          fromDrafts: parsed.data.edits.filter((e, i) => e.source === 'assistant' && results[i]?.ok)
+            .length,
+          via: 'api',
+        },
+      });
+      return json({ results });
+    }
+    if (id === 'discard') {
+      const parsed = catalogDiscardInput.safeParse(await readJson(request));
+      if (!parsed.success) return invalid('discard', parsed.error.issues);
+      const r = await c.discardStaged(parsed.data.items, by);
+      await audit(request, 'catalog.edits_discarded', {
+        actor: caller,
+        detail: { discarded: r.discarded, via: 'api' },
+      });
+      return json(r);
+    }
+    if (id === 'publish') {
+      const parsed = catalogPublishInput.safeParse(await readJson(request));
+      if (!parsed.success) return invalid('publish', parsed.error.issues);
+      const requestId = parsed.data.requestId ?? crypto.randomUUID();
+      const results = await c.publishStaged(parsed.data.keys, {
+        by,
+        requestId,
+        urgent: parsed.data.urgent,
+      });
+      const count = (s: string) => results.filter((r) => r.status === s).length;
+      await audit(request, 'catalog.edits_published', {
+        actor: caller,
+        detail: {
+          published: count('published'),
+          failed: count('failed'),
+          unchanged: count('unchanged'),
+          keys: results
+            .filter((r) => r.status === 'published')
+            .map((r) => r.key)
+            .slice(0, 50),
+          requestId,
+          urgent: parsed.data.urgent ?? false,
+          via: 'api',
+        },
+      });
+      return json({ requestId, results });
+    }
+  }
+
+  if (section === 'drafts' && post && !sub) {
+    const blocked = need('operator');
+    if (blocked) return blocked;
+    if (!id) {
+      const parsed = catalogDraftsInput.safeParse(await readJson(request));
+      if (!parsed.success) return invalid('drafts', parsed.error.issues);
+      const results = await c.putDrafts(parsed.data.drafts, by);
+      const saved = results.filter((r) => r.ok).length;
+      await audit(request, 'catalog.drafts_saved', {
+        actor: caller,
+        detail: { saved, refused: results.length - saved, via: 'api' },
+      });
+      return json({ results });
+    }
+    if (id === 'discard') {
+      const parsed = catalogDiscardInput.safeParse(await readJson(request));
+      if (!parsed.success) return invalid('discard', parsed.error.issues);
+      const r = await c.discardDrafts(parsed.data.items, by);
+      await audit(request, 'catalog.drafts_discarded', {
+        actor: caller,
+        detail: { discarded: r.discarded, via: 'api' },
+      });
+      return json(r);
+    }
+  }
+
+  if (section === 'gaps' && id === 'rebuild' && post && !sub) {
+    // Reads every product in the catalog: admin only.
+    const blocked = need('admin');
+    if (blocked) return blocked;
+    const r = await c.rebuildGaps(by);
+    await audit(request, 'catalog.gaps_rebuilt', {
+      actor: caller,
+      detail: { products: r.products, via: 'api' },
+    });
+    return json(r);
   }
 
   if (section === 'reindex' && post && !id) {

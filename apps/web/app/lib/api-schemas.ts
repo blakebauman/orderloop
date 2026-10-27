@@ -12,8 +12,11 @@ import {
 import {
   categorySchema,
   channelSchema,
+  EDIT_SOURCES,
+  EDITABLE_FIELDS,
   productInputSchema,
   productTypeSchema,
+  TEXT_MAX,
 } from '@orderloop/core/product';
 import { z } from 'zod';
 
@@ -102,3 +105,67 @@ export const catalogCategoriesInput = z.object({
 });
 
 export { channelSchema as catalogChannelInput, productTypeSchema as catalogTypeInput };
+
+// The product editor (/api/v1/catalog/edits, /drafts). Shapes only: the catalog checks each edit
+// against the product and its type and answers per edit.
+const productKey = z.string().min(1).max(128);
+const fieldRef = z.object({
+  field: z.enum(EDITABLE_FIELDS),
+  /** `attribute` only: the attribute's code. */
+  code: z.string().min(1).max(128).optional(),
+  /** `mediaAlt` only: the media's `src`. */
+  src: z.string().min(1).max(2048).optional(),
+  /** Every field but `status`. */
+  locale: z.string().min(1).max(35).optional(),
+});
+const editTarget = {
+  key: productKey,
+  ref: fieldRef,
+  /** `assistant` when a person accepts an assistant draft. */
+  source: z.enum(EDIT_SOURCES).optional(),
+};
+
+export const catalogEditsInput = z.object({
+  edits: z
+    .array(
+      z.discriminatedUnion('op', [
+        z.object({
+          ...editTarget,
+          op: z.literal('set'),
+          value: z.string().max(TEXT_MAX).nullable(),
+        }),
+        z.object({ ...editTarget, op: z.literal('clear') }),
+      ]),
+    )
+    .min(1)
+    .max(500),
+});
+
+/** Staged edits or drafts to drop: one field's, or without `ref` all of a product's. */
+export const catalogDiscardInput = z.object({
+  items: z
+    .array(z.object({ key: productKey, ref: fieldRef.optional() }))
+    .min(1)
+    .max(500),
+});
+
+export const catalogPublishInput = z.object({
+  keys: z.array(productKey).min(1).max(500),
+  /** Sending it again answers the first result and publishes nothing twice. */
+  requestId: z.string().min(1).max(128).optional(),
+  urgent: z.boolean().optional(),
+});
+
+export const catalogDraftsInput = z.object({
+  drafts: z
+    .array(
+      z.object({
+        key: productKey,
+        ref: fieldRef,
+        value: z.string().min(1).max(TEXT_MAX),
+        model: z.string().min(1).max(200).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});

@@ -36,6 +36,12 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'catalog.type_deleted': 'Deleted a product type',
   'catalog.channel_deleted': 'Deleted a catalog channel',
   'catalog.categories_deleted': 'Deleted catalog categories',
+  'catalog.edits_staged': 'Staged catalog edits',
+  'catalog.edits_discarded': 'Discarded staged catalog edits',
+  'catalog.edits_published': 'Published catalog edits',
+  'catalog.drafts_saved': 'Saved assistant drafts for catalog products',
+  'catalog.drafts_discarded': 'Discarded assistant drafts',
+  'catalog.gaps_rebuilt': "Rebuilt the catalog's gap index",
   'plugin.drafted': 'The assistant drafted a plugin',
   'plugin.draft_refused': 'The assistant’s plugin draft was refused',
 } as const;
