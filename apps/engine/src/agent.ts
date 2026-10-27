@@ -6,6 +6,7 @@
  */
 
 import {
+  aiGateFeedback,
   atLeast,
   type EdgeState,
   EMPTY_ORDER_STATE,
@@ -33,6 +34,7 @@ import {
 import { approvals, createDb, nodeRuns, orders } from '@orderloop/db';
 import { Agent, type Connection, type ConnectionContext, callable, getCurrentAgent } from 'agents';
 import { and, eq } from 'drizzle-orm';
+import { sendAiFeedback } from './ai';
 import { recordAudit } from './audit';
 import { compensateOrder } from './connectors';
 import { a2aAgent } from './namespaces';
@@ -595,6 +597,10 @@ export class OrderAgent extends Agent<Env, State> {
     if (!w || !this.state.instanceId) throw new Error('That node is not waiting for an approval');
     const instance = await this.env.ORDER_LOOP.get(this.state.instanceId);
     await instance.sendEvent({ type: w.eventType, payload: { decision, by, note: note ?? null } });
+    // The AI gate that sent the order here learns whether the review was needed.
+    const feedback = aiGateFeedback(this.state, nodeId, decision);
+    if (feedback && this.state.orderId)
+      this.ctx.waitUntil(sendAiFeedback(this.env, this.state.orderId, feedback));
     // On the order page's socket; an RPC caller (the web app, the assistant) records its own.
     if (caller)
       await recordAudit(this.env, 'approval.decided', {
