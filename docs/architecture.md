@@ -1285,7 +1285,10 @@ spend the gateway's rate limit twice, and one that read a name before a rename c
 vector after one that read it after). See
 [Configuration](configuration.md#bindings).
 
-The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_change`) fills missing
+The copilot (`EngineRpc.copilot`, also used by the assistant's `propose_flow_change`) answers with
+the whole graph, so it gets `COPILOT_MAX_TOKENS` (4,096) and `COPILOT_TIMEOUT_MS` (120 s) instead
+of `runJson`'s 2,048 and 20 s: a small flow took 18 s live, and nothing waits on it as an order step
+does. It fills missing
 config from catalog defaults, gives edges ids, keeps existing positions and re-runs layout only when
 nodes were added, then returns `validateGraph`'s errors and warnings with the graph. Every model
 call, the assistant's and Assess's included, goes through AI Gateway when `AI_GATEWAY_ID` is set.

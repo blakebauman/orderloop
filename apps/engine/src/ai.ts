@@ -554,6 +554,14 @@ const CATALOG_BRIEF = NODE_SPECS.map((s) => ({
   ),
 }));
 
+/**
+ * The copilot returns the whole graph, and Llama writes about 35 tokens a second: a large flow's
+ * graph runs past the default 2,048 tokens and the 20 s an order step waits. No step waits on the
+ * copilot, so it gets room to finish, as a plugin draft does.
+ */
+export const COPILOT_MAX_TOKENS = 4096;
+export const COPILOT_TIMEOUT_MS = 120_000;
+
 export async function copilot(env: Env, req: CopilotRequest): Promise<CopilotResult> {
   const { value } = await runJson<{ explanation: string; graph: FlowGraph }>(
     env,
@@ -615,6 +623,7 @@ Rules: exactly one trigger node. Edges: {id, source, target, sourceHandle}. sour
       required: ['explanation', 'graph'],
     },
     () => copilotHeuristic(req),
+    { maxTokens: COPILOT_MAX_TOKENS, timeoutMs: COPILOT_TIMEOUT_MS },
   );
   const graph = normalizeGraph(value.graph, req.graph);
   const { errors, warnings } = validateGraph(graph, await registry(env));

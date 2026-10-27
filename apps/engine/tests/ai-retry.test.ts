@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { FlowNode, Order, RunContext } from '@orderloop/core';
 import { describe, expect, it, vi } from 'vitest';
-import { runJson } from '../src/ai';
+import { COPILOT_MAX_TOKENS, copilot, runJson } from '../src/ai';
 import { assess } from '../src/clef';
 import { EXECUTORS, type ExecInput } from '../src/nodes';
 
@@ -140,6 +140,12 @@ describe('model calls in an order step', () => {
     } finally {
       errors.mockRestore();
     }
+  });
+
+  it('give the copilot room for a whole graph', async () => {
+    const m = model(() => ({ response: { explanation: 'ok', graph: { nodes: [], edges: [] } } }));
+    await copilot(m.env, { prompt: 'a web order' });
+    expect(m.calls[0]!.input.max_tokens).toBe(COPILOT_MAX_TOKENS);
   });
 
   it('Assess retries too', async () => {
