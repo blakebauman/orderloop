@@ -33,6 +33,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
 | `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset. It also locks `audit/` for the same number of days, or indefinitely when unset ([Bucket locks](#bucket-locks)) |
 | `catalogBackupDays` | `90` | Whole days (at least 31, so a backup outlives Durable Objects' 30 days of point-in-time recovery; refused below or fractional) the catalog's daily backups are kept. `provision.sh` replaces the catalog bucket's lifecycle rule `backups` (prefix `backups/`) with that expiry, and its lock rule `catalog-backups` with the same age, on every run ([Catalog backups](#catalog-backups), [Bucket locks](#bucket-locks)) |
+| `logRetentionDays` | `400` | Whole days (at least 30; refused below or fractional) the logs bucket `orderloop-logs<suffix>` keeps the Workers' trace events Logpush writes there. `provision.sh` replaces the bucket's lifecycle rule `logs` (prefix `workers/`) with that expiry on every run ([Logs](#logs)) |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `payments` | `mock` | `mock` or `stripe` (anything else is refused; a demo can't be `stripe`). `stripe` takes payments through Stripe with the environment's `STRIPE_SECRET_KEY`, and a deploy without that secret stops before it migrates anything. Rendered into the engine's `PAYMENTS_MODE` |
 | `stripePublishableKey` | none | The Stripe publishable key (`pk_test_…` or `pk_live_…`) of the same account and mode as `STRIPE_SECRET_KEY`; only with `payments` `stripe`, and a deploy whose secret key is in the other mode stops. Agentic checkout gives it to platforms to tokenize cards with. Rendered into the engine's `STRIPE_PUBLISHABLE_KEY` |
@@ -56,7 +57,8 @@ With the suffix, deployment `acme` gets these resource names:
 | Workflows | `orderloop-order-acme`, `orderloop-replenish-acme`, `orderloop-catalog-feed-acme`, `orderloop-catalog-backup-acme`, `orderloop-catalog-restore-acme` (Workflow names are unique per account) |
 | Plugin Worker and D1 | `orderloop-plugin-<id>-acme` for each installed plugin (the Worker and its database share the name) |
 | D1 | `orderloop-acme` (bound by the engine, web and catalog Workers; the catalog writes variant names and prices into `products`) |
-| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents, feed files and backups) |
+| R2 | `orderloop-docs-acme`, `orderloop-catalog-acme` (the catalog's published documents, feed files and backups), `orderloop-logs-acme` (the Workers' logs, from Logpush) |
+| Logpush | job `orderloop-workers-acme` (`workers_trace_events`, filtered to the deployment's Workers) and the R2 API token it writes with, `orderloop-logpush-acme` ([Logs](#logs)) |
 | Queues | `orderloop-catalog-feed-parts-acme` and its dead-letter queue `orderloop-catalog-feed-parts-dlq-acme`; the purge queue `orderloop-catalog-purge-acme` and its dead-letter queue `orderloop-catalog-purge-dlq-acme`; the listing-changes queue `orderloop-catalog-changes-acme` and its dead-letter queue `orderloop-catalog-changes-dlq-acme` (queue names are unique per account) |
 | Analytics Engine | dataset `orderloop_catalog_edge_acme` (dashes in the suffix become underscores) |
 | Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
@@ -89,6 +91,7 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    delete never ran (the docs bucket gets the same `health` rule). It sets the catalog
    bucket's lock rule `catalog-backups` on `backups/` for `catalogBackupDays` days
    ([Bucket locks](#bucket-locks)).
+   It creates the logs bucket `orderloop-logs<suffix>` (in the jurisdiction), replaces its lifecycle rule `logs` with a `logRetentionDays` expiry, and creates or updates the deployment's Logpush job ([Logs](#logs)); the job needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and without them it says it skipped it.
    It also sets the R2 lifecycle rule that expires the audit archive after `auditArchiveDays`, or removes it when that is unset, and the docs bucket's lock rules ([Bucket locks](#bucket-locks)); re-run it after changing the number.
    It sets the environment's `PRINCIPAL_KEY`, `DATA_KEY` and `PASSWORD_PEPPER` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without the first two. It never replaces a `DATA_KEY` or `PASSWORD_PEPPER` the web Worker already holds: when the environment has lost one, it stops and asks for the deployment's own value, since a new one would leave every secret sealed under the old key, or every password hashed with the old pepper, unreadable. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
@@ -245,6 +248,83 @@ the same four policies created on that account (dashboard **Notifications**, or 
 `/alerting/v3/policies`), sent to whoever is on call for it. Add a webhook or PagerDuty destination
 to a policy when email isn't enough. Log-match alert rules (Workers Observability alerts on a
 query) can only be made in the dashboard; prefer an error-level log, which Issues already catches.
+
+## Logs
+
+Workers Logs keeps 7 days. Every app Worker (web, engine, catalog, catalog-edge) and every
+plugin Worker also sets `logpush: true` ([Configuration](configuration.md#runtime-limits-and-observability)),
+and each deployment has one Workers Logpush job, `orderloop-workers<suffix>`, that writes their
+trace events to the deployment's own bucket, `orderloop-logs<suffix>` (in its jurisdiction), under
+`workers/<yyyymmdd>/` as gzipped NDJSON, one record per invocation. They are kept
+`logRetentionDays` days (default 400), then the bucket's lifecycle rule `logs` deletes them.
+`provision.sh` makes the bucket, the rule and the job; CI does nothing here, and a Worker with
+`logpush` but no job just pushes nothing, so deploys never depend on it.
+
+**What a record holds.** The job's fields are `LOG_FIELDS` in `scripts/fleet.ts`:
+`EventTimestampMs`, `EventType` (`fetch`, `queue`, `scheduled`, `alarm`, `worker_rpc`, …),
+`Outcome`, `ScriptName`, `Entrypoint` (the Durable Object or Workflow class), `ScriptVersion` (to
+match a deploy), `Exceptions` (with stacks), `Logs` (every `console` line: the `audit_event`
+lines, dead letters, retention sweeps and the rest) and `CPUTimeMs`/`WallTimeMs`. Logpush cuts
+`Logs` and `Exceptions` together at 16,384 characters an invocation; past that a record says
+`<<<Logpush: … truncated>>>`. The audit log itself is in D1 and its R2 archive, so a truncated
+line loses nothing of record.
+
+**What it leaves out, and why.** The `Event` field is not pushed. It is what started the
+invocation: for a request its URL, method, headers and `cf` object. Cloudflare redacts headers by
+name (`cookie`, `set-cookie`, and any name containing `auth`, `key`, `secret`, `token` or `jwt`)
+and long ID-like strings in the URL, but the headers still carry the client's IP
+(`cf-connecting-ip`), user agent and any credential header with another name, and
+`observability.redact_query_string` is documented for Workers Logs and traces, not for Logpush.
+Leaving `Event` out keeps query strings, `Authorization`, cookies and client addresses out of the
+bucket entirely; what it costs is the request line and response status of each invocation, and a
+queue's or cron's own details. The app's own lines are kept, so what the code logs is what the
+bucket holds: `audit_event` lines carry the actor (an email), target and IP of each audited
+action, as the audit log does, and they stay for `logRetentionDays` whatever
+`personalDataRetentionDays` erases from orders. To get the request line back, attach a Logpush
+transformer to the job that selects only the method, path and status from `Event`, and test it
+against a sample record first: the job then can't also have its filter (a transformer takes the
+`WHERE` instead).
+
+**One job per deployment, filtered.** A `workers_trace_events` job takes every Worker on the
+account that sets `logpush`, so each job's filter names its own deployment's Workers
+(`ScriptName in [...]`; `logpushJob` in `scripts/fleet.ts`, which refuses a filter past Logpush's
+1,000 bytes). `pnpm test:fleet` checks no two deployments' jobs share a Worker, a job or a bucket.
+Cloudflare documents a limit of 4 Logpush jobs per zone and publishes no account figure for
+account datasets such as `workers_trace_events`. If the same 4 applies to an account, a shared
+account holds four deployments' jobs (today `orderloop` and `demo` would take two). When
+`provision.sh` can't create one, it stops and says so: then ask Cloudflare to raise the limit, or
+put the customer on their own account, which any deployment is built to allow. One job for the
+whole account is not an option: it would put every deployment's logs behind one credential and
+in one place.
+
+**The credential.** Logpush writes to R2 as an S3 client. `provision.sh` makes the key itself: an
+account-owned API token, `orderloop-logpush<suffix>`, whose only permission is Workers R2 Storage
+Bucket Item Write on the logs bucket; the access key id is the token's id and the secret the
+SHA-256 of its value. The value exists only in the script's shell and in the job's destination
+(Cloudflare keeps it there); it is never printed or written to disk. A deployment in a
+jurisdiction is reached through its S3 endpoint (`<account>.<jurisdiction>.r2.cloudflarestorage.com`)
+instead of `r2://`. Creating the job or the token needs `CLOUDFLARE_API_TOKEN` with Logs Write
+and Account API Tokens Write; re-runs only update the job (filter, fields) and need Logs Write.
+That token is a person's, made in the dashboard (**Manage Account** > **Account API Tokens**), not
+CI's: token-making is not something the deploy should be able to do. To replace the key (a
+suspected leak, or a job whose last push failed for its credentials), run
+`ROTATE_LOGPUSH_KEY=1 ./scripts/provision.sh <id>`: it rolls the token's value and gives the job
+the new one. The bucket has no lock rule: Logpush's own writes are the only ones the token
+allows, and how its destination check writes has not been confirmed against a lock.
+
+**Reading them.** Download a day and search it:
+
+```bash
+wrangler r2 object get orderloop-logs<suffix>/workers/20261027/<file> --file part.gz --remote
+gunzip -c part.gz | jq -c 'select(.Outcome != "ok") | {EventTimestampMs, ScriptName, Exceptions}'
+gunzip -c part.gz | grep -F audit_event | jq -c '{EventTimestampMs, ScriptName, Logs}'
+```
+
+(Add `--jurisdiction` for a deployment in one. Wrangler can't list a bucket; list a day's files
+in the dashboard, **R2** > the bucket, or with any S3 client and an R2 read token.) The job's state, its last push and last error, is in
+the account's **Logpush** page in the dashboard. Cost: Workers Logpush is 10 million
+pushed records a month included on the account, then $0.05 a million, and R2 storage of the
+gzipped files.
 
 ## Holding and checking deployments
 
@@ -575,4 +655,4 @@ A deployment holds only that customer's data, so removing it is the erasure:
 2. Delete `deployments/<id>.jsonc` and merge, so CI stops deploying it.
 3. Delete the Workers (`orderloop-web-<id>`, `orderloop-engine-<id>`, `orderloop-catalog-<id>`, `orderloop-catalog-edge-<id>` and `orderloop-plugin-<plugin>-<id>` for each plugin, which removes their Durable
    Objects and Workflow instances), the D1 database, the R2 buckets (`orderloop-docs-<id>` and `orderloop-catalog-<id>`; empty them first, and before emptying `orderloop-docs-<id>` remove its [bucket locks](#bucket-locks), `wrangler r2 bucket lock remove orderloop-docs-<id> --name audit-archive` and `--name plugin-bundles`, and before emptying `orderloop-catalog-<id>` its `--name catalog-backups` (with `--jurisdiction` as provisioned), since a locked object can't be deleted and so neither can the bucket), the catalog's KV namespace, the two feed queues, the two purge queues and the two changes queues, each plugin's D1 database (`orderloop-plugin-<plugin>-<id>`), the AI
-   Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`.
+   Gateway and its logs, the OAuth KV namespace, the GitHub environment and `.secrets/<id>/`. Delete the Logpush job `orderloop-workers-<id>` and its token `orderloop-logpush-<id>` (the account's **Logpush** page in the dashboard, and **Manage Account** > **Account API Tokens**), and empty and delete `orderloop-logs-<id>` once the contract no longer needs its logs; until then the bucket keeps them for `logRetentionDays` on its own.

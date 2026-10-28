@@ -16,6 +16,7 @@
  *   node scripts/fleet.ts write-check <id>        the deploy smoke test's write check, signed with
  *                                                 PRINCIPAL_KEY from the environment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
+ *   node scripts/fleet.ts logpush <id>            its Logpush job's name, bucket, filter and fields, as JSON
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
  *   node scripts/fleet.ts set-catalog-kv <id> <kv id>  record the catalog's card KV namespace id
  *   node scripts/fleet.ts set-plugin-d1 <id> <plugin> <uuid>  record a plugin's D1 database id
@@ -120,6 +121,14 @@ export function keysProblem(env: Record<string, string | undefined>): string | n
 /** Days a deployment keeps its catalog backups when its registry doesn't say. */
 export const CATALOG_BACKUP_DAYS = 90;
 
+/**
+ * Days the logs bucket keeps Workers' pushed logs when the registry doesn't say: past a year, so an
+ * incident found at an annual review still has its logs, and the same as audit retention.
+ */
+export const LOG_RETENTION_DAYS = 400;
+/** Workers Logs itself keeps 7 days; less than a month here would add little to that. */
+export const MIN_LOG_RETENTION_DAYS = 30;
+
 export type Deployment = {
   id: string;
   ring: Ring;
@@ -161,6 +170,11 @@ export type Deployment = {
    * backup outlives Durable Objects' 30 days of point-in-time recovery). Default 90.
    */
   catalogBackupDays: number;
+  /**
+   * Days the logs bucket (`orderloop-logs<suffix>`) keeps what Logpush writes there, the Workers'
+   * trace events (at least 30). Default 400.
+   */
+  logRetentionDays: number;
   /** Model tokens a person's assistant may use a day (0: no limit); unset keeps the base. */
   assistantDailyTokens?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
@@ -364,6 +378,14 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   const backupDays = raw.catalogBackupDays;
   if (backupDays !== undefined && (!Number.isInteger(backupDays) || (backupDays as number) < 31))
     throw new Error(`${file}: catalogBackupDays must be a whole number of days, at least 31`);
+  const logDays = raw.logRetentionDays;
+  if (
+    logDays !== undefined &&
+    (!Number.isInteger(logDays) || (logDays as number) < MIN_LOG_RETENTION_DAYS)
+  )
+    throw new Error(
+      `${file}: logRetentionDays must be a whole number of days, at least ${MIN_LOG_RETENTION_DAYS}`,
+    );
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
@@ -530,6 +552,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(tokens !== undefined ? { assistantDailyTokens: tokens as number } : {}),
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     catalogBackupDays: backupDays === undefined ? CATALOG_BACKUP_DAYS : (backupDays as number),
+    logRetentionDays: logDays === undefined ? LOG_RETENTION_DAYS : (logDays as number),
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs === true,
     ...(sso
@@ -592,11 +615,59 @@ export const names = (d: Deployment) => ({
   catalogChanges: `orderloop-catalog-changes${d.suffix}`,
   catalogChangesDlq: `orderloop-catalog-changes-dlq${d.suffix}`,
   catalogPurgeDlq: `orderloop-catalog-purge-dlq${d.suffix}`,
+  /** Where Logpush writes the deployment's Workers' trace events, and the job and token that do. */
+  logs: `orderloop-logs${d.suffix}`,
+  logpushJob: `orderloop-workers${d.suffix}`,
+  logpushToken: `orderloop-logpush${d.suffix}`,
   // Analytics Engine dataset names allow letters, digits and underscores.
   catalogEdgeDataset: `orderloop_catalog_edge${d.suffix.replaceAll('-', '_')}`,
   /** A plugin's Worker and its D1 database share a name. */
   plugin: (p: string) => `orderloop-plugin-${p}${d.suffix}`,
 });
+
+/**
+ * The trace-event fields Logpush keeps. `Event` is left out: it is the request (URL, method,
+ * headers, `cf`) or the queue, cron or alarm that started the invocation, and its headers carry
+ * the client's IP and user agent and, past Cloudflare's name-based redaction, any credential
+ * header it doesn't recognise. What forensics needs is in `Logs`: the `audit_event` lines and
+ * every other line the code writes.
+ */
+export const LOG_FIELDS = [
+  'EventTimestampMs',
+  'EventType',
+  'Outcome',
+  'ScriptName',
+  'Entrypoint',
+  'ScriptVersion',
+  'Exceptions',
+  'Logs',
+  'CPUTimeMs',
+  'WallTimeMs',
+];
+
+/** Logpush refuses a filter longer than about 1,000 bytes. */
+const LOGPUSH_FILTER_MAX = 1000;
+
+/**
+ * The deployment's Logpush job (`provision.sh` creates or updates it): the Workers whose trace
+ * events it pushes, by script name, since a job for `workers_trace_events` otherwise takes every
+ * Worker on the account that sets `logpush`, other deployments' included.
+ */
+export function logpushJob(d: Deployment) {
+  const n = names(d);
+  const scripts = [n.web, n.engine, n.catalog, n.catalogEdge, ...workerPlugins(d).map(n.plugin)];
+  const filter = JSON.stringify({ where: { key: 'ScriptName', operator: 'in', value: scripts } });
+  if (filter.length > LOGPUSH_FILTER_MAX)
+    throw new Error(`${d.id}: its Logpush filter (${filter.length} bytes) is too long`);
+  return {
+    name: n.logpushJob,
+    bucket: n.logs,
+    prefix: 'workers/',
+    scripts,
+    filter,
+    output_options: { output_type: 'ndjson', field_names: LOG_FIELDS, timestamp_format: 'rfc3339' },
+  };
+}
 
 /** The engine's and web Worker's service bindings to the deployment's Worker plugins. */
 function pluginServices(d: Deployment) {
@@ -658,6 +729,9 @@ export function renderPlugin(base: Config, d: Deployment, p: string): Config {
   config.name = names(d).plugin(p);
   config.workers_dev = false;
   config.preview_urls = false;
+  // Its logs go to the deployment's logs bucket like the apps' (logpushJob names it). The
+  // deployment decides, so a plugin's own config can't say otherwise (PLUGIN_CONFIG_KEYS).
+  config.logpush = true;
   config.d1_databases = dbs.map((db) => ({
     ...db,
     database_name: names(d).plugin(p),
@@ -1155,6 +1229,12 @@ export function shellVars(d: Deployment): Record<string, string> {
     AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
     // How long catalog backups (backups/ in CATALOG_R2) are kept, and locked.
     CATALOG_BACKUP_DAYS: String(d.catalogBackupDays),
+    // The logs bucket, how long it keeps what Logpush writes, and the job and R2 token that write
+    // it (the job's filter and fields: `fleet.ts logpush <id>`).
+    LOGS_R2: n.logs,
+    LOG_RETENTION_DAYS: String(d.logRetentionDays),
+    LOGPUSH_JOB: n.logpushJob,
+    LOGPUSH_TOKEN: n.logpushToken,
     // Space-separated plugin ids; each one's D1 database is named orderloop-plugin-<id><suffix>.
     PLUGINS: workerPlugins(d).join(' '),
     // The deployment's own Secrets Store (own Cloudflare account), when its registry names one.
@@ -1307,6 +1387,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'status') await status();
     else if (cmd === 'write-check') await writeCheck(args[0]);
     else if (cmd === 'names') shellNames(args[0]);
+    else if (cmd === 'logpush') console.log(JSON.stringify(logpushJob(byId(args[0]))));
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
     else if (cmd === 'set-catalog-kv') setCatalogKv(args[0], args[1]);
     else if (cmd === 'set-plugin-d1') setPluginD1(args[0], args[1], args[2]);
@@ -1314,7 +1395,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|write-check|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
+        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|write-check|names|logpush|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

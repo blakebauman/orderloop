@@ -541,7 +541,10 @@ Not covered by the redaction:
 - **Workers logs** are on for the engine, web, catalog and catalog-edge Workers (`observability` in `wrangler.jsonc`, invocation logs
   included). Every audit event is also written as one `{"type":"audit_event",…}` JSON line
   (`apps/web/app/lib/audit.server.ts`, `apps/engine/src/audit.ts`), carrying `actor`, `target`, `detail` and `ip`; these lines
-  outlive the D1 retention and are subject to Cloudflare's log retention instead.
+  outlive the D1 retention and are subject to Cloudflare's log retention instead: 7 days in
+  Workers Logs, and `logRetentionDays` (default 400) in the deployment's logs bucket, where
+  Logpush copies them ([Logs](operations.md#logs)). Erasure doesn't reach them there; the bucket
+  never gets the request's URL, headers or client IP (`Event` isn't pushed).
 
 ## Retention
 

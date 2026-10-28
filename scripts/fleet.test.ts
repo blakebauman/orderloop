@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -8,7 +9,9 @@ import { parse } from 'jsonc-parser';
 import {
   healthCheckKey,
   keysProblem,
+  LOG_FIELDS,
   loadDeployments,
+  logpushJob,
   matrix,
   missingPluginSecrets,
   names,
@@ -897,4 +900,83 @@ test('the deploy refuses a shared key too short to sign with', () => {
     keysProblem({ PRINCIPAL_KEY: 'short', DATA_KEY: key, DATA_KEY_PREVIOUS: 'x'.repeat(31) }) ?? '',
     /^PRINCIPAL_KEY, DATA_KEY_PREVIOUS must be at least 32 characters/,
   );
+});
+
+test('logRetentionDays sets how long the logs bucket keeps pushed logs, at least 30', () => {
+  assert.equal(toDeployment(acme).logRetentionDays, 400);
+  assert.equal(shellVars(toDeployment(acme)).LOG_RETENTION_DAYS, '400');
+  assert.equal(shellVars(toDeployment(acme)).LOGS_R2, 'orderloop-logs-acme');
+  const month = toDeployment({ ...acme, logRetentionDays: 30 });
+  assert.equal(shellVars(month).LOG_RETENTION_DAYS, '30');
+  // Workers Logs already keeps 7 days; a week or two more is not worth a bucket.
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: 7 }), /at least 30/);
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: 90.5 }), /logRetentionDays/);
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: '400' }), /logRetentionDays/);
+});
+
+test("every Worker of a deployment sends its trace events to Logpush, plugins' too", () => {
+  const demo = toDeployment({ ...acme, id: 'acme-demo', demo: true });
+  for (const d of [...loadDeployments().filter((x) => x.d1Id && x.catalogKvId), acme, demo]) {
+    for (const [app, render] of [
+      ['engine', renderEngine],
+      ['web', renderWeb],
+      ['catalog', renderCatalog],
+      ['catalog-edge', renderCatalogEdge],
+    ] as const)
+      assert.equal(render(base(app), d).logpush, true, `${d.id}: ${app}`);
+  }
+  const pluginBase = { name: 'orderloop-plugin-ledger', d1_databases: [{ binding: 'DB' }] };
+  assert.equal(renderPlugin(pluginBase, withLedger, 'ledger').logpush, true);
+  // The deployment decides, not the plugin.
+  assert.throws(
+    () => renderPlugin({ ...pluginBase, logpush: false }, withLedger, 'ledger'),
+    /may not declare logpush/,
+  );
+});
+
+test("a deployment's Logpush job takes only its own Workers, without the request", () => {
+  const d = toDeployment({
+    ...acme,
+    plugins: { ledger: { d1Id: 'd1-ledger' }, carrier: { runtime: 'sandboxed' } },
+  });
+  const job = logpushJob(d);
+  assert.equal(job.name, 'orderloop-workers-acme');
+  assert.equal(job.bucket, 'orderloop-logs-acme');
+  // A sandboxed plugin runs in the engine: no Worker of its own to name.
+  assert.deepEqual(job.scripts, [
+    'orderloop-web-acme',
+    'orderloop-engine-acme',
+    'orderloop-catalog-acme',
+    'orderloop-catalog-edge-acme',
+    'orderloop-plugin-ledger-acme',
+  ]);
+  assert.deepEqual(JSON.parse(job.filter), {
+    where: { key: 'ScriptName', operator: 'in', value: job.scripts },
+  });
+  assert.deepEqual(job.output_options.field_names, LOG_FIELDS);
+  assert.ok(LOG_FIELDS.includes('Logs') && LOG_FIELDS.includes('Exceptions'));
+  // The request's URL, headers and client details stay out of the bucket.
+  assert.ok(!LOG_FIELDS.includes('Event'));
+  // On a shared account each job is filtered to its own deployment's Workers, so none takes
+  // another's, and no two deployments share a job or a bucket.
+  const all = [...loadDeployments(), d];
+  const seen = new Map<string, string>();
+  for (const x of all)
+    for (const s of logpushJob(x).scripts) {
+      assert.equal(seen.get(s), undefined, `${s} is in ${seen.get(s)}'s job and ${x.id}'s`);
+      seen.set(s, x.id);
+    }
+  assert.equal(new Set(all.map((x) => logpushJob(x).name)).size, all.length);
+  assert.equal(new Set(all.map((x) => logpushJob(x).bucket)).size, all.length);
+});
+
+test("a Logpush filter past Logpush's 1,000 bytes is refused before provisioning", () => {
+  const plugins = Object.fromEntries(
+    Array.from({ length: 30 }, (_, i) => [`plugin-number-${i}`, { d1Id: `d1-${i}` }]),
+  );
+  assert.throws(() => logpushJob(toDeployment({ ...acme, plugins })), /Logpush filter/);
+});
+
+test('provision.sh parses', () => {
+  execFileSync('bash', ['-n', join(import.meta.dirname, 'provision.sh')]);
 });
