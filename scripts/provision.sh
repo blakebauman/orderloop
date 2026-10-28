@@ -83,6 +83,10 @@ wrangler r2 bucket lifecycle add "$CATALOG_R2" backups backups/ --expire-days "$
   --force ${j[@]+"${j[@]}"}
 wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name restores ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
 wrangler r2 bucket lifecycle add "$CATALOG_R2" restores restores/ --expire-days 30 --force ${j[@]+"${j[@]}"}
+# The deploy smoke test's write check deletes its health/ object as it ends; one whose check was
+# cut off (a timeout) is gone a day later. Replaced each run, on both buckets.
+wrangler r2 bucket lifecycle remove "$CATALOG_R2" --name health ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$CATALOG_R2" health health/ --expire-days 1 --force ${j[@]+"${j[@]}"}
 # And nothing deletes or overwrites a backup before then: a lock of the same age, so the lifecycle
 # rule and the lock never disagree. The backup Workflow skips a key that exists, as the lock needs.
 # `lock set` replaces the bucket's whole lock configuration: this is the catalog bucket's only rule.
@@ -113,6 +117,10 @@ if [ -n "$AUDIT_ARCHIVE_DAYS" ]; then
     --force ${j[@]+"${j[@]}"}
   echo "Archived audit events in $R2 expire after $AUDIT_ARCHIVE_DAYS days"
 fi
+
+# The write check's leftovers in the docs bucket, as in the catalog's above.
+wrangler r2 bucket lifecycle remove "$R2" --name health ${j[@]+"${j[@]}"} >/dev/null 2>&1 || true
+wrangler r2 bucket lifecycle add "$R2" health health/ --expire-days 1 --force ${j[@]+"${j[@]}"}
 
 # Bucket locks on the same bucket: nothing deletes the audit archive before the lifecycle rule
 # above expires it (the same number of days, so the two never disagree; kept indefinitely when

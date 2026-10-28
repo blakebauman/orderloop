@@ -3,6 +3,7 @@
  * Worker's `CatalogApi` entrypoint over a service binding. Callers never import catalog source.
  */
 
+import type { HealthReport } from '../health';
 import type { FieldRef, Gap, GapGroup, GapKind } from './content';
 import type {
   Category,
@@ -361,4 +362,11 @@ export interface ProductCatalogRpc {
     keys: string[],
     opts: { by: string; requestId: string; urgent?: boolean },
   ): Promise<PublishResult[]>;
+  /**
+   * The deploy smoke test's write check (the web app's `POST /health/write`): a row through
+   * CatalogMeta's SQLite and one shard's, and an object through the published bucket under
+   * `health/`, which catalog-edge never serves; each written, read back and deleted. No product,
+   * outbox row or publish is touched.
+   */
+  writeHealth(): Promise<HealthReport>;
 }

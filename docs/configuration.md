@@ -185,8 +185,8 @@ with `head_sampling_rate` 0.05 (logs from 5% of requests; every request is still
 Engine) and source maps are uploaded.
 
 Both app Workers answer `GET /health` with `{ ok: true, service }`. The web app's
-`GET /health/deep` also checks D1, R2 and the engine (see
-[Request routing](architecture.md#request-routing)). The web app sets `workers_dev` and
+`GET /health/deep` also checks D1, R2 and the engine, and `POST /health/write`, which only CI can
+sign, writes through every store (see [Request routing](architecture.md#request-routing)). The web app sets `workers_dev` and
 `preview_urls` to `false` too, so `orderloop.app` is its only address and the zone's rules apply to
 every request.
 

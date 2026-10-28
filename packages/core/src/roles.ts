@@ -392,6 +392,64 @@ export async function verifyRpcActor(
 }
 
 /**
+ * The header carrying the deploy smoke test's write check (`POST /health/write`). CI signs it; no
+ * person, token or connected app ever can.
+ */
+export const HEALTH_CHECK_HEADER = 'x-orderloop-health-check';
+
+const HEALTH_CHECK_VERSION = 'h1';
+const HEALTH_CHECK_LABEL = 'orderloop-health-check';
+const healthKeys = new Map<string, Promise<string>>();
+
+/**
+ * The key the write check is signed with: an HMAC of the deployment's principal key with its own
+ * label, as `pluginKey` derives a plugin's. CI holds the principal key already, so it needs nothing
+ * new; and since every other envelope is checked under the principal key itself, a write check
+ * opens nothing else, nor anything else a write check. scripts/fleet.ts derives the same value.
+ */
+export function healthCheckKey(principalKey: string): Promise<string> {
+  let key = healthKeys.get(principalKey);
+  if (!key) {
+    key = (async () => {
+      const mac = await crypto.subtle.sign(
+        'HMAC',
+        await hmacKey(principalKey),
+        enc.encode(HEALTH_CHECK_LABEL),
+      );
+      return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
+    })();
+    healthKeys.set(principalKey, key);
+  }
+  return key;
+}
+
+/** The write check's header value for `path`, good for `PRINCIPAL_TTL_MS`: its own envelope (`h1`). */
+export async function signHealthCheck(
+  principalKey: string,
+  path: string,
+  now = Date.now(),
+): Promise<string> {
+  return seal(await healthCheckKey(principalKey), HEALTH_CHECK_VERSION, {
+    path,
+    exp: now + PRINCIPAL_TTL_MS,
+  });
+}
+
+/**
+ * Whether `header` is a write check signed under one of `principalKeys` (the current key, then the
+ * one before it while a rotation finishes) for this `path`, and not yet expired.
+ */
+export async function verifyHealthCheck(
+  principalKeys: readonly (string | undefined)[],
+  header: string | null | undefined,
+  path: string,
+  now = Date.now(),
+): Promise<boolean> {
+  const keys = await Promise.all(principalKeys.map((k) => (k ? healthCheckKey(k) : undefined)));
+  return (await unseal(keys, HEALTH_CHECK_VERSION, header, path, now)) !== null;
+}
+
+/**
  * The workspace setting (`workspace_settings`) that keeps whoever started an order from deciding
  * its approvals: `on` or `off` (the default).
  */

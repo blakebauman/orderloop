@@ -2,6 +2,7 @@ import {
   AGENT_CARD_PATH,
   agentCard,
   checkPluginView,
+  HEALTH_WRITE_PATH,
   isLegacyA2AVersion,
   legacyAgentCard,
   PLUGIN_VIEW_MAX_BYTES,
@@ -30,6 +31,7 @@ import { cartGuest } from '../app/lib/cart-guest.server';
 import { withSecurityHeaders } from '../app/lib/csp';
 import { demoRefusal } from '../app/lib/demo.server';
 import { docs, engine } from '../app/lib/env.server';
+import { writeHealth } from '../app/lib/health.server';
 import { mcpDiscovery } from '../app/lib/mcp-discovery';
 import { isOAuthPath, oauthFetch } from '../app/lib/oauth.server';
 import { openApiDocument } from '../app/lib/openapi';
@@ -179,6 +181,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   const url = new URL(request.url);
   if (url.pathname === '/health') return Response.json({ ok: true, service: 'orderloop-web' });
   if (url.pathname === '/health/deep') return deepHealth(env);
+  // The deploy smoke test's writes: signed by CI alone, ahead of setup and the demo lock, since a
+  // new or demo deployment's stores must take writes too.
+  if (url.pathname === HEALTH_WRITE_PATH && request.method === 'POST') return writeHealth(request);
 
   // With no people yet, a deployed workspace is waiting for its first admin: only the setup page
   // (and its assets) answer. On localhost the same state is open, for local development.

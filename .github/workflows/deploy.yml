@@ -56,7 +56,8 @@ jobs:
     # Also when there are no plugins (plugin-bundles skipped), never after it failed.
     if: ${{ !cancelled() && (needs.plugin-bundles.result == 'success' || needs.plugin-bundles.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The deploys, the Smoke test step's 28 minutes at most, and the rollback after it.
+    timeout-minutes: 45
     # The deployment's GitHub environment holds its secrets (PRINCIPAL_KEY and DATA_KEY, required,
     # and PRINCIPAL_KEY_PREVIOUS and DATA_KEY_PREVIOUS during a rotation; SETUP_TOKEN, SHOPIFY_WEBHOOK_SECRET,
     # STRIPE_WEBHOOK_SECRET, OIDC_CLIENT_SECRET, INTAKE_ALLOWLIST, SHIPPING_CARRIER_AUTH, STRIPE_SECRET_KEY,
@@ -283,18 +284,32 @@ jobs:
           [ "$(cat "$RUNNER_TEMP/web-secrets.json")" != "{}" ] && secrets=(--secrets-file "$RUNNER_TEMP/web-secrets.json")
           retry pnpm --filter @orderloop/web exec wrangler deploy "${secrets[@]}"
       # A new domain's certificate can take a few minutes to issue, so each check retries for up
-      # to five minutes before it counts as failed.
+      # to five minutes before it counts as failed, a request at most 20 s: each curl ends within
+      # about 5 min 20 s and the write check within 5 min, under 27 min for the five. The step's own
+      # timeout fails it (and so rolls the deploy back) if anything still hangs; the job's
+      # timeout leaves room for the deploys before it and the rollback after, since a job that
+      # times out is cancelled and skips the rollback.
+      # The write check signs with a key derived from PRINCIPAL_KEY (scripts/fleet.ts write-check),
+      # inside node: the key and the header stay out of the command line and the log.
       - name: Smoke test
         id: smoke
+        timeout-minutes: 28
+        env:
+          PRINCIPAL_KEY: ${{ secrets.PRINCIPAL_KEY }}
         run: |
-          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health"
+          curl -fsS --max-time 20 --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health"
           # D1, R2 and the engine (over the service binding) all answer.
-          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health/deep"
+          curl -fsS --max-time 20 --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health/deep"
+          # And they take writes: D1 from the web app and the engine, R2 under health/, the engine's
+          # and the catalog's Durable Object storage and the catalog's bucket, each written, read
+          # back and deleted. Tries for five minutes in all, ten seconds an attempt; a failure names
+          # the store.
+          node scripts/fleet.ts write-check "$ID"
           # The app itself, not just the health route: the sign-in page renders.
           # (On a workspace with no people yet it redirects to the setup page, which must render too.)
-          curl -fsSL --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
+          curl -fsSL --max-time 20 --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"
           # The public catalog API answers on its own host.
-          curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$CATALOG_DOMAIN/health"
+          curl -fsS --max-time 20 --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$CATALOG_DOMAIN/health"
       # A latency budget on the deployed app, once it is up. It warns rather than fails: a slow
       # runner or network blip must not roll production back. The best of three runs counts, so a
       # cold start alone doesn't trip it.

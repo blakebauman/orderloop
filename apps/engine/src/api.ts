@@ -12,6 +12,8 @@ import {
   type CopilotResult,
   type CreateCartInput,
   type EngineRpc,
+  HEALTH_WRITE_PATH,
+  healthReport,
   type OrderState,
   type PaymentEvent,
   type PluginCase,
@@ -23,9 +25,10 @@ import {
   type StartOrderOnceInput,
   type TaxCertificateInput,
   UCP_PATH,
+  verifyHealthCheck,
 } from '@orderloop/core';
 import type { ProductDraftRequest } from '@orderloop/core/product';
-import { createDb, orders } from '@orderloop/db';
+import { createDb, orders, probeDb } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { A2A_PATH, a2aCaller, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
@@ -42,8 +45,9 @@ import {
   submitCart,
 } from './cart/carts';
 import { searchCartProducts } from './cart/search';
+import { probeBucket } from './health';
 import { handleMcp, MCP_PATH } from './mcp';
-import { a2aAgent, cartAgent, orderAgent } from './namespaces';
+import { a2aAgent, cartAgent, healthProbe, orderAgent } from './namespaces';
 import { fromOutside, startOrder, startOrderOnce } from './orders';
 import { handleStripeEvent } from './payment-events';
 import { installedPlugins, pinnedManifest } from './plugin-host';
@@ -225,6 +229,20 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
       db: () => this.env.DB.prepare('select 1').first(),
       docs: () => this.env.DOCS.head('health'),
       ...plugins,
+    });
+  }
+
+  async writeHealth(signed: string) {
+    // Only CI can sign the check (from the principal key the two Workers share), so a caller
+    // without it costs no writes; refused, it also shows the web app and engine disagree on keys.
+    const keys = [this.env.PRINCIPAL_KEY, this.env.PRINCIPAL_KEY_PREVIOUS];
+    if (!(await verifyHealthCheck(keys, signed, HEALTH_WRITE_PATH)))
+      return healthReport('orderloop-engine', { signature: 'fail' });
+    const id = `engine-${crypto.randomUUID()}`;
+    return runHealthChecks('orderloop-engine', {
+      db: () => probeDb(createDb(this.env.DB), id),
+      docs: () => probeBucket(this.env.DOCS, id, (p) => this.ctx.waitUntil(p)),
+      objects: () => healthProbe(this.env).probe(id),
     });
   }
 

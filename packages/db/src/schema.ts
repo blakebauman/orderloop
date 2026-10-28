@@ -1090,3 +1090,12 @@ export const promotionRedemptions = sqliteTable(
     index('promotion_redemptions_customer').on(t.promotionId, t.customerId),
   ],
 );
+
+/**
+ * The deploy smoke test's write check: a row the web app or the engine writes, reads back and
+ * deletes (`probeDb`). Empty between checks.
+ */
+export const healthProbes = sqliteTable('health_probes', {
+  id: text('id').primaryKey(),
+  at: integer('at').notNull(),
+});

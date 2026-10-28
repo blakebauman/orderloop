@@ -7,7 +7,7 @@
  * (feed-import.ts); its progress is kept by CatalogFeeds.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { newId } from '@orderloop/core';
+import { type HealthReport, newId, runHealthChecks } from '@orderloop/core';
 import {
   aliasShard,
   BOARD_COLUMNS,
@@ -52,6 +52,7 @@ import {
   type WriteResult,
 } from '@orderloop/core/product';
 import { type CatalogConfig, feeds, meta, shard, shardFor, typeResolver } from './config';
+import { probeBucket } from './health';
 import { storeStream } from './upload';
 
 /** Products per putProducts call. */
@@ -551,5 +552,15 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
       ),
     );
     return { ok: true, deleted: r.categories.map((c) => c.code) };
+  }
+
+  writeHealth(): Promise<HealthReport> {
+    const id = `catalog-${crypto.randomUUID()}`;
+    // Shard 0 stands for the class: every shard runs the same code on the same kind of storage.
+    return runHealthChecks('orderloop-catalog', {
+      meta: () => meta(this.env).probe(id),
+      shard: () => shard(this.env, 0).probe(id),
+      published: () => probeBucket(this.env.PUBLISHED, id, (p) => this.ctx.waitUntil(p)),
+    });
   }
 }

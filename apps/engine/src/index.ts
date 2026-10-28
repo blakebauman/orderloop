@@ -20,6 +20,8 @@ export { OrderAgent } from './agent';
 export { EngineApi } from './api';
 export { AssistantAgent } from './assistant/agent';
 export { CartAgent } from './cart/agent';
+// The deploy smoke test's write check object (health.ts).
+export { HealthProbe } from './health';
 // What a plugin can ask of the core, bound into it as ORDERLOOP (plugin-api.ts).
 export { PluginHost } from './plugin-api';
 // The sandbox's capabilities, reached as `ctx.exports` by the plugins it loads (plugin-host.ts).

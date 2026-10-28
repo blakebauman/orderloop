@@ -33,6 +33,7 @@ import {
   tableColumns,
 } from './backup';
 import type { CatalogConfig } from './config';
+import { probeStorage } from './health';
 
 export class CatalogMeta extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -248,6 +249,11 @@ export class CatalogMeta extends DurableObject<Env> {
 
   session(): string {
     return this.sessionId;
+  }
+
+  /** The deploy smoke test's write: a row of its own table, written and gone (health.ts). */
+  probe(id: string): Promise<void> {
+    return probeStorage(this.ctx.storage, id);
   }
 
   /** Restarts on `bookmark`'s storage (`rewindInPlace`); the call itself fails as it aborts. */

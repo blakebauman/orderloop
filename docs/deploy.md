@@ -185,7 +185,7 @@ beside them the web app's [device tests](testing.md#devices-the-web-app-on-iphon
 `devices` job, which doesn't gate a deploy). On `main` it then deploys
 every deployment in `deployments/`, ring by ring ([Operations](operations.md#rings)). Each
 deployment's job (`.github/workflows/deploy.yml`) records a D1 Time Travel bookmark, migrates its
-D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker; a sandboxed plugin's bundle is published and pinned instead), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's,
+D1, deploys its catalog, deploys its catalog-edge, deploys each [plugin](plugins.md) (its D1 migrations, then its Worker; a sandboxed plugin's bundle is published and pinned instead), deploys its engine, deploys its web app, smoke-tests `/health`, `/health/deep` and `/login` on the app's host and `https://$CATALOG_DOMAIN/health` on the catalog's, then runs the [write check](#the-write-check),
 checks their latency (the best of three requests to `/login`, `/health/deep` and the catalog's
 `/health` against budgets of 1.5 s, 1 s and 0.5 s; over budget is a warning on the run, never a
 failure or a rollback) and, for `orderloop` only, deploys these docs, in that order, so a change never reaches a
@@ -223,6 +223,50 @@ because the Cloudflare API occasionally fails a request outright (codes `7403`, 
 step is safe to repeat. If the job still fails, re-run its failed jobs in GitHub Actions rather
 than deploying from a laptop. The manual commands under [First deploy](#first-deploy) are for
 setting up a new account.
+
+### The write check
+
+The smoke test's reads prove each store answers, not that it takes writes: a D1 that refuses
+writes, a Durable Object class that can't persist its SQLite or a missing table would pass them.
+So the last smoke check, `node scripts/fleet.ts write-check <id>`, posts to `/health/write` on the
+app's host, and each Worker writes, reads back and deletes:
+
+| Check | Store | What is written |
+|---|---|---|
+| `db`, `engine.db` | D1, through the web app's and the engine's bindings | A row in `health_probes` (migration `0061`), empty between checks |
+| `docs`, `engine.docs` | The `DOCS` bucket | An object under `health/` (never `audit/`, `plugins/` or `backups/`, which bucket locks keep from being overwritten or deleted) |
+| `engine.objects` | Durable Object SQLite | A row in the `HealthProbe` object (`v6`), never an order, cart or assistant |
+| `catalog.meta`, `catalog.shard` | CatalogMeta's and shard 0's SQLite | A row in each object's own `health_probes` table: no product, outbox row or publish |
+| `catalog.published` | The catalog's bucket | An object under `health/`, which catalog-edge never serves |
+
+Each check is pass or fail only, with `503` when any fails, so the log names the broken store and
+nothing about why. A row whose check stopped before its delete is cleared by the next check; an R2
+object whose delete never ran (the invocation keeps running for it with `waitUntil`, but one cut
+off even so) expires under the bucket's `health` lifecycle rule a day later. Like the other smoke
+checks it tries for five minutes in all: each attempt (signed afresh) gives up after 10 seconds,
+with 10 seconds between attempts, and neither an attempt nor a wait runs past the five minutes
+(`postWriteCheck` in `scripts/fleet.ts`). Its failure rolls the deploy back.
+
+Every smoke check is bounded, so a hang fails the deploy rather than cancelling it: a cancelled job
+skips the rollback step, which runs on `failure()` (and deliberately not on `cancelled()`, so a
+person cancelling a run never rolls production back). Each curl check retries for five minutes,
+each request at most 20 seconds (`--max-time 20`), so it ends within about 5 minutes 20 seconds;
+with the write check the step's worst case is under 27 minutes, and the step's own
+`timeout-minutes: 28` fails it if anything still hangs. The job's `timeout-minutes: 45` covers the
+deploys before it and the rollback after it. No queue send is checked: `wrangler deploy`
+already fails when a queue a Worker binds doesn't exist, and a test message would reach a
+consumer that has to act on it.
+
+The route isn't public. CI signs the `x-orderloop-health-check` header with
+`healthCheckKey(PRINCIPAL_KEY)`, an HMAC of the principal key with its own label (as each plugin's
+`PLUGIN_KEY` is derived), so it needs no new secret: the step gets `PRINCIPAL_KEY` from the
+environment and signs inside node, keeping the key and the header out of the command line and the
+log. The envelope (`h1`) is bound to `/health/write` and expires after a minute
+(`signHealthCheck` / `verifyHealthCheck` in `packages/core/src/roles.ts`). Every other envelope is
+checked under the principal key itself, so a write check opens nothing else, and nothing else
+(a principal header, an actor, a plugin's key) passes as one. The engine checks the same header
+again; an engine on another key than the web app's fails `engine.signature`. Only the shared key
+can sign one, and all it can do is these writes.
 
 ### Restoring D1
 

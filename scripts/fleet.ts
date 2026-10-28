@@ -13,6 +13,8 @@
  *   node scripts/fleet.ts check-plugin-secrets <id> <plugin> <manifest.json>  fail if a secret the
  *                                                 plugin needs isn't set (STORE_SECRET_NAMES or ENV_SECRETS)
  *   node scripts/fleet.ts status                  deep health of every deployment
+ *   node scripts/fleet.ts write-check <id>        the deploy smoke test's write check, signed with
+ *                                                 PRINCIPAL_KEY from the environment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
  *   node scripts/fleet.ts set-catalog-kv <id> <kv id>  record the catalog's card KV namespace id
@@ -1219,6 +1221,82 @@ async function status() {
   }
 }
 
+/** The write check's path and header (`HEALTH_WRITE_PATH`, `HEALTH_CHECK_HEADER` in @orderloop/core). */
+const HEALTH_WRITE_PATH = '/health/write';
+const HEALTH_CHECK_HEADER = 'x-orderloop-health-check';
+
+/**
+ * The key the deploy smoke test signs its write check with: the HMAC of the deployment's principal
+ * key with the check's own label, as `healthCheckKey` in @orderloop/core derives it (fleet.test.ts
+ * holds the two to the same vector).
+ */
+export const healthCheckKey = (principalKey: string) =>
+  createHmac('sha256', principalKey).update('orderloop-health-check').digest('hex');
+
+/** The write check's header value, good for a minute (`signHealthCheck` in @orderloop/core). */
+export function signHealthCheck(principalKey: string, now = Date.now()): string {
+  const body = JSON.stringify({ path: HEALTH_WRITE_PATH, exp: now + 60_000 });
+  const signed = `h1.${Buffer.from(body).toString('base64url')}`;
+  const sig = createHmac('sha256', healthCheckKey(principalKey)).update(signed).digest('base64url');
+  return `${signed}.${sig}`;
+}
+
+/** How long the write check may take in all: five minutes, like the smoke test's curl checks. */
+export const WRITE_CHECK_DEADLINE_MS = 5 * 60_000;
+/** How long one attempt may take before it counts as failed (the Workers' own checks take 3 s). */
+export const WRITE_CHECK_ATTEMPT_MS = 10_000;
+/** The wait between attempts. */
+export const WRITE_CHECK_DELAY_MS = 10_000;
+
+/**
+ * Posts the write check to `url` until it answers `200` or `deadlineMs` has passed, and returns the
+ * report. No attempt and no wait runs past the deadline, so the whole check ends within it (a new
+ * Worker version takes a moment to be everywhere; the deploy job's Smoke test step also has a
+ * timeout of its own). Each attempt is signed afresh, since a header lasts a minute. The header is
+ * never printed; a report names only checks and pass or fail.
+ */
+export async function postWriteCheck(
+  url: string,
+  principalKey: string,
+  {
+    deadlineMs = WRITE_CHECK_DEADLINE_MS,
+    attemptMs = WRITE_CHECK_ATTEMPT_MS,
+    delayMs = WRITE_CHECK_DELAY_MS,
+    log = console.log as (line: string) => void,
+  } = {},
+): Promise<string> {
+  const deadline = Date.now() + deadlineMs;
+  let last = 'no attempt';
+  for (let attempt = 1; ; attempt++) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { [HEALTH_CHECK_HEADER]: signHealthCheck(principalKey) },
+        signal: AbortSignal.timeout(Math.min(attemptMs, left)),
+      });
+      const body = await r.text();
+      if (r.ok) return body;
+      last = `${r.status} ${body.slice(0, 500)}`;
+    } catch (err) {
+      last = (err as Error).message;
+    }
+    const wait = Math.min(delayMs, deadline - Date.now());
+    if (wait <= 0) break;
+    log(`write check attempt ${attempt} failed: ${last}`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  throw new Error(`write check failed: ${last}`);
+}
+
+/** The write check on deployment `id`, with PRINCIPAL_KEY from the environment. */
+async function writeCheck(id: string | undefined) {
+  const key = process.env.PRINCIPAL_KEY;
+  if (!key) throw new Error('write-check needs PRINCIPAL_KEY in the environment');
+  console.log(await postWriteCheck(`https://${byId(id).domain}${HEALTH_WRITE_PATH}`, key));
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [cmd, ...args] = process.argv.slice(2);
   try {
@@ -1227,6 +1305,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'secrets') secrets(args[0], args[1], args[2], args[3]);
     else if (cmd === 'check-plugin-secrets') checkPluginSecrets(args[0], args[1], args[2]);
     else if (cmd === 'status') await status();
+    else if (cmd === 'write-check') await writeCheck(args[0]);
     else if (cmd === 'names') shellNames(args[0]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
     else if (cmd === 'set-catalog-kv') setCatalogKv(args[0], args[1]);
@@ -1235,7 +1314,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
+        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|write-check|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

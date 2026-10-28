@@ -71,6 +71,7 @@ import {
   tableColumns,
 } from './backup';
 import { type CatalogConfig, meta, shard, typeResolver } from './config';
+import { probeStorage } from './health';
 import { type ListingChange, sendChanges } from './listings';
 import { publishKeys } from './publish';
 
@@ -764,6 +765,11 @@ export class CatalogShard extends DurableObject<Env> {
 
   session(): string {
     return this.sessionId;
+  }
+
+  /** The deploy smoke test's write: a row of its own table, written and gone (health.ts). */
+  probe(id: string): Promise<void> {
+    return probeStorage(this.ctx.storage, id);
   }
 
   /**
