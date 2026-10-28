@@ -6,7 +6,7 @@ import {
 } from '@orderloop/core';
 import { eventShort } from './events';
 
-export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
+export const STATUS_COLOR: Record<NodeStatus | OrderStatus | 'recorded', string> = {
   pending: 'var(--idle)',
   queued: 'var(--idle)',
   running: 'var(--run)',
@@ -19,6 +19,8 @@ export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
   skipped: 'var(--idle)',
   cancelled: 'var(--idle)',
   rolled_back: 'var(--undo)',
+  // An open order with no run (`liveStatus`): history, not work, so never the wait's amber.
+  recorded: 'var(--idle)',
 };
 
 export const statusColor = (s: string | undefined) =>
@@ -32,6 +34,17 @@ export const orderStatus = (status: string, id: string, declined?: Set<string> |
   status === 'cancelled' && (Array.isArray(declined) ? declined.includes(id) : declined?.has(id))
     ? 'declined'
     : status;
+
+/**
+ * An order's status as live work. An order the index left open but the engine has no run for (a
+ * recorded one: no `instanceId`) can't move, so it reads "recorded" rather than queued, running or
+ * waiting, and nothing counts it as overdue. An ended order keeps its status.
+ */
+export function liveStatus(o: { status: string; instanceId: string | null }) {
+  return !o.instanceId && ['queued', 'running', 'waiting'].includes(o.status)
+    ? 'recorded'
+    : o.status;
+}
 
 /** Sentence-case status for badges: "rolled_back" → "Rolled back". */
 export const statusLabel = (s: string) => humanize(s);

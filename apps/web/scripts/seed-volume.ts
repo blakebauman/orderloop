@@ -8,19 +8,22 @@
  *   pnpm db:seed:volume --cleanup
  *
  * Orders go on the built-in flows (published here as the app does on first use), with steps,
- * waits, failures and reasons taken from each flow's own nodes: open orders wait at an approval
- * (with a pending approval), an event or a timer; ended ones completed, failed, rolled back, were
- * declined or cancelled, spread over the window with a weekly rhythm and some growth. Each gets
- * its payments (captures, charges and some refunds), approvals already decided, and a timing row
- * per step it ran (`node_runs`), so every overview and Performance figure has something to count.
+ * failures and reasons taken from each flow's own nodes. Every one has ended: completed, failed,
+ * rolled back, declined or cancelled, spread over the window with a weekly rhythm and some growth.
+ * Each gets its payments (captures, charges and some refunds), the approvals it passed (decided),
+ * and a timing row per step it ran (`node_runs`), so every overview and Performance figure has
+ * something to count.
  *
- * Only the orders index is written: there is no OrderAgent or Workflow behind these orders, so an
- * order's own page has no timeline or graph. Every row it writes has an id starting `ord_bench_`
- * (orders), `pay_bench_`, `apr_bench_` or `cus_bench_`, in channel `bench`, and `--cleanup`
- * deletes exactly those. The same `--seed` gives the same data relative to today.
+ * Only the orders index is written: there is no OrderAgent or Workflow behind these orders (their
+ * `instance_id` is null, which is how the app tells a recorded order), so an order's own page is
+ * the read-only recorded view. That is why none is left open: a wait or a pending approval on one
+ * could never be acted on. Open work comes from `pnpm db:seed:live`, which starts real orders.
+ * Every row it writes has an id starting `ord_bench_` (orders), `pay_bench_`, `apr_bench_`,
+ * `cus_bench_`, `cart_bench_` or `pr_bench_`, or a `BENCH-` SKU, and `--cleanup` deletes exactly
+ * those. The same `--seed` gives the same data relative to today.
  */
 
-import { durationMs, type Flow, TEMPLATES, withDefaults } from '@orderloop/core';
+import { type Flow, ORDER_CHANNELS, type OrderChannel, TEMPLATES } from '@orderloop/core';
 import { createDb, seedFlows } from '@orderloop/db';
 import { DAY, failWith, HOUR, inserts, localEnv, MIN, rng, run } from './seed-lib';
 
@@ -216,6 +219,50 @@ const CART_TITLES = [
 
 const BUSINESS_MODELS = new Set(['b2b', 'procurement', 'replenishment']);
 
+/**
+ * The channels each built-in flow's orders arrive on, weighted: the channels its trigger routes
+ * from (the template's `channels`), the busiest first.
+ */
+const CHANNELS: Record<string, readonly (readonly [OrderChannel, number])[]> = {
+  'tpl-storefront-order': [
+    ['web', 60],
+    ['mobile', 32],
+    ['api', 8],
+  ],
+  'tpl-marketplace-order': [
+    ['marketplace', 70],
+    ['web', 18],
+    ['mobile', 12],
+  ],
+  'tpl-omnichannel-order': [
+    ['web', 50],
+    ['mobile', 40],
+    ['api', 10],
+  ],
+  'tpl-pos-sale': [['pos', 1]],
+  'tpl-b2b-order': [
+    ['email', 40],
+    ['edi', 30],
+    ['api', 20],
+    ['manual', 10],
+  ],
+  'tpl-subscription': [
+    ['web', 70],
+    ['mobile', 30],
+  ],
+  'tpl-purchase-request': [
+    ['manual', 80],
+    ['email', 20],
+  ],
+  'tpl-reorder': [
+    ['schedule', 85],
+    ['manual', 15],
+  ],
+};
+for (const [flow, channels] of Object.entries(CHANNELS))
+  for (const [c] of channels)
+    if (!ORDER_CHANNELS.includes(c)) throw new Error(`seed-volume: ${flow} has no channel ${c}`);
+
 type FlowRow = { id: string; name: string; published_version: number | null };
 
 async function main() {
@@ -370,9 +417,6 @@ async function generate(db: D1Database) {
     const steps = [...(flow.nodes as Flow['nodes'])]
       .filter((n) => n.type !== 'control.end' && !n.type.startsWith('trigger.'))
       .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
-    const waits = steps.filter((n) =>
-      ['control.approval', 'control.wait_event', 'control.wait'].includes(n.type),
-    );
     const failable = steps.filter((n) => FAILS[n.type]);
     const approvalsInFlow = steps.filter((n) => n.type === 'control.approval');
     const title = business
@@ -392,139 +436,81 @@ async function generate(db: D1Database) {
         ? r.pick(['Monthly coffee box', 'Quarterly filters', 'Weekly produce box'])
         : `Order ${10_000 + i}`;
 
-    // Where it is now: recent orders may still be open; older ones have ended.
+    // When it ended: its usual span after it started, or, for an order started too recently to
+    // have run its span, some time between its start and now. None is left open (see the top).
     const age = now - createdAt;
-    // When it ends, if it has: an order whose end is still to come is open now.
-    const endsAt = createdAt + Math.floor(mix.ends[0] + r.next() * (mix.ends[1] - mix.ends[0]));
-    const open = endsAt > now;
-    let status: string;
-    let updatedAt: number;
-    let waitingAt: string | null = null;
-    let waitingOn: string | null = null;
-    let waitingFor: string | null = null;
-    let waitingSince: number | null = null;
-    let waitingDue: number | null = null;
+    const endsAt = Math.min(
+      createdAt + Math.floor(mix.ends[0] + r.next() * (mix.ends[1] - mix.ends[0])),
+      createdAt + Math.floor(age * (0.3 + 0.7 * r.next())),
+    );
+    const status = r.weighted([
+      ['completed', 84],
+      ['failed', 4.5],
+      ['rolled_back', 2.5],
+      ['declined', approvalsInFlow.length ? 4 : 0.5],
+      ['cancelled', 4.5],
+    ] as const);
+    const updatedAt = endsAt;
     let stoppedAt: string | null = null;
     let reason: string | null = null;
     let stopIndex = steps.length; // steps that ran, for node_runs
 
-    if (open && waits.length && r.chance(0.85)) {
-      const w = r.pick(waits);
-      status = 'waiting';
-      waitingAt = w.label;
-      waitingSince = createdAt + Math.floor(r.next() * Math.min(age, HOUR * 6));
-      // A share of waits have been sitting for over a day, so the overview has stale ones to show.
-      if (r.chance(0.2) && age > DAY) waitingSince = createdAt + Math.floor(r.next() * (age - DAY));
-      updatedAt = waitingSince;
-      const cfg = (w.config ?? {}) as Record<string, unknown>;
-      // An approval or event wait is due when its step times out, as the engine sets it (unscaled,
-      // seven days when the step has none); the stale share above can run past it, so the overview
-      // has overdue waits as well as long ones on time. A timer has no deadline.
-      if (w.type !== 'control.wait')
-        waitingDue =
-          waitingSince + durationMs(String(withDefaults(w.type, cfg).timeout || '7 days'));
-      if (w.type === 'control.approval') {
-        waitingFor = `person:${String(cfg.assignee ?? '')}`;
-        waitingOn = `${w.label} for ${title}`;
+    if (status === 'failed' || status === 'rolled_back') {
+      const at = failable.length ? r.pick(failable) : r.pick(steps);
+      stoppedAt = at.label;
+      reason = r.pick(FAILS[at.type] ?? ['Step failed']);
+      if (
+        status === 'rolled_back' &&
+        steps.slice(0, steps.indexOf(at)).some((n) => n.type === 'commerce.reserve_inventory')
+      )
+        reason += '; reservations released';
+      stopIndex = steps.indexOf(at);
+    } else if (status === 'declined') {
+      const at = approvalsInFlow.length ? r.pick(approvalsInFlow) : r.pick(steps);
+      stoppedAt = at.label;
+      reason = r.pick([
+        'Rejected by the approver',
+        'No approval decision in time',
+        'Outside policy',
+      ]);
+      stopIndex = steps.indexOf(at);
+      if (at.type === 'control.approval')
         approvalRows.push([
           `apr_bench_${id.slice(10)}`,
           id,
-          w.id,
-          `approval-${w.id}`,
-          waitingOn,
-          String(cfg.assignee ?? ''),
+          at.id,
+          `approval-${at.id}`,
+          `${at.label} for ${title}`,
+          String((at.config as Record<string, unknown>)?.assignee ?? ''),
           amount,
-          'pending',
+          reason.startsWith('No') ? 'escalated' : 'rejected',
           null,
-          waitingSince,
-          null,
-          null,
+          createdAt + Math.floor((updatedAt - createdAt) / 2),
+          updatedAt,
+          reason.startsWith('No') ? null : 'bench@example.com',
         ]);
-      } else if (w.type === 'control.wait_event') {
-        waitingFor = `event:${String(cfg.event ?? '')}`;
-        waitingOn = `Waiting for ${String(cfg.event ?? '')}`;
-      } else {
-        waitingFor = 'timer';
-      }
-      stopIndex = steps.indexOf(w);
-    } else if (open) {
-      status = r.chance(0.7) ? 'running' : 'queued';
-      updatedAt = createdAt + Math.floor(r.next() * Math.min(age, 10 * MIN));
-      stopIndex = Math.floor(steps.length / 3);
-    } else {
-      status = r.weighted([
-        ['completed', 84],
-        ['failed', 4.5],
-        ['rolled_back', 2.5],
-        ['declined', approvalsInFlow.length ? 4 : 0.5],
-        ['cancelled', 4.5],
-      ] as const);
-      updatedAt = endsAt;
-      if (status === 'failed' || status === 'rolled_back') {
-        const at = failable.length ? r.pick(failable) : r.pick(steps);
-        stoppedAt = at.label;
-        reason = r.pick(FAILS[at.type] ?? ['Step failed']);
-        if (
-          status === 'rolled_back' &&
-          steps.slice(0, steps.indexOf(at)).some((n) => n.type === 'commerce.reserve_inventory')
-        )
-          reason += '; reservations released';
-        stopIndex = steps.indexOf(at);
-      } else if (status === 'declined') {
-        const at = approvalsInFlow.length ? r.pick(approvalsInFlow) : r.pick(steps);
-        stoppedAt = at.label;
-        reason = r.pick([
-          'Rejected by the approver',
-          'No approval decision in time',
-          'Outside policy',
-        ]);
-        stopIndex = steps.indexOf(at);
-        if (at.type === 'control.approval')
-          approvalRows.push([
-            `apr_bench_${id.slice(10)}`,
-            id,
-            at.id,
-            `approval-${at.id}`,
-            `${at.label} for ${title}`,
-            String((at.config as Record<string, unknown>)?.assignee ?? ''),
-            amount,
-            reason.startsWith('No') ? 'escalated' : 'rejected',
-            null,
-            createdAt + HOUR,
-            updatedAt,
-            reason.startsWith('No') ? null : 'bench@example.com',
-          ]);
-      } else if (status === 'cancelled') {
-        reason = r.pick([
-          'Cancelled by the customer',
-          'Duplicate order',
-          'Cancelled by an operator',
-        ]);
-        stopIndex = r.int(1, Math.max(1, steps.length - 2));
-      }
+    } else if (status === 'cancelled') {
+      reason = r.pick(['Cancelled by the customer', 'Duplicate order', 'Cancelled by an operator']);
+      stopIndex = r.int(1, Math.max(1, steps.length - 2));
     }
     counts[status] = (counts[status] ?? 0) + 1;
 
     orderRows.push([
       id,
       flow.model,
-      'bench',
+      r.weighted(CHANNELS[flow.id] ?? [['api', 1]]),
       null,
       business ? null : customer[2],
       status,
       title,
       flow.id,
       version,
+      // No run: the engine never started it, so it reads as a recorded order everywhere.
       null,
       1,
       customer[0],
       currency,
       amount,
-      waitingOn,
-      waitingAt,
-      waitingSince,
-      waitingDue,
-      waitingFor,
       stoppedAt,
       reason,
       createdAt,
@@ -533,7 +519,7 @@ async function generate(db: D1Database) {
       null,
     ]);
 
-    // Approvals it passed on the way (decided, for the approvals history).
+    // Approvals it passed on the way (decided, for the approvals history), before it ended.
     for (const a of approvalsInFlow)
       if (steps.indexOf(a) < stopIndex && r.chance(0.8))
         approvalRows.push([
@@ -547,18 +533,14 @@ async function generate(db: D1Database) {
           'approved',
           null,
           createdAt + MIN,
-          createdAt + r.around(3 * HOUR, 1),
+          Math.min(updatedAt, createdAt + r.around(3 * HOUR, 1)),
           'bench@example.com',
         ]);
 
-    // Money: a card is taken soon after checkout (so open orders past it have paid too); a B2B
-    // invoice is paid when the order completes. Some completed orders are refunded later.
-    const paidAt = business ? updatedAt : createdAt + r.around(HOUR, 1.5);
-    if (
-      !['procurement', 'replenishment'].includes(flow.model) &&
-      paidAt < now &&
-      (status === 'completed' || (!business && status === 'waiting'))
-    ) {
+    // Money: a card is taken soon after checkout; a B2B invoice is paid when the order completes.
+    // Some completed orders are refunded later.
+    const paidAt = business ? updatedAt : Math.min(updatedAt, createdAt + r.around(HOUR, 1.5));
+    if (!['procurement', 'replenishment'].includes(flow.model) && status === 'completed') {
       paymentRows.push([
         `pay_bench_${id.slice(10)}`,
         id,
@@ -730,11 +712,6 @@ async function generate(db: D1Database) {
         'customer_id',
         'currency',
         'total',
-        'waiting_on',
-        'waiting_at',
-        'waiting_since',
-        'waiting_due',
-        'waiting_for',
         'stopped_at',
         'reason',
         'created_at',

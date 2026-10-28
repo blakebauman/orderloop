@@ -43,6 +43,8 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
+  isNull,
   lt,
   not,
   or,
@@ -76,6 +78,17 @@ export type OrderFilters = {
   /** Newest-first paging: only orders created before the previous page's last row. */
   after?: OrderCursor;
 };
+
+/**
+ * An order the engine runs: the engine names its Workflow instance in the index when it starts the
+ * order. A recorded order (one `pnpm db:seed:volume` wrote straight into the index) has none, so
+ * nothing can resume it: it is never live work. No live count, queue or open-status filter includes
+ * it, and a list shows its open status as "Recorded" (`liveStatus` in format.ts).
+ */
+const hasRun = isNotNull(orders.instanceId);
+
+/** Open statuses: an order in one is live work only while it has a run. */
+const OPEN_STATUSES = ['queued', 'running', 'waiting'];
 
 export const WITHIN = { '24h': 86_400_000, '7d': 7 * 86_400_000 } as const;
 export type Within = keyof typeof WITHIN;
@@ -156,17 +169,20 @@ function ordersWhere(f: OrderFilters) {
       ? // Orders declined before `declined` existed were stored as cancelled (see `orderStatus`).
         or(eq(orders.status, 'declined'), inArray(orders.id, declinedIds()))
       : f.status
-        ? eq(orders.status, f.status)
+        ? and(eq(orders.status, f.status), OPEN_STATUSES.includes(f.status) ? hasRun : undefined)
         : undefined,
     f.attention
       ? or(
           inArray(orders.status, ['failed', 'rolled_back']),
-          inArray(
-            orders.id,
-            db()
-              .select({ id: approvals.orderId })
-              .from(approvals)
-              .where(eq(approvals.status, 'pending')),
+          and(
+            hasRun,
+            inArray(
+              orders.id,
+              db()
+                .select({ id: approvals.orderId })
+                .from(approvals)
+                .where(eq(approvals.status, 'pending')),
+            ),
           ),
         )
       : undefined,
@@ -199,11 +215,11 @@ export async function overview(now = Date.now()) {
       d
         .select({ status: orders.status, n: sql<number>`count(*)` })
         .from(orders)
-        .where(inArray(orders.status, ['queued', 'running', 'waiting']))
+        .where(and(inArray(orders.status, OPEN_STATUSES), hasRun))
         .groupBy(orders.status),
       ordersQuery(d, { sort: 'updated' }, 8),
-      // The longest-waiting few; the queue's size comes with them.
-      approvalsQuery(d, 'pending', { limit: 5 }),
+      // The longest-waiting few that can be decided; the queue's size comes with them.
+      approvalsQuery(d, 'pending', { scope: 'live', limit: 5 }),
       // What ended in the last 24 hours, by status (an ended order's last update is its end).
       d
         .select({
@@ -230,7 +246,7 @@ export async function overview(now = Date.now()) {
           overdue: sql<number>`coalesce(sum(${orders.waitingDue} <= ${now}), 0)`,
         })
         .from(orders)
-        .where(eq(orders.status, 'waiting'))
+        .where(and(eq(orders.status, 'waiting'), hasRun))
         .groupBy(orders.flowId, orders.waitingAt, orders.waitingFor),
       // Where orders ended badly this week, by flow and step, with the latest reason. Grouped in
       // SQL; the reason is the newest order's, picked by the max-updatedAt row of each group. The
@@ -271,14 +287,27 @@ export const APPROVALS_PAGE = 50;
 export type ApprovalCursor = { requestedAt: number; id: string };
 
 /**
+ * Which approvals, by their order: those on orders with a run, which a decision resumes (`live`),
+ * or those on recorded orders, which nothing can decide (`recorded`). Unset, every approval.
+ */
+export type ApprovalScope = 'live' | 'recorded';
+
+/** The approvals a scope picks, over a query that joins `orders` (left: a missing one is recorded). */
+const inScope = (scope?: ApprovalScope) =>
+  scope === 'live' ? hasRun : scope === 'recorded' ? isNull(orders.instanceId) : undefined;
+
+/**
  * One page of the approvals inbox, with how many rows match and how many came before this page.
  * Pending approvals read oldest request first (the longest wait is the most urgent); history reads
- * newest first. Pages are keyed by the last row, so a decision taken meanwhile shifts nothing.
+ * newest first. Pages are keyed by the last row, so a decision taken meanwhile shifts nothing. The
+ * queue reads the `live` scope, so every row on it can be decided; approvals on recorded orders are
+ * a scope of their own that the inbox folds into one line (`pendingApprovalCounts`).
  */
 export async function listApprovals(
   status = 'pending',
   after: ApprovalCursor | null = null,
   limit = APPROVALS_PAGE,
+  scope?: ApprovalScope,
 ) {
   const d = db();
   const later = status === 'pending' ? gt : lt;
@@ -288,7 +317,7 @@ export async function listApprovals(
         and(eq(approvals.requestedAt, after.requestedAt), later(approvals.id, after.id)),
       )
     : undefined;
-  const page = approvalsQuery(d, status, { where: past, limit: limit + 1 });
+  const page = approvalsQuery(d, status, { where: past, scope, limit: limit + 1 });
   // How many rows the pages before this one held, so the page can say where it starts.
   const [rows, before] = past
     ? await d.batch([
@@ -296,7 +325,14 @@ export async function listApprovals(
         d
           .select({ n: sql<number>`count(*)` })
           .from(approvals)
-          .where(and(status === 'all' ? undefined : eq(approvals.status, status), not(past))),
+          .leftJoin(orders, eq(orders.id, approvals.orderId))
+          .where(
+            and(
+              status === 'all' ? undefined : eq(approvals.status, status),
+              inScope(scope),
+              not(past),
+            ),
+          ),
       ])
     : [await page, [{ n: 0 }]];
   const shown = rows.slice(0, limit);
@@ -310,7 +346,35 @@ export async function listApprovals(
   };
 }
 
-function approvalsQuery(d: Db, status: string, { where, limit }: { where?: SQL; limit: number }) {
+/**
+ * Pending approvals, split by whether a decision can resume their order: `live` is the queue the
+ * nav badge and the overview count, `recorded` the ones on orders with no run.
+ */
+export async function pendingApprovalCounts() {
+  const row = await db()
+    .select({
+      live: sql<number>`coalesce(sum(${orders.instanceId} is not null), 0)`,
+      recorded: sql<number>`coalesce(sum(${orders.instanceId} is null), 0)`,
+    })
+    .from(approvals)
+    .leftJoin(orders, eq(orders.id, approvals.orderId))
+    .where(eq(approvals.status, 'pending'))
+    .get();
+  return { live: Number(row?.live ?? 0), recorded: Number(row?.recorded ?? 0) };
+}
+
+function approvalsQuery(
+  d: Db,
+  status: string,
+  { where, scope, limit }: { where?: SQL; scope?: ApprovalScope; limit: number },
+) {
+  const matching = status === 'all' ? sql`1` : sql`q.status = ${status}`;
+  const scoped =
+    scope === 'live'
+      ? sql` and o.instance_id is not null`
+      : scope === 'recorded'
+        ? sql` and o.instance_id is null`
+        : sql``;
   return d
     .select({
       id: approvals.id,
@@ -340,17 +404,20 @@ function approvalsQuery(d: Db, status: string, { where, limit }: { where?: SQL; 
       customerName: customers.name,
       fxRate: orders.fxRate,
       startedBy: orders.startedBy,
-      // How many approvals have this status, so a short list can count the rest. Uncorrelated, so
-      // SQLite counts once from the status index; a window count would read every matching row.
-      total: (status === 'all'
-        ? sql<number>`(select count(*) from approvals)`
-        : sql<number>`(select count(*) from approvals q where q.status = ${status})`
+      // How many approvals have this status (in this scope), so a short list can count the rest.
+      // Uncorrelated, so SQLite counts once from the status index; a window count would read every
+      // matching row.
+      total: (scope
+        ? sql<number>`(select count(*) from approvals q left join orders o on o.id = q.order_id where ${matching}${scoped})`
+        : status === 'all'
+          ? sql<number>`(select count(*) from approvals)`
+          : sql<number>`(select count(*) from approvals q where q.status = ${status})`
       ).as('total'),
     })
     .from(approvals)
     .leftJoin(orders, eq(orders.id, approvals.orderId))
     .leftJoin(customers, eq(customers.id, orders.customerId))
-    .where(and(status === 'all' ? undefined : eq(approvals.status, status), where))
+    .where(and(status === 'all' ? undefined : eq(approvals.status, status), inScope(scope), where))
     .orderBy(
       ...(status === 'pending'
         ? [asc(approvals.requestedAt), asc(approvals.id)]
@@ -701,14 +768,16 @@ export async function commerceData() {
 }
 
 /**
- * Orders waiting on an outside event (the index's `waiting_for` names one), the `limit` most
- * recently updated, and how many there are in all.
+ * Orders with a run waiting on an outside event (the index's `waiting_for` names one), the `limit`
+ * most recently updated, and how many there are in all.
  */
 export async function waitingOnEvents(limit: number) {
   const d = db();
+  // Only orders with a run: the list reads each one's live waits, and a recorded order has none.
   const where = and(
     inArray(orders.status, ['waiting', 'running']),
     contains(orders.waitingFor, 'event:'),
+    hasRun,
   );
   const [rows, all] = await d.batch([
     d.select().from(orders).where(where).orderBy(desc(orders.updatedAt)).limit(limit),
@@ -735,7 +804,7 @@ export async function runningByFlow(): Promise<Record<string, Record<number, num
   const rows = await db()
     .select({ flowId: orders.flowId, version: orders.flowVersion, n: sql<number>`count(*)` })
     .from(orders)
-    .where(inArray(orders.status, ['queued', 'running', 'waiting']))
+    .where(and(inArray(orders.status, OPEN_STATUSES), hasRun))
     .groupBy(orders.flowId, orders.flowVersion);
   const out: Record<string, Record<number, number>> = {};
   for (const r of rows) {

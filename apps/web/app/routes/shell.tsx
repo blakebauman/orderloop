@@ -1,6 +1,6 @@
 // The roles subpath alone: the core barrel would bring zod into every page.
 import { atLeast, type Principal, ROLE_LABELS } from '@orderloop/core/roles';
-import { approvals, users } from '@orderloop/db';
+import { users } from '@orderloop/db';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,7 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import {
   Check,
   ChevronDown,
@@ -46,6 +46,7 @@ import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
 import { useShortcutLabel } from '~/lib/device';
 import { db } from '~/lib/env.server';
+import { pendingApprovalCounts } from '~/lib/orders.server';
 import { PluginsProvider } from '~/lib/plugins';
 import { pluginManifests } from '~/lib/plugins.server';
 import { pageShortcut } from '~/lib/shortcuts';
@@ -58,11 +59,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (me.twoFactorDue || me.passwordChangeDue)
     return { pending: 0, auth: true, me, nav: false, plugins: [] };
   const [pending, admins, auth, plugins] = await Promise.all([
-    db()
-      .select({ n: sql<number>`count(*)` })
-      .from(approvals)
-      .where(eq(approvals.status, 'pending'))
-      .get(),
+    // Only what a decision here can resume: approvals on recorded orders aren't owed by anyone.
+    pendingApprovalCounts(),
     // Who to ask when a page needs a higher role: up to three active admins.
     atLeast(me.role, 'admin')
       ? []
@@ -76,7 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Installed plugins: their nodes in the editor, their pages in the nav.
     pluginManifests(),
   ]);
-  return { pending: pending?.n ?? 0, auth, me, nav: true, admins, plugins };
+  return { pending: pending.live, auth, me, nav: true, admins, plugins };
 }
 
 /**

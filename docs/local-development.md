@@ -100,7 +100,13 @@ pnpm db:seed:all --url http://localhost:5298 --orders 5000 --days 30
      payouts, messages, and invoice and purchase order documents, for Commerce's **Records** tabs;
 4. `pnpm db:seed:live`, only if the dev server answers: it starts each of the 15 demo scenarios as
    a real order through `POST /api/v1/orders` (so an order's page has its graph and timeline,
-   **Approvals** its context and Commerce its outside events), makes five carts through the engine
+   **Approvals** its context and Commerce its outside events), and the five that stop for a person
+   or an outside event (`b2b-credit`, `purchase`, `b2b-email`, `marketplace`, `pickup`) several
+   times more, 36 orders in all, each with its own Idempotency-Key (`seed-live:<scenario>`, then
+   `seed-live:<scenario>:<n>`) so a re-run starts none twice. They are the open work: the overview's
+   waiting orders, the approvals queue and the outside events. Local dev runs a day as a minute
+   (`TIME_SCALE`), so their approvals and events time out within minutes of the seed. It also makes
+   five carts through the engine
    (open, locked, submitted and canceled), and runs the catalog demo (below).
 
 Adding people turns sign-in on: once `pnpm db:seed:records` has run, `/login` asks for the dev
@@ -117,7 +123,9 @@ days. To start completely fresh, delete `apps/web/.wrangler/state` and seed agai
 What still needs a hand: the Plugins page lists only plugins the dev server runs
 (`ORDERLOOP_DEV_PLUGINS=example pnpm web:dev`), and **Connected apps** on the Account page fills
 when an MCP or A2A client signs in. The generated orders (`ord_bench_…`) have no OrderAgent behind
-them, so their pages are read-only (below); the scenario orders are the live ones.
+them, so they are all history and their pages are read-only (below); the scenario orders are the
+live ones. The generated carts (`cart_bench_…`, created by `bench@example.com`) have no CartAgent
+either, so a generated cart's own page finds nothing.
 
 ## Volume data
 
@@ -139,19 +147,23 @@ the built-in flows as the app does on first use, spreads the orders over them (u
 own steps for where an order waits or stopped and why), and writes:
 
 - customers (`cus_bench_…`): 240 people and 20 companies;
-- orders (`ord_bench_…`, channel `bench`): started more on weekdays and in working hours, growing
-  over the window, from a month before it so its first days are already busy. Orders whose end is
-  still to come are open: waiting at an approval (with a pending approval), an event or a timer,
-  some for over a day, or running. The rest completed, failed or rolled back at a step with a
-  reason, were declined at an approval, or were cancelled. Each has the approvals it passed, its
-  payment (a card soon after checkout, a B2B invoice when it completes; some refunded later) and a
-  `node_runs` row per step it ran;
+- orders (`ord_bench_…`, on the channels each flow takes: web and mobile for the storefront, email
+  and EDI for B2B, the till for POS, and so on): started more on weekdays and in working hours,
+  growing over the window, from a month before it so its first days are already busy. Every one
+  has ended: completed, failed or rolled back at a step with a reason, declined at an approval, or
+  cancelled; one started too recently to have run its usual span ended sooner. None is left
+  waiting or running, and none has a pending approval: with no run behind it, nothing could act on
+  it. Each has the approvals it passed (decided), its payment (a card soon after checkout, a B2B
+  invoice when it completes; some refunded later) and a `node_runs` row per step it ran;
 - products (`BENCH-…`) with store stock, contract prices and volume rules, for Commerce;
 - carts (`cart_bench_…`), most submitted to one of the orders above.
 
 Each run replaces what the previous one wrote; `--seed <n>` (default 1) makes it repeatable
 relative to today. Only the index tables are written, with no OrderAgent or Workflow behind an
-order. A generated order's page is the read-only **recorded order** view the order page falls back
+order, and `instance_id` null: that is how the app tells a recorded order from a live one. A
+recorded order is never live work: the overview's open counts and waits, the approvals queue and
+its badge, the orders list's open statuses and Commerce's outside events leave it out, and a list
+that shows it with an open status reads **Recorded** (`liveStatus`, `apps/web/app/lib/format.ts`). A generated order's page is the read-only **recorded order** view the order page falls back
 to when the engine has no run for an order (`recordedOrder`, `apps/web/app/lib/orders.server.ts`):
 its flow coloured by the steps `node_runs` recorded and the ones it waits at, with the path it took
 inked (an edge counts as taken when its source finished and its target ran, since `node_runs` keeps
@@ -159,8 +171,7 @@ no branches), the step timings, its approvals and records, and no live timeline 
 banner says it is a record and how the order ended. A rolled-back order lists what its records show
 was undone (released reservations, voided authorizations, cancelled seller orders, shipments and
 pickups, reversed payouts, voided invoices, revoked codes), marks those steps reversed, and says so
-when it recorded none. Commerce's **Outside events**, which asks
-each order's agent what it waits for, lists none of them.
+when it recorded none.
 
 ## Catalog demo data
 

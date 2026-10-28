@@ -47,7 +47,9 @@ export function rowContext(state: OrderState | null | undefined, r: ApprovalReco
 
 /**
  * The order a page of the inbox reads in: rows that can be decided here first, soonest escalation
- * first, then the longest waiting; rows whose order has no live run last. Sorts in place.
+ * first, then the longest waiting; rows whose order has no live run last. The queue already holds
+ * only orders the index says have a run (`listApprovals`' live scope); this catches one whose run
+ * the engine can't find when the page reads it. Sorts in place.
  */
 export function byUrgency<R extends { id: string; orderId: string; requestedAt: number }>(
   rows: R[],
