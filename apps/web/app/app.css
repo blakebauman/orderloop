@@ -738,6 +738,16 @@
   :root {
     --arrive-rise: 0px;
   }
+  /* Menus, dialogs and sheets (tw-animate's enter and exit) fade without sliding or zooming.
+     Unlayered, so it outranks the slide and zoom utilities however specific they are. */
+  :where([data-state]) {
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+  }
 }
 
 /* Moving between pages (`viewTransition` on the shell's links, the orders list and the order's
