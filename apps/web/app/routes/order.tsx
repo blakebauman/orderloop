@@ -557,7 +557,8 @@ function OrderView() {
  * totals and the everyday actions keep a phone's width. Picking it opens the same Cancel panel.
  */
 function OrderMenu({ disabled, onCancel }: { disabled: boolean; onCancel: () => void }) {
-  // Picking hands focus to the panel's reason field, so the menu mustn't take it back on close.
+  // The panel opens once the menu has closed: opened while the menu still holds focus, its reason
+  // field's autofocus is taken back as the menu closes.
   const picked = useRef(false);
   return (
     <DropdownMenu>
@@ -577,6 +578,7 @@ function OrderMenu({ disabled, onCancel }: { disabled: boolean; onCancel: () => 
           if (!picked.current) return;
           picked.current = false;
           e.preventDefault();
+          onCancel();
         }}
       >
         <DropdownMenuItem
@@ -585,7 +587,6 @@ function OrderMenu({ disabled, onCancel }: { disabled: boolean; onCancel: () => 
           disabled={disabled}
           onSelect={() => {
             picked.current = true;
-            onCancel();
           }}
         >
           <CircleSlash aria-hidden="true" /> Cancel order…
