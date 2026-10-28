@@ -64,13 +64,11 @@ export function DecisionContext({
         </p>
       ) : null}
       {/* The clock counts to when decisions close, the moment that matters to the person deciding;
-          once closed, the controls say what happens next. */}
+          once closed, the controls say what happens next. A deadline still ahead is muted: amber
+          is for one that has passed. */}
       {ticking && ctx.deadline ? (
         <p
-          className={cn(
-            'text-muted-foreground text-xs',
-            ctx.deadline - now < 10 * 60_000 && 'font-medium text-wait',
-          )}
+          className="text-muted-foreground text-xs"
           title={formatTime(ctx.deadline)}
           suppressHydrationWarning
         >

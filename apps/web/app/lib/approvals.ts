@@ -5,7 +5,7 @@
  */
 
 import { BASE_CURRENCY, type FlowNode, type OrderState, toBase } from '@orderloop/core';
-import { money } from './format';
+import { money, orderRef } from './format';
 
 export type ApprovalContext = {
   /** One line saying why a person is being asked, e.g. "Over credit limit by $2,332". */
@@ -23,6 +23,45 @@ export type ApprovalContext = {
   /** The approval step asking, e.g. "Sales approval". */
   step?: string;
 };
+
+/** What the approvals inbox and the overview know of a pending or decided approval. */
+export type ApprovalRecord = {
+  orderId: string;
+  nodeId: string;
+  title: string;
+  stepLabel?: string | null;
+};
+
+/**
+ * The context for one approval row: from the order's live state when it could be read, and from
+ * the approval's own record otherwise or where the live state has no reason to give. The record
+ * offers its title (with the order's ref in place of its id, which the row already shows) as the
+ * reason and the step's label from the flow version the order pinned.
+ */
+export function rowContext(state: OrderState | null | undefined, r: ApprovalRecord) {
+  const ctx: ApprovalContext = state ? approvalContext(state, r.nodeId) : { facts: [], trail: [] };
+  ctx.reason ??= r.title.split(r.orderId).join(orderRef(r.orderId)).trim() || undefined;
+  ctx.step ??= r.stepLabel ?? undefined;
+  return ctx;
+}
+
+/**
+ * The order a page of the inbox reads in: rows that can be decided here first, soonest escalation
+ * first, then the longest waiting; rows whose order has no live run last. Sorts in place.
+ */
+export function byUrgency<R extends { id: string; orderId: string; requestedAt: number }>(
+  rows: R[],
+  context: Record<string, ApprovalContext | undefined>,
+  noRun: Record<string, boolean | undefined>,
+): R[] {
+  const deadline = (r: R) => context[r.id]?.deadline ?? Number.POSITIVE_INFINITY;
+  return rows.sort(
+    (a, b) =>
+      Number(!!noRun[a.orderId]) - Number(!!noRun[b.orderId]) ||
+      deadline(a) - deadline(b) ||
+      a.requestedAt - b.requestedAt,
+  );
+}
 
 /** How far back through earlier approvals to look for the reason. */
 const MAX_HOPS = 4;

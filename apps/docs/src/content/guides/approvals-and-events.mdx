@@ -42,7 +42,9 @@ screen readers hear it once); within five seconds the undo window shortens to fi
 close, the buttons stay in place but disabled, any note is kept, and the card says where the order
 is going: "Decisions are closed; the order is going to Decline order".
 
-The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`. Each row
+The inbox filters by `pending`, `approved`, `rejected`, `escalated` (shown as **Timed out**) or `all`, and
+shows 50 approvals at a time with a link to the next page. Pending approvals come longest waiting
+first, and within a page the one closest to timing out leads; history comes newest first. Each row
 says why a person is being asked, from the step that sent the order there:
 
 - a credit check: how far over the limit, the limit and the balance, all in USD, with a
@@ -54,9 +56,15 @@ says why a person is being asked, from the step that sent the order there:
 
 It also shows what the order is for (its first lines), any approval steps before this one and how
 they ended ("Before this: Manager approval timed out"), and when the approval times out and to which
-step. When an approval times out and the next one on the same order arrives, the new one takes the
-old row's place. Keyboard: `j`/`k` (or the arrow keys) move between rows, `a` approves, `r` rejects
-and `z` undoes.
+step. The countdown stays plain while there is time; only an approval past its deadline is marked
+in amber. When the order's live state can't be read, the row falls back to the approval's title and
+its step's name. When an approval times out and the next one on the same order arrives, the new one
+takes the old row's place. Keyboard: `j`/`k` (or the arrow keys) move between rows, `a` approves,
+`r` rejects and `z` undoes.
+
+An approval whose order has no live run can't be decided from the inbox or the overview: the row
+says "No live run for this order, so it can't be decided here" in place of the buttons and links to
+the order, and the keyboard skips it.
 
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email; see [Team and roles](/guides/team-and-roles/#who-decided).
 

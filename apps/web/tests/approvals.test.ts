@@ -1,6 +1,6 @@
 import { EMPTY_ORDER_STATE, type OrderState } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { approvalContext } from '../app/lib/approvals';
+import { approvalContext, byUrgency, rowContext } from '../app/lib/approvals';
 
 const state = (currency: string, total: number, fxRate: number): OrderState => ({
   ...EMPTY_ORDER_STATE,
@@ -159,5 +159,57 @@ describe('approvalContext reasons', () => {
     const ctx = approvalContext(s, 'mgr');
     expect(ctx.reason).toBe('Over the $5,000.00 budget by $4,760.00');
     expect(ctx.facts).toEqual(['This order $9,760.00', 'Budget $5,000.00']);
+  });
+});
+
+describe('rowContext', () => {
+  const record = {
+    orderId: 'ord_01jxabc123',
+    nodeId: 'mgr',
+    title: 'Approve purchase ord_01jxabc123 (it)',
+    stepLabel: 'Manager approval',
+  };
+
+  it('falls back to the approval’s own record when the order has no live state', () => {
+    for (const state of [null, undefined]) {
+      const ctx = rowContext(state, record);
+      // The title's order id becomes the ref the row shows beside it.
+      expect(ctx.reason).toBe('Approve purchase #abc123 (it)');
+      expect(ctx.step).toBe('Manager approval');
+      expect(ctx.deadline).toBeUndefined();
+    }
+  });
+
+  it('keeps the live reason, figures and clock, and uses the record only for what is missing', () => {
+    const s = purchase({ branch: 'approved' });
+    s.waits = [
+      { nodeId: 'mgr', eventType: 'e', kind: 'approval', title: 't', deadline: 5000, since: 0 },
+    ];
+    const live = rowContext(s, { ...record, stepLabel: 'Stale label' });
+    expect(live.reason).toBe('Over the $5,000.00 threshold');
+    expect(live.step).toBe('Manager approval');
+    expect(live.deadline).toBe(5000);
+
+    // Live state with no step that explains the request: the title says what it is.
+    s.nodes.needs_mgr = { status: 'pending', runs: 0 };
+    expect(rowContext(s, record).reason).toBe('Approve purchase #abc123 (it)');
+  });
+
+  it('leaves the reason empty rather than blank when there is no title', () => {
+    expect(rowContext(null, { ...record, title: '' }).reason).toBeUndefined();
+  });
+});
+
+describe('byUrgency', () => {
+  it('puts the soonest escalation first, then the longest wait, and orders with no run last', () => {
+    const row = (id: string, requestedAt: number) => ({ id, orderId: `ord_${id}`, requestedAt });
+    const rows = [row('late', 10), row('norun', 1), row('soon', 30), row('old', 5), row('new', 40)];
+    const ctx = (deadline?: number) => ({ facts: [], trail: [], deadline });
+    const sorted = byUrgency(
+      rows,
+      { late: ctx(900), soon: ctx(100), norun: ctx(), old: ctx(), new: ctx() },
+      { ord_norun: true },
+    );
+    expect(sorted.map((r) => r.id)).toEqual(['soon', 'late', 'old', 'new', 'norun']);
   });
 });

@@ -13,7 +13,7 @@ import { Ago } from '~/components/ago';
 import { DecisionContext, lockAt } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
-import { type ApprovalContext, approvalContext } from '~/lib/approvals';
+import { rowContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded, flowSteps } from '~/lib/flows.server';
@@ -47,23 +47,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     flowSteps(),
     demoAvailable(),
   ]);
-  const top = o.approvals.slice(0, 5);
+  const top = o.approvals;
   const [names, declinedSet, states] = await Promise.all([
     customerNames(o.recent.map((r) => r.customerId)),
     declinedOrderIds(o.recent.map((r) => r.id)),
     Promise.all(
+      // null: the order has no live run. undefined: the read failed, which says nothing.
       top.map((a) =>
         engine()
           .snapshot(a.orderId)
-          .catch(() => null),
+          .catch(() => undefined),
       ),
     ),
   ]);
-  const decisions = top.map((a, i) => ({
+  const decisions = top.map(({ startedBy: _, total: __, ...a }, i) => ({
     ...a,
-    ctx: states[i]
-      ? approvalContext(states[i] as OrderState, a.nodeId)
-      : ({ facts: [], trail: [] } as ApprovalContext),
+    ctx: rowContext(states[i] as OrderState | null | undefined, a),
+    noRun: states[i] === null,
   }));
   return {
     open: o.open,
@@ -74,7 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     declined: [...declinedSet],
     demo,
     decisions,
-    moreDecisions: Math.max(0, o.approvals.length - top.length),
+    moreDecisions: Math.max(0, o.pendingApprovals - top.length),
     trails: waitTrails(o.waitsByFlow, steps),
     stopped: stoppedSteps(o.stoppedWeek, steps),
     // When this was read, for the header's "Updated" line.
@@ -471,9 +471,14 @@ function DecisionCard({ d }: { d: Data['decisions'][number] }) {
               {d.ctx.onTimeout ? `; it goes to ${d.ctx.onTimeout}` : ''}.
             </p>
           ) : null}
+          {d.noRun ? (
+            <p className="mt-1 text-muted-foreground text-sm">
+              No live run for this order, so it can’t be decided here.
+            </p>
+          ) : null}
           <p className="mt-1 text-muted-foreground text-xs">
-            Assigned to {humanize(d.assignee) || 'any approver'} · requested{' '}
-            <Ago ms={d.requestedAt} />
+            {d.ctx.step ? `${d.ctx.step} · assigned to` : 'Assigned to'}{' '}
+            {humanize(d.assignee) || 'any approver'} · requested <Ago ms={d.requestedAt} />
           </p>
         </div>
       </div>
