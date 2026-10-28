@@ -6,6 +6,7 @@ vi.mock('~/lib/env.server', () => ({ db: () => ({}) }));
 
 const { recordedEdges, recordedReversals, recordedRuns } = await import('../app/lib/orders.server');
 const { clearRightEdge } = await import('../app/components/flow-canvas');
+const { liveStatus, statusColor } = await import('../app/lib/format');
 
 const graph = {
   nodes: [
@@ -202,5 +203,19 @@ describe('framing a flow from its first step', () => {
   it('never goes below a readable zoom to do it', () => {
     // Ending after the second step would take 252 / 500, about 0.5.
     expect(clearRightEdge(spans, 0, 1, 300)).toBe(1);
+  });
+});
+
+describe('liveStatus', () => {
+  it('shows an open order with no run as recorded, in the idle tone, never waiting', () => {
+    for (const status of ['queued', 'running', 'waiting'])
+      expect(liveStatus({ status, instanceId: null })).toBe('recorded');
+    expect(statusColor(liveStatus({ status: 'waiting', instanceId: null }))).toBe('var(--idle)');
+  });
+
+  it('keeps an ended order’s status, and every status of an order with a run', () => {
+    expect(liveStatus({ status: 'completed', instanceId: null })).toBe('completed');
+    expect(liveStatus({ status: 'rolled_back', instanceId: null })).toBe('rolled_back');
+    expect(liveStatus({ status: 'waiting', instanceId: 'ord_a-g1' })).toBe('waiting');
   });
 });

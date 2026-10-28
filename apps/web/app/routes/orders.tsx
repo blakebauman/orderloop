@@ -30,6 +30,7 @@ import {
   channelLabel,
   clip,
   count,
+  liveStatus,
   money,
   orderRef,
   orderStatus,
@@ -131,7 +132,7 @@ export default function Orders() {
   const { revalidate } = useRevalidator();
   // The index is updated by each order's agent; refresh while anything is in flight and the tab
   // is in view.
-  const live = orders.some((o) => ['queued', 'running', 'waiting'].includes(o.status));
+  const live = orders.some((o) => ['queued', 'running', 'waiting'].includes(liveStatus(o)));
   useEffect(() => {
     if (!live) return;
     const t = window.setInterval(() => {
@@ -362,7 +363,7 @@ export default function Orders() {
               </TableHead>
               <TableBody>
                 {orders.map((o) => {
-                  const status = orderStatus(o.status, o.id, declined);
+                  const status = orderStatus(liveStatus(o), o.id, declined);
                   const modelLabel = ORDER_MODEL_LABELS[o.model as OrderModel] ?? o.model;
                   const channel = channelLabel(o.channel);
                   const customer =
@@ -555,6 +556,15 @@ type Row = Awaited<ReturnType<typeof loader>>['orders'][number];
  * have.
  */
 function Where({ order: o, status }: { order: Row; status: string }) {
+  // No run behind it: where the record left it, without a clock that would read as live or overdue.
+  if (status === 'recorded')
+    return o.waitingAt ? (
+      <div className="truncate text-muted-foreground" title={o.waitingAt}>
+        Recorded at {o.waitingAt}
+      </div>
+    ) : (
+      <span className="hidden text-muted-foreground md:inline">—</span>
+    );
   if (o.waitingOn || o.waitingAt) {
     const who = waitingForLabel(o.waitingFor);
     // An event step is often named for its event ("Customer collects"); don't say it twice.

@@ -1,7 +1,9 @@
 /**
  * The seed that needs the engine: with `pnpm web:dev` running, it starts every demo scenario as a
  * real order (so order pages have their graph and timeline, approvals their context, Commerce its
- * outside events) and builds carts in the engine (open, locked, submitted and canceled), through
+ * outside events), and the ones that stop for a person or an outside event several more times, so
+ * the overview's open work and the approvals queue have live rows (generated orders have no run,
+ * so they are all history). It also builds carts in the engine (open, locked, submitted and canceled), through
  * the REST API as the local dev admin (`pnpm db:seed:records` writes the token). The catalog demo
  * (`seed-catalog.ts`) runs with the same token. See docs/local-development.md, "Seed everything".
  *
@@ -43,21 +45,36 @@ if (!ping) fail(`nothing answers at ${origin}; start \`pnpm web:dev\` first`);
 if (ping.status === 401)
   fail('the API refused the token; run `pnpm db:seed:records` again to restore it');
 
-// Every scenario once: some finish, some wait at an approval or an event, some fail on purpose.
-// Each has its own Idempotency-Key, so a re-run finds the order it started before.
+/**
+ * How many orders each scenario starts in all. Those that stop for a person (an approval) or an
+ * outside event (payment, a seller's answer, a pickup) run several times, so there is open work to
+ * see and decide; the rest run once.
+ */
+const RUNS: Record<string, number> = {
+  'b2b-credit': 6,
+  purchase: 6,
+  'b2b-email': 5,
+  marketplace: 5,
+  pickup: 4,
+};
+
+// Some finish, some wait at an approval or an event, some fail on purpose. Each order has its own
+// Idempotency-Key (`seed-live:<scenario>`, then `:2`, `:3`…), so a re-run finds the orders it
+// started before rather than starting more.
 let started = 0;
 let kept = 0;
-for (const s of SCENARIOS) {
-  const r = await api<{ orderId?: string; replayed?: boolean; error?: string }>(
-    'POST',
-    'orders',
-    { flowId: s.flowId, input: s.input },
-    { 'idempotency-key': `seed-live:${s.id}` },
-  );
-  if (r.ok && r.body?.replayed) kept++;
-  else if (r.ok) started++;
-  else console.log(`order ${s.id}: ${r.status} ${r.body?.error ?? ''}`);
-}
+for (const s of SCENARIOS)
+  for (let n = 1; n <= (RUNS[s.id] ?? 1); n++) {
+    const r = await api<{ orderId?: string; replayed?: boolean; error?: string }>(
+      'POST',
+      'orders',
+      { flowId: s.flowId, input: s.input },
+      { 'idempotency-key': n === 1 ? `seed-live:${s.id}` : `seed-live:${s.id}:${n}` },
+    );
+    if (r.ok && r.body?.replayed) kept++;
+    else if (r.ok) started++;
+    else console.log(`order ${s.id} #${n}: ${r.status} ${r.body?.error ?? ''}`);
+  }
 console.log(`seed-live: started ${started} scenario orders, ${kept} already there`);
 
 // Carts on the flows that price them, in each state the Carts page shows.

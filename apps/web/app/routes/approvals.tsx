@@ -19,8 +19,8 @@ import { type ApprovalContext, byUrgency, rowContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
 import { decodeCursor, encodeCursor } from '~/lib/cursor';
 import { engine } from '~/lib/env.server';
-import { count, humanize, money, orderRef, outcomeLabel } from '~/lib/format';
-import { listApprovals } from '~/lib/orders.server';
+import { assigneeLabel, count, money, orderRef, outcomeLabel, plural } from '~/lib/format';
+import { listApprovals, pendingApprovalCounts } from '~/lib/orders.server';
 import { approvalSeparation } from '~/lib/settings.server';
 import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
@@ -35,10 +35,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
   const params = new URL(request.url).searchParams;
   const status = params.get('status') ?? 'pending';
+  // The pending queue holds only what a decision can resume; approvals on recorded orders (no run
+  // behind them) are their own list, folded into one line under the queue.
+  const recorded = status === 'pending' && params.get('recorded') === '1';
+  const scope = status !== 'pending' ? undefined : recorded ? 'recorded' : 'live';
   // Pages are keyed by their last row; the cursor is the orders list's, read as request time + id.
   const cursor = decodeCursor(params.get('after'));
   const after = cursor ? { requestedAt: cursor.createdAt, id: cursor.id } : null;
-  const [page, separate] = await Promise.all([listApprovals(status, after), approvalSeparation()]);
+  const [page, separate, pending] = await Promise.all([
+    listApprovals(status, after, undefined, scope),
+    approvalSeparation(),
+    status === 'pending' ? pendingApprovalCounts() : null,
+  ]);
   const { rows } = page;
   // Each row on the page carries the reason, figures and escalation clock from its order's live
   // state: one read per order, at most a page's worth. A run that isn't there (null) is a fact
@@ -72,6 +80,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (status === 'pending') byUrgency(rows, context, noRun);
   return {
     status,
+    recorded,
+    /** Pending approvals on recorded orders, for the queue's folded line. */
+    undecidable: pending?.recorded ?? 0,
     // Who started each order stays on the server; the page only needs `refused`.
     rows: rows.map(({ startedBy: _, total: __, ...r }) => r),
     context,
@@ -128,12 +139,18 @@ function useStableRows(rows: Item[], status: string, view: string) {
 }
 
 export default function Approvals() {
-  const { rows, status, context, refused, noRun, total, from, paged, next } =
+  const { rows, status, recorded, undecidable, context, refused, noRun, total, from, paged, next } =
     useLoaderData<typeof loader>();
   const canApprove = useCan('approver');
   const anyOpen = rows.some((r) => r.status === 'pending' && !refused[r.id] && !noRun[r.orderId]);
   const [params, setParams] = useSearchParams();
-  const shown = useStableRows(rows, status, `${status}:${params.get('after') ?? ''}`);
+  const shown = useStableRows(
+    rows,
+    status,
+    `${status}:${recorded ? 'recorded' : ''}:${params.get('after') ?? ''}`,
+  );
+  // Where this list's pages and "first page" go: the recorded list keeps its own scope.
+  const base = `?status=${encodeURIComponent(status)}${recorded ? '&recorded=1' : ''}`;
   // J or K from anywhere on the page (outside fields) starts the keyboard path at the first row.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -182,6 +199,17 @@ export default function Approvals() {
         }
       />
       <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
+        {recorded ? (
+          <p className="mb-3 flex max-w-[75ch] flex-wrap items-baseline gap-x-3 gap-y-1 text-muted-foreground text-sm">
+            <span>
+              Approvals on recorded orders. These orders have no run behind them, so a decision here
+              would have nothing to resume.
+            </span>
+            <Link to="?status=pending" className="hit-area text-link hover:underline">
+              Back to the queue
+            </Link>
+          </p>
+        ) : null}
         {shown.length ? (
           <>
             {anyOpen && !canApprove ? (
@@ -227,7 +255,7 @@ export default function Approvals() {
               ))}
             </ul>
             <Pages
-              status={status}
+              base={base}
               total={total}
               from={from}
               shown={rows.length}
@@ -240,10 +268,7 @@ export default function Approvals() {
             <Empty
               action={
                 paged ? (
-                  <Link
-                    to={`?status=${encodeURIComponent(status)}`}
-                    className="text-link text-sm hover:underline"
-                  >
+                  <Link to={base} className="text-link text-sm hover:underline">
                     Back to the first page
                   </Link>
                 ) : status !== 'all' ? (
@@ -259,16 +284,41 @@ export default function Approvals() {
             >
               {paged
                 ? 'Nothing is left on this page.'
-                : status === 'pending'
-                  ? 'Nothing is waiting on a decision.'
-                  : status === 'all'
-                    ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
-                    : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
+                : recorded
+                  ? 'No approvals are waiting on recorded orders.'
+                  : status === 'pending'
+                    ? 'Nothing is waiting on a decision.'
+                    : status === 'all'
+                      ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
+                      : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
             </Empty>
           </div>
         )}
+        {status === 'pending' && !recorded && undecidable ? <RecordedLine n={undecidable} /> : null}
       </div>
     </>
+  );
+}
+
+/**
+ * Approvals on recorded orders (no run behind them, so nothing a decision could resume), folded
+ * into one line under the queue rather than listed as rows nobody can act on.
+ */
+function RecordedLine({ n }: { n: number }) {
+  return (
+    <p className="mt-3 flex max-w-[75ch] flex-wrap items-baseline gap-x-3 gap-y-1 text-muted-foreground text-sm">
+      <span>
+        {n === 1
+          ? '1 approval on a recorded order can’t be decided here: the order has no run to resume.'
+          : `${plural(n, 'approval')} on recorded orders can’t be decided here: those orders have no run to resume.`}
+      </span>
+      <Link
+        to="?status=pending&recorded=1"
+        className="hit-area inline-flex items-center gap-1 text-link hover:underline"
+      >
+        Show {n === 1 ? 'it' : 'them'} <ArrowRight className="size-3.5" aria-hidden="true" />
+      </Link>
+    </p>
   );
 }
 
@@ -277,14 +327,15 @@ export default function Approvals() {
  * back is to the first page rather than one page back.
  */
 function Pages({
-  status,
+  base,
   total,
   from,
   shown,
   paged,
   next,
 }: {
-  status: string;
+  /** This list's own address, without a page. */
+  base: string;
   total: number;
   from: number;
   shown: number;
@@ -302,16 +353,13 @@ function Pages({
       </span>
       <span className="ml-auto flex items-center gap-4">
         {paged ? (
-          <Link
-            to={`?status=${encodeURIComponent(status)}`}
-            className="hit-area text-link hover:underline"
-          >
+          <Link to={base} className="hit-area text-link hover:underline">
             First page
           </Link>
         ) : null}
         {next ? (
           <Link
-            to={`?status=${encodeURIComponent(status)}&after=${encodeURIComponent(next)}`}
+            to={`${base}&after=${encodeURIComponent(next)}`}
             className="hit-area inline-flex items-center gap-1 text-link hover:underline"
           >
             Next page <ArrowRight className="size-3.5" aria-hidden="true" />
@@ -412,7 +460,7 @@ function Row({
         ) : null}
         <p className="mt-1 text-muted-foreground text-xs">
           {ctx?.step ? `${ctx.step} · assigned to` : 'Assigned to'}{' '}
-          {humanize(r.assignee) || 'any approver'} · requested <Ago ms={r.requestedAt} />
+          {assigneeLabel(r.assignee) || 'any approver'} · requested <Ago ms={r.requestedAt} />
           {r.status === 'escalated'
             ? ` · nobody decided in time${ctx?.onTimeout ? `, so it went to ${ctx.onTimeout}` : ''}`
             : r.decidedBy

@@ -62,9 +62,18 @@ its step's name. When an approval times out and the next one on the same order a
 takes the old row's place. Keyboard: `j`/`k` (or the arrow keys) move between rows, `a` approves,
 `r` rejects and `z` undoes.
 
-An approval whose order has no live run can't be decided from the inbox or the overview: the row
-says "No live run for this order, so it can't be decided here" in place of the buttons and links to
-the order, and the keyboard skips it.
+The pending queue, the count on **Approvals** in the navigation and the overview's **Needs a
+decision** hold only approvals a decision can resume. An order that was recorded in the orders
+index without ever running (generated history, say) has nothing to resume, so its approvals are
+folded into one line under the queue, "3 approvals on recorded orders can't be decided here", whose
+**Show them** link lists them on their own, read-only. Should a queued approval's order turn out to
+have no live run when the inbox reads it, its row says "No live run for this order, so it can't be
+decided here" in place of the buttons and links to the order, and the keyboard skips it.
+
+A recorded order is never counted as live work anywhere: the overview's open orders and **Where
+orders are waiting**, the orders list's open statuses and **Needs attention**, and Commerce's
+**Outside events** leave it out. Where it is listed on its own (all orders, recently updated), an
+order recorded as open reads **Recorded**, in grey, rather than waiting or overdue.
 
 Deciding needs the `approver` role or higher. `by` is the signed-in person's email; see [Team and roles](/guides/team-and-roles/#who-decided).
 

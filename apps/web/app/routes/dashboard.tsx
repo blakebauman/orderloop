@@ -18,9 +18,10 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded, flowSteps } from '~/lib/flows.server';
 import {
+  assigneeLabel,
   clip,
   duration,
-  humanize,
+  liveStatus,
   money,
   orderRef,
   orderStatus,
@@ -70,7 +71,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     open: o.open,
     ended24h: o.ended24h,
     declined24h: o.declined24h,
-    recent: o.recent,
+    // An open order with no run reads "recorded", never waiting (`liveStatus`).
+    recent: o.recent.map((r) => ({ ...r, status: liveStatus(r) })),
     names,
     declined: [...declinedSet],
     demo,
@@ -479,7 +481,7 @@ function DecisionCard({ d }: { d: Data['decisions'][number] }) {
           ) : null}
           <p className="mt-1 text-muted-foreground text-xs">
             {d.ctx.step ? `${d.ctx.step} · assigned to` : 'Assigned to'}{' '}
-            {humanize(d.assignee) || 'any approver'} · requested <Ago ms={d.requestedAt} />
+            {assigneeLabel(d.assignee) || 'any approver'} · requested <Ago ms={d.requestedAt} />
           </p>
         </div>
       </div>
