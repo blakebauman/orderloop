@@ -130,7 +130,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
   const href = (t: string) => pluginViewHref(base, t) ?? base;
   switch (b.type) {
     case 'text':
-      return <p className={cn('max-w-[75ch] text-sm', TONE[b.tone])}>{b.text}</p>;
+      return <p className={cn('max-w-measure text-sm', TONE[b.tone])}>{b.text}</p>;
     case 'alert':
       return (
         <Alert variant={ALERT[b.tone]}>

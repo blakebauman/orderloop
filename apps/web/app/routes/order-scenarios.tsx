@@ -80,7 +80,9 @@ export default function Scenarios() {
                   <li key={s.id} className="flex flex-wrap items-start gap-x-6 gap-y-2 px-4 py-3">
                     <div className="min-w-0 flex-1 basis-80">
                       <h3 className="font-medium text-sm">{s.label}</h3>
-                      <p className="mt-0.5 max-w-[68ch] text-muted-foreground text-sm">{s.blurb}</p>
+                      <p className="mt-0.5 max-w-measure text-muted-foreground text-sm">
+                        {s.blurb}
+                      </p>
                       <p className="mt-1 text-xs">
                         <span className="text-muted-foreground">
                           {s.flow ?? 'Flow not published'}

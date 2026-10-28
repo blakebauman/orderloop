@@ -252,4 +252,17 @@ describe('recorded orders in lists', () => {
     expect(ids(waiting.orders)).toEqual(['ord_live']);
     expect(waiting.total).toBe(1);
   });
+
+  it('counts the ones past their deadline as overdue, and none before it', async () => {
+    // Each wait is due 10ms after it began (`approval`); a timer's (no deadline) never is.
+    approval('late', 100);
+    approval('due', 200);
+    approval('timer', 300);
+    sqlite.prepare(`update orders set waiting_for = 'event:payment.received'`).run();
+    sqlite.prepare(`update orders set waiting_due = null where id = 'ord_timer'`).run();
+    expect(await waitingOnEvents(10, 150)).toMatchObject({ total: 3, overdue: 1 });
+    // Exactly at its deadline counts, as `isOverdue` does.
+    expect(await waitingOnEvents(10, 210)).toMatchObject({ total: 3, overdue: 2 });
+    expect(await waitingOnEvents(10, 50)).toMatchObject({ total: 3, overdue: 0 });
+  });
 });

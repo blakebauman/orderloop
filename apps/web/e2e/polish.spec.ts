@@ -62,3 +62,13 @@ test('G then a letter goes to a page, and ? lists the shortcuts', async ({ page 
   await page.keyboard.press('Shift+?');
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
 });
+
+test('pages hydrate without a mismatch, the CSP nonce included', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the same markup on every device');
+  const mismatches: string[] = [];
+  page.on('console', (m) => {
+    if (/hydrat|didn't match/i.test(m.text())) mismatches.push(m.text());
+  });
+  for (const path of ['/', '/commerce', '/team']) await open(page, path);
+  expect(mismatches).toEqual([]);
+});

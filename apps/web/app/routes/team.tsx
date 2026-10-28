@@ -442,7 +442,7 @@ export default function Team() {
               className="rounded-md border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
               <p className="font-medium">{secret.label}</p>
-              <p className="mt-0.5 max-w-[65ch] text-muted-foreground text-xs">
+              <p className="mt-0.5 max-w-measure text-muted-foreground text-xs">
                 {secret.kind === 'password' ? (
                   <>
                     Send it to them privately, with the sign-in page{' '}
@@ -776,7 +776,7 @@ function AddTokenForm({
         </Field>
       </div>
       {/* The role is the boundary: say what this token will be able to do before it exists. */}
-      <p className="max-w-[65ch] text-muted-foreground text-xs" aria-live="polite">
+      <p className="max-w-measure text-muted-foreground text-xs" aria-live="polite">
         A token with the {ROLE_LABELS[role].toLowerCase()} role:{' '}
         {ROLE_GUIDE[role].charAt(0).toLowerCase() + ROLE_GUIDE[role].slice(1)}
       </p>
@@ -988,7 +988,7 @@ function ScimSection({
     });
   return (
     <Section title="SCIM provisioning">
-      <p className="max-w-[65ch] text-muted-foreground text-xs">
+      <p className="max-w-measure text-muted-foreground text-xs">
         Your identity provider can add people, update them and turn them off here. Turning someone
         off signs them out everywhere and disconnects their apps and the API tokens they made. Give
         it the endpoint and a token.
@@ -1033,12 +1033,10 @@ function ScimSection({
         <roles.Form method="post" className="mt-4">
           <input type="hidden" name="intent" value="scim-roles" />
           <p className="text-sm">Groups from your identity provider</p>
-          <ul className="mt-2 divide-y rounded-md border text-sm">
+          {/* Ruled rows like the card's other lists, not a box inside the card. */}
+          <ul className="mt-2 divide-y border-y text-sm">
             {groups.map((g) => (
-              <li
-                key={g.id}
-                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-              >
+              <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span>
                   {g.displayName}{' '}
                   <span className="text-muted-foreground text-xs">
@@ -1081,7 +1079,7 @@ function ScimSection({
               {rolesError}
             </p>
           ) : null}
-          <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+          <p className="mt-2 max-w-measure text-muted-foreground text-xs">
             Someone in a group that gives a role has the highest role of their groups, or Viewer
             when none of theirs gives one. Their role follows changes to their groups, and the last
             active admin always stays an admin.
@@ -1112,7 +1110,7 @@ function SsoForm({
   const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
   return (
     <Section title="Single sign-on">
-      <p className="max-w-[65ch] text-muted-foreground text-xs">
+      <p className="max-w-measure text-muted-foreground text-xs">
         People can sign in through your identity provider,{' '}
         <span className="font-mono">{issuer}</span>. Someone already on the team is matched by email
         on their first sign-in.
@@ -1162,7 +1160,7 @@ function SsoForm({
           </p>
         ) : null}
       </fetcher.Form>
-      <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
         With single sign-on only, your identity provider handles two-factor sign-in, and a person
         disabled there can’t sign in here once their session ends; disable them here to end it now.
         {linked
@@ -1196,7 +1194,7 @@ function ApprovalSeparationForm({ separated }: { separated: boolean }) {
           Save
         </Button>
       </fetcher.Form>
-      <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
         Separates duties: the person or API token that started an order can’t approve or reject its
         steps, so a second person always decides. Orders from channels, email and the stock review
         have no starter, and anyone with the Approver role may decide them.
@@ -1241,7 +1239,7 @@ function TwoFactorRequirementForm({
           {error}
         </p>
       ) : null}
-      <p className="mt-2 max-w-[65ch] text-muted-foreground text-xs">
+      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
         People in these roles without two-factor sign-in can only use their Account page until they
         set it up, and can’t turn it off. API tokens aren’t affected.
         {required !== 'off' && missing

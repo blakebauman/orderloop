@@ -769,9 +769,10 @@ export async function commerceData() {
 
 /**
  * Orders with a run waiting on an outside event (the index's `waiting_for` names one), the `limit`
- * most recently updated, and how many there are in all.
+ * most recently updated, how many there are in all, and how many of those are past their step's
+ * deadline (the index's `waiting_due`) at `now`.
  */
-export async function waitingOnEvents(limit: number) {
+export async function waitingOnEvents(limit: number, now = Date.now()) {
   const d = db();
   // Only orders with a run: the list reads each one's live waits, and a recorded order has none.
   const where = and(
@@ -781,9 +782,19 @@ export async function waitingOnEvents(limit: number) {
   );
   const [rows, all] = await d.batch([
     d.select().from(orders).where(where).orderBy(desc(orders.updatedAt)).limit(limit),
-    d.select({ n: sql<number>`count(*)` }).from(orders).where(where),
+    d
+      .select({
+        n: sql<number>`count(*)`,
+        overdue: sql<number>`coalesce(sum(${orders.waitingDue} <= ${now}), 0)`,
+      })
+      .from(orders)
+      .where(where),
   ]);
-  return { orders: rows, total: Number(all[0]?.n ?? rows.length) };
+  return {
+    orders: rows,
+    total: Number(all[0]?.n ?? rows.length),
+    overdue: Number(all[0]?.overdue ?? 0),
+  };
 }
 
 export async function publishedFlows() {

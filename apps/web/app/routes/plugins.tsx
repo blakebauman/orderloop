@@ -181,7 +181,7 @@ export function Upload({ publishers }: { publishers: string[] }) {
   if (!publishers.length)
     return (
       <Section title="Install from a file">
-        <p className="max-w-[65ch] text-muted-foreground text-sm">
+        <p className="max-w-measure text-muted-foreground text-sm">
           Installing from a file is off: this workspace doesn’t trust any plugin publisher yet. A
           plugin file installs only when it is signed by a publisher the workspace trusts, and that
           list is part of the workspace’s setup, not this page. To install one, ask whoever runs

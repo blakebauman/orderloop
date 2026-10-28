@@ -28,6 +28,9 @@
   --text-2xs: 0.6875rem;
   /* A page's body and header width (components/page.tsx). */
   --container-page: 87.5rem;
+  /* The measure for running text (`max-w-measure`): Inter's characters average about 0.8ch, so
+     55ch holds 65 to 75 of them a line at any size, page intros and xs helpers alike. */
+  --container-measure: 55ch;
 }
 
 @theme inline {

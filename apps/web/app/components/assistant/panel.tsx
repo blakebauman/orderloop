@@ -97,9 +97,10 @@ import {
  * nobody connects to an assistant they never opened.
  *
  * Both slide, in 200ms with an exponential ease-out: the answer to a press starts fast and settles.
- * The sheet slides in from the right edge, where the button that opens it sits. The column opens by
- * its width while its content keeps its own 400px and stays pinned to the right edge, so it slides
- * out from behind the page's edge rather than being wiped on, and nothing inside rewraps mid-way.
+ * The sheet slides in from the right edge, where the button that opens it sits. The column moves
+ * only by transform: opening takes its 400px at once (the page lays out one time) and slides its
+ * content in from the right edge; closing slides the content out and gives the width back once it
+ * has gone. Animating the width instead would lay the whole page out again on every frame.
  * Reduced motion shows and hides both at once.
  */
 export function AssistantPanel() {
@@ -122,10 +123,10 @@ export function AssistantPanel() {
         open ? 'opacity-100' : 'pointer-events-none translate-x-full opacity-0',
         // With the keyboard up, it takes exactly the visible area above it, over the bars.
         'in-data-keyboard:z-50 in-data-keyboard:top-[var(--vvtop)] in-data-keyboard:bottom-auto in-data-keyboard:h-[var(--vvh)]',
-        // Wide screens: a column beside the page, its width animated so the page beside it narrows
-        // with it instead of jumping 400px in one frame.
-        'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:flex lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:justify-end lg:translate-x-0 lg:transition-[width,opacity] lg:motion-reduce:transition-none',
-        open ? 'lg:w-[400px] lg:border-l lg:opacity-100' : 'lg:w-0 lg:opacity-0',
+        // Wide screens: a column beside the page. Its width changes in one step, not per frame: at
+        // once on opening, and on closing only after the content's 200ms slide out.
+        'lg:sticky lg:inset-auto lg:top-[var(--shell-h)] lg:flex lg:h-[calc(100dvh-var(--shell-h))] lg:shrink-0 lg:justify-end lg:translate-x-0 lg:opacity-100 lg:transition-[width] lg:duration-0 lg:motion-reduce:transition-none',
+        open ? 'lg:w-[400px]' : 'lg:w-0 lg:delay-200',
       )}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -134,7 +135,13 @@ export function AssistantPanel() {
         }
       }}
     >
-      <div className="flex h-full flex-col lg:w-[400px] lg:shrink-0">
+      <div
+        className={cn(
+          'flex h-full flex-col lg:w-[400px] lg:shrink-0 lg:border-l',
+          'lg:transition-[opacity,translate] lg:duration-200 lg:ease-[cubic-bezier(0.16,1,0.3,1)] lg:motion-reduce:transition-none',
+          open ? 'lg:translate-x-0 lg:opacity-100' : 'lg:translate-x-full lg:opacity-0',
+        )}
+      >
         {opened ? (
           <Suspense fallback={<PanelFrame busy />}>
             <Conversation />

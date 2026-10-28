@@ -176,6 +176,11 @@ uppercase, and never in mono.
 **The Scale Lives In The Theme Rule.** Sizes come from the theme (`text-ui`, `text-2xs`,
 Tailwind's steps), not hand-written pixel values, so they grow with the reader's text size.
 
+**The Measure Rule.** Running text, a page's intro under its title (`PageHeader`) and the xs helper
+lines in sections alike, is held to `max-w-measure` (55ch, `--container-measure` in app.css): Inter
+averages about 0.8ch a character, so that is 65 to 75 characters a line at any size. Not a
+hand-written `max-w-[…ch]`.
+
 ## Screens and breakpoints
 
 Tailwind's default breakpoints, read as devices:
@@ -243,9 +248,10 @@ under 32rem tall, under 64rem wide).
 - **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the
   tab bar. While the on-screen keyboard is up (`data-keyboard` on `<html>`, from
   `useVisualViewport`) it takes exactly the area above the keyboard. Both slide in 200ms on an
-  exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`): the sheet from the right edge, the column
-  by its width with its 400px content pinned to the right, so the page narrows with it and nothing
-  inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
+  exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`), by transform and opacity only: the sheet
+  from the right edge; the column takes its 400px at once (the page narrows in one layout, not one
+  per frame) while its content slides in from the right, and on closing gives the width back only
+  after the content has slid out. Nothing inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
   confirmation is pinned above the composer (`wait` tint) until it is answered.
 - **Slow pages:** a navigation that takes over 400ms draws a link-blue rule sweeping under the top
   bar and marks main `aria-busy`. Quicker ones show nothing.
