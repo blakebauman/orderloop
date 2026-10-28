@@ -31,14 +31,24 @@ export async function probeStorage(storage: DurableObjectStorage, id: string): P
  * An object under `health/` written, read back and deleted. catalog-edge reads only the keys the
  * publisher writes (`paths`), and the bucket's lock covers `backups/` alone.
  */
-export async function probeBucket(bucket: R2Bucket, id: string): Promise<void> {
+export function probeBucket(
+  bucket: R2Bucket,
+  id: string,
+  waitUntil: (work: Promise<unknown>) => void,
+): Promise<void> {
   const key = `health/${id}`;
   const body = crypto.randomUUID();
-  await bucket.put(key, body);
-  try {
-    const got = await bucket.get(key);
-    if ((await got?.text()) !== body) throw new Error('health probe object not read back');
-  } finally {
-    await bucket.delete(key);
-  }
+  const run = (async () => {
+    await bucket.put(key, body);
+    try {
+      const got = await bucket.get(key);
+      if ((await got?.text()) !== body) throw new Error('health probe object not read back');
+    } finally {
+      await bucket.delete(key);
+    }
+  })();
+  // A check that times out answers before its delete: the invocation stays until it has run. One
+  // cut off even so is expired by the bucket's `health` lifecycle rule (provision.sh).
+  waitUntil(run.catch(() => {}));
+  return run;
 }

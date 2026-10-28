@@ -240,9 +240,20 @@ app's host, and each Worker writes, reads back and deletes:
 | `catalog.published` | The catalog's bucket | An object under `health/`, which catalog-edge never serves |
 
 Each check is pass or fail only, with `503` when any fails, so the log names the broken store and
-nothing about why. A row whose check stopped before its delete is cleared by the next check. Like
-the other smoke checks it tries for five minutes (30 attempts, 10 seconds apart), signing each
-attempt afresh, and its failure rolls the deploy back. No queue send is checked: `wrangler deploy`
+nothing about why. A row whose check stopped before its delete is cleared by the next check; an R2
+object whose delete never ran (the invocation keeps running for it with `waitUntil`, but one cut
+off even so) expires under the bucket's `health` lifecycle rule a day later. Like the other smoke
+checks it tries for five minutes in all: each attempt (signed afresh) gives up after 10 seconds,
+with 10 seconds between attempts, and neither an attempt nor a wait runs past the five minutes
+(`postWriteCheck` in `scripts/fleet.ts`). Its failure rolls the deploy back.
+
+Every smoke check is bounded, so a hang fails the deploy rather than cancelling it: a cancelled job
+skips the rollback step, which runs on `failure()` (and deliberately not on `cancelled()`, so a
+person cancelling a run never rolls production back). Each curl check retries for five minutes,
+each request at most 20 seconds (`--max-time 20`), so it ends within about 5 minutes 20 seconds;
+with the write check the step's worst case is under 27 minutes, and the step's own
+`timeout-minutes: 28` fails it if anything still hangs. The job's `timeout-minutes: 45` covers the
+deploys before it and the rollback after it. No queue send is checked: `wrangler deploy`
 already fails when a queue a Worker binds doesn't exist, and a test message would reach a
 consumer that has to act on it.
 

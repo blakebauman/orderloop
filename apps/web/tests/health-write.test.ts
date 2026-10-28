@@ -10,7 +10,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const KEY = 'test-principal-key-0123456789abcdef';
 const workerEnv: Record<string, string | undefined> = { PRINCIPAL_KEY: KEY };
-vi.mock('cloudflare:workers', () => ({ env: workerEnv }));
+/** What the check handed to `waitUntil`: the R2 probe, so its delete outlives a timed-out check. */
+const kept: Promise<unknown>[] = [];
+vi.mock('cloudflare:workers', () => ({
+  env: workerEnv,
+  waitUntil: (p: Promise<unknown>) => kept.push(p),
+}));
 
 const probeDb = vi.fn(async () => {});
 vi.mock('@orderloop/db', () => ({ probeDb }));
@@ -76,6 +81,7 @@ const ALL_OK = {
 describe('POST /health/write', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    kept.length = 0;
     objects = new Map();
     bucketDown = false;
     workerEnv.PRINCIPAL_KEY = KEY;
@@ -94,6 +100,7 @@ describe('POST /health/write', () => {
       expect.any(String),
     );
     expect(objects.size).toBe(0);
+    expect(kept).toHaveLength(1);
     // The engine checks the same header again for itself.
     expect(writeHealthEngine).toHaveBeenCalledWith(signed);
   });

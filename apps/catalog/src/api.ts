@@ -560,7 +560,7 @@ export class CatalogApi extends WorkerEntrypoint<Env> implements ProductCatalogR
     return runHealthChecks('orderloop-catalog', {
       meta: () => meta(this.env).probe(id),
       shard: () => shard(this.env, 0).probe(id),
-      published: () => probeBucket(this.env.PUBLISHED, id),
+      published: () => probeBucket(this.env.PUBLISHED, id, (p) => this.ctx.waitUntil(p)),
     });
   }
 }

@@ -241,7 +241,7 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
     const id = `engine-${crypto.randomUUID()}`;
     return runHealthChecks('orderloop-engine', {
       db: () => probeDb(createDb(this.env.DB), id),
-      docs: () => probeBucket(this.env.DOCS, id),
+      docs: () => probeBucket(this.env.DOCS, id, (p) => this.ctx.waitUntil(p)),
       objects: () => healthProbe(this.env).probe(id),
     });
   }

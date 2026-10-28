@@ -1241,39 +1241,60 @@ export function signHealthCheck(principalKey: string, now = Date.now()): string 
   return `${signed}.${sig}`;
 }
 
+/** How long the write check may take in all: five minutes, like the smoke test's curl checks. */
+export const WRITE_CHECK_DEADLINE_MS = 5 * 60_000;
+/** How long one attempt may take before it counts as failed (the Workers' own checks take 3 s). */
+export const WRITE_CHECK_ATTEMPT_MS = 10_000;
+/** The wait between attempts. */
+export const WRITE_CHECK_DELAY_MS = 10_000;
+
 /**
- * The deploy smoke test's write check on deployment `id`, with PRINCIPAL_KEY from the environment.
- * Like the smoke test's other checks it tries for up to five minutes (a new Worker version takes a
- * moment to be everywhere), each attempt signed afresh, since a header lasts a minute. The header
- * is never printed; the report names only checks and pass or fail.
+ * Posts the write check to `url` until it answers `200` or `deadlineMs` has passed, and returns the
+ * report. No attempt and no wait runs past the deadline, so the whole check ends within it (a new
+ * Worker version takes a moment to be everywhere; the deploy job's Smoke test step also has a
+ * timeout of its own). Each attempt is signed afresh, since a header lasts a minute. The header is
+ * never printed; a report names only checks and pass or fail.
  */
-async function writeCheck(id: string | undefined, attempts = 30, delayMs = 10_000) {
-  const key = process.env.PRINCIPAL_KEY;
-  if (!key) throw new Error('write-check needs PRINCIPAL_KEY in the environment');
-  const url = `https://${byId(id).domain}${HEALTH_WRITE_PATH}`;
-  let last = '';
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+export async function postWriteCheck(
+  url: string,
+  principalKey: string,
+  {
+    deadlineMs = WRITE_CHECK_DEADLINE_MS,
+    attemptMs = WRITE_CHECK_ATTEMPT_MS,
+    delayMs = WRITE_CHECK_DELAY_MS,
+    log = console.log as (line: string) => void,
+  } = {},
+): Promise<string> {
+  const deadline = Date.now() + deadlineMs;
+  let last = 'no attempt';
+  for (let attempt = 1; ; attempt++) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
     try {
       const r = await fetch(url, {
         method: 'POST',
-        headers: { [HEALTH_CHECK_HEADER]: signHealthCheck(key) },
-        signal: AbortSignal.timeout(20_000),
+        headers: { [HEALTH_CHECK_HEADER]: signHealthCheck(principalKey) },
+        signal: AbortSignal.timeout(Math.min(attemptMs, left)),
       });
       const body = await r.text();
-      if (r.ok) {
-        console.log(body);
-        return;
-      }
+      if (r.ok) return body;
       last = `${r.status} ${body.slice(0, 500)}`;
     } catch (err) {
       last = (err as Error).message;
     }
-    if (attempt < attempts) {
-      console.log(`write check attempt ${attempt} failed: ${last}`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+    const wait = Math.min(delayMs, deadline - Date.now());
+    if (wait <= 0) break;
+    log(`write check attempt ${attempt} failed: ${last}`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
   throw new Error(`write check failed: ${last}`);
+}
+
+/** The write check on deployment `id`, with PRINCIPAL_KEY from the environment. */
+async function writeCheck(id: string | undefined) {
+  const key = process.env.PRINCIPAL_KEY;
+  if (!key) throw new Error('write-check needs PRINCIPAL_KEY in the environment');
+  console.log(await postWriteCheck(`https://${byId(id).domain}${HEALTH_WRITE_PATH}`, key));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

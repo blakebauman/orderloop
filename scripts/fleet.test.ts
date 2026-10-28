@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
@@ -13,6 +15,7 @@ import {
   pluginBinding,
   pluginKey,
   pluginOwnSecrets,
+  postWriteCheck,
   RESERVED_PATH_SEGMENTS,
   renderCatalog,
   renderCatalogEdge,
@@ -24,6 +27,8 @@ import {
   shellVars,
   signHealthCheck,
   toDeployment,
+  WRITE_CHECK_ATTEMPT_MS,
+  WRITE_CHECK_DEADLINE_MS,
   workerPlugins,
 } from './fleet.ts';
 
@@ -557,6 +562,75 @@ test("the smoke test's write check is signed as core derives and checks it", () 
   // Its own key: never the principal key, nor any plugin's.
   assert.notEqual(healthCheckKey('test-principal-key'), 'test-principal-key');
   assert.notEqual(healthCheckKey('test-principal-key'), pluginKey('test-principal-key', 'health'));
+});
+
+/** A local server answering each request with `answer(n)` (`null`: never answers), and its URL. */
+async function server(answer: (n: number) => { status: number; body: string } | null) {
+  let n = 0;
+  const headers: (string | undefined)[] = [];
+  const s = createServer((req, res) => {
+    headers.push(req.headers['x-orderloop-health-check'] as string | undefined);
+    const a = answer(++n);
+    if (a) res.writeHead(a.status).end(a.body);
+  });
+  await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', resolve));
+  const { port } = s.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/health/write`,
+    headers,
+    close: () => {
+      s.closeAllConnections();
+      s.close();
+    },
+  };
+}
+
+test('the write check retries until the report is ok, signing each attempt', async () => {
+  const s = await server((n) =>
+    n < 3 ? { status: 503, body: '{"ok":false}' } : { status: 200, body: '{"ok":true}' },
+  );
+  const lines: string[] = [];
+  try {
+    const report = await postWriteCheck(s.url, 'test-principal-key', {
+      deadlineMs: 5_000,
+      delayMs: 10,
+      log: (l) => lines.push(l),
+    });
+    assert.equal(report, '{"ok":true}');
+    assert.equal(s.headers.length, 3);
+    assert.ok(s.headers.every((h) => h?.startsWith('h1.')));
+    // The log says which attempt failed and how, never the header.
+    assert.deepEqual(lines, [
+      'write check attempt 1 failed: 503 {"ok":false}',
+      'write check attempt 2 failed: 503 {"ok":false}',
+    ]);
+  } finally {
+    s.close();
+  }
+});
+
+test('the write check gives up at its deadline, even when the deployment never answers', async () => {
+  const s = await server(() => null);
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      postWriteCheck(s.url, 'test-principal-key', {
+        deadlineMs: 600,
+        attemptMs: 250,
+        delayMs: 100,
+        log: () => {},
+      }),
+      /write check failed/,
+    );
+    // Within the deadline and a little slack: no attempt or wait outlives it.
+    assert.ok(Date.now() - started < 900, `took ${Date.now() - started} ms`);
+    assert.ok(s.headers.length >= 2);
+  } finally {
+    s.close();
+  }
+  // The defaults keep it to the smoke test's five minutes, an attempt to ten seconds.
+  assert.equal(WRITE_CHECK_DEADLINE_MS, 300_000);
+  assert.equal(WRITE_CHECK_ATTEMPT_MS, 10_000);
 });
 
 test('buyer details are granted to a plugin only by its registry entry', () => {
