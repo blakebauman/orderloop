@@ -14,23 +14,49 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@orderloop/ui/sheet';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from '@orderloop/ui/sidebar';
+import { TooltipProvider } from '@orderloop/ui/tooltip';
 import { and, eq, isNull } from 'drizzle-orm';
 import {
-  Check,
-  ChevronDown,
+  Blocks,
+  ChevronsUpDown,
+  ChevronUp,
   Ellipsis,
+  Gauge,
   LayoutDashboard,
   MessageSquareText,
   Monitor,
   Moon,
+  Package,
   Plus,
+  Puzzle,
   ReceiptText,
+  ScrollText,
   ShoppingCart,
   Stamp,
+  Store,
   Sun,
   UserRound,
+  UsersRound,
+  Workflow,
 } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import {
   Link,
   NavLink,
@@ -44,7 +70,7 @@ import {
 import { Mark } from '~/components/mark';
 import { AssistantProvider, useAssistant } from '~/lib/assistant';
 import { authEnabled, requireUser } from '~/lib/auth.server';
-import { useShortcutLabel } from '~/lib/device';
+import { useMedia, useShortcutLabel } from '~/lib/device';
 import { db } from '~/lib/env.server';
 import { pendingApprovalCounts } from '~/lib/orders.server';
 import { PluginsProvider } from '~/lib/plugins';
@@ -53,11 +79,16 @@ import { pageShortcut } from '~/lib/shortcuts';
 import { type ThemeChoice, useTheme } from '~/lib/theme';
 import type { Route } from './+types/shell';
 
+/** The sidebar as it was left (shadcn's `sidebar_state` cookie), so the server draws it right. */
+const sidebarOpenFrom = (request: Request) =>
+  !/(?:^|;\s*)sidebar_state=false(?:;|$)/.test(request.headers.get('Cookie') ?? '');
+
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
+  const sidebarOpen = sidebarOpenFrom(request);
   // Until their two-factor sign-in is set up, a person sees only their Account page.
   if (me.twoFactorDue || me.passwordChangeDue)
-    return { pending: 0, auth: true, me, nav: false, plugins: [] };
+    return { pending: 0, auth: true, me, nav: false, plugins: [], sidebarOpen };
   const [pending, admins, auth, plugins] = await Promise.all([
     // Only what a decision here can resume: approvals on recorded orders aren't owed by anyone.
     pendingApprovalCounts(),
@@ -74,7 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Installed plugins: their nodes in the editor, their pages in the nav.
     pluginManifests(),
   ]);
-  return { pending: pending.live, auth, me, nav: true, admins, plugins };
+  return { pending: pending.live, auth, me, nav: true, admins, plugins, sidebarOpen };
 }
 
 /**
@@ -133,42 +164,36 @@ export function shouldRevalidate({
 type NavItem = {
   to: string;
   label: string;
+  icon: typeof Sun;
   end?: boolean;
   badge?: boolean;
   document?: boolean;
-  /** Starts a group in the top bar, after a hairline. */
-  group?: boolean;
-  /** A reference page: in the top bar's More menu rather than a link of its own. */
-  more?: boolean;
-  /** A plugin's page, under its own heading in More. */
+  /** The sidebar group it heads or belongs to; the day's work has none. */
+  section?: 'Build' | 'Reference';
+  /** A plugin's page, under its own heading. */
   plugin?: boolean;
 };
 
 /**
  * In this order everywhere: the day's work, then building, then reference pages (and plugins'),
- * which the top bar keeps under More.
+ * then the workspace's.
  */
 const NAV: NavItem[] = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/orders', label: 'Orders' },
-  { to: '/approvals', label: 'Approvals', badge: true },
-  { to: '/carts', label: 'Carts' },
-  { to: '/flows', label: 'Flows', group: true },
-  { to: '/commerce', label: 'Commerce', more: true },
-  { to: '/catalog', label: 'Catalog', more: true },
-  { to: '/performance', label: 'Performance', more: true },
+  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/orders', label: 'Orders', icon: ReceiptText },
+  { to: '/approvals', label: 'Approvals', icon: Stamp, badge: true },
+  { to: '/carts', label: 'Carts', icon: ShoppingCart },
+  { to: '/flows', label: 'Flows', icon: Workflow, section: 'Build' },
+  { to: '/commerce', label: 'Commerce', icon: Store, section: 'Reference' },
+  { to: '/catalog', label: 'Catalog', icon: Package, section: 'Reference' },
+  { to: '/performance', label: 'Performance', icon: Gauge, section: 'Reference' },
 ];
 
 /**
  * Phones are for keeping up and deciding: the day's work as tabs, in NAV's order. Flows (which a
  * phone only reviews) and the rest are under More.
  */
-const TABS: { to: string; label: string; icon: typeof Sun; end?: boolean; badge?: boolean }[] = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
-  { to: '/orders', label: 'Orders', icon: ReceiptText },
-  { to: '/approvals', label: 'Approvals', icon: Stamp, badge: true },
-  { to: '/carts', label: 'Carts', icon: ShoppingCart },
-];
+const TABS = NAV.filter((n) => !n.section);
 
 const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Light', icon: Sun },
@@ -179,11 +204,11 @@ const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
 /** Past two digits a count is 99+, everywhere it's shown. */
 const countLabel = (n: number) => (n > 99 ? '99+' : String(n));
 
-/** The workspace's own pages, for admins: under More beside the reference pages. */
+/** The workspace's own pages, for admins: the sidebar's last group, and More's on a phone. */
 const WORKSPACE: NavItem[] = [
-  { to: '/team', label: 'Team and roles' },
-  { to: '/audit', label: 'Audit log' },
-  { to: '/plugins', label: 'Plugins' },
+  { to: '/team', label: 'Team and roles', icon: UsersRound },
+  { to: '/audit', label: 'Audit log', icon: ScrollText },
+  { to: '/plugins', label: 'Plugins', icon: Puzzle },
 ];
 
 /** Approvals waiting on someone: the bar's one call for attention, filled in `wait`. */
@@ -268,6 +293,7 @@ function ShortcutsSheet({
   onOpenChange: (o: boolean) => void;
 }) {
   const assistant = useShortcutLabel('J');
+  const sidebar = useShortcutLabel('\\');
   const save = useShortcutLabel('S');
   const send = useShortcutLabel('Enter');
   const row = 'flex items-center justify-between gap-4 py-1.5 text-sm';
@@ -297,6 +323,7 @@ function ShortcutsSheet({
         </div>
         {group('Everywhere', [
           ['Open or close the assistant', [assistant]],
+          ['Collapse or expand the sidebar', [sidebar]],
           ...GO.map((g): [string, string[], string?] => [
             `Go to ${g.label}`,
             ['G', g.key.toUpperCase()],
@@ -341,7 +368,9 @@ export default function Shell() {
   return (
     <PluginsProvider plugins={plugins}>
       <AssistantProvider>
-        <ShellFrame />
+        <TooltipProvider>
+          <ShellFrame />
+        </TooltipProvider>
       </AssistantProvider>
     </PluginsProvider>
   );
@@ -378,12 +407,10 @@ function AssistantToggle() {
       )}
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
-      <span className="sr-only sm:not-sr-only md:max-lg:sr-only [[data-squeeze~=assistant]_&]:sr-only">
-        Assistant
-      </span>
+      <span className="sr-only sm:not-sr-only">Assistant</span>
       <span
         aria-hidden="true"
-        className="hidden font-sans text-2xs text-muted-foreground xl:fine:inline [[data-squeeze~=assistant]_&]:hidden"
+        className="hidden font-sans text-2xs text-muted-foreground xl:fine:inline"
       >
         <kbd className="font-sans">{shortcut}</kbd>
       </span>
@@ -416,165 +443,178 @@ function PendingBar() {
   ) : null;
 }
 
-/** What gives way, in this order, before any link folds into More. */
-const SQUEEZE = ['wordmark', 'account', 'assistant', 'new'];
+/** Canvas pages, whose graph wants the width: the flow editor and an order. */
+const railFor = (path: string) =>
+  /^\/flows\/[^/]+$/.test(path) ||
+  (/^\/orders\/[^/]+$/.test(path) && path !== '/orders/new' && path !== '/orders/scenarios');
+
+/** Past this many, a group of plugins' pages shows the first few and folds the rest. */
+const PLUGIN_FOLD = 6;
+
+/** Rows a finger can hit: 44px on touch, the preset's 36px otherwise. */
+const ROW = 'touch:h-11';
 
 /**
- * Fits the top bar to its width as the window and the reader's text size change. Labels give way
- * first (the wordmark, the account's name, then Assistant's and New order's words, which stay as
- * named icons), and only then do links fold into More from the right; the links' room never gets
- * narrower than More. An invisible ruler holds every link, and each way More can read, at natural
- * width. It runs before paint and marks what gave way on the bar (`data-squeeze`), so a label that
- * doesn't fit never draws.
- *
- * `current` is the current page's index among the links, the link count when it's one of More's
- * own pages, or -1; `badge` is the approvals link's index while approvals wait, else -1.
+ * Every page, from md, on shadcn's Sidebar (`@orderloop/ui/sidebar`): the brand row on the
+ * header's line, whose mark is the toggle (⌘\); the day's work; Build, Reference, From plugins and,
+ * for admins, Workspace; the account at its foot.
  */
-function useFittingBar(count: number, current: number, badge: number) {
-  const bar = useRef<HTMLDivElement>(null);
-  const box = useRef<HTMLElement>(null);
-  const ruler = useRef<HTMLDivElement>(null);
-  const [fits, setFits] = useState(count);
-  useLayoutEffect(() => {
-    const row = bar.current;
-    const room = box.current;
-    const marks = ruler.current;
-    if (!row || !room || !marks) return;
-    const fit = () => {
-      // Phones have the tab bar instead, and nothing to squeeze for.
-      if (getComputedStyle(room).display === 'none') {
-        row.dataset.squeeze = '';
-        return;
-      }
-      const items = [...marks.children] as HTMLElement[];
-      // The last four are More as it can read: More or the current page, with or without the count.
-      const mores = items.splice(count);
-      const gap = Number.parseFloat(getComputedStyle(marks).columnGap) || 0;
-      const more = (n: number) =>
-        mores[(current >= n ? 2 : 0) + (badge >= n ? 1 : 0)]?.offsetWidth ?? 0;
-      const fitting = () => {
-        for (let n = count; n > 0; n--) {
-          const last = items[n - 1];
-          if (last && last.offsetLeft + last.offsetWidth + gap + more(n) <= room.clientWidth)
-            return n;
-        }
-        return 0;
-      };
-      let level = 0;
-      let n = count;
-      for (;;) {
-        row.dataset.squeeze = SQUEEZE.slice(0, level).join(' ');
-        n = fitting();
-        if (n === count || level === SQUEEZE.length) break;
-        level++;
-      }
-      room.style.minWidth = `${more(n)}px`;
-      setFits(n);
-    };
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(room);
-    observer.observe(marks);
-    return () => observer.disconnect();
-  }, [count, current, badge]);
-  return { bar, box, ruler, fits: Math.min(fits, count) };
-}
-
-/** A top-bar link's underline tab; its outline sits inside it, clear of the rule below. */
-const navTab = (active: boolean) =>
-  cn(
-    // A transparent rule on top balances the underline, so the text sits on the bar's centre line.
-    'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-y-2 border-t-transparent px-2.5 text-ui focus-visible:outline-offset-[-2px]',
-    tint,
-    active
-      ? 'border-b-foreground font-medium text-foreground'
-      : 'border-b-transparent text-muted-foreground hover:border-b-rule hover:text-foreground',
-  );
-
-/** A link's place in the top bar, with the hairline that starts its group. */
-function NavSlot({ group, children }: { group?: boolean; children: React.ReactNode }) {
-  return (
-    <div className="flex shrink-0">
-      {group ? <span className="mx-1.5 h-4 w-px self-center bg-rule" aria-hidden="true" /> : null}
-      {children}
-    </div>
-  );
-}
-
-/**
- * The top bar's More: links that didn't fit the row, the reference pages, plugins' pages and, for
- * admins, the workspace's. While you're on one of them it reads as that page, underlined; it carries
- * the approvals count while Approvals is inside it.
- */
-function NavMore({
-  overflow,
-  reference,
-  plugins,
-  workspace,
-  path,
+function AppSidebar({
+  groups,
   pending,
+  path,
+  onShortcuts,
 }: {
-  overflow: NavItem[];
-  reference: NavItem[];
-  plugins: NavItem[];
-  workspace: NavItem[];
-  path: string;
+  groups: { title?: string; items: NavItem[] }[];
   pending: number;
+  path: string;
+  onShortcuts: () => void;
 }) {
-  const current = [...overflow, ...reference, ...plugins, ...workspace].find((i) => isAt(path, i));
-  const waiting = pending > 0 ? overflow.find((i) => i.badge) : undefined;
-  // Menu items are already 500, so the page you're on is marked with a check, not weight.
-  const item = ({ to, label, end, badge, document }: NavItem) => {
-    const here = isAt(path, { to, end });
-    return (
-      <DropdownMenuItem key={to} asChild>
-        <Link
-          to={to}
-          reloadDocument={document}
-          viewTransition
-          aria-current={here ? 'page' : undefined}
-          className="justify-between"
-        >
-          {label}
-          <span className="flex items-center gap-2">
-            {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-            {here ? <Check className="size-3.5 text-muted-foreground" aria-hidden="true" /> : null}
-          </span>
-        </Link>
-      </DropdownMenuItem>
-    );
-  };
-  const section = (title: string, items: NavItem[]) =>
-    items.length ? (
-      <>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="caption">{title}</DropdownMenuLabel>
-        {items.map(item)}
-      </>
-    ) : null;
+  const { me, auth } = useLoaderData<typeof loader>();
+  const { state } = useSidebar();
+  const expanded = state === 'expanded';
+  const shortcut = useShortcutLabel('\\');
+  const [allPlugins, setAllPlugins] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className={cn(navTab(!!current), 'data-[state=open]:text-foreground')}>
-        {current?.label ?? 'More'}
-        <span className="sr-only">
-          {current ? ', and more pages' : ' pages'}
-          {waiting ? `, includes ${waiting.label}, ${pending} pending` : ''}
-        </span>
-        {waiting ? <PendingCount n={pending} hidden /> : null}
-        <ChevronDown className="size-3.5 opacity-60" aria-hidden="true" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        className="max-h-[calc(var(--vvh,100dvh)-var(--shell-h)-1rem)] w-56 overflow-y-auto"
-      >
-        {overflow.map(item)}
-        {overflow.length && reference.length ? <DropdownMenuSeparator /> : null}
-        {reference.map(item)}
-        {section('From plugins', plugins)}
-        {section('Workspace', workspace)}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Sidebar className="vt-sidebar pl-(--safe-left)">
+      {/* On the header's line: its height, its inset and its rule. */}
+      <SidebarHeader className="h-(--shell-h) shrink-0 justify-end gap-0 border-sidebar-border border-b px-2 pt-safe-0 pb-0">
+        <div className="flex h-[calc(3rem-1px)] items-center gap-2 px-0.5">
+          <SidebarTrigger
+            aria-label="Sidebar"
+            aria-controls="sidebar-nav"
+            aria-keyshortcuts="Meta+\ Control+\"
+            title={`${expanded ? 'Collapse' : 'Expand'} the sidebar (${shortcut})`}
+            className="hit-area"
+          >
+            <Mark className="size-5" />
+          </SidebarTrigger>
+          <span className="truncate font-semibold text-base tracking-title transition-opacity duration-(--motion-instant) @max-[8rem]:opacity-0">
+            OrderLoop
+          </span>
+        </div>
+      </SidebarHeader>
+      <SidebarContent id="sidebar-nav" role="navigation" aria-label="Main" className="py-1">
+        {groups.map(({ title, items }) => {
+          const plugins = !!items[0]?.plugin && items.length > PLUGIN_FOLD;
+          const shown =
+            plugins && !allPlugins
+              ? items.filter((it, i) => i < PLUGIN_FOLD - 1 || isAt(path, it))
+              : items;
+          const id = title ? `sidebar-${title.toLowerCase().replace(/\W+/g, '-')}` : undefined;
+          return (
+            <SidebarGroup key={title ?? 'work'} className="py-1">
+              {title ? (
+                <SidebarGroupLabel id={id} className="caption">
+                  {title}
+                </SidebarGroupLabel>
+              ) : null}
+              <SidebarMenu aria-labelledby={id}>
+                {shown.map(({ to, label, icon: Icon, end, badge, document }) => {
+                  const here = isAt(path, { to, end });
+                  const counted = badge && pending > 0;
+                  return (
+                    <SidebarMenuItem key={to}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={here}
+                        tooltip={counted ? `${label}, ${countLabel(pending)}` : label}
+                        className={ROW}
+                      >
+                        <NavLink
+                          to={to}
+                          end={end}
+                          reloadDocument={document}
+                          viewTransition
+                          aria-current={here ? 'page' : undefined}
+                        >
+                          <Icon
+                            className={here ? undefined : 'text-muted-foreground'}
+                            aria-hidden="true"
+                          />
+                          {counted ? (
+                            // As a rail, the count becomes a dot on the icon.
+                            <span
+                              aria-hidden="true"
+                              className="absolute top-1.5 left-[1.375rem] hidden size-2 rounded-full bg-wait ring-2 ring-sidebar @max-[8rem]:block"
+                            />
+                          ) : null}
+                          <span>
+                            {label}
+                            {counted ? <span className="sr-only">, {pending} pending</span> : null}
+                          </span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                      {counted ? (
+                        <SidebarMenuBadge>
+                          <PendingCount n={pending} hidden />
+                        </SidebarMenuBadge>
+                      ) : null}
+                    </SidebarMenuItem>
+                  );
+                })}
+                {plugins ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setAllPlugins((a) => !a)}
+                      aria-expanded={allPlugins}
+                      tooltip={allPlugins ? 'Fewer plugin pages' : 'All plugin pages'}
+                      className={cn(ROW, 'text-muted-foreground')}
+                    >
+                      {allPlugins ? (
+                        <ChevronUp aria-hidden="true" />
+                      ) : (
+                        <Ellipsis aria-hidden="true" />
+                      )}
+                      <span>{allPlugins ? 'Fewer' : `${items.length - shown.length} more`}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
+              </SidebarMenu>
+            </SidebarGroup>
+          );
+        })}
+      </SidebarContent>
+      {/* Who is signed in, their account, the shortcuts, the theme, and signing in or out. */}
+      <SidebarFooter className="border-sidebar-border border-t pb-safe-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <SidebarMenuButton asChild tooltip={shortWho(me, auth)} className={ROW}>
+                <DropdownMenuTrigger
+                  aria-label={`${shortWho(me, auth)}, account menu`}
+                  title={expanded ? who(me, auth) : undefined}
+                >
+                  <UserRound className="text-muted-foreground" aria-hidden="true" />
+                  <ChevronsUpDown
+                    className="absolute right-2.5 text-muted-foreground @max-[8rem]:hidden"
+                    aria-hidden="true"
+                  />
+                  <span className="pr-5">{shortWho(me, auth)}</span>
+                </DropdownMenuTrigger>
+              </SidebarMenuButton>
+              <DropdownMenuContent
+                side={expanded ? 'top' : 'right'}
+                align={expanded ? 'start' : 'end'}
+                className="w-56"
+              >
+                <AccountItems me={me} auth={auth} onShortcuts={onShortcuts} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
+}
+
+/** Closes the sidebar opened over the page when a navigation lands. */
+function ClosePeekOnNavigation() {
+  const { pathname } = useLocation();
+  const { setPeek } = useSidebar();
+  useEffect(() => setPeek(false), [pathname, setPeek]);
+  return null;
 }
 
 /** Where a phone starts an order: in thumb reach, on the pages that list orders. */
@@ -585,7 +625,7 @@ const QUIET_NEW_ORDER = [{ to: '/approvals' }, { to: '/flows' }];
 
 function ShellFrame() {
   const slow = useSlowNavigation();
-  const { pending, auth, me, nav: showNav, plugins } = useLoaderData<typeof loader>();
+  const { pending, me, nav: showNav, plugins, sidebarOpen } = useLoaderData<typeof loader>();
   const operator = showNav && atLeast(me.role, 'operator');
   // A plugin's pages are served by its own Worker, so its links load a whole document.
   const nav: NavItem[] = showNav
@@ -594,23 +634,25 @@ function ShellFrame() {
         ...plugins
           .filter((p) => atLeast(me.role, p.pageRole))
           .flatMap((p) =>
-            p.nav.map((n) => ({ to: n.path, label: n.label, document: true, plugin: true })),
+            p.nav.map((n) => ({
+              to: n.path,
+              label: n.label,
+              icon: Blocks,
+              document: true,
+              plugin: true,
+            })),
           ),
       ]
     : [];
-  const links = nav.filter((n) => !n.more && !n.plugin);
-  const reference = nav.filter((n) => n.more);
-  const pluginLinks = nav.filter((n) => n.plugin);
   const workspace = showNav && atLeast(me.role, 'admin') ? WORKSPACE : [];
+  const groups = [
+    { items: nav.filter((n) => !n.section && !n.plugin) },
+    { title: 'Build', items: nav.filter((n) => n.section === 'Build') },
+    { title: 'Reference', items: nav.filter((n) => n.section === 'Reference') },
+    { title: 'From plugins', items: nav.filter((n) => n.plugin) },
+    { title: 'Workspace', items: workspace },
+  ].filter((g) => g.items.length);
   const path = useCurrentPath();
-  const here = links.findIndex((l) => isAt(path, l));
-  const inMore = [...reference, ...pluginLinks, ...workspace].find((i) => isAt(path, i));
-  const currentLabel = links[here]?.label ?? inMore?.label;
-  const { bar, box, ruler, fits } = useFittingBar(
-    links.length,
-    here >= 0 ? here : inMore ? links.length : -1,
-    pending > 0 ? links.findIndex((l) => l.badge) : -1,
-  );
   const [shortcuts, setShortcuts] = useState(false);
   const openShortcuts = useCallback(() => setShortcuts(true), []);
   useGoKeys(openShortcuts);
@@ -618,142 +660,87 @@ function ShellFrame() {
   // The assistant's sheet covers the page, and this button would sit on its send button.
   const assistantOpen = useAssistant().open;
   const quietNewOrder = QUIET_NEW_ORDER.some((p) => isAt(path, p));
+  // The sidebar opens over the page, as a rail beside it, below lg, on a canvas, and beside the
+  // assistant's column below xl. Asked as "narrow" so the server (which sees neither) assumes wide.
+  const narrow = useMedia('(max-width: 1023.98px)');
+  const xl = useMedia('(min-width: 1280px)');
+  const overlay = narrow || railFor(path) || (assistantOpen && !xl);
   return (
-    <div className="flex min-h-dvh flex-col">
+    <SidebarProvider
+      defaultOpen={sidebarOpen}
+      overlay={overlay}
+      // The rail clears a phone's notch on its side.
+      style={{ '--sidebar-width-icon': 'calc(3.25rem + var(--safe-left))' } as React.CSSProperties}
+      className="min-h-dvh"
+    >
+      <ClosePeekOnNavigation />
       <a
         href="#main"
         className="sr-only z-50 rounded-md bg-card px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
       >
         Skip to content
       </a>
-      {/* 3rem tall with its rule, under the status bar's inset: full-height pages and the assistant
-          subtract --shell-h (app.css). */}
-      <header className="vt-shell-bar sticky top-0 z-40 border-b bg-background pt-safe-0">
-        <div
-          ref={bar}
-          className="flex h-[calc(3rem-1px)] items-center gap-3 px-safe-4 sm:gap-6 sm:px-safe-5"
-        >
-          <Link
-            to="/"
-            viewTransition
-            className="hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-base"
-            aria-label="OrderLoop overview"
-          >
-            <Mark className="size-5" />
-            <span className="hidden sm:inline md:max-lg:hidden [[data-squeeze~=wordmark]_&]:hidden">
-              OrderLoop
-            </span>
-          </Link>
-          {showNav ? (
-            <nav
-              ref={box}
-              aria-label="Main"
-              className="relative -mb-px hidden h-full min-w-0 flex-1 items-stretch gap-1 overflow-hidden md:flex"
+      {showNav ? (
+        <AppSidebar groups={groups} pending={pending} path={path} onShortcuts={openShortcuts} />
+      ) : null}
+      <SidebarInset>
+        {/* 3rem tall with its rule, under the status bar's inset: full-height pages and the
+            assistant subtract --shell-h (app.css). From md the sidebar holds the brand, the pages
+            and the account, so this holds only what acts on the page. */}
+        <header className="vt-shell-bar sticky top-0 z-40 border-b bg-background pt-safe-0">
+          <div className="flex h-[calc(3rem-1px)] items-center gap-3 pr-safe-4 pl-safe-4 sm:gap-6 sm:pr-safe-5 sm:pl-safe-5 md:pl-5">
+            <Link
+              to="/"
+              viewTransition
+              className={cn(
+                'hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-base',
+                showNav && 'md:hidden',
+              )}
+              aria-label="OrderLoop overview"
             >
-              <div
-                ref={ruler}
-                aria-hidden="true"
-                className="pointer-events-none invisible absolute top-0 left-0 flex h-0 w-max gap-1 overflow-hidden"
-              >
-                {links.map(({ to, label, badge, group }) => (
-                  <NavSlot key={to} group={group}>
-                    <span className={navTab(true)}>
-                      {label}
-                      {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-                    </span>
-                  </NavSlot>
-                ))}
-                {[false, true].flatMap((named) =>
-                  [false, true].map((counted) => (
-                    <span key={`${named}${counted}`} className={navTab(true)}>
-                      {named && currentLabel ? currentLabel : 'More'}
-                      {counted && pending > 0 ? <PendingCount n={pending} hidden /> : null}
-                      <ChevronDown className="size-3.5" />
-                    </span>
-                  )),
-                )}
-              </div>
-              {links.slice(0, fits).map(({ to, label, end, badge, group }) => (
-                <NavSlot key={to} group={group}>
-                  <NavLink
-                    to={to}
-                    end={end}
-                    viewTransition
-                    className={navTab(isAt(path, { to, end }))}
-                  >
-                    {label}
-                    {badge && pending > 0 ? <PendingCount n={pending} /> : null}
-                  </NavLink>
-                </NavSlot>
-              ))}
-              <NavMore
-                overflow={links.slice(fits)}
-                reference={reference}
-                plugins={pluginLinks}
-                workspace={workspace}
-                path={path}
-                pending={pending}
-              />
-            </nav>
-          ) : null}
-          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-            {showNav ? <AssistantToggle /> : null}
-            {operator ? (
-              <Link
-                to="/orders/new"
-                title="New order"
-                className={cn(
-                  'hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl px-3 font-medium text-ui md:inline-flex',
-                  tint,
-                  quietNewOrder
-                    ? 'border border-input bg-input/30 text-foreground hover:bg-input/50'
-                    : 'bg-primary text-primary-foreground hover:bg-primary/90',
-                )}
-              >
-                <Plus className="size-3.5" aria-hidden="true" />
-                <span className="max-lg:sr-only [[data-squeeze~=new]_&]:sr-only">New order</span>
-              </Link>
-            ) : null}
-            {/* Who is signed in, the pages that belong to them and the team, and the theme. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label={`${shortWho(me, auth)}, account menu`}
-                title={who(me, auth)}
-                className={cn(
-                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border border-input bg-input/30 px-3 text-ui text-muted-foreground hover:bg-input/50 hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
-                  tint,
-                )}
-              >
-                <UserRound className="size-4" aria-hidden="true" />
-                <span className="max-w-32 truncate md:max-lg:sr-only [[data-squeeze~=account]_&]:sr-only">
-                  {shortWho(me, auth)}
-                </span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <AccountItems me={me} auth={auth} onShortcuts={openShortcuts} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Signing out is a POST; the account menu's item submits this. */}
-            <form id="sign-out" method="post" action="/logout" hidden />
+              <Mark className="size-5" />
+              <span className="hidden sm:inline">OrderLoop</span>
+            </Link>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+              {showNav ? <AssistantToggle /> : null}
+              {operator ? (
+                <Link
+                  to="/orders/new"
+                  title="New order"
+                  className={cn(
+                    'hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl px-3 font-medium text-ui md:inline-flex',
+                    tint,
+                    quietNewOrder
+                      ? 'border border-input bg-input/30 text-foreground hover:bg-input/50'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                  )}
+                >
+                  <Plus className="size-3.5" aria-hidden="true" />
+                  New order
+                </Link>
+              ) : null}
+              {/* Signing out is a POST; the account menu's item submits this. */}
+              <form id="sign-out" method="post" action="/logout" hidden />
+            </div>
           </div>
+          <PendingBar />
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <main
+            id="main"
+            tabIndex={-1}
+            aria-busy={slow || undefined}
+            className={cn(
+              'min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0',
+              // Room under the last row for the New order button.
+              phoneNewOrder && 'pb-[calc(var(--tabbar-h)+4.5rem)]',
+            )}
+          >
+            <Outlet />
+          </main>
+          {showNav ? <LazyAssistantPanel /> : null}
         </div>
-        <PendingBar />
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <main
-          id="main"
-          tabIndex={-1}
-          aria-busy={slow || undefined}
-          className={cn(
-            'min-w-0 flex-1 pb-[var(--tabbar-h)] outline-none md:pb-0',
-            // Room under the last row for the New order button.
-            phoneNewOrder && 'pb-[calc(var(--tabbar-h)+4.5rem)]',
-          )}
-        >
-          <Outlet />
-        </main>
-        {showNav ? <LazyAssistantPanel /> : null}
-      </div>
+      </SidebarInset>
       {phoneNewOrder && !assistantOpen ? (
         <Link
           to="/orders/new"
@@ -766,13 +753,13 @@ function ShellFrame() {
       ) : null}
       <TabBar nav={nav} workspace={workspace} pending={pending} path={path} />
       {showNav ? <ShortcutsSheet open={shortcuts} onOpenChange={setShortcuts} /> : null}
-    </div>
+    </SidebarProvider>
   );
 }
 
 /**
  * Phones: the main pages as tabs along the bottom, in thumb reach and clear of the home indicator,
- * and More for everything else. Wider screens have the links in the top bar instead.
+ * and More for everything else. Wider screens have the sidebar instead.
  */
 function TabBar({
   nav,
@@ -862,9 +849,8 @@ function TabBar({
 }
 
 /**
- * The More sheet, grouped as the desktop groups them: the pages without a tab, plugins' pages and
- * the workspace's (as in the top bar's More), then the account, the theme and signing in or out
- * (as in the account menu).
+ * The More sheet, grouped as the sidebar groups them: the pages without a tab, plugins' pages and
+ * the workspace's, then the account, the theme and signing in or out (as in the account menu).
  */
 function MoreMenu({
   nav,
@@ -919,7 +905,9 @@ function MoreMenu({
           </>
         ) : null}
       </div>
-      <div className="border-t p-2">{list([{ to: '/account', label: 'Account' }])}</div>
+      <div className="border-t p-2">
+        {list([{ to: '/account', label: 'Account', icon: UserRound }])}
+      </div>
       <fieldset className="border-t px-4 pt-3 pb-3">
         <legend className="caption float-left mb-2 w-full">Theme</legend>
         <Segmented
@@ -990,7 +978,7 @@ const shortWho = (me: Principal, auth: boolean) =>
 
 /**
  * Who is signed in, their account, the keyboard shortcuts (with a keyboard), the theme, and
- * signing in or out. The workspace's pages are in More.
+ * signing in or out. The workspace's pages are the sidebar's.
  */
 function AccountItems({
   me,
