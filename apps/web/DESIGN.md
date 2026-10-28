@@ -84,16 +84,16 @@ components:
     padding: "0 0.75rem"
   input:
     textColor: "{colors.ink}"
-    rounded: "{rounded.3xl}"
+    rounded: "{rounded.4xl}"
     height: "2.25rem"
     padding: "0.25rem 0.75rem"
   card:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.4xl}"
+    rounded: "{rounded.2xl}"
   tile:
     backgroundColor: "{colors.muted}"
-    rounded: "{rounded.2xl}"
+    rounded: "{rounded.xl}"
     padding: "1rem"
   status-badge:
     rounded: "{rounded.full}"
@@ -105,7 +105,7 @@ components:
 ## Overview
 
 The console where people watch orders, decide approvals and draw flows. Its visual system is
-**Ledger**: shadcn's base-luma preset (neutral greys, Inter, pill buttons and fields) on the Radix
+**Ledger**: shadcn's base-maia preset (neutral greys, Inter, pill buttons and fields) on the Radix
 primitives in `packages/ui`, with status tokens (`ok`, `wait`, `bad`, `undo`, `run`, `idle`, `ai`)
 that mean one thing each. The tokens live in `apps/web/app/app.css`, are mirrored in
 `packages/design/src/tokens.ts`, and the docs site's reading of them is recorded in
@@ -129,7 +129,7 @@ Neutral greys with no tint carry everything; colour is reserved for one blue and
 - **Muted** (`muted`): tiles, segmented tracks, hover fills.
 - **Muted text** (`muted-foreground`): secondary text and captions. Set to hold 4.5:1 on paper,
   on muted and on a tile.
-- **Rule** and **Input** (`rule`, `input`): hairlines, and the fill of fields (at half strength).
+- **Rule** and **Input** (`rule`, `input`): hairlines, and the edge and faint fill of fields.
 - **Ring** (`ring`): the focus edge on fields and buttons, dark enough to hold 3:1 on paper and on
   muted fills. The page-wide focus outline is ink.
 
@@ -202,10 +202,10 @@ under 32rem tall, under 64rem wide).
   the approvals count while Approvals is inside it. A tab marks as soon as it is chosen, not when
   its page arrives. Focus outlines on the links sit inside them, clear of the rule. A transparent
   2px rule on top balances the underline, so tab text sits on the bar's centre line with the
-  wordmark and the pills. Menu items are 500 already, so More marks the page you're on with a
-  check, as the theme's radio items do, not with weight.
+  wordmark and the pills. More marks the page you're on with a check, as the theme's radio items
+  do, not with weight.
 - **Titles in the bar's menus and sheets** (the account menu's who, a sheet's title) are 600 with
-  `tracking-title`, the title tier, so they read as headers over 500 items; hints (⌘J, ?) are
+  `tracking-title`, the title tier, so they read as headers over 400 items; hints (⌘J, ?) are
   11px/400 muted everywhere except the shortcuts list's boxed keys.
 - **Fitting the bar:** it never scrolls or overlaps, whatever the window or text size
   (`useFittingBar`). An invisible ruler holds every link, and each way More can read, at natural
@@ -328,12 +328,12 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
 
 ## Elevation & Depth
 
-Lifted, lightly. A card sits on the page with a faint ring and a soft two-layer shadow; inside it,
-depth is tonal: tiles are a muted step, not another shadow. In dark the shadow is dropped and the
-ring alone separates a card.
+Flat. A card sits on the page edged by a faint ring and no shadow; inside it, depth is tonal:
+tiles are a muted step. Shadows are kept for what floats over the page (menus, sheets, a phone's
+New order).
 
 ### Shadow Vocabulary
-- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
+- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)`): every panel (`card`), a ring rather than a shadow.
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
 - **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
 
@@ -342,9 +342,12 @@ ring alone separates a card.
 
 ## Shapes
 
-Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 4xl, tiles 2xl,
-one-line fields 3xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
-pills. Hairlines divide rows inside a card; cards themselves have no border.
+Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 2xl, tiles and
+rows inside a card xl, the flow canvas 2xl, one-line fields 4xl, text areas xl, menus 2xl, and
+bordered notices, option tiles and bordered lists lg (the preset's alert and item). Buttons, one-line
+fields, badges, segmented controls, filter links and icon buttons are pills. Checkboxes are 6px
+boxes and radios round, both native and drawn by app.css. Hairlines divide rows inside a card; cards
+themselves have no border.
 
 **The Pill Rule.** Anything you press or that labels a status is fully round. Square corners are
 for code and data blocks only.
@@ -352,10 +355,10 @@ for code and data blocks only.
 ## Components
 
 - **Buttons** (`packages/ui/src/button.tsx`): pills. Primary is an ink fill with paper text; outline is a
-  rule on paper; ghost fills muted on hover; link is the work blue. Focus turns the edge to `ring`
+  rule over a faint `input` fill; ghost fills muted on hover; link is the work blue. Focus turns the edge to `ring`
   with a soft halo. Every size carries `hit-area`.
-- **Fields** (`input.tsx`, `textarea.tsx`, `native-select.tsx`): filled pills (`input` at half
-  strength), no rest border. Focus: the `ring` edge and halo. Invalid: the destructive edge.
+- **Fields** (`input.tsx`, `textarea.tsx`, `native-select.tsx`): pills with an `input` hairline
+  over an `input` fill at 30%. Focus: the `ring` edge and halo. Invalid: the destructive edge.
 - **Segmented** (`segmented.tsx`): a radio group drawn as a muted pill track; the chosen segment
   is raised on paper. Arrow keys move the choice.
 - **Card and tile** (`card`, `tile` in app.css): the panel and the step inside it. `Section`
@@ -387,7 +390,7 @@ for code and data blocks only.
   products into collapsible sections, each headed by a caption button (a chevron that turns 90°,
   the group's name and `· count`); each product appears in one group only. Longer lists end in a
   link-blue "Show more".
-- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded 2xl,
+- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded xl,
   muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
   size) is the link, stretched over the whole row; the product key is mono 2xs muted under it, then
   a muted reason line clamped to two lines, locales in mono. Its actions sit at the right, above the

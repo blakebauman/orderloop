@@ -242,7 +242,7 @@ export default function Orders() {
             />
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-2xs text-muted-foreground touch:hidden"
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm bg-muted px-1 font-sans text-2xs text-muted-foreground touch:hidden"
             >
               /
             </span>
@@ -592,7 +592,7 @@ function AttentionToggle({ checked, className }: { checked: boolean; className?:
   return (
     <label
       className={cn(
-        'inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]',
+        'inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border border-input bg-input/30 px-3 text-ui text-muted-foreground hover:bg-input/50 has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]',
         className,
       )}
     >

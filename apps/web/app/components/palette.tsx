@@ -56,7 +56,7 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
                     onClick={() => onPick(s.type)}
                     title={s.description}
                     // On a touch screen dragging is unreliable (iPadOS), so a tap adds it.
-                    className="flex w-full cursor-grab items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-ui hover:border-border hover:bg-muted/60 active:cursor-grabbing touch:cursor-default touch:py-2.5"
+                    className="flex w-full cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-ui hover:border-border hover:bg-muted/60 active:cursor-grabbing touch:cursor-default touch:py-2.5"
                   >
                     <NodeIcon
                       name={s.icon}

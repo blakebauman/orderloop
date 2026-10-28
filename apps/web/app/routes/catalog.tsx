@@ -638,7 +638,7 @@ function CardRow({
       data-card={c.key}
       data-flip={flip ? c.key : undefined}
       aria-busy={busy || undefined}
-      className="group relative mx-1.5 flex items-start gap-3 rounded-2xl px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
+      className="group relative mx-1.5 flex items-start gap-3 rounded-xl px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
       onKeyDown={(e) => {
         // The card's link has focus; Enter follows it on its own.
         if (!(e.target instanceof HTMLAnchorElement) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -661,7 +661,7 @@ function CardRow({
           checked={tick.on}
           onChange={tick.toggle}
           aria-label={`Publish ${c.title}`}
-          className="hit-area relative z-10 mt-1 size-4 shrink-0 accent-foreground max-lg:hidden"
+          className="hit-area relative z-10 mt-1 size-4 shrink-0 max-lg:hidden"
         />
       ) : null}
       <div className="min-w-0 flex-1">
@@ -670,7 +670,7 @@ function CardRow({
           preventScrollReset
           data-card-link
           aria-keyshortcuts={keys || undefined}
-          className="block truncate font-medium text-sm outline-none after:absolute after:inset-0 after:rounded-2xl"
+          className="block truncate font-medium text-sm outline-none after:absolute after:inset-0 after:rounded-xl"
         >
           {c.title}
         </Link>

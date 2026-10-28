@@ -727,7 +727,7 @@ function TurnError({
   onDismiss: () => void;
 }) {
   return (
-    <div role="alert" className="flex items-start gap-2 rounded-2xl bg-bad/10 px-3 py-2 text-sm">
+    <div role="alert" className="flex items-start gap-2 rounded-xl bg-bad/10 px-3 py-2 text-sm">
       <CircleAlert className="mt-0.5 size-4 shrink-0 text-bad" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p className="font-medium text-bad">The assistant couldn’t finish that reply.</p>
@@ -943,7 +943,7 @@ function HeldMessages({
               value={t}
               onChange={(e) => onChange(i, e.target.value)}
               aria-label="Queued message"
-              className="h-7 min-w-0 flex-1 rounded-xl bg-transparent px-2 text-ui focus-visible:bg-background focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+              className="h-7 min-w-0 flex-1 rounded-xl bg-transparent px-2 text-ui focus-visible:bg-background focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             />
             <QueueItemActions>
               <QueueItemAction label="Remove queued message" onClick={() => onRemove(i)}>

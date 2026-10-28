@@ -177,14 +177,14 @@ export default function Account() {
         <div className="max-w-[560px]">
           {/* Not alerts: they are there when the page loads, so they're read in order. */}
           {me.passwordChangeDue ? (
-            <p className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
+            <p className="mb-6 rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Choose your own password to continue.</span> You signed
               in with a temporary password an admin gave you; the rest of OrderLoop opens once you
               replace it.
             </p>
           ) : null}
           {me.twoFactorDue ? (
-            <p className="mb-6 rounded-md border border-wait/40 bg-wait/10 p-4 text-sm">
+            <p className="mb-6 rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Set up two-factor sign-in to continue.</span> Your role
               needs it in this workspace; the rest of OrderLoop opens once it is on.
             </p>
@@ -721,7 +721,7 @@ function Disconnect({
       {confirming ? (
         <end.Form
           method="post"
-          className="flex basis-full flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2"
+          className="flex basis-full flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2"
         >
           <input type="hidden" name="intent" value="disconnect-app" />
           <input type="hidden" name="ref" value={id} />
