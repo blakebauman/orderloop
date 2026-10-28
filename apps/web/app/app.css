@@ -31,6 +31,23 @@
   /* The measure for running text (`max-w-measure`): Inter's characters average about 0.8ch, so
      55ch holds 65 to 75 of them a line at any size, page intros and xs helpers alike. */
   --container-measure: 55ch;
+
+  /* Motion: quiet and exact. Things move only when state changes, by opacity, colour and a few
+     pixels, never by bouncing or scaling content. Three durations, by how far the eye travels:
+     instant for feedback and leaving, move for something appearing or changing state, travel for
+     pages and panels. Arrivals decelerate; exits are shorter and accelerate away. */
+  --ease-arrive: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-leave: cubic-bezier(0.4, 0, 1, 1);
+  --default-transition-duration: var(--motion-instant);
+  --default-transition-timing-function: var(--ease-arrive);
+  /* Something new in a list or a log: a fade and a 4px rise (no rise where motion is reduced). */
+  --animate-arrive: ol-arrive var(--motion-move) var(--ease-arrive) both;
+  @keyframes ol-arrive {
+    from {
+      opacity: 0;
+      translate: 0 var(--arrive-rise);
+    }
+  }
 }
 
 @theme inline {
@@ -195,6 +212,15 @@
   --edge-idle: oklch(0.269 0 0);
 
   color-scheme: dark;
+}
+
+/* Motion (see the @theme block above for the easings). Its own block: the palette `:root` above is
+   mirrored value for value in packages/design, and durations aren't part of that palette. */
+:root {
+  --motion-instant: 100ms;
+  --motion-move: 180ms;
+  --motion-travel: 240ms;
+  --arrive-rise: 4px;
 }
 
 @layer base {
@@ -455,6 +481,10 @@
   font-size: 11px;
   font-family: var(--font-mono);
 }
+/* Live state on the flow graph: an edge changes colour with its step, rather than snapping. */
+.react-flow .react-flow__edge-path {
+  transition: stroke var(--motion-move) var(--ease-arrive);
+}
 @keyframes ol-dash {
   to {
     stroke-dashoffset: -20;
@@ -598,20 +628,9 @@
   }
 }
 
-/* A confirm card arrives with a short rise, so a prepared action is noticed without a modal. */
-@keyframes ol-arrive {
-  from {
-    opacity: 0;
-    translate: 0 4px;
-  }
-}
+/* A confirm card arrives with the shared rise, so a prepared action is noticed without a modal. */
 .ol-confirm {
-  animation: ol-arrive 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-@media (prefers-reduced-motion: reduce) {
-  .ol-confirm {
-    animation: none;
-  }
+  animation: var(--animate-arrive);
 }
 
 /* Tables (`Table` in packages/ui). The table pads its cells at zero specificity, so a cell's own
@@ -713,5 +732,75 @@
     translate: 0 0;
     width: 100%;
     opacity: 0.6;
+  }
+}
+
+/* Reduced motion: nothing travels. Colour and state still change (they carry meaning), arrivals
+   fade without rising, and page changes (below) and the undo bar happen at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --arrive-rise: 0px;
+  }
+}
+
+/* Moving between pages (`viewTransition` on the shell's links, the orders list and the order's
+   breadcrumb): the page cross-fades, the old one leaving faster than the new one arrives. The top
+   bar and the phone's tab bar are their own layers, so they hold still while the page changes. */
+::view-transition-old(root) {
+  animation: ol-fade-out var(--motion-instant) var(--ease-leave) both;
+}
+::view-transition-new(root) {
+  animation: ol-fade-in var(--motion-travel) var(--ease-arrive) both;
+}
+@keyframes ol-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ol-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.vt-shell-bar {
+  view-transition-name: shell-bar;
+}
+.vt-tab-bar {
+  view-transition-name: tab-bar;
+}
+/* An order's title travels from its row in the list to the order page's heading, and back. On a
+   phone the page change is a cross-fade alone: the row and the heading sit too close for travel
+   to say anything. */
+.vt-order-title {
+  view-transition-name: order-title;
+  @media (width < 48rem) {
+    view-transition-name: none;
+  }
+}
+::view-transition-group(order-title) {
+  animation-duration: var(--motion-travel);
+  animation-timing-function: var(--ease-arrive);
+}
+::view-transition-old(order-title),
+::view-transition-new(order-title) {
+  /* Scale the snapshots to the group rather than stretching text to fit. */
+  height: 100%;
+  object-fit: none;
+  object-position: left center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-group(order-title),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* The undo window running out: a hairline that drains over exactly the decision's window. */
+@keyframes ol-drain {
+  to {
+    scale: 0 1;
   }
 }

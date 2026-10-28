@@ -10,7 +10,7 @@ export function StatusDot({ status, className }: { status?: string; className?: 
     <span
       aria-hidden="true"
       className={cn(
-        'inline-block size-2 shrink-0 rounded-full',
+        'inline-block size-2 shrink-0 rounded-full transition-[background-color] duration-(--motion-move)',
         live && 'motion-safe:animate-pulse',
         className,
       )}
@@ -38,7 +38,8 @@ function Stamp({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 font-medium text-xs',
+        // A step that changes state cross-fades to its new colour rather than snapping.
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 font-medium text-xs transition-[color,background-color,border-color] duration-(--motion-move)',
         ended && 'border py-px',
       )}
       style={
@@ -52,7 +53,10 @@ function Stamp({
       ) : (
         <span
           aria-hidden="true"
-          className={cn('size-1.5 rounded-full', live && 'motion-safe:animate-pulse')}
+          className={cn(
+            'size-1.5 rounded-full transition-[background-color] duration-(--motion-move)',
+            live && 'motion-safe:animate-pulse',
+          )}
           style={{ background: color }}
         />
       )}

@@ -67,6 +67,7 @@ import {
   statusColor,
 } from '~/lib/format';
 import { customerNames, orderRecords, recordedOrder } from '~/lib/orders.server';
+import { useArrivals } from '~/lib/use-arrivals';
 import { useDateTime } from '~/lib/use-date-time';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/order';
@@ -336,13 +337,13 @@ function OrderView() {
             squeezing it to a column. */}
         <div className="min-w-0 flex-1 basis-72">
           <div className="caption">
-            <Link to="/orders" className="hover:text-foreground hover:underline">
+            <Link to="/orders" viewTransition className="hover:text-foreground hover:underline">
               Orders
             </Link>{' '}
             / {ORDER_MODEL_LABELS[order.model as OrderModel]}
           </div>
           <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
-            <span className="min-w-0 truncate">
+            <span className="vt-order-title min-w-0 truncate">
               {order.title || ORDER_MODEL_LABELS[order.model as OrderModel]}{' '}
               <span className="font-mono font-normal text-base text-muted-foreground">
                 {orderRef(order.id)}
@@ -997,14 +998,26 @@ const KIND_TONE: Record<string, string> = {
 
 function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: string) => void }) {
   const formatTime = useDateTime();
-  const items = [...state.timeline].reverse();
+  // Keyed by what each entry says, not its place: the newest is on top, so places shift. Repeats
+  // are numbered oldest first, so an entry's key never changes as more arrive.
+  const repeats = new Map<string, number>();
+  const items = state.timeline
+    .map((t) => {
+      const said = `${t.at}:${t.kind}:${t.nodeId ?? ''}:${t.message}`;
+      const n = (repeats.get(said) ?? 0) + 1;
+      repeats.set(said, n);
+      return { t, key: `${said}#${n}` };
+    })
+    .reverse();
+  // What happens while the order is open arrives on top with the shared rise.
+  const arrived = useArrivals(items.map((i) => i.key));
   const start = state.timeline[0]?.at ?? 0;
   const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
   if (!items.length) return <Empty>Nothing has happened yet.</Empty>;
   return (
     <ol className="space-y-2.5">
-      {items.map((t, i) => (
-        <li key={`${t.at}-${i}`} className="flex gap-3 text-sm">
+      {items.map(({ t, key }) => (
+        <li key={key} className={cn('flex gap-3 text-sm', arrived(key) && 'animate-arrive')}>
           <time
             dateTime={new Date(t.at).toISOString()}
             title={formatTime(t.at)}
@@ -1253,13 +1266,13 @@ function RecordedOrderView() {
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
         <div className="min-w-0 flex-1 basis-72">
           <div className="caption">
-            <Link to="/orders" className="hover:text-foreground hover:underline">
+            <Link to="/orders" viewTransition className="hover:text-foreground hover:underline">
               Orders
             </Link>{' '}
             / {ORDER_MODEL_LABELS[o.model as OrderModel]}
           </div>
           <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
-            <span className="min-w-0 truncate">
+            <span className="vt-order-title min-w-0 truncate">
               {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
               <span className="font-mono font-normal text-base text-muted-foreground">
                 {orderRef(o.id)}

@@ -531,6 +531,7 @@ function NavMore({
         <Link
           to={to}
           reloadDocument={document}
+          viewTransition
           aria-current={here ? 'page' : undefined}
           className="justify-between"
         >
@@ -627,13 +628,14 @@ function ShellFrame() {
       </a>
       {/* 3rem tall with its rule, under the status bar's inset: full-height pages and the assistant
           subtract --shell-h (app.css). */}
-      <header className="sticky top-0 z-40 border-b bg-background pt-safe-0">
+      <header className="vt-shell-bar sticky top-0 z-40 border-b bg-background pt-safe-0">
         <div
           ref={bar}
           className="flex h-[calc(3rem-1px)] items-center gap-3 px-safe-4 sm:gap-6 sm:px-safe-5"
         >
           <Link
             to="/"
+            viewTransition
             className="hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-base"
             aria-label="OrderLoop overview"
           >
@@ -673,7 +675,12 @@ function ShellFrame() {
               </div>
               {links.slice(0, fits).map(({ to, label, end, badge, group }) => (
                 <NavSlot key={to} group={group}>
-                  <NavLink to={to} end={end} className={navTab(isAt(path, { to, end }))}>
+                  <NavLink
+                    to={to}
+                    end={end}
+                    viewTransition
+                    className={navTab(isAt(path, { to, end }))}
+                  >
                     {label}
                     {badge && pending > 0 ? <PendingCount n={pending} /> : null}
                   </NavLink>
@@ -796,7 +803,7 @@ function TabBar({
     <>
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t bg-background px-safe-0 pb-[var(--safe-bottom)] md:hidden"
+        className="vt-tab-bar fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t bg-background px-safe-0 pb-[var(--safe-bottom)] md:hidden"
       >
         <ul
           className="grid h-full"
@@ -804,7 +811,12 @@ function TabBar({
         >
           {tabs.map(({ to, label, icon: Icon, end, badge }) => (
             <li key={to} className="contents">
-              <NavLink to={to} end={end} className={cn(item, state(isAt(path, { to, end })))}>
+              <NavLink
+                to={to}
+                end={end}
+                viewTransition
+                className={cn(item, state(isAt(path, { to, end })))}
+              >
                 <span className="relative">
                   <Icon className="size-5" aria-hidden="true" />
                   {badge && pending > 0 ? (
@@ -873,7 +885,7 @@ function MoreMenu({
     <ul>
       {items.map(({ to, label, end, badge, document }) => (
         <li key={to}>
-          <NavLink to={to} end={end} reloadDocument={document} className={row}>
+          <NavLink to={to} end={end} reloadDocument={document} viewTransition className={row}>
             {label}
             {badge && pending > 0 ? <PendingCount n={pending} /> : null}
           </NavLink>

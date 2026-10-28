@@ -346,6 +346,50 @@ New order).
 ### Named Rules
 **The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
 
+## Motion
+
+Quiet and exact. The console is watched all day, so things move only when state changes, and only
+to say what changed and where: opacity, colour and a few pixels of travel. Nothing bounces, scales
+content or loops, except live work (a running step's pulse, a live edge's dash, the ellipsis and
+shimmer of work in progress, the slow-page bar).
+
+### Tokens
+
+In `app.css`, and in `app/lib/motion.ts` for animations run from script (a test keeps them equal).
+
+- **Durations:** `--motion-instant` 100ms (feedback, hover, anything leaving), `--motion-move` 180ms
+  (something appearing or changing state), `--motion-travel` 240ms (pages and panels). Plain
+  `transition-*` utilities default to instant.
+- **Easing:** `ease-arrive` (`cubic-bezier(0.16,1,0.3,1)`) for arrivals; `ease-leave` for exits,
+  which are also shorter.
+- **Arrival:** `animate-arrive`, a fade and a 4px rise in move time, for something new in a list
+  or a log.
+
+### Moments
+
+- **A step settling.** When a step changes state, its status rule and its edges on the order's
+  graph, its badges and dots cross-fade to the new status colour in move time, and the timeline
+  entry that reports it arrives on top with `animate-arrive`. Graph and timeline move together, so
+  the eye joins them.
+- **Deciding.** The undo notice arrives with `animate-arrive`, and a hairline along its foot drains
+  over exactly that decision's window (shorter near a deadline). "Recording decision…" arrives the
+  same way.
+- **Moving between pages.** Shell links, the orders list and an order's breadcrumb use View
+  Transitions: the page cross-fades (the old page leaves in instant time, the new arrives in
+  travel time) while the top bar and the tab bar hold still. From md, an order's title travels
+  from its row to the order page's heading and back; on a phone the page only cross-fades.
+- **Lists that change.** Orders and approvals that join an open list fade in (`useArrivals`): never
+  what was already on screen, never a whole new list (another filter or page), never more than five
+  at once (a burst is a refresh), and never while the tab is hidden, so coming back shows the
+  current state at once. An approval that resolves holds its place and fades to the resolved tint.
+- **Overlays.** Menus and dialogs open in instant time; sheets open in travel time and close in
+  move time, decelerating in and accelerating out.
+
+### Named Rules
+**The Reduced Motion Rule.** With reduced motion nothing travels, but nothing that carries meaning
+is lost: colours still change, arrivals fade without rising, page changes happen at once, and the
+undo bar is hidden because the seconds count says the same.
+
 ## Shapes
 
 Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 2xl, tiles and
@@ -405,8 +449,8 @@ for code and data blocks only.
   reason `bad`. Keyboard: J and K (or the arrows, once a card has focus) move between cards, Enter
   opens one, D drafts, A accepts, X ticks, ⌘Enter (Ctrl+Enter) publishes what's ticked; each is also
   a button, and the hints show only with `fine:` at lg. Cards glide to their new place after a
-  change (measured before and after, moved with the Web Animations API in 200ms on
-  `cubic-bezier(0.16,1,0.3,1)`); reduced motion moves them at once.
+  change (measured before and after, moved with the Web Animations API in move time on
+  `ease-arrive`); reduced motion moves them at once.
 - **Product sheet** (`components/catalog/sheet.tsx`): the side sheet from sm, 42rem wide and 56rem
   from xl; below sm the bottom sheet. Its content is a flush `Table`: fields as rows, locales as
   columns (mono, not uppercase, the most-filled first), the field-name column sticky on the left
@@ -442,6 +486,8 @@ actions must reach the engine.
 - **Do** give a small control `hit-area` rather than growing it.
 - **Do** put a phone's most frequent action within thumb reach: the tab bar, a bottom sheet.
 - **Do** keep one scroll region at a time on a phone.
+- **Do** take durations and easing from the motion tokens, and animate only what is new
+  (`useArrivals`), never a list as it first draws.
 
 ### Don't
 
@@ -452,3 +498,5 @@ actions must reach the engine.
 - **Don't** let a narrow screen change what it can't save (the flow editor below lg).
 - **Don't** interrupt work to suggest installing the app.
 - **Don't** port another product's look; Ledger is this product's.
+- **Don't** make a person wait on motion: an action responds at once, and a page change never
+  waits for its transition.
