@@ -29,6 +29,7 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  type Rect,
   useReactFlow,
 } from '@xyflow/react';
 // Only the pages with a canvas load React Flow's stylesheet; app.css restyles it for Ledger.
@@ -127,7 +128,7 @@ function Inner({
   onAddNode,
   className,
 }: FlowCanvasProps) {
-  const { fitView, screenToFlowPosition, setViewport, getNodesBounds } = useReactFlow();
+  const { screenToFlowPosition, setViewport, getNodesBounds, getNodes } = useReactFlow();
   const { resolved: colorMode } = useTheme();
   const touch = useMedia('(pointer: coarse)');
   const [expanded, setExpanded] = useState(false);
@@ -237,7 +238,10 @@ function Inner({
   runsRef.current = runs;
 
   const wrapRef = useRef<HTMLDivElement>(null);
-  /** Frame the live step(s); with none, the first few columns from the trigger. */
+  /**
+   * Frame the whole flow when it fits at a readable zoom; otherwise the live step(s), or where a
+   * finished run stopped or ended, or with none of those the first few columns from the trigger.
+   */
   const frame = useCallback(
     (animate = false) => {
       const g = graphRef.current;
@@ -256,46 +260,59 @@ function Inner({
       const start = g.nodes.find((n) => n.type.startsWith('trigger.'));
       const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const duration = animate && !reduce ? 300 : 0;
-      // Nothing to follow: open on the trigger and what comes after it, anchored at the left edge
-      // so the first step is never cut off when the columns don't fit at a readable zoom.
-      if (!live.length && !stopped.length && !ended.length && start && wrapRef.current) {
-        const ids = g.nodes
-          .filter((n) => n.position.x <= start.position.x + 3 * 280)
-          .map((n) => n.id);
-        const b = getNodesBounds(ids);
-        const w = wrapRef.current.clientWidth;
-        const h = wrapRef.current.clientHeight;
-        if (b.width > 0 && w > 0) {
-          const zoom = Math.min(
-            1,
-            Math.max(0.7, Math.min((w - 48) / b.width, (h - 48) / b.height)),
-          );
-          void setViewport(
-            { x: 24 - b.x * zoom, y: h / 2 - (b.y + b.height / 2) * zoom, zoom },
-            { duration },
-          );
-          return;
-        }
+      const el = wrapRef.current;
+      const w = el?.clientWidth ?? 0;
+      const h = el?.clientHeight ?? 0;
+      const all = getNodesBounds(g.nodes.map((n) => n.id));
+      if (!w || !h || !all.width) return;
+      const fits = (b: Rect) =>
+        Math.min((w - 2 * FRAME_PAD) / b.width, (h - 2 * FRAME_PAD) / b.height);
+      const middle = (b: Rect, zoom: number) => h / 2 - (b.y + b.height / 2) * zoom;
+      // The whole flow fits at a readable zoom: show all of it, centred.
+      if (fits(all) >= MIN_READABLE_ZOOM) {
+        const zoom = Math.min(1, fits(all));
+        void setViewport(
+          { x: w / 2 - (all.x + all.width / 2) * zoom, y: middle(all, zoom), zoom },
+          { duration },
+        );
+        return;
       }
-      const focus = live.length
-        ? live
-        : stopped.length
-          ? stopped
-          : ended.length
-            ? ended
-            : start
-              ? g.nodes.filter((n) => n.position.x <= start.position.x + 3 * 280).map((n) => n.id)
-              : [];
-      void fitView({
-        padding: 0.15,
-        // Wide flows would shrink to illegible; keep a readable floor.
-        minZoom: 0.7,
-        maxZoom: 1,
-        duration,
-        nodes: focus.length && g.nodes.length > 10 ? withNeighbours(g, focus) : undefined,
-      });
+      const firstColumns = start
+        ? g.nodes.filter((n) => n.position.x <= start.position.x + 3 * 280).map((n) => n.id)
+        : [];
+      const focus = live.length ? live : stopped.length ? stopped : ended.length ? ended : [];
+      const spans = getNodes().map((n) => ({
+        left: n.position.x,
+        right: n.position.x + (n.measured?.width ?? n.width ?? 0),
+      }));
+      // Nothing to follow: open on the trigger and what comes after it, anchored at the left edge,
+      // zoomed out a little if that ends the frame between columns rather than through a step.
+      if (!focus.length && firstColumns.length) {
+        const b = getNodesBounds(firstColumns);
+        const zoom = clearRightEdge(spans, b.x, clampZoom(fits(b)), w);
+        void setViewport({ x: FRAME_PAD - b.x * zoom, y: middle(b, zoom), zoom }, { duration });
+        return;
+      }
+      // Otherwise centre the focus and the steps either side of it, then move the frame so no step
+      // is cut in half at the left edge: a sliver of a card reads as a broken layout.
+      const ids = focus.length ? withNeighbours(g, focus) : g.nodes.map((n) => n.id);
+      const b = getNodesBounds(ids);
+      const zoom = clampZoom(fits(b));
+      let x = w / 2 - (b.x + b.width / 2) * zoom;
+      const boxes = spans.map((n) => ({ left: n.left * zoom, right: n.right * zoom }));
+      const cut = boxes.filter((n) => x + n.left < 0 && x + n.right > 0);
+      if (cut.length) {
+        const kept = getNodesBounds(focus.length ? focus : ids);
+        const inShift = FRAME_PAD - Math.min(...cut.map((n) => x + n.left));
+        // Bring the cut step fully in while the focus still fits; otherwise push it fully out.
+        x +=
+          x + inShift + (kept.x + kept.width) * zoom <= w - FRAME_PAD
+            ? inShift
+            : -Math.max(...cut.map((n) => x + n.right));
+      }
+      void setViewport({ x, y: middle(b, zoom), zoom }, { duration });
     },
-    [fitView, setViewport, getNodesBounds],
+    [setViewport, getNodesBounds, getNodes],
   );
   // The sheet settles its size after the first frame (panels load, a phone stacks the layout,
   // the canvas expands). Until someone pans or zooms, keep the framing true to the new size.
@@ -544,6 +561,39 @@ export function makeNode(
 const NODE_WIDTH = 220;
 const NODE_GAP = 16;
 
+/** Space kept between a framed flow and the sheet's edge, in screen pixels. */
+const FRAME_PAD = 24;
+/** Wide flows would shrink to illegible; framing never goes below this zoom. */
+const MIN_READABLE_ZOOM = 0.7;
+const clampZoom = (z: number) => Math.min(1, Math.max(MIN_READABLE_ZOOM, z));
+
+/**
+ * The largest zoom, no more than `zoom` and still readable, at which a frame anchored at `originX`
+ * (flow units, drawn at FRAME_PAD) ends between columns instead of through a step. `zoom` itself
+ * when no such zoom exists.
+ */
+export function clearRightEdge(
+  spans: { left: number; right: number }[],
+  originX: number,
+  zoom: number,
+  width: number,
+) {
+  const room = width - 2 * FRAME_PAD;
+  const clear = (z: number) =>
+    spans.every((n) => {
+      const left = (n.left - originX) * z;
+      const right = (n.right - originX) * z;
+      return right <= room + 0.5 || left >= room + FRAME_PAD;
+    });
+  if (clear(zoom)) return zoom;
+  const candidates = spans
+    .filter((n) => n.right > originX)
+    .map((n) => room / (n.right - originX))
+    .filter((z) => z < zoom && z >= MIN_READABLE_ZOOM)
+    .sort((a, b) => b - a);
+  return candidates.find(clear) ?? zoom;
+}
+
 /** Each step's position, moved down below any step above it in its column that it would overlap. */
 function spreadColumns(
   steps: { id: string; position: { x: number; y: number } }[],
@@ -570,5 +620,5 @@ function withNeighbours(g: FlowGraph, ids: string[]) {
     if (ids.includes(e.target)) set.add(e.source);
     if (ids.includes(e.source)) set.add(e.target);
   }
-  return [...set].map((id) => ({ id }));
+  return [...set];
 }

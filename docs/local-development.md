@@ -153,8 +153,13 @@ Each run replaces what the previous one wrote; `--seed <n>` (default 1) makes it
 relative to today. Only the index tables are written, with no OrderAgent or Workflow behind an
 order. A generated order's page is the read-only **recorded order** view the order page falls back
 to when the engine has no run for an order (`recordedOrder`, `apps/web/app/lib/orders.server.ts`):
-its flow coloured by the steps `node_runs` recorded and the ones it waits at, the step timings, its
-approvals and records, and no live timeline or actions. Commerce's **Outside events**, which asks
+its flow coloured by the steps `node_runs` recorded and the ones it waits at, with the path it took
+inked (an edge counts as taken when its source finished and its target ran, since `node_runs` keeps
+no branches), the step timings, its approvals and records, and no live timeline or actions. One
+banner says it is a record and how the order ended. A rolled-back order lists what its records show
+was undone (released reservations, voided authorizations, cancelled seller orders, shipments and
+pickups, reversed payouts, voided invoices, revoked codes), marks those steps reversed, and says so
+when it recorded none. Commerce's **Outside events**, which asks
 each order's agent what it waits for, lists none of them.
 
 ## Catalog demo data

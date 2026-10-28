@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('cloudflare:workers', () => ({ env: {} }));
 vi.mock('~/lib/env.server', () => ({ db: () => ({}) }));
 
-const { recordedRuns } = await import('../app/lib/orders.server');
+const { recordedEdges, recordedReversals, recordedRuns } = await import('../app/lib/orders.server');
+const { clearRightEdge } = await import('../app/components/flow-canvas');
 
 const graph = {
   nodes: [
@@ -47,5 +48,159 @@ describe('a recorded order’s graph', () => {
       waitingSince: 9,
     });
     expect(runs).toEqual({ validate: expect.objectContaining({ status: 'failed' }) });
+  });
+});
+
+/** Validate branches to Ship or Reject; Ship runs into a loop that goes round again. */
+const branching = {
+  nodes: [
+    { id: 'validate', type: 'commerce.validate', label: 'Validate', position: { x: 0, y: 0 } },
+    { id: 'ship', type: 'commerce.ship', label: 'Ship', position: { x: 1, y: 0 } },
+    { id: 'reject', type: 'commerce.notify', label: 'Reject', position: { x: 1, y: 1 } },
+    { id: 'loop', type: 'control.loop', label: 'Each parcel', position: { x: 2, y: 0 } },
+  ],
+  edges: [
+    { id: 'e-ship', source: 'validate', target: 'ship', sourceHandle: 'ok', targetHandle: null },
+    {
+      id: 'e-reject',
+      source: 'validate',
+      target: 'reject',
+      sourceHandle: 'invalid',
+      targetHandle: null,
+    },
+    { id: 'e-loop', source: 'ship', target: 'loop', sourceHandle: null, targetHandle: null },
+    { id: 'e-again', source: 'loop', target: 'ship', sourceHandle: 'body', targetHandle: 'next' },
+  ],
+} as unknown as FlowGraph;
+
+describe('a recorded order’s path', () => {
+  it('inks the edges it took and fades the rest once the order has ended', () => {
+    const runs = recordedRuns(branching, [step('validate', 'succeeded'), step('ship', 'failed')], {
+      status: 'failed',
+      waitingAt: null,
+      waitingSince: null,
+    });
+    expect(recordedEdges(branching, runs, { status: 'failed' })).toEqual({
+      'e-ship': 'active',
+      'e-reject': 'inactive',
+      // Ship failed, so nothing left it.
+      'e-loop': 'inactive',
+      'e-again': 'inactive',
+    });
+  });
+
+  it('on an open order, fades only the branches not taken and leaves the rest to come', () => {
+    const runs = recordedRuns(branching, [step('validate', 'succeeded')], {
+      status: 'waiting',
+      waitingAt: 'Ship',
+      waitingSince: 9,
+    });
+    expect(recordedEdges(branching, runs, { status: 'waiting' })).toEqual({
+      'e-ship': 'active',
+      'e-reject': 'inactive',
+      'e-loop': 'pending',
+      'e-again': 'pending',
+    });
+  });
+
+  it('takes a loop’s back edge only when its target ran again', () => {
+    const once = recordedRuns(
+      branching,
+      [step('validate', 'succeeded'), step('ship', 'succeeded'), step('loop', 'succeeded')],
+      { status: 'completed', waitingAt: null, waitingSince: null },
+    );
+    expect(recordedEdges(branching, once, { status: 'completed' })['e-again']).toBe('inactive');
+    const twice = recordedRuns(
+      branching,
+      [
+        step('validate', 'succeeded'),
+        step('ship', 'succeeded', 1),
+        step('loop', 'succeeded'),
+        step('ship', 'succeeded', 2),
+      ],
+      { status: 'completed', waitingAt: null, waitingSince: null },
+    );
+    expect(recordedEdges(branching, twice, { status: 'completed' })['e-again']).toBe('active');
+  });
+
+  it('has no path without the flow it ran on', () => {
+    expect(recordedEdges(null, {}, { status: 'completed' })).toEqual({});
+  });
+});
+
+const none = {
+  reservationsReleased: 0,
+  authorizationsVoided: 0,
+  sellerOrdersCancelled: 0,
+  payoutsReversed: 0,
+  shipmentsCancelled: 0,
+  invoicesVoided: 0,
+  codesRevoked: 0,
+};
+const ran = (nodeId: string, type: string, status = 'succeeded', startedAt = 1) => ({
+  nodeId,
+  type,
+  status,
+  startedAt,
+});
+
+describe('what a rolled-back order’s records show was undone', () => {
+  it('ties each reversal to the step that made what was reversed', () => {
+    expect(
+      recordedReversals(
+        [
+          ran('validate', 'commerce.validate'),
+          ran('authorize', 'commerce.authorize_payment', 'succeeded', 2),
+          ran('reserve', 'commerce.reserve_inventory', 'succeeded', 3),
+          ran('ship', 'commerce.ship', 'failed', 4),
+        ],
+        { ...none, reservationsReleased: 2, authorizationsVoided: 1, shipmentsCancelled: 1 },
+      ),
+    ).toEqual([
+      { nodeId: 'authorize', text: 'Voided 1 payment authorization' },
+      { nodeId: 'reserve', text: 'Released 2 stock reservations' },
+    ]);
+  });
+
+  it('reverses nothing the records don’t show, even on a step that could be undone', () => {
+    expect(
+      recordedReversals(
+        [ran('authorize', 'commerce.authorize_payment'), ran('split', 'commerce.split_by_seller')],
+        none,
+      ),
+    ).toEqual([]);
+  });
+
+  it('skips a step whose last run failed, and gives shared records to one step', () => {
+    expect(
+      recordedReversals(
+        [
+          ran('reserve', 'commerce.reserve_inventory', 'succeeded', 1),
+          ran('reserve', 'commerce.reserve_inventory', 'failed', 2),
+          ran('pickup', 'commerce.pickup_ready', 'succeeded', 3),
+          ran('ship', 'commerce.ship', 'succeeded', 4),
+        ],
+        { ...none, reservationsReleased: 1, shipmentsCancelled: 1 },
+      ),
+    ).toEqual([{ nodeId: 'pickup', text: 'Cancelled 1 pickup' }]);
+  });
+});
+
+describe('framing a flow from its first step', () => {
+  // Three 220px steps, 280px apart.
+  const spans = [0, 280, 560].map((x) => ({ left: x, right: x + 220 }));
+
+  it('keeps the zoom when the frame already ends between steps', () => {
+    expect(clearRightEdge(spans, 0, 1, 2000)).toBe(1);
+  });
+
+  it('zooms out just enough to end the frame after the step it would cut', () => {
+    // At 1 the frame (700px of room) ends inside the third step, which ends at 780.
+    expect(clearRightEdge(spans, 0, 1, 748)).toBeCloseTo(700 / 780);
+  });
+
+  it('never goes below a readable zoom to do it', () => {
+    // Ending after the second step would take 252 / 500, about 0.5.
+    expect(clearRightEdge(spans, 0, 1, 300)).toBe(1);
   });
 });

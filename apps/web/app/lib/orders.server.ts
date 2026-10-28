@@ -1,5 +1,7 @@
 import {
+  type EdgeState,
   type FlowGraph,
+  isBackEdge,
   type NodeRun,
   type NodeStatus,
   TERMINAL_ORDER_STATUSES,
@@ -11,6 +13,7 @@ import {
   customers,
   type Db,
   documents,
+  entitlements,
   flows,
   fxRates,
   getFlowVersionJson,
@@ -26,6 +29,7 @@ import {
   priceRules,
   priceSources,
   products,
+  reservations,
   sellerOrders,
   sellers,
   shipments,
@@ -33,6 +37,7 @@ import {
 import { and, asc, desc, eq, getTableColumns, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
+import { plural } from './format';
 import { SCENARIO_CUSTOMERS, SCENARIO_SKUS } from './scenarios';
 
 export type OrderFilters = {
@@ -351,15 +356,169 @@ export function recordedRuns(
 }
 
 /**
+ * The path a recorded order took, inked as the live view inks it. `node_runs` keeps no branches, so
+ * an edge counts as taken when its source finished and its target ran. On an order that has ended,
+ * every other edge was not taken; on an open one, an edge is untaken only when its source took
+ * another branch, and the rest may still be taken.
+ */
+export function recordedEdges(
+  graph: FlowGraph | null,
+  runs: Record<string, NodeRun>,
+  order: { status: string },
+): Record<string, EdgeState> {
+  const ended = TERMINAL_ORDER_STATUSES.includes(order.status as never);
+  const finished = (id: string) => ['succeeded', 'rolled_back'].includes(runs[id]?.status ?? '');
+  const ran = (id: string) => !!runs[id] && runs[id].status !== 'skipped';
+  const taken = (e: FlowGraph['edges'][number]) =>
+    finished(e.source) &&
+    ran(e.target) &&
+    // Going round a loop again means its target ran more than once.
+    (!isBackEdge(e) || (runs[e.target]?.runs ?? 0) > 1);
+  const edges = graph?.edges ?? [];
+  const states: Record<string, EdgeState> = {};
+  for (const e of edges) {
+    if (taken(e)) states[e.id] = 'active';
+    else if (ended) states[e.id] = 'inactive';
+    else {
+      const handle = e.sourceHandle || 'out';
+      const otherBranch = edges.some(
+        (o) => o.source === e.source && (o.sourceHandle || 'out') !== handle && taken(o),
+      );
+      states[e.id] = otherBranch || runs[e.source]?.status === 'skipped' ? 'inactive' : 'pending';
+    }
+  }
+  return states;
+}
+
+/** What each compensation leaves in D1, counted for one order (see `undoneOn`). */
+export type Undone = {
+  reservationsReleased: number;
+  authorizationsVoided: number;
+  sellerOrdersCancelled: number;
+  payoutsReversed: number;
+  shipmentsCancelled: number;
+  invoicesVoided: number;
+  codesRevoked: number;
+};
+
+/**
+ * The step types whose compensation (the engine's `ROLLBACKS`) leaves a record behind, and how the
+ * record reads. A step whose compensation leaves nothing countable (a promotion given back) isn't
+ * here, so it is never shown as reversed on a guess.
+ */
+const REVERSALS: Record<string, { undone: keyof Undone; say: (n: number) => string }> = {
+  'commerce.reserve_inventory': {
+    undone: 'reservationsReleased',
+    say: (n) => `Released ${plural(n, 'stock reservation')}`,
+  },
+  'commerce.authorize_payment': {
+    undone: 'authorizationsVoided',
+    say: (n) => `Voided ${plural(n, 'payment authorization')}`,
+  },
+  'commerce.split_by_seller': {
+    undone: 'sellerOrdersCancelled',
+    say: (n) => `Cancelled ${plural(n, 'seller order')}`,
+  },
+  'commerce.payout': { undone: 'payoutsReversed', say: (n) => `Reversed ${plural(n, 'payout')}` },
+  'commerce.ship': {
+    undone: 'shipmentsCancelled',
+    say: (n) => `Cancelled ${plural(n, 'shipment')}`,
+  },
+  'commerce.pickup_ready': {
+    undone: 'shipmentsCancelled',
+    say: (n) => `Cancelled ${plural(n, 'pickup')}`,
+  },
+  'commerce.invoice': { undone: 'invoicesVoided', say: (n) => `Voided ${plural(n, 'invoice')}` },
+  'commerce.deliver_digital': {
+    undone: 'codesRevoked',
+    say: (n) => `Revoked ${plural(n, 'digital code')}`,
+  },
+};
+
+/**
+ * What a rolled-back order's records show was undone, tied to the step that did it: the last step
+ * of each reversible type whose last run succeeded, when its records were reversed. Records alone don't say
+ * which of two steps of one type made them, so they go to the last one to run.
+ */
+export function recordedReversals(
+  steps: { nodeId: string; type: string; status: string; startedAt: number }[],
+  undone: Undone,
+): { nodeId: string; text: string }[] {
+  const lastRun = new Map<string, (typeof steps)[number]>();
+  for (const st of [...steps].sort((a, b) => a.startedAt - b.startedAt)) lastRun.set(st.nodeId, st);
+  const last = new Map<string, string>();
+  for (const st of lastRun.values())
+    if (st.status === 'succeeded' && REVERSALS[st.type]) last.set(st.type, st.nodeId);
+  const claimed = new Set<keyof Undone>();
+  const out: { nodeId: string; text: string }[] = [];
+  for (const [type, nodeId] of last) {
+    const r = REVERSALS[type]!;
+    const n = undone[r.undone];
+    if (!n || claimed.has(r.undone)) continue;
+    claimed.add(r.undone);
+    out.push({ nodeId, text: r.say(n) });
+  }
+  return out;
+}
+
+/** Counts what the compensations left on one order's records, in one round trip. */
+async function undoneOn(orderId: string): Promise<Undone> {
+  const d = db();
+  const n = sql<number>`count(*)`.mapWith(Number);
+  const [res, pays, parts, outs, ships, bills, codes] = await d.batch([
+    d
+      .select({ n })
+      .from(reservations)
+      .where(and(eq(reservations.orderId, orderId), eq(reservations.status, 'released'))),
+    d
+      .select({ n })
+      .from(payments)
+      .where(and(eq(payments.orderId, orderId), eq(payments.status, 'voided'))),
+    d
+      .select({ n })
+      .from(sellerOrders)
+      .where(and(eq(sellerOrders.orderId, orderId), eq(sellerOrders.status, 'cancelled'))),
+    d
+      .select({ n })
+      .from(payouts)
+      .where(and(eq(payouts.orderId, orderId), eq(payouts.status, 'reversed'))),
+    d
+      .select({ n })
+      .from(shipments)
+      .where(and(eq(shipments.orderId, orderId), eq(shipments.status, 'cancelled'))),
+    d
+      .select({ n })
+      .from(invoices)
+      .where(and(eq(invoices.orderId, orderId), eq(invoices.status, 'void'))),
+    d
+      .select({ n })
+      .from(entitlements)
+      .where(and(eq(entitlements.orderId, orderId), eq(entitlements.status, 'revoked'))),
+  ]);
+  return {
+    reservationsReleased: res[0]?.n ?? 0,
+    authorizationsVoided: pays[0]?.n ?? 0,
+    sellerOrdersCancelled: parts[0]?.n ?? 0,
+    payoutsReversed: outs[0]?.n ?? 0,
+    shipmentsCancelled: ships[0]?.n ?? 0,
+    invoicesVoided: bills[0]?.n ?? 0,
+    codesRevoked: codes[0]?.n ?? 0,
+  };
+}
+
+/**
  * An order the orders index has but the engine has no run for (one `pnpm db:seed:volume`
  * generated, say): what D1 recorded, for a read-only page. The flow is the version it ran on;
- * `runs` colours its graph by each step's last recorded run, and the steps it is waiting at.
+ * `runs` colours its graph by each step's last recorded run, and the steps it is waiting at, and
+ * `edges` inks the path it took. A rolled-back order also says what its records show was undone,
+ * and those steps read as rolled back.
  */
 export async function recordedOrder(orderId: string) {
   const d = db();
   const order = await d.select().from(orders).where(eq(orders.id, orderId)).get();
   if (!order) return null;
-  const [version, steps, asks] = await Promise.all([
+  const rolledBack = order.status === 'rolled_back';
+  const [version, steps, asks, undone] = await Promise.all([
     getFlowVersionJson(d, order.flowId, order.flowVersion ?? undefined),
     d
       .select()
@@ -371,6 +530,7 @@ export async function recordedOrder(orderId: string) {
       .from(approvals)
       .where(eq(approvals.orderId, orderId))
       .orderBy(asc(approvals.requestedAt)),
+    rolledBack ? undoneOn(orderId) : null,
   ]);
   const flow = version
     ? {
@@ -381,19 +541,32 @@ export async function recordedOrder(orderId: string) {
     : null;
   const label = (id: string) => flow?.graph.nodes.find((n) => n.id === id)?.label ?? id;
   const runs = recordedRuns(flow?.graph ?? null, steps, order);
+  const reversed = undone
+    ? recordedReversals(
+        steps.map((r) => ({ ...r, type: r.nodeType })),
+        undone,
+      ).map((r) => ({ ...r, label: label(r.nodeId) }))
+    : [];
+  const undoneIds = new Set(reversed.map((r) => r.nodeId));
+  for (const id of undoneIds) if (runs[id]) runs[id] = { ...runs[id], status: 'rolled_back' };
+  // Only a step's last run was reversed; an earlier run of it had already ended.
+  const lastRun = new Map(steps.map((r) => [r.nodeId, r]));
   return {
     order,
     flow,
     runs,
+    edges: recordedEdges(flow?.graph ?? null, runs, order),
     steps: steps.map((r) => ({
       nodeId: r.nodeId,
       label: label(r.nodeId),
       type: r.nodeType,
-      status: r.status,
+      status: undoneIds.has(r.nodeId) && lastRun.get(r.nodeId) === r ? 'rolled_back' : r.status,
       startedAt: r.startedAt,
       durationMs: r.durationMs,
     })),
     approvals: asks,
+    /** Null unless the order rolled back; empty when its records show nothing undone. */
+    reversed: rolledBack ? reversed : null,
   };
 }
 

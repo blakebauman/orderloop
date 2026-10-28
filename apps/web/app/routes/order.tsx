@@ -1214,15 +1214,32 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
 }
 
 /**
+ * How a recorded order ended, after its status: "Rolled back: insufficient stock." A reason that
+ * already starts with the status ("Cancelled by the customer") stands alone, and one with its own
+ * colon follows a full stop so it doesn't read as a list.
+ */
+function endedAs(status: string, reason: string | null) {
+  const head = humanize(status);
+  if (!reason?.trim()) return `${head}.`;
+  if (reason.toLowerCase().startsWith(head.toLowerCase())) return sentence(reason);
+  if (reason.includes(':')) return `${head}. ${sentence(reason)}`;
+  // Lower-case an ordinary first word only; "ERP" and "3-D Secure" keep theirs.
+  const lead = /^[A-Z][a-z]+\b/.test(reason) ? reason[0]!.toLowerCase() + reason.slice(1) : reason;
+  return `${head}: ${sentence(lead)}`;
+}
+
+/**
  * An order with no run in the engine: the header, how it ended or what it waits on, its flow
- * coloured by the steps D1 recorded, and its approvals and records. Nothing here acts on it.
+ * coloured by the steps D1 recorded with the path it took, what a rollback undid, and its approvals
+ * and records. Nothing here acts on it.
  */
 function RecordedOrderView() {
   const { recorded, records, customerName } = useLoaderData<typeof loader>();
-  const { order: o, flow, runs, steps, approvals } = recorded!;
+  const { order: o, flow, runs, edges, steps, approvals, reversed } = recorded!;
   const wide = useMedia(WIDE);
   const [graphOpen, setGraphOpen] = useState(false);
   const terminal = TERMINAL_ORDER_STATUSES.includes(o.status as never);
+  const cause = steps.findLast((st) => st.status === 'failed');
   return (
     <div className="flex flex-col lg:h-[calc(100dvh-var(--shell-h))]">
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
@@ -1259,27 +1276,28 @@ function RecordedOrderView() {
         </div>
       </header>
 
-      <div className="border-b bg-muted/40 px-4 py-2 text-muted-foreground text-sm sm:px-6">
+      {/* One block: that this is a record, how the order ended, in its status colour once it has. */}
+      <div
+        className={cn('border-b px-4 py-2 text-sm sm:px-6', !terminal && 'bg-muted/40')}
+        style={
+          terminal
+            ? { background: `color-mix(in oklch, ${statusColor(o.status)} 7%, transparent)` }
+            : undefined
+        }
+      >
         <p className="max-w-[75ch]">
-          <span className="font-medium text-foreground">Recorded order.</span> The engine has no run
-          for this order, so this is what the database kept: the steps it recorded, its approvals
-          and its records. There is no live state to act on.
+          <span
+            className="font-medium"
+            style={{ color: terminal ? statusColor(o.status) : undefined }}
+          >
+            Recorded order{terminal ? ` · ${endedAs(o.status, o.reason)}` : '.'}
+          </span>{' '}
+          <span className="text-foreground/75">
+            The engine has no run for it, so this is what the database kept. There is no live state
+            to act on.
+          </span>
         </p>
       </div>
-
-      {terminal && o.reason ? (
-        <div
-          className="border-b px-4 py-2 text-sm sm:px-6"
-          style={{
-            color: statusColor(o.status),
-            background: `color-mix(in oklch, ${statusColor(o.status)} 7%, transparent)`,
-          }}
-        >
-          <p className="max-w-[75ch]">
-            <span className="font-medium">{humanize(o.status)}.</span> {sentence(o.reason)}
-          </p>
-        </div>
-      ) : null}
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_400px]">
         <aside className="min-h-0 space-y-6 p-4 text-sm lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:border-l">
@@ -1299,6 +1317,7 @@ function RecordedOrderView() {
               {graphOpen ? 'Hide the flow' : 'Show the flow'}
             </Button>
           ) : null}
+          {reversed ? <RecordedRollback reversed={reversed} cause={cause} /> : null}
           <section>
             <h2 className="section-title mb-2">Steps</h2>
             {steps.length ? (
@@ -1315,9 +1334,14 @@ function RecordedOrderView() {
                     <Tr key={`${st.nodeId}-${st.startedAt}`}>
                       <Td>{st.label}</Td>
                       <Td>
-                        <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1.5',
+                            st.status === 'rolled_back' && 'text-undo',
+                          )}
+                        >
                           <StatusDot status={st.status} />
-                          {humanize(st.status)}
+                          {st.status === 'rolled_back' ? 'Reversed' : humanize(st.status)}
                         </span>
                       </Td>
                       <Td numeric className="text-muted-foreground">
@@ -1345,10 +1369,56 @@ function RecordedOrderView() {
         </aside>
         {flow && (wide || graphOpen) ? (
           <div className="h-[60dvh] min-h-[320px] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:h-auto">
-            <FlowCanvas graph={flow.graph} runs={runs} />
+            <FlowCanvas graph={flow.graph} runs={runs} edgeStates={edges} />
           </div>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * What a rolled-back recorded order's records show was undone, step by step, as the live view's
+ * rollback reads. Generated orders often recorded no reversals at all; that is said, not guessed.
+ */
+function RecordedRollback({
+  reversed,
+  cause,
+}: {
+  reversed: { nodeId: string; label: string; text: string }[];
+  cause?: { label: string };
+}) {
+  return (
+    <section aria-labelledby="recorded-rollback-title">
+      <h2 id="recorded-rollback-title" className="section-title flex items-center gap-2">
+        <Undo2 className="size-4 text-undo" aria-hidden="true" />
+        Rolled back
+      </h2>
+      {cause ? (
+        <p className="mt-1">
+          Stopped at <span className="font-medium">{cause.label}</span>
+        </p>
+      ) : null}
+      {reversed.length ? (
+        <Table edge="flush" className="mt-3" caption="Steps the records show were reversed">
+          <TableHead>
+            <Tr>
+              <Th>Step</Th>
+              <Th>Reversed</Th>
+            </Tr>
+          </TableHead>
+          <TableBody>
+            {reversed.map((r) => (
+              <Tr key={r.nodeId}>
+                <Td className="py-2">{r.label}</Td>
+                <Td className="py-2 text-muted-foreground">{r.text}</Td>
+              </Tr>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <p className="mt-1 text-muted-foreground">Reversals weren’t recorded for this order.</p>
+      )}
+    </section>
   );
 }
