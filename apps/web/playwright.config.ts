@@ -1,6 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 5390;
+/**
+ * `E2E_PORT` moves the dev server off 5390, so device tests in another worktree can run at the
+ * same time. A server already on the port is reused only with `E2E_REUSE=1`: otherwise the run
+ * would quietly test whatever another checkout is serving there, and `--strictPort` stops it instead.
+ */
+const PORT = Number(process.env.E2E_PORT ?? 5390);
+if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535)
+  throw new Error(
+    `E2E_PORT must be a port number from 1024 to 65535, not "${process.env.E2E_PORT}"`,
+  );
 const state = '.wrangler/e2e';
 
 /**
@@ -38,7 +47,7 @@ export default defineConfig({
       `ORDERLOOP_E2E=1 react-router dev --port ${PORT} --strictPort`,
     ].join(' && '),
     url: `http://localhost:${PORT}/`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !process.env.CI && process.env.E2E_REUSE === '1',
     timeout: 180_000,
     stdout: 'ignore',
   },

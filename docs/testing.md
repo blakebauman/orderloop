@@ -437,7 +437,10 @@ in WebKit, as five projects: `iphone` (iPhone 15), `iphone-landscape`, `ipad` (i
 `ORDERLOOP_E2E=1`, which `apps/web/vite.config.ts` reads to run offline: `remoteBindings: false`, the
 engine on `AI_MODE: 'mock'`, and state under `apps/web/.wrangler/e2e`, migrated and seeded with the
 demo data afresh on each run, so it never touches the database `pnpm web:dev` uses. No Cloudflare
-account is needed. Locally a server already on port 5390 is reused. `e2e/warm.ts` (global setup)
+account is needed. The server runs on port 5390; `E2E_PORT=5391 pnpm --filter @orderloop/web e2e`
+moves it, so another worktree's device tests can run at the same time. A server already on the port
+is reused only with `E2E_REUSE=1` (say, one left running between runs of a single spec); otherwise
+the run stops at `--strictPort` rather than testing what another checkout serves there. `e2e/warm.ts` (global setup)
 visits every page once first, since the dev server reloads the browser the first time it bundles a
 page's dependencies; `open()` in `e2e/helpers.ts` waits until app.css has applied and the page has
 hydrated. If the dev server's Workers runtime crashes (it restarts itself), `open()` waits for the server
