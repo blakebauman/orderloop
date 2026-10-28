@@ -84,16 +84,16 @@ components:
     padding: "0 0.75rem"
   input:
     textColor: "{colors.ink}"
-    rounded: "{rounded.3xl}"
+    rounded: "{rounded.4xl}"
     height: "2.25rem"
     padding: "0.25rem 0.75rem"
   card:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.4xl}"
+    rounded: "{rounded.2xl}"
   tile:
     backgroundColor: "{colors.muted}"
-    rounded: "{rounded.2xl}"
+    rounded: "{rounded.xl}"
     padding: "1rem"
   status-badge:
     rounded: "{rounded.full}"
@@ -105,7 +105,7 @@ components:
 ## Overview
 
 The console where people watch orders, decide approvals and draw flows. Its visual system is
-**Ledger**: shadcn's base-luma preset (neutral greys, Inter, pill buttons and fields) on the Radix
+**Ledger**: shadcn's base-maia preset (neutral greys, Inter, pill buttons and fields) on the Radix
 primitives in `packages/ui`, with status tokens (`ok`, `wait`, `bad`, `undo`, `run`, `idle`, `ai`)
 that mean one thing each. The tokens live in `apps/web/app/app.css`, are mirrored in
 `packages/design/src/tokens.ts`, and the docs site's reading of them is recorded in
@@ -129,7 +129,7 @@ Neutral greys with no tint carry everything; colour is reserved for one blue and
 - **Muted** (`muted`): tiles, segmented tracks, hover fills.
 - **Muted text** (`muted-foreground`): secondary text and captions. Set to hold 4.5:1 on paper,
   on muted and on a tile.
-- **Rule** and **Input** (`rule`, `input`): hairlines, and the fill of fields (at half strength).
+- **Rule** and **Input** (`rule`, `input`): hairlines, and the edge and faint fill of fields.
 - **Ring** (`ring`): the focus edge on fields and buttons, dark enough to hold 3:1 on paper and on
   muted fills. The page-wide focus outline is ink.
 
@@ -202,10 +202,10 @@ under 32rem tall, under 64rem wide).
   the approvals count while Approvals is inside it. A tab marks as soon as it is chosen, not when
   its page arrives. Focus outlines on the links sit inside them, clear of the rule. A transparent
   2px rule on top balances the underline, so tab text sits on the bar's centre line with the
-  wordmark and the pills. Menu items are 500 already, so More marks the page you're on with a
-  check, as the theme's radio items do, not with weight.
+  wordmark and the pills. More marks the page you're on with a check, as the theme's radio items
+  do, not with weight.
 - **Titles in the bar's menus and sheets** (the account menu's who, a sheet's title) are 600 with
-  `tracking-title`, the title tier, so they read as headers over 500 items; hints (⌘J, ?) are
+  `tracking-title`, the title tier, so they read as headers over 400 items; hints (⌘J, ?) are
   11px/400 muted everywhere except the shortcuts list's boxed keys.
 - **Fitting the bar:** it never scrolls or overlaps, whatever the window or text size
   (`useFittingBar`). An invisible ruler holds every link, and each way More can read, at natural
@@ -331,23 +331,70 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
 
 ## Elevation & Depth
 
-Lifted, lightly. A card sits on the page with a faint ring and a soft two-layer shadow; inside it,
-depth is tonal: tiles are a muted step, not another shadow. In dark the shadow is dropped and the
-ring alone separates a card.
+Flat. A card sits on the page edged by a faint ring and no shadow; inside it, depth is tonal:
+tiles are a muted step. Shadows are kept for what floats over the page (menus, sheets, a phone's
+New order).
 
 ### Shadow Vocabulary
-- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
+- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)`): every panel (`card`), a ring rather than a shadow.
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
 - **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
 
 ### Named Rules
 **The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
 
+## Motion
+
+Quiet and exact. The console is watched all day, so things move only when state changes, and only
+to say what changed and where: opacity, colour and a few pixels of travel. Nothing bounces, scales
+content or loops, except live work (a running step's pulse, a live edge's dash, the ellipsis and
+shimmer of work in progress, the slow-page bar).
+
+### Tokens
+
+In `app.css`, and in `app/lib/motion.ts` for animations run from script (a test keeps them equal).
+
+- **Durations:** `--motion-instant` 100ms (feedback, hover, anything leaving), `--motion-move` 180ms
+  (something appearing or changing state), `--motion-travel` 240ms (pages and panels). Plain
+  `transition-*` utilities default to instant.
+- **Easing:** `ease-arrive` (`cubic-bezier(0.16,1,0.3,1)`) for arrivals; `ease-leave` for exits,
+  which are also shorter.
+- **Arrival:** `animate-arrive`, a fade and a 4px rise in move time, for something new in a list
+  or a log.
+
+### Moments
+
+- **A step settling.** When a step changes state, its status rule and its edges on the order's
+  graph, its badges and dots cross-fade to the new status colour in move time, and the timeline
+  entry that reports it arrives on top with `animate-arrive`. Graph and timeline move together, so
+  the eye joins them.
+- **Deciding.** The undo notice arrives with `animate-arrive`, and a hairline along its foot drains
+  over exactly that decision's window (shorter near a deadline). "Recording decision…" arrives the
+  same way.
+- **Moving between pages.** Shell links, the orders list and an order's breadcrumb use View
+  Transitions: the page cross-fades (the old page leaves in instant time, the new arrives in
+  travel time) while the top bar and the tab bar hold still. From md, an order's title travels
+  from its row to the order page's heading and back; on a phone the page only cross-fades.
+- **Lists that change.** Orders and approvals that join an open list fade in (`useArrivals`): never
+  what was already on screen, never a whole new list (another filter or page), never more than five
+  at once (a burst is a refresh), and never while the tab is hidden, so coming back shows the
+  current state at once. An approval that resolves holds its place and fades to the resolved tint.
+- **Overlays.** Menus and dialogs open in instant time; sheets open in travel time and close in
+  move time, decelerating in and accelerating out.
+
+### Named Rules
+**The Reduced Motion Rule.** With reduced motion nothing travels, but nothing that carries meaning
+is lost: colours still change, arrivals fade without rising, page changes happen at once, and the
+undo bar is hidden because the seconds count says the same.
+
 ## Shapes
 
-Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 4xl, tiles 2xl,
-one-line fields 3xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
-pills. Hairlines divide rows inside a card; cards themselves have no border.
+Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 2xl, tiles and
+rows inside a card xl, the flow canvas 2xl, one-line fields 4xl, text areas xl, menus 2xl, and
+bordered notices, option tiles and bordered lists lg (the preset's alert and item). Buttons, one-line
+fields, badges, segmented controls, filter links and icon buttons are pills. Checkboxes are 6px
+boxes and radios round, both native and drawn by app.css. Hairlines divide rows inside a card; cards
+themselves have no border.
 
 **The Pill Rule.** Anything you press or that labels a status is fully round. Square corners are
 for code and data blocks only.
@@ -355,10 +402,10 @@ for code and data blocks only.
 ## Components
 
 - **Buttons** (`packages/ui/src/button.tsx`): pills. Primary is an ink fill with paper text; outline is a
-  rule on paper; ghost fills muted on hover; link is the work blue. Focus turns the edge to `ring`
+  rule over a faint `input` fill; ghost fills muted on hover; link is the work blue. Focus turns the edge to `ring`
   with a soft halo. Every size carries `hit-area`.
-- **Fields** (`input.tsx`, `textarea.tsx`, `native-select.tsx`): filled pills (`input` at half
-  strength), no rest border. Focus: the `ring` edge and halo. Invalid: the destructive edge.
+- **Fields** (`input.tsx`, `textarea.tsx`, `native-select.tsx`): pills with an `input` hairline
+  over an `input` fill at 30%. Focus: the `ring` edge and halo. Invalid: the destructive edge.
 - **Segmented** (`segmented.tsx`): a radio group drawn as a muted pill track; the chosen segment
   is raised on paper. Arrow keys move the choice.
 - **Card and tile** (`card`, `tile` in app.css): the panel and the step inside it. `Section`
@@ -390,7 +437,7 @@ for code and data blocks only.
   products into collapsible sections, each headed by a caption button (a chevron that turns 90°,
   the group's name and `· count`); each product appears in one group only. Longer lists end in a
   link-blue "Show more".
-- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded 2xl,
+- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded xl,
   muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
   size) is the link, stretched over the whole row; the product key is mono 2xs muted under it, then
   a muted reason line clamped to two lines, locales in mono. Its actions sit at the right, above the
@@ -399,8 +446,8 @@ for code and data blocks only.
   reason `bad`. Keyboard: J and K (or the arrows, once a card has focus) move between cards, Enter
   opens one, D drafts, A accepts, X ticks, ⌘Enter (Ctrl+Enter) publishes what's ticked; each is also
   a button, and the hints show only with `fine:` at lg. Cards glide to their new place after a
-  change (measured before and after, moved with the Web Animations API in 200ms on
-  `cubic-bezier(0.16,1,0.3,1)`); reduced motion moves them at once.
+  change (measured before and after, moved with the Web Animations API in move time on
+  `ease-arrive`); reduced motion moves them at once.
 - **Product sheet** (`components/catalog/sheet.tsx`): the side sheet from sm, 42rem wide and 56rem
   from xl; below sm the bottom sheet. Its content is a flush `Table`: fields as rows, locales as
   columns (mono, not uppercase, the most-filled first), the field-name column sticky on the left
@@ -436,6 +483,8 @@ actions must reach the engine.
 - **Do** give a small control `hit-area` rather than growing it.
 - **Do** put a phone's most frequent action within thumb reach: the tab bar, a bottom sheet.
 - **Do** keep one scroll region at a time on a phone.
+- **Do** take durations and easing from the motion tokens, and animate only what is new
+  (`useArrivals`), never a list as it first draws.
 
 ### Don't
 
@@ -446,3 +495,5 @@ actions must reach the engine.
 - **Don't** let a narrow screen change what it can't save (the flow editor below lg).
 - **Don't** interrupt work to suggest installing the app.
 - **Don't** port another product's look; Ledger is this product's.
+- **Don't** make a person wait on motion: an action responds at once, and a page change never
+  waits for its transition.

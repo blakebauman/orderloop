@@ -547,7 +547,7 @@ function FieldCell({
       data-ref={anchor ? refKey(ref) : undefined}
       data-ref-focus={anchor && focused ? '' : undefined}
       className={cn(
-        '-my-1.5 -ml-1.5 flex flex-col gap-1.5 rounded-2xl p-1.5',
+        '-my-1.5 -ml-1.5 flex flex-col gap-1.5 rounded-xl p-1.5',
         focused && 'bg-muted/60 ring-1 ring-ring/40',
       )}
     >

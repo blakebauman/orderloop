@@ -255,7 +255,7 @@ export function CartView({
         <div className="grid min-w-0 content-start gap-4">
           {cart.external && !final ? <SessionEnds cart={cart} guest={guest} /> : null}
           {error ? (
-            <p role="alert" className="rounded-md border border-bad/40 px-3 py-2 text-bad text-sm">
+            <p role="alert" className="rounded-lg border border-bad/40 px-3 py-2 text-bad text-sm">
               {error}
             </p>
           ) : null}
@@ -320,7 +320,7 @@ export function CartView({
                                   onChange={(e) =>
                                     setTicks(tick(ticks, l, e.currentTarget.checked))
                                   }
-                                  className="relative z-[1] size-4 accent-primary"
+                                  className="relative z-[1] size-4"
                                 />
                                 <span className="sr-only">Select {l.sku}</span>
                               </label>
@@ -509,7 +509,7 @@ function SessionEnds({ cart, guest }: { cart: NonNullable<CartState['cart']>; gu
       role={guest && near ? 'status' : undefined}
       className={cn(
         'text-muted-foreground text-sm',
-        near && 'rounded-md border border-wait/40 px-3 py-2 font-medium text-wait',
+        near && 'rounded-lg border border-wait/40 px-3 py-2 font-medium text-wait',
       )}
       suppressHydrationWarning
     >
@@ -567,7 +567,7 @@ function BulkLines({
           type="checkbox"
           checked={chosen > 0 && chosen === total}
           onChange={(e) => onAll(e.currentTarget.checked)}
-          className="relative z-[1] size-4 accent-primary"
+          className="relative z-[1] size-4"
         />
         Select all
       </label>
@@ -765,7 +765,7 @@ function AddLines({
             <ul
               aria-label="Products found"
               aria-busy={searching}
-              className="max-h-80 divide-y overflow-y-auto overscroll-contain rounded-md border"
+              className="max-h-80 divide-y overflow-y-auto overscroll-contain rounded-lg border"
             >
               {found.products.map((p) => (
                 <FoundProduct key={p.sku} product={p} currency={found.currency} onAdd={onAdd} />
@@ -1159,7 +1159,7 @@ function ShipTo({
             {quote.shippingOptions.map((o) => (
               <label
                 key={o.id}
-                className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:disabled]:cursor-default"
+                className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:disabled]:cursor-default"
               >
                 <input
                   type="radio"
@@ -1380,7 +1380,7 @@ function ReturnForm({ post }: { post: ReturnPost }) {
       {Object.entries(post.fields).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
-      <p className="rounded-md border px-3 py-2 text-sm">
+      <p className="rounded-lg border px-3 py-2 text-sm">
         Sending the cart back to your system…{' '}
         <button type="submit" className="text-link hover:underline">
           Continue

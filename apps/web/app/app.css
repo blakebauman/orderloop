@@ -9,7 +9,7 @@
 /* Streamdown renders the assistant's markdown with Tailwind classes of its own. */
 @source "../node_modules/streamdown/dist/*.js";
 
-/* Ledger, on shadcn's base-luma preset: neutral greys with no tint, Inter, generous radii and pill
+/* Ledger, on shadcn's base-maia preset: neutral greys with no tint, Inter, generous radii and pill
    controls (buttons and one-line fields are fully round). One blue accent for links and work in
    progress, and signal colours reserved for order and step status. Green means "succeeded" and
    nothing else; it is never the brand. Light is the default; dark is chosen with the theme switch. */
@@ -28,6 +28,23 @@
   --text-2xs: 0.6875rem;
   /* A page's body and header width (components/page.tsx). */
   --container-page: 87.5rem;
+
+  /* Motion: quiet and exact. Things move only when state changes, by opacity, colour and a few
+     pixels, never by bouncing or scaling content. Three durations, by how far the eye travels:
+     instant for feedback and leaving, move for something appearing or changing state, travel for
+     pages and panels. Arrivals decelerate; exits are shorter and accelerate away. */
+  --ease-arrive: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-leave: cubic-bezier(0.4, 0, 1, 1);
+  --default-transition-duration: var(--motion-instant);
+  --default-transition-timing-function: var(--ease-arrive);
+  /* Something new in a list or a log: a fade and a 4px rise (no rise where motion is reduced). */
+  --animate-arrive: ol-arrive var(--motion-move) var(--ease-arrive) both;
+  @keyframes ol-arrive {
+    from {
+      opacity: 0;
+      translate: 0 var(--arrive-rise);
+    }
+  }
 }
 
 @theme inline {
@@ -194,6 +211,15 @@
   color-scheme: dark;
 }
 
+/* Motion (see the @theme block above for the easings). Its own block: the palette `:root` above is
+   mirrored value for value in packages/design, and durations aren't part of that palette. */
+:root {
+  --motion-instant: 100ms;
+  --motion-move: 180ms;
+  --motion-travel: 240ms;
+  --arrive-rise: 4px;
+}
+
 @layer base {
   * {
     border-color: var(--rule);
@@ -218,6 +244,62 @@
   input,
   textarea {
     caret-color: var(--link);
+  }
+  /* Checkboxes and radios stay native (they post with their form) but are drawn as the preset's:
+     an input-edged 16px box with 6px corners, round for a radio, filled with primary once
+     checked, the mark drawn in borders so no image loads. */
+  input:where([type="checkbox"], [type="radio"]) {
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex-shrink: 0;
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    border: 1px solid var(--input);
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--primary-foreground);
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 100ms;
+    [data-theme="dark"] & {
+      background-color: color-mix(in oklch, var(--input) 30%, transparent);
+    }
+    &:checked {
+      border-color: var(--primary);
+      background-color: var(--primary);
+    }
+    &:focus-visible {
+      outline: none;
+      border-color: var(--ring);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+    }
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    &[aria-invalid="true"] {
+      border-color: var(--destructive);
+    }
+  }
+  input:where([type="checkbox"]):checked::before {
+    content: "";
+    width: 0.3125rem;
+    height: 0.5625rem;
+    margin-top: -0.125rem;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    rotate: 45deg;
+  }
+  input:where([type="radio"]) {
+    border-radius: 9999px;
+  }
+  input:where([type="radio"]):checked::before {
+    content: "";
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background-color: currentColor;
   }
   h1,
   h2,
@@ -334,22 +416,16 @@
   color: var(--muted-foreground);
 }
 
-/* The preset's card: very round, no border, lifted by a soft shadow and a faint ring. */
+/* The preset's card: rounded, no border and no shadow, edged by a faint ring. */
 @utility card {
-  border-radius: var(--radius-4xl);
+  border-radius: var(--radius-2xl);
   background-color: var(--card);
   color: var(--card-foreground);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06),
-    0 2px 4px -2px rgb(0 0 0 / 0.06);
-  [data-theme="dark"] & {
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
-  }
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
 }
 
-/* A control floating over a scrolling page (a phone's New order): the card's lift, a step deeper so
-   rows pass under it. In dark the primary is light on a dark page and needs no lift. */
+/* A control floating over a scrolling page (a phone's New order): a soft lift so rows pass under
+   it. In dark the primary is light on a dark page and needs no lift. */
 @utility shadow-float {
   box-shadow:
     0 6px 12px -2px rgb(0 0 0 / 0.14),
@@ -361,7 +437,7 @@
 
 /* A tile inside a card: a muted, rounded step rather than a ruled cell. */
 @utility tile {
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-xl);
   background-color: color-mix(in oklch, var(--muted) 70%, transparent);
 }
 
@@ -401,6 +477,10 @@
 .react-flow .react-flow__edge-text {
   font-size: 11px;
   font-family: var(--font-mono);
+}
+/* Live state on the flow graph: an edge changes colour with its step, rather than snapping. */
+.react-flow .react-flow__edge-path {
+  transition: stroke var(--motion-move) var(--ease-arrive);
 }
 @keyframes ol-dash {
   to {
@@ -545,20 +625,9 @@
   }
 }
 
-/* A confirm card arrives with a short rise, so a prepared action is noticed without a modal. */
-@keyframes ol-arrive {
-  from {
-    opacity: 0;
-    translate: 0 4px;
-  }
-}
+/* A confirm card arrives with the shared rise, so a prepared action is noticed without a modal. */
 .ol-confirm {
-  animation: ol-arrive 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-@media (prefers-reduced-motion: reduce) {
-  .ol-confirm {
-    animation: none;
-  }
+  animation: var(--animate-arrive);
 }
 
 /* Tables (`Table` in packages/ui). The table pads its cells at zero specificity, so a cell's own
@@ -660,5 +729,75 @@
     translate: 0 0;
     width: 100%;
     opacity: 0.6;
+  }
+}
+
+/* Reduced motion: nothing travels. Colour and state still change (they carry meaning), arrivals
+   fade without rising, and page changes (below) and the undo bar happen at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --arrive-rise: 0px;
+  }
+}
+
+/* Moving between pages (`viewTransition` on the shell's links, the orders list and the order's
+   breadcrumb): the page cross-fades, the old one leaving faster than the new one arrives. The top
+   bar and the phone's tab bar are their own layers, so they hold still while the page changes. */
+::view-transition-old(root) {
+  animation: ol-fade-out var(--motion-instant) var(--ease-leave) both;
+}
+::view-transition-new(root) {
+  animation: ol-fade-in var(--motion-travel) var(--ease-arrive) both;
+}
+@keyframes ol-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ol-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.vt-shell-bar {
+  view-transition-name: shell-bar;
+}
+.vt-tab-bar {
+  view-transition-name: tab-bar;
+}
+/* An order's title travels from its row in the list to the order page's heading, and back. On a
+   phone the page change is a cross-fade alone: the row and the heading sit too close for travel
+   to say anything. */
+.vt-order-title {
+  view-transition-name: order-title;
+  @media (width < 48rem) {
+    view-transition-name: none;
+  }
+}
+::view-transition-group(order-title) {
+  animation-duration: var(--motion-travel);
+  animation-timing-function: var(--ease-arrive);
+}
+::view-transition-old(order-title),
+::view-transition-new(order-title) {
+  /* Scale the snapshots to the group rather than stretching text to fit. */
+  height: 100%;
+  object-fit: none;
+  object-position: left center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-group(order-title),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* The undo window running out: a hairline that drains over exactly the decision's window. */
+@keyframes ol-drain {
+  to {
+    scale: 0 1;
   }
 }

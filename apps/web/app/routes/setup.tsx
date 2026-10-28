@@ -6,24 +6,34 @@
 
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { useState } from 'react';
 import { data, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Mark } from '~/components/mark';
+import { Turnstile } from '~/components/turnstile';
 import { authEnabled, startSession, Throttled } from '~/lib/auth.server';
 import { redeemSetupCode, setupOpen } from '~/lib/setup.server';
 import { TeamError } from '~/lib/team.server';
+import { checkTurnstile, turnstileSiteKey, withTurnstilePolicy } from '~/lib/turnstile.server';
 import type { Route } from './+types/setup';
 
 export const meta = () => [{ title: 'Set up · OrderLoop' }];
 
-/** Lets a throttled attempt's Retry-After reach the response. */
-export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
+/**
+ * Lets a throttled attempt's Retry-After reach the response, and the page load Turnstile when the
+ * deployment uses it.
+ */
+export const headers: Route.HeadersFunction = ({ actionHeaders }) =>
+  withTurnstilePolicy(actionHeaders);
 
 export async function loader() {
-  return { open: await setupOpen(), team: await authEnabled() };
+  return { open: await setupOpen(), team: await authEnabled(), turnstile: turnstileSiteKey() };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const f = await request.formData();
+  // Before the code is looked at: a bot racing a new deployment's first admin gets nowhere.
+  const refused = await checkTurnstile(request, f, 'setup');
+  if (refused) return data({ error: refused.error }, { status: refused.status });
   const str = (k: string) => String(f.get(k) ?? '');
   try {
     const id = await redeemSetupCode(request, str('code'), {
@@ -44,9 +54,11 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Setup() {
-  const { open, team } = useLoaderData<typeof loader>();
-  const error = useActionData<typeof action>()?.error;
+  const { open, team, turnstile } = useLoaderData<typeof loader>();
+  const result = useActionData<typeof action>();
+  const error = result?.error;
   const busy = useNavigation().state === 'submitting';
+  const [checked, setChecked] = useState(false);
   return (
     <main className="grid min-h-dvh content-start justify-items-center bg-background px-4 pt-[16vh]">
       <div className="w-full max-w-sm card p-6">
@@ -104,12 +116,19 @@ export default function Setup() {
             <p id="password-hint" className="mt-1.5 text-muted-foreground text-xs">
               At least 10 characters.
             </p>
+            {turnstile ? (
+              <Turnstile siteKey={turnstile} action="setup" reset={result} onSolved={setChecked} />
+            ) : null}
             {error ? (
               <p className="mt-2 text-destructive text-sm" role="alert">
                 {error}
               </p>
             ) : null}
-            <Button type="submit" className="mt-4 w-full" disabled={busy}>
+            <Button
+              type="submit"
+              className="mt-4 w-full"
+              disabled={busy || (!!turnstile && !checked)}
+            >
               {busy ? 'Creating…' : 'Create admin account'}
             </Button>
           </Form>

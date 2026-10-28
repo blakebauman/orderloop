@@ -301,7 +301,7 @@ export default function FlowEditor() {
             </NativeSelect>
             {/* Channels are metadata for routing; one control instead of a row of toggles. */}
             <DropdownMenu>
-              <DropdownMenuTrigger className="inline-flex h-8 max-w-72 items-center gap-1.5 rounded-4xl border border-input bg-transparent px-3 text-xs hover:bg-accent">
+              <DropdownMenuTrigger className="inline-flex h-8 max-w-72 items-center gap-1.5 rounded-4xl border border-input bg-input/30 px-3 text-xs hover:bg-input/50">
                 <span className="text-muted-foreground">Channels:</span>
                 <span className="truncate">
                   {flow.channels.length
@@ -601,7 +601,7 @@ export default function FlowEditor() {
                   onChange={(e) => setFlow({ ...flow, description: e.target.value })}
                   readOnly={!wide}
                   rows={4}
-                  className="w-full rounded-2xl border border-transparent bg-input/50 px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+                  className="w-full rounded-xl border border-input bg-input/30 px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 />
               </label>
               <div>

@@ -39,6 +39,7 @@ import {
   loadSheet,
 } from '~/lib/catalog-board.server';
 import { count } from '~/lib/format';
+import { EASE, MOTION } from '~/lib/motion';
 import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/catalog';
@@ -651,7 +652,7 @@ function CardRow({
       data-card={c.key}
       data-flip={flip ? c.key : undefined}
       aria-busy={busy || undefined}
-      className="group relative mx-1.5 flex items-start gap-3 rounded-2xl px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
+      className="group relative mx-1.5 flex items-start gap-3 rounded-xl px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
       onKeyDown={(e) => {
         // The card's link has focus; Enter follows it on its own.
         if (!(e.target instanceof HTMLAnchorElement) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -674,7 +675,7 @@ function CardRow({
           checked={tick.on}
           onChange={tick.toggle}
           aria-label={`Publish ${c.title}`}
-          className="hit-area relative z-10 mt-1 size-4 shrink-0 accent-foreground max-lg:hidden"
+          className="hit-area relative z-10 mt-1 size-4 shrink-0 max-lg:hidden"
         />
       ) : null}
       <div className="min-w-0 flex-1">
@@ -683,7 +684,7 @@ function CardRow({
           preventScrollReset
           data-card-link
           aria-keyshortcuts={keys || undefined}
-          className="block truncate font-medium text-sm outline-none after:absolute after:inset-0 after:rounded-2xl"
+          className="block truncate font-medium text-sm outline-none after:absolute after:inset-0 after:rounded-xl"
         >
           {c.title}
         </Link>
@@ -808,8 +809,8 @@ function useFlip(root: RefObject<HTMLDivElement | null>, dep: unknown) {
       const dy = was.y - at.y;
       if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
       card.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0 0' }], {
-        duration: 200,
-        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        duration: MOTION.move,
+        easing: EASE.arrive,
       });
     }
     last.current = next;

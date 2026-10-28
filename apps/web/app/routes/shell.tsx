@@ -250,7 +250,7 @@ function Keys({ keys, sep = 'then' }: { keys: string[]; sep?: string }) {
       {keys.map((k, i) => (
         <span key={k} className="contents">
           {i ? sep : null}
-          <kbd className="min-w-6 rounded-md border px-1.5 py-0.5 text-center font-sans text-foreground text-xs">
+          <kbd className="min-w-5 rounded-sm bg-muted px-1 py-0.5 text-center font-sans text-foreground text-xs">
             {k}
           </kbd>
         </span>
@@ -374,7 +374,7 @@ function AssistantToggle() {
         tint,
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
-          : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
+          : 'border-input bg-input/30 text-muted-foreground hover:bg-input/50 hover:text-foreground',
       )}
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
@@ -531,6 +531,7 @@ function NavMore({
         <Link
           to={to}
           reloadDocument={document}
+          viewTransition
           aria-current={here ? 'page' : undefined}
           className="justify-between"
         >
@@ -627,13 +628,14 @@ function ShellFrame() {
       </a>
       {/* 3rem tall with its rule, under the status bar's inset: full-height pages and the assistant
           subtract --shell-h (app.css). */}
-      <header className="sticky top-0 z-40 border-b bg-background pt-safe-0">
+      <header className="vt-shell-bar sticky top-0 z-40 border-b bg-background pt-safe-0">
         <div
           ref={bar}
           className="flex h-[calc(3rem-1px)] items-center gap-3 px-safe-4 sm:gap-6 sm:px-safe-5"
         >
           <Link
             to="/"
+            viewTransition
             className="hit-area -mx-1.5 flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 font-semibold tracking-title text-base"
             aria-label="OrderLoop overview"
           >
@@ -673,7 +675,12 @@ function ShellFrame() {
               </div>
               {links.slice(0, fits).map(({ to, label, end, badge, group }) => (
                 <NavSlot key={to} group={group}>
-                  <NavLink to={to} end={end} className={navTab(isAt(path, { to, end }))}>
+                  <NavLink
+                    to={to}
+                    end={end}
+                    viewTransition
+                    className={navTab(isAt(path, { to, end }))}
+                  >
                     {label}
                     {badge && pending > 0 ? <PendingCount n={pending} /> : null}
                   </NavLink>
@@ -699,7 +706,7 @@ function ShellFrame() {
                   'hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl px-3 font-medium text-ui md:inline-flex',
                   tint,
                   quietNewOrder
-                    ? 'border border-input text-foreground hover:bg-accent'
+                    ? 'border border-input bg-input/30 text-foreground hover:bg-input/50'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90',
                 )}
               >
@@ -713,7 +720,7 @@ function ShellFrame() {
                 aria-label={`${shortWho(me, auth)}, account menu`}
                 title={who(me, auth)}
                 className={cn(
-                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
+                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border border-input bg-input/30 px-3 text-ui text-muted-foreground hover:bg-input/50 hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
                   tint,
                 )}
               >
@@ -796,7 +803,7 @@ function TabBar({
     <>
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t bg-background px-safe-0 pb-[var(--safe-bottom)] md:hidden"
+        className="vt-tab-bar fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t bg-background px-safe-0 pb-[var(--safe-bottom)] md:hidden"
       >
         <ul
           className="grid h-full"
@@ -804,7 +811,12 @@ function TabBar({
         >
           {tabs.map(({ to, label, icon: Icon, end, badge }) => (
             <li key={to} className="contents">
-              <NavLink to={to} end={end} className={cn(item, state(isAt(path, { to, end })))}>
+              <NavLink
+                to={to}
+                end={end}
+                viewTransition
+                className={cn(item, state(isAt(path, { to, end })))}
+              >
                 <span className="relative">
                   <Icon className="size-5" aria-hidden="true" />
                   {badge && pending > 0 ? (
@@ -873,7 +885,7 @@ function MoreMenu({
     <ul>
       {items.map(({ to, label, end, badge, document }) => (
         <li key={to}>
-          <NavLink to={to} end={end} reloadDocument={document} className={row}>
+          <NavLink to={to} end={end} reloadDocument={document} viewTransition className={row}>
             {label}
             {badge && pending > 0 ? <PendingCount n={pending} /> : null}
           </NavLink>

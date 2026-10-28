@@ -17,6 +17,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import {
   Form,
   Link,
+  NavLink,
   useLoaderData,
   useRevalidator,
   useSearchParams,
@@ -56,6 +57,7 @@ const WITHIN_LABEL: Record<string, string> = {
 };
 
 import { pageShortcut } from '~/lib/shortcuts';
+import { useArrivals } from '~/lib/use-arrivals';
 import type { Route } from './+types/orders';
 
 export const meta = () => [{ title: 'Orders · OrderLoop' }];
@@ -116,6 +118,11 @@ export default function Orders() {
   const { orders, total, names, sort, declined, paged, older, flow } =
     useLoaderData<typeof loader>();
   const [params] = useSearchParams();
+  // Orders that arrive while the list is open fade in; another search or page is a new list.
+  const arrived = useArrivals(
+    orders.map((o) => o.id),
+    { scope: params.toString() },
+  );
   const submit = useSubmit();
   const search = useRef<HTMLInputElement>(null);
   const query = params.get('q') ?? '';
@@ -242,7 +249,7 @@ export default function Orders() {
             />
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-2xs text-muted-foreground touch:hidden"
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm bg-muted px-1 font-sans text-2xs text-muted-foreground touch:hidden"
             >
               /
             </span>
@@ -401,19 +408,27 @@ export default function Orders() {
                     // On a phone the row is a card, and the whole card opens the order.
                     <Tr
                       key={o.id}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-4 py-2.5 hover:bg-muted/40 has-[a[data-row]:focus-visible]:bg-muted/40 max-md:relative max-md:active:bg-muted/60 md:table-row md:p-0"
+                      className={cn(
+                        'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-4 py-2.5 hover:bg-muted/40 has-[a[data-row]:focus-visible]:bg-muted/40 max-md:relative max-md:active:bg-muted/60 md:table-row md:p-0',
+                        arrived(o.id) && 'animate-arrive',
+                      )}
                     >
                       <Td className="min-w-0">
-                        <Link
+                        {/* The title travels to the order page's heading (app.css, vt-order-title). */}
+                        <NavLink
                           to={`/orders/${o.id}`}
+                          viewTransition
                           data-row
-                          className={cn(
-                            'scroll-mt-[calc(var(--shell-h)+2.5rem)] scroll-mb-4 hover:underline max-md:after:absolute max-md:after:inset-0',
-                            title && 'font-medium',
-                          )}
+                          className={({ isTransitioning }) =>
+                            cn(
+                              'scroll-mt-[calc(var(--shell-h)+2.5rem)] scroll-mb-4 hover:underline max-md:after:absolute max-md:after:inset-0',
+                              title && 'font-medium',
+                              isTransitioning && 'vt-order-title',
+                            )
+                          }
                         >
                           {title || <span className="text-muted-foreground">Untitled</span>}
-                        </Link>{' '}
+                        </NavLink>{' '}
                         <span className="font-mono font-normal text-muted-foreground text-xs">
                           {orderRef(o.id)}
                         </span>
@@ -592,7 +607,7 @@ function AttentionToggle({ checked, className }: { checked: boolean; className?:
   return (
     <label
       className={cn(
-        'inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]',
+        'inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border border-input bg-input/30 px-3 text-ui text-muted-foreground hover:bg-input/50 has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]',
         className,
       )}
     >

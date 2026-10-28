@@ -150,7 +150,7 @@ export function Inspector({
       </div>
 
       {run && run.status !== 'pending' ? (
-        <div className="rounded-md border bg-muted/30 p-3">
+        <div className="rounded-lg border bg-muted/30 p-3">
           <h2 className="section-title">Last run</h2>
           <div className="mt-1 text-sm">
             {statusLabel(run.status)}

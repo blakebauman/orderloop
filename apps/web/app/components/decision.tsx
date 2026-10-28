@@ -216,7 +216,7 @@ export function DecisionControls({
 
   if (busy) {
     return (
-      <p className="text-muted-foreground text-sm" aria-live="polite">
+      <p className="animate-arrive text-muted-foreground text-sm" aria-live="polite">
         Recording decision…
       </p>
     );
@@ -226,9 +226,17 @@ export function DecisionControls({
     const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
     return (
       <div
-        className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/50 px-3 py-2 text-sm"
+        className="relative flex animate-arrive flex-wrap items-center gap-3 overflow-hidden rounded-lg border bg-muted/50 px-3 py-2 text-sm"
         aria-live="polite"
       >
+        {/* The window running out, drained over exactly this decision's window (shorter near a
+            deadline). Hidden where motion is reduced: the seconds say the same. */}
+        <span
+          key={pending.at}
+          aria-hidden="true"
+          className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-foreground/35 motion-reduce:hidden"
+          style={{ animation: `ol-drain ${pending.ms}ms linear forwards` }}
+        />
         <span>
           {pending.decision === 'approved' ? 'Approving' : 'Rejecting'} in{' '}
           <span className="tabular">{left}s</span>
