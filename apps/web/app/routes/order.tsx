@@ -873,7 +873,7 @@ function Actions({
   return (
     <div className="space-y-3">
       {state.waits.map((w) => (
-        <div key={w.eventType} className="rounded-md border border-wait/35 bg-wait/[0.06] p-3">
+        <div key={w.eventType} className="rounded-lg border border-wait/35 bg-wait/[0.06] p-3">
           <div className="flex items-center gap-2 text-wait text-xs">
             <StatusDot status="waiting" />
             {w.kind === 'approval'

@@ -5,9 +5,10 @@
 #
 #   ./scripts/provision.sh <id>
 #
-# Needs `wrangler login` (or CLOUDFLARE_API_TOKEN) and `gh auth login`. The AI Gateway is created
-# through the API, so it also needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them
-# it prints what to create instead.
+# Needs `wrangler login` (or CLOUDFLARE_API_TOKEN) and `gh auth login`. The AI Gateway and the
+# Turnstile widget are created through the API, so they also need CLOUDFLARE_API_TOKEN (for the
+# widget, with Turnstile Sites Write) and CLOUDFLARE_ACCOUNT_ID; without them it prints what to
+# create instead.
 set -euo pipefail
 id="${1:?usage: scripts/provision.sh <id>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -203,6 +204,76 @@ for KEY in PRINCIPAL_KEY DATA_KEY PASSWORD_PEPPER; do
     echo "Set $KEY on $ENVIRONMENT"
   fi
 done
+# The Turnstile widget on password sign-in and /setup (docs/operations.md, "Turnstile"): managed,
+# for the deployment's domain alone, and named like its web Worker, so each deployment on a shared
+# account finds its own. Its site key is public: it goes in the registry, which turns the check on.
+# Its secret goes from the API straight into the environment, as TURNSTILE_SECRET_KEY, and nowhere
+# else: never printed, never on disk. Set it before the registry has the key, or the deploy stops.
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+  widgets="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/challenges/widgets"
+  cf() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$@"; }
+  # Every widget in the account, one JSON object a line, page by page.
+  list_widgets() {
+    local page=1 pages=1 body
+    while [ "$page" -le "$pages" ]; do
+      body=$(cf "$widgets?per_page=1000&page=$page")
+      jq -c '.result[] | {sitekey, name, domains}' <<<"$body"
+      pages=$(jq -r '.result_info.total_pages // 1' <<<"$body")
+      page=$((page + 1))
+    done
+  }
+  all_widgets=$(list_widgets)
+  # The registry's key names the widget when it has one; otherwise the name does.
+  if [ -n "$TURNSTILE_SITE_KEY" ]; then
+    sitekey=$(jq -rs --arg k "$TURNSTILE_SITE_KEY" 'map(select(.sitekey == $k))[0].sitekey // empty' <<<"$all_widgets")
+    if [ -z "$sitekey" ]; then
+      echo "turnstileSiteKey in deployments/$id.jsonc is no widget in this account: fix it, or remove" >&2
+      echo "it to find or create $WEB" >&2
+      exit 1
+    fi
+  else
+    named=$(jq -s --arg n "$WEB" 'map(select(.name == $n)) | length' <<<"$all_widgets")
+    [ "$named" -gt 1 ] && echo "WARNING: $named Turnstile widgets are named $WEB; using the first" >&2
+    sitekey=$(jq -rs --arg n "$WEB" 'map(select(.name == $n))[0].sitekey // empty' <<<"$all_widgets")
+  fi
+  if [ -n "$sitekey" ]; then
+    echo "Turnstile widget $WEB already exists"
+    # Its domains are where its tokens can be solved: anything besides this deployment's is a
+    # widget shared with, or left over from, something else.
+    domains=$(jq -cs --arg k "$sitekey" 'map(select(.sitekey == $k))[0].domains | sort' <<<"$all_widgets")
+    if [ "$domains" != "$(jq -cn --arg d "$DOMAIN" '[$d]')" ]; then
+      echo "WARNING: Turnstile widget $sitekey has domains $domains, not [\"$DOMAIN\"]." >&2
+      echo "WARNING: give it exactly $DOMAIN in the dashboard (Turnstile > the widget > Hostnames)." >&2
+    fi
+  else
+    # Only the site key is read from the answer; the secret is fetched below, if it's needed.
+    sitekey=$(cf -X POST "$widgets" -H 'Content-Type: application/json' \
+      --data "$(jq -n --arg n "$WEB" --arg d "$DOMAIN" '{name: $n, domains: [$d], mode: "managed"}')" |
+      jq -er .result.sitekey)
+    echo "Created Turnstile widget $WEB for $DOMAIN"
+  fi
+  if grep -qx TURNSTILE_SECRET_KEY <<<"$EXISTING"; then
+    echo "$ENVIRONMENT already has TURNSTILE_SECRET_KEY"
+  else
+    (
+      set +x
+      secret=$(cf "$widgets/$sitekey" | jq -jer .result.secret)
+      [ -n "$secret" ] || { echo "Turnstile widget $WEB returned no secret" >&2; exit 1; }
+      printf '%s' "$secret" | gh secret set TURNSTILE_SECRET_KEY --env "$ENVIRONMENT"
+    )
+    echo "Set TURNSTILE_SECRET_KEY on $ENVIRONMENT"
+  fi
+  if [ "$TURNSTILE_SITE_KEY" = "$sitekey" ]; then
+    echo "deployments/$id.jsonc has the widget's turnstileSiteKey"
+  else
+    echo "To turn on Turnstile, set \"turnstileSiteKey\": \"$sitekey\" in deployments/$id.jsonc"
+  fi
+else
+  echo "Skipped the Turnstile widget: set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, or create"
+  echo "\"$WEB\" in the dashboard (Turnstile > Add widget: managed, domain $DOMAIN), set its secret as"
+  echo "TURNSTILE_SECRET_KEY on $ENVIRONMENT, and its site key as turnstileSiteKey in the registry."
+fi
+
 # A Worker that already runs has its own secrets, set by hand or by an earlier deploy: a new
 # generated one would replace them on the next deploy, so only a new deployment gets them.
 if $RUNNING; then

@@ -39,6 +39,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `assistantDailyTokens` | `1000000` | Whole number of model tokens each person's assistant conversations may use per UTC day; `0` is no limit (negative or fractional is refused). Rendered into the engine's `ASSISTANT_DAILY_TOKENS` |
 | `aiGatewayLogs` | `false` | `true` or `false` (a boolean). Whether the deployment's AI Gateway keeps request logs (model, tokens, cost, duration and metadata, until they're deleted). They never hold the prompts or responses: every call sends `cf-aig-collect-log-payload: false`. Reviewers' verdicts on AI gates are sent as feedback on these entries ([Architecture](architecture.md)), so with logs off there is nothing to evaluate models against. Rendered into the engine's `AI_GATEWAY_LOGS`, which every model call sends as the gateway's `collectLog`; `provision.sh` also sets it as the default of a gateway it creates |
 | `sso` | none | `{ "issuer": "https://…", "clientId": "…", "trustEmail"?: true }`: the customer's OpenID Connect identity provider and this deployment's client id; the issuer must be an https URL and the client id non-empty (refused otherwise). `trustEmail` (for Entra ID, which leaves out `email_verified`) lets a token without the claim match people by email. Rendered into the web Worker's `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_TRUST_EMAIL`; the client secret is the environment's `OIDC_CLIENT_SECRET`. See [Single sign-on](#single-sign-on) |
+| `turnstileSiteKey` | none | The public site key (`0x…`; Cloudflare's `1x`–`3x` test keys, which pass or fail whoever solves them, only on a `demo`; anything else is refused) of the deployment's Turnstile widget. Rendered into the web Worker's `TURNSTILE_SITE_KEY` (always, empty without one), which puts a Turnstile challenge on password sign-in and `/setup`. A deploy stops before it migrates anything when the environment lacks `TURNSTILE_SECRET_KEY`. See [Turnstile](#turnstile) |
 | `plugins` | none | `{ "<plugin id>": { "alias": "/<segment>/", "d1Id": "…", "personalData": "send", "capabilities": ["orders:start"], "runtime": "sandboxed", "secrets": ["API_KEY"] } }`: the plugins (`plugins/<id>/`) this deployment installs. `runtime` is `worker` (the default) or `sandboxed`. A `worker` plugin is its own Worker `orderloop-plugin-<id><suffix>` and D1 database of the same name, bound to the engine and web Workers as `PLUGIN_<ID>`; `d1Id` is written by `scripts/provision.sh` (`fleet.ts set-plugin-d1`) and required to deploy. A `sandboxed` plugin has no Worker, binding or database: CI publishes its bundle and the engine loads it (Worker Loader), and a `d1Id` on one is refused. `personalData` is optional and can only be `"send"`: it grants the plugin buyer details, which its manifest can ask for but not give itself; it is rendered into the engine's `PLUGIN_GRANTS`. `alias` is another path the plugin's pages answer at, besides `/plugins/<id>/` (orderloop.app gives punchout `/punchout/`): one lowercase segment, not one of the app's own top-level paths (`RESERVED_PATH_SEGMENTS` in `scripts/fleet.ts`, which `fleet.test.ts` checks against `apps/web/app/routes.ts` and `apps/web/workers/app.ts`) and not another plugin's; it is rendered into the web Worker's `PLUGIN_ALIASES` (see [Aliases](plugins.md#aliases)). `capabilities` grants what the plugin may ask the core to do through its `ORDERLOOP` binding (`carts:external`, `orders:start`, `orders:cancel`, each at most once; see [The host API](plugins.md#the-host-api)): a plugin whose manifest asks for one not listed is refused; it is rendered into `PLUGIN_GRANTS` too, and gives a `worker` plugin its `ORDERLOOP` service binding. `secrets` lists the plugin's secret names (upper case, not `PLUGIN_KEY`, `PLUGIN_KEY_PREVIOUS`, `DB`, `SECRETS` or `STORAGE`) and is needed only with `secretsStore`, because Secrets Store bindings are per secret. Any other key, an unknown `runtime`, ids that aren't plugin ids or are the engine's own variable names (`bundles`, `secrets`, `grants`, `key`, `storage`, `dev-bundles`, `publishers`), the `example` and `fixture-carrier` fixtures, and ids without `plugins/<id>/wrangler.jsonc` are refused. A `worker` plugin's `wrangler.jsonc` may hold only vars and one D1 binding `DB`, or rendering refuses it. See [Plugins](plugins.md) |
 | `secretsStore` | none | `{ "storeId": "<32 hex characters>" }` (anything else is refused): the Cloudflare Secrets Store of a deployment on its own Cloudflare account, where its plugins' secrets live as `PLUGIN_<ID>_<NAME>` instead of in the GitHub environment. Leave it out on a shared account (one store and 100 secrets an account). Rendered as `secrets_store_secrets` bindings for each plugin's listed `secrets`. See [Plugin secrets](#plugin-secrets) |
 | `pluginInstalls` | none (off) | `{ "publishers"?: { "<name>": "<Ed25519 public key>" }, "assistant"?: true }`, with at least one: who may sign a sandboxed plugin an admin installs at runtime from the Plugins page, and whether the assistant may draft business-rule plugins for an admin to approve (rendered as the engine's `ASSISTANT_PLUGINS`; see [Plugins](plugins.md#assistant-drafted-plugins)). No publisher may be named `assistant`. A name is lowercase letters, digits and hyphens; a key is the raw 32 bytes in base64url (43 characters, from `pnpm plugin:pack keygen`). Rendered into the engine's `PLUGIN_PUBLISHERS`. Without it, runtime installs are off. See [Plugin publishers](#plugin-publishers) |
@@ -61,6 +62,7 @@ With the suffix, deployment `acme` gets these resource names:
 | Analytics Engine | dataset `orderloop_catalog_edge_acme` (dashes in the suffix become underscores) |
 | Catalog KV | `orderloop-catalog-cards-acme` (the catalog's `CARDS` namespace, id in `catalogKvId`) |
 | AI Gateway | `orderloop-acme` (`AI_GATEWAY_ID`) |
+| Turnstile widget | `orderloop-web-acme`, managed, for `acme.orderloop.app` (site key in `turnstileSiteKey`) |
 | Vectorize | `orderloop-products-acme` (the engine's `PRODUCT_VECTORS`; none for a demo) |
 | OAuth KV | created on the first deploy, bound to that web Worker |
 
@@ -93,6 +95,8 @@ back the base files unchanged, and `pnpm test:fleet` checks that.
    It sets the environment's `PRINCIPAL_KEY`, `DATA_KEY` and `PASSWORD_PEPPER` (`openssl rand -hex 32`, never written to disk) when it lacks them, for a deployment that already runs too, since a deploy fails without the first two. It never replaces a `DATA_KEY` or `PASSWORD_PEPPER` the web Worker already holds: when the environment has lost one, it stops and asks for the deployment's own value, since a new one would leave every secret sealed under the old key, or every password hashed with the old pepper, unreadable. It writes `d1Id` into the registry file and sets the environment's `SETUP_TOKEN`, the one-time setup code. New values are generated and saved in `.secrets/<id>/` (gitignored; the code is `.secrets/<id>/setup-code`); a secret
    the environment already has is left alone, and once the web Worker exists it sets none, since a
    generated one would replace the Worker's own on the next deploy. Re-running it is safe.
+   With the API token and account id it also finds or creates the deployment's Turnstile widget
+   and copies its secret into the environment; see [Turnstile](#turnstile).
 3. If `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` aren't repository secrets, add them to
    the environment. Add `SHOPIFY_WEBHOOK_SECRET`, `INTAKE_ALLOWLIST`, `SHIPPING_CARRIER_AUTH`,
    `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` or `OIDC_CLIENT_SECRET` ([single sign-on](#single-sign-on)) there if the customer uses them (Stripe also
@@ -477,6 +481,39 @@ configured provider), so passwords and passkeys work again; people single sign-o
 password and need an admin to reset one for them.
 A person disabled at the provider keeps their session until it ends; an admin disabling them on the
 Team page ends it now, or the provider can do it through SCIM (below).
+
+## Turnstile
+
+Password sign-in and `/setup` can ask for a [Turnstile](https://developers.cloudflare.com/turnstile/)
+challenge, so bots can't stuff passwords or race a new deployment's first admin. It is per
+deployment and off until the registry has a site key. Passkeys, single sign-on and the two-factor
+step aren't gated: the first two can't be stuffed, and the two-factor page is reached only through
+a password sign-in that passed the challenge. How the check works is under `TURNSTILE_SITE_KEY` in
+[Configuration](configuration.md#web-variables).
+
+1. Run `./scripts/provision.sh <id>` with `CLOUDFLARE_API_TOKEN` (with **Turnstile Sites Write**)
+   and `CLOUDFLARE_ACCOUNT_ID` set. It reads every page of the account's widgets. When the registry
+   already has `turnstileSiteKey` it uses that widget, and stops if the account has none with that
+   key; otherwise it finds the widget named like the web Worker (`orderloop-web<suffix>`, warning
+   when more than one has that name), or creates it: managed mode, the deployment's domain only. It
+   warns when the widget it found has any domains but exactly the deployment's. Named per
+   deployment, it works the same on a shared or a dedicated account. When the environment has no
+   `TURNSTILE_SECRET_KEY`, it reads the widget's secret from the API and sets it there through
+   `gh secret set`, without printing it or writing it to disk. It prints the site key.
+2. Put that key in the registry file as `"turnstileSiteKey": "0x…"` and merge. The deploy renders
+   `TURNSTILE_SITE_KEY` and sets the secret; a deploy without the secret stops before migrating.
+
+Without the API token, create the widget in the dashboard (**Turnstile** > **Add widget**, managed,
+the deployment's domain, named `orderloop-web<suffix>`), set its secret as `TURNSTILE_SECRET_KEY` in
+the GitHub environment, then add the site key to the registry.
+
+A widget works on its domains' subdomains too, so `orderloop.app`'s also runs on
+`demo.orderloop.app`; the check accepts a token only for the host the form was posted to, so one
+deployment's tokens never sign in at another. To turn it off, remove `turnstileSiteKey` and merge;
+the Worker keeps the secret unused. To rotate the secret, rotate it in the dashboard, set the new
+value in the environment and redeploy: tokens fail with `invalid-input-secret` (logged as
+`turnstile_refused`) in between. The web Worker logs `turnstile_misconfigured` when it has a site
+key but no secret, and refuses every attempt.
 
 ### Provisioning (SCIM)
 

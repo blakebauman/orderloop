@@ -9,7 +9,7 @@
 /* Streamdown renders the assistant's markdown with Tailwind classes of its own. */
 @source "../node_modules/streamdown/dist/*.js";
 
-/* Ledger, on shadcn's base-luma preset: neutral greys with no tint, Inter, generous radii and pill
+/* Ledger, on shadcn's base-maia preset: neutral greys with no tint, Inter, generous radii and pill
    controls (buttons and one-line fields are fully round). One blue accent for links and work in
    progress, and signal colours reserved for order and step status. Green means "succeeded" and
    nothing else; it is never the brand. Light is the default; dark is chosen with the theme switch. */
@@ -219,6 +219,62 @@
   textarea {
     caret-color: var(--link);
   }
+  /* Checkboxes and radios stay native (they post with their form) but are drawn as the preset's:
+     an input-edged 16px box with 6px corners, round for a radio, filled with primary once
+     checked, the mark drawn in borders so no image loads. */
+  input:where([type="checkbox"], [type="radio"]) {
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex-shrink: 0;
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    border: 1px solid var(--input);
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--primary-foreground);
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 100ms;
+    [data-theme="dark"] & {
+      background-color: color-mix(in oklch, var(--input) 30%, transparent);
+    }
+    &:checked {
+      border-color: var(--primary);
+      background-color: var(--primary);
+    }
+    &:focus-visible {
+      outline: none;
+      border-color: var(--ring);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+    }
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    &[aria-invalid="true"] {
+      border-color: var(--destructive);
+    }
+  }
+  input:where([type="checkbox"]):checked::before {
+    content: "";
+    width: 0.3125rem;
+    height: 0.5625rem;
+    margin-top: -0.125rem;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    rotate: 45deg;
+  }
+  input:where([type="radio"]) {
+    border-radius: 9999px;
+  }
+  input:where([type="radio"]):checked::before {
+    content: "";
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background-color: currentColor;
+  }
   h1,
   h2,
   h3 {
@@ -334,22 +390,16 @@
   color: var(--muted-foreground);
 }
 
-/* The preset's card: very round, no border, lifted by a soft shadow and a faint ring. */
+/* The preset's card: rounded, no border and no shadow, edged by a faint ring. */
 @utility card {
-  border-radius: var(--radius-4xl);
+  border-radius: var(--radius-2xl);
   background-color: var(--card);
   color: var(--card-foreground);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06),
-    0 2px 4px -2px rgb(0 0 0 / 0.06);
-  [data-theme="dark"] & {
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
-  }
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
 }
 
-/* A control floating over a scrolling page (a phone's New order): the card's lift, a step deeper so
-   rows pass under it. In dark the primary is light on a dark page and needs no lift. */
+/* A control floating over a scrolling page (a phone's New order): a soft lift so rows pass under
+   it. In dark the primary is light on a dark page and needs no lift. */
 @utility shadow-float {
   box-shadow:
     0 6px 12px -2px rgb(0 0 0 / 0.14),
@@ -361,7 +411,7 @@
 
 /* A tile inside a card: a muted, rounded step rather than a ruled cell. */
 @utility tile {
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-xl);
   background-color: color-mix(in oklch, var(--muted) 70%, transparent);
 }
 

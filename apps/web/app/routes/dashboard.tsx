@@ -278,7 +278,7 @@ export default function Dashboard() {
                       <button
                         type="submit"
                         disabled={nav.state !== 'idle'}
-                        className="group/s flex w-full items-start gap-3 rounded-2xl px-3 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
+                        className="group/s flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
                       >
                         <Play
                           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
@@ -379,7 +379,7 @@ function Strip({
               key={f.status}
               to={f.to}
               aria-label={`${f.label}: ${f.n} ${f.n === 1 ? 'order' : 'orders'}${f.note ? `, ${f.note}` : ''}`}
-              className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted max-md:flex max-md:min-h-11 max-md:shrink-0 max-md:items-center max-md:gap-2 max-md:px-3 max-md:py-1"
+              className="min-w-0 rounded-xl px-4 py-2.5 hover:bg-muted max-md:flex max-md:min-h-11 max-md:shrink-0 max-md:items-center max-md:gap-2 max-md:px-3 max-md:py-1"
             >
               <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs">
                 <span

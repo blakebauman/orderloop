@@ -420,7 +420,7 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
             defaultValue={editableCases(i.cases)}
             rows={10}
             spellCheck={false}
-            className="w-full rounded-2xl border border-transparent bg-input/50 p-3 font-mono text-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+            className="w-full rounded-xl border border-input bg-input/30 p-3 font-mono text-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
           />
         </Field>
         <div>
