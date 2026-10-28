@@ -637,8 +637,8 @@ export default function FlowEditor() {
                 </p>
                 <p>
                   Branches are the labelled outputs on each node. To repeat steps, use a{' '}
-                  <b className="font-semibold">Loop</b> and connect the end of its body to the amber{' '}
-                  <b className="font-semibold">next</b> input.
+                  <b className="font-semibold">Loop</b> and connect the end of its body to its{' '}
+                  <b className="font-semibold">next</b> input, the ring under the node.
                 </p>
                 <p>
                   Publishing snapshots a new version. Running orders keep the version they started

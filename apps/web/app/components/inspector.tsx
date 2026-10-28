@@ -137,7 +137,7 @@ export function Inspector({
             </span>
           ))}
           {spec?.loop ? (
-            <span className="rounded bg-wait/15 px-1.5 py-0.5 font-mono text-wait text-xs">
+            <span className="rounded border border-[var(--ink)] border-dashed px-1.5 py-0.5 font-mono text-xs">
               next (loop back)
             </span>
           ) : null}

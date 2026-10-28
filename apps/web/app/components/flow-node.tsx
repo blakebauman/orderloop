@@ -1,8 +1,8 @@
 /**
  * A flow node card: a ledger entry on the sheet. A status rule on the left edge, the category icon,
  * undo/waits tags, the label, the last summary, and one labelled source handle per output branch.
- * Loop nodes get a second input ("next") on the bottom edge for back-edges. Nothing on the card is
- * set below 11px.
+ * Loop nodes get a second input ("next") on the bottom edge for back-edges: a hollow ink ring, named
+ * on the card, since colour on the canvas is kept for status. Nothing on the card is set below 11px.
  */
 
 import type { NodeCategory, NodeRun } from '@orderloop/core';
@@ -98,7 +98,10 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
           type="target"
           id="next"
           position={Position.Bottom}
-          className={cn(handleClass, '!-bottom-1 !bg-[var(--wait)]')}
+          className={cn(
+            handleClass,
+            '!-bottom-1 !rounded-full !border-[1.5px] !border-[var(--ink)] !bg-[var(--node)]',
+          )}
           title="next — connect the end of the loop body here"
         />
       ) : null}
@@ -147,7 +150,7 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
         </div>
       ) : null}
 
-      <div className={cn('pt-1.5 pb-2', multi && 'pt-1')}>
+      <div className={cn('pt-1.5 pb-2', multi && 'pt-1', spec?.loop && 'pb-0')}>
         {multi ? (
           outputs.map((o) => {
             const taken = data.run?.branches?.includes(o);
@@ -184,6 +187,11 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
           />
         ) : null}
       </div>
+      {spec?.loop ? (
+        <div className="pt-0.5 pb-2 text-center font-mono text-2xs text-[var(--muted-foreground)] leading-none">
+          next
+        </div>
+      ) : null}
     </div>
   );
 }

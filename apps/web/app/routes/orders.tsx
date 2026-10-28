@@ -10,8 +10,10 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@orderloop/ui/sheet';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { useEffect, useRef } from 'react';
+import { ListFilter } from 'lucide-react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import {
   Form,
   Link,
@@ -165,6 +167,41 @@ export default function Orders() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const form = useRef<HTMLFormElement>(null);
+  const [sheet, setSheet] = useState(false);
+  // What the phone's Filter button counts: the filters in its sheet that are set.
+  const active = [
+    params.get('model'),
+    params.get('channel'),
+    params.get('status'),
+    attention,
+  ].filter(Boolean).length;
+  // Submit only what is set, so a shared link reads ?status=failed, not ?model=&….
+  const apply = (data: FormData) => {
+    const next = new URLSearchParams();
+    for (const [k, v] of data)
+      if (v !== '' && !(k === 'sort' && v === 'created')) next.set(k, String(v));
+    submit(next, { replace: true });
+  };
+  // The bar's fields are uncontrolled, so a filter set in the sheet or cleared by a link would leave
+  // them showing (and the next search submitting) the old value; put them on the URL's.
+  useEffect(() => {
+    const f = form.current;
+    if (!f) return;
+    const values: [string, string][] = [
+      ['model', params.get('model') ?? ''],
+      ['channel', params.get('channel') ?? ''],
+      ['status', params.get('status') ?? ''],
+      ['sort', sort],
+    ];
+    for (const [name, v] of values) {
+      const el = f.elements.namedItem(name);
+      if (el instanceof HTMLSelectElement && el.value !== v) el.value = v;
+    }
+    const a = f.elements.namedItem('attention');
+    if (a instanceof HTMLInputElement) a.checked = attention;
+  }, [params, sort, attention]);
+
   const n = orders.length;
   const capped = n === PAGE && !older;
   // A page of a longer list says so: "Newest 200 of 960 orders", not "200 orders".
@@ -181,75 +218,14 @@ export default function Orders() {
       <PageHeader title="Orders" subtitle={<span aria-live="polite">{subtitle}</span>} />
       <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <Form
-          className="mb-4 grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap"
-          onChange={(e) => {
-            // Submit only what is set, so a shared link reads ?status=failed, not ?model=&….
-            const data = new FormData(e.currentTarget);
-            const next = new URLSearchParams();
-            for (const [k, v] of data)
-              if (v !== '' && !(k === 'sort' && v === 'created')) next.set(k, String(v));
-            submit(next, { replace: true });
-          }}
+          ref={form}
+          className="mb-4 flex flex-wrap items-center gap-2"
+          onChange={(e) => apply(new FormData(e.currentTarget))}
         >
           {/* Set from a flow's card; kept while the other filters change. */}
           {flow ? <input type="hidden" name="flow" value={flow.id} /> : null}
-          <NativeSelect
-            name="model"
-            defaultValue={params.get('model') ?? ''}
-            wrapperClassName="w-full sm:w-auto"
-            className="h-8 w-full sm:w-40"
-            aria-label="Commerce model"
-          >
-            <NativeSelectOption value="">All models</NativeSelectOption>
-            {ORDER_MODELS.map((m) => (
-              <NativeSelectOption key={m} value={m}>
-                {ORDER_MODEL_LABELS[m]}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            name="channel"
-            defaultValue={params.get('channel') ?? ''}
-            wrapperClassName="w-full sm:w-auto"
-            className="h-8 w-full sm:w-40"
-            aria-label="Channel"
-          >
-            <NativeSelectOption value="">All channels</NativeSelectOption>
-            {ORDER_CHANNELS.map((c) => (
-              <NativeSelectOption key={c} value={c}>
-                {ORDER_CHANNEL_LABELS[c]}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            name="status"
-            defaultValue={params.get('status') ?? ''}
-            wrapperClassName="w-full sm:w-auto"
-            className="h-8 w-full sm:w-36"
-            aria-label="Status"
-          >
-            <NativeSelectOption value="">All statuses</NativeSelectOption>
-            {ORDER_STATUSES.map((s) => (
-              <NativeSelectOption key={s} value={s}>
-                {statusLabel(s)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            key={sort}
-            name="sort"
-            defaultValue={sort}
-            wrapperClassName="w-full sm:w-auto"
-            className="h-8 w-full sm:w-40"
-            aria-label="Sort"
-          >
-            {SORTS.map((s) => (
-              <NativeSelectOption key={s.value} value={s.value}>
-                {s.label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <div className="relative col-span-2 w-full sm:w-72">
+          <FilterFields sort={sort} />
+          <div className="relative min-w-0 flex-1 md:w-72 md:flex-none">
             <Input
               ref={search}
               name="q"
@@ -271,18 +247,68 @@ export default function Orders() {
               /
             </span>
           </div>
-          <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]">
-            <input
-              type="checkbox"
-              name="attention"
-              value="1"
-              defaultChecked={attention}
-              className="sr-only"
-            />
-            Needs attention
-          </label>
+          <AttentionToggle checked={attention} className="max-md:hidden" />
+          {/* A phone keeps the search and puts the rest in a sheet, so the orders start on the
+              first screen. The sheet is outside the form in the DOM: its change is applied over the
+              bar's own (hidden) fields, which the effect above keeps on the URL's values. */}
+          <Sheet open={sheet} onOpenChange={setSheet}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="hit-area md:hidden">
+                <ListFilter aria-hidden="true" />
+                Filter
+                {active ? (
+                  <span className="rounded-full bg-primary px-1.5 font-medium text-2xs text-primary-foreground tabular">
+                    {active}
+                    <span className="sr-only"> on</span>
+                  </span>
+                ) : null}
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              side="bottom"
+              className="gap-0"
+              aria-describedby={undefined}
+              onChange={(e) => {
+                e.stopPropagation();
+                const t = e.target as HTMLInputElement | HTMLSelectElement;
+                const data = new FormData(form.current ?? undefined);
+                data.delete(t.name);
+                if (!(t instanceof HTMLInputElement && t.type === 'checkbox') || t.checked)
+                  data.set(t.name, t.value);
+                apply(data);
+              }}
+            >
+              <div className="border-b px-4 pt-4 pr-14 pb-3">
+                <SheetTitle className="font-semibold text-base tracking-title">
+                  Filter orders
+                </SheetTitle>
+              </div>
+              <div className="grid gap-3 p-4">
+                <FilterFields sort={sort} sheet />
+                <AttentionToggle checked={attention} className="h-11 justify-self-start" />
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t px-4 py-3">
+                {active ? (
+                  <Link
+                    to={sort === 'created' ? '/orders' : `/orders?sort=${sort}`}
+                    onClick={() => setSheet(false)}
+                    className="hit-area text-link text-sm hover:underline"
+                  >
+                    Clear filters
+                  </Link>
+                ) : (
+                  <span />
+                )}
+                <SheetClose asChild>
+                  <Button size="sm" className="hit-area">
+                    Done
+                  </Button>
+                </SheetClose>
+              </div>
+            </SheetContent>
+          </Sheet>
           {filtered ? (
-            <Button asChild variant="ghost" size="sm">
+            <Button asChild variant="ghost" size="sm" className="max-md:hidden">
               <Link to={sort === 'created' ? '/orders' : `/orders?sort=${sort}`}>
                 Clear filters
               </Link>
@@ -488,6 +514,97 @@ export default function Orders() {
         ) : null}
       </div>
     </>
+  );
+}
+
+/**
+ * The list's filters and sort: in the bar from md, and on a phone labelled one under another in
+ * the Filter sheet instead.
+ */
+function FilterFields({ sort, sheet }: { sort: Sort; sheet?: boolean }) {
+  const [params] = useSearchParams();
+  const id = useId();
+  const field = (label: string, width: string, control: (props: SelectProps) => ReactNode) =>
+    sheet ? (
+      <div className="grid gap-1.5">
+        <label htmlFor={`${id}${label}`} className="font-medium text-xs">
+          {label}
+        </label>
+        {control({ id: `${id}${label}`, wrapperClassName: 'w-full', className: 'w-full' })}
+      </div>
+    ) : (
+      control({ wrapperClassName: 'max-md:hidden', className: `h-8 ${width}`, 'aria-label': label })
+    );
+  return (
+    <>
+      {field('Commerce model', 'w-40', (p) => (
+        <NativeSelect name="model" defaultValue={params.get('model') ?? ''} {...p}>
+          <NativeSelectOption value="">All models</NativeSelectOption>
+          {ORDER_MODELS.map((m) => (
+            <NativeSelectOption key={m} value={m}>
+              {ORDER_MODEL_LABELS[m]}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      ))}
+      {field('Channel', 'w-40', (p) => (
+        <NativeSelect name="channel" defaultValue={params.get('channel') ?? ''} {...p}>
+          <NativeSelectOption value="">All channels</NativeSelectOption>
+          {ORDER_CHANNELS.map((c) => (
+            <NativeSelectOption key={c} value={c}>
+              {ORDER_CHANNEL_LABELS[c]}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      ))}
+      {field('Status', 'w-36', (p) => (
+        <NativeSelect name="status" defaultValue={params.get('status') ?? ''} {...p}>
+          <NativeSelectOption value="">All statuses</NativeSelectOption>
+          {ORDER_STATUSES.map((s) => (
+            <NativeSelectOption key={s} value={s}>
+              {statusLabel(s)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      ))}
+      {field('Sort', 'w-40', (p) => (
+        <NativeSelect key={sort} name="sort" defaultValue={sort} {...p}>
+          {SORTS.map((s) => (
+            <NativeSelectOption key={s.value} value={s.value}>
+              {s.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      ))}
+    </>
+  );
+}
+
+type SelectProps = {
+  id?: string;
+  wrapperClassName: string;
+  className: string;
+  'aria-label'?: string;
+};
+
+/** "Needs attention", a pill that is on or off. */
+function AttentionToggle({ checked, className }: { checked: boolean; className?: string }) {
+  return (
+    <label
+      className={cn(
+        'inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-4xl border px-3 text-ui text-muted-foreground has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:font-medium has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)]',
+        className,
+      )}
+    >
+      <input
+        type="checkbox"
+        name="attention"
+        value="1"
+        defaultChecked={checked}
+        className="sr-only"
+      />
+      Needs attention
+    </label>
   );
 }
 

@@ -187,7 +187,9 @@ export default function Dashboard() {
           </>
         }
       />
-      <div className="mx-auto max-w-page space-y-6 px-4 pb-10 sm:px-6">
+      {/* A column of sections. On a phone the two grids below dissolve into it (`contents`), so the
+          decision can come first, above the status strip, while the first screen still has room. */}
+      <div className="mx-auto flex max-w-page flex-col gap-6 px-4 pb-10 sm:px-6">
         {/* Open work now, then the last day's endings: each figure opens the matching orders. */}
         <nav aria-label="Orders by status" className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_5fr]">
           <Strip title="Open now" figures={now} cols="grid-cols-2" lead />
@@ -198,12 +200,13 @@ export default function Dashboard() {
           />
         </nav>
 
-        {/* Phones read decisions, then where orders wait, then what ended badly, then recent
-            orders; wide screens put what ended badly in the rail beside the rest. */}
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div className="min-w-0 space-y-6 lg:col-start-1">
+        {/* Phones read decisions (moved above the strip), then where orders wait, then what ended
+            badly, then recent orders; wide screens put what ended badly in the rail beside the rest. */}
+        <div className="grid gap-6 max-md:contents lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <div className="min-w-0 max-md:contents md:space-y-6 lg:col-start-1">
             {decisions.length ? (
               <Section
+                className="max-md:-order-1"
                 title={
                   <span className="flex items-center gap-2">
                     Needs a decision
@@ -233,7 +236,7 @@ export default function Dashboard() {
                 </ul>
               </Section>
             ) : (
-              <p className="flex items-center gap-2 card px-5 py-3 text-sm">
+              <p className="flex items-center gap-2 card px-5 py-3 text-sm max-md:-order-1">
                 <span aria-hidden="true" className="size-1.5 rounded-full bg-ok" />
                 <span>
                   <span className="font-medium">No decisions waiting.</span>{' '}
@@ -351,7 +354,8 @@ export default function Dashboard() {
 /**
  * A group of figures in the status strip. `lead` is open work, set larger: it is what can still be
  * acted on. A bad ending with any orders takes its status colour, so a failure isn't drawn like a
- * completion.
+ * completion. On a phone each group is one line of figures, label then count, that scrolls sideways
+ * when it doesn't fit, so the strip doesn't push the decision queue off the first screen.
  */
 function Strip({
   title,
@@ -367,7 +371,7 @@ function Strip({
   return (
     <section aria-label={title} className="min-w-0">
       <h2 className="caption mb-1.5">{title}</h2>
-      <div className={`card grid ${cols} gap-1 p-1.5`}>
+      <div className={`card grid ${cols} gap-1 p-1.5 max-md:flex max-md:overflow-x-auto`}>
         {figures.map((f) => {
           const bad = f.n > 0 && (f.status === 'failed' || f.status === 'rolled_back');
           return (
@@ -375,9 +379,9 @@ function Strip({
               key={f.status}
               to={f.to}
               aria-label={`${f.label}: ${f.n} ${f.n === 1 ? 'order' : 'orders'}${f.note ? `, ${f.note}` : ''}`}
-              className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted"
+              className="min-w-0 rounded-3xl px-4 py-2.5 hover:bg-muted max-md:flex max-md:min-h-11 max-md:shrink-0 max-md:items-center max-md:gap-2 max-md:px-3 max-md:py-1"
             >
-              <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs">
                 <span
                   aria-hidden="true"
                   className="size-1.5 rounded-full"
@@ -385,11 +389,12 @@ function Strip({
                 />
                 {f.label}
               </span>
-              <span className="mt-0.5 flex items-baseline gap-2">
+              <span className="mt-0.5 flex items-baseline gap-2 max-md:mt-0">
                 <span
                   className={cn(
                     'tabular',
                     lead ? 'font-semibold text-2xl' : 'font-medium text-lg',
+                    'max-md:text-base',
                     bad && 'font-semibold',
                   )}
                   style={
@@ -399,7 +404,9 @@ function Strip({
                   {f.n}
                 </span>
                 {f.note ? (
-                  <span className="truncate text-muted-foreground text-xs tabular">{f.note}</span>
+                  <span className="truncate text-muted-foreground text-xs tabular max-md:hidden">
+                    {f.note}
+                  </span>
                 ) : null}
               </span>
             </Link>
