@@ -11,7 +11,7 @@ import type { ComponentProps } from 'react';
 
 export const Queue = ({ className, ...props }: ComponentProps<'div'>) => (
   <div
-    className={cn('flex flex-col gap-1 rounded-2xl bg-muted/50 px-2 py-2', className)}
+    className={cn('flex flex-col gap-1 rounded-xl bg-muted/50 px-2 py-2', className)}
     {...props}
   />
 );

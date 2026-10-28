@@ -727,7 +727,7 @@ function TurnError({
   onDismiss: () => void;
 }) {
   return (
-    <div role="alert" className="flex items-start gap-2 rounded-2xl bg-bad/10 px-3 py-2 text-sm">
+    <div role="alert" className="flex items-start gap-2 rounded-xl bg-bad/10 px-3 py-2 text-sm">
       <CircleAlert className="mt-0.5 size-4 shrink-0 text-bad" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p className="font-medium text-bad">The assistant couldn’t finish that reply.</p>

@@ -155,8 +155,8 @@ button, its node cards, status stamps, and the run figure on the home page.
 - Hue only from the status ramp and the node categories, and only where there is a status or a
   node type to show.
 - One 48rem reading column; the home page widens to 72rem for the run figure.
-- Cards, not ruled boxes: very round (`rounded-4xl`), no border, lifted by a faint ring and a soft
-  shadow; what sits inside a card is a muted, rounded tile. Rules remain for rows and tables.
+- Cards, not ruled boxes: rounded (`rounded-2xl`), no border and no shadow, edged by a faint
+  ring; what sits inside a card is a muted, rounded tile. Rules remain for rows and tables.
 
 ## Colors
 
@@ -219,16 +219,15 @@ queries, so it behaves the same wherever it's placed). It reads left to right, r
 
 ## Elevation & Depth
 
-Cards carry the depth: a 1px ring at 5% of ink and a soft two-step shadow (the ring alone in dark),
-as the app's `card` utility draws them. Inside a card, separation is a tonal step (a muted tile) or a
+Cards are flat: a 1px ring at 10% of ink and no shadow, as the app's `card` utility draws them. Inside a card, separation is a tonal step (a muted tile) or a
 hairline between rows. The node card's `0 1px 0 rule` underline is the canvas's own. Starlight's
 other shadows (search, pagination) are removed.
 
 ## Shapes
 
 - **Pill** (`--ol-pill`): buttons, the header button, the search field, as the app's `rounded-4xl`
-  buttons and `rounded-3xl` fields.
-- **26px** (2.6 × `--ol-radius`, the app's `rounded-4xl` `card`): link cards and other cards.
+  buttons and fields.
+- **18px** (1.8 × `--ol-radius`, the app's `rounded-2xl` `card`): link cards and other cards.
 - **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): callouts, node cards, code
   blocks, the sidebar's current page.
 - **3px**: inline code, focus rings.
@@ -336,7 +335,7 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
 
 - **Don't** hand-edit `src/styles/theme.css`; a hook blocks it and the design tests catch it.
 - **Don't** use green for anything but "succeeded", or a status hue for decoration.
-- **Don't** add shadows beyond the card's, gradients, glass, or coloured edges thicker than 1px. The node card's
+- **Don't** add shadows to cards, gradients, glass, or coloured edges thicker than 1px. The node card's
   status rule is the one exception, and it is the app's.
 - **Don't** set titles or buttons in uppercase, or put an eyebrow above a heading; uppercase is for
   captions only.

@@ -366,29 +366,20 @@ mobile-starlight-toc a[aria-current="true"] {
   padding-inline: 0.25rem;
 }
 
-/* ── Cards (page.tsx Section, the app's `card`): very round, no border, a faint ring and soft
-   shadow ─────────────────────────────────────────────────────────────── */
+/* ── Cards (page.tsx Section, the app's `card`): rounded, no border and no shadow, a faint ring
+   ─────────────────────────────────────────────────────────────────────── */
 
 .sl-link-card,
 .card {
   border: 0;
-  border-radius: calc(var(--ol-radius) * 2.6);
+  border-radius: calc(var(--ol-radius) * 1.8);
   background: var(--ol-card);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--ol-ink) 5%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06),
-    0 2px 4px -2px rgb(0 0 0 / 0.06);
-}
-
-:root[data-theme="dark"] :is(.sl-link-card, .card) {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--ol-ink) 10%, transparent);
 }
 
 .sl-link-card:hover {
   background: var(--ol-card);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--ol-ink) 25%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ol-ink) 25%, transparent);
 }
 
 .sl-link-card .title {

@@ -250,7 +250,7 @@ function Keys({ keys, sep = 'then' }: { keys: string[]; sep?: string }) {
       {keys.map((k, i) => (
         <span key={k} className="contents">
           {i ? sep : null}
-          <kbd className="min-w-6 rounded-md border px-1.5 py-0.5 text-center font-sans text-foreground text-xs">
+          <kbd className="min-w-5 rounded-sm bg-muted px-1 py-0.5 text-center font-sans text-foreground text-xs">
             {k}
           </kbd>
         </span>
@@ -374,7 +374,7 @@ function AssistantToggle() {
         tint,
         open
           ? 'border-foreground/25 bg-accent font-medium text-foreground'
-          : 'border-input text-muted-foreground hover:bg-accent hover:text-foreground',
+          : 'border-input bg-input/30 text-muted-foreground hover:bg-input/50 hover:text-foreground',
       )}
     >
       <MessageSquareText className="size-3.5" aria-hidden="true" />
@@ -699,7 +699,7 @@ function ShellFrame() {
                   'hit-area hidden h-8 items-center justify-center gap-1.5 rounded-4xl px-3 font-medium text-ui md:inline-flex',
                   tint,
                   quietNewOrder
-                    ? 'border border-input text-foreground hover:bg-accent'
+                    ? 'border border-input bg-input/30 text-foreground hover:bg-input/50'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90',
                 )}
               >
@@ -713,7 +713,7 @@ function ShellFrame() {
                 aria-label={`${shortWho(me, auth)}, account menu`}
                 title={who(me, auth)}
                 className={cn(
-                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border px-3 text-ui text-muted-foreground hover:bg-accent hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
+                  'hit-area hidden h-8 items-center gap-2 rounded-4xl border border-input bg-input/30 px-3 text-ui text-muted-foreground hover:bg-input/50 hover:text-foreground md:flex data-[state=open]:bg-accent data-[state=open]:text-foreground',
                   tint,
                 )}
               >

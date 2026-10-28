@@ -90,10 +90,10 @@ components:
   card:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.4xl}"
+    rounded: "{rounded.2xl}"
   tile:
     backgroundColor: "{colors.muted}"
-    rounded: "{rounded.2xl}"
+    rounded: "{rounded.xl}"
     padding: "1rem"
   status-badge:
     rounded: "{rounded.full}"
@@ -328,12 +328,12 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
 
 ## Elevation & Depth
 
-Lifted, lightly. A card sits on the page with a faint ring and a soft two-layer shadow; inside it,
-depth is tonal: tiles are a muted step, not another shadow. In dark the shadow is dropped and the
-ring alone separates a card.
+Flat. A card sits on the page edged by a faint ring and no shadow; inside it, depth is tonal:
+tiles are a muted step. Shadows are kept for what floats over the page (menus, sheets, a phone's
+New order).
 
 ### Shadow Vocabulary
-- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent), 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06)`): every panel (`card`).
+- **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)`): every panel (`card`), a ring rather than a shadow.
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
 - **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
 
@@ -342,8 +342,8 @@ ring alone separates a card.
 
 ## Shapes
 
-Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 4xl, tiles 2xl,
-one-line fields 4xl, text areas xl, menus 2xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
+Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 2xl, tiles and
+rows inside a card xl, one-line fields 4xl, text areas xl, menus 2xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
 pills. Hairlines divide rows inside a card; cards themselves have no border.
 
 **The Pill Rule.** Anything you press or that labels a status is fully round. Square corners are
@@ -387,7 +387,7 @@ for code and data blocks only.
   products into collapsible sections, each headed by a caption button (a chevron that turns 90°,
   the group's name and `· count`); each product appears in one group only. Longer lists end in a
   link-blue "Show more".
-- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded 2xl,
+- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded xl,
   muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
   size) is the link, stretched over the whole row; the product key is mono 2xs muted under it, then
   a muted reason line clamped to two lines, locales in mono. Its actions sit at the right, above the
