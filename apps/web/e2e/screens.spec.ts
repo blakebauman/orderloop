@@ -67,8 +67,9 @@ test('the assistant composer stays above the on-screen keyboard', async ({ page 
 
 test('a cart finds a product by name and adds it with a quantity', async ({ page }, info) => {
   await open(page, '/carts');
-  await page.getByLabel('Title').fill('Search check');
   await page.getByRole('button', { name: 'New cart' }).click();
+  await page.getByRole('dialog').getByLabel('Title').fill('Search check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Open cart' }).click();
   await expect(page).toHaveURL(/\/carts\/cart_/);
   await open(page, new URL(page.url()).pathname);
   const find = page.getByRole('searchbox', { name: 'Find a product' });
@@ -100,8 +101,9 @@ test('a cart sets the quantity of several lines at once, and removes them', asyn
   page,
 }, info) => {
   await open(page, '/carts');
-  await page.getByLabel('Title').fill('Bulk check');
   await page.getByRole('button', { name: 'New cart' }).click();
+  await page.getByRole('dialog').getByLabel('Title').fill('Bulk check');
+  await page.getByRole('dialog').getByRole('button', { name: 'Open cart' }).click();
   await expect(page).toHaveURL(/\/carts\/cart_/);
   await open(page, new URL(page.url()).pathname);
   for (const sku of ['WID-100', 'GSK-010']) {
