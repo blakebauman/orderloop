@@ -394,8 +394,9 @@ In `app.css`, and in `app/lib/motion.ts` for animations run from script (a test 
 
 ### Named Rules
 **The Reduced Motion Rule.** With reduced motion nothing travels, but nothing that carries meaning
-is lost: colours still change, arrivals fade without rising, page changes happen at once, and the
-undo bar is hidden because the seconds count says the same.
+is lost: colours still change, arrivals and overlays (menus, dialogs, sheets) fade without rising,
+sliding or zooming, page changes happen at once, and the undo bar is hidden because the seconds
+count says the same.
 
 ## Shapes
 
