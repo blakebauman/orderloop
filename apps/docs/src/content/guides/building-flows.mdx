@@ -48,6 +48,11 @@ lists them, and **Restore** brings one back.
   Drag one onto the canvas.
 - **Canvas.** Each output branch of a node is its own handle; an edge leaves from
   the branch it belongs to. A `control.loop` node has a second input, `next`, for its back-edge.
+  A flow too wide to read whole opens on its first loop or wait, the part an order spends its
+  time in, rather than on the trigger. **Jump to** lists the flow's loops and waits (approvals,
+  events and timed waits) by label and centres the one you pick; the order page's graph has it
+  too. **Fit view** (the corner control) never shrinks the labels past reading: when the whole
+  flow doesn't fit, it shows as much as fits around the selected node, or around where you are.
 - **Inspector.** The selected node's label and config fields, generated from the node's catalog
   entry, plus its per-node `retries` and `timeout`. Validation messages appear beside the field.
   A **Provider** field (on shipping rate, create shipment, return label, tax and address

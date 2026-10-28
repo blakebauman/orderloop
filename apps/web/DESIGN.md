@@ -307,6 +307,13 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
   it is review-only, saying so: nothing on screen can change the flow. A Loop's second input,
   `next`, is a hollow ink ring on the node's bottom edge, named under the outputs, and its back-edge
   is dashed ink labelled `next`: colour on the canvas is for status only (The One Meaning Rule).
+  A flow too wide to read whole opens framed on its first loop or wait (an order page frames its
+  live, failed or final step instead), never below 0.7 zoom. Fit view stops at the zoom that keeps
+  a 13px label at 10px and, past that, fits around the selection or the current view. Every
+  canvas with a loop or a wait has **Jump to**, a menu of them by label that centres the one
+  picked; it is on the canvas, so it works in the review-only editor and the order page's Graph
+  tab. React Flow's credit stays (its authors ask that only subscribers remove it), at caption
+  size.
 - **Overview on a phone:** "Needs a decision" (or "No decisions waiting") comes first, above the
   status strip (the two grids below md are `contents`, and the panel is ordered first). Each strip
   group is one line of figures, label then count, 44px tall, scrolling sideways if it doesn't fit;
