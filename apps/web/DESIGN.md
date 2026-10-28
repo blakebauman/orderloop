@@ -470,6 +470,25 @@ for code and data blocks only.
   it isn't plain feed data: From feed (no dot), Edited here and Staged (ink), Draft (`ai`), Draft
   with its field changed since, Conflict and Missing (`wait`), Didn't publish (`bad`). A field with
   no value and no gap is a muted dash, "Empty" to screen readers.
+- **Approvals inbox** (`routes/approvals.tsx`): pending approvals are grouped by flow · step · rule
+  (`groupApprovals` in `lib/approvals.ts`), one card per group, headed by a section title naming all
+  three, then a muted line with the count, when the first closes and any order title every row
+  shares. Rows say only what differs: the deadline first (`DecisionDeadline`: muted "Decide in 3m"
+  or "Closes 2:05 PM", ink in the last ten seconds, never `wait`), the ref (mono), the customer and
+  the age, with the row's reason on one truncated line only when it adds to the group's rule, and a
+  Details disclosure (a chevron that turns 90°) for the figures, trail, timeout step, assignee and
+  the note field. A group with two or more rows the person can decide leads each with a checkbox
+  (`accent-foreground`, `hit-area`) and its header with Select all; ticking shows Approve selected
+  (ink) and Reject selected (outline) at the header's right. A batch is each row's own held
+  decision (`DecisionHandle`), so each row shows its own Undo; the header shows the count and
+  seconds left with Undo all, which takes focus. A row that can't be ticked keeps the column empty
+  and says why in place of its buttons. X (or Space on the row) ticks; Z with Undo all focused
+  takes the batch back; one polite live line per group speaks when a batch starts and ends. A row
+  whose decisions have closed leaves its group for a folded muted line under the list ("2
+  approvals closed, waiting for the engine"), never disabled buttons. Motion follows the shared rules: a row
+  that joins while the inbox is open fades in (`animate-arrive`, `useArrivals`), a group that forms
+  fades in as one (its rows don't fade again), and a row that resolves holds its place and fades to
+  the resolved tint.
 - **Install hint** (`components/install-hint.tsx`): on Account only, on an iPhone or iPad in
   Safari, until it's dismissed. iOS never offers Add to Home Screen itself.
 

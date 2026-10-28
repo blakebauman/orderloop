@@ -399,6 +399,12 @@ function approvalsQuery(
       >`(select json_extract(n.value, '$.label') from flow_versions fv, json_each(fv.flow_json, '$.nodes') n where fv.flow_id = orders.flow_id and fv.version = orders.flow_version and json_extract(n.value, '$.id') = approvals.node_id limit 1)`.as(
         'step_label',
       ),
+      // The flow, so the inbox can group approvals by flow, step and rule. Its name is aliased
+      // like the order's title: `customers.name` is selected too.
+      flowId: orders.flowId,
+      flowName: sql<string | null>`(select f.name from flows f where f.id = orders.flow_id)`.as(
+        'flow_name',
+      ),
       currency: orders.currency,
       customerId: orders.customerId,
       customerName: customers.name,
