@@ -366,8 +366,9 @@ export function ActionCard({
       </Settled>
     );
 
-  // Settled: one ruled line, in the words of what happened.
+  // Settled: one Trace line, in the words of what happened.
   if (!asking) {
+    const title = p?.title ?? fallbackTitle;
     const out = (part.state === 'output-available' ? part.output : null) as {
       done?: string;
       href?: string;
@@ -378,14 +379,22 @@ export function ActionCard({
     )
       return (
         <Settled icon={Ban} tone="muted">
-          {p?.title ?? fallbackTitle}: left as it was. You declined.
+          {title}: left as it was. You declined.
         </Settled>
       );
     if (part.state === 'output-error')
       return (
-        <Settled icon={CircleAlert} tone="bad">
-          {p?.title ?? fallbackTitle} didn’t go through. {part.errorText}
-        </Settled>
+        <TraceCollapsible defaultOpen>
+          <TraceCollapsibleTrigger>
+            <TraceLine status="error">
+              <TraceIcon>
+                <CircleAlert />
+              </TraceIcon>
+              <TraceTitle>{title} didn’t go through</TraceTitle>
+            </TraceLine>
+          </TraceCollapsibleTrigger>
+          <TraceCollapsibleContent>{part.errorText}</TraceCollapsibleContent>
+        </TraceCollapsible>
       );
     if (out?.done)
       return (
@@ -394,10 +403,12 @@ export function ActionCard({
         </Settled>
       );
     return (
-      <Settled icon={ArrowUpRight} tone="muted">
-        {p?.title ?? fallbackTitle}
-        <span aria-hidden="true" className="ol-dots" />
-      </Settled>
+      <TraceLine status="running">
+        <TraceIcon>
+          <ArrowUpRight />
+        </TraceIcon>
+        <TraceTitle>{title}</TraceTitle>
+      </TraceLine>
     );
   }
 
@@ -486,6 +497,7 @@ export function ActionCard({
   );
 }
 
+/** A finished thing as a Trace line that wraps rather than truncates: its words can be a sentence. */
 function Settled({
   icon: Icon,
   tone,
@@ -493,28 +505,29 @@ function Settled({
   children,
 }: {
   icon: LucideIcon;
-  tone: 'ink' | 'muted' | 'bad';
+  tone: 'ink' | 'muted';
   href?: string;
   children: React.ReactNode;
 }) {
-  const body = (
-    <>
-      <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+  const line = (
+    <TraceLine
+      className={cn(
+        'items-start text-ui leading-snug',
+        tone === 'ink' && 'font-medium text-foreground',
+      )}
+    >
+      <TraceIcon className="mt-0.5">
+        <Icon />
+      </TraceIcon>
       <span className="min-w-0">{children}</span>
-    </>
-  );
-  const cls = cn(
-    'flex items-start gap-2 border-y py-1.5 text-ui leading-snug',
-    tone === 'ink' && 'font-medium text-foreground',
-    tone === 'muted' && 'text-muted-foreground',
-    tone === 'bad' && 'text-bad',
+    </TraceLine>
   );
   return href ? (
-    <Link to={href} className={cn(cls, 'hover:underline')}>
-      {body}
+    <Link to={href} className="hit-area hover:underline">
+      {line}
     </Link>
   ) : (
-    <div className={cls}>{body}</div>
+    line
   );
 }
 
@@ -601,9 +614,11 @@ export function ProposalCard({ part, streaming }: { part: Part; streaming: boole
   // Nothing drafted: say so, and offer nothing to review.
   if (!diff)
     return (
-      <Settled icon={PenLine} tone="muted">
-        No change drafted for {pr.flowName}. {pr.explanation}
-      </Settled>
+      <Trace>
+        <Settled icon={PenLine} tone="muted">
+          No change drafted for {pr.flowName}. {pr.explanation}
+        </Settled>
+      </Trace>
     );
   return (
     <section className="my-1 rounded-2xl border border-input bg-card text-sm">
