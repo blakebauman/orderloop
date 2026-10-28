@@ -245,7 +245,7 @@ function ColumnShell({
   return (
     <section
       aria-labelledby={`col-${column}`}
-      className={cn('card min-w-0 overflow-clip', hidden && 'max-lg:hidden')}
+      className={cn('card relative min-w-0 overflow-clip', hidden && 'max-lg:hidden')}
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4 py-2.5 max-lg:sr-only">
         <h2 id={`col-${column}`} className="section-title flex items-center gap-2">

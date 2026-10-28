@@ -152,7 +152,7 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       );
     case 'table':
       return b.rows.length ? (
-        <div className="card overflow-clip">
+        <div className="card relative overflow-clip">
           {/* A plugin's columns stack under their labels on a phone, as the core's tables do. */}
           <Table stack="cards" scroll>
             <TableHead>

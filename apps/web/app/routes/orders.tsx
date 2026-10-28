@@ -374,7 +374,7 @@ export default function Orders() {
         ) : null}
 
         {n ? (
-          <div className="card overflow-clip">
+          <div className="card relative overflow-clip">
             <Table stack="rows" sticky caption="Orders">
               <TableHead>
                 <Tr>
