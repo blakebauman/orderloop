@@ -1,6 +1,17 @@
 import { EMPTY_ORDER_STATE, type OrderState } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
-import { approvalContext, byUrgency, rowContext } from '../app/lib/approvals';
+import {
+  type ApprovalContext,
+  approvalContext,
+  batchProgress,
+  byUrgency,
+  cannotSelect,
+  deadlineWords,
+  groupApprovals,
+  groupName,
+  lockAt,
+  rowContext,
+} from '../app/lib/approvals';
 
 const state = (currency: string, total: number, fxRate: number): OrderState => ({
   ...EMPTY_ORDER_STATE,
@@ -63,6 +74,8 @@ describe('approvalContext', () => {
   it('states credit in the base currency and the order in its own', () => {
     const ctx = approvalContext(state('GBP', 85_000, 0.79), 'ok');
     expect(ctx.reason).toBe('Over credit limit by $19,594.94');
+    // The rule leaves this order's figures out, so orders over the same limit group together.
+    expect(ctx.rule).toBe('Over credit limit');
     expect(ctx.facts).toEqual([
       'This order £85,000.00 ($107,594.94)',
       'Limit $100,000.00',
@@ -137,6 +150,7 @@ describe('approvalContext reasons', () => {
   it('keeps the reason through an earlier approval, and lists that approval as history', () => {
     const timedOut = approvalContext(purchase({ branch: 'escalated' }), 'fin');
     expect(timedOut.reason).toBe('Over the $5,000.00 threshold');
+    expect(timedOut.rule).toBe('Over the $5,000.00 threshold');
     expect(timedOut.trail).toEqual(['Manager approval timed out']);
     expect(timedOut.onTimeout).toBe('Tell requester');
     const approved = approvalContext(purchase({ branch: 'approved', by: 'dana' }), 'fin');
@@ -158,6 +172,7 @@ describe('approvalContext reasons', () => {
     };
     const ctx = approvalContext(s, 'mgr');
     expect(ctx.reason).toBe('Over the $5,000.00 budget by $4,760.00');
+    expect(ctx.rule).toBe('Over the $5,000.00 budget');
     expect(ctx.facts).toEqual(['This order $9,760.00', 'Budget $5,000.00']);
   });
 });
@@ -211,5 +226,155 @@ describe('byUrgency', () => {
       { ord_norun: true },
     );
     expect(sorted.map((r) => r.id)).toEqual(['soon', 'late', 'old', 'new', 'norun']);
+  });
+});
+
+describe('groupApprovals', () => {
+  const ctx = (rule?: string, deadline?: number): ApprovalContext => ({
+    facts: [],
+    trail: [],
+    rule,
+    reason: rule,
+    deadline,
+    step: 'Finance approval',
+  });
+  const row = (
+    id: string,
+    over: Partial<{ nodeId: string; flowId: string; orderTitle: string }>,
+  ) => ({
+    id,
+    nodeId: 'fin',
+    flowId: 'tpl-purchase-request',
+    flowName: 'Purchase request',
+    orderTitle: 'Laptops for the new support team',
+    ...over,
+  });
+
+  it('puts identical requests in one group, named by step, flow and rule, with the soonest deadline', () => {
+    const rule = 'Over the $5,000.00 threshold';
+    const rows = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => row(id, {}));
+    const context = Object.fromEntries(rows.map((r, i) => [r.id, ctx(rule, 9000 - i * 1000)]));
+    const groups = groupApprovals(rows, context);
+    expect(groups).toHaveLength(1);
+    const [g] = groups;
+    expect(groupName(g!)).toBe(
+      'Finance approval · Purchase request · Over the $5,000.00 threshold',
+    );
+    expect(g!.ids).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(g!.soonest).toBe(4000);
+    // Every row is for the same thing, so the group says it once and the rows needn't.
+    expect(g!.title).toBe('Laptops for the new support team');
+  });
+
+  it('never mixes flows, steps or rules, and keeps the order of each group’s most urgent row', () => {
+    const rows = [
+      row('credit', { nodeId: 'mgr' }),
+      row('fin1', {}),
+      row('other', { flowId: 'tpl-b2b-order' }),
+      row('fin2', { orderTitle: 'Desks' }),
+      row('budget', {}),
+    ];
+    const groups = groupApprovals(rows, {
+      credit: ctx('Over the $5,000.00 threshold'),
+      fin1: ctx('Over the $5,000.00 threshold'),
+      other: ctx('Over the $5,000.00 threshold'),
+      fin2: ctx('Over the $5,000.00 threshold'),
+      budget: ctx('Over the $9,000.00 budget'),
+    });
+    expect(groups.map((g) => g.ids)).toEqual([['credit'], ['fin1', 'fin2'], ['other'], ['budget']]);
+    // Titles differ, so each row keeps its own.
+    expect(groups[1]!.title).toBeUndefined();
+    // A lone row has nothing to share.
+    expect(groups[0]!.title).toBeUndefined();
+  });
+
+  it('groups rows whose rule can’t be read by flow and step alone, apart from those whose can', () => {
+    const groups = groupApprovals([row('a', {}), row('b', {}), row('c', {})], {
+      a: ctx(),
+      b: undefined,
+      c: ctx('Over credit limit'),
+    });
+    expect(groups.map((g) => g.ids)).toEqual([['a', 'b'], ['c']]);
+    expect(groupName(groups[0]!)).toBe('Finance approval · Purchase request');
+  });
+});
+
+describe('cannotSelect', () => {
+  const can = { canApprove: true };
+
+  it('lets an open row its person can decide join a batch', () => {
+    expect(cannotSelect(can)).toBeNull();
+  });
+
+  it('keeps every refusal a row’s own buttons keep', () => {
+    expect(cannotSelect({ canApprove: false })).toMatch(/approver role/);
+    expect(cannotSelect({ ...can, noRun: true })).toMatch(/No live run/);
+    const own = 'You started this order, so someone else must decide its approvals.';
+    expect(cannotSelect({ ...can, refused: own })).toBe(own);
+    expect(cannotSelect({ ...can, closed: true })).toMatch(/closed/);
+    // Held in its undo window, or sent: it can't be decided twice.
+    expect(cannotSelect({ ...can, decided: true })).toMatch(/Already decided/);
+  });
+});
+
+describe('batchProgress', () => {
+  const held = { held: true, sent: false };
+  const undone = { held: false, sent: false };
+  const sent = (ok: boolean, error?: string) => ({
+    held: false,
+    sent: true,
+    result: { ok, error },
+  });
+
+  it('holds while any decision is in its undo window, and each row can be taken back alone', () => {
+    // Three approved together; the person undoes the second on its own row.
+    expect(batchProgress('approved', [held, undone, held])).toMatchObject({
+      phase: 'holding',
+      held: 2,
+    });
+    // The other two run out their windows and are sent; one is still being recorded.
+    expect(
+      batchProgress('approved', [sent(true), undone, { held: false, sent: true }]),
+    ).toMatchObject({ phase: 'sending' });
+    expect(batchProgress('approved', [sent(true), undone, sent(true)])).toEqual({
+      phase: 'done',
+      held: 0,
+      message: 'Approved 2. 1 taken back.',
+    });
+  });
+
+  it('says when Undo all took everything back, and nothing was sent', () => {
+    expect(batchProgress('rejected', [undone, undone]).message).toBe(
+      'Took back 2; nothing was sent.',
+    );
+  });
+
+  it('says what the order refused, row by row', () => {
+    expect(
+      batchProgress('rejected', [sent(true), sent(false, 'That node is not waiting')]).message,
+    ).toBe('Rejected 1. 1 not recorded: That node is not waiting.');
+    expect(batchProgress('approved', [sent(false, 'a'), sent(false, 'b')]).message).toBe(
+      '2 not recorded; each row says why.',
+    );
+  });
+});
+
+describe('deadlineWords', () => {
+  const now = Date.UTC(2026, 9, 27, 13, 0);
+  // Deadlines are the step's; the words count to when decisions close, two seconds before.
+  const at = (ms: number) => now + ms + (now - lockAt(now));
+
+  it('counts down within the hour, warns in the last ten seconds, then says closed', () => {
+    expect(deadlineWords(at(3 * 60_000), now)).toEqual({ kind: 'in', when: 'in 3m' });
+    expect(deadlineWords(at(8_000), now)).toEqual({ kind: 'soon', when: 'in 8s' });
+    expect(deadlineWords(at(0), now)).toEqual({ kind: 'closed' });
+  });
+
+  it('gives a later deadline as the time it closes, with the day when it isn’t today', () => {
+    expect(deadlineWords(at(65 * 60_000), now, 'UTC')).toEqual({ kind: 'at', when: '2:05 PM UTC' });
+    expect(deadlineWords(at(25 * 3_600_000), now, 'UTC')).toEqual({
+      kind: 'at',
+      when: 'Wed 2:00 PM UTC',
+    });
   });
 });

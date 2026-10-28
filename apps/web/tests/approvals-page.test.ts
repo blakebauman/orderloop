@@ -161,6 +161,8 @@ describe('listApprovals', () => {
     const { rows } = await listApprovals('pending', null, 10);
     expect(rows.map((r) => r.stepLabel)).toEqual(['Finance approval', null]);
     expect(rows[0]!.title).toBe('Approve ord_a');
+    // And its flow, which the inbox groups by alongside the step.
+    expect(rows[0]).toMatchObject({ flowId: 'f_buy', flowName: 'Buy' });
   });
 
   it('starts past the end with nothing left and still counts what came before', async () => {

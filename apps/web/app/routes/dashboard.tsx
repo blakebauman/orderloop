@@ -10,7 +10,7 @@ import { ArrowRight, ChevronRight, Play } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import { Form, Link, useLoaderData, useNavigation, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
-import { DecisionContext, lockAt } from '~/components/decision';
+import { DecisionDeadline } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { rowContext } from '~/lib/approvals';
@@ -443,21 +443,18 @@ function Amount({
 }
 
 /**
- * One approval waiting on a person. The card opens the order; its link is named by the order, and
- * the reason, figures and clock describe it. When the decision window closes it says so in place.
+ * One approval waiting on a person, read as the inbox reads it: the order, then its deadline and
+ * reason on one line. The card opens the order, where the figures are. When decisions close it says
+ * so in place, in ink: amber is for overdue ages.
  */
 function DecisionCard({ d }: { d: Data['decisions'][number] }) {
   const titleId = useId();
   const detailId = useId();
   const deadline = d.ctx.deadline;
-  const now = useNow(deadline ? 1000 : null);
-  const closed = deadline !== undefined && lockAt(deadline) <= now;
   const name =
     d.orderTitle || (d.orderModel ? ORDER_MODEL_LABELS[d.orderModel as OrderModel] : 'Order');
   return (
-    <li
-      className={`relative flex items-start gap-3 px-4 py-3 hover:bg-muted/40 ${closed ? 'opacity-70' : ''}`}
-    >
+    <li className="relative flex items-start gap-3 px-4 py-3 hover:bg-muted/40">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <Link
@@ -474,11 +471,20 @@ function DecisionCard({ d }: { d: Data['decisions'][number] }) {
           <span className="text-muted-foreground text-sm">{d.customerName ?? d.customerId}</span>
         </div>
         <div id={detailId}>
-          <DecisionContext ctx={d.ctx} clock={!closed} className="mt-1" />
-          {closed ? (
-            <p className="mt-1 font-medium text-sm text-wait">
-              Decisions closed
-              {d.ctx.onTimeout ? `; it goes to ${d.ctx.onTimeout}` : ''}.
+          {deadline !== undefined || d.ctx.reason ? (
+            <p className="mt-1 flex min-w-0 items-baseline gap-x-2 text-sm">
+              {deadline !== undefined ? (
+                <DecisionDeadline
+                  deadline={deadline}
+                  onTimeout={d.ctx.onTimeout}
+                  className="shrink-0"
+                />
+              ) : null}
+              {d.ctx.reason ? (
+                <span className="min-w-0 truncate font-medium" title={d.ctx.reason}>
+                  {d.ctx.reason}
+                </span>
+              ) : null}
             </p>
           ) : null}
           {d.noRun ? (
