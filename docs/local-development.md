@@ -147,7 +147,8 @@ own steps for where an order waits or stopped and why), and writes:
   payment (a card soon after checkout, a B2B invoice when it completes; some refunded later) and a
   `node_runs` row per step it ran;
 - products (`BENCH-…`) with store stock, contract prices and volume rules, for Commerce;
-- carts (`cart_bench_…`), most submitted to one of the orders above.
+- carts (`cart_bench_…`), most submitted to one of the orders above. No CartAgent holds them, so
+  Carts lists them without a link (`cartOpens`: only an id `newId('cart')` made opens).
 
 Each run replaces what the previous one wrote; `--seed <n>` (default 1) makes it repeatable
 relative to today. Only the index tables are written, with no OrderAgent or Workflow behind an

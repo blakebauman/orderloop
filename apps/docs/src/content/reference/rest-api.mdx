@@ -187,7 +187,9 @@ POST /api/v1/orders/ord_…/approvals/approval
 
 `decision` is `approved` or `rejected`. A person or an API token always decides as themselves; the record names the caller. The decision takes effect at once;
 the dashboard's undo window does not apply to the API. An unknown order is `404`, and a node that
-isn't waiting for an approval (already decided, or never reached) is `409`.
+isn't waiting for an approval (already decided, or never reached) is `409`. So is an order that is
+recorded but has no live run to resume (one imported as a record, say), with
+`{ error: "The order has no live run, so its approvals can’t be decided" }`.
 
 ## Cancel
 

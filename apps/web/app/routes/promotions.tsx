@@ -168,7 +168,14 @@ export default function Promotions() {
                         {p.redeemed}
                       </Td>
                       <Td className="max-md:-ml-3 max-md:basis-full">
-                        {canOperate ? (
+                        {state === 'ended' ? (
+                          // Pausing or resuming it would change nothing, and its dates can't be
+                          // edited: the way to run it again is a new code.
+                          <p className="max-w-48 text-muted-foreground text-xs max-md:pl-3 md:text-right">
+                            Ended, so it no longer applies.
+                            {canOperate ? ' To run it again, add a new code.' : null}
+                          </p>
+                        ) : canOperate ? (
                           <Form method="post">
                             <input type="hidden" name="intent" value="status" />
                             <input type="hidden" name="id" value={p.id} />

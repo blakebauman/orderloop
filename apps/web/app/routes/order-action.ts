@@ -42,12 +42,18 @@ export async function action({ request, params }: Route.ActionArgs) {
                 ? res.error
                 : res.reason === 'not_found'
                   ? 'That order no longer exists'
-                  : 'That step is no longer waiting for a decision',
+                  : res.reason === 'no_run'
+                    ? 'No live run for this order, so it can’t be decided.'
+                    : 'That step is no longer waiting for a decision',
           },
           {
-            status: { own_order: 403, forbidden: 403, not_found: 404, not_waiting: 409 }[
-              res.reason
-            ],
+            status: {
+              own_order: 403,
+              forbidden: 403,
+              not_found: 404,
+              no_run: 409,
+              not_waiting: 409,
+            }[res.reason],
           },
         );
       await record('approval.decided', { nodeId, decision, ...(note ? { note } : {}) });

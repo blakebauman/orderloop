@@ -25,6 +25,8 @@ import {
   UCP_PATH,
 } from '@orderloop/core';
 import type { ProductDraftRequest } from '@orderloop/core/product';
+import { createDb, orders } from '@orderloop/db';
+import { eq } from 'drizzle-orm';
 import { A2A_PATH, a2aCaller, handleA2A } from './a2a/route';
 import { routeAgents } from './agent-routes';
 import { copilot } from './ai';
@@ -117,7 +119,13 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
       };
     const { name: by, id: deciderId } = actor;
     const s = await this.snapshot(orderId);
-    if (!s) return { ok: false as const, reason: 'not_found' as const };
+    // An order recorded with no run behind it (imported, or written straight to D1) has an
+    // approval row nothing will ever resume: say so, rather than that the order is gone.
+    if (!s)
+      return {
+        ok: false as const,
+        reason: (await this.recorded(orderId)) ? ('no_run' as const) : ('not_found' as const),
+      };
     if (!s.waits.some((w) => w.kind === 'approval' && w.nodeId === nodeId))
       return { ok: false as const, reason: 'not_waiting' as const };
     const own = await separationRefusal(this.env, orderId, deciderId);
@@ -143,6 +151,16 @@ export class EngineApi extends WorkerEntrypoint<Env> implements EngineRpc {
 
   async intakeMailboxes() {
     return parseMailboxes(this.env.INTAKE_MAILBOXES);
+  }
+
+  /** Whether D1 has the order, whatever its agent holds. */
+  private async recorded(orderId: string) {
+    const row = await createDb(this.env.DB)
+      .select({ id: orders.id })
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .get();
+    return !!row;
   }
 
   async snapshot(orderId: string): Promise<OrderState | null> {

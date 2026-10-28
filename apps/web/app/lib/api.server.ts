@@ -402,8 +402,9 @@ export async function handleApi(request: Request, caller: Principal): Promise<Re
       }
       if (res.reason === 'own_order' || res.reason === 'forbidden')
         return json({ error: res.error }, 403);
-      return res.reason === 'not_found'
-        ? json({ error: 'Not found' }, 404)
+      if (res.reason === 'not_found') return json({ error: 'Not found' }, 404);
+      return res.reason === 'no_run'
+        ? json({ error: 'The order has no live run, so its approvals can’t be decided' }, 409)
         : json({ error: `${parts[3]} is not waiting for an approval` }, 409);
     }
     if (parts[2] === 'cancel' && request.method === 'POST') {

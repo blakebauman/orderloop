@@ -439,14 +439,27 @@ export default function FlowEditor() {
               >
                 <FlaskConical /> Test run
               </Button>
-              <Button
-                size="sm"
-                disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
-                onClick={() => setConfirm('publish')}
-                aria-describedby={publishStatusId}
+              {/* A disabled button shows no tooltip and takes no pointer, so the reason goes on a
+                  wrapper the pointer reaches; screen readers get it from the header's status. */}
+              <span
+                className="inline-flex"
+                title={
+                  issues.errors.length
+                    ? 'Fix the checks to publish'
+                    : !unpublished
+                      ? `Nothing new to publish: v${published} is up to date`
+                      : undefined
+                }
               >
-                <Rocket /> Publish
-              </Button>
+                <Button
+                  size="sm"
+                  disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
+                  onClick={() => setConfirm('publish')}
+                  aria-describedby={publishStatusId}
+                >
+                  <Rocket /> Publish
+                </Button>
+              </span>
             </>
           ) : (
             <span className="text-muted-foreground text-xs">
