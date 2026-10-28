@@ -119,7 +119,7 @@ export default function Carts() {
         </nav>
 
         {carts.length ? (
-          <div className="card overflow-clip">
+          <div className="card relative overflow-clip">
             <Table stack="rows" caption="Carts">
               <TableHead>
                 <Tr>

@@ -16,6 +16,12 @@ import {
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@orderloop/ui/dropdown-menu';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableFoot, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
@@ -23,6 +29,7 @@ import { useAgent } from 'agents/react';
 import {
   ChevronRight,
   CircleSlash,
+  Ellipsis,
   ExternalLink,
   FileText,
   MessageSquareText,
@@ -342,16 +349,17 @@ function OrderView() {
             </Link>{' '}
             / {ORDER_MODEL_LABELS[order.model as OrderModel]}
           </div>
+          {/* A title wraps rather than truncating; the ref stays whole beside its last word. */}
           <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
-            <span className="vt-order-title min-w-0 truncate">
+            <span className="vt-order-title min-w-0 [overflow-wrap:anywhere]">
               {order.title || ORDER_MODEL_LABELS[order.model as OrderModel]}{' '}
-              <span className="font-mono font-normal text-base text-muted-foreground">
+              <span className="whitespace-nowrap font-mono font-normal text-base text-muted-foreground">
                 {orderRef(order.id)}
               </span>
             </span>
             <StatusBadge status={shownStatus(state)} />
           </h1>
-          <p className="mt-1 text-muted-foreground text-xs">
+          <p className="mt-1 text-muted-foreground text-xs [overflow-wrap:anywhere]">
             {customerName ??
               order.customerId ??
               (order.contact ? `Guest · ${order.contact.email}` : 'No customer')}{' '}
@@ -364,37 +372,45 @@ function OrderView() {
             <span className="select-all font-mono">{order.id}</span>
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        {/* Wraps as a whole rather than clipping: on a phone the actions fit beside the totals
+            because Cancel order folds into the ⋯ menu below md. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="text-right">
             <div className="font-semibold text-lg tabular">
               {money(order.total, order.currency)}
             </div>
-            <div className="text-muted-foreground text-xs tabular">
+            <div className="whitespace-nowrap text-muted-foreground text-xs tabular">
               {plural(order.lines.length, 'line')} · tax {money(order.tax, order.currency)}
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              assistant.setScope('page');
-              assistant.focus();
-            }}
-            title="Ask the assistant about this order"
-          >
-            <MessageSquareText /> Ask
-          </Button>
-          <ShareButton title={`${title} ${orderRef(order.id)}`} />
-          {!terminal && canOperate ? (
+          <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              disabled={!!busy || cancelling}
-              onClick={() => setCancelling(true)}
+              onClick={() => {
+                assistant.setScope('page');
+                assistant.focus();
+              }}
+              title="Ask the assistant about this order"
             >
-              <CircleSlash /> Cancel order
+              <MessageSquareText /> Ask
             </Button>
-          ) : null}
+            <ShareButton title={`${title} ${orderRef(order.id)}`} />
+            {!terminal && canOperate ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hidden md:inline-flex"
+                  disabled={!!busy || cancelling}
+                  onClick={() => setCancelling(true)}
+                >
+                  <CircleSlash /> Cancel order
+                </Button>
+                <OrderMenu disabled={!!busy || cancelling} onCancel={() => setCancelling(true)} />
+              </>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -534,6 +550,50 @@ function OrderView() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Below md the header's destructive action sits in a ⋯ menu, as a row's do on Team, so the title,
+ * totals and the everyday actions keep a phone's width. Picking it opens the same Cancel panel.
+ */
+function OrderMenu({ disabled, onCancel }: { disabled: boolean; onCancel: () => void }) {
+  // The panel opens once the menu has closed: opened while the menu still holds focus, its reason
+  // field's autofocus is taken back as the menu closes.
+  const picked = useRef(false);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="md:hidden"
+          aria-label="More order actions"
+        >
+          <Ellipsis aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(e) => {
+          if (!picked.current) return;
+          picked.current = false;
+          e.preventDefault();
+          onCancel();
+        }}
+      >
+        <DropdownMenuItem
+          className="touch:min-h-11"
+          variant="destructive"
+          disabled={disabled}
+          onSelect={() => {
+            picked.current = true;
+          }}
+        >
+          <CircleSlash aria-hidden="true" /> Cancel order…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1272,15 +1332,15 @@ function RecordedOrderView() {
             / {ORDER_MODEL_LABELS[o.model as OrderModel]}
           </div>
           <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
-            <span className="vt-order-title min-w-0 truncate">
+            <span className="vt-order-title min-w-0 [overflow-wrap:anywhere]">
               {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
-              <span className="font-mono font-normal text-base text-muted-foreground">
+              <span className="whitespace-nowrap font-mono font-normal text-base text-muted-foreground">
                 {orderRef(o.id)}
               </span>
             </span>
             <StatusBadge status={o.status} />
           </h1>
-          <p className="mt-1 text-muted-foreground text-xs">
+          <p className="mt-1 text-muted-foreground text-xs [overflow-wrap:anywhere]">
             {customerName ??
               o.customerId ??
               (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')}{' '}

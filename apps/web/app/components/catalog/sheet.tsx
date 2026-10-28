@@ -18,15 +18,22 @@ import {
 } from '@orderloop/ui/sheet';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Ago } from '~/components/ago';
 import { ToneBadge } from '~/components/status';
 import { useMedia } from '~/lib/device';
 import { humanize } from '~/lib/format';
-import { DRAFTABLE, fieldLabel, sameRef } from './labels';
+import { DRAFTABLE, fieldLabel, issueText, sameRef } from './labels';
 import { refusal, useCatalogAction } from './use-action';
 
 type Base = Omit<FieldRef, 'locale'>;
+
+/** The product type's attribute labels, by code, so every field on the sheet reads by its name. */
+const AttributeLabels = createContext<Record<string, string>>({});
+const useFieldLabel = () => {
+  const labels = useContext(AttributeLabels);
+  return (ref: Pick<FieldRef, 'field' | 'code' | 'src'>) => fieldLabel(ref, labels);
+};
 
 const isText = (v: unknown): v is Record<string, string> =>
   !!v &&
@@ -102,14 +109,18 @@ const refKey = (r: FieldRef) => `${fieldId(r)}@${r.locale ?? ''}`;
  */
 export function ProductSheetView({
   sheet,
+  attributeLabels = {},
   canEdit,
   onClose,
 }: {
   sheet: ProductSheet;
+  /** Labels the product's type gives its attributes, by code. */
+  attributeLabels?: Record<string, string>;
   canEdit: boolean;
   onClose: () => void;
 }) {
   const p = sheet.product;
+  const label = (ref: Pick<FieldRef, 'field' | 'code' | 'src'>) => fieldLabel(ref, attributeLabels);
   const { rows, locales } = layout(sheet);
   const focus = focusRef(sheet);
   const body = useRef<HTMLDivElement>(null);
@@ -146,177 +157,184 @@ export function ProductSheetView({
   const freshDrafts = sheet.drafts.filter((d) => !d.stale).length;
   const canDraft = sheet.gaps.some((g) => DRAFTABLE.has(g.kind));
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent
-        side={phone ? 'bottom' : 'right'}
-        onOpenAutoFocus={(e) => {
-          // Focus what put the product on the board (its first action), so Enter acts on it.
-          const first = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
-            '[data-ref-focus] button',
-          );
-          if (first) {
-            e.preventDefault();
-            first.focus({ preventScroll: true });
-          }
-        }}
-        className="w-full gap-0 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-w-2xl xl:max-w-4xl"
-      >
-        <SheetHeader className="gap-1 border-b px-6 pt-6 pb-4">
-          <SheetTitle className="pr-8 font-semibold text-lg tracking-title">{title}</SheetTitle>
-          <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-mono text-xs">{p.key}</span>
-            <span aria-hidden="true">·</span>
-            <span>{humanize(p.status)}</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              version {p.version}, changed <Ago ms={p.updatedAt} />
-            </span>
-          </SheetDescription>
-          {canEdit ? (
-            <Toolbar
-              productKey={p.key}
-              canDraft={canDraft}
-              drafts={freshDrafts}
-              staged={sheet.staged.length}
-            />
-          ) : null}
-        </SheetHeader>
-
-        <div ref={body} className="flex flex-col gap-6 px-6 py-5">
-          {sheet.rejection ? (
-            <section aria-labelledby="refused" className="tile flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <ToneBadge tone="bad" label="Refused" />
-                <h3 id="refused" className="font-medium text-sm">
-                  The feed’s last row for this product was refused
-                  {sheet.rejection.row !== undefined ? ` (row ${sheet.rejection.row})` : ''}
-                </h3>
-              </div>
-              <ul className="flex flex-col gap-1 text-sm">
-                {sheet.rejection.issues.map((i) => (
-                  <li key={`${i.path}:${i.message}`}>
-                    {i.path ? <span className="font-mono text-xs">{i.path}</span> : null}{' '}
-                    {i.message}
-                  </li>
-                ))}
-              </ul>
-              <p className="text-muted-foreground text-xs">
-                Fix it at the source: the next feed that sends a valid row for{' '}
-                <span className="font-mono">{p.key}</span> clears this. What’s live below is the
-                last row the catalog took.
-              </p>
-            </section>
-          ) : null}
-
-          <StatusField sheet={sheet} canEdit={canEdit} />
-
-          <section aria-labelledby="content">
-            <h3 id="content" className="caption mb-2">
-              Content
-            </h3>
+    <AttributeLabels.Provider value={attributeLabels}>
+      <Sheet open onOpenChange={(o) => !o && onClose()}>
+        <SheetContent
+          side={phone ? 'bottom' : 'right'}
+          onOpenAutoFocus={(e) => {
+            // Focus what put the product on the board (its first action), so Enter acts on it.
+            const first = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
+              '[data-ref-focus] button',
+            );
+            if (first) {
+              e.preventDefault();
+              first.focus({ preventScroll: true });
+            }
+          }}
+          className="w-full gap-0 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-w-2xl xl:max-w-4xl"
+        >
+          <SheetHeader className="gap-1 border-b px-6 pt-6 pb-4">
+            <SheetTitle className="pr-8 font-semibold text-lg tracking-title">{title}</SheetTitle>
+            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-mono text-xs">{p.key}</span>
+              <span aria-hidden="true">·</span>
+              <span>{humanize(p.status)}</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                version {p.version}, changed <Ago ms={p.updatedAt} />
+              </span>
+            </SheetDescription>
             {canEdit ? (
-              <p className="mb-3 text-muted-foreground text-xs lg:hidden">
-                Review and accept drafts here; editing and publishing are on a larger screen.
-              </p>
+              <Toolbar
+                productKey={p.key}
+                canDraft={canDraft}
+                drafts={freshDrafts}
+                staged={sheet.staged.length}
+              />
             ) : null}
-            {/* A phone stacks each field's locales; anything wider sets them side by side. */}
-            <div className="flex flex-col divide-y sm:hidden">
-              {rows.map((base) => (
-                <div key={fieldId(base as FieldRef)} className="py-3">
-                  <p className="mb-2 font-medium text-sm">
-                    {base.field === 'attribute' ? (
-                      <span className="font-mono text-xs">{fieldLabel(base)}</span>
-                    ) : (
-                      fieldLabel(base)
-                    )}
-                    {base.field === 'mediaAlt' ? (
-                      <span className="ml-2 font-mono font-normal text-2xs text-muted-foreground">
-                        {base.src?.split('/').at(-1)}
-                      </span>
-                    ) : null}
-                  </p>
-                  <dl className="flex flex-col gap-3">
-                    {locales.map((locale) => (
-                      <div key={locale} className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
-                        <dt className="pt-0.5 font-mono text-muted-foreground text-xs">{locale}</dt>
-                        <dd className="min-w-0">
-                          <FieldCell
-                            sheet={sheet}
-                            fieldRef={{ ...base, locale } as FieldRef}
-                            canEdit={canEdit}
-                            focused={false}
-                            anchor={false}
-                          />
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
+          </SheetHeader>
+
+          <div ref={body} className="flex flex-col gap-6 px-6 py-5">
+            {sheet.rejection ? (
+              <section aria-labelledby="refused" className="tile flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ToneBadge tone="bad" label="Refused" />
+                  <h3 id="refused" className="font-medium text-sm">
+                    The feed’s last row for this product was refused
+                    {sheet.rejection.row !== undefined ? ` (row ${sheet.rejection.row})` : ''}
+                  </h3>
                 </div>
-              ))}
-            </div>
-            <div data-strip className="-mx-6 overflow-x-auto px-6 max-sm:hidden">
-              <Table edge="flush" className="w-full">
-                <TableHead>
-                  <Tr>
-                    <Th scope="col" className="sticky left-0 z-10 w-28 bg-popover sm:w-36">
-                      <span className="sr-only">Field</span>
-                    </Th>
-                    {locales.map((l) => (
-                      <Th key={l} scope="col" className="min-w-44">
-                        <span className="font-mono normal-case tracking-normal">{l}</span>
-                      </Th>
-                    ))}
-                  </Tr>
-                </TableHead>
-                <TableBody>
-                  {rows.map((base) => (
-                    <Tr key={fieldId(base as FieldRef)} className="align-top">
-                      <Th
-                        scope="row"
-                        className="sticky left-0 z-10 w-28 bg-popover align-top font-normal normal-case tracking-normal text-foreground sm:w-36"
-                      >
-                        <span
-                          className={cn(
-                            'block text-sm',
-                            base.field === 'attribute' && 'font-mono text-xs',
-                          )}
-                        >
-                          {fieldLabel(base)}
+                <ul className="flex flex-col gap-1 text-sm">
+                  {sheet.rejection.issues.map((i) => (
+                    <li key={`${i.path}:${i.message}`}>
+                      {issueText(i)}
+                      {i.path ? (
+                        <span className="ml-2 font-mono text-2xs text-muted-foreground">
+                          {i.path}
                         </span>
-                        {base.field === 'mediaAlt' ? (
-                          <span
-                            className="block max-w-36 truncate font-mono text-2xs normal-case tracking-normal text-muted-foreground"
-                            title={base.src}
-                          >
-                            {base.src?.split('/').at(-1)}
-                          </span>
-                        ) : null}
-                      </Th>
-                      {locales.map((locale) => {
-                        const ref = { ...base, locale } as FieldRef;
-                        return (
-                          <Td key={locale} className="align-top">
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-muted-foreground text-xs">
+                  Fix it at the source: the next feed that sends a valid row for{' '}
+                  <span className="font-mono">{p.key}</span> clears this. What’s live below is the
+                  last row the catalog took.
+                </p>
+              </section>
+            ) : null}
+
+            <StatusField sheet={sheet} canEdit={canEdit} />
+
+            <section aria-labelledby="content">
+              <h3 id="content" className="caption mb-2">
+                Content
+              </h3>
+              {canEdit ? (
+                <p className="mb-3 text-muted-foreground text-xs lg:hidden">
+                  Review and accept drafts here; editing and publishing are on a larger screen.
+                </p>
+              ) : null}
+              {/* A phone stacks each field's locales; anything wider sets them side by side. */}
+              <div className="flex flex-col divide-y sm:hidden">
+                {rows.map((base) => (
+                  <div key={fieldId(base as FieldRef)} className="py-3">
+                    <p className="mb-2 font-medium text-sm">
+                      {label(base)}
+                      {base.field === 'attribute' ? (
+                        <span className="ml-2 font-mono font-normal text-2xs text-muted-foreground">
+                          {base.code}
+                        </span>
+                      ) : null}
+                      {base.field === 'mediaAlt' ? (
+                        <span className="ml-2 font-mono font-normal text-2xs text-muted-foreground">
+                          {base.src?.split('/').at(-1)}
+                        </span>
+                      ) : null}
+                    </p>
+                    <dl className="flex flex-col gap-3">
+                      {locales.map((locale) => (
+                        <div key={locale} className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
+                          <dt className="pt-0.5 font-mono text-muted-foreground text-xs">
+                            {locale}
+                          </dt>
+                          <dd className="min-w-0">
                             <FieldCell
                               sheet={sheet}
-                              fieldRef={ref}
+                              fieldRef={{ ...base, locale } as FieldRef}
                               canEdit={canEdit}
-                              focused={focusKey === refKey(ref)}
+                              focused={false}
+                              anchor={false}
                             />
-                          </Td>
-                        );
-                      })}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+              </div>
+              <div data-strip className="-mx-6 overflow-x-auto px-6 max-sm:hidden">
+                <Table edge="flush" className="w-full">
+                  <TableHead>
+                    <Tr>
+                      <Th scope="col" className="sticky left-0 z-10 w-28 bg-popover sm:w-36">
+                        <span className="sr-only">Field</span>
+                      </Th>
+                      {locales.map((l) => (
+                        <Th key={l} scope="col" className="min-w-44">
+                          <span className="font-mono normal-case tracking-normal">{l}</span>
+                        </Th>
+                      ))}
                     </Tr>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </section>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((base) => (
+                      <Tr key={fieldId(base as FieldRef)} className="align-top">
+                        <Th
+                          scope="row"
+                          className="sticky left-0 z-10 w-28 bg-popover align-top font-normal normal-case tracking-normal text-foreground sm:w-36"
+                        >
+                          <span className="block text-sm">{label(base)}</span>
+                          {base.field === 'attribute' ? (
+                            <span className="block font-mono text-2xs normal-case tracking-normal text-muted-foreground">
+                              {base.code}
+                            </span>
+                          ) : null}
+                          {base.field === 'mediaAlt' ? (
+                            <span
+                              className="block max-w-36 truncate font-mono text-2xs normal-case tracking-normal text-muted-foreground"
+                              title={base.src}
+                            >
+                              {base.src?.split('/').at(-1)}
+                            </span>
+                          ) : null}
+                        </Th>
+                        {locales.map((locale) => {
+                          const ref = { ...base, locale } as FieldRef;
+                          return (
+                            <Td key={locale} className="align-top">
+                              <FieldCell
+                                sheet={sheet}
+                                fieldRef={ref}
+                                canEdit={canEdit}
+                                focused={focusKey === refKey(ref)}
+                              />
+                            </Td>
+                          );
+                        })}
+                      </Tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </section>
 
-          <FeedFacts sheet={sheet} />
-          <History sheet={sheet} />
-        </div>
-      </SheetContent>
-    </Sheet>
+            <FeedFacts sheet={sheet} />
+            <History sheet={sheet} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </AttributeLabels.Provider>
   );
 }
 
@@ -482,6 +500,7 @@ function FieldCell({
   anchor?: boolean;
 }) {
   const key = sheet.product.key;
+  const label = useFieldLabel();
   const act = useCatalogAction();
   const [editing, setEditing] = useState<string | null>(null);
   const live = fieldValue(sheet.product, ref);
@@ -561,7 +580,7 @@ function FieldCell({
           {long ? (
             <Textarea
               autoFocus
-              aria-label={`${fieldLabel(ref)}, ${ref.locale}`}
+              aria-label={`${label(ref)}, ${ref.locale}`}
               rows={6}
               value={editing}
               onChange={(e) => setEditing(e.target.value)}
@@ -569,7 +588,7 @@ function FieldCell({
           ) : (
             <Input
               autoFocus
-              aria-label={`${fieldLabel(ref)}, ${ref.locale}`}
+              aria-label={`${label(ref)}, ${ref.locale}`}
               value={editing}
               onChange={(e) => setEditing(e.target.value)}
             />
@@ -748,6 +767,7 @@ function FeedFacts({ sheet }: { sheet: ProductSheet }) {
 }
 
 function History({ sheet }: { sheet: ProductSheet }) {
+  const label = useFieldLabel();
   if (!sheet.revisions.length) return null;
   return (
     <section aria-labelledby="history">
@@ -764,7 +784,7 @@ function History({ sheet }: { sheet: ProductSheet }) {
               <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
             ) : null}
             <span className="font-medium">
-              {fieldLabel(r.ref)}
+              {label(r.ref)}
               {r.ref.locale ? (
                 <span className="font-mono text-muted-foreground text-xs"> {r.ref.locale}</span>
               ) : null}

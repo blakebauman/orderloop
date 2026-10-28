@@ -1,4 +1,12 @@
-import type { BoardCard, BoardColumn, FieldRef, GapGroup, GapKind } from '@orderloop/core/product';
+import type {
+  BoardCard,
+  BoardColumn,
+  FieldRef,
+  GapGroup,
+  GapKind,
+  Rejection,
+} from '@orderloop/core/product';
+import { humanize } from '~/lib/format';
 
 /** The board's columns, left to right toward live. */
 export const COLUMN_LABEL: Record<BoardColumn, string> = {
@@ -50,9 +58,7 @@ export function cardReason(c: BoardCard): string {
       if (c.rejection)
         parts.push(
           `${c.rejection.row !== undefined ? `Row ${c.rejection.row} refused` : 'Refused'}: ${
-            c.rejection.issues[0]
-              ? `${c.rejection.issues[0].path ? `${c.rejection.issues[0].path}: ` : ''}${c.rejection.issues[0].message}`
-              : 'see the sheet'
+            c.rejection.issues[0] ? issueText(c.rejection.issues[0]) : 'see the sheet'
           }`,
         );
       else if (c.kinds.rejected) parts.push('Feed row refused');
@@ -72,8 +78,14 @@ export function cardReason(c: BoardCard): string {
   }
 }
 
-/** A field's name on the sheet, without its locale. */
-export function fieldLabel(ref: Pick<FieldRef, 'field' | 'code' | 'src'>): string {
+/**
+ * A field's name on the sheet, without its locale. An attribute reads by the label its product
+ * type gives it (`labels`, by code), else its code in words: "care" → "Care".
+ */
+export function fieldLabel(
+  ref: Pick<FieldRef, 'field' | 'code' | 'src'>,
+  labels: Record<string, string> = {},
+): string {
   switch (ref.field) {
     case 'title':
       return 'Title';
@@ -84,7 +96,7 @@ export function fieldLabel(ref: Pick<FieldRef, 'field' | 'code' | 'src'>): strin
     case 'status':
       return 'Status';
     case 'attribute':
-      return ref.code ?? 'Attribute';
+      return ref.code ? (labels[ref.code] ?? words(ref.code)) : 'Attribute';
     case 'mediaAlt':
       return 'Alt text';
   }
@@ -111,3 +123,76 @@ export const GROUP_KIND: Partial<Record<GapGroup, GapKind>> = {
   rejected: 'rejected',
   missing_required: 'missing_required',
 };
+
+type Issue = Rejection['issues'][number];
+
+const ACRONYMS: Record<string, string> = { sku: 'SKU', gtin: 'GTIN', url: 'URL', id: 'ID' };
+
+/** A code in words, keeping the acronyms people say as letters: "sku" → "SKU", "care_info" → "Care info". */
+const words = (code: string) =>
+  humanize(code)
+    .split(' ')
+    .map((w) => ACRONYMS[w.toLowerCase()] ?? w)
+    .join(' ');
+
+const singular = (s: string) =>
+  s.endsWith('ies') ? `${s.slice(0, -3)}y` : s.endsWith('s') ? s.slice(0, -1) : s;
+
+/**
+ * Where an issue is, from its dotted path: "variants.0.sku" → "Variant 1 SKU",
+ * "attributes.care" → "Care", "title.en" → "Title (en)".
+ */
+function where(path: string): string {
+  const parts = path.split('.').filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    const next = parts[i + 1];
+    if (next !== undefined && /^\d+$/.test(next)) {
+      out.push(`${singular(p)} ${Number(next) + 1}`);
+      i++;
+    } else if (p === 'attributes' && next) {
+      out.push(words(next));
+      i++;
+    } else if (/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(p) && i > 0) out.push(`(${p})`);
+    else out.push(words(p).toLowerCase());
+  }
+  const text = out.join(' ').replace(/\b(sku|gtin|url|id)\b/g, (w) => ACRONYMS[w]!);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A feed row's validation issue as a sentence: "variants" with zod's "Too small: expected array to
+ * have >=1 items" reads "Needs at least one variant". One we don't know keeps its message after
+ * where it is, without the validator's "Invalid input:" preamble.
+ */
+export function issueText({ path, message }: Issue): string {
+  const at = where(path);
+  const last =
+    path
+      .split('.')
+      .filter((p) => p && !/^\d+$/.test(p))
+      .at(-1) ?? '';
+  const item = words(singular(last)).toLowerCase() || 'item';
+  const min = /^Too small: expected array to have >=(\d+) items?$/.exec(message);
+  if (min) {
+    const n = Number(min[1]);
+    return n === 1 ? `Needs at least one ${item}` : `Needs at least ${n} ${item}s`;
+  }
+  if (/^Too small: expected string to have >=1 characters?$/.test(message))
+    return `${at || 'A value'} is empty`;
+  const long = /^Too big: expected string to have <=(\d+) characters?$/.exec(message);
+  if (long) return `${at || 'A value'} is longer than ${long[1]} characters`;
+  const many = /^Too big: expected array to have <=(\d+) items?$/.exec(message);
+  if (many) return `Too many ${item}s (at most ${many[1]})`;
+  if (message === 'required' || /^Invalid input: expected \w+, received undefined$/.test(message))
+    return `${at || 'A value'} is missing`;
+  const type = /^Invalid input: expected (\w+), received \w+$/.exec(message);
+  if (type)
+    return `${at || 'A value'} should be ${/^[aeiou]/.test(type[1]!) ? 'an' : 'a'} ${type[1]}`;
+  if (/^Invalid option: expected one of /.test(message))
+    return `${at || 'A value'} isn’t one of the allowed values`;
+  const text = message.replace(/^Invalid (input|string|option): /, '');
+  if (!at) return text.charAt(0).toUpperCase() + text.slice(1);
+  return `${at}: ${text}`;
+}

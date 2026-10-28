@@ -9,7 +9,7 @@ import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useEffect, useState } from 'react';
-import { statusLabel } from '~/lib/format';
+import { plainSummary, statusLabel } from '~/lib/format';
 import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
@@ -158,7 +158,7 @@ export function Inspector({
             {run.branches?.length ? ` · took ${run.branches.join(', ')}` : ''}
           </div>
           {run.summary ? (
-            <div className="mt-1 text-muted-foreground text-xs">{run.summary}</div>
+            <div className="mt-1 text-muted-foreground text-xs">{plainSummary(run.summary)}</div>
           ) : null}
           {run.error ? <div className="mt-1 text-bad text-sm">{run.error}</div> : null}
           {run.output !== undefined ? (

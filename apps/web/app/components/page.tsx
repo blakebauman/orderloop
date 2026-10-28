@@ -59,8 +59,10 @@ export function Section({
       className={cn(
         // Flush content runs to the edges, so the card clips it to its corners. Clip, not hidden:
         // hidden would make the card a scroll container and stop a sticky table header at its top.
+        // Relative, so it also clips what's positioned inside it (a sort link's hit area, a header's
+        // sr-only text), which would otherwise widen the page at large text sizes.
         'card min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)]',
-        flush && 'overflow-clip',
+        flush && 'relative overflow-clip',
         className,
       )}
     >

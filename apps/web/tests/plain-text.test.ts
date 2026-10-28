@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { eventName, plainLog, plainVars, readableReason } from '../app/lib/format';
+import { eventName, plainLog, plainSummary, plainVars, readableReason } from '../app/lib/format';
 
 const sqlError = `Failed query: select "sku", "name", "cost" from "products" where "products"."sku" in (?, ?)\nparams: WID-100,GSK-010`;
 
@@ -29,9 +29,25 @@ describe('plainVars', () => {
     expect(plainVars('year=null')).toBe('Nothing set');
   });
 
+  it('drops empty values from a list already in words', () => {
+    expect(plainVars('Cycle 0, Year null')).toBe('Cycle 0');
+    expect(plainVars('Year null')).toBe('Nothing set');
+    // Nothing empty in it: not a list this needs to change.
+    expect(plainVars('Cycle 0')).toBeNull();
+  });
+
   it('is null for text that is not a list of variables', () => {
     expect(plainVars('Subtotal $20.00')).toBeNull();
     expect(plainVars('cycle=2, and more')).toBeNull();
+  });
+});
+
+describe('plainSummary', () => {
+  it("reads an older order's variables on the graph and in the inspector", () => {
+    expect(plainSummary('cycle=0, year=null')).toBe('Cycle 0');
+    expect(plainSummary('Cycle 0, Year null')).toBe('Cycle 0');
+    expect(plainSummary('Cycle 0')).toBe('Cycle 0');
+    expect(plainSummary('Reserved 2 lines')).toBe('Reserved 2 lines');
   });
 });
 
