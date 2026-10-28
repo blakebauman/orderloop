@@ -20,4 +20,5 @@ export function createDb(d1: D1Database): Db {
 }
 export * from './audit';
 export * from './flows';
+export * from './health';
 export * from './match';

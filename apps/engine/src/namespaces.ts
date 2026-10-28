@@ -38,6 +38,9 @@ export const cartAgent = (env: Env, cartId: string) => scope(env, env.CART_AGENT
 export const pluginStorage = (env: Env, pluginId: string) =>
   scope(env, env.PLUGIN_STORAGE).getByName(pluginId);
 
+/** The deploy smoke test's write check object (health.ts): the one, holding nothing between checks. */
+export const healthProbe = (env: Env) => scope(env, env.HEALTH_PROBE).getByName('health');
+
 /** `env` with each namespace in the jurisdiction, for the Agents SDK's own routing. */
 export const scopedEnv = (env: Env): Env => ({
   ...env,

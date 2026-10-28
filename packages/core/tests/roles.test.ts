@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { HEALTH_WRITE_PATH } from '../src/health';
 import {
   atLeast,
+  healthCheckKey,
   OWN_ORDER_REFUSAL,
   ownOrderRefusal,
   PRINCIPAL_TTL_MS,
@@ -8,6 +10,7 @@ import {
   SSO_LINK_TTL_MS,
   signCartGuest,
   signCartGuestSession,
+  signHealthCheck,
   signPlatform,
   signPrincipal,
   signRpcActor,
@@ -15,6 +18,7 @@ import {
   signSsoLink,
   verifyCartGuest,
   verifyCartGuestSession,
+  verifyHealthCheck,
   verifyPlatform,
   verifyPrincipal,
   verifyRpcActor,
@@ -263,5 +267,81 @@ describe('the single sign-on flow cookie', () => {
       now,
     );
     expect(await verifySsoFlow([key], staff, now)).toBeNull();
+  });
+});
+
+describe('the deploy smoke test write check', () => {
+  const key = 'test-principal-key';
+  const path = HEALTH_WRITE_PATH;
+  const now = 1_000_000;
+
+  it('derives its key and header as scripts/fleet.ts does', async () => {
+    // The same vectors as scripts/fleet.test.ts.
+    expect(await healthCheckKey(key)).toBe(
+      '741ef8f7c4079a820efd230cf6547e293084bacaf7c7f22483e5141c763214d9',
+    );
+    expect(await signHealthCheck(key, path, 0)).toBe(
+      'h1.eyJwYXRoIjoiL2hlYWx0aC93cml0ZSIsImV4cCI6NjAwMDB9.B_0yJK2-A4b70YJu7y81gTGCBneleXbTpN3BsRyaU5w',
+    );
+  });
+
+  it('accepts a fresh header for its own path, under the current or previous key', async () => {
+    const h = await signHealthCheck(key, path, now);
+    expect(await verifyHealthCheck([key], h, path, now)).toBe(true);
+    expect(await verifyHealthCheck([key], h, path, now + PRINCIPAL_TTL_MS - 1)).toBe(true);
+    expect(await verifyHealthCheck(['new-principal-key', key], h, path, now)).toBe(true);
+  });
+
+  it('refuses an expired, misdirected, tampered, missing or other-key header', async () => {
+    const h = await signHealthCheck(key, path, now);
+    expect(await verifyHealthCheck([key], h, path, now + PRINCIPAL_TTL_MS)).toBe(false);
+    expect(await verifyHealthCheck([key], h, '/health/deep', now)).toBe(false);
+    expect(await verifyHealthCheck([key], h, '/mcp', now)).toBe(false);
+    expect(await verifyHealthCheck(['other-principal-key'], h, path, now)).toBe(false);
+    expect(await verifyHealthCheck([undefined], h, path, now)).toBe(false);
+    expect(await verifyHealthCheck([key], null, path, now)).toBe(false);
+    expect(await verifyHealthCheck([key], '', path, now)).toBe(false);
+    const [v, , sig] = h.split('.');
+    const later = btoa(JSON.stringify({ path, exp: now + 86_400_000 })).replace(/=+$/, '');
+    expect(await verifyHealthCheck([key], `${v}.${later}.${sig}`, path, now)).toBe(false);
+  });
+
+  it('opens nothing else, and nothing else opens it', async () => {
+    // The h1 envelope signed with the principal key itself rather than the derived key.
+    const [, payload] = (await signHealthCheck(key, path, now)).split('.');
+    const raw = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(key),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const mac = new Uint8Array(
+      await crypto.subtle.sign('HMAC', raw, new TextEncoder().encode(`h1.${payload}`)),
+    );
+    const direct = btoa(String.fromCharCode(...mac))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    expect(await verifyHealthCheck([key], `h1.${payload}.${direct}`, path, now)).toBe(false);
+    // Every other envelope, for the same path, under the principal key or the derived one.
+    const derived = await healthCheckKey(key);
+    const staff = { kind: 'user' as const, id: 'u', name: 'A', role: 'admin' as const };
+    for (const other of [
+      await signPrincipal(key, staff, path, now),
+      await signPrincipal(derived, staff, path, now),
+      await signRpcActor(key, { ...staff, kind: 'staff' }, path, now),
+      await signCartGuest(key, { cartId: 'c', id: 'g', name: 'G' }, path, now),
+      await signPlatform(key, { id: 'p', name: 'P', profileUrl: 'u', origin: 'o' }, path, now),
+    ])
+      expect(await verifyHealthCheck([key], other, path, now)).toBe(false);
+    // And the write check is nothing else, even at its own path.
+    const h = await signHealthCheck(key, path, now);
+    for (const k of [key, derived]) {
+      expect(await verifyPrincipal([k], h, path, now)).toBeNull();
+      expect(await verifyRpcActor([k], h, path, now)).toBeNull();
+      expect(await verifyCartGuest([k], h, path, now)).toBeNull();
+      expect(await verifyPlatform([k], h, path, now)).toBeNull();
+    }
   });
 });

@@ -8,7 +8,8 @@
  * `backups/<date>/<object>/<table>-<n>.ndjson`, a row a line, then `backups/<date>/manifest.json`
  * once every object is copied. Tables left out are rebuilt by a republish or are transient: a
  * shard's `outbox`, `applied` (batch ids, a week), `published` (what is in R2 now, which a restore
- * must keep) and `gap_rebuild` (a pending rebuild). The other Durable Objects hold no data of
+ * must keep) and `gap_rebuild` (a pending rebuild); and in every object, `health_probes` (the
+ * deploy smoke test's, health.ts, empty between checks). The other Durable Objects hold no data of
  * record: listing indexes and search shards are rebuilt from the republish a restore ends with,
  * publishers keep nothing, and CatalogFeeds is the history of past imports, whose files expire in
  * 30 days anyway.

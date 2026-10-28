@@ -21,7 +21,7 @@ describe('Durable Object namespaces', () => {
     const direct = Object.entries(sources)
       .filter(([path]) => !path.endsWith('/namespaces.ts'))
       .filter(([, src]) =>
-        /\b(ORDER_AGENT|ASSISTANT_AGENT|A2A_AGENT|CART_AGENT|PLUGIN_STORAGE)\.(getByName|idFromName|get|newUniqueId)\(|routeAgentRequest\(\w+, (this\.)?env\)/.test(
+        /\b(ORDER_AGENT|ASSISTANT_AGENT|A2A_AGENT|CART_AGENT|PLUGIN_STORAGE|HEALTH_PROBE)\.(getByName|idFromName|get|newUniqueId)\(|routeAgentRequest\(\w+, (this\.)?env\)/.test(
           src,
         ),
       )

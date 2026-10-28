@@ -284,12 +284,20 @@ jobs:
           retry pnpm --filter @orderloop/web exec wrangler deploy "${secrets[@]}"
       # A new domain's certificate can take a few minutes to issue, so each check retries for up
       # to five minutes before it counts as failed.
+      # The write check signs with a key derived from PRINCIPAL_KEY (scripts/fleet.ts write-check),
+      # inside node: the key and the header stay out of the command line and the log.
       - name: Smoke test
         id: smoke
+        env:
+          PRINCIPAL_KEY: ${{ secrets.PRINCIPAL_KEY }}
         run: |
           curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health"
           # D1, R2 and the engine (over the service binding) all answer.
           curl -fsS --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 "https://$DOMAIN/health/deep"
+          # And they take writes: D1 from the web app and the engine, R2 under health/, the engine's
+          # and the catalog's Durable Object storage and the catalog's bucket, each written, read
+          # back and deleted. Retries for five minutes too; a failure names the store.
+          node scripts/fleet.ts write-check "$ID"
           # The app itself, not just the health route: the sign-in page renders.
           # (On a workspace with no people yet it redirects to the setup page, which must render too.)
           curl -fsSL --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 300 -o /dev/null "https://$DOMAIN/login"

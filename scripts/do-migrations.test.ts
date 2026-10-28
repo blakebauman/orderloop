@@ -22,6 +22,7 @@ const APPLIED: Record<string, Migration[]> = {
     { tag: 'v3', new_sqlite_classes: ['A2AAgent'] },
     { tag: 'v4', new_sqlite_classes: ['PluginStorage'] },
     { tag: 'v5', new_sqlite_classes: ['CartAgent'] },
+    { tag: 'v6', new_sqlite_classes: ['HealthProbe'] },
   ],
   catalog: [
     { tag: 'v1', new_sqlite_classes: ['CatalogShard', 'CatalogMeta'] },

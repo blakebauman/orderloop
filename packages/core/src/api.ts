@@ -287,6 +287,13 @@ export interface EngineRpc {
   /** Deep health: the engine's own D1 and R2 bindings answer. */
   health(): Promise<HealthReport>;
   /**
+   * The deploy smoke test's write check (`HEALTH_WRITE_PATH`): a row through D1, an object through
+   * R2 under `health/` and a row through the `HealthProbe` object's SQLite, each written, read back
+   * and deleted. `signed` is the check's own header (`signHealthCheck`), passed on by the web app;
+   * without it nothing is written and the report fails `signature`.
+   */
+  writeHealth(signed: string): Promise<HealthReport>;
+  /**
    * The UCP business profile (`/.well-known/ucp`) with `origin`'s URLs, or null while agentic
    * checkout is off. The engine builds it because it holds the signing key.
    */

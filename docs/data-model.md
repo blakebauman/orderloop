@@ -78,6 +78,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0058_products_search.sql` | `products_search`: an external-content FTS5 index over `products.sku` and `name`, built from the rows there (`rebuild`) and kept by triggers on `products` |
 | `0059_tax_certificates.sql` | `tax_certificates` and its index `tax_certificates_customer (customer_id, created_at)`: customers' tax exemption certificates |
 | `0060_order_waiting_due.sql` | `orders.waiting_due` (nullable, ms): when the order's soonest open wait times out, so lists can mark an overdue wait. Null for a timer and on rows not re-indexed since |
+| `0061_health_probes.sql` | `health_probes` (`id`, `at`): the deploy smoke test's [write check](deploy.md#the-write-check), a row the web app and the engine each write, read back and delete (`probeDb` in `packages/db/src/health.ts`); empty between checks, read by nothing else |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.

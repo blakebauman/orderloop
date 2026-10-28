@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
 import {
+  healthCheckKey,
   keysProblem,
   loadDeployments,
   matrix,
@@ -21,6 +22,7 @@ import {
   sandboxedPlugins,
   secretsProblem,
   shellVars,
+  signHealthCheck,
   toDeployment,
   workerPlugins,
 } from './fleet.ts';
@@ -540,6 +542,21 @@ test("a plugin's key is derived from the principal key, as core derives it", () 
     pluginKey('test-principal-key', 'ledger'),
     pluginKey('test-principal-key', 'example'),
   );
+});
+
+test("the smoke test's write check is signed as core derives and checks it", () => {
+  // The same vectors as packages/core/tests/roles.test.ts.
+  assert.equal(
+    healthCheckKey('test-principal-key'),
+    '741ef8f7c4079a820efd230cf6547e293084bacaf7c7f22483e5141c763214d9',
+  );
+  assert.equal(
+    signHealthCheck('test-principal-key', 0),
+    'h1.eyJwYXRoIjoiL2hlYWx0aC93cml0ZSIsImV4cCI6NjAwMDB9.B_0yJK2-A4b70YJu7y81gTGCBneleXbTpN3BsRyaU5w',
+  );
+  // Its own key: never the principal key, nor any plugin's.
+  assert.notEqual(healthCheckKey('test-principal-key'), 'test-principal-key');
+  assert.notEqual(healthCheckKey('test-principal-key'), pluginKey('test-principal-key', 'health'));
 });
 
 test('buyer details are granted to a plugin only by its registry entry', () => {
