@@ -73,7 +73,7 @@ exist now (their columns in [Data model](data-model.md#product-catalog)).
 
 ## The Catalog page
 
-`/catalog` (under More; `apps/web/app/routes/catalog.tsx`, design brief in the surface brief for that
+`/catalog` (the sidebar's Reference group; `apps/web/app/routes/catalog.tsx`, design brief in the surface brief for that
 file) draws the board: a line on the last feed, then Gaps, Drafted, Staged (Publish at its head, for
 the ticked products) and Published today. Gaps groups each product once, in the first group that
 applies: Conflicts, Rejected rows, Missing required, Missing text (`groupOf` in

@@ -75,6 +75,16 @@
   --color-ink: var(--ink);
   --color-link: var(--link);
 
+  /* shadcn's sidebar (packages/ui/src/sidebar.tsx). */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
   /* Status signals. */
   --color-ok: var(--ok);
   --color-run: var(--run);
@@ -155,6 +165,18 @@
   --cat-control: oklch(0.5 0.1 62);
   --cat-ai: var(--ai);
 
+  /* The sidebar: the preset's ground, half a step under the paper so the page reads as the surface
+     and the sidebar as its frame; its current page a step deeper than the preset's accent, so it
+     reads on that ground. */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.945 0 0);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: var(--ring);
+
   /* The flow graph sheet. */
   --sheet: oklch(0.985 0 0);
   --sheet-grid: oklch(0.87 0 0);
@@ -203,6 +225,9 @@
 
   --cat-commerce: oklch(0.76 0.07 230);
   --cat-control: oklch(0.8 0.11 75);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
 
   --sheet: oklch(0.17 0 0);
   --sheet-grid: oklch(0.27 0 0);
@@ -435,6 +460,16 @@
     0 3px 6px -3px rgb(0 0 0 / 0.1);
   [data-theme="dark"] & {
     box-shadow: none;
+  }
+}
+
+/* The sidebar opened over the page: the card's lift, a step deeper. */
+@utility shadow-overlay {
+  box-shadow:
+    0 10px 24px -6px rgb(0 0 0 / 0.16),
+    0 4px 8px -4px rgb(0 0 0 / 0.1);
+  [data-theme="dark"] & {
+    box-shadow: 0 10px 24px -6px rgb(0 0 0 / 0.6);
   }
 }
 
@@ -754,8 +789,9 @@
 }
 
 /* Moving between pages (`viewTransition` on the shell's links, the orders list and the order's
-   breadcrumb): the page cross-fades, the old one leaving faster than the new one arrives. The top
-   bar and the phone's tab bar are their own layers, so they hold still while the page changes. */
+   breadcrumb): the page cross-fades, the old one leaving faster than the new one arrives. The
+   header, the sidebar and the phone's tab bar are their own layers, so they hold still while the
+   page changes. */
 ::view-transition-old(root) {
   animation: ol-fade-out var(--motion-instant) var(--ease-leave) both;
 }
@@ -777,6 +813,9 @@
 }
 .vt-tab-bar {
   view-transition-name: tab-bar;
+}
+.vt-sidebar {
+  view-transition-name: sidebar;
 }
 /* An order's title travels from its row in the list to the order page's heading, and back. On a
    phone the page change is a cross-fade alone: the row and the heading sit too close for travel

@@ -11,7 +11,7 @@ too. The roles are ordered, so each one can do everything the roles before it ca
 | `viewer` | See orders, flows, approvals and the Commerce page; use the [assistant](/guides/assistant/) to read |
 | `approver` | Also approve and reject approvals, including through the assistant |
 | `operator` | Also start, cancel and restart orders, deliver events, create, edit and publish flows, run the stock review, add, verify and revoke customers' [tax exemption certificates](/guides/fulfillment/#tax-exemption), write the [product catalog](/guides/product-catalog/) (deleting a channel needs `admin`), and have the assistant do those and draft flow changes |
-| `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, republish the catalog, update the product index (**Update product index** under Inventory on the Commerce page), read the audit log, and install and manage plugins at **Plugins** (under **More**, Workspace) ([Installing a plugin](/guides/installing-plugins/)) |
+| `admin` | Also manage the team and API tokens, webhook subscriptions and integration keys, republish the catalog, update the product index (**Update product index** under Inventory on the Commerce page), read the audit log, and install and manage plugins at **Plugins** (in the sidebar's Workspace group) ([Installing a plugin](/guides/installing-plugins/)) |
 
 Every request checks the role on the server; the dashboard also hides controls a role can't use.
 
@@ -327,7 +327,7 @@ an app that uses both is connected twice. See [MCP server](/reference/mcp/) and
 
 ## Audit log
 
-Admins see security and business events at **Audit log** (under **More**, Workspace, and linked from the Team page, `/audit`), newest first,
+Admins see security and business events at **Audit log** (in the sidebar's Workspace group, and linked from the Team page, `/audit`), newest first,
 filtered by kind, and through [`GET /api/v1/audit-events`](/reference/rest-api/#audit-events).
 Each event records when, who acted, what they acted on, details and the address. The page names
 an API token by its name ("ERP sync (API token)"), and links an order, cart, customer or flow it

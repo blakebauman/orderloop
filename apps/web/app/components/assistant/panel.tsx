@@ -119,7 +119,7 @@ export function AssistantPanel() {
       className={cn(
         'z-30 overflow-hidden bg-card ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
         // Phones and tablets: a sheet over the page, between the top bar and the phone tab bar.
-        'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200',
+        'fixed inset-x-0 top-[var(--shell-h)] bottom-[var(--tabbar-h)] transition-[opacity,translate] duration-200 md:left-(--sidebar-width-icon)',
         open ? 'opacity-100' : 'pointer-events-none translate-x-full opacity-0',
         // With the keyboard up, it takes exactly the visible area above it, over the bars.
         'in-data-keyboard:z-50 in-data-keyboard:top-[var(--vvtop)] in-data-keyboard:bottom-auto in-data-keyboard:h-[var(--vvh)]',
