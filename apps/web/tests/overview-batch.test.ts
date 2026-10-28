@@ -1,13 +1,17 @@
 import { createDb } from '@orderloop/db';
 import { describe, expect, it, vi } from 'vitest';
 
-/** A D1 binding that records each statement's SQL and finds nothing. */
+/** A D1 binding that records each statement's SQL and parameters, and finds nothing. */
 const statements: string[] = [];
+const params = new Map<string, unknown[]>();
 const d1 = {
   prepare: (query: string) => {
     statements.push(query);
     const stmt = {
-      bind: () => stmt,
+      bind: (...values: unknown[]) => {
+        params.set(query, values);
+        return stmt;
+      },
       all: async () => ({ results: [], success: true, meta: {} }),
       raw: async () => [],
       first: async () => null,
@@ -59,6 +63,15 @@ describe('overview', () => {
       const cols = resultColumns(s);
       expect(cols, s).toEqual([...new Set(cols)]);
     }
+  });
+
+  it('counts a wait as overdue only once its deadline is past, as of the read', async () => {
+    statements.length = 0;
+    await overview(1_000);
+    const waits = statements.find((s) => s.includes('min("waiting_since")'));
+    // A null deadline (a timer) compares as null, which the sum skips: never overdue.
+    expect(waits).toMatch(/coalesce\(sum\("waiting_due" <= \?\), 0\)/);
+    expect(params.get(waits!)).toContain(1_000);
   });
 
   it("ties each step's latest reason to its own flow and step", async () => {

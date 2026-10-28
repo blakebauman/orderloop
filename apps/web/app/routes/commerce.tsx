@@ -91,6 +91,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           event: w.event!,
           nodeId: w.nodeId,
           since: w.since,
+          due: w.deadline ?? null,
         };
       }),
   );
@@ -920,7 +921,12 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
           </span>
         </Link>
         <p id={waitId} className="text-muted-foreground">
-          <WaitingAt at={`Waits for ${eventWaiting(e.event)}`} since={e.since} on={null} />
+          <WaitingAt
+            at={`Waits for ${eventWaiting(e.event)}`}
+            since={e.since}
+            on={null}
+            due={e.due}
+          />
         </p>
         {e.customer || e.amount ? (
           <p className="text-muted-foreground text-xs tabular">

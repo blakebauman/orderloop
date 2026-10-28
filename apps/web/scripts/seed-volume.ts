@@ -20,7 +20,7 @@
  * deletes exactly those. The same `--seed` gives the same data relative to today.
  */
 
-import { type Flow, TEMPLATES } from '@orderloop/core';
+import { durationMs, type Flow, TEMPLATES, withDefaults } from '@orderloop/core';
 import { createDb, seedFlows } from '@orderloop/db';
 import { DAY, failWith, HOUR, inserts, localEnv, MIN, rng, run } from './seed-lib';
 
@@ -403,6 +403,7 @@ async function generate(db: D1Database) {
     let waitingOn: string | null = null;
     let waitingFor: string | null = null;
     let waitingSince: number | null = null;
+    let waitingDue: number | null = null;
     let stoppedAt: string | null = null;
     let reason: string | null = null;
     let stopIndex = steps.length; // steps that ran, for node_runs
@@ -416,6 +417,12 @@ async function generate(db: D1Database) {
       if (r.chance(0.2) && age > DAY) waitingSince = createdAt + Math.floor(r.next() * (age - DAY));
       updatedAt = waitingSince;
       const cfg = (w.config ?? {}) as Record<string, unknown>;
+      // An approval or event wait is due when its step times out, as the engine sets it (unscaled,
+      // seven days when the step has none); the stale share above can run past it, so the overview
+      // has overdue waits as well as long ones on time. A timer has no deadline.
+      if (w.type !== 'control.wait')
+        waitingDue =
+          waitingSince + durationMs(String(withDefaults(w.type, cfg).timeout || '7 days'));
       if (w.type === 'control.approval') {
         waitingFor = `person:${String(cfg.assignee ?? '')}`;
         waitingOn = `${w.label} for ${title}`;
@@ -516,6 +523,7 @@ async function generate(db: D1Database) {
       waitingOn,
       waitingAt,
       waitingSince,
+      waitingDue,
       waitingFor,
       stoppedAt,
       reason,
@@ -725,6 +733,7 @@ async function generate(db: D1Database) {
         'waiting_on',
         'waiting_at',
         'waiting_since',
+        'waiting_due',
         'waiting_for',
         'stopped_at',
         'reason',

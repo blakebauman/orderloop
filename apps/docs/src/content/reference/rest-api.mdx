@@ -138,7 +138,8 @@ with a different body returns `422` and starts nothing.
 leading `#`, as the app writes an order's reference, is ignored), title, customer id or name, contact email
 or external id. Each row has `id`, `model`, `channel`, `externalId`, `contactEmail`, `status`, `title`, `flowId`, `flowVersion`, `instanceId`,
 `generation`, `customerId`, `currency`, `total`, `waitingOn` (the open waits' titles),
-`waitingAt` (the labels of the steps holding them), `waitingSince`, `waitingFor` (what each wait is on:
+`waitingAt` (the labels of the steps holding them), `waitingSince`, `waitingDue` (when the soonest open
+wait times out, its step's deadline; `null` for a timer, which has none), `waitingFor` (what each wait is on:
 `person:<role>`, `event:<name>` or `timer`, joined with ` · `), `stoppedAt` and `reason` (for an order
 that failed, rolled back, was declined or cancelled: where it stopped and why), `createdAt` and
 `updatedAt` (epoch milliseconds).

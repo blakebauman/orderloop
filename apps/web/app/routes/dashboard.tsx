@@ -563,13 +563,11 @@ function RecentRow({
   );
 }
 
-/** Orders waiting longer than this are drawn in the wait colour: worth a look. */
-const STALE_MS = 24 * 60 * 60 * 1000;
-
 /**
  * Where open orders are waiting, along each flow: its waiting steps in the order the flow runs
- * them, each with how many wait there, the oldest wait and what it waits on. Each step opens those
- * orders, longest-waiting first.
+ * them, each with how many wait there, how many are overdue, the oldest wait and what it waits on.
+ * Only the overdue count takes the wait colour: a long wait that is still within its step's
+ * deadline is on time. Each step opens those orders, longest-waiting first.
  */
 function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number }) {
   const now = useNow(30_000);
@@ -581,7 +579,7 @@ function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number
           to="/orders?status=waiting&sort=waiting"
           className="hit-area text-link text-xs hover:underline"
         >
-          Longest first
+          See all
         </Link>
       }
     >
@@ -623,11 +621,11 @@ function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number
                           <span className="truncate text-sm">{s.step}</span>
                         </span>
                         <span className="block truncate text-muted-foreground text-xs">
-                          {age !== null ? (
-                            <span className={cn(age > STALE_MS && 'font-medium text-wait')}>
-                              oldest {duration(age)}
-                            </span>
+                          {s.overdue ? (
+                            <span className="font-medium text-wait">{s.overdue} overdue</span>
                           ) : null}
+                          {s.overdue && (age !== null || s.on) ? ' · ' : null}
+                          {age !== null ? `oldest ${duration(age)}` : null}
                           {age !== null && s.on ? ' · ' : null}
                           {s.on ? `on ${s.on}` : null}
                         </span>
@@ -684,7 +682,10 @@ function EndedBadly({ steps }: { steps: StoppedStep[] }) {
                     <span className="font-medium">{s.step}</span>
                     <span className="text-muted-foreground"> · {s.name}</span>
                   </Link>
-                  <span className="shrink-0 font-semibold text-bad tabular">{s.n}</span>
+                  <span className="shrink-0 text-muted-foreground text-xs tabular">
+                    <span className="font-semibold text-bad text-sm">{s.n}</span>{' '}
+                    {s.n === 1 ? 'order' : 'orders'}
+                  </span>
                 </div>
                 {s.reason ? (
                   <p className="truncate text-muted-foreground text-xs" title={s.reason}>

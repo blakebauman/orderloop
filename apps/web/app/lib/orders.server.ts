@@ -178,7 +178,7 @@ export async function overview(now = Date.now()) {
         .from(approvals)
         .innerJoin(orders, eq(orders.id, approvals.orderId))
         .where(and(declinedWhere, gte(orders.updatedAt, dayAgo))),
-      // Where open orders wait, by flow and step, with the oldest wait.
+      // Where open orders wait, by flow and step, with the oldest wait and how many are overdue.
       d
         .select({
           flowId: orders.flowId,
@@ -186,6 +186,7 @@ export async function overview(now = Date.now()) {
           for: orders.waitingFor,
           n: sql<number>`count(*)`,
           oldest: sql<number | null>`min(${orders.waitingSince})`,
+          overdue: sql<number>`coalesce(sum(${orders.waitingDue} <= ${now}), 0)`,
         })
         .from(orders)
         .where(eq(orders.status, 'waiting'))

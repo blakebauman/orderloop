@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { stoppedSteps, waitingOn, waitTrails } from '../app/lib/where';
+import { isOverdue, stoppedSteps, waitingOn, waitTrails } from '../app/lib/where';
 
 const FLOWS = [
   { id: 'b2b', name: 'B2B order', steps: ['Credit check', 'Sales approval', 'Ship', 'Invoice'] },
   { id: 'web', name: 'Web order', steps: ['Charge', 'Fulfil'] },
 ];
+
+describe('isOverdue', () => {
+  it('is overdue only once the deadline has passed, and never without one', () => {
+    expect(isOverdue(1_000, 999)).toBe(false);
+    expect(isOverdue(1_000, 1_000)).toBe(true);
+    expect(isOverdue(1_000, 5_000)).toBe(true);
+    // A timer has no deadline: however long it has run, it is on time.
+    expect(isOverdue(null, Number.MAX_SAFE_INTEGER)).toBe(false);
+    expect(isOverdue(undefined, Number.MAX_SAFE_INTEGER)).toBe(false);
+  });
+});
 
 describe('waitingOn', () => {
   it('names a person by role (or as an approver), an outside event or a timer', () => {
@@ -20,10 +31,17 @@ describe('waitTrails', () => {
   it('lays waits along each flow in step order, busiest flow first, merging a step', () => {
     const trails = waitTrails(
       [
-        { flowId: 'web', at: 'Fulfil', for: 'event:shipped', n: 1, oldest: 50 },
-        { flowId: 'b2b', at: 'Ship', for: 'timer', n: 2, oldest: 30 },
-        { flowId: 'b2b', at: 'Sales approval', for: 'person:finance', n: 1, oldest: 20 },
-        { flowId: 'b2b', at: 'Sales approval', for: 'person:', n: 2, oldest: 10 },
+        { flowId: 'web', at: 'Fulfil', for: 'event:shipped', n: 1, oldest: 50, overdue: 0 },
+        { flowId: 'b2b', at: 'Ship', for: 'timer', n: 2, oldest: 30, overdue: 0 },
+        {
+          flowId: 'b2b',
+          at: 'Sales approval',
+          for: 'person:finance',
+          n: 1,
+          oldest: 20,
+          overdue: 1,
+        },
+        { flowId: 'b2b', at: 'Sales approval', for: 'person:', n: 2, oldest: 10, overdue: 1 },
       ],
       FLOWS,
     );
@@ -32,16 +50,16 @@ describe('waitTrails', () => {
       ['Web order', 1],
     ]);
     expect(trails[0]?.steps).toEqual([
-      { step: 'Sales approval', n: 3, oldest: 10, on: 'Finance or an approver' },
-      { step: 'Ship', n: 2, oldest: 30, on: 'a timer' },
+      { step: 'Sales approval', n: 3, oldest: 10, overdue: 2, on: 'Finance or an approver' },
+      { step: 'Ship', n: 2, oldest: 30, overdue: 0, on: 'a timer' },
     ]);
   });
 
   it('keeps a flow or step it cannot place, last in its flow', () => {
     const [trail] = waitTrails(
       [
-        { flowId: 'gone', at: null, for: null, n: 1, oldest: null },
-        { flowId: 'gone', at: 'Pack', for: null, n: 1, oldest: 5 },
+        { flowId: 'gone', at: null, for: null, n: 1, oldest: null, overdue: 0 },
+        { flowId: 'gone', at: 'Pack', for: null, n: 1, oldest: 5, overdue: 0 },
       ],
       FLOWS,
     );

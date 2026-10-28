@@ -77,6 +77,7 @@ D1 holds indexes and the back office. An order's live run state is not in D1: it
 | `0057_product_index_lease.sql` | `product_index_lease`: the one lease a product index reindex holds while it runs |
 | `0058_products_search.sql` | `products_search`: an external-content FTS5 index over `products.sku` and `name`, built from the rows there (`rebuild`) and kept by triggers on `products` |
 | `0059_tax_certificates.sql` | `tax_certificates` and its index `tax_certificates_customer (customer_id, created_at)`: customers' tax exemption certificates |
+| `0060_order_waiting_due.sql` | `orders.waiting_due` (nullable, ms): when the order's soonest open wait times out, so lists can mark an overdue wait. Null for a timer and on rows not re-indexed since |
 
 Apply them with `pnpm db:migrate:local`, or `pnpm --filter @orderloop/web db:migrate:remote` before
 deploying code that needs them. The engine's tests apply the same directory to their D1 on start.
@@ -107,7 +108,7 @@ engine, `ensureSeeded` in the web app; see [Templates](https://docs.orderloop.ap
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `waiting_for` (what the open waits are on: `person:<role>`, `event:<name>` or `timer`, joined with ` · `), `stopped_at` and `reason` (for an order that failed, rolled back, was declined or cancelled: the failed steps' labels and why), `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `erased_at` (set by `eraseDataSubject`; null otherwise), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
+| `orders` | The orders index for lists, filters and the dashboard. Written by `startOrder` and then by the agent's `syncIndex` | `id`, `model`, `channel`, `external_id`, `contact_email`, `status`, `title`, `flow_id`, `flow_version`, `instance_id`, `generation`, `customer_id`, `currency`, `total`, `waiting_on`, `waiting_at`, `waiting_since`, `waiting_due` (the soonest open wait's deadline, as the Workflow set it with `TIME_SCALE` applied; null when none has one, so a timer is never overdue), `waiting_for` (what the open waits are on: `person:<role>`, `event:<name>` or `timer`, joined with ` · `), `stopped_at` and `reason` (for an order that failed, rolled back, was declined or cancelled: the failed steps' labels and why), `idempotency_key`, `idempotency_fingerprint`, `fx_rate` (the order's rate, set when it is priced), `erased_at` (set by `eraseDataSubject`; null otherwise), `started_by` (the principal id that started it: set by the web app for New order, a demo scenario, an editor test run, a restart and `POST /api/v1/orders`, and by the engine for A2A `place_order`; null for channel webhooks, Shopify, EDI, email intake and the stock review; from `StartOrderInput.startedBy`, never a request body, and not in the fingerprint) |
 | `approvals` | One row per approval wait, for the approvals inbox | `order_id`, `node_id`, `event_type`, `title`, `assignee`, `amount`, `status`, `decided_by`, `note` |
 
 Indexes: `orders_status (status, updated_at)`, `orders_model (model, updated_at)`,
@@ -182,7 +183,8 @@ Chart over Recharts), colored with the existing Ledger tokens.
 The overview (`overview` in `apps/web/app/lib/orders.server.ts`, one D1 batch) reads the orders
 index: open counts by status; orders that ended in the last 24 hours by status, with the completed
 total and how many were declined; open waits grouped by `flow_id`, `waiting_at` and
-`waiting_for` with the oldest `waiting_since`; and the last 7 days' failed and rolled-back orders
+`waiting_for` with the oldest `waiting_since` and how many are overdue (`waiting_due` at or before the
+read); and the last 7 days' failed and rolled-back orders
 grouped by `flow_id` and `stopped_at`, with the latest `reason`. `waitTrails` and `stoppedSteps`
 (`apps/web/app/lib/where.ts`) lay those along each flow's steps, ordered as the flow's published
 version draws them (`flowSteps` in `apps/web/app/lib/flows.server.ts`). Its links open the orders

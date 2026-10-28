@@ -165,6 +165,8 @@ export class OrderAgent extends Agent<Env, State> {
     const timers = s.waits.length
       ? []
       : Object.entries(s.nodes).filter(([, r]) => r.status === 'waiting');
+    // When the soonest open wait times out. A timer has no deadline, so it is never overdue.
+    const dues = s.waits.flatMap((w) => (w.deadline ? [w.deadline] : []));
     const ended = ['failed', 'rolled_back', 'declined', 'cancelled'].includes(s.status);
     // Where an order that ended badly stopped: the steps that failed, or else the end it reached
     // (an end step can fail the order and roll it back, e.g. "Out of stock").
@@ -191,6 +193,7 @@ export class OrderAgent extends Agent<Env, State> {
         : timers.length
           ? Math.min(...timers.map(([, r]) => r.startedAt ?? s.updatedAt))
           : null,
+      waitingDue: dues.length ? Math.min(...dues) : null,
       waitingFor:
         [
           ...s.waits.map((w) =>

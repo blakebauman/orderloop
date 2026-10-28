@@ -145,6 +145,12 @@ no green button, no green decoration.
 **The One Meaning Rule.** A status colour is never used decoratively. If it isn't a status, it is
 grey.
 
+**The Overdue Rule.** On a wait's age or count, `wait` means overdue: past the waiting step's own
+timeout or deadline (the index's `waiting_due`, `isOverdue` in `lib/where.ts`), and the word
+"overdue" sits beside it. A wait still on time reads in the normal or muted colour however long it
+has run, and a step with no deadline (a timer) is never overdue. The Waiting badge and dot keep
+`wait`: that is the status, not an age.
+
 ## Typography
 
 **Body Font:** Inter Variable (with the system sans)

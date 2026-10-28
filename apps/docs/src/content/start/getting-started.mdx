@@ -28,9 +28,11 @@ simulates, and **Edit first** opens one in the New order form (without its simul
 Without the demo data the panel is hidden; start an order from **New order** instead. Either way (operators only), the order page opens. The flow graph colours each node as it runs,
 waits and finishes, and the timeline records every step. The overview keeps itself current while it's open. Its top line counts the orders open now and
 those that ended in the last 24 hours, by outcome. Below **Needs a decision**, **Where orders are
-waiting** lays each flow's open waits along its steps, with how many wait at each, for how long
-and on whom (a person, the outside world, a timer). **Ended badly this week** lists the steps where
-orders failed or rolled back, with the latest reason. Every figure opens the matching orders.
+waiting** lays each flow's open waits along its steps, with how many wait at each, how many are
+overdue (past the step's own timeout, so the step should have moved on), for how long and on whom
+(a person, the outside world, a timer). Only overdue waits are marked; a long wait still within its
+step's timeout is on time, and a timer is never overdue. **Ended badly this week** lists the steps
+where orders failed or rolled back, how many orders at each, with the latest reason. Every figure opens the matching orders.
 
 The **Performance** page shows, in USD, how the business did over the last 7, 30 or 90 days:
 revenue, orders ended and money collected and refunded day by day, then completion by model (as
