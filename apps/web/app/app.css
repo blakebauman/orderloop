@@ -453,7 +453,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   background: var(--muted);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0.05em 0.3em;
 }
 .ol-prose table {

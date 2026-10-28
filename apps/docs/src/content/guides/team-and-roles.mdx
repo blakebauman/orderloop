@@ -60,21 +60,23 @@ counted against the same limit as other step-ups and audited as `auth.step_up_fa
 - **Add person:** email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
   privately.
-- **Role:** change and save. You can't lower your own role. Lowering someone's role revokes the API
-  tokens they made with a role above their new one; their [connected apps](#connected-apps) follow
+- **Role:** pick a new one and **Save** appears beside it. You can't lower your own role. Lowering
+  someone's role revokes the API tokens they made with a role above their new one; their [connected apps](#connected-apps) follow
   the new role on their own.
-- **Reset password:** after you confirm, gives the person a new temporary password, signs them
-  out everywhere, disconnects their [connected apps](#connected-apps) and removes their
-  [passkeys](#passkeys), since whoever had the old password could have set those up.
-- **Disable / Enable:** after you confirm, a disabled person can't sign in, their sessions end, their
-  connected apps are disconnected and the API tokens they made are revoked. Enabling them again
-  brings none of these back. You can't disable yourself.
-- **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
-  confirm, it turns
-  their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
-  can set it up again. It also removes their [passkeys](#passkeys), in case the lost device holds
-  one, and ends their sessions and connected apps, which that device may still be signed in to. It
-  applies even if they had passkeys but no authenticator app. You can't reset your own.
+- **Actions** (the **⋯** button at the end of a person's row) holds the rest, each confirmed under
+  the row before it happens:
+  - **Reset password:** after you confirm, gives the person a new temporary password, signs them
+    out everywhere, disconnects their [connected apps](#connected-apps) and removes their
+    [passkeys](#passkeys), since whoever had the old password could have set those up.
+  - **Disable / Enable:** after you confirm, a disabled person can't sign in, their sessions end, their
+    connected apps are disconnected and the API tokens they made are revoked. Enabling them again
+    brings none of these back. You can't disable yourself.
+  - **Reset two-factor:** for someone who has lost their phone and their recovery codes. After you
+    confirm, it turns
+    their [two-factor sign-in](#two-factor-sign-in) off, so they sign in with their password alone and
+    can set it up again. It also removes their [passkeys](#passkeys), in case the lost device holds
+    one, and ends their sessions and connected apps, which that device may still be signed in to. It
+    applies even if they had passkeys but no authenticator app. You can't reset your own.
 - The last active admin can't be demoted or disabled, so someone can always manage the team.
 - **Single sign-on:** when your identity provider is connected, a section for who may join and
   whether it is the only way in; see [Single sign-on](#single-sign-on).

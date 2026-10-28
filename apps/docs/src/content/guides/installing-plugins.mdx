@@ -15,7 +15,8 @@ The page is admin-only: **Plugins**, under **More** in the Workspace group.
 - The file is a `.olplugin`, at most 5 MiB, signed by its publisher.
 - The workspace must trust that publisher. Trusted publishers are set by the workspace administrator
   as part of the workspace's setup; you can't add one from the page. The page names them under
-  **Install from a file**, and if none is set the section isn't shown.
+  **Install from a file**; if none is set, the section says installing from a file is off and
+  who can change that.
 - A plugin the workspace already has from its setup can't be replaced by a file with the same id.
 - A plugin installed from a file can't ask OrderLoop to act for it (open carts, start or cancel
   orders): only a plugin from the workspace's setup can be allowed to. A file whose plugin asks for

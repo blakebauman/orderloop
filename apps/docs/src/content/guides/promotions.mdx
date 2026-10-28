@@ -9,7 +9,8 @@ by whoever starts it, for example through the REST API); when it runs, its flow'
 
 ## Creating codes
 
-Operators manage codes on **Promotions** (linked from the Pricing section of **Commerce**). A code
+Operators manage codes on **Promotions** (linked from the Pricing section of **Commerce**);
+**New promotion** opens the form for a new one. A code
 is letters, digits, dashes and underscores, up to 32, and is matched however it's typed
 (` welcome15 ` is `WELCOME15`). Each code takes off one of:
 
@@ -27,8 +28,9 @@ and can be limited to:
 - **Uses in all** and **uses per customer**: each order that keeps a code uses it once.
 - **An end date**.
 
-**Pause** stops a code applying to new orders; **Resume** lets it apply again. The **Used**
-column counts the orders that have used it.
+**Pause** stops a code applying to new orders; **Resume** lets it apply again. A code past its end
+date is marked **Ended**, paused or not, since resuming it changes nothing. A code for one customer
+names them, linked to their page. The **Used** column counts the orders that have used it.
 
 ## In a flow
 

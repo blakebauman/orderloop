@@ -9,12 +9,16 @@ import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
+import { Fragment, type ReactNode } from 'react';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { ToneBadge } from '~/components/status';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { dateTime, money } from '~/lib/format';
+import { customerNames } from '~/lib/orders.server';
+import { promotionState } from '~/lib/promotions';
 import {
   createPromotion,
   listPromotions,
@@ -28,7 +32,13 @@ export const meta = () => [{ title: 'Promotions · OrderLoop' }];
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  return { promotions: await listPromotions() };
+  const promotions = await listPromotions();
+  // One clock for the page, so the server and the hydrating browser agree on what has ended.
+  return {
+    promotions,
+    customers: await customerNames(promotions.map((p) => p.customerId)),
+    now: Date.now(),
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -68,10 +78,13 @@ const describe = (p: { kind: string; value: number; currency: string | null }) =
       : 'Free shipping';
 
 export default function Promotions() {
-  const { promotions } = useLoaderData<typeof loader>();
+  const { promotions, customers, now } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state === 'submitting';
   const canOperate = useCan('operator');
+  // A code added closes the form; a refusal keeps it open with what was typed. Nothing else on the
+  // page can be submitted while the sheet is open, so an `ok` then is the new code.
+  const sheet = useFormSheet(result, (r) => 'ok' in r);
   return (
     <>
       <PageHeader
@@ -82,6 +95,16 @@ export default function Promotions() {
           </Link>
         }
         subtitle="Codes buyers and staff enter on a cart. A flow applies them with an Apply promotions step, after Price lines and before Calculate tax."
+        actions={
+          canOperate ? (
+            <FormSheet open={sheet.open} onOpenChange={sheet.onOpenChange} label="New promotion">
+              <NewPromotion
+                error={sheet.result && 'error' in sheet.result ? sheet.result.error : null}
+                busy={busy}
+              />
+            </FormSheet>
+          ) : null
+        }
       />
       <Body className="grid gap-4">
         <Section title="Codes" flush>
@@ -101,13 +124,28 @@ export default function Promotions() {
               <TableBody>
                 {promotions.map((p) => {
                   const paused = p.status === 'paused';
+                  const state = promotionState(p, now);
+                  const limits: ReactNode[] = [
+                    p.minSubtotal ? `over ${money(p.minSubtotal)}` : null,
+                    p.skus ? `${JSON.parse(p.skus).length} SKUs` : null,
+                    p.customerId ? (
+                      <Link to={`/customers/${p.customerId}`} className="text-link hover:underline">
+                        {customers[p.customerId] ?? p.customerId}
+                      </Link>
+                    ) : null,
+                    p.maxRedemptions ? `${p.maxRedemptions} uses` : null,
+                    p.perCustomerLimit ? `${p.perCustomerLimit} per customer` : null,
+                    p.validTo
+                      ? `${state === 'ended' ? 'ended' : 'until'} ${dateTime(p.validTo, 'UTC')}`
+                      : null,
+                  ].filter(Boolean);
                   return (
-                    <Tr key={p.id} className={cn(paused && 'text-muted-foreground')}>
+                    <Tr key={p.id} className={cn(state !== 'active' && 'text-muted-foreground')}>
                       <Td>
                         <span className="font-mono">{p.code}</span>
-                        {paused ? (
+                        {state !== 'active' ? (
                           <span className="ml-2 align-[0.0625em]">
-                            <ToneBadge tone="idle" label="Paused" />
+                            <ToneBadge tone="idle" label={state === 'ended' ? 'Ended' : 'Paused'} />
                           </span>
                         ) : null}
                         {p.name ? (
@@ -116,16 +154,15 @@ export default function Promotions() {
                       </Td>
                       <Td label="Takes off">{describe(p)}</Td>
                       <Td label="Limits" className="text-muted-foreground text-xs">
-                        {[
-                          p.minSubtotal ? `over ${money(p.minSubtotal)}` : null,
-                          p.skus ? `${JSON.parse(p.skus).length} SKUs` : null,
-                          p.customerId ? `customer ${p.customerId}` : null,
-                          p.maxRedemptions ? `${p.maxRedemptions} uses` : null,
-                          p.perCustomerLimit ? `${p.perCustomerLimit} per customer` : null,
-                          p.validTo ? `until ${dateTime(p.validTo, 'UTC')}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ') || 'None'}
+                        {limits.length
+                          ? limits.map((l, i) => (
+                              // The limits keep a fixed order, so the index is a stable key.
+                              <Fragment key={i}>
+                                {i ? ' · ' : null}
+                                {l}
+                              </Fragment>
+                            ))
+                          : 'None'}
                       </Td>
                       <Td numeric label="Used">
                         {p.redeemed}
@@ -160,74 +197,74 @@ export default function Promotions() {
             <Empty>No promotions yet.</Empty>
           )}
         </Section>
-        {canOperate ? (
-          <Section title="New promotion">
-            <Form method="post" className="grid max-w-xl gap-3 text-sm">
-              {[
-                ['code', 'Code', 'WELCOME15'],
-                ['name', 'Name (optional)', 'Welcome offer'],
-              ].map(([k, label, ph]) => (
-                <div key={k} className="grid gap-1">
-                  <label htmlFor={`promo-${k}`} className="caption">
-                    {label}
-                  </label>
-                  <Input id={`promo-${k}`} name={k} placeholder={ph} className="h-8" />
-                </div>
-              ))}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1">
-                  <label htmlFor="promo-kind" className="caption">
-                    Takes off
-                  </label>
-                  <NativeSelect id="promo-kind" name="kind" className="h-8">
-                    <NativeSelectOption value="pct">A percentage</NativeSelectOption>
-                    <NativeSelectOption value="amount">
-                      An amount ({BASE_CURRENCY})
-                    </NativeSelectOption>
-                    <NativeSelectOption value="free_shipping">Shipping</NativeSelectOption>
-                  </NativeSelect>
-                </div>
-                <div className="grid gap-1">
-                  <label htmlFor="promo-value" className="caption">
-                    Percent or amount
-                  </label>
-                  <Input id="promo-value" name="value" inputMode="decimal" className="h-8" />
-                </div>
-              </div>
-              {[
-                ['minSubtotal', `Minimum subtotal (${BASE_CURRENCY}, optional)`],
-                ['skus', 'Only these SKUs (optional, comma separated)'],
-                ['customerId', 'Only this customer id (optional)'],
-                ['maxRedemptions', 'Uses in all (optional)'],
-                ['perCustomerLimit', 'Uses per customer (optional)'],
-              ].map(([k, label]) => (
-                <div key={k} className="grid gap-1">
-                  <label htmlFor={`promo-${k}`} className="caption">
-                    {label}
-                  </label>
-                  <Input id={`promo-${k}`} name={k} className="h-8" />
-                </div>
-              ))}
-              <div className="grid gap-1">
-                <label htmlFor="promo-validTo" className="caption">
-                  Ends on (optional)
-                </label>
-                <Input id="promo-validTo" name="validTo" type="date" className="h-8 w-48" />
-              </div>
-              {result && 'error' in result ? (
-                <p role="alert" className="text-bad">
-                  {result.error}
-                </p>
-              ) : null}
-              <div>
-                <Button type="submit" size="sm" disabled={busy}>
-                  Add promotion
-                </Button>
-              </div>
-            </Form>
-          </Section>
-        ) : null}
       </Body>
     </>
+  );
+}
+
+/** The fields of a new code; the action checks them (`promotionFrom`). */
+function NewPromotion({ error, busy }: { error?: string | null; busy: boolean }) {
+  return (
+    <Form method="post" className="grid gap-3 text-sm">
+      {[
+        ['code', 'Code', 'WELCOME15'],
+        ['name', 'Name (optional)', 'Welcome offer'],
+      ].map(([k, label, ph]) => (
+        <div key={k} className="grid gap-1">
+          <label htmlFor={`promo-${k}`} className="caption">
+            {label}
+          </label>
+          <Input id={`promo-${k}`} name={k} placeholder={ph} className="h-8" />
+        </div>
+      ))}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-1">
+          <label htmlFor="promo-kind" className="caption">
+            Takes off
+          </label>
+          <NativeSelect id="promo-kind" name="kind" className="h-8">
+            <NativeSelectOption value="pct">A percentage</NativeSelectOption>
+            <NativeSelectOption value="amount">An amount ({BASE_CURRENCY})</NativeSelectOption>
+            <NativeSelectOption value="free_shipping">Shipping</NativeSelectOption>
+          </NativeSelect>
+        </div>
+        <div className="grid gap-1">
+          <label htmlFor="promo-value" className="caption">
+            Percent or amount
+          </label>
+          <Input id="promo-value" name="value" inputMode="decimal" className="h-8" />
+        </div>
+      </div>
+      {[
+        ['minSubtotal', `Minimum subtotal (${BASE_CURRENCY}, optional)`],
+        ['skus', 'Only these SKUs (optional, comma separated)'],
+        ['customerId', 'Only this customer id (optional)'],
+        ['maxRedemptions', 'Uses in all (optional)'],
+        ['perCustomerLimit', 'Uses per customer (optional)'],
+      ].map(([k, label]) => (
+        <div key={k} className="grid gap-1">
+          <label htmlFor={`promo-${k}`} className="caption">
+            {label}
+          </label>
+          <Input id={`promo-${k}`} name={k} className="h-8" />
+        </div>
+      ))}
+      <div className="grid gap-1">
+        <label htmlFor="promo-validTo" className="caption">
+          Ends on (optional)
+        </label>
+        <Input id="promo-validTo" name="validTo" type="date" className="h-8 w-48" />
+      </div>
+      {error ? (
+        <p role="alert" className="text-bad">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button type="submit" size="sm" disabled={busy}>
+          Add promotion
+        </Button>
+      </div>
+    </Form>
   );
 }

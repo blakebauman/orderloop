@@ -359,6 +359,15 @@ for code and data blocks only.
   asked. Its actions are children, so it sits inside the caller's form.
 - **Sheet** (`packages/ui/src/sheet.tsx`): from the bottom on a phone, capped at 85dvh and scrolling
   inside, with its corners rounded at the top; from the side otherwise. It pads for the safe areas.
+- **Form sheet** (`components/form-sheet.tsx`): a list page's create form behind one primary
+  "New …" button (a `Plus` and the noun) in the page or section header, opened in a Sheet 28rem
+  wide. The form mounts only while open, so closing clears it; a refusal keeps it open with the
+  error under the fields; success closes it (or the page moves on). Never a create form left open
+  under a list.
+- **Row actions** (Team's people): a row's secondary actions in one ghost `⋯` menu at its end,
+  labelled "Actions for <name>", so every row has the same shape. Items that can't be taken back end
+  in "…" and open a Confirm under the row; the destructive one sits below a separator. On a phone
+  the menu sits in the row's top corner. Save beside a row's field shows only once it changes.
 - **Share** (`components/share-button.tsx`): the system share sheet where there is one, else Copy
   link.
 - **Board column** (`ColumnShell` in `routes/catalog.tsx`): a card per state, headed by a section
