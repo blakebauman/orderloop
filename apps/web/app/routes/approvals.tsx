@@ -41,6 +41,7 @@ import { assigneeLabel, count, money, orderRef, outcomeLabel, plural, until } fr
 import { listApprovals, pendingApprovalCounts } from '~/lib/orders.server';
 import { approvalSeparation } from '~/lib/settings.server';
 import { pageShortcut } from '~/lib/shortcuts';
+import { useArrivals } from '~/lib/use-arrivals';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
 import type { Route } from './+types/approvals';
@@ -206,10 +207,12 @@ export default function Approvals() {
     useLoaderData<typeof loader>();
   const canApprove = useCan('approver');
   const [params, setParams] = useSearchParams();
-  const shown = useStableRows(
-    rows,
-    status,
-    `${status}:${recorded ? 'recorded' : ''}:${params.get('after') ?? ''}`,
+  const view = `${status}:${recorded ? 'recorded' : ''}:${params.get('after') ?? ''}`;
+  const shown = useStableRows(rows, status, view);
+  // Approvals that join while the inbox is open fade in at the end; another view is a new list.
+  const arrived = useArrivals(
+    shown.map(({ r }) => r.id),
+    { scope: view },
   );
   // The last context seen for each row, so one that has left the queue keeps its group and can
   // still say what it was about.
@@ -259,6 +262,11 @@ export default function Approvals() {
       )
     : [];
   const byId = new Map(queue.map((s) => [s.r.id, s]));
+  // A group that forms while the inbox is open fades in as one; its rows then don't fade again.
+  const groupArrived = useArrivals(
+    groups.map((g) => g.key),
+    { scope: view },
+  );
   // Whether each row can join its group's batch: the same refusals its own buttons keep. A row
   // that is resolved has nothing to say about it ('').
   const why: Record<string, string | null> = {};
@@ -333,6 +341,7 @@ export default function Approvals() {
 
   const rowProps = (s: Shown, group?: ApprovalGroup) => ({
     r: s.r,
+    arrived: arrived(s.r.id) && !(group && groupArrived(group.key)),
     ctx: ctxs[s.r.id],
     group,
     refused: refused[s.r.id],
@@ -396,7 +405,14 @@ export default function Approvals() {
             <div ref={queueRef} data-queue className={pending ? 'space-y-4' : undefined}>
               {pending ? (
                 groups.map((g) => (
-                  <Group key={g.key} g={g} canApprove={canApprove} why={why} tracking={tracking}>
+                  <Group
+                    key={g.key}
+                    g={g}
+                    arrived={groupArrived(g.key)}
+                    canApprove={canApprove}
+                    why={why}
+                    tracking={tracking}
+                  >
                     {(select) =>
                       g.ids.map((id) => {
                         const s = byId.get(id)!;
@@ -474,12 +490,15 @@ type Select =
  */
 function Group({
   g,
+  arrived,
   canApprove,
   why,
   tracking,
   children,
 }: {
   g: ApprovalGroup;
+  /** Formed while the inbox was open: it fades in. */
+  arrived?: boolean;
   canApprove: boolean;
   /** Per row: null when it can join a batch, else why not ('' for a row with nothing to say). */
   why: Record<string, string | null>;
@@ -593,7 +612,10 @@ function Group({
   const left = batch ? Math.max(0, Math.ceil((batch.ends - now) / 1000)) : 0;
 
   return (
-    <section aria-labelledby={headingId} className="card overflow-hidden">
+    <section
+      aria-labelledby={headingId}
+      className={cn('card overflow-hidden', arrived && 'animate-arrive')}
+    >
       <div ref={barRef} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
         {batching && !batch ? (
           <input
@@ -788,6 +810,7 @@ function Row({
   refused,
   noRun,
   gone,
+  arrived,
   tracking,
   select,
 }: {
@@ -801,6 +824,8 @@ function Row({
   noRun?: boolean;
   /** No longer in the pending queue (escalated or decided elsewhere); kept in place briefly. */
   gone?: boolean;
+  /** Joined the list while it was open: it fades in. */
+  arrived?: boolean;
   tracking: Tracking;
   /** Its part in the group's batch. */
   select?: Select;
@@ -872,7 +897,12 @@ function Row({
       aria-labelledby={titleId}
       aria-describedby={reason ? reasonId : undefined}
       aria-keyshortcuts={decidable && !refused ? (tick ? 'A R Z X' : 'A R Z') : undefined}
-      className={cn('flex items-start gap-3 px-4 py-3', gone && 'bg-muted/40')}
+      className={cn(
+        // A row that resolves holds its place and fades to the resolved tint, never jumping away.
+        'flex items-start gap-3 px-4 py-3 transition-[background-color] duration-(--motion-move)',
+        gone && 'bg-muted/40',
+        arrived && 'animate-arrive',
+      )}
     >
       {select && ('on' in select || 'why' in select) ? (
         tick ? (
@@ -901,13 +931,18 @@ function Row({
             {group ? (
               <Link
                 to={`/orders/${r.orderId}`}
+                viewTransition
                 className="font-medium font-mono text-sm hover:underline"
               >
                 {orderRef(r.orderId)}
               </Link>
             ) : (
               <>
-                <Link to={`/orders/${r.orderId}`} className="font-medium hover:underline">
+                <Link
+                  to={`/orders/${r.orderId}`}
+                  viewTransition
+                  className="font-medium hover:underline"
+                >
                   {orderName}
                 </Link>
                 <span className="font-mono font-normal text-muted-foreground text-xs">
