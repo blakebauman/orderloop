@@ -203,7 +203,7 @@ function Inner({
             : state === 'inactive'
               ? 'var(--edge-idle)'
               : back
-                ? 'var(--wait)'
+                ? 'var(--ink)'
                 : 'var(--edge)';
         const handle = e.sourceHandle && e.sourceHandle !== 'out' ? e.sourceHandle : undefined;
         return {

@@ -248,6 +248,14 @@
     @media (width < 48rem) and (orientation: landscape) and (max-height: 32rem) {
       --tabbar-h: calc(2.75rem + 1px + var(--safe-bottom));
     }
+    /* What focus, find or a link scrolls into view stops above the tab bar, and above a phone's
+       floating New order button (shell.tsx) where there is one, rather than under them. */
+    scroll-padding-bottom: var(--tabbar-h);
+    @media (width < 48rem) {
+      &:has([data-float-action]) {
+        scroll-padding-bottom: calc(var(--tabbar-h) + 4.5rem);
+      }
+    }
   }
   /* Live order pages update themselves; pull-to-refresh and the rubber band only get in the way. */
   body {

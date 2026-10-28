@@ -231,7 +231,8 @@ under 32rem tall, under 64rem wide).
   would fade the focus outline in.
 - **One order everywhere:** the top bar, the tab bar and More list pages in `NAV`'s order.
 - **New order on a phone:** a floating pill (`shadow-float`) above the tab bar on the right, on
-  the overview and the orders list only; main pads its foot so the last row clears it.
+  the overview and the orders list only; main pads its foot so the last row clears it, and the
+  page's `scroll-padding-bottom` keeps what focus or a link scrolls to clear of it.
 - **Tab bar (below md):** Overview, Orders, Approvals (with its count), Carts, and More: the day's
   work, in thumb reach; a phone keeps up and decides, and only reviews flows. 3.5rem plus the home
   indicator (`--tabbar-h`); in `short:` 2.75rem with the labels for screen readers only. More is a
@@ -303,7 +304,16 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
 
 - **Flow editor:** at lg it builds. On touch, a palette item is tapped in (dragging is unreliable
   on iPadOS), node handles grow and carry a 32px target, and a connection snaps from 40px. Below lg
-  it is review-only, saying so: nothing on screen can change the flow.
+  it is review-only, saying so: nothing on screen can change the flow. A Loop's second input,
+  `next`, is a hollow ink ring on the node's bottom edge, named under the outputs, and its back-edge
+  is dashed ink labelled `next`: colour on the canvas is for status only (The One Meaning Rule).
+- **Overview on a phone:** "Needs a decision" (or "No decisions waiting") comes first, above the
+  status strip (the two grids below md are `contents`, and the panel is ordered first). Each strip
+  group is one line of figures, label then count, 44px tall, scrolling sideways if it doesn't fit;
+  md and up keep the tiles.
+- **Orders list on a phone:** the bar keeps the search and a Filter button with the count of
+  filters set; model, channel, status, sort and Needs attention move to a bottom sheet. They are the
+  same URL parameters as the bar's from md.
 - **Order page:** at lg the graph sits beside Actions, Activity, Details and Node. Below lg the
   graph is a tab of its own, so each view has the screen and the page is the one scroll region.
 - **Tables:** below md, `table-stack` makes each row a card: its first cell on a line of its own,

@@ -752,6 +752,7 @@ function ShellFrame() {
       {phoneNewOrder && !assistantOpen ? (
         <Link
           to="/orders/new"
+          data-float-action
           className="fixed right-[max(1rem,var(--safe-right))] bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 inline-flex h-11 items-center gap-1.5 rounded-4xl bg-primary pr-4.5 pl-4 font-medium text-primary-foreground text-sm shadow-float md:hidden"
         >
           <Plus className="size-4" aria-hidden="true" />

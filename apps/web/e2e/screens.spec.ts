@@ -22,6 +22,71 @@ test('at lg the flow editor edits', async ({ page }, info) => {
   await expect(page.getByRole('button', { name: 'Delete node' })).toBeVisible();
 });
 
+test("a loop's next input is drawn in ink and named, not in a status colour", async ({
+  page,
+}, info) => {
+  test.skip(isNarrow(info), 'lg and up');
+  await open(page, '/flows/tpl-marketplace-order');
+  const node = page.locator('.react-flow__node', { has: page.locator('[data-handleid="next"]') });
+  await expect(node).toHaveCount(1);
+  await expect(node.getByText('next', { exact: true })).toBeAttached();
+  const colours = await node.locator('[data-handleid="next"]').evaluate((handle) => {
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--wait)';
+    document.body.appendChild(probe);
+    const wait = getComputedStyle(probe).color;
+    probe.remove();
+    const h = getComputedStyle(handle);
+    return { wait, fill: h.backgroundColor, ring: h.borderTopColor };
+  });
+  expect(colours.fill).not.toBe(colours.wait);
+  expect(colours.ring).not.toBe(colours.wait);
+});
+
+test('on a phone the overview puts the decision first, clear of New order', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'iphone', 'iPhone upright');
+  await open(page, '/');
+  const decision = page
+    .getByRole('heading', { name: /Needs a decision/ })
+    .or(page.getByText('No decisions waiting.'));
+  const strip = page.getByRole('heading', { name: 'Open now' });
+  const [d, s] = [await decision.boundingBox(), await strip.boundingBox()];
+  expect(d!.y, 'the decision comes before the status strip').toBeLessThan(s!.y);
+  // The status strip is a line per group on a phone, not a block of tiles.
+  const figures = page.getByRole('navigation', { name: 'Orders by status' }).getByRole('link');
+  const heights = await figures.evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().height),
+  );
+  expect(Math.max(...heights)).toBeLessThanOrEqual(48);
+  const fab = await page.getByRole('link', { name: 'New order' }).last().boundingBox();
+  expect(d!.y + d!.height, 'the decision heading is above the New order button').toBeLessThan(
+    fab!.y,
+  );
+});
+
+test('on a phone the orders list keeps search and puts the filters in a sheet', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'iphone', 'iPhone upright');
+  await open(page, '/orders');
+  const search = page.getByRole('searchbox', { name: /Search orders/ });
+  await expect(search).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Status' })).toBeHidden();
+  await page.getByRole('button', { name: /^Filter/ }).tap();
+  const sheet = page.getByRole('dialog', { name: 'Filter orders' });
+  await sheet.getByLabel('Status').selectOption('failed');
+  await expect(page).toHaveURL(/[?&]status=failed/);
+  await sheet.getByRole('button', { name: 'Done' }).tap();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole('button', { name: /^Filter/ })).toHaveText(/1 on/);
+  // A search after that keeps the filter set in the sheet.
+  await search.fill('ord');
+  await expect(page).toHaveURL(/[?&]q=ord/);
+  expect(new URL(page.url()).searchParams.get('status')).toBe('failed');
+});
+
 test('below lg the order page shows one view at a time', async ({ page }, info) => {
   test.skip(!isNarrow(info), 'below lg');
   // Starting a real order, then waiting for it to settle: slower on a CI runner.
