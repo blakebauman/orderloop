@@ -17,6 +17,9 @@
     "issues": { "enabled": true }
   },
   "upload_source_maps": true,
+  // Trace events also go to Workers Logpush: the deployment's job (scripts/provision.sh) keeps
+  // them in its logs bucket past Workers Logs' 7 days. See docs/operations.md, "Logs".
+  "logpush": true,
   // Workers Caching: tiered, collapses concurrent misses, revalidates in the background. Kept across
   // deploys (paths carry the document format), so a deploy doesn't start from a cold cache.
   "cache": { "enabled": true, "cross_version_cache": true },

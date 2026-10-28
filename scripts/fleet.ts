@@ -17,6 +17,11 @@
  *   node scripts/fleet.ts write-check <id>        the deploy smoke test's write check, signed with
  *                                                 PRINCIPAL_KEY from the environment
  *   node scripts/fleet.ts names <id>              resource names, as shell variables (provisioning)
+ *   node scripts/fleet.ts logpush <id>            its Logpush job's name, bucket, filter and fields, as JSON
+ *   node scripts/fleet.ts logpush-foreign <id>    fail if another Logpush job (the API's list, on stdin)
+ *                                                 would take its Workers' logs
+ *   node scripts/fleet.ts logpush-token <id> <account> [check <group id>]  the Logpush R2 token to
+ *                                                 create (permission groups on stdin), or check one (token on stdin)
  *   node scripts/fleet.ts set-d1 <id> <uuid>      record the D1 database id in the registry
  *   node scripts/fleet.ts set-catalog-kv <id> <kv id>  record the catalog's card KV namespace id
  *   node scripts/fleet.ts set-plugin-d1 <id> <plugin> <uuid>  record a plugin's D1 database id
@@ -122,6 +127,14 @@ export function keysProblem(env: Record<string, string | undefined>): string | n
 /** Days a deployment keeps its catalog backups when its registry doesn't say. */
 export const CATALOG_BACKUP_DAYS = 90;
 
+/**
+ * Days the logs bucket keeps Workers' pushed logs when the registry doesn't say: past a year, so an
+ * incident found at an annual review still has its logs, and the same as audit retention.
+ */
+export const LOG_RETENTION_DAYS = 400;
+/** Workers Logs itself keeps 7 days; less than a month here would add little to that. */
+export const MIN_LOG_RETENTION_DAYS = 30;
+
 export type Deployment = {
   id: string;
   ring: Ring;
@@ -163,6 +176,12 @@ export type Deployment = {
    * backup outlives Durable Objects' 30 days of point-in-time recovery). Default 90.
    */
   catalogBackupDays: number;
+  /**
+   * Days the logs bucket (`orderloop-logs<suffix>`) keeps what Logpush writes there, the Workers'
+   * trace events (at least 30). Default 400, or `personalDataRetentionDays` when that is set,
+   * which it may not exceed: erasure never reaches the logs.
+   */
+  logRetentionDays: number;
   /** Model tokens a person's assistant may use a day (0: no limit); unset keeps the base. */
   assistantDailyTokens?: number;
   /** `send` lets workflow AI nodes see buyers' personal data; the default, `redact`, doesn't. */
@@ -374,6 +393,20 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   const backupDays = raw.catalogBackupDays;
   if (backupDays !== undefined && (!Number.isInteger(backupDays) || (backupDays as number) < 31))
     throw new Error(`${file}: catalogBackupDays must be a whole number of days, at least 31`);
+  const logDays = raw.logRetentionDays;
+  if (
+    logDays !== undefined &&
+    (!Number.isInteger(logDays) || (logDays as number) < MIN_LOG_RETENTION_DAYS)
+  )
+    throw new Error(
+      `${file}: logRetentionDays must be a whole number of days, at least ${MIN_LOG_RETENTION_DAYS}`,
+    );
+  // The logs carry audit lines (emails, IPs) and error text, and erasure never reaches them: they
+  // may not outlast the personal data the sweep erases.
+  if (logDays !== undefined && personal !== undefined && (logDays as number) > (personal as number))
+    throw new Error(
+      `${file}: logRetentionDays (${logDays}) can't be longer than personalDataRetentionDays (${personal})`,
+    );
   const retention = raw.auditRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || (retention as number) < 90))
     throw new Error(`${file}: auditRetentionDays must be a whole number of days, at least 90`);
@@ -553,6 +586,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     ...(tokens !== undefined ? { assistantDailyTokens: tokens as number } : {}),
     ...(archive !== undefined ? { auditArchiveDays: archive as number } : {}),
     catalogBackupDays: backupDays === undefined ? CATALOG_BACKUP_DAYS : (backupDays as number),
+    logRetentionDays: (logDays ?? personal ?? LOG_RETENTION_DAYS) as number,
     aiPersonalData: raw.aiPersonalData === 'send' ? 'send' : 'redact',
     aiGatewayLogs: raw.aiGatewayLogs === true,
     ...(sso
@@ -616,11 +650,183 @@ export const names = (d: Deployment) => ({
   catalogChanges: `orderloop-catalog-changes${d.suffix}`,
   catalogChangesDlq: `orderloop-catalog-changes-dlq${d.suffix}`,
   catalogPurgeDlq: `orderloop-catalog-purge-dlq${d.suffix}`,
+  /** Where Logpush writes the deployment's Workers' trace events, and the job and token that do. */
+  logs: `orderloop-logs${d.suffix}`,
+  logpushJob: `orderloop-workers${d.suffix}`,
+  logpushToken: `orderloop-logpush${d.suffix}`,
   // Analytics Engine dataset names allow letters, digits and underscores.
   catalogEdgeDataset: `orderloop_catalog_edge${d.suffix.replaceAll('-', '_')}`,
   /** A plugin's Worker and its D1 database share a name. */
   plugin: (p: string) => `orderloop-plugin-${p}${d.suffix}`,
 });
+
+/**
+ * The trace-event fields Logpush keeps. `Event` is left out: it is the request (URL, method,
+ * headers, `cf`) or the queue, cron or alarm that started the invocation, and its headers carry
+ * the client's IP and user agent and, past Cloudflare's name-based redaction, any credential
+ * header it doesn't recognise. What forensics needs is in `Logs`: the `audit_event` lines and
+ * every other line the code writes.
+ */
+export const LOG_FIELDS = [
+  'EventTimestampMs',
+  'EventType',
+  'Outcome',
+  'ScriptName',
+  'Entrypoint',
+  'ScriptVersion',
+  'Exceptions',
+  'Logs',
+  'CPUTimeMs',
+  'WallTimeMs',
+];
+
+/** Logpush refuses a filter longer than about 1,000 bytes. */
+const LOGPUSH_FILTER_MAX = 1000;
+
+/**
+ * The deployment's Logpush job (`provision.sh` creates or updates it): the Workers whose trace
+ * events it pushes, by script name, since a job for `workers_trace_events` otherwise takes every
+ * Worker on the account that sets `logpush`, other deployments' included.
+ */
+export function logpushJob(d: Deployment) {
+  const n = names(d);
+  const scripts = [n.web, n.engine, n.catalog, n.catalogEdge, ...workerPlugins(d).map(n.plugin)];
+  const filter = JSON.stringify({ where: { key: 'ScriptName', operator: 'in', value: scripts } });
+  if (filter.length > LOGPUSH_FILTER_MAX)
+    throw new Error(`${d.id}: its Logpush filter (${filter.length} bytes) is too long`);
+  return {
+    name: n.logpushJob,
+    bucket: n.logs,
+    prefix: 'workers/',
+    scripts,
+    filter,
+    output_options: { output_type: 'ndjson', field_names: LOG_FIELDS, timestamp_format: 'rfc3339' },
+  };
+}
+
+type LogpushFilter = {
+  and?: LogpushFilter[];
+  or?: LogpushFilter[];
+  key?: string;
+  operator?: string;
+  value?: unknown;
+};
+
+/**
+ * Whether a Logpush filter (the job's `filter` string) can let through events from Worker
+ * `script`. Only `ScriptName` conditions are decided; any other condition (`Outcome`, …) might
+ * hold, and a filter that doesn't parse, or has no `where`, lets everything through.
+ */
+export function filterAdmits(filter: string | null | undefined, script: string): boolean {
+  if (!filter) return true;
+  let where: LogpushFilter | undefined;
+  try {
+    where = (JSON.parse(filter) as { where?: LogpushFilter }).where;
+  } catch {
+    return true;
+  }
+  if (!where) return true;
+  const admits = (f: LogpushFilter): boolean => {
+    if (f.and) return f.and.every(admits);
+    if (f.or) return f.or.some(admits);
+    if (f.key !== 'ScriptName') return true;
+    const v = f.value;
+    const list = Array.isArray(v) ? v : [v];
+    switch (f.operator) {
+      case 'eq':
+        return v === script;
+      case '!eq':
+        return v !== script;
+      case 'in':
+        return list.includes(script);
+      case '!in':
+        return !list.includes(script);
+      case 'startsWith':
+        return typeof v === 'string' && script.startsWith(v);
+      case '!startsWith':
+        return !(typeof v === 'string' && script.startsWith(v));
+      case 'endsWith':
+        return typeof v === 'string' && script.endsWith(v);
+      case '!endsWith':
+        return !(typeof v === 'string' && script.endsWith(v));
+      case 'contains':
+        return typeof v === 'string' && script.includes(v);
+      case '!contains':
+        return !(typeof v === 'string' && script.includes(v));
+      default:
+        return true;
+    }
+  };
+  return admits(where);
+}
+
+/**
+ * The account's `workers_trace_events` jobs, other than the deployment's own, that would take its
+ * Workers' trace events. `logpush` puts a Worker in every such job on the account, so one without
+ * a filter (another project's, made in the dashboard) would collect this deployment's audit lines
+ * and errors. Another deployment's job, filtered to its own Workers, doesn't.
+ */
+export function foreignJobsReaching(
+  jobs: { id: number; name?: string | null; filter?: string | null }[],
+  d: Deployment,
+) {
+  const own = logpushJob(d);
+  return jobs.filter(
+    (j) => j.name !== own.name && own.scripts.some((s) => filterAdmits(j.filter, s)),
+  );
+}
+
+/** The permission group Logpush's R2 token gets: object writes, and nothing else. */
+export const R2_WRITE_GROUP = 'Workers R2 Storage Bucket Item Write';
+
+/**
+ * The account token Logpush writes the logs bucket with: R2 object writes in that one bucket.
+ * `groups` is the account's permission groups (the API's list); exactly one must be
+ * `R2_WRITE_GROUP`. The resource names the bucket's jurisdiction (`default` outside one).
+ */
+export function logpushToken(
+  d: Deployment,
+  accountId: string,
+  groups: { id: string; name: string }[],
+) {
+  if (!/^[0-9a-f]{32}$/.test(accountId)) throw new Error(`${accountId} is not an account id`);
+  const found = groups.filter((g) => g.name === R2_WRITE_GROUP);
+  if (found.length !== 1)
+    throw new Error(
+      `expected one permission group named "${R2_WRITE_GROUP}", found ${found.length}`,
+    );
+  const bucket = `com.cloudflare.edge.r2.bucket.${accountId}_${d.jurisdiction ?? 'default'}_${names(d).logs}`;
+  return {
+    name: names(d).logpushToken,
+    policies: [
+      { effect: 'allow', resources: { [bucket]: '*' }, permission_groups: [{ id: found[0]!.id }] },
+    ],
+  };
+}
+
+/**
+ * Whether an existing token (the API's token details) holds exactly `expected`'s one policy: the
+ * same effect, the same single resource and the one permission group. Rolling a token that can do
+ * more would hand Logpush that much more.
+ */
+export function tokenMatches(
+  token: {
+    name?: string;
+    policies?: { effect?: string; resources?: unknown; permission_groups?: { id: string }[] }[];
+  },
+  expected: ReturnType<typeof logpushToken>,
+) {
+  const [want] = expected.policies;
+  const got = token.policies ?? [];
+  if (token.name !== expected.name || got.length !== 1 || !want) return false;
+  const [p] = got;
+  return (
+    p!.effect === want.effect &&
+    JSON.stringify(p!.resources) === JSON.stringify(want.resources) &&
+    (p!.permission_groups ?? []).length === 1 &&
+    p!.permission_groups![0]!.id === want.permission_groups[0]!.id
+  );
+}
 
 /** The engine's and web Worker's service bindings to the deployment's Worker plugins. */
 function pluginServices(d: Deployment) {
@@ -682,6 +888,9 @@ export function renderPlugin(base: Config, d: Deployment, p: string): Config {
   config.name = names(d).plugin(p);
   config.workers_dev = false;
   config.preview_urls = false;
+  // Its logs go to the deployment's logs bucket like the apps' (logpushJob names it). The
+  // deployment decides, so a plugin's own config can't say otherwise (PLUGIN_CONFIG_KEYS).
+  config.logpush = true;
   config.d1_databases = dbs.map((db) => ({
     ...db,
     database_name: names(d).plugin(p),
@@ -1193,6 +1402,12 @@ export function shellVars(d: Deployment): Record<string, string> {
     AUDIT_ARCHIVE_DAYS: String(d.auditArchiveDays ?? ''),
     // How long catalog backups (backups/ in CATALOG_R2) are kept, and locked.
     CATALOG_BACKUP_DAYS: String(d.catalogBackupDays),
+    // The logs bucket, how long it keeps what Logpush writes, and the job and R2 token that write
+    // it (the job's filter and fields: `fleet.ts logpush <id>`).
+    LOGS_R2: n.logs,
+    LOG_RETENTION_DAYS: String(d.logRetentionDays),
+    LOGPUSH_JOB: n.logpushJob,
+    LOGPUSH_TOKEN: n.logpushToken,
     // Space-separated plugin ids; each one's D1 database is named orderloop-plugin-<id><suffix>.
     PLUGINS: workerPlugins(d).join(' '),
     // The deployment's own Secrets Store (own Cloudflare account), when its registry names one.
@@ -1201,6 +1416,48 @@ export function shellVars(d: Deployment): Record<string, string> {
     SANDBOXED_PLUGINS: sandboxedPlugins(d).join(' '),
     SUFFIX: d.suffix,
   };
+}
+
+/** provision.sh: refuse when another job would collect the deployment's logs (jobs on stdin). */
+function logpushForeign(id: string | undefined) {
+  const jobs = (
+    JSON.parse(readFileSync(0, 'utf8')) as {
+      result: { id: number; name?: string; filter?: string }[];
+    }
+  ).result;
+  const foreign = foreignJobsReaching(jobs, byId(id));
+  if (foreign.length)
+    throw new Error(
+      `${foreign.map((j) => `Logpush job ${j.id} (${j.name || 'unnamed'})`).join(', ')} would also take ${id}'s Worker logs: filter it to its own Workers' ScriptName, or delete it`,
+    );
+}
+
+/**
+ * provision.sh: with `body`, the token to create from the permission groups on stdin; with
+ * `check <group id>`, fail unless the token details on stdin hold exactly that policy.
+ */
+function logpushTokenCmd(
+  id: string | undefined,
+  accountId: string | undefined,
+  mode?: string,
+  groupId?: string,
+) {
+  const d = byId(id);
+  if (!accountId) throw new Error('logpush-token <id> <account id> [check <group id>]');
+  const input = JSON.parse(readFileSync(0, 'utf8')) as { result: unknown };
+  if (mode === undefined) {
+    console.log(
+      JSON.stringify(logpushToken(d, accountId, input.result as { id: string; name: string }[])),
+    );
+    return;
+  }
+  if (mode !== 'check' || !groupId)
+    throw new Error('logpush-token <id> <account id> check <group id>');
+  const expected = logpushToken(d, accountId, [{ id: groupId, name: R2_WRITE_GROUP }]);
+  if (!tokenMatches(input.result as Parameters<typeof tokenMatches>[0], expected))
+    throw new Error(
+      `token ${expected.name} exists but isn't R2 object writes on ${names(d).logs} alone: check it, or delete it so provision.sh makes it again`,
+    );
 }
 
 function shellNames(id: string | undefined) {
@@ -1345,6 +1602,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (cmd === 'status') await status();
     else if (cmd === 'write-check') await writeCheck(args[0]);
     else if (cmd === 'names') shellNames(args[0]);
+    else if (cmd === 'logpush') console.log(JSON.stringify(logpushJob(byId(args[0]))));
+    else if (cmd === 'logpush-foreign') logpushForeign(args[0]);
+    else if (cmd === 'logpush-token') logpushTokenCmd(args[0], args[1], args[2], args[3]);
     else if (cmd === 'set-d1') setD1(args[0], args[1]);
     else if (cmd === 'set-catalog-kv') setCatalogKv(args[0], args[1]);
     else if (cmd === 'set-plugin-d1') setPluginD1(args[0], args[1], args[2]);
@@ -1352,7 +1612,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(loadDeployments().filter((d) => d.demo && d.d1Id)));
     else
       throw new Error(
-        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|write-check|names|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
+        'usage: fleet.ts render|matrix|secrets|check-plugin-secrets|status|write-check|names|logpush|logpush-foreign|logpush-token|set-d1|set-catalog-kv|set-plugin-d1|demos (see the header)',
       );
   } catch (err) {
     console.error((err as Error).message);

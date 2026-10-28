@@ -176,6 +176,11 @@ uppercase, and never in mono.
 **The Scale Lives In The Theme Rule.** Sizes come from the theme (`text-ui`, `text-2xs`,
 Tailwind's steps), not hand-written pixel values, so they grow with the reader's text size.
 
+**The Measure Rule.** Running text, a page's intro under its title (`PageHeader`) and the xs helper
+lines in sections alike, is held to `max-w-measure` (55ch, `--container-measure` in app.css): Inter
+averages about 0.8ch a character, so that is 65 to 75 characters a line at any size. Not a
+hand-written `max-w-[…ch]`.
+
 ## Screens and breakpoints
 
 Tailwind's default breakpoints, read as devices:
@@ -243,9 +248,10 @@ under 32rem tall, under 64rem wide).
 - **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the
   tab bar. While the on-screen keyboard is up (`data-keyboard` on `<html>`, from
   `useVisualViewport`) it takes exactly the area above the keyboard. Both slide in 200ms on an
-  exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`): the sheet from the right edge, the column
-  by its width with its 400px content pinned to the right, so the page narrows with it and nothing
-  inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
+  exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`), by transform and opacity only: the sheet
+  from the right edge; the column takes its 400px at once (the page narrows in one layout, not one
+  per frame) while its content slides in from the right, and on closing gives the width back only
+  after the content has slid out. Nothing inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
   confirmation is pinned above the composer (`wait` tint) until it is answered.
 - **Slow pages:** a navigation that takes over 400ms draws a link-blue rule sweeping under the top
   bar and marks main `aria-busy`. Quicker ones show nothing.
@@ -307,6 +313,13 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
   it is review-only, saying so: nothing on screen can change the flow. A Loop's second input,
   `next`, is a hollow ink ring on the node's bottom edge, named under the outputs, and its back-edge
   is dashed ink labelled `next`: colour on the canvas is for status only (The One Meaning Rule).
+  A flow too wide to read whole opens framed on its first loop or wait (an order page frames its
+  live, failed or final step instead), never below 0.7 zoom. Fit view stops at the zoom that keeps
+  a 13px label at 10px and, past that, fits around the selection or the current view. Every
+  canvas with a loop or a wait has **Jump to**, a menu of them by label that centres the one
+  picked; it is on the canvas, so it works in the review-only editor and the order page's Graph
+  tab. React Flow's credit stays (its authors ask that only subscribers remove it), at caption
+  size.
 - **Overview on a phone:** "Needs a decision" (or "No decisions waiting") comes first, above the
   status strip (the two grids below md are `contents`, and the panel is ordered first). Each strip
   group is one line of figures, label then count, 44px tall, scrolling sideways if it doesn't fit;
