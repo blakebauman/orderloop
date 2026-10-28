@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { installKeyboard, isNarrow, isTouch, keyboard, open, tapTargets } from './helpers';
+import {
+  installKeyboard,
+  isNarrow,
+  isTouch,
+  keyboard,
+  open,
+  stepInView,
+  tapTargets,
+} from './helpers';
 
 test('below lg the flow editor is review-only', async ({ page }, info) => {
   test.skip(!isNarrow(info), 'below lg');
@@ -8,7 +16,7 @@ test('below lg the flow editor is review-only', async ({ page }, info) => {
   await expect(page.getByRole('button', { name: /^Publish/ })).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Flow name' })).toHaveAttribute('readonly', '');
   // Picking a step shows its settings, with nothing to change them.
-  await page.locator('.react-flow__node').first().tap();
+  await (await stepInView(page)).tap();
   await expect(page.getByRole('button', { name: 'Delete node' })).toHaveCount(0);
   await expect(page.locator('.react-flow__node.draggable')).toHaveCount(0);
   await expect(page.getByText('Unsaved')).toHaveCount(0);
@@ -18,7 +26,7 @@ test('at lg the flow editor edits', async ({ page }, info) => {
   test.skip(isNarrow(info), 'lg and up');
   await open(page, '/flows/tpl-storefront-order');
   await expect(page.getByRole('button', { name: /^Publish/ })).toBeVisible();
-  await page.locator('.react-flow__node').first().click();
+  await (await stepInView(page)).click();
   await expect(page.getByRole('button', { name: 'Delete node' })).toBeVisible();
 });
 

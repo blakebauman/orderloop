@@ -1,18 +1,5 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
-import { isTouch, open } from './helpers';
-
-/** Whether the step is drawn wholly inside the canvas. */
-async function inView(page: Page, step: Locator) {
-  const sheet = await page.locator('.react-flow').boundingBox();
-  const box = await step.boundingBox();
-  if (!sheet || !box) return false;
-  return (
-    box.x >= sheet.x &&
-    box.y >= sheet.y &&
-    box.x + box.width <= sheet.x + sheet.width &&
-    box.y + box.height <= sheet.y + sheet.height
-  );
-}
+import { expect, type Page, test } from '@playwright/test';
+import { inView, isTouch, open } from './helpers';
 
 const step = (page: Page, label: string) =>
   page.locator('.react-flow__node', { hasText: label }).first();
