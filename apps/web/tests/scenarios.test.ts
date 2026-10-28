@@ -62,9 +62,13 @@ describe('format', () => {
     expect(channelLabel('pos')).toBe('Point of sale');
     expect(channelLabel('bench')).toBe('Other channel');
     expect(clip('Database error at\n  Supplier cost')).toBe('Database error at Supplier cost');
-    const reason = clip(`Supplier cost: Failed query: select ${'"sku", '.repeat(2000)}`);
+    const reason = clip(`Returned: ${'damaged in transit, '.repeat(200)}`);
     expect(reason.length).toBeLessThanOrEqual(160);
     expect(reason.endsWith('…')).toBe(true);
+    // A database error stored before the engine named only where it happened reads that way too.
+    expect(clip(`Supplier cost: Failed query: select ${'"sku", '.repeat(2000)}`)).toBe(
+      'Database error at Supplier cost',
+    );
     expect(plural(1, 'reservation')).toBe('1 reservation');
     expect(plural(1200, 'line')).toBe('1,200 lines');
   });

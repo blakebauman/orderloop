@@ -136,6 +136,11 @@ export class OrderAgent extends Agent<Env, State> {
     return this.flowCache;
   }
 
+  /** A step's label in the pinned flow, or its id when the flow doesn't name it. */
+  private stepLabel(nodeId: string): string {
+    return this.pinnedFlow()?.nodes.find((n) => n.id === nodeId)?.label ?? nodeId;
+  }
+
   /**
    * Records a timeline entry (a keyed one replaces its earlier copy) and returns the broadcast
    * tail with it: `base` is the tail it builds on, never the whole timeline.
@@ -401,10 +406,11 @@ export class OrderAgent extends Agent<Env, State> {
       timeline: this.log({
         nodeId: w.nodeId,
         kind: w.kind === 'approval' ? 'approval' : 'event',
+        // An event wait reads by its step, as a step's own lines do; the key stays on the wait.
         message:
           w.kind === 'approval'
             ? `Awaiting approval: ${w.title} (${w.assignee})`
-            : `Waiting for ${w.event}`,
+            : `${this.stepLabel(w.nodeId)}: waiting`,
         key: `open:${w.eventType}`,
       }),
     });
@@ -435,7 +441,7 @@ export class OrderAgent extends Agent<Env, State> {
         nodeId: w?.nodeId,
         kind: w?.kind === 'approval' ? 'approval' : 'event',
         message: w
-          ? `${w.title}: ${outcome === 'escalated' || outcome === 'timeout' ? 'timed out' : outcome}${payload.by ? ` by ${String(payload.by)}` : ''}${payload.note ? ` — “${String(payload.note)}”` : ''}`
+          ? `${w.kind === 'approval' ? w.title : this.stepLabel(w.nodeId)}: ${outcome === 'escalated' || outcome === 'timeout' ? 'timed out' : outcome}${payload.by ? ` by ${String(payload.by)}` : ''}${payload.note ? ` — “${String(payload.note)}”` : ''}`
           : outcome,
         key: `close:${eventType}`,
       }),

@@ -99,10 +99,12 @@ The Workflow calls `openWait` from a node's `:open` step and `closeWait` from it
 - `openWait(w)` is a no-op if a wait with the same `eventType` is already open (a retried step).
   For an approval it inserts an `approvals` row (`status: 'pending'`, `onConflictDoNothing`), then
   adds the wait, starts the node's run at the wait's `since`, and adds an `open:${eventType}`
-  timeline entry.
+  timeline entry: "Awaiting approval: <title> (<assignee>)", or for an event "<step label>:
+  waiting" (the event's key stays on the wait, not in the text people read).
 - `closeWait(eventType, outcome, payload)` updates the approval row with the outcome, `decided_at`,
   `decided_by` (the payload's `by`, `timeout` for an escalation) and `note`, removes the wait, and
-  adds a `close:${eventType}` entry.
+  adds a `close:${eventType}` entry: the approval's title or the event's step label, then the
+  outcome ("Payment received: timed out").
 
 ## Callable methods
 

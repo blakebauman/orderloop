@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { capReason, failureReason, orderReason, plural, REASON_MAX } from '../src/words';
+import {
+  capReason,
+  failureReason,
+  orderReason,
+  plural,
+  REASON_MAX,
+  varsSummary,
+} from '../src/words';
 
 // What D1 through Drizzle threw at the supplier cost step before PR #314: the whole statement and
 // its parameters, about 12 KB.
@@ -47,5 +54,12 @@ describe('order reasons', () => {
     expect(plural(1, 'reservation')).toBe('1 reservation');
     expect(plural(0, 'authorization')).toBe('0 authorizations');
     expect(plural(3, 'SKU')).toBe('3 SKUs');
+  });
+
+  it("reads a step's variables as words, leaving out empty ones", () => {
+    expect(varsSummary({ cycle: 2 })).toBe('Cycle 2');
+    expect(varsSummary({ cycle: 0, year: null })).toBe('Cycle 0');
+    expect(varsSummary({ next_tier: 'gold', limit: 5 })).toBe('Next tier gold, Limit 5');
+    expect(varsSummary({ year: null })).toBe('Nothing set');
   });
 });

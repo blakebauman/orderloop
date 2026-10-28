@@ -4,7 +4,7 @@
  * (tests/where.test.ts); the rows come from `overview()` and the steps from `flowSteps()`.
  */
 
-import { humanize } from './format';
+import { assigneeLabel } from './format';
 
 export type FlowSteps = { id: string; name: string; steps: string[] };
 
@@ -46,7 +46,8 @@ export function waitingOn(forValue: string | null): string | null {
       forValue.split(' · ').map((f) => {
         if (f === 'timer') return 'a timer';
         // As the orders list names them (`waitingForLabel`): the role, or "an approver".
-        if (f.startsWith('person:')) return humanize(f.slice('person:'.length)) || 'an approver';
+        if (f.startsWith('person:'))
+          return assigneeLabel(f.slice('person:'.length)) || 'an approver';
         if (f.startsWith('event:')) return 'an outside event';
         return f;
       }),

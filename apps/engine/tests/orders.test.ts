@@ -197,6 +197,12 @@ describe('B2B order', () => {
     const done = await settled(orderId);
     expect(done.status).toBe('completed');
     expect(done.nodes.done!.status).toBe('succeeded');
+    expect(done.nodes.paid!.summary).toBe('Received');
+    expect(
+      (await state(orderId)).timeline
+        .filter((t) => t.kind === 'event' && t.nodeId === 'paid')
+        .map((t) => t.message),
+    ).toEqual(['Payment received: waiting', 'Payment received: received']);
 
     const ship = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
     expect(ship).toHaveLength(1);
@@ -275,6 +281,11 @@ describe('B2B order', () => {
     expect(done.reason).toBe('Sent to collections');
     expect(done.nodes.remind!.runs).toBe(3);
     expect(done.nodes.dunning!.runs).toBe(4);
+    // An event wait reads by its step, never by the event's key.
+    const waitLines = (await state(orderId)).timeline
+      .filter((t) => t.kind === 'event' && t.nodeId === 'paid')
+      .map((t) => t.message);
+    expect(waitLines).toEqual(['Payment received: waiting', 'Payment received: timed out']);
 
     // Every finished run is timed once: executor steps, waits and each loop iteration.
     const rows = await db().select().from(nodeRuns).where(eq(nodeRuns.orderId, orderId));

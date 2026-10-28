@@ -280,7 +280,7 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
               ? 'Timed out'
               : `${branch}${payload.by ? ` by ${String(payload.by)}` : ''}`
             : branch === 'received'
-              ? `${str(config.event)} received`
+              ? 'Received'
               : 'Timed out',
           vars: approval ? undefined : { [eventVar(str(config.event))]: payload },
         };

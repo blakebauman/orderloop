@@ -54,6 +54,8 @@ import { useMedia, WIDE } from '~/lib/device';
 import { engine } from '~/lib/env.server';
 import { eventAction, eventWaiting } from '~/lib/events';
 import {
+  assigneeLabel,
+  clip,
   duration,
   humanize,
   money,
@@ -61,6 +63,7 @@ import {
   orderRef,
   plainLog,
   plural,
+  readableReason,
   statusColor,
 } from '~/lib/format';
 import { customerNames, orderRecords, recordedOrder } from '~/lib/orders.server';
@@ -418,7 +421,7 @@ function OrderView() {
           ) : null}
           <p className="max-w-[75ch]">
             <span className="font-medium">{humanize(shownStatus(state))}.</span>{' '}
-            {sentence(state.reason || finishedAt(state))}
+            {sentence(state.reason ? readableReason(state.reason) : finishedAt(state))}
             {state.rollback
               ? state.rollback.outcome === 'complete'
                 ? ' Every completed step that can be undone was reversed.'
@@ -622,7 +625,9 @@ function Compensation({
         <Undo2 className="size-4 text-undo" aria-hidden="true" />
         {failed ? 'Rollback incomplete' : state.rollback ? 'Rolled back' : 'Rolling back'}
       </h2>
-      {!cause && state.reason ? <p className="mt-1 text-sm">{sentence(state.reason)}</p> : null}
+      {!cause && state.reason ? (
+        <p className="mt-1 text-sm">{sentence(readableReason(state.reason))}</p>
+      ) : null}
       {cause ? (
         <p className="mt-1 text-sm">
           Stopped at{' '}
@@ -634,7 +639,7 @@ function Compensation({
             {label(cause[0])}
           </button>
           {cause[1].error ? (
-            <span className="text-muted-foreground">: {cause[1].error}</span>
+            <span className="text-muted-foreground">: {clip(cause[1].error)}</span>
           ) : null}
         </p>
       ) : null}
@@ -872,7 +877,7 @@ function Actions({
           <div className="flex items-center gap-2 text-wait text-xs">
             <StatusDot status="waiting" />
             {w.kind === 'approval'
-              ? `Approval for ${humanize(w.assignee) || 'anyone'}`
+              ? `Approval for ${assigneeLabel(w.assignee) || 'anyone'}`
               : 'Waiting for an outside event'}
             <span className="ml-auto text-muted-foreground">
               since <Ago ms={w.since} />
@@ -980,9 +985,10 @@ function Actions({
   );
 }
 
+// An event line is detail, not a link: it reads muted like any step's.
 const KIND_TONE: Record<string, string> = {
   approval: 'text-wait',
-  event: 'text-link',
+  event: 'text-muted-foreground',
   ai: 'text-ai',
   rollback: 'text-undo',
   order: 'text-foreground',
@@ -1016,7 +1022,9 @@ function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: strin
                 {label(t.nodeId)}
               </button>
             ) : null}
-            {plainLog(t.nodeId ? t.message.replace(`${label(t.nodeId)}: `, '') : t.message)}
+            {t.nodeId
+              ? plainLog(t.message.replace(`${label(t.nodeId)}: `, ''), label(t.nodeId))
+              : plainLog(t.message)}
           </span>
         </li>
       ))}
@@ -1290,7 +1298,8 @@ function RecordedOrderView() {
             className="font-medium"
             style={{ color: terminal ? statusColor(o.status) : undefined }}
           >
-            Recorded order{terminal ? ` · ${endedAs(o.status, o.reason)}` : '.'}
+            Recorded order
+            {terminal ? ` · ${endedAs(o.status, o.reason && readableReason(o.reason))}` : '.'}
           </span>{' '}
           <span className="text-foreground/75">
             The engine has no run for it, so this is what the database kept. There is no live state

@@ -67,7 +67,7 @@ import * as cx from './connectors';
 import { extractCatalog } from './product-index';
 import { provide } from './providers';
 import { customerTaxCertificates } from './tax-certificates';
-import { plural } from './words';
+import { plural, varsSummary } from './words';
 
 export type NodeResult = {
   branches?: string[];
@@ -976,9 +976,7 @@ export const EXECUTORS: Record<string, Exec> = {
     return {
       vars,
       output: vars,
-      summary: Object.entries(vars)
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .join(', '),
+      summary: varsSummary(vars),
     };
   },
 
