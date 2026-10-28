@@ -1,4 +1,4 @@
-import type { Page, TestInfo } from '@playwright/test';
+import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 /** Phones are below md (the tab bar); touch is every project but the desktop. */
 export const isPhone = (info: TestInfo) => info.project.name.startsWith('iphone');
@@ -146,4 +146,35 @@ export async function tapTargets(page: Page, selector: string) {
         return { name, width: Math.round(width), height: Math.round(height) };
       }),
   );
+}
+
+/** Whether the step is drawn wholly inside the flow canvas. */
+export async function inView(page: Page, step: Locator) {
+  const sheet = await page.locator('.react-flow').boundingBox();
+  const box = await step.boundingBox();
+  if (!sheet || !box) return false;
+  return (
+    box.x >= sheet.x &&
+    box.y >= sheet.y &&
+    box.x + box.width <= sheet.x + sheet.width &&
+    box.y + box.height <= sheet.y + sheet.height
+  );
+}
+
+/**
+ * A step the canvas shows whole, once it has framed the flow. A wide flow opens where its orders
+ * wait or loop, so its first step (the trigger) may be off-screen.
+ */
+export async function stepInView(page: Page) {
+  const steps = page.locator('.react-flow__node');
+  let found = -1;
+  await expect
+    .poll(async () => {
+      const n = await steps.count();
+      found = -1;
+      for (let i = 0; i < n && found < 0; i++) if (await inView(page, steps.nth(i))) found = i;
+      return found;
+    })
+    .toBeGreaterThanOrEqual(0);
+  return steps.nth(found);
 }
