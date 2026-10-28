@@ -124,7 +124,7 @@ components:
 # Design System: Order Loop docs
 
 This file describes `apps/docs`: the Starlight site at docs.orderloop.app and the Scalar page at
-`/api/`. The system itself is the web app's, "Ledger" (shadcn's base-luma preset, `b1VlIttI`, with the
+`/api/`. The system itself is the web app's, "Ledger" (shadcn's base-maia preset, `bbVJxYW`, with the
 app's status ramp kept), authored in `apps/web/app/app.css`; this file
 records what the docs do with it. It is **derived from the shipped code** (`src/styles/brand.css`,
 `src/components/`, the generated `src/styles/theme.css`). When the code and this file disagree,
@@ -132,7 +132,7 @@ fix whichever is wrong and say which in the commit.
 
 ## Overview
 
-**North star: the app's reading copy.** The app is a commerce back office in shadcn's base-luma
+**North star: the app's reading copy.** The app is a commerce back office in shadcn's base-maia
 preset: neutral greys with no tint, Inter, generous radii and pill controls, one blue for links, and
 signal colours that mean a status and nothing else. The docs are the same system for the moments
 you're not at the desk:
@@ -155,8 +155,8 @@ button, its node cards, status stamps, and the run figure on the home page.
 - Hue only from the status ramp and the node categories, and only where there is a status or a
   node type to show.
 - One 48rem reading column; the home page widens to 72rem for the run figure.
-- Cards, not ruled boxes: very round (`rounded-4xl`), no border, lifted by a faint ring and a soft
-  shadow; what sits inside a card is a muted, rounded tile. Rules remain for rows and tables.
+- Cards, not ruled boxes: rounded (`rounded-2xl`), no border and no shadow, edged by a faint
+  ring; what sits inside a card is a muted, rounded tile. Rules remain for rows and tables.
 
 ## Colors
 
@@ -219,18 +219,19 @@ queries, so it behaves the same wherever it's placed). It reads left to right, r
 
 ## Elevation & Depth
 
-Cards carry the depth: a 1px ring at 5% of ink and a soft two-step shadow (the ring alone in dark),
-as the app's `card` utility draws them. Inside a card, separation is a tonal step (a muted tile) or a
+Cards are flat: a 1px ring at 10% of ink and no shadow, as the app's `card` utility draws them. Inside a card, separation is a tonal step (a muted tile) or a
 hairline between rows. The node card's `0 1px 0 rule` underline is the canvas's own. Starlight's
 other shadows (search, pagination) are removed.
 
 ## Shapes
 
 - **Pill** (`--ol-pill`): buttons, the header button, the search field, as the app's `rounded-4xl`
-  buttons and `rounded-3xl` fields.
-- **26px** (2.6 × `--ol-radius`, the app's `rounded-4xl` `card`): link cards and other cards.
-- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): callouts, node cards, code
-  blocks, the sidebar's current page.
+  buttons and fields.
+- **18px** (1.8 × `--ol-radius`, the app's `rounded-2xl` `card` and flow canvas): link cards and
+  other cards, the run figure.
+- **10px** (`--ol-radius`, the app's `rounded-lg` alerts): callouts, previous / next.
+- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): node cards, code blocks,
+  the sidebar's current page.
 - **3px**: inline code, focus rings.
 - **2px**: status stamps and output handles.
 - Borders are 1px. The node card's 3px status rule is the one thicker line, and it is the app's
@@ -240,7 +241,7 @@ other shadows (search, pagination) are removed.
 
 ### Top bar
 
-The wordmark with the mark; search as an app input (a filled pill, 32px); then "API
+The wordmark with the mark; search as an app input (a hairline pill with a faint fill, 32px); then "API
 explorer" as a muted text link and **Open the app** as the one ink button, the app's "New order"
 slot; GitHub; the theme select. The links ride an override of `SocialIcons`, the one slot in
 Starlight's header right group, so `Header` stays Starlight's. Below 50rem the right group hides
@@ -271,7 +272,7 @@ column labels on no fill, a hairline under each row, a soft muted hover, tabular
 
 ### Callouts
 
-1px border at 30% of the hue, a 5% flat tint into paper, 8px corners. Note is ink (neutral), tip
+1px border at 30% of the hue, a 5% flat tint into paper, 10px corners. Note is ink (neutral), tip
 is `ok`, caution is `wait`, danger is `bad`. Never a thick coloured edge.
 
 ### Buttons
@@ -336,9 +337,9 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
 
 - **Don't** hand-edit `src/styles/theme.css`; a hook blocks it and the design tests catch it.
 - **Don't** use green for anything but "succeeded", or a status hue for decoration.
-- **Don't** add shadows beyond the card's, gradients, glass, or coloured edges thicker than 1px. The node card's
+- **Don't** add shadows to cards, gradients, glass, or coloured edges thicker than 1px. The node card's
   status rule is the one exception, and it is the app's.
 - **Don't** set titles or buttons in uppercase, or put an eyebrow above a heading; uppercase is for
   captions only.
 - **Don't** borrow styling from other projects (felix-web, durablefibers, Supabase). Ledger is
-  shadcn's base-luma preset as this product applies it, not another product's look.
+  shadcn's base-maia preset as this product applies it, not another product's look.

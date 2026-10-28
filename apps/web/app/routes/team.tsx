@@ -439,7 +439,7 @@ export default function Team() {
             <div
               ref={secretRef}
               tabIndex={-1}
-              className="rounded-md border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
               <p className="font-medium">{secret.label}</p>
               <p className="mt-0.5 max-w-measure text-muted-foreground text-xs">
@@ -565,7 +565,7 @@ export default function Team() {
                             <Td colSpan={4} className="block px-4 pt-0 pb-3 md:table-cell">
                               <fetcher.Form
                                 method="post"
-                                className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2"
+                                className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2"
                                 onSubmit={() => setAsking(null)}
                               >
                                 <input type="hidden" name="intent" value={asking.intent} />

@@ -38,6 +38,15 @@ export type EmbedPolicy = { frameAncestors: string[]; formAction: string[] };
 export const EMBED_HEADER = 'x-orderloop-embed';
 
 /**
+ * Carried from the sign-in and setup pages' `headers` when the deployment uses Turnstile
+ * (`withTurnstilePolicy`); entry.server.tsx lets that page alone load Turnstile, and drops it.
+ */
+export const TURNSTILE_HEADER = 'x-orderloop-turnstile';
+
+/** Where Turnstile's script and challenge frame come from. */
+export const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+/**
  * Any https page may frame this one. Only for a refusal a buyer's page shows in its frame (a used
  * start link, a closed cart): it carries no data and nothing to click, and without it the buyer
  * sees a blocked frame instead of the reason.
@@ -95,14 +104,22 @@ export function parseEmbed(raw: string | null): EmbedPolicy | null {
  * The Content-Security-Policy for an HTML page. Scripts run only from this origin or with the
  * response's nonce (the theme script and React Router's inline scripts); styles and fonts come
  * from this origin. Pages can't be framed, and forms post only here, unless `embed` (an external
- * cart's page) names the origins that may frame it and where its return form posts.
+ * cart's page) names the origins that may frame it and where its return form posts. A page with
+ * `turnstile` (sign-in or setup, on a deployment that uses it) may also run Turnstile's script and
+ * show its challenge frame.
  */
-export function contentSecurityPolicy(nonce: string, embed?: EmbedPolicy | null): string {
+export function contentSecurityPolicy(
+  nonce: string,
+  embed?: EmbedPolicy | null,
+  opts: { turnstile?: boolean } = {},
+): string {
   const ancestors = embed?.frameAncestors.length ? embed.frameAncestors.join(' ') : "'none'";
   const actions = ["'self'", ...(embed?.formAction ?? [])].join(' ');
+  const turnstile = opts.turnstile ? ` ${TURNSTILE_ORIGIN}` : '';
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}'${turnstile}`,
+    ...(opts.turnstile ? [`frame-src ${TURNSTILE_ORIGIN}`] : []),
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob:",
@@ -114,6 +131,23 @@ export function contentSecurityPolicy(nonce: string, embed?: EmbedPolicy | null)
   ].join('; ');
 }
 
+/** Headers a route passes to entry.server.tsx and no response may carry. */
+const INTERNAL_HEADERS = [EMBED_HEADER, TURNSTILE_HEADER];
+
+/**
+ * A page's headers as sent: the route's `EMBED_HEADER` and `TURNSTILE_HEADER` folded into its
+ * Content-Security-Policy when there is a `nonce`, and removed either way (a HEAD answer, or the
+ * dev server, which sets no policy).
+ */
+export function pageHeaders(headers: Headers, nonce?: string): Headers {
+  const embed = parseEmbed(headers.get(EMBED_HEADER));
+  const turnstile = headers.has(TURNSTILE_HEADER);
+  for (const h of INTERNAL_HEADERS) headers.delete(h);
+  if (nonce)
+    headers.set('Content-Security-Policy', contentSecurityPolicy(nonce, embed, { turnstile }));
+  return headers;
+}
+
 /**
  * Headers every response from the web Worker carries. HSTS only over HTTPS, so local development
  * on http://localhost isn't pinned.
@@ -122,6 +156,9 @@ export function withSecurityHeaders(res: Response, url: URL): Response {
   // A WebSocket upgrade's response can't be rebuilt, and has no body to protect.
   if (res.status === 101 || res.webSocket) return res;
   const out = new Response(res.body, res);
+  // A route's notes to entry.server.tsx also reach React Router's `.data` answers, which never
+  // pass through it.
+  for (const h of INTERNAL_HEADERS) out.headers.delete(h);
   const set = (k: string, v: string) => {
     if (!out.headers.has(k)) out.headers.set(k, v);
   };

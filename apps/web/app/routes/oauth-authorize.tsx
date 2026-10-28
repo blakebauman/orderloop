@@ -278,7 +278,7 @@ function Consent({
           </button>
         </p>
         {details.redirectIsLoopback ? (
-          <p className="mt-3 rounded-md border border-wait/40 bg-wait/10 p-3 text-sm">
+          <p className="mt-3 rounded-lg border border-wait/40 bg-wait/10 p-3 text-sm">
             <span className="font-medium">This sends access to an app on your computer.</span>{' '}
             Continue only if you just started connecting from it.
           </p>
@@ -291,7 +291,7 @@ function Consent({
             {roles.map((r, i) => (
               <label
                 key={r}
-                className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary"
+                className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary"
               >
                 <input
                   type="radio"

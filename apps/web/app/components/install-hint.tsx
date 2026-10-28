@@ -23,7 +23,7 @@ export function InstallHint() {
   return (
     <aside
       aria-label="Add to Home Screen"
-      className="mb-6 flex items-start gap-3 rounded-md border bg-card p-4"
+      className="mb-6 flex items-start gap-3 rounded-lg border bg-card p-4"
     >
       <Share className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <p className="min-w-0 flex-1 text-sm">

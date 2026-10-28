@@ -280,7 +280,7 @@ function FilterLink({
     <Link
       to={to}
       aria-current={active ? 'page' : undefined}
-      className="rounded-md border px-2.5 py-1 text-muted-foreground aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground"
+      className="hit-area rounded-4xl border border-input bg-input/30 px-3 py-1 text-muted-foreground hover:bg-input/50 hover:text-foreground aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground"
     >
       {children}
     </Link>

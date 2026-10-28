@@ -125,7 +125,7 @@ export function Passkeys({ passkeys }: { passkeys: PasskeyRow[] }) {
           </p>
         ) : null}
         {passkeys.length ? (
-          <ul className="divide-y rounded-sm border text-sm">
+          <ul className="divide-y rounded-lg border text-sm">
             {passkeys.map((p) => (
               <li key={p.id} className="p-3">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

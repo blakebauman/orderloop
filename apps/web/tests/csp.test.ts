@@ -7,6 +7,7 @@ import {
   documentNonce,
   NonceContext,
   parseEmbed,
+  TURNSTILE_ORIGIN,
   useNonce,
   withSecurityHeaders,
 } from '../app/lib/csp';
@@ -19,6 +20,21 @@ describe('page CSP', () => {
     const csp = contentSecurityPolicy('n');
     expect(directive(csp, 'frame-ancestors')).toBe("frame-ancestors 'none'");
     expect(directive(csp, 'form-action')).toBe("form-action 'self'");
+  });
+
+  it('lets only a page that asks for Turnstile run its script and show its frame', () => {
+    const plain = contentSecurityPolicy('n');
+    expect(plain).not.toContain(TURNSTILE_ORIGIN);
+    expect(directive(plain, 'frame-src')).toBeUndefined();
+    const csp = contentSecurityPolicy('n', null, { turnstile: true });
+    expect(directive(csp, 'script-src')).toBe(
+      "script-src 'self' 'nonce-n' https://challenges.cloudflare.com",
+    );
+    expect(directive(csp, 'frame-src')).toBe('frame-src https://challenges.cloudflare.com');
+    // Nothing else opens up: it still can't be framed, and still posts only here.
+    expect(directive(csp, 'frame-ancestors')).toBe("frame-ancestors 'none'");
+    expect(directive(csp, 'form-action')).toBe("form-action 'self'");
+    expect(directive(csp, 'connect-src')).toBe("connect-src 'self'");
   });
 
   it('lets an external cart be framed by its origins and post its return to its URL', () => {
