@@ -98,7 +98,7 @@ export function Connections({
                       id={selectId}
                       value={picks[o] ?? ''}
                       onChange={(e) => setPicks((p) => ({ ...p, [o]: e.target.value }))}
-                      className="h-8 min-w-0 flex-1 rounded-3xl border border-transparent bg-input/50 px-3 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+                      className="h-8 min-w-0 flex-1 rounded-4xl border border-input bg-input/30 px-3 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                     >
                       <option value="">Connect to…</option>
                       {options.map((n) => (

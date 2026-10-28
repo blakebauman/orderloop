@@ -9,7 +9,7 @@
 /* Streamdown renders the assistant's markdown with Tailwind classes of its own. */
 @source "../node_modules/streamdown/dist/*.js";
 
-/* Ledger, on shadcn's base-luma preset: neutral greys with no tint, Inter, generous radii and pill
+/* Ledger, on shadcn's base-maia preset: neutral greys with no tint, Inter, generous radii and pill
    controls (buttons and one-line fields are fully round). One blue accent for links and work in
    progress, and signal colours reserved for order and step status. Green means "succeeded" and
    nothing else; it is never the brand. Light is the default; dark is chosen with the theme switch. */

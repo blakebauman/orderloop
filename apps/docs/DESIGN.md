@@ -124,7 +124,7 @@ components:
 # Design System: Order Loop docs
 
 This file describes `apps/docs`: the Starlight site at docs.orderloop.app and the Scalar page at
-`/api/`. The system itself is the web app's, "Ledger" (shadcn's base-luma preset, `b1VlIttI`, with the
+`/api/`. The system itself is the web app's, "Ledger" (shadcn's base-maia preset, `bbVJxYW`, with the
 app's status ramp kept), authored in `apps/web/app/app.css`; this file
 records what the docs do with it. It is **derived from the shipped code** (`src/styles/brand.css`,
 `src/components/`, the generated `src/styles/theme.css`). When the code and this file disagree,
@@ -132,7 +132,7 @@ fix whichever is wrong and say which in the commit.
 
 ## Overview
 
-**North star: the app's reading copy.** The app is a commerce back office in shadcn's base-luma
+**North star: the app's reading copy.** The app is a commerce back office in shadcn's base-maia
 preset: neutral greys with no tint, Inter, generous radii and pill controls, one blue for links, and
 signal colours that mean a status and nothing else. The docs are the same system for the moments
 you're not at the desk:
@@ -240,7 +240,7 @@ other shadows (search, pagination) are removed.
 
 ### Top bar
 
-The wordmark with the mark; search as an app input (a filled pill, 32px); then "API
+The wordmark with the mark; search as an app input (a hairline pill with a faint fill, 32px); then "API
 explorer" as a muted text link and **Open the app** as the one ink button, the app's "New order"
 slot; GitHub; the theme select. The links ride an override of `SocialIcons`, the one slot in
 Starlight's header right group, so `Header` stays Starlight's. Below 50rem the right group hides
@@ -341,4 +341,4 @@ the caret is link blue; scrollbars are thin, in the rule colour; link underlines
 - **Don't** set titles or buttons in uppercase, or put an eyebrow above a heading; uppercase is for
   captions only.
 - **Don't** borrow styling from other projects (felix-web, durablefibers, Supabase). Ledger is
-  shadcn's base-luma preset as this product applies it, not another product's look.
+  shadcn's base-maia preset as this product applies it, not another product's look.

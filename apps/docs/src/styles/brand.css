@@ -1,5 +1,5 @@
 /*
- * Ledger (the app's design, on shadcn's base-luma preset) in the docs: the web app's components carried into Starlight. Hand-written and safe to
+ * Ledger (the app's design, on shadcn's base-maia preset) in the docs: the web app's components carried into Starlight. Hand-written and safe to
  * edit. Colours come only from theme.css (generated from @orderloop/design, never hand-edited):
  * Starlight's slots, plus `--ol-*` for the app's own tokens. Each block names the app component
  * it follows, so a change there has an obvious counterpart here. See apps/docs/DESIGN.md.
@@ -78,19 +78,19 @@ header.header {
   width: auto;
 }
 
-/* Search reads as one of the app's inputs: a filled pill with no edge until hovered. */
+/* Search reads as one of the app's inputs: a pill with a hairline edge and a faint fill. */
 site-search > button[data-open-modal] {
   height: 2rem;
-  border: 1px solid transparent;
+  border: 1px solid var(--ol-input);
   border-radius: var(--ol-pill);
-  background: color-mix(in oklch, var(--ol-input) 50%, transparent);
+  background: color-mix(in oklch, var(--ol-input) 30%, transparent);
   color: var(--ol-muted-foreground);
   font-size: 0.8125rem;
   box-shadow: none;
 }
 
 site-search > button[data-open-modal]:hover {
-  border-color: var(--ol-input);
+  background: color-mix(in oklch, var(--ol-input) 50%, transparent);
   color: var(--ol-ink);
 }
 
