@@ -665,23 +665,29 @@ type Segment = { at: number } & (
   | { part: Indexed; trace?: never }
 );
 
-/** A read the assistant made, not an action, proposal or draft (those have cards of their own). */
-const isRead = (p: Message['parts'][number]) => {
+/**
+ * A part that reads as one Trace line: a read, or an action no longer asking (answered, or
+ * `replaced` by a newer request). An action that asks keeps its card outside the trace; proposals
+ * and drafts have cards of their own.
+ */
+const isLine = (p: Message['parts'][number], replaced: boolean) => {
   if (!isToolUIPart(p)) return false;
   const name = getToolName(p);
-  return (
-    isAssistantTool(name) &&
-    !ACTION.has(name) &&
-    name !== 'propose_flow_change' &&
-    name !== 'draft_plugin'
-  );
+  if (ACTION.has(name)) return replaced || p.state !== 'approval-requested';
+  return isAssistantTool(name) && name !== 'propose_flow_change' && name !== 'draft_plugin';
 };
 
-/** A message's parts in order, with each run of thinking and reads gathered into one segment. */
-export function segments(parts: Message['parts']): Segment[] {
+/**
+ * A message's parts in order, with each run of thinking and Trace lines gathered into one segment.
+ * `replaced` says whether the action at a part's index was replaced by a newer request.
+ */
+export function segments(
+  parts: Message['parts'],
+  replaced: (i: number) => boolean = () => false,
+): Segment[] {
   const out: Segment[] = [];
   parts.forEach((p, i) => {
-    if (p.type === 'reasoning' || isRead(p)) {
+    if (p.type === 'reasoning' || isLine(p, replaced(i))) {
       const last = out.at(-1);
       if (last?.trace) last.trace.push({ p, i });
       else out.push({ at: i, trace: [{ p, i }] });
@@ -712,8 +718,8 @@ function AssistantMessage({
   return (
     <MessageFrame from="assistant">
       <MessageContent className="space-y-2">
-        {segments(parts).map((seg) => {
-          // Thinking and reads that run together share one Trace.
+        {segments(parts, (i) => replaced.has(actionKey(m.id, i))).map((seg) => {
+          // Thinking, reads and answered actions that run together share one Trace.
           if (seg.trace)
             return (
               <Trace key={seg.at}>
@@ -723,6 +729,15 @@ function AssistantMessage({
                       key={i}
                       text={p.text}
                       running={streaming && p.state === 'streaming'}
+                    />
+                  ) : isToolUIPart(p) && ACTION.has(getToolName(p)) ? (
+                    <ActionCard
+                      key={actionKey(m.id, i)}
+                      part={p}
+                      preview={preview}
+                      respond={respond}
+                      actionKey={actionKey(m.id, i)}
+                      replaced={replaced.has(actionKey(m.id, i))}
                     />
                   ) : isToolUIPart(p) ? (
                     <ReadLine key={p.toolCallId} part={p} streaming={streaming} />

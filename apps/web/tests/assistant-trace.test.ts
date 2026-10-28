@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { segments } from '../app/components/assistant/panel';
-import { ReadLine, ReasoningLine } from '../app/components/assistant/parts';
+import { ActionCard, ReadLine, ReasoningLine } from '../app/components/assistant/parts';
 
 type Parts = Parameters<typeof segments>[0];
 type Tool = Parameters<typeof ReadLine>[0]['part'];
@@ -39,13 +39,79 @@ describe('assistant message segments', () => {
     ]);
   });
 
-  it('keeps actions and drafts out of the trace', () => {
+  it('keeps an action that asks, and drafts, out of the trace', () => {
     const parts = [
       read('output-available', { output: { count: 1, total: '$1.00' } }),
       { type: 'tool-cancel_order', toolCallId: 'c', state: 'approval-requested', input: {} },
       { type: 'tool-draft_plugin', toolCallId: 'd', state: 'input-available', input: {} },
     ] as unknown as Parts;
     expect(segments(parts).map((s) => Boolean(s.trace))).toEqual([true, false, false]);
+  });
+
+  it('gathers an answered or replaced action into the trace with the reads', () => {
+    const parts = [
+      read('output-available', { output: { count: 1, total: '$1.00' } }),
+      { type: 'tool-cancel_order', toolCallId: 'c', state: 'output-available', input: {} },
+      { type: 'tool-cancel_order', toolCallId: 'e', state: 'approval-requested', input: {} },
+      { type: 'tool-cancel_order', toolCallId: 'f', state: 'approval-requested', input: {} },
+    ] as unknown as Parts;
+    const segs = segments(parts, (i) => i === 2);
+    expect(segs.map((s) => (s.trace ? s.trace.map((t) => t.i) : s.part.i))).toEqual([[0, 1, 2], 3]);
+  });
+});
+
+describe('ActionCard once answered', () => {
+  const action = (state: string, extra: Record<string, unknown> = {}) =>
+    ({
+      type: 'tool-cancel_order',
+      toolCallId: `act-${state}`,
+      state,
+      input: { orderId: 'ord_1' },
+      ...extra,
+    }) as unknown as Tool;
+  const card = (part: Tool, replaced = false) =>
+    html(
+      createElement(ActionCard, {
+        part,
+        preview: () => new Promise<never>(() => {}),
+        respond: () => {},
+        actionKey: 'k',
+        replaced,
+      }),
+    );
+
+  it('is a line in the words of what happened, linked to it', () => {
+    const out = card(
+      action('output-available', { output: { done: 'Cancelled ORD-1.', href: '/orders/ord_1' } }),
+    );
+    expect(out).toContain('data-slot="trace-line"');
+    expect(out).toContain('Cancelled ORD-1.');
+    expect(out).toContain('href="/orders/ord_1"');
+    expect(out).not.toContain('<button');
+  });
+
+  it('says a declined action was left as it was, neutrally', () => {
+    const out = card(action('output-denied'));
+    expect(out).toContain('left as it was. You declined.');
+    expect(out).not.toContain('data-status');
+  });
+
+  it('opens a failed action on its error', () => {
+    const out = card(action('output-error', { errorText: 'Order already shipped' }));
+    expect(out).toContain('data-status="error"');
+    expect(out).toContain('didn’t go through');
+    expect(out).toContain('Order already shipped');
+  });
+
+  it('shimmers while an approved action runs', () => {
+    const out = card(action('approval-responded', { approval: { id: 'a', approved: true } }));
+    expect(out).toContain('data-status="running"');
+  });
+
+  it('says a replaced request was replaced', () => {
+    const out = card(action('approval-requested', { approval: { id: 'a' } }), true);
+    expect(out).toContain('replaced by the newer request below');
+    expect(out).not.toContain('<button');
   });
 });
 
