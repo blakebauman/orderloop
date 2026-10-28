@@ -568,7 +568,7 @@ that did deploy, with the rest.
 
 Within a minute per isolate the plugin's nodes appear in the editor palette and its `nav` entries in
 the shell (for people at or above its `pageRole`). Admins see what is installed at **Plugins**
-(`/plugins`, under More in the Workspace group), and `GET /api/v1/plugins` lists it.
+(`/plugins`, in the sidebar's Workspace group), and `GET /api/v1/plugins` lists it.
 
 ## Installing at runtime
 

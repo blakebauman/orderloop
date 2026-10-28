@@ -19,6 +19,20 @@ describe('freshKeys', () => {
     expect(freshKeys(['b'], known, now + 1000, 5)).toEqual(new Set());
   });
 
+  it('lets rows already fading in finish when a burst lands after them', () => {
+    // Two arrived at now - 100 and are mid-fade; six more land at once.
+    const known = new Map([
+      ['a', now - 100],
+      ['b', now - 100],
+    ]);
+    const fresh = freshKeys(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], known, now, 5);
+    expect(fresh).toEqual(new Set(['a', 'b']));
+  });
+
+  it('never replays a key once it has settled', () => {
+    expect(freshKeys(['a'], new Map([['a', 0]]), now, 5)).toEqual(new Set());
+  });
+
   it('animates nothing when a burst lands, so a refresh never plays as a backlog', () => {
     const known = new Map<string, number>();
     const keys = ['a', 'b', 'c', 'd', 'e', 'f'];

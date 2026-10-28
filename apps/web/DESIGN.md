@@ -163,7 +163,7 @@ only where a value must be read character by character.
 - **Title** (600, 1.75rem, 1.25, -0.015em): a page's h1. It wraps; it is never truncated.
 - **Section title** (600, 15px, 1.3): a card's heading, in sentence case.
 - **Body** (400, 0.875rem): running text, rows, fields.
-- **UI** (400, 0.8125rem, `text-ui`): the top bar, segmented controls, compact controls.
+- **UI** (400, 0.8125rem, `text-ui`): the header, segmented controls, compact controls.
 - **Caption** (500, 0.6875rem: 11px, 0.05em, UPPERCASE): field, column and fact labels, and the group
   labels in menus and sheets (the `caption` utility alone; a menu label sets no size of its own). The only uppercase in
   the product.
@@ -187,10 +187,11 @@ Tailwind's default breakpoints, read as devices:
 
 | Width | Typically | What changes |
 |---|---|---|
-| below `sm` (640px) | iPhone upright | Top bar shows the mark and Assistant as icons |
-| below `md` (768px) | phones, either way up | Bottom tab bar; tables stack into cards (see Tables); the Commerce jump links stick under the top bar |
-| `md` to `lg` (768–1023px) | iPad upright | Links in the top bar; Assistant, New order and the account name are icons |
-| `lg` and up (1024px) | iPad on its side, desktop | The full flow editor; the order page's graph beside its panels; the assistant as a column |
+| below `sm` (640px) | iPhone upright | The header shows the mark and Assistant as icons |
+| below `md` (768px) | phones, either way up | Bottom tab bar, no sidebar; tables stack into cards (see Tables); the Commerce jump links stick under the header |
+| `md` to `lg` (768–1023px) | iPad upright | The sidebar is an icon rail beside the page and opens over it |
+| `lg` and up (1024px) | iPad on its side, desktop | The full sidebar (the reader can collapse it); the full flow editor; the order page's graph beside its panels; the assistant as a column |
+| `xl` and up (1280px) | desktop | The full sidebar and the assistant's column side by side; below this, opening the assistant rails the sidebar |
 
 Size and hint by what is pointing, not by width: `touch:` is a coarse pointer (a finger), `fine:` a
 mouse or trackpad (an iPad with a trackpad reports fine). `short:` is a phone on its side (landscape,
@@ -198,63 +199,74 @@ under 32rem tall, under 64rem wide).
 
 ## The shell
 
-- **Top bar:** 3rem plus the status bar's inset (`--shell-h`), sticky, with a rule under it. The
-  wordmark, the main links from md, then Assistant, New order (from md) and account.
-- **Its links:** the day's work (Overview, Orders, Approvals, Carts), a hairline, Flows, then
-  **More**: links that didn't fit, reference pages (Commerce, Performance), plugins' pages under
-  "From plugins", and for admins the workspace's pages under "Workspace" (Team and roles, Audit
-  log, Plugins). While you're on one of its pages, More reads as that page, underlined; it carries
-  the approvals count while Approvals is inside it. A tab marks as soon as it is chosen, not when
-  its page arrives. Focus outlines on the links sit inside them, clear of the rule. A transparent
-  2px rule on top balances the underline, so tab text sits on the bar's centre line with the
-  wordmark and the pills. More marks the page you're on with a check, as the theme's radio items
-  do, not with weight.
-- **Titles in the bar's menus and sheets** (the account menu's who, a sheet's title) are 600 with
+- **Sidebar (from md):** shadcn's Sidebar (radix-maia), ported to `packages/ui/src/sidebar.tsx`
+  and composed in `shell.tsx` (`AppSidebar`). Full height on its own ground (`--sidebar`, half a step
+  under the paper; `.205` in dark, a step above the page), with a rule. From the top: the header
+  row, on the header's line (its height, its inset, its rule), whose mark is the `SidebarTrigger`
+  (named "Sidebar", ⌘\ or Ctrl+\); the day's work (Overview, Orders, Approvals, Carts) with no
+  label; then groups labelled as captions: Build (Flows), Reference (Commerce, Catalog,
+  Performance), From plugins (past six, the first five and "N more"), and for admins Workspace (Team
+  and roles, Audit log, Plugins); the account in the footer; `SidebarRail` on its edge. Rows are
+  `SidebarMenuButton`s, an icon and a name in `NAV`'s order; the page you're on is
+  `--sidebar-accent` (a step deeper than the preset's, so it reads on the ground) and 500, with
+  `aria-current`, marked as soon as it is chosen, not when its page arrives. On touch every row is
+  44px tall. The approvals count is a `SidebarMenuBadge`.
+- **Expanded or a rail:** 16rem, or a 3.25rem rail of icons (`--sidebar-width`,
+  `--sidebar-width-icon` plus the notch's inset). The reader's choice is shadcn's `sidebar_state`
+  cookie, read by the shell's loader, so the server draws it at the right width. Below lg, on a
+  canvas (the flow editor, an order) and beside the assistant's column below xl, the provider is in
+  `overlay`: the sidebar stays a rail and its toggle opens it over the page (`peek`, with
+  `shadow-overlay`), leaving the choice alone; Escape, a press outside it or a navigation closes it.
+  Below lg it is also a rail by CSS, so an iPad draws it right before hydration. The icon-only look
+  follows the drawn width (a container query below 8rem), not `data-state`: names go to screen
+  readers and a tooltip, group labels keep their height as hairlines, the count becomes a `wait`
+  dot, and icons stay at the same x, so nothing moves as it narrows. Width changes take the travel
+  time on the arriving ease; reduced motion jumps. It is its own view-transition layer
+  (`vt-sidebar`), still while pages change. Not shadcn's: no mobile Sheet (phones have the tab
+  bar), and ⌘\ rather than ⌘B, which Firefox keeps for its bookmarks.
+- **Header:** 3rem plus the status bar's inset (`--shell-h`), sticky over the page, with a rule
+  under it. From md it holds only what acts on the page: Assistant and New order. Pages carry their
+  own crumbs, so it doesn't name the page. Below md it starts with the mark (a link to Overview).
+- **Titles in menus and sheets** (the account menu's who, a sheet's title) are 600 with
   `tracking-title`, the title tier, so they read as headers over 400 items; hints (⌘J, ?) are
   11px/400 muted everywhere except the shortcuts list's boxed keys.
-- **Fitting the bar:** it never scrolls or overlaps, whatever the window or text size
-  (`useFittingBar`). An invisible ruler holds every link, and each way More can read, at natural
-  width. Before paint, labels give way first, in this order: the wordmark, the account's name,
-  Assistant's words and hint, New order's words (each stays an icon with its name); only then do
-  links fold into More from the right. The links' room never gets narrower than More. What gave way
-  is marked on the bar as `data-squeeze` and the labels hide by it. Before hydration (or without
-  JavaScript) the row clips rather than drawing under the controls.
-- **Approvals count:** a filled `wait` pill, 99+ past two digits, in the top bar, tab bar and
-  More alike: the bar's one call for attention.
-- **New order:** ink, except on Approvals and Flows, where it steps back to an outline. From md to
-  lg it is an icon with a `title`.
-- **Account:** its menu holds who is signed in, their Account page, Keyboard shortcuts (with a
-  fine pointer), the theme and signing in or out; the workspace's pages are in More. The button names who: a person's name, Workspace, or with sign-in off the role everyone acts
+- **Approvals count:** a filled `wait` pill, 99+ past two digits, in the sidebar, tab bar and
+  More alike (a `wait` dot on the rail): the shell's one call for attention.
+- **New order:** ink, except on Approvals and Flows, where it steps back to an outline.
+- **Account:** the sidebar's foot. Its menu (upward, or to the right of a rail) holds who is signed
+  in, their Account page, Keyboard shortcuts (with a fine pointer), the theme and signing in or
+  out; the workspace's pages are the sidebar's. The button names who: a person's name, Workspace, or with sign-in off the role everyone acts
   as ("Admin, no sign-in"); its accessible name is that plus "account menu", and its `title` the
   full identity.
-- **Shortcuts** are written for the device: ⌘J on Apple, Ctrl+J elsewhere (`useShortcutLabel`).
+- **Shortcuts** are written for the device: ⌘J and ⌘\ on Apple, Ctrl+J and Ctrl+\ elsewhere
+  (`useShortcutLabel`).
   The Assistant's hint shows from xl with a fine pointer and is hidden from screen readers, which
   get `aria-keyshortcuts`. G then a letter goes to a page (H Overview, O Orders, A Approvals, C
   Carts, F Flows, P Performance) and ? opens the list of every shortcut; they follow
   `pageShortcut`'s rules and run before a page's own keys.
 - **Transitions** in the bars name their properties (`tint`), never `transition-colors`, which
   would fade the focus outline in.
-- **One order everywhere:** the top bar, the tab bar and More list pages in `NAV`'s order.
+- **One order everywhere:** the sidebar, the tab bar and More list pages in `NAV`'s order.
 - **New order on a phone:** a floating pill (`shadow-float`) above the tab bar on the right, on
   the overview and the orders list only; main pads its foot so the last row clears it, and the
   page's `scroll-padding-bottom` keeps what focus or a link scrolls to clear of it.
 - **Tab bar (below md):** Overview, Orders, Approvals (with its count), Carts, and More: the day's
   work, in thumb reach; a phone keeps up and decides, and only reviews flows. 3.5rem plus the home
   indicator (`--tabbar-h`); in `short:` 2.75rem with the labels for screen readers only. More is a
-  bottom sheet grouped like the desktop: Pages, From plugins and Workspace (as in More), then
+  bottom sheet grouped like the sidebar: Pages, From plugins and Workspace, then
   Account, the theme and signing in or out (as in the account menu). It closes when a page is chosen.
 - **Main** pads its foot by `--tabbar-h`. A full-height page (the flow editor, the order page at
   lg) is `calc(100dvh - var(--shell-h))`; never hard-code the bar heights.
-- **Assistant:** a column beside the page at lg; below that a sheet between the top bar and the
-  tab bar. While the on-screen keyboard is up (`data-keyboard` on `<html>`, from
+- **Assistant:** a column beside the page at lg; below that a sheet between the header and the
+  tab bar, beside the rail from md. While the on-screen keyboard is up (`data-keyboard` on `<html>`, from
   `useVisualViewport`) it takes exactly the area above the keyboard. Both slide in 200ms on an
   exponential ease-out (`cubic-bezier(0.16,1,0.3,1)`), by transform and opacity only: the sheet
   from the right edge; the column takes its 400px at once (the page narrows in one layout, not one
   per frame) while its content slides in from the right, and on closing gives the width back only
   after the content has slid out. Nothing inside rewraps. Reduced motion shows and hides it at once. An action waiting for the person's
   confirmation is pinned above the composer (`wait` tint) until it is answered.
-- **Slow pages:** a navigation that takes over 400ms draws a link-blue rule sweeping under the top
-  bar and marks main `aria-busy`. Quicker ones show nothing.
+- **Slow pages:** a navigation that takes over 400ms draws a link-blue rule sweeping under the
+  header and marks main `aria-busy`. Quicker ones show nothing.
 - **Route announcer:** after a client-side navigation, the new page's h1 is read out in a polite
   live region. Focus stays where it was.
 
@@ -303,7 +315,7 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
   rest named by their `label`; `stack="rows"` leaves the row's layout to the caller (the orders and
   carts lists, where the whole card opens the row). Either way the header stays for screen readers
   and the parts keep their table roles.
-- **Long lists** (`sticky`) keep the header under the top bar; the card clips with
+- **Long lists** (`sticky`) keep the header under the shell's header; the card clips with
   `overflow-clip`, never `overflow-hidden`, which would stop it.
 
 ## Screens that change shape
@@ -352,6 +364,8 @@ New order).
 - **Card** (`box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)`): every panel (`card`), a ring rather than a shadow.
 - **Raised segment** (`shadow-sm`): the chosen segment of a segmented control.
 - **Float** (`shadow-float`): a control over a scrolling page, a phone's New order. None in dark.
+- **Overlay** (`shadow-overlay`): the sidebar opened over the page (`peek`). Deeper in dark, where it
+  still has to lift off a near-black page.
 
 ### Named Rules
 **The No Nested Cards Rule.** Inside a card, group with tiles or rows, never another card.
@@ -397,8 +411,9 @@ In `app.css`, and in `app/lib/motion.ts` for animations run from script (a test 
 
 ### Named Rules
 **The Reduced Motion Rule.** With reduced motion nothing travels, but nothing that carries meaning
-is lost: colours still change, arrivals fade without rising, page changes happen at once, and the
-undo bar is hidden because the seconds count says the same.
+is lost: colours still change, arrivals and overlays (menus, dialogs, sheets) fade without rising,
+sliding or zooming, page changes happen at once, and the undo bar is hidden because the seconds
+count says the same.
 
 ## Shapes
 
@@ -427,6 +442,9 @@ for code and data blocks only.
   that went badly is ruled in the colour with a mark (✕ or undo) instead of tinted, so it reads
   apart without colour.
 - **Counts** (pending approvals in the bars): `wait` pills.
+- **Sidebar** (`packages/ui/src/sidebar.tsx`): shadcn's, adapted; see The shell.
+- **Tooltip** (`packages/ui/src/tooltip.tsx`): an ink pill with paper text, 12px, after 300ms; only
+  where a name isn't on screen (the sidebar's rail).
 - **Confirm** (`components/confirm.tsx`): an "are you sure?" where the action was, never a modal.
   The safe choice has focus, Escape backs out of the newest one, and focus goes back to what
   asked. Its actions are children, so it sits inside the caller's form.
@@ -472,6 +490,25 @@ for code and data blocks only.
   it isn't plain feed data: From feed (no dot), Edited here and Staged (ink), Draft (`ai`), Draft
   with its field changed since, Conflict and Missing (`wait`), Didn't publish (`bad`). A field with
   no value and no gap is a muted dash, "Empty" to screen readers.
+- **Approvals inbox** (`routes/approvals.tsx`): pending approvals are grouped by flow · step · rule
+  (`groupApprovals` in `lib/approvals.ts`), one card per group, headed by a section title naming all
+  three, then a muted line with the count, when the first closes and any order title every row
+  shares. Rows say only what differs: the deadline first (`DecisionDeadline`: muted "Decide in 3m"
+  or "Closes 2:05 PM", ink in the last ten seconds, never `wait`), the ref (mono), the customer and
+  the age, with the row's reason on one truncated line only when it adds to the group's rule, and a
+  Details disclosure (a chevron that turns 90°) for the figures, trail, timeout step, assignee and
+  the note field. A group with two or more rows the person can decide leads each with a checkbox
+  (`accent-foreground`, `hit-area`) and its header with Select all; ticking shows Approve selected
+  (ink) and Reject selected (outline) at the header's right. A batch is each row's own held
+  decision (`DecisionHandle`), so each row shows its own Undo; the header shows the count and
+  seconds left with Undo all, which takes focus. A row that can't be ticked keeps the column empty
+  and says why in place of its buttons. X (or Space on the row) ticks; Z with Undo all focused
+  takes the batch back; one polite live line per group speaks when a batch starts and ends. A row
+  whose decisions have closed leaves its group for a folded muted line under the list ("2
+  approvals closed, waiting for the engine"), never disabled buttons. Motion follows the shared rules: a row
+  that joins while the inbox is open fades in (`animate-arrive`, `useArrivals`), a group that forms
+  fades in as one (its rows don't fade again), and a row that resolves holds its place and fades to
+  the resolved tint.
 - **Install hint** (`components/install-hint.tsx`): on Account only, on an iPhone or iPad in
   Safari, until it's dismissed. iOS never offers Add to Home Screen itself.
 
@@ -503,7 +540,8 @@ actions must reach the engine.
 
 - **Don't** fade the focus ring below 3:1, or remove the outline without drawing an edge.
 - **Don't** put a status colour on something that isn't a status.
-- **Don't** read `env(safe-area-inset-*)` directly, or hard-code 3rem for the top bar.
+- **Don't** read `env(safe-area-inset-*)` directly, or hard-code 3rem for the header or 16rem for the
+  sidebar (`--shell-h`, `--sidebar-width`).
 - **Don't** set a field under 16px for touch, or show a keyboard shortcut to a finger.
 - **Don't** let a narrow screen change what it can't save (the flow editor below lg).
 - **Don't** interrupt work to suggest installing the app.

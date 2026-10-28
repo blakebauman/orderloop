@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { fakeSafeArea, isPhone, isTouch, open, PAGES, tapTargets } from './helpers';
+import { expect, type Page, test } from '@playwright/test';
+import { fakeSafeArea, isNarrow, isPhone, isTouch, open, PAGES, tapTargets } from './helpers';
 
 for (const path of PAGES) {
   test(`${path} doesn't scroll sideways`, async ({ page }) => {
@@ -47,7 +47,7 @@ test('controls take a 44px tap on touch screens', async ({ page }, info) => {
   await open(page, '/orders');
   const targets = await tapTargets(
     page,
-    'header a, header button, nav[aria-label="Main"] a, nav[aria-label="Main"] button, main button',
+    'header a, header button, nav[aria-label="Main"] a, nav[aria-label="Main"] button, [data-slot=sidebar] button[aria-label="Sidebar"], button[aria-label$="account menu"], main button',
   );
   expect(targets.length).toBeGreaterThan(0);
   // Height is what a thumb misses; a text link in a row can be as narrow as its word.
@@ -80,24 +80,83 @@ test('fields are 16px on touch screens, so iOS does not zoom into them', async (
   }
 });
 
-test('at double text size the top bar folds links into More rather than overlapping', async ({
+test('at double text size the sidebar and header fit without scrolling sideways', async ({
   page,
 }, info) => {
   test.skip(isPhone(info), 'phones have the tab bar');
   await open(page, '/orders');
   await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
-  const more = page.locator('header nav > button');
-  await expect(more).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const box = document.querySelector('header nav > button')!.getBoundingClientRect();
-        const actions = [...document.querySelectorAll('header > div > div:last-child > *')]
+        const actions = [...document.querySelectorAll('header a, header button')]
           .map((el) => el.getBoundingClientRect())
           .filter((r) => r.width > 0);
-        const overlaps = actions.some((r) => r.left < box.right - 0.5);
-        return { overlaps, sideways: document.documentElement.scrollWidth > window.innerWidth };
+        return {
+          clipped: actions.some((r) => r.right > window.innerWidth + 0.5),
+          sideways: document.documentElement.scrollWidth > window.innerWidth,
+        };
       }),
     )
-    .toEqual({ overlaps: false, sideways: false });
+    .toEqual({ clipped: false, sideways: false });
+});
+
+/** The sidebar's width on screen: its panel, border included. */
+const sidebarWidth = (page: Page) =>
+  page
+    .locator('#sidebar-nav')
+    .evaluate((nav) =>
+      Math.round(nav.closest('[data-slot=sidebar-container]')!.getBoundingClientRect().width),
+    );
+
+test('the sidebar holds every page, collapses to a rail and remembers it', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'the full sidebar is lg and up');
+  await open(page, '/orders');
+  const main = page.getByRole('navigation', { name: 'Main' });
+  for (const name of ['Overview', 'Orders', 'Flows', 'Commerce', 'Catalog', 'Team and roles'])
+    await expect(main.getByRole('link', { name, exact: true })).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Orders', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  expect(await sidebarWidth(page)).toBe(256);
+  const toggle = page.getByRole('button', { name: 'Sidebar', exact: true });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await toggle.click();
+  await expect.poll(() => sidebarWidth(page)).toBe(52);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  // A rail keeps every page by name for screen readers.
+  await expect(main.getByRole('link', { name: 'Commerce', exact: true })).toBeAttached();
+  await open(page, '/orders');
+  expect(await sidebarWidth(page), 'collapsed before paint after a reload').toBe(52);
+  await page.locator('main h1').click();
+  await page.keyboard.press('Meta+Backslash');
+  await expect.poll(() => sidebarWidth(page)).toBe(256);
+});
+
+test('on a canvas the sidebar is a rail that opens over the page', async ({ page }, info) => {
+  test.skip(isNarrow(info), 'the editor edits at lg');
+  await open(page, '/flows/tpl-storefront-order');
+  expect(await sidebarWidth(page)).toBe(52);
+  const canvas = page.locator('main');
+  const before = await canvas.boundingBox();
+  await page.getByRole('button', { name: 'Sidebar', exact: true }).click();
+  await expect.poll(() => sidebarWidth(page)).toBe(256);
+  expect((await canvas.boundingBox())!.x, 'the page stays where it was').toBe(before!.x);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => sidebarWidth(page)).toBe(52);
+});
+
+test('an iPad upright has the rail beside the page', async ({ page }, info) => {
+  test.skip(info.project.name !== 'ipad', 'iPad upright');
+  await open(page, '/orders');
+  expect(await sidebarWidth(page)).toBe(52);
+  await page.getByRole('button', { name: 'Sidebar', exact: true }).tap();
+  await expect.poll(() => sidebarWidth(page)).toBe(256);
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Carts' }).tap();
+  await expect(page).toHaveURL(/\/carts$/);
+  await expect.poll(() => sidebarWidth(page)).toBe(52);
 });

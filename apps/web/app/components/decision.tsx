@@ -8,24 +8,83 @@ import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Check, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
-import type { ApprovalContext } from '~/lib/approvals';
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { type ApprovalContext, deadlineWords, lockAt, SEND_MS, WARN_MS } from '~/lib/approvals';
 import { until } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
 
 const UNDO_MS = 5000;
-/** Time a decision needs to reach the order before its step times out. */
-const SEND_MS = 1500;
-/** Decisions close this long before the deadline, so the last one still arrives in time. */
-const LOCK_LEAD_MS = SEND_MS + 500;
-/** How long before closing the countdown warns that decisions are about to close. */
-const WARN_MS = 10_000;
-
-/** When decisions on an approval close: a little before its step times out. */
-export const lockAt = (deadline: number) => deadline - LOCK_LEAD_MS;
 
 export type Decision = 'approved' | 'rejected';
+
+/**
+ * What a list can ask of one row's controls: a batch decides each selected row through its own
+ * controls, so every decision in it gets that row's undo window, note and refusals.
+ */
+export type DecisionHandle = {
+  /**
+   * Holds `decision` as if its button were pressed. `quiet` leaves focus and the announcement to the
+   * batch. Returns when its undo window ends, or null if nothing was held (closed, busy, already held).
+   */
+  decide: (decision: Decision, opts?: { quiet?: boolean }) => number | null;
+  /** Takes back a held decision; nothing is sent. */
+  undo: () => void;
+};
+
+const noSubscribe = () => () => {};
+
+/**
+ * The deadline, said first: "Decide in 3m", "Closes 2:05 PM", "Decisions close in 8s". Muted while
+ * there is time and ink in the last ten seconds; never amber, which is for overdue ages. The full
+ * time is in the tooltip.
+ */
+export function DecisionDeadline({
+  deadline,
+  onTimeout,
+  className,
+}: {
+  deadline: number;
+  /** Where the order goes if nobody decides, for the closed line. */
+  onTimeout?: string;
+  className?: string;
+}) {
+  const now = useNow(1000);
+  const formatTime = useDateTime();
+  // The server can't know the viewer's zone: it and the hydrating render say UTC, then local.
+  const hydrated = useSyncExternalStore(
+    noSubscribe,
+    () => true,
+    () => false,
+  );
+  const w = deadlineWords(deadline, now, hydrated ? undefined : 'UTC');
+  return (
+    <span
+      className={cn(
+        'tabular',
+        w.kind === 'soon' ? 'font-medium text-foreground' : 'text-muted-foreground',
+        className,
+      )}
+      title={formatTime(deadline)}
+      suppressHydrationWarning
+    >
+      {w.kind === 'closed'
+        ? `Decisions closed${onTimeout ? `; it goes to ${onTimeout}` : ''}`
+        : w.kind === 'soon'
+          ? `Decisions close ${w.when}`
+          : w.kind === 'in'
+            ? `Decide ${w.when}`
+            : `Closes ${w.when}`}
+    </span>
+  );
+}
 
 /**
  * Why a person is asked, the figures behind it, what the order is for, the approvals before this
@@ -35,19 +94,23 @@ export function DecisionContext({
   ctx,
   className,
   clock = true,
+  reason = true,
 }: {
   ctx: ApprovalContext;
   className?: string;
   /** Show the escalation clock; off once the approval is no longer open. */
   clock?: boolean;
+  /** Show the reason line; off where the row already says it. */
+  reason?: boolean;
 }) {
   const now = useNow(clock && ctx.deadline ? 1000 : null);
   const formatTime = useDateTime();
   const ticking = clock && ctx.deadline !== undefined && lockAt(ctx.deadline) > now;
-  if (!ctx.reason && !ctx.facts.length && !ctx.lines && !ctx.trail.length && !ticking) return null;
+  const said = reason ? ctx.reason : undefined;
+  if (!said && !ctx.facts.length && !ctx.lines && !ctx.trail.length && !ticking) return null;
   return (
     <div className={cn('space-y-0.5 text-sm', className)}>
-      {ctx.reason ? <p className="font-medium text-foreground">{ctx.reason}</p> : null}
+      {said ? <p className="font-medium text-foreground">{said}</p> : null}
       {ctx.facts.length ? (
         <p className="max-w-[72ch] text-muted-foreground text-xs tabular">
           {ctx.facts.join(' · ')}
@@ -95,6 +158,8 @@ export function DecisionControls({
   onFlush,
   label,
   defaultNote = '',
+  withNote = true,
+  handle,
 }: {
   onDecide: (decision: Decision, note: string) => void;
   /** When the step times out. The undo window never runs past it. */
@@ -117,12 +182,20 @@ export function DecisionControls({
   /** What the buttons decide, for their accessible names, e.g. "#agszfp, $9,760.00". */
   label?: string;
   defaultNote?: string;
+  /** Show the note field. Hidden, a note already typed is kept and still sent. */
+  withNote?: boolean;
+  /** For a list that decides several rows at once (`DecisionHandle`). */
+  handle?: React.Ref<DecisionHandle>;
 }) {
   const [note, setNote] = useState(defaultNote);
   // `ms` is this decision's undo window: shorter than usual when the step is about to time out.
-  const [pending, setPending] = useState<{ decision: Decision; at: number; ms: number } | null>(
-    null,
-  );
+  // A quiet one was made by a batch, which takes focus and speaks for all of its rows.
+  const [pending, setPending] = useState<{
+    decision: Decision;
+    at: number;
+    ms: number;
+    quiet?: boolean;
+  } | null>(null);
   // Near the deadline, tick so the controls lock before a decision could arrive too late.
   const nearDeadline = deadline !== undefined && deadline - Date.now() < UNDO_MS + 60_000;
   const now = useNow(pending ? 250 : nearDeadline ? 1000 : null);
@@ -151,13 +224,25 @@ export function DecisionControls({
   useEffect(() => {
     if (locked && focusWithin.current) closedRef.current?.focus();
   }, [locked]);
-  const decide = (decision: Decision) => {
+  const decide = (decision: Decision, quiet?: boolean) => {
     const at = Date.now();
     const ms = windowFor(at);
-    if (ms !== null) setPending({ decision, at, ms });
+    if (ms !== null) setPending({ decision, at, ms, quiet });
+    return ms === null ? null : at + ms;
   };
   const decideRef = useRef(decide);
   decideRef.current = decide;
+  const held = useRef(false);
+  held.current = !!pending;
+  useImperativeHandle(
+    handle,
+    () => ({
+      decide: (decision, opts) =>
+        held.current || busy || disabled ? null : decideRef.current(decision, opts?.quiet),
+      undo: () => setPending(null),
+    }),
+    [busy, disabled],
+  );
   const noteId = useId();
   const commit = useRef(onDecide);
   commit.current = onDecide;
@@ -200,7 +285,9 @@ export function DecisionControls({
     const el = shortcuts?.current;
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A row's selection checkbox is still the row; a text field is not.
+      const typing = e.target instanceof HTMLInputElement && e.target.type !== 'checkbox';
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (pending && (k === 'z' || k === 'escape')) {
         e.preventDefault();
@@ -227,7 +314,7 @@ export function DecisionControls({
     return (
       <div
         className="relative flex animate-arrive flex-wrap items-center gap-3 overflow-hidden rounded-lg border bg-muted/50 px-3 py-2 text-sm"
-        aria-live="polite"
+        aria-live={pending.quiet ? undefined : 'polite'}
       >
         {/* The window running out, drained over exactly this decision's window (shorter near a
             deadline). Hidden where motion is reduced: the seconds say the same. */}
@@ -250,7 +337,7 @@ export function DecisionControls({
           variant="outline"
           className="ml-auto"
           onClick={() => setPending(null)}
-          autoFocus
+          autoFocus={!pending.quiet}
         >
           Undo
         </Button>
@@ -259,7 +346,8 @@ export function DecisionControls({
   }
 
   // Closed decisions keep the controls (and any note) in place, disabled, under one line that
-  // says what happens next. Ten seconds before, screen readers hear it once.
+  // says what happens next, in ink: amber is for overdue ages. Ten seconds before, screen readers
+  // hear it once. (The inbox moves a closed row out of its queue instead.)
   return (
     <div ref={rootRef} className="space-y-2">
       {locked ? (
@@ -267,7 +355,7 @@ export function DecisionControls({
           ref={closedRef}
           tabIndex={-1}
           role="status"
-          className="font-medium text-sm text-wait outline-none"
+          className="font-medium text-foreground text-sm outline-none"
         >
           Decisions are closed;{' '}
           {onTimeout ? `the order is going to ${onTimeout}` : 'the step is timing out'}.
@@ -285,6 +373,7 @@ export function DecisionControls({
         disabled={disabled || locked}
         decide={decide}
         label={label}
+        withNote={withNote}
       />
     </div>
   );
@@ -298,6 +387,7 @@ function DecisionForm({
   disabled,
   decide,
   label,
+  withNote,
 }: {
   compact?: boolean;
   noteId: string;
@@ -306,20 +396,25 @@ function DecisionForm({
   disabled?: boolean;
   decide: (decision: Decision) => void;
   label?: string;
+  withNote?: boolean;
 }) {
   return (
     <div className={cn('flex flex-wrap items-center gap-2', compact && 'sm:flex-nowrap')}>
-      <label htmlFor={noteId} className="sr-only">
-        Note for the order history
-      </label>
-      <Input
-        id={noteId}
-        placeholder="Note (optional)"
-        className={cn('h-8 text-sm', compact ? 'w-full sm:w-48' : 'w-full')}
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        disabled={disabled}
-      />
+      {withNote ? (
+        <>
+          <label htmlFor={noteId} className="sr-only">
+            Note for the order history
+          </label>
+          <Input
+            id={noteId}
+            placeholder="Note (optional)"
+            className={cn('h-8 text-sm', compact ? 'w-full sm:w-48' : 'w-full')}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={disabled}
+          />
+        </>
+      ) : null}
       <div className="flex gap-2">
         <Button
           size="sm"
@@ -345,7 +440,6 @@ function DecisionForm({
   );
 }
 
-/** A clock that ticks only while something on screen depends on it. */
 /**
  * Records a decision through the order's action route with `keepalive`, so it still arrives when
  * the page is being closed or navigated away from.

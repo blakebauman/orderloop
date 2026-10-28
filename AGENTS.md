@@ -13,7 +13,7 @@ pnpm check-types             # turbo → tsc --noEmit (web runs react-router typ
 pnpm test:fleet              # deployments/ registry and the configs scripts/fleet.ts renders
 pnpm test:toolkit            # .claude/ toolkit: skill/agent lint and hook tests (see .claude/README.md)
 pnpm --filter @orderloop/<pkg> test     # one package's tests
-pnpm --filter @orderloop/web e2e        # device tests: WebKit as iPhone, iPad and desktop (offline dev server)
+pnpm --filter @orderloop/web e2e        # device tests: WebKit as iPhone, iPad and desktop (offline dev server; E2E_PORT=… beside another worktree)
 pnpm turbo run lint check-types test --filter='...[origin/main]'  # what changed since main, plus dependents
 pnpm --filter @orderloop/engine types   # after changing apps/engine/wrangler.jsonc
 pnpm --filter @orderloop/web types      # after changing apps/web/wrangler.jsonc
