@@ -90,6 +90,8 @@ import {
   Prose,
   ReadLine,
   ReasoningLine,
+  SourcesLine,
+  sourcesOf,
   statusWords,
 } from './parts';
 
@@ -715,6 +717,8 @@ function AssistantMessage({
   const parts = m.parts;
   const lastText = parts.findLastIndex((p) => p.type === 'text');
   const text = textOf(m);
+  // One record is already linked from its read's line; a list of them earns its own line.
+  const sources = sourcesOf(parts);
   return (
     <MessageFrame from="assistant">
       <MessageContent className="space-y-2">
@@ -770,6 +774,11 @@ function AssistantMessage({
           }
           return null;
         })}
+        {!streaming && sources.length > 1 ? (
+          <Trace>
+            <SourcesLine sources={sources} />
+          </Trace>
+        ) : null}
         {m.metadata?.source === 'heuristic' && !streaming ? (
           <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
             <Info className="size-3" aria-hidden="true" />

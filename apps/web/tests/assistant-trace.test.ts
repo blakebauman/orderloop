@@ -3,7 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { segments } from '../app/components/assistant/panel';
-import { ActionCard, ReadLine, ReasoningLine } from '../app/components/assistant/parts';
+import {
+  ActionCard,
+  ReadLine,
+  ReasoningLine,
+  SourcesLine,
+  sourcesOf,
+} from '../app/components/assistant/parts';
 
 type Parts = Parameters<typeof segments>[0];
 type Tool = Parameters<typeof ReadLine>[0]['part'];
@@ -156,5 +162,54 @@ describe('ReasoningLine', () => {
     const out = html(createElement(ReasoningLine, { text: 'Check stock first.', running: false }));
     expect(out).toContain('Thought');
     expect(out).toContain('aria-expanded="false"');
+  });
+});
+
+describe('sources', () => {
+  const tool = (type: string, output: Record<string, unknown>, state = 'output-available') => ({
+    type: `tool-${type}`,
+    toolCallId: `${type}-${JSON.stringify(output)}`,
+    state,
+    input: {},
+    output,
+  });
+
+  it('lists each record a reply opened once, in order, and leaves searches out', () => {
+    const parts = [
+      tool('find_orders', { count: 9, total: '$9.00', orders: [{ href: '/orders/a' }] }),
+      tool('get_order', { id: 'ord_a', ref: '#A1', title: 'Desks', href: '/orders/ord_a' }),
+      tool('get_flow', { id: 'f1', name: 'Checkout', href: '/flows/f1' }),
+      tool('assess_order', { id: 'ord_a', ref: '#A1' }),
+      tool('get_cart', { id: 'cart_1', title: '', href: '/carts/cart_1' }),
+      tool('get_order', { href: '/orders/ord_b' }, 'output-error'),
+    ] as unknown as Parts;
+    expect(sourcesOf(parts)).toEqual([
+      { href: '/orders/ord_a', label: '#A1 · Desks' },
+      { href: '/flows/f1', label: 'Checkout' },
+      { href: '/carts/cart_1', label: 'cart_1' },
+    ]);
+  });
+
+  it('is one closed line that opens on a link to each record', () => {
+    const out = html(
+      createElement(SourcesLine, {
+        sources: [
+          { href: '/orders/ord_a', label: '#A1 · Desks' },
+          { href: '/flows/f1', label: 'Checkout' },
+        ],
+      }),
+    );
+    expect(out).toContain('Used 2 records');
+    expect(out).toContain('aria-expanded="false"');
+  });
+
+  it('links a flow read to its flow, as an order read links to its order', () => {
+    const part = read('output-available', {
+      output: { id: 'f1', name: 'Checkout', href: '/flows/f1' },
+    });
+    const flow = { ...part, type: 'tool-get_flow' } as Tool;
+    expect(html(createElement(ReadLine, { part: flow, streaming: false }))).toContain(
+      'href="/flows/f1"',
+    );
   });
 });

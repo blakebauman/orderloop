@@ -15,7 +15,13 @@ import {
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { cn } from '@orderloop/ui/lib/utils';
-import { type DynamicToolUIPart, getToolName, type ToolUIPart } from 'ai';
+import {
+  type DynamicToolUIPart,
+  getToolName,
+  isToolUIPart,
+  type ToolUIPart,
+  type UIMessage,
+} from 'ai';
 import {
   ArrowDown,
   ArrowUpRight,
@@ -25,6 +31,7 @@ import {
   CircleAlert,
   FileText,
   Inbox,
+  Library,
   type LucideIcon,
   PenLine,
   Puzzle,
@@ -235,11 +242,9 @@ export function ReadLine({ part, streaming }: { part: Part; streaming: boolean }
   const out =
     part.state === 'output-available' ? ((part.output ?? {}) as Record<string, unknown>) : null;
   const result = out ? found(name, out) : null;
+  const record = out ? recordOf(name, out) : null;
   const node = out && name === 'get_order' ? focusNode(out) : null;
-  const href =
-    out && name === 'get_order' && typeof out.href === 'string'
-      ? `${out.href}${node ? `?node=${encodeURIComponent(node)}` : ''}`
-      : null;
+  const href = record ? `${record.href}${node ? `?node=${encodeURIComponent(node)}` : ''}` : null;
   const line = (
     <TraceLine>
       <TraceIcon>
@@ -260,6 +265,74 @@ export function ReadLine({ part, streaming }: { part: Part; streaming: boolean }
     </Link>
   ) : (
     line
+  );
+}
+
+// ── Sources ────────────────────────────────────────────────────────────────
+
+/** A record the assistant opened to answer: an order, cart or flow, with where it lives. */
+export type Source = { href: string; label: string };
+
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** The one record a read opened, if it opened one (a search or list is many, linked in the reply). */
+function recordOf(name: string, out: Record<string, unknown>): Source | null {
+  switch (name) {
+    case 'get_order':
+      return str(out.href) ? { href: str(out.href), label: words(out.ref, out.title) } : null;
+    case 'assess_order':
+      return str(out.id) ? { href: `/orders/${str(out.id)}`, label: words(out.ref) } : null;
+    case 'get_cart':
+    case 'create_cart':
+    case 'change_cart':
+      return str(out.href) ? { href: str(out.href), label: words(out.title || out.id) } : null;
+    case 'get_flow':
+      return str(out.href) ? { href: str(out.href), label: words(out.name) } : null;
+    default:
+      return null;
+  }
+}
+
+const words = (...v: unknown[]) => v.map(str).filter(Boolean).join(' · ');
+
+/** The distinct records a message's reads opened, in the order it opened them. */
+export function sourcesOf(parts: UIMessage['parts']): Source[] {
+  const seen = new Map<string, Source>();
+  for (const p of parts) {
+    if (!isToolUIPart(p) || p.state !== 'output-available') continue;
+    const r = recordOf(getToolName(p), (p.output ?? {}) as Record<string, unknown>);
+    if (r && !seen.has(r.href)) seen.set(r.href, r);
+  }
+  return [...seen.values()];
+}
+
+/** What a reply drew on, as one line that opens on a link to each record. */
+export function SourcesLine({ sources }: { sources: readonly Source[] }) {
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>
+        <TraceLine>
+          <TraceIcon>
+            <Library />
+          </TraceIcon>
+          <TraceTitle>Used {plural(sources.length, 'record')}</TraceTitle>
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <ul className="space-y-1.5">
+          {sources.map((s) => (
+            <li key={s.href} className="min-w-0 truncate">
+              <Link
+                to={s.href}
+                className="hit-area text-foreground/80 hover:text-foreground hover:underline"
+              >
+                {s.label || s.href}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }
 
