@@ -85,7 +85,9 @@ fails the instance. The order's reason is a summary (`failureReason` in `apps/en
 `<step label>: <first line of the error>`, capped at 200 characters, or "Database error at
 <step label>" for a database error, whose message is the SQL statement and its parameters. It is
 shown on one line in the overview and the orders list, so it never carries a statement or a stack;
-the full error is on the step's run (`NodeRun.error`) and in the timeline.
+the full error is on the step's run (`NodeRun.error`) and in the timeline. A reason stored before this
+summary existed still holds the statement; the web app reads it the same way where it shows a
+reason (`readableReason` in `apps/web/app/lib/format.ts`).
 
 ## Interpreted nodes
 

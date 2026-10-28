@@ -66,13 +66,29 @@ export function assigneeLabel(s: string | null | undefined) {
 export const channelLabel = (c: string) =>
   ORDER_CHANNEL_LABELS[c as OrderChannel] ?? 'Other channel';
 
+/** A database driver's error: a statement, its parameters and SQLite codes, never for people. */
+const DATABASE_ERROR = /Failed query:|\bD1_[A-Z_]*ERROR\b|\bSQLITE_[A-Z_]+\b/;
+
 /**
- * Free text for one line: its first line, whitespace collapsed, cut at a word with "…" past
- * `max`. Order reasons are capped by the engine; this keeps a row indexed before that (once a
- * whole SQL statement) from laying out kilobytes.
+ * An order's reason as people read it, on one line. The engine cuts a database error back to
+ * where it happened (`orderReason` in apps/engine/src/words.ts); an order that stopped before it
+ * did still has the statement stored ("Supplier cost: Failed query: select …"), so it reads the
+ * same way here: "Database error at Supplier cost".
+ */
+export function readableReason(s: string) {
+  const line = s.replace(/\s+/g, ' ').trim();
+  const db = DATABASE_ERROR.exec(line);
+  if (!db) return line;
+  const where = line.slice(0, db.index).replace(/[\s:]+$/, '');
+  return where ? `Database error at ${where}` : 'Database error';
+}
+
+/**
+ * A reason for one line: `readableReason`, cut at a word with "…" past `max`. Order reasons are
+ * capped by the engine; this keeps a row indexed before that from laying out kilobytes.
  */
 export function clip(s: string, max = 160) {
-  const line = s.replace(/\s+/g, ' ').trim();
+  const line = readableReason(s);
   if (line.length <= max) return line;
   const cut = line.slice(0, max - 1);
   const space = cut.lastIndexOf(' ');
@@ -198,17 +214,54 @@ export const waitingForLabel = (s: string | null | undefined): string =>
 /** A short, sayable reference that tells look-alike orders apart: "ord_mv65gsxyqcs34m" → "#qcs34m". */
 export const orderRef = (id: string) => `#${id.slice(-6)}`;
 
+/** An event key a flow names (`return.requested`), as it appears in older timeline lines. */
+const EVENT_KEY = /([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)/;
+
+/** An event key in words, for where no step names it: "return.requested" → "Return requested". */
+export const eventName = (key: string) => humanize(key.replace(/\./g, ' '));
+
 /**
- * Engine log lines in operator words: drops ids ("ord_…", "cus_…") and names assignees in
- * parentheses, e.g. "(sales_ops)" → "(Sales ops)".
+ * A step's variables as a `control.set` step reports them ("cycle=2, year=null"), in words:
+ * "Cycle 2". A variable with no value is left out; null when the text isn't such a list.
  */
-export const plainLog = (s: string) =>
-  s
+export function plainVars(s: string): string | null {
+  const pairs = s.split(', ').map((p) => /^([A-Za-z_]\w*)=(.*)$/.exec(p));
+  if (!pairs.every(Boolean)) return null;
+  const words = pairs
+    .map((m) => [m![1]!, m![2]!.replace(/^"(.*)"$/, '$1')] as const)
+    .filter(([, v]) => v !== 'null' && v !== '' && v !== 'undefined')
+    .map(([k, v]) => `${humanize(k)} ${v}`);
+  return words.join(', ') || 'Nothing set';
+}
+
+/**
+ * Engine log lines in operator words: drops ids ("ord_…", "cus_…"), names assignees in
+ * parentheses ("(sales_ops)" → "(Sales ops)"), reads a step's variables ("cycle=2" → "Cycle 2"),
+ * and names an outside event by its step instead of its key. `step` is the label of the step the
+ * line belongs to, shown beside it: "Waiting for seller.responded" then reads "Waiting", and
+ * "Waiting for return.requested: timed out" reads "Timed out". Without one, the key reads as
+ * words ("Return requested: timed out").
+ */
+export function plainLog(s: string, step?: string) {
+  const text = plainVars(s.trim()) ?? plainEvent(s.trim(), step) ?? s;
+  const plain = text
     .replace(/\s*\bfor\s+cus_[\w-]+/g, '')
     .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')
     .replace(/\(([a-z]+(?:_[a-z]+)+)\)/g, (_, slug: string) => `(${assigneeLabel(slug)})`)
     .replace(/\s{2,}/g, ' ')
     .trim();
+  return plain.charAt(0).toUpperCase() + plain.slice(1);
+}
+
+/** An event wait's line by its key ("Waiting for k", "Waiting for k: timed out", "k received"). */
+function plainEvent(s: string, step?: string): string | null {
+  const m = new RegExp(`^(Waiting for )?${EVENT_KEY.source}(?:: (.+)| (received))?$`).exec(s);
+  if (!m) return null;
+  const [, waiting, key, outcome = m[4]] = m;
+  if (outcome) return step ? outcome : `${eventName(key!)}: ${outcome}`;
+  if (!waiting) return null;
+  return step ? 'Waiting' : `Waiting for ${eventName(key!).toLowerCase()}`;
+}
 
 /** A node's run time: "12ms", "12s", "3m", "2.5h", "4d". */
 export function duration(ms: number) {

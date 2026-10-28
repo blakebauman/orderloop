@@ -47,3 +47,20 @@ export function orderReason(text: string): string {
 
 /** "1 reservation" / "3 reservations". */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What a `control.set` step assigned, in words: `{ cycle: 2, year: null }` → "Cycle 2". A
+ * variable with no value is left out; text reads without quotes.
+ */
+export function varsSummary(vars: Record<string, unknown>): string {
+  const words = Object.entries(vars)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `${sentenceCase(k)} ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+  return words.join(', ') || 'Nothing set';
+}
+
+/** "next_cycle" → "Next cycle". */
+const sentenceCase = (s: string) => {
+  const t = s.replace(/[_-]+/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};

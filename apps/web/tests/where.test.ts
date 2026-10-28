@@ -21,6 +21,8 @@ describe('waitingOn', () => {
   it('names a person by role (or as an approver), an outside event or a timer', () => {
     expect(waitingOn(null)).toBeNull();
     expect(waitingOn('person:sales_ops')).toBe('Sales ops');
+    expect(waitingOn('person:ap')).toBe('Accounts payable');
+    expect(waitingOn('person:trust_safety')).toBe('Trust and safety');
     expect(waitingOn('person:')).toBe('an approver');
     expect(waitingOn('event:carrier.delivered')).toBe('an outside event');
     expect(waitingOn('timer · event:x · event:y')).toBe('a timer or an outside event');
