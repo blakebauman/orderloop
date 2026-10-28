@@ -2,7 +2,14 @@ import { isbot } from 'isbot';
 import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext, RouterContextProvider } from 'react-router';
 import { ServerRouter } from 'react-router';
-import { contentSecurityPolicy, EMBED_HEADER, NonceContext, newNonce, parseEmbed } from './lib/csp';
+import {
+  contentSecurityPolicy,
+  EMBED_HEADER,
+  NonceContext,
+  newNonce,
+  parseEmbed,
+  TURNSTILE_HEADER,
+} from './lib/csp';
 
 export const streamTimeout = 5_000;
 
@@ -45,8 +52,14 @@ export default async function handleRequest(
   // An external cart's page may be framed by the buyer's system and post its return there.
   const embed = parseEmbed(responseHeaders.get(EMBED_HEADER));
   responseHeaders.delete(EMBED_HEADER);
+  // Sign-in and setup may load Turnstile, when the deployment uses it.
+  const turnstile = responseHeaders.has(TURNSTILE_HEADER);
+  responseHeaders.delete(TURNSTILE_HEADER);
   // Vite's dev server injects its own inline scripts, which carry no nonce.
   if (!import.meta.env.DEV)
-    responseHeaders.set('Content-Security-Policy', contentSecurityPolicy(nonce, embed));
+    responseHeaders.set(
+      'Content-Security-Policy',
+      contentSecurityPolicy(nonce, embed, { turnstile }),
+    );
   return new Response(body, { headers: responseHeaders, status: responseStatusCode });
 }

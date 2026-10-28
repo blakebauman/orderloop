@@ -85,7 +85,11 @@
     "OIDC_CLIENT_ID": "",
     // "true" when the provider leaves out email_verified for addresses it owns (Entra ID): the
     // registry's sso.trustEmail. Otherwise an unverified email never matches anyone.
-    "OIDC_TRUST_EMAIL": ""
+    "OIDC_TRUST_EMAIL": "",
+    // Turnstile on password sign-in and /setup (app/lib/turnstile.server.ts): the widget's public
+    // site key, from the registry's turnstileSiteKey, checked with the TURNSTILE_SECRET_KEY secret.
+    // Empty: no check, as in local development.
+    "TURNSTILE_SITE_KEY": ""
   }
   // Secrets (wrangler secret put): SETUP_TOKEN — the one-time setup code that creates an admin on
   // /setup (app/lib/setup.server.ts); a new one recovers admin access. SHOPIFY_WEBHOOK_SECRET —
@@ -95,6 +99,7 @@
   // POST /api/v1/webhooks/stripe. PRINCIPAL_KEY — signs what this Worker forwards to the engine.
   // DATA_KEY (and DATA_KEY_PREVIOUS during a rotation) — encrypts the secrets stored in D1.
   // PASSWORD_PEPPER — mixed into every password hash (pbkdf2p); never change or remove it once set.
-  // OIDC_CLIENT_SECRET — the identity provider's client secret for single sign-on. Signed webhooks
+  // OIDC_CLIENT_SECRET — the identity provider's client secret for single sign-on.
+  // TURNSTILE_SECRET_KEY — the Turnstile widget's secret, required with TURNSTILE_SITE_KEY. Signed webhooks
   // use integration keys (/api/v1/integrations), stored in D1, not a secret here.
 }

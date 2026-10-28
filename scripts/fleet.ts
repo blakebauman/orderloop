@@ -4,7 +4,8 @@
  *   node scripts/fleet.ts render <id>             write apps/{catalog,catalog-edge,engine,web}/wrangler.<id>.json
  *                                                 and plugins/<plugin>/wrangler.<id>.json for each plugin
  *   node scripts/fleet.ts matrix                  print the deployments of each ring for CI
- *   node scripts/fleet.ts secrets <engine|web> <out>  write this app's secrets from the environment
+ *   node scripts/fleet.ts secrets <engine|web> <out> [id]  write this app's secrets from the
+ *                                                 environment, refusing ones deployment <id> can't run on
  *   node scripts/fleet.ts secrets plugin <out> <plugin> [id]  write a plugin's own keys, derived, and
  *                                                 its PLUGIN_<ID>_* secrets from ENV_SECRETS (none
  *                                                 when deployment <id> has a Secrets Store)
@@ -75,6 +76,7 @@ const SECRETS = {
     'PASSWORD_PEPPER',
     'STRIPE_WEBHOOK_SECRET',
     'OIDC_CLIENT_SECRET',
+    'TURNSTILE_SECRET_KEY',
   ],
   engine: [
     'PRINCIPAL_KEY',
@@ -173,6 +175,13 @@ export type Deployment = {
    * environment's OIDC_CLIENT_SECRET; the redirect URI to register is https://<domain>/login/sso/callback.
    */
   sso?: { issuer: string; clientId: string; trustEmail?: boolean };
+  /**
+   * The site key of this deployment's Turnstile widget (public; scripts/provision.sh creates the
+   * widget and prints it). With it, password sign-in and /setup ask for a Turnstile check, which
+   * the web Worker verifies with the environment's TURNSTILE_SECRET_KEY: a deploy then requires
+   * that secret. Without it, neither page shows a check.
+   */
+  turnstileSiteKey?: string;
   /**
    * How the engine takes payments: `mock` (the default) records them without taking money;
    * `stripe` authorizes, captures and refunds through Stripe with the environment's
@@ -378,6 +387,13 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
     if (sso.trustEmail !== undefined && typeof sso.trustEmail !== 'boolean')
       throw new Error(`${file}: sso.trustEmail must be true or false`);
   }
+  const turnstile = raw.turnstileSiteKey;
+  // Real keys are 0x…, Cloudflare's test keys 1x…–3x…; anything else is a paste of something else.
+  if (
+    turnstile !== undefined &&
+    (typeof turnstile !== 'string' || !/^[0-3]x[\w-]{8,64}$/.test(turnstile))
+  )
+    throw new Error(`${file}: turnstileSiteKey must be a Turnstile site key (0x…)`);
   if (raw.payments !== undefined && raw.payments !== 'mock' && raw.payments !== 'stripe')
     throw new Error(`${file}: payments must be "mock" or "stripe"`);
   const payments = raw.payments === 'stripe' ? 'stripe' : 'mock';
@@ -541,6 +557,7 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
           },
         }
       : {}),
+    ...(turnstile !== undefined ? { turnstileSiteKey: turnstile as string } : {}),
     payments,
     ...(pk !== undefined ? { stripePublishableKey: pk as string } : {}),
     plugins: plugins as Deployment['plugins'],
@@ -908,6 +925,8 @@ export function renderWeb(base: Config, d: Deployment): Config {
     PLUGIN_ALIASES: Object.keys(aliases).length ? JSON.stringify(aliases) : '',
   };
   if (d.demo) config.vars = { ...config.vars, DEMO_MODE: 'true' };
+  // Always set, so a deployment without a widget never shows another's.
+  config.vars = { ...config.vars, TURNSTILE_SITE_KEY: d.turnstileSiteKey ?? '' };
   if (d.sso)
     config.vars = {
       ...config.vars,
@@ -965,10 +984,20 @@ export function matrix(list: Deployment[]): Record<Ring, Deployment[]> {
 }
 
 /**
- * Why the environment's secrets can't run `d`, or null: a Stripe deployment needs
- * STRIPE_SECRET_KEY, in the same mode (test or live) as its publishable key.
+ * Why the environment's secrets can't run `app` for `d`, or null. The engine of a Stripe
+ * deployment needs STRIPE_SECRET_KEY, in the same mode (test or live) as its publishable key. The
+ * web Worker of a deployment with a Turnstile site key needs TURNSTILE_SECRET_KEY: without it every
+ * password sign-in would be refused.
  */
-export function secretsProblem(d: Deployment, env: Record<string, string | undefined>) {
+export function secretsProblem(
+  d: Deployment,
+  env: Record<string, string | undefined>,
+  app: 'engine' | 'web',
+) {
+  if (app === 'web')
+    return d.turnstileSiteKey && !env.TURNSTILE_SECRET_KEY
+      ? `${d.id} has a turnstileSiteKey: add its widget's secret as TURNSTILE_SECRET_KEY to the ${d.environment} GitHub environment`
+      : null;
   if (d.payments !== 'stripe') return null;
   const sk = env.STRIPE_SECRET_KEY;
   if (!sk)
@@ -993,7 +1022,7 @@ function secrets(app: string | undefined, out: string | undefined, id?: string, 
     );
   const short = keysProblem(process.env);
   if (short) throw new Error(short);
-  const problem = app === 'engine' && id ? secretsProblem(byId(id), process.env) : null;
+  const problem = id ? secretsProblem(byId(id), process.env, app) : null;
   if (problem) throw new Error(problem);
   // Only the ones set: `--secrets-file` adds to a Worker's secrets and never removes one.
   const values = Object.fromEntries(
@@ -1149,6 +1178,8 @@ export function shellVars(d: Deployment): Record<string, string> {
     CATALOG_CHANGES_DLQ: n.catalogChangesDlq,
     CATALOG_DOMAIN: d.catalogDomain,
     DOMAIN: d.domain,
+    // The registry's Turnstile site key, to compare with the widget provision.sh finds or creates.
+    TURNSTILE_SITE_KEY: d.turnstileSiteKey ?? '',
     ENVIRONMENT: d.environment,
     JURISDICTION: d.jurisdiction ?? '',
     AI_GATEWAY_LOGS: String(d.aiGatewayLogs),

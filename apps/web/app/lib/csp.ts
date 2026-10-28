@@ -19,6 +19,15 @@ export type EmbedPolicy = { frameAncestors: string[]; formAction: string[] };
 export const EMBED_HEADER = 'x-orderloop-embed';
 
 /**
+ * Carried from the sign-in and setup pages' `headers` when the deployment uses Turnstile
+ * (`withTurnstilePolicy`); entry.server.tsx lets that page alone load Turnstile, and drops it.
+ */
+export const TURNSTILE_HEADER = 'x-orderloop-turnstile';
+
+/** Where Turnstile's script and challenge frame come from. */
+export const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+/**
  * Any https page may frame this one. Only for a refusal a buyer's page shows in its frame (a used
  * start link, a closed cart): it carries no data and nothing to click, and without it the buyer
  * sees a blocked frame instead of the reason.
@@ -76,14 +85,22 @@ export function parseEmbed(raw: string | null): EmbedPolicy | null {
  * The Content-Security-Policy for an HTML page. Scripts run only from this origin or with the
  * response's nonce (the theme script and React Router's inline scripts); styles and fonts come
  * from this origin. Pages can't be framed, and forms post only here, unless `embed` (an external
- * cart's page) names the origins that may frame it and where its return form posts.
+ * cart's page) names the origins that may frame it and where its return form posts. A page with
+ * `turnstile` (sign-in or setup, on a deployment that uses it) may also run Turnstile's script and
+ * show its challenge frame.
  */
-export function contentSecurityPolicy(nonce: string, embed?: EmbedPolicy | null): string {
+export function contentSecurityPolicy(
+  nonce: string,
+  embed?: EmbedPolicy | null,
+  opts: { turnstile?: boolean } = {},
+): string {
   const ancestors = embed?.frameAncestors.length ? embed.frameAncestors.join(' ') : "'none'";
   const actions = ["'self'", ...(embed?.formAction ?? [])].join(' ');
+  const turnstile = opts.turnstile ? ` ${TURNSTILE_ORIGIN}` : '';
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}'${turnstile}`,
+    ...(opts.turnstile ? [`frame-src ${TURNSTILE_ORIGIN}`] : []),
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob:",

@@ -29,6 +29,12 @@ The code works once. If creating the account fails (for example because the emai
 code still works. A wrong code is refused, counted per address (10 wrong codes in 15 minutes, then
 `429` and a wait) and recorded in the [audit log](#audit-log).
 
+A workspace can also ask for a security check (Cloudflare Turnstile) on the setup page and on the
+sign-in page's password form, to keep bots from guessing codes and passwords. Most people see it
+pass on its own; sometimes it asks you to tick a box. **Sign in** and **Create admin account** wait
+until it has passed, and after a refused attempt it runs again. Signing in with a passkey or single
+sign-on, and the two-factor code, don't ask for it.
+
 ## Recovering admin access
 
 If no admin can sign in, ask whoever runs your workspace for a new setup code. It opens `/setup`
