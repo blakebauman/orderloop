@@ -523,7 +523,7 @@ const STATUS_TEXT: Record<CartStatus, string> = {
   locked: 'Locked',
   submitted: 'Submitted',
   returned: 'Returned to the buyer',
-  canceled: 'Canceled',
+  canceled: 'Cancelled',
 };
 
 /**

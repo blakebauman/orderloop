@@ -272,11 +272,11 @@ export default function FlowEditor() {
     <div className="flex flex-col lg:h-[calc(100dvh-var(--shell-h))]">
       <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
+          {/* As on every page, the crumb is the parent; the flow's name is the title below it. */}
           <div className="caption">
             <Link to="/flows" className="hover:text-foreground hover:underline">
               Flows
-            </Link>{' '}
-            / <span className="font-mono">{flow.id}</span>
+            </Link>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Input

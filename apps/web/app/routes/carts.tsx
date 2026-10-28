@@ -27,7 +27,7 @@ const STATUS_LABELS = {
   locked: 'Locked',
   submitted: 'Submitted',
   returned: 'Returned',
-  canceled: 'Canceled',
+  canceled: 'Cancelled',
 } as const;
 type CartStatus = keyof typeof STATUS_LABELS;
 

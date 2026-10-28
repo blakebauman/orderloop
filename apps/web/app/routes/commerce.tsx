@@ -33,7 +33,7 @@ import {
   customerNames,
   publishedFlows,
   recentInboundEmails,
-  waitingOrders,
+  waitingOnEvents,
 } from '~/lib/orders.server';
 import { updateProductIndex } from '~/lib/product-index.server';
 import { RECORD_KINDS, type RecordKind, type RecordRow, recordTone } from '~/lib/records';
@@ -44,7 +44,7 @@ import type { Route } from './+types/commerce';
 
 export const meta = () => [{ title: 'Commerce · OrderLoop' }];
 
-/** Waiting orders whose live state the page reads, newest first. */
+/** Orders waiting on an outside event whose live state the page reads, most recently updated first. */
 const CHECKED = 20;
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -53,7 +53,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const q = params.get('q')?.trim() ?? '';
   const [office, waiting, emails, configured, flows, records] = await Promise.all([
     commercePage(params),
-    waitingOrders(),
+    waitingOnEvents(CHECKED),
     recentInboundEmails(),
     // The engine owns INTAKE_MAILBOXES; ask it rather than assume the defaults.
     engine().intakeMailboxes(),
@@ -67,9 +67,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     flowId,
     flowName: flowName.get(flowId) ?? null,
   }));
-  const states = (
-    await Promise.all(waiting.slice(0, CHECKED).map((o) => engine().snapshot(o.id)))
-  ).filter((s): s is OrderState => !!s);
+  const states = (await Promise.all(waiting.orders.map((o) => engine().snapshot(o.id)))).filter(
+    (s): s is OrderState => !!s,
+  );
   const names = await customerNames(states.map((s) => s.order?.customerId));
   const events = states.flatMap((s) =>
     s.waits
@@ -97,7 +97,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     ...office,
     events,
-    partial: waiting.length > CHECKED,
+    // Every order waiting on one, not just those read: the header counts them all.
+    waitingTotal: waiting.total,
+    shownOrders: states.length,
     emails,
     mailboxes,
     records,
@@ -149,7 +151,8 @@ export default function Commerce() {
     stores,
     pricing,
     events: allEvents,
-    partial,
+    waitingTotal,
+    shownOrders,
     emails,
     mailboxes,
     records,
@@ -167,6 +170,8 @@ export default function Commerce() {
   const canAdmin = useCan('admin');
   const [recorded, setRecorded] = useState<ReadonlySet<string>>(new Set());
   const open = events.filter((e) => !recorded.has(eventKey(e))).length;
+  // More orders wait on an outside event than the page read.
+  const partial = waitingTotal > shownOrders;
   // The stock review is the only form on this page that navigates.
   const reviewing = nav.state === 'submitting';
   return (
@@ -266,7 +271,11 @@ export default function Commerce() {
           title="Outside events"
           className="xl:col-span-2"
           actions={
-            open ? (
+            partial ? (
+              <span className="font-medium text-wait text-xs tabular">
+                {plural(waitingTotal, 'order')} waiting
+              </span>
+            ) : open ? (
               <span className="font-medium text-wait text-xs tabular">{open} waiting</span>
             ) : null
           }
@@ -293,11 +302,14 @@ export default function Commerce() {
           )}
           {partial ? (
             <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-              These are from the {CHECKED} most recently updated waiting orders.{' '}
-              <Link to="/orders?status=waiting" className="text-link hover:underline">
-                See every waiting order
-              </Link>
-              .
+              <span className="block max-w-[75ch]">
+                Showing the {shownOrders} most recently updated of {count(waitingTotal)} orders
+                waiting on an outside event.{' '}
+                <Link to="/orders?status=waiting" className="text-link hover:underline">
+                  See every waiting order
+                </Link>
+                .
+              </span>
             </p>
           ) : null}
         </Section>
@@ -388,8 +400,10 @@ export default function Commerce() {
           flush
         >
           <p className="border-b px-4 py-2 text-muted-foreground text-xs">
-            Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from
-            the store. Reserved stock is held by running orders.
+            <span className="block max-w-[75ch]">
+              Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws
+              from the store. Reserved stock is held by running orders.
+            </span>
           </p>
           {inventory.total || q ? (
             <Table stack="cards" scroll caption="Inventory">

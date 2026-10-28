@@ -1,4 +1,9 @@
-import type { NodeStatus, OrderStatus } from '@orderloop/core';
+import {
+  type NodeStatus,
+  ORDER_CHANNEL_LABELS,
+  type OrderChannel,
+  type OrderStatus,
+} from '@orderloop/core';
 import { eventShort } from './events';
 
 export const STATUS_COLOR: Record<NodeStatus | OrderStatus, string> = {
@@ -39,6 +44,42 @@ export function humanize(s: string | null | undefined) {
 }
 
 /**
+ * Who an approval is assigned to, by the assignee a flow names: the seeded templates' teams by
+ * name ("ap" is "Accounts payable"), any other in operator words. A flow's assignee is free text,
+ * so an unknown short one reads as the abbreviation it probably is ("qa" → "QA").
+ */
+const ASSIGNEE_LABELS: Record<string, string> = {
+  ap: 'Accounts payable',
+  buyer: 'Buyer',
+  finance: 'Finance',
+  manager: 'Manager',
+  sales_ops: 'Sales ops',
+  trust_safety: 'Trust and safety',
+};
+
+export function assigneeLabel(s: string | null | undefined) {
+  if (!s) return '';
+  return ASSIGNEE_LABELS[s] ?? (/^[a-z]{2,3}$/.test(s) ? s.toUpperCase() : humanize(s));
+}
+
+/** Where an order came in, by its channel; a value the app doesn't know isn't shown raw. */
+export const channelLabel = (c: string) =>
+  ORDER_CHANNEL_LABELS[c as OrderChannel] ?? 'Other channel';
+
+/**
+ * Free text for one line: its first line, whitespace collapsed, cut at a word with "…" past
+ * `max`. Order reasons are capped by the engine; this keeps a row indexed before that (once a
+ * whole SQL statement) from laying out kilobytes.
+ */
+export function clip(s: string, max = 160) {
+  const line = s.replace(/\s+/g, ' ').trim();
+  if (line.length <= max) return line;
+  const cut = line.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.·-]+$/, '')}…`;
+}
+
+/**
  * How an approval or wait ended, in operator words. The flow's output stays `escalated` (or
  * `timeout`); what a person sees is that the step timed out.
  */
@@ -49,8 +90,9 @@ export function outcomeLabel(s: string | null | undefined) {
 /** Whole quantities with thousands separators: 25000 → "25,000". */
 export const count = (n: number) => new Intl.NumberFormat('en-US').format(n);
 
-/** "1 line" / "3 lines". */
-export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** "1 line" / "3 lines" / "1,200 lines". */
+export const plural = (n: number, one: string, many = `${one}s`) =>
+  `${count(n)} ${n === 1 ? one : many}`;
 
 export function money(n: number | null | undefined, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
@@ -145,7 +187,7 @@ export const waitingForLabel = (s: string | null | undefined): string =>
           t === 'timer'
             ? 'a timer'
             : t.startsWith('person:')
-              ? humanize(t.slice(7)) || 'an approver'
+              ? assigneeLabel(t.slice(7)) || 'an approver'
               : t.startsWith('event:')
                 ? eventShort(t.slice(6)) || 'an event'
                 : t,
@@ -157,14 +199,14 @@ export const waitingForLabel = (s: string | null | undefined): string =>
 export const orderRef = (id: string) => `#${id.slice(-6)}`;
 
 /**
- * Engine log lines in operator words: drops ids ("ord_…", "cus_…") and humanizes role slugs in
+ * Engine log lines in operator words: drops ids ("ord_…", "cus_…") and names assignees in
  * parentheses, e.g. "(sales_ops)" → "(Sales ops)".
  */
 export const plainLog = (s: string) =>
   s
     .replace(/\s*\bfor\s+cus_[\w-]+/g, '')
     .replace(/\s*\b(ord|cus|apr)_[\w-]+/g, '')
-    .replace(/\(([a-z]+(?:_[a-z]+)+)\)/g, (_, slug: string) => `(${humanize(slug)})`)
+    .replace(/\(([a-z]+(?:_[a-z]+)+)\)/g, (_, slug: string) => `(${assigneeLabel(slug)})`)
     .replace(/\s{2,}/g, ' ')
     .trim();
 

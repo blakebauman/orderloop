@@ -1,5 +1,13 @@
 import { expect, it, describe as suite } from 'vitest';
-import { AUDIT_ACTIONS, AUDIT_GROUPS, describe, isAuditGroup } from '../app/lib/audit';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_GROUPS,
+  actorLabel,
+  describe,
+  describeParts,
+  isAuditGroup,
+  targetHref,
+} from '../app/lib/audit';
 
 suite('audit vocabulary', () => {
   it('describes events in one line', () => {
@@ -134,5 +142,55 @@ suite('audit vocabulary', () => {
       'personal_data',
     ]);
     expect(isAuditGroup('orders')).toBe(false);
+  });
+});
+
+suite('audit actors and targets', () => {
+  it('names an API token by its name, not its principal id', () => {
+    expect(actorLabel({ actor: 'token:Local seed scripts', actorKind: 'token' })).toBe(
+      'Local seed scripts (API token)',
+    );
+    expect(actorLabel({ actor: 'ann@example.com', actorKind: 'user' })).toBe('ann@example.com');
+    expect(actorLabel({ actor: null })).toBeNull();
+  });
+
+  it('links what an event acted on when the app has a page for it', () => {
+    expect(targetHref({ action: 'cart.created', target: 'cart_mv65gsxyqcs34m' })).toBe(
+      '/carts/cart_mv65gsxyqcs34m',
+    );
+    expect(targetHref({ action: 'order.cancelled', target: 'ord_abc123' })).toBe(
+      '/orders/ord_abc123',
+    );
+    expect(targetHref({ action: 'flow.published', target: 'tpl-storefront-order' })).toBe(
+      '/flows/tpl-storefront-order',
+    );
+    expect(targetHref({ action: 'team.user_added', target: 'ann@example.com' })).toBeNull();
+    expect(targetHref({ action: 'order.started', target: null })).toBeNull();
+  });
+
+  it('splits a description so its target can be linked, in the order describe reads', () => {
+    const e = {
+      action: 'cart.canceled',
+      actor: 'token:Local seed scripts',
+      target: 'cart_x1',
+      detail: { via: 'api' },
+    };
+    expect(describeParts(e)).toEqual({
+      label: 'Cancelled a cart',
+      target: 'cart_x1',
+      details: ['via the REST API'],
+    });
+    expect(describe(e)).toBe('Cancelled a cart: cart_x1, via the REST API');
+  });
+
+  it('counts what disabling a person ended in words', () => {
+    expect(
+      describe({
+        action: 'team.user_disabled',
+        actor: 'ops@example.com',
+        target: 'ann@example.com',
+        detail: { sessions: 1, apps: 0, tokens: 2 },
+      }),
+    ).toBe('Disabled a person: ann@example.com, 1 session, 0 apps and 2 tokens ended');
   });
 });

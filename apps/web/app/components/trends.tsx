@@ -2,7 +2,7 @@ import { BASE_CURRENCY } from '@orderloop/core';
 import type { ChartConfig } from '@orderloop/ui/chart';
 import { lazy, Suspense } from 'react';
 import { Empty } from '~/components/page';
-import { count, money } from '~/lib/format';
+import { count, money, plural } from '~/lib/format';
 import type { Performance } from '~/lib/metrics.server';
 
 const base = (n: number) => money(n, BASE_CURRENCY);
@@ -51,7 +51,7 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
       <Panel
         title="Orders ended"
         figure={count(ended)}
-        summary={`${count(ended)} orders ended ${period}: ${count(completed)} completed, ${count(stopped)} declined or cancelled, ${count(failed)} failed or rolled back.`}
+        summary={`${plural(ended, 'order')} ended ${period}: ${count(completed)} completed, ${count(stopped)} declined or cancelled, ${count(failed)} failed or rolled back.`}
       >
         {ended ? (
           <Chart days={daily} config={outcomeConfig} format={count} stacked />

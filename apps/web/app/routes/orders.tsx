@@ -4,7 +4,6 @@ import {
   ORDER_MODEL_LABELS,
   ORDER_MODELS,
   ORDER_STATUSES,
-  type OrderChannel,
   type OrderModel,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
@@ -28,6 +27,8 @@ import { requireUser } from '~/lib/auth.server';
 import { decodeCursor, encodeCursor } from '~/lib/cursor';
 import { flowName } from '~/lib/flows.server';
 import {
+  channelLabel,
+  clip,
   count,
   money,
   orderRef,
@@ -37,6 +38,7 @@ import {
   waitingForLabel,
 } from '~/lib/format';
 import {
+  countOrders,
   customerNames,
   declinedOrderIds,
   isWithin,
@@ -75,30 +77,30 @@ export async function loader({ request }: Route.LoaderArgs) {
   const sort: Sort = SORTS.find((s) => s.value === q.get('sort'))?.value ?? 'created';
   // Paging follows creation order, so only the default sort pages.
   const after = sort === 'created' ? decodeCursor(q.get('after')) : null;
-  const orders = await listOrders(
-    {
-      model: q.get('model') || undefined,
-      channel: q.get('channel') || undefined,
-      status: q.get('status') || undefined,
-      q: q.get('q') || undefined,
-      attention: q.get('attention') === '1',
-      flow: q.get('flow') || undefined,
-      step: q.get('step') || undefined,
-      within: isWithin(q.get('within')) ? (q.get('within') as Within) : undefined,
-      after: after ?? undefined,
-      sort,
-    },
-    PAGE,
-  );
-  const [names, declinedSet] = await Promise.all([
+  const filters = {
+    model: q.get('model') || undefined,
+    channel: q.get('channel') || undefined,
+    status: q.get('status') || undefined,
+    q: q.get('q') || undefined,
+    attention: q.get('attention') === '1',
+    flow: q.get('flow') || undefined,
+    step: q.get('step') || undefined,
+    within: isWithin(q.get('within')) ? (q.get('within') as Within) : undefined,
+    sort,
+  };
+  const orders = await listOrders({ ...filters, after: after ?? undefined }, PAGE);
+  const [names, declinedSet, total] = await Promise.all([
     customerNames(orders.map((o) => o.customerId)),
     declinedOrderIds(orders.map((o) => o.id)),
+    // Only a full page needs the count: a short first page is all of them.
+    orders.length === PAGE || after ? countOrders(filters) : null,
   ]);
   const last = orders.at(-1);
   const flow = q.get('flow');
   return {
     flow: flow ? { id: flow, name: (await flowName(flow)) ?? flow } : null,
     orders,
+    total,
     names,
     sort,
     declined: [...declinedSet],
@@ -108,7 +110,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Orders() {
-  const { orders, names, sort, declined, paged, older, flow } = useLoaderData<typeof loader>();
+  const { orders, total, names, sort, declined, paged, older, flow } =
+    useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const submit = useSubmit();
   const search = useRef<HTMLInputElement>(null);
@@ -163,9 +166,14 @@ export default function Orders() {
 
   const n = orders.length;
   const capped = n === PAGE && !older;
-  const subtitle = `${capped ? `First ${count(PAGE)}` : count(n)} ${n === 1 ? 'order' : 'orders'}${
-    filtered ? ' match' : ''
-  }${paged ? ', older page' : ''}${live ? ' · updating live' : ''}`;
+  // A page of a longer list says so: "Newest 200 of 960 orders", not "200 orders".
+  const of = total && (total.n > n || paged) ? `${count(total.n)}${total.more ? '+' : ''}` : null;
+  const shown = of
+    ? `${sort === 'created' && !paged ? 'Newest ' : ''}${count(n)} of ${of} orders`
+    : `${count(n)} ${n === 1 ? 'order' : 'orders'}`;
+  const subtitle = `${shown}${filtered ? ' match' : ''}${paged ? ', older page' : ''}${
+    live ? ' · updating live' : ''
+  }`;
 
   return (
     <>
@@ -356,7 +364,7 @@ export default function Orders() {
                 {orders.map((o) => {
                   const status = orderStatus(o.status, o.id, declined);
                   const modelLabel = ORDER_MODEL_LABELS[o.model as OrderModel] ?? o.model;
-                  const channelLabel = ORDER_CHANNEL_LABELS[o.channel as OrderChannel] ?? o.channel;
+                  const channel = channelLabel(o.channel);
                   const customer =
                     (o.customerId && names[o.customerId]) ||
                     (o.contactEmail ? `Guest · ${o.contactEmail}` : o.customerId) ||
@@ -384,7 +392,7 @@ export default function Orders() {
                         </span>
                         <div className="truncate text-muted-foreground text-xs">
                           {modelLabel}
-                          {channelLabel !== modelLabel ? ` · ${channelLabel}` : ''} · started{' '}
+                          {channel !== modelLabel ? ` · ${channel}` : ''} · started{' '}
                           <Ago ms={o.createdAt} />
                           {o.generation > 1 ? ` · run ${o.generation}` : ''}
                         </div>
@@ -395,8 +403,11 @@ export default function Orders() {
                       <Td className="row-start-2 mt-1.5 md:mt-0">
                         <StatusBadge status={status} />
                       </Td>
-                      <Td className="col-span-2 mt-1 min-w-0 text-xs md:max-w-72">
-                        <Where order={o} status={status} />
+                      <Td className="col-span-2 mt-1 min-w-0 text-xs">
+                        {/* A table cell ignores max-width; a block inside it holds the column. */}
+                        <div className="min-w-0 md:max-w-72">
+                          <Where order={o} status={status} />
+                        </div>
                       </Td>
                       <Td className="hidden max-w-56 truncate text-muted-foreground md:table-cell">
                         {customer}
@@ -572,8 +583,8 @@ function Where({ order: o, status }: { order: Row; status: string }) {
           </div>
         ) : null}
         {o.reason ? (
-          <div className="truncate text-muted-foreground" title={o.reason}>
-            {o.reason}
+          <div className="truncate text-muted-foreground" title={clip(o.reason, 500)}>
+            {clip(o.reason)}
           </div>
         ) : null}
       </>

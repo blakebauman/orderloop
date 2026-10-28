@@ -18,6 +18,7 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded, flowSteps } from '~/lib/flows.server';
 import {
+  clip,
   duration,
   humanize,
   money,
@@ -505,7 +506,11 @@ function Position({ o, status }: { o: Data['recent'][number]; status: string }) 
       <>
         {statusLabel(status)}
         {o.stoppedAt ? ` at ${o.stoppedAt}` : ''}
-        {o.reason ? <span className="text-muted-foreground">: {o.reason}</span> : null}
+        {o.reason ? (
+          <span className="text-muted-foreground" title={clip(o.reason, 500)}>
+            : {clip(o.reason)}
+          </span>
+        ) : null}
       </>
     );
   return <>{statusLabel(status)}</>;
@@ -687,8 +692,8 @@ function EndedBadly({ steps }: { steps: StoppedStep[] }) {
                   <span className="shrink-0 font-semibold text-bad tabular">{s.n}</span>
                 </div>
                 {s.reason ? (
-                  <p className="truncate text-muted-foreground text-xs" title={s.reason}>
-                    {s.reason}
+                  <p className="truncate text-muted-foreground text-xs" title={clip(s.reason, 500)}>
+                    {clip(s.reason)}
                   </p>
                 ) : null}
                 <p className="text-muted-foreground text-xs">

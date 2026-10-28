@@ -35,6 +35,7 @@ import { Link, useNavigate } from 'react-router';
 import { Confirmation, ConfirmationActions } from '~/components/ai-elements/confirmation';
 import { MessageResponse } from '~/components/ai-elements/message';
 import { useAssistant } from '~/lib/assistant';
+import { plural } from '~/lib/format';
 
 type Part = ToolUIPart | DynamicToolUIPart;
 
@@ -121,7 +122,9 @@ function found(name: string, out: Record<string, unknown>): string | null {
       if (!c) return null;
       const total = c.approvals + c.failed + c.stalled;
       // Nothing waiting is already said by the attention line above the conversation.
-      return total ? `${c.approvals} approvals · ${c.failed} failed · ${c.stalled} stalled` : null;
+      return total
+        ? `${plural(c.approvals, 'approval')} · ${c.failed} failed · ${c.stalled} stalled`
+        : null;
     }
     case 'find_orders':
       return `${out.count} found · ${out.total}`;
@@ -129,15 +132,15 @@ function found(name: string, out: Record<string, unknown>): string | null {
       // Where the order is in its flow, not only its status.
       return `${out.ref} · ${whereAt(out) ?? statusWords(out.status)}`;
     case 'find_products':
-      return `${n(out.products)} products`;
+      return plural(n(out.products), 'product');
     case 'list_carts':
-      return `${n(out.carts)} carts`;
+      return plural(n(out.carts), 'cart');
     case 'get_cart':
     case 'create_cart':
     case 'change_cart':
-      return `${n(out.lines)} lines${out.priced && out.total ? ` · ${out.total}` : ''}`;
+      return `${plural(n(out.lines), 'line')}${out.priced && out.total ? ` · ${out.total}` : ''}`;
     case 'list_flows':
-      return `${n(out.flows)} flows`;
+      return plural(n(out.flows), 'flow');
     case 'get_flow':
       return typeof out.name === 'string' ? out.name : null;
     case 'draft_product_content':
