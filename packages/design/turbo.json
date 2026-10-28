@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The token tests compare this package with the web app's app.css and the docs' generated
+    // theme, so a change to either must re-run them rather than replay a cached pass.
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/web/app/app.css",
+        "$TURBO_ROOT$/apps/docs/src/styles/theme.css"
+      ]
+    }
+  }
+}

@@ -104,10 +104,6 @@
 }
 
 :root {
-  --motion-instant: 100ms;
-  --motion-move: 180ms;
-  --motion-travel: 240ms;
-  --arrive-rise: 4px;
   --radius: 0.625rem;
   --paper: oklch(1 0 0);
   --background: var(--paper);
@@ -213,6 +209,15 @@
   --edge-idle: oklch(0.269 0 0);
 
   color-scheme: dark;
+}
+
+/* Motion (see the @theme block above for the easings). Its own block: the palette `:root` above is
+   mirrored value for value in packages/design, and durations aren't part of that palette. */
+:root {
+  --motion-instant: 100ms;
+  --motion-move: 180ms;
+  --motion-travel: 240ms;
+  --arrive-rise: 4px;
 }
 
 @layer base {
