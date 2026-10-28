@@ -1,4 +1,9 @@
-import { type FlowGraph, TERMINAL_ORDER_STATUSES } from '@orderloop/core';
+import {
+  type FlowGraph,
+  type NodeRun,
+  type NodeStatus,
+  TERMINAL_ORDER_STATUSES,
+} from '@orderloop/core';
 import {
   approvals,
   contains,
@@ -14,6 +19,7 @@ import {
   locationStock,
   locations,
   messages,
+  nodeRuns,
   orders,
   payments,
   payouts,
@@ -316,6 +322,78 @@ export async function orderRecords(orderId: string) {
     sellers: parts.map((p) => ({ ...p, name: p.name ?? 'Marketplace' })),
     payouts: outs,
     invoices: bills,
+  };
+}
+
+/**
+ * A recorded order's graph colours: each step's last recorded run, and the steps it is waiting at
+ * (named in `waitingAt`) while it hasn't ended.
+ */
+export function recordedRuns(
+  graph: FlowGraph | null,
+  steps: { nodeId: string; status: string; run: number; startedAt: number; endedAt: number }[],
+  order: { status: string; waitingAt: string | null; waitingSince: number | null },
+): Record<string, NodeRun> {
+  const runs: Record<string, NodeRun> = {};
+  for (const r of steps)
+    runs[r.nodeId] = {
+      status: r.status as NodeStatus,
+      runs: r.run,
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+    };
+  if (TERMINAL_ORDER_STATUSES.includes(order.status as never)) return runs;
+  const waitingAt = new Set(order.waitingAt?.split(' · ') ?? []);
+  for (const n of graph?.nodes ?? [])
+    if (waitingAt.has(n.label))
+      runs[n.id] = { status: 'waiting', runs: 1, startedAt: order.waitingSince ?? undefined };
+  return runs;
+}
+
+/**
+ * An order the orders index has but the engine has no run for (one `pnpm db:seed:volume`
+ * generated, say): what D1 recorded, for a read-only page. The flow is the version it ran on;
+ * `runs` colours its graph by each step's last recorded run, and the steps it is waiting at.
+ */
+export async function recordedOrder(orderId: string) {
+  const d = db();
+  const order = await d.select().from(orders).where(eq(orders.id, orderId)).get();
+  if (!order) return null;
+  const [version, steps, asks] = await Promise.all([
+    getFlowVersionJson(d, order.flowId, order.flowVersion ?? undefined),
+    d
+      .select()
+      .from(nodeRuns)
+      .where(and(eq(nodeRuns.orderId, orderId), eq(nodeRuns.generation, order.generation ?? 1)))
+      .orderBy(asc(nodeRuns.startedAt)),
+    d
+      .select()
+      .from(approvals)
+      .where(eq(approvals.orderId, orderId))
+      .orderBy(asc(approvals.requestedAt)),
+  ]);
+  const flow = version
+    ? {
+        name: version.flow.name,
+        version: version.version,
+        graph: { nodes: version.flow.nodes, edges: version.flow.edges } as FlowGraph,
+      }
+    : null;
+  const label = (id: string) => flow?.graph.nodes.find((n) => n.id === id)?.label ?? id;
+  const runs = recordedRuns(flow?.graph ?? null, steps, order);
+  return {
+    order,
+    flow,
+    runs,
+    steps: steps.map((r) => ({
+      nodeId: r.nodeId,
+      label: label(r.nodeId),
+      type: r.nodeType,
+      status: r.status,
+      startedAt: r.startedAt,
+      durationMs: r.durationMs,
+    })),
+    approvals: asks,
   };
 }
 

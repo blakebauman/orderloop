@@ -53,17 +53,29 @@ import { actor, requireUser } from '~/lib/auth.server';
 import { useMedia, WIDE } from '~/lib/device';
 import { engine } from '~/lib/env.server';
 import { eventAction, eventWaiting } from '~/lib/events';
-import { humanize, money, offset, orderRef, plainLog, plural, statusColor } from '~/lib/format';
-import { customerNames, orderRecords } from '~/lib/orders.server';
+import {
+  duration,
+  humanize,
+  money,
+  offset,
+  orderRef,
+  plainLog,
+  plural,
+  statusColor,
+} from '~/lib/format';
+import { customerNames, orderRecords, recordedOrder } from '~/lib/orders.server';
 import { useDateTime } from '~/lib/use-date-time';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/order';
 
-export const meta = ({ loaderData: d, params }: Route.MetaArgs) => [
-  {
-    title: `${d?.snapshot.order?.title || (d?.snapshot.order ? ORDER_MODEL_LABELS[d.snapshot.order.model as OrderModel] : 'Order')} ${orderRef(params.orderId)} · OrderLoop`,
-  },
-];
+export const meta = ({ loaderData: d, params }: Route.MetaArgs) => {
+  const o = d?.snapshot?.order ?? d?.recorded?.order;
+  return [
+    {
+      title: `${o?.title || (o ? ORDER_MODEL_LABELS[o.model as OrderModel] : 'Order')} ${orderRef(params.orderId)} · OrderLoop`,
+    },
+  ];
+};
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await requireUser(request);
@@ -72,11 +84,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     engine().snapshot(params.orderId),
     orderRecords(params.orderId),
   ]);
-  if (!snapshot) throw data('Order not found', { status: 404 });
-  const customerId = snapshot.order?.customerId;
-  const names = await customerNames([customerId]);
+  // No run in the engine (a generated order, say): what D1 recorded, read-only.
+  const recorded = snapshot ? null : await recordedOrder(params.orderId);
+  if (!snapshot && !recorded) throw data('Order not found', { status: 404 });
+  const customerId = snapshot ? snapshot.order?.customerId : recorded?.order.customerId;
+  const names = await customerNames([customerId ?? undefined]);
   return {
     snapshot,
+    recorded,
     records,
     customerName: customerId ? (names[customerId] ?? null) : null,
     actor: actor(me),
@@ -153,18 +168,21 @@ const rolledBack = (s: OrderState) =>
  * live state starts over from that order's snapshot rather than keeping the last one's flow.
  */
 export default function OrderPage() {
-  const { snapshot } = useLoaderData<typeof loader>();
+  const { snapshot, recorded } = useLoaderData<typeof loader>();
+  if (!snapshot) return <RecordedOrderView key={recorded!.order.id} />;
   return <OrderView key={snapshot.orderId} />;
 }
 
 function OrderView() {
   const canOperate = useCan('operator');
   const {
-    snapshot,
+    snapshot: live,
     records: loadedRecords,
     customerName,
     actor: by,
   } = useLoaderData<typeof loader>();
+  // OrderPage shows this only for an order the engine has.
+  const snapshot = live!;
   const [state, setState] = useState<OrderState>(snapshot);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(
@@ -1071,6 +1089,27 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
           <p className="text-muted-foreground">No lines yet.</p>
         )}
       </section>
+      <RecordSections records={records} currency={o.currency} />
+      <details className="group">
+        <summary className="caption flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
+          <ChevronRight
+            className="size-3.5 transition-transform group-open:rotate-90"
+            aria-hidden="true"
+          />
+          Flow variables (for debugging)
+        </summary>
+        <pre className="mt-2 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
+          {JSON.stringify(state.vars, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+/** What the order's steps wrote to D1: documents, money, sellers, shipments and messages. */
+function RecordSections({ records, currency }: { records: Records; currency: string }) {
+  return (
+    <>
       {records.documents.length || records.invoices.length ? (
         <section>
           <h2 className="section-title mb-2">Documents</h2>
@@ -1119,7 +1158,7 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
         rows={records.payments.map((p) => [
           humanize(p.kind),
           humanize(p.status),
-          money(p.amount, o.currency),
+          money(p.amount, currency),
         ])}
       />
       <Ledger
@@ -1127,15 +1166,15 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
         rows={records.sellers.map((s) => [
           s.name,
           s.reason ? `${humanize(s.status)}: ${s.reason}` : humanize(s.status),
-          money(s.subtotal, o.currency),
+          money(s.subtotal, currency),
         ])}
       />
       <Ledger
         title="Seller payouts"
         rows={records.payouts.map((p) => [
-          `${p.name ?? p.sellerId} (${money(p.commission, o.currency)} commission)`,
+          `${p.name ?? p.sellerId} (${money(p.commission, currency)} commission)`,
           humanize(p.status),
-          money(p.net, o.currency),
+          money(p.net, currency),
         ])}
       />
       <Ledger
@@ -1150,19 +1189,7 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
         title="Messages sent"
         rows={records.messages.map((m) => [m.subject, m.recipient, ''])}
       />
-      <details className="group">
-        <summary className="caption flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
-          <ChevronRight
-            className="size-3.5 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          />
-          Flow variables (for debugging)
-        </summary>
-        <pre className="mt-2 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
-          {JSON.stringify(state.vars, null, 2)}
-        </pre>
-      </details>
-    </div>
+    </>
   );
 }
 
@@ -1183,5 +1210,145 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
         </TableBody>
       </Table>
     </section>
+  );
+}
+
+/**
+ * An order with no run in the engine: the header, how it ended or what it waits on, its flow
+ * coloured by the steps D1 recorded, and its approvals and records. Nothing here acts on it.
+ */
+function RecordedOrderView() {
+  const { recorded, records, customerName } = useLoaderData<typeof loader>();
+  const { order: o, flow, runs, steps, approvals } = recorded!;
+  const wide = useMedia(WIDE);
+  const [graphOpen, setGraphOpen] = useState(false);
+  const terminal = TERMINAL_ORDER_STATUSES.includes(o.status as never);
+  return (
+    <div className="flex flex-col lg:h-[calc(100dvh-var(--shell-h))]">
+      <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
+        <div className="min-w-0 flex-1 basis-72">
+          <div className="caption">
+            <Link to="/orders" className="hover:text-foreground hover:underline">
+              Orders
+            </Link>{' '}
+            / {ORDER_MODEL_LABELS[o.model as OrderModel]}
+          </div>
+          <h1 className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold tracking-title text-xl leading-tight">
+            <span className="min-w-0 truncate">
+              {o.title || ORDER_MODEL_LABELS[o.model as OrderModel]}{' '}
+              <span className="font-mono font-normal text-base text-muted-foreground">
+                {orderRef(o.id)}
+              </span>
+            </span>
+            <StatusBadge status={o.status} />
+          </h1>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {customerName ??
+              o.customerId ??
+              (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')}{' '}
+            · {ORDER_CHANNEL_LABELS[o.channel as keyof typeof ORDER_CHANNEL_LABELS] ?? o.channel}
+            {flow ? ` · ${flow.name} v${flow.version}` : ''} ·{' '}
+            <span className="select-all font-mono">{o.id}</span>
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="font-semibold text-lg tabular">{money(o.total, o.currency)}</div>
+          <div className="text-muted-foreground text-xs tabular">
+            Started <Ago ms={o.createdAt} />
+          </div>
+        </div>
+      </header>
+
+      <div className="border-b bg-muted/40 px-4 py-2 text-muted-foreground text-sm sm:px-6">
+        <p className="max-w-[75ch]">
+          <span className="font-medium text-foreground">Recorded order.</span> The engine has no run
+          for this order, so this is what the database kept: the steps it recorded, its approvals
+          and its records. There is no live state to act on.
+        </p>
+      </div>
+
+      {terminal && o.reason ? (
+        <div
+          className="border-b px-4 py-2 text-sm sm:px-6"
+          style={{
+            color: statusColor(o.status),
+            background: `color-mix(in oklch, ${statusColor(o.status)} 7%, transparent)`,
+          }}
+        >
+          <p className="max-w-[75ch]">
+            <span className="font-medium">{humanize(o.status)}.</span> {sentence(o.reason)}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+        <aside className="min-h-0 space-y-6 p-4 text-sm lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:border-l">
+          {!terminal && o.waitingOn ? (
+            <section className="rounded-lg border border-wait/30 bg-wait/5 p-3">
+              <h2 className="section-title mb-1 text-wait">Waiting</h2>
+              <p>{o.waitingOn}</p>
+              {o.waitingSince ? (
+                <p className="mt-1 text-muted-foreground text-xs">
+                  {o.waitingAt ? `At ${o.waitingAt} · ` : ''}since <Ago ms={o.waitingSince} />
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          {!wide && flow ? (
+            <Button variant="outline" size="sm" onClick={() => setGraphOpen((v) => !v)}>
+              {graphOpen ? 'Hide the flow' : 'Show the flow'}
+            </Button>
+          ) : null}
+          <section>
+            <h2 className="section-title mb-2">Steps</h2>
+            {steps.length ? (
+              <Table edge="flush" caption="Steps">
+                <TableHead>
+                  <Tr>
+                    <Th>Step</Th>
+                    <Th>Result</Th>
+                    <Th numeric>Took</Th>
+                  </Tr>
+                </TableHead>
+                <TableBody>
+                  {steps.map((st) => (
+                    <Tr key={`${st.nodeId}-${st.startedAt}`}>
+                      <Td>{st.label}</Td>
+                      <Td>
+                        <span className="inline-flex items-center gap-1.5">
+                          <StatusDot status={st.status} />
+                          {humanize(st.status)}
+                        </span>
+                      </Td>
+                      <Td numeric className="text-muted-foreground">
+                        {duration(st.durationMs)}
+                      </Td>
+                    </Tr>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-muted-foreground">No steps recorded.</p>
+            )}
+          </section>
+          {approvals.length ? (
+            <Ledger
+              title="Approvals"
+              rows={approvals.map((a) => [
+                a.title,
+                a.decidedBy ? `${humanize(a.status)} by ${a.decidedBy}` : humanize(a.status),
+                a.amount !== null ? money(a.amount, o.currency) : '',
+              ])}
+            />
+          ) : null}
+          <RecordSections records={records} currency={o.currency} />
+        </aside>
+        {flow && (wide || graphOpen) ? (
+          <div className="h-[60dvh] min-h-[320px] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:h-auto">
+            <FlowCanvas graph={flow.graph} runs={runs} />
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }

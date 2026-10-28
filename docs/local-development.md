@@ -117,7 +117,7 @@ days. To start completely fresh, delete `apps/web/.wrangler/state` and seed agai
 What still needs a hand: the Plugins page lists only plugins the dev server runs
 (`ORDERLOOP_DEV_PLUGINS=example pnpm web:dev`), and **Connected apps** on the Account page fills
 when an MCP or A2A client signs in. The generated orders (`ord_bench_…`) have no OrderAgent behind
-them, so their own pages answer 404; open the scenario orders instead.
+them, so their pages are read-only (below); the scenario orders are the live ones.
 
 ## Volume data
 
@@ -151,8 +151,11 @@ own steps for where an order waits or stopped and why), and writes:
 
 Each run replaces what the previous one wrote; `--seed <n>` (default 1) makes it repeatable
 relative to today. Only the index tables are written, with no OrderAgent or Workflow behind an
-order, so a generated order's page has no graph or timeline, and Commerce's **Outside events**,
-which asks each order's agent what it waits for, lists none of them.
+order. A generated order's page is the read-only **recorded order** view the order page falls back
+to when the engine has no run for an order (`recordedOrder`, `apps/web/app/lib/orders.server.ts`):
+its flow coloured by the steps `node_runs` recorded and the ones it waits at, the step timings, its
+approvals and records, and no live timeline or actions. Commerce's **Outside events**, which asks
+each order's agent what it waits for, lists none of them.
 
 ## Catalog demo data
 
