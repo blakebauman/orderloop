@@ -445,13 +445,42 @@ test("a customer's turnstileSiteKey turns on the web Worker's Turnstile check", 
   assert.equal(renderWeb(base('web'), acme).vars.TURNSTILE_SITE_KEY, '');
   assert.equal(shellVars(guarded).TURNSTILE_SITE_KEY, key);
   assert.equal(shellVars(acme).TURNSTILE_SITE_KEY, '');
-  // Cloudflare's test keys are site keys too.
+  for (const bad of ['', 'pk_live_abc', '0x4AAA AAAA', '0x1', 42, '0x4AAAAAAABkMYinukE8nzY;'])
+    assert.throws(() => toDeployment({ ...acme, turnstileSiteKey: bad }), /turnstileSiteKey/);
+});
+
+test("Cloudflare's Turnstile test keys are refused in production and on customers", () => {
+  const test = '1x00000000000000000000AA';
+  const production = {
+    id: 'orderloop',
+    ring: 'internal',
+    slot: 1,
+    domain: 'orderloop.app',
+    suffix: '',
+    environment: 'production',
+  };
+  for (const k of [test, '2x00000000000000000000AB', '3x00000000000000000000FF']) {
+    assert.throws(() => toDeployment({ ...production, turnstileSiteKey: k }), /test key/);
+    assert.throws(() => toDeployment({ ...acme, turnstileSiteKey: k }), /test key/);
+  }
   assert.equal(
-    toDeployment({ ...acme, turnstileSiteKey: '1x00000000000000000000AA' }).turnstileSiteKey,
+    toDeployment({ ...production, turnstileSiteKey: '0x4AAAAAAABkMYinukE8nzY' }).turnstileSiteKey,
+    '0x4AAAAAAABkMYinukE8nzY',
+  );
+});
+
+test('a demo may use a Turnstile test key', () => {
+  const demo = { id: 'demo', ring: 'internal', slot: 5, domain: 'demo.orderloop.app', demo: true };
+  const d = toDeployment({ ...demo, turnstileSiteKey: '1x00000000000000000000AA' });
+  assert.equal(d.turnstileSiteKey, '1x00000000000000000000AA');
+  assert.equal(
+    renderWeb(base('web'), { ...d, d1Id: 'd1-demo' }).vars.TURNSTILE_SITE_KEY,
     '1x00000000000000000000AA',
   );
-  for (const bad of ['', 'pk_live_abc', '0x4AAA AAAA', '0x1', 42, '1x00000000000000000000AA;'])
-    assert.throws(() => toDeployment({ ...acme, turnstileSiteKey: bad }), /turnstileSiteKey/);
+  assert.throws(
+    () => toDeployment({ ...demo, turnstileSiteKey: '4x00000000000000000000AA' }),
+    /turnstileSiteKey/,
+  );
 });
 
 test('a deployment with a Turnstile site key needs its secret to deploy', () => {

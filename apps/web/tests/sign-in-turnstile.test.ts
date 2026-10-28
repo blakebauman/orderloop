@@ -60,6 +60,7 @@ beforeEach(() => {
   for (const k of Object.keys(env)) delete env[k];
   demo = false;
   signIn.mockReset();
+  signInDemo.mockClear();
   signIn.mockResolvedValue({ cookie: 'session=1', twoFactor: false });
   redeemSetupCode.mockReset();
   redeemSetupCode.mockResolvedValue('usr_ada');
@@ -142,6 +143,16 @@ describe('with Turnstile', () => {
     expect(answer(await login.action(post('/login', { intent: 'demo' })))).toMatchObject({
       status: 302,
     });
+    expect(siteverify).not.toHaveBeenCalled();
+  });
+
+  it('treats a demo sign-in on a deployment that is no demo as a password sign-in, and refuses it', async () => {
+    expect(answer(await login.action(post('/login', { intent: 'demo' })))).toMatchObject({
+      status: 400,
+      data: { error: expect.stringMatching(/Complete the check/) },
+    });
+    expect(signIn).not.toHaveBeenCalled();
+    expect(signInDemo).not.toHaveBeenCalled();
     expect(siteverify).not.toHaveBeenCalled();
   });
 

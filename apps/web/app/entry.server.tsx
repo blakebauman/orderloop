@@ -2,14 +2,7 @@ import { isbot } from 'isbot';
 import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext, RouterContextProvider } from 'react-router';
 import { ServerRouter } from 'react-router';
-import {
-  contentSecurityPolicy,
-  EMBED_HEADER,
-  NonceContext,
-  newNonce,
-  parseEmbed,
-  TURNSTILE_HEADER,
-} from './lib/csp';
+import { NonceContext, newNonce, pageHeaders } from './lib/csp';
 
 export const streamTimeout = 5_000;
 
@@ -22,7 +15,10 @@ export default async function handleRequest(
   _loadContext: RouterContextProvider,
 ) {
   if (request.method.toUpperCase() === 'HEAD') {
-    return new Response(null, { status: responseStatusCode, headers: responseHeaders });
+    return new Response(null, {
+      status: responseStatusCode,
+      headers: pageHeaders(responseHeaders),
+    });
   }
 
   const nonce = newNonce();
@@ -49,17 +45,9 @@ export default async function handleRequest(
   if ((userAgent && isbot(userAgent)) || routerContext.isSpaMode) await body.allReady;
 
   responseHeaders.set('Content-Type', 'text/html');
-  // An external cart's page may be framed by the buyer's system and post its return there.
-  const embed = parseEmbed(responseHeaders.get(EMBED_HEADER));
-  responseHeaders.delete(EMBED_HEADER);
-  // Sign-in and setup may load Turnstile, when the deployment uses it.
-  const turnstile = responseHeaders.has(TURNSTILE_HEADER);
-  responseHeaders.delete(TURNSTILE_HEADER);
-  // Vite's dev server injects its own inline scripts, which carry no nonce.
-  if (!import.meta.env.DEV)
-    responseHeaders.set(
-      'Content-Security-Policy',
-      contentSecurityPolicy(nonce, embed, { turnstile }),
-    );
+  // The policy, with what the route asked for: an external cart's framers and return URL, or
+  // Turnstile on sign-in and setup. Vite's dev server injects its own inline scripts, which carry
+  // no nonce, so it gets none.
+  pageHeaders(responseHeaders, import.meta.env.DEV ? undefined : nonce);
   return new Response(body, { headers: responseHeaders, status: responseStatusCode });
 }

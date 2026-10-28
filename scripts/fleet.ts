@@ -179,7 +179,8 @@ export type Deployment = {
    * The site key of this deployment's Turnstile widget (public; scripts/provision.sh creates the
    * widget and prints it). With it, password sign-in and /setup ask for a Turnstile check, which
    * the web Worker verifies with the environment's TURNSTILE_SECRET_KEY: a deploy then requires
-   * that secret. Without it, neither page shows a check.
+   * that secret. Without it, neither page shows a check. Cloudflare's test keys (1x…–3x…) only
+   * on a demo.
    */
   turnstileSiteKey?: string;
   /**
@@ -389,11 +390,17 @@ export function toDeployment(raw: Record<string, unknown>, file = 'deployment'):
   }
   const turnstile = raw.turnstileSiteKey;
   // Real keys are 0x…, Cloudflare's test keys 1x…–3x…; anything else is a paste of something else.
+  // A test key always passes (or always fails) whoever solves it, so only a demo may have one:
+  // anywhere else, people's passwords would sit behind a check that checks nothing.
   if (
     turnstile !== undefined &&
     (typeof turnstile !== 'string' || !/^[0-3]x[\w-]{8,64}$/.test(turnstile))
   )
     throw new Error(`${file}: turnstileSiteKey must be a Turnstile site key (0x…)`);
+  if (typeof turnstile === 'string' && !turnstile.startsWith('0x') && raw.demo !== true)
+    throw new Error(
+      `${file}: turnstileSiteKey ${turnstile.slice(0, 2)}… is a Cloudflare test key, which only a demo may use; use the widget's own (0x…)`,
+    );
   if (raw.payments !== undefined && raw.payments !== 'mock' && raw.payments !== 'stripe')
     throw new Error(`${file}: payments must be "mock" or "stripe"`);
   const payments = raw.payments === 'stripe' ? 'stripe' : 'mock';

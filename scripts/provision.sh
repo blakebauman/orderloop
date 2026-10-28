@@ -212,10 +212,39 @@ done
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   widgets="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/challenges/widgets"
   cf() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$@"; }
-  sitekey=$(cf "$widgets?per_page=1000" |
-    jq -r --arg n "$WEB" '[.result[] | select(.name == $n)][0].sitekey // empty')
+  # Every widget in the account, one JSON object a line, page by page.
+  list_widgets() {
+    local page=1 pages=1 body
+    while [ "$page" -le "$pages" ]; do
+      body=$(cf "$widgets?per_page=1000&page=$page")
+      jq -c '.result[] | {sitekey, name, domains}' <<<"$body"
+      pages=$(jq -r '.result_info.total_pages // 1' <<<"$body")
+      page=$((page + 1))
+    done
+  }
+  all_widgets=$(list_widgets)
+  # The registry's key names the widget when it has one; otherwise the name does.
+  if [ -n "$TURNSTILE_SITE_KEY" ]; then
+    sitekey=$(jq -rs --arg k "$TURNSTILE_SITE_KEY" 'map(select(.sitekey == $k))[0].sitekey // empty' <<<"$all_widgets")
+    if [ -z "$sitekey" ]; then
+      echo "turnstileSiteKey in deployments/$id.jsonc is no widget in this account: fix it, or remove" >&2
+      echo "it to find or create $WEB" >&2
+      exit 1
+    fi
+  else
+    named=$(jq -s --arg n "$WEB" 'map(select(.name == $n)) | length' <<<"$all_widgets")
+    [ "$named" -gt 1 ] && echo "WARNING: $named Turnstile widgets are named $WEB; using the first" >&2
+    sitekey=$(jq -rs --arg n "$WEB" 'map(select(.name == $n))[0].sitekey // empty' <<<"$all_widgets")
+  fi
   if [ -n "$sitekey" ]; then
     echo "Turnstile widget $WEB already exists"
+    # Its domains are where its tokens can be solved: anything besides this deployment's is a
+    # widget shared with, or left over from, something else.
+    domains=$(jq -cs --arg k "$sitekey" 'map(select(.sitekey == $k))[0].domains | sort' <<<"$all_widgets")
+    if [ "$domains" != "$(jq -cn --arg d "$DOMAIN" '[$d]')" ]; then
+      echo "WARNING: Turnstile widget $sitekey has domains $domains, not [\"$DOMAIN\"]." >&2
+      echo "WARNING: give it exactly $DOMAIN in the dashboard (Turnstile > the widget > Hostnames)." >&2
+    fi
   else
     # Only the site key is read from the answer; the secret is fetched below, if it's needed.
     sitekey=$(cf -X POST "$widgets" -H 'Content-Type: application/json' \

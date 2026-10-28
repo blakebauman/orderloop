@@ -112,6 +112,23 @@ export function contentSecurityPolicy(
   ].join('; ');
 }
 
+/** Headers a route passes to entry.server.tsx and no response may carry. */
+const INTERNAL_HEADERS = [EMBED_HEADER, TURNSTILE_HEADER];
+
+/**
+ * A page's headers as sent: the route's `EMBED_HEADER` and `TURNSTILE_HEADER` folded into its
+ * Content-Security-Policy when there is a `nonce`, and removed either way (a HEAD answer, or the
+ * dev server, which sets no policy).
+ */
+export function pageHeaders(headers: Headers, nonce?: string): Headers {
+  const embed = parseEmbed(headers.get(EMBED_HEADER));
+  const turnstile = headers.has(TURNSTILE_HEADER);
+  for (const h of INTERNAL_HEADERS) headers.delete(h);
+  if (nonce)
+    headers.set('Content-Security-Policy', contentSecurityPolicy(nonce, embed, { turnstile }));
+  return headers;
+}
+
 /**
  * Headers every response from the web Worker carries. HSTS only over HTTPS, so local development
  * on http://localhost isn't pinned.
@@ -120,6 +137,9 @@ export function withSecurityHeaders(res: Response, url: URL): Response {
   // A WebSocket upgrade's response can't be rebuilt, and has no body to protect.
   if (res.status === 101 || res.webSocket) return res;
   const out = new Response(res.body, res);
+  // A route's notes to entry.server.tsx also reach React Router's `.data` answers, which never
+  // pass through it.
+  for (const h of INTERNAL_HEADERS) out.headers.delete(h);
   const set = (k: string, v: string) => {
     if (!out.headers.has(k)) out.headers.set(k, v);
   };
