@@ -626,9 +626,10 @@
   }
 }
 
-/* Work in progress as a light sweeping across muted text (AI Elements' Shimmer). Still, in plain
-   muted text, where motion is reduced. */
-.ol-shimmer {
+/* Work in progress as a light sweeping across muted text (AI Elements' Shimmer, and a running Trace
+   line's title). A utility, so variants can apply it. Still, in plain muted text, where motion is
+   reduced. */
+@utility ol-shimmer {
   display: inline-block;
   background-image:
     linear-gradient(
@@ -646,6 +647,11 @@
   -webkit-background-clip: text;
   color: transparent;
   animation: ol-shimmer var(--shimmer-duration, 2s) linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background: none;
+    color: var(--muted-foreground);
+  }
 }
 @keyframes ol-shimmer {
   from {
@@ -653,13 +659,6 @@
   }
   to {
     background-position: 0% center;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ol-shimmer {
-    animation: none;
-    background: none;
-    color: var(--muted-foreground);
   }
 }
 
