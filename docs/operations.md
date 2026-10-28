@@ -33,7 +33,7 @@ Each deployment is a file, `deployments/<id>.jsonc`. `scripts/fleet.ts` reads th
 | `personalDataRetentionDays` | none (kept) | Whole days after an order finishes that the daily sweep erases its buyer's personal data; at least 30 (refused below). Rendered into the engine's `PERSONAL_DATA_RETENTION_DAYS`; see [Retention](data-model.md#personal-data-on-finished-orders) |
 | `auditArchiveDays` | none (kept) | Whole days (at least 1; refused below) the R2 archive keeps audit events. `provision.sh` replaces the bucket's lifecycle rule `audit-archive` (prefix `audit/`) with that expiry on every run, and removes it when unset. It also locks `audit/` for the same number of days, or indefinitely when unset ([Bucket locks](#bucket-locks)) |
 | `catalogBackupDays` | `90` | Whole days (at least 31, so a backup outlives Durable Objects' 30 days of point-in-time recovery; refused below or fractional) the catalog's daily backups are kept. `provision.sh` replaces the catalog bucket's lifecycle rule `backups` (prefix `backups/`) with that expiry, and its lock rule `catalog-backups` with the same age, on every run ([Catalog backups](#catalog-backups), [Bucket locks](#bucket-locks)) |
-| `logRetentionDays` | `400` | Whole days (at least 30; refused below or fractional) the logs bucket `orderloop-logs<suffix>` keeps the Workers' trace events Logpush writes there. `provision.sh` replaces the bucket's lifecycle rule `logs` (prefix `workers/`) with that expiry on every run ([Logs](#logs)) |
+| `logRetentionDays` | `400`, or `personalDataRetentionDays` when set | Whole days (at least 30; refused below or fractional, and refused above `personalDataRetentionDays` when that is set) the logs bucket `orderloop-logs<suffix>` keeps the Workers' trace events Logpush writes there. `provision.sh` replaces the bucket's lifecycle rule `logs` (prefix `workers/`) with that expiry on every run ([Logs](#logs)) |
 | `aiPersonalData` | `redact` | `redact` or `send` (anything else is refused). `send` lets the workflow AI nodes and the assistant's `assess_order` see buyers' contact details, names and addresses; see [Personal data](data-model.md#personal-data). Rendered into the engine's `AI_PERSONAL_DATA` |
 | `payments` | `mock` | `mock` or `stripe` (anything else is refused; a demo can't be `stripe`). `stripe` takes payments through Stripe with the environment's `STRIPE_SECRET_KEY`, and a deploy without that secret stops before it migrates anything. Rendered into the engine's `PAYMENTS_MODE` |
 | `stripePublishableKey` | none | The Stripe publishable key (`pk_test_…` or `pk_live_…`) of the same account and mode as `STRIPE_SECRET_KEY`; only with `payments` `stripe`, and a deploy whose secret key is in the other mode stops. Agentic checkout gives it to platforms to tokenize cards with. Rendered into the engine's `STRIPE_PUBLISHABLE_KEY` |
@@ -256,9 +256,15 @@ plugin Worker also sets `logpush: true` ([Configuration](configuration.md#runtim
 and each deployment has one Workers Logpush job, `orderloop-workers<suffix>`, that writes their
 trace events to the deployment's own bucket, `orderloop-logs<suffix>` (in its jurisdiction), under
 `workers/<yyyymmdd>/` as gzipped NDJSON, one record per invocation. They are kept
-`logRetentionDays` days (default 400), then the bucket's lifecycle rule `logs` deletes them.
-`provision.sh` makes the bucket, the rule and the job; CI does nothing here, and a Worker with
-`logpush` but no job just pushes nothing, so deploys never depend on it.
+`logRetentionDays` days (default 400, or `personalDataRetentionDays` when that is set), then the
+bucket's lifecycle rule `logs` deletes them. `provision.sh` makes the bucket, the rule and the job;
+CI does nothing here, so deploys never depend on it. Without the deployment's own job, `logpush`
+doesn't keep the logs anywhere of ours, but it isn't inert: on a shared account any other
+`workers_trace_events` job whose filter lets these Workers through (one with no filter at all, say)
+collects them. `provision.sh` refuses to go on while such a job exists (`foreignJobsReaching` in
+`scripts/fleet.ts`), but it only looks when it runs: after making a Logpush job on a shared account
+for anything else, filter it to its own Workers' `ScriptName`, and re-run `provision.sh` for each
+deployment there to check.
 
 **What a record holds.** The job's fields are `LOG_FIELDS` in `scripts/fleet.ts`:
 `EventTimestampMs`, `EventType` (`fetch`, `queue`, `scheduled`, `alarm`, `worker_rpc`, …),
@@ -279,8 +285,11 @@ Leaving `Event` out keeps query strings, `Authorization`, cookies and client add
 bucket entirely; what it costs is the request line and response status of each invocation, and a
 queue's or cron's own details. The app's own lines are kept, so what the code logs is what the
 bucket holds: `audit_event` lines carry the actor (an email), target and IP of each audited
-action, as the audit log does, and they stay for `logRetentionDays` whatever
-`personalDataRetentionDays` erases from orders. To get the request line back, attach a Logpush
+action, as the audit log does, and error text can quote whatever the failing code held. Erasure
+never reaches the bucket: the retention sweep's erasure of personal data doesn't touch it,
+and expiry after `logRetentionDays` is the only way a record leaves. That is why
+`logRetentionDays` defaults to `personalDataRetentionDays` when a deployment sets it, and may not
+be longer. To get the request line back, attach a Logpush
 transformer to the job that selects only the method, path and status from `Event`, and test it
 against a sample record first: the job then can't also have its filter (a transformer takes the
 `WHERE` instead).
@@ -299,9 +308,14 @@ in one place.
 
 **The credential.** Logpush writes to R2 as an S3 client. `provision.sh` makes the key itself: an
 account-owned API token, `orderloop-logpush<suffix>`, whose only permission is Workers R2 Storage
-Bucket Item Write on the logs bucket; the access key id is the token's id and the secret the
-SHA-256 of its value. The value exists only in the script's shell and in the job's destination
-(Cloudflare keeps it there); it is never printed or written to disk. A deployment in a
+Bucket Item Write on the logs bucket (`logpushToken` in `scripts/fleet.ts`: one policy, one
+resource naming the bucket and its jurisdiction, and the permission group found by its exact
+name); the access key id is the token's id and the secret the SHA-256 of its value. A re-run that
+needs a key rolls the existing token only after checking it still holds exactly that policy
+(`tokenMatches`), and stops otherwise. The value exists only in the script's shell and in the job's destination
+(Cloudflare keeps it there); it is never printed or written to disk, the script turns off
+`set -x` while it runs, and any API error it echoes has `access-key-id` and `secret-access-key`
+values replaced with `REDACTED`. A deployment in a
 jurisdiction is reached through its S3 endpoint (`<account>.<jurisdiction>.r2.cloudflarestorage.com`)
 instead of `r2://`. Creating the job or the token needs `CLOUDFLARE_API_TOKEN` with Logs Write
 and Account API Tokens Write; re-runs only update the job (filter, fields) and need Logs Write.
@@ -310,7 +324,10 @@ CI's: token-making is not something the deploy should be able to do. To replace 
 suspected leak, or a job whose last push failed for its credentials), run
 `ROTATE_LOGPUSH_KEY=1 ./scripts/provision.sh <id>`: it rolls the token's value and gives the job
 the new one. The bucket has no lock rule: Logpush's own writes are the only ones the token
-allows, and how its destination check writes has not been confirmed against a lock.
+allows, and how its destination check writes has not been confirmed against a lock. So the
+bucket is not tamper-evident: anyone who can write it (that token, or an account admin) could
+change or remove a log file unseen. For evidence, use the audit log: its hash chain in D1 and its
+locked R2 archive ([Bucket locks](#bucket-locks)) are; the logs bucket is for investigation.
 
 **Reading them.** Download a day and search it:
 

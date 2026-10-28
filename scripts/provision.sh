@@ -189,9 +189,14 @@ echo "Logs in $LOGS_R2 expire after $LOG_RETENTION_DAYS days"
 # by script name; every Worker on the account that sets `logpush` would reach it otherwise), with
 # the fields `fleet.ts logpush` lists. Found by name and updated in place on a re-run, its key kept.
 # Creating one also makes its key, so CLOUDFLARE_API_TOKEN then needs Account API Tokens Write as
-# well as Logs Write. ROTATE_LOGPUSH_KEY=1 rolls the key and gives the job the new one.
+# well as Logs Write. ROTATE_LOGPUSH_KEY=1 rolls the key and gives the job the new one. Tracing is
+# off throughout (and restored after), since the key passes through this shell.
+case $- in *x*) logpush_xtrace=1 ;; *) logpush_xtrace="" ;; esac
+set +x
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   acct="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+  # Whatever the API says back, minus any key it quotes from a destination.
+  redact() { sed -E 's/(secret-access-key|access-key-id)=[^&"[:space:]]*/\1=REDACTED/g'; }
   # One Cloudflare API call, its response on stdout; stops provisioning on a failure, naming it.
   # The API token reaches curl through a pipe and a body through stdin, never its arguments.
   cf() {
@@ -203,18 +208,22 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
         -H 'Content-Type: application/json' --data-binary @-)
     fi
     if ! jq -e .success >/dev/null 2>&1 <<<"$out"; then
-      echo "Cloudflare API $1 ${2%%\?*}: $(jq -r '[.errors[]?.message] | join("; ")' <<<"$out" 2>/dev/null)" >&2
+      echo "Cloudflare API $1 ${2%%\?*}: $(jq -r '[.errors[]?.message] | join("; ")' <<<"$out" 2>/dev/null | redact)" >&2
       return 1
     fi
     printf '%s' "$out"
   }
   # Logpush signs its writes to R2 as an S3 client: the access key id is an API token's id, the
   # secret the SHA-256 of its value. The token is the account's, named for the deployment, and may
-  # only write objects in the logs bucket. Its value stays in this shell and in the job's
-  # destination: never printed, never on disk. An existing token is rolled rather than duplicated.
-  # It runs in a command substitution, where bash drops `set -e`, so each step returns on failure.
+  # only write objects in the logs bucket (`logpushToken` in fleet.ts builds it). Its value stays in
+  # this shell and in the job's destination: never printed, never on disk. An existing token is
+  # rolled rather than duplicated, and only once it holds exactly that policy. It runs in a command
+  # substitution, where bash drops `set -e`, so each step returns on failure.
   logpush_destination() {
-    local tid="" page=1 listed pg made value secret
+    local tid="" page=1 listed body pg made value secret
+    body=$(cf GET "/tokens/permission_groups?name=Workers%20R2%20Storage%20Bucket%20Item%20Write" |
+      node scripts/fleet.ts logpush-token "$id" "$CLOUDFLARE_ACCOUNT_ID") || return 1
+    pg=$(jq -er '.policies[0].permission_groups[0].id' <<<"$body") || return 1
     while :; do
       listed=$(cf GET "/tokens?per_page=50&page=$page") || return 1
       [ "$(jq '.result | length' <<<"$listed")" = 0 ] && break
@@ -223,14 +232,11 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
       page=$((page + 1))
     done
     if [ -n "$tid" ]; then
+      cf GET "/tokens/$tid" | node scripts/fleet.ts logpush-token "$id" "$CLOUDFLARE_ACCOUNT_ID" check "$pg" ||
+        return 1
       value=$(cf PUT "/tokens/$tid/value" <<<'{}' | jq -er .result) || return 1
     else
-      pg=$(cf GET "/tokens/permission_groups?name=Workers%20R2%20Storage%20Bucket%20Item%20Write" |
-        jq -er '.result[0].id') || return 1
-      made=$(jq -n --arg name "$LOGPUSH_TOKEN" --arg pg "$pg" \
-        --arg r "com.cloudflare.edge.r2.bucket.${CLOUDFLARE_ACCOUNT_ID}_${JURISDICTION:-default}_$LOGS_R2" \
-        '{name: $name, policies: [{effect: "allow", resources: {($r): "*"}, permission_groups: [{id: $pg}]}]}' |
-        cf POST /tokens) || return 1
+      made=$(cf POST /tokens <<<"$body") || return 1
       tid=$(jq -er .result.id <<<"$made") || return 1
       value=$(jq -er .result.value <<<"$made") || return 1
     fi
@@ -244,22 +250,27 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
         "$LOGS_R2" "$logs_prefix" "$CLOUDFLARE_ACCOUNT_ID" "$tid" "$secret"
     fi
   }
-  job_id=$(cf GET /logpush/datasets/workers_trace_events/jobs |
-    jq -r --arg n "$LOGPUSH_JOB" '[.result[] | select(.name == $n)][0].id // empty')
+  jobs=$(cf GET /logpush/datasets/workers_trace_events/jobs)
+  # `logpush` puts these Workers in every workers_trace_events job on the account: refuse while one
+  # that isn't this deployment's (an unfiltered one, say) would take their logs too.
+  node scripts/fleet.ts logpush-foreign "$id" <<<"$jobs"
+  job_id=$(jq -r --arg n "$LOGPUSH_JOB" '[.result[] | select(.name == $n)][0].id // empty' <<<"$jobs")
   job=$(jq '{enabled: true, filter, output_options}' <<<"$logpush_spec")
   if [ -n "$job_id" ]; then
     if [ "${ROTATE_LOGPUSH_KEY:-}" = 1 ]; then
       dest=$(logpush_destination)
-      job=$(DEST="$dest" jq '. + {destination_conf: env.DEST}' <<<"$job")
+      job=$(jq --rawfile d <(printf '%s' "$dest") '. + {destination_conf: $d}' <<<"$job")
     fi
     updated=$(cf PUT "/logpush/jobs/$job_id" <<<"$job")
     echo "Logpush job $LOGPUSH_JOB updated: $(jq -r '.scripts | join(", ")' <<<"$logpush_spec") to $LOGS_R2${ROTATE_LOGPUSH_KEY:+ (new key)}"
-    last_error=$(jq -r '.result.error_message // empty' <<<"$updated")
-    [ -n "$last_error" ] && echo "  Its last push failed: $last_error (ROTATE_LOGPUSH_KEY=1 gives it a new key)"
+    last_error=$(jq -r '.result.error_message // empty' <<<"$updated" | redact)
+    if [ -n "$last_error" ]; then
+      echo "  Its last push failed: $last_error (ROTATE_LOGPUSH_KEY=1 gives it a new key)"
+    fi
   else
     dest=$(logpush_destination)
-    job=$(DEST="$dest" jq --arg n "$LOGPUSH_JOB" \
-      '. + {name: $n, dataset: "workers_trace_events", destination_conf: env.DEST}' <<<"$job")
+    job=$(jq --arg n "$LOGPUSH_JOB" --rawfile d <(printf '%s' "$dest") \
+      '. + {name: $n, dataset: "workers_trace_events", destination_conf: $d}' <<<"$job")
     if ! created=$(cf POST /logpush/jobs <<<"$job" 2>&1); then
       echo "$created" >&2
       if grep -qi 'max jobs' <<<"$created"; then
@@ -274,6 +285,7 @@ else
   echo "Skipped the Logpush job: set CLOUDFLARE_API_TOKEN (Logs Write, and Account API Tokens Write"
   echo "to create it) and CLOUDFLARE_ACCOUNT_ID, and run this again. Until then nothing is pushed."
 fi
+if [ -n "$logpush_xtrace" ]; then set -x; fi
 
 # The GitHub environment the deploy job runs in, and its secrets. A secret already set is left
 # alone; the setup code is generated and kept in .secrets/<id>/ (gitignored) for the first admin.
