@@ -342,7 +342,7 @@ export default function Account() {
                 ))}
               </ul>
               <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-                <span className="block max-w-[75ch]">
+                <span className="block max-w-measure">
                   A session ends 30 days after sign-in, or after 7 days without use.
                 </span>
               </p>

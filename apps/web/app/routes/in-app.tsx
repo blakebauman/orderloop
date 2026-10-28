@@ -77,7 +77,7 @@ function Refused({ title, children }: { title: string; children: React.ReactNode
     <div className="mx-auto max-w-page px-4 pt-7 pb-10 sm:px-6">
       <title>{`${title} · OrderLoop`}</title>
       <h1 className="font-semibold tracking-title text-[1.75rem] leading-tight">{title}</h1>
-      <div className="max-w-[68ch]">{children}</div>
+      <div className="max-w-measure">{children}</div>
       <Link to="/" className="mt-6 inline-block font-medium text-link text-sm hover:underline">
         Back to the overview
       </Link>

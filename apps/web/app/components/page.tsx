@@ -19,7 +19,7 @@ export function PageHeader({
           {title}
         </h1>
         {subtitle ? (
-          <p className="mt-1 max-w-[68ch] text-muted-foreground text-sm">{subtitle}</p>
+          <p className="mt-1 max-w-measure text-muted-foreground text-sm">{subtitle}</p>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -83,7 +83,7 @@ export function Empty({
 }) {
   return (
     <div className="px-4 py-8 text-center text-muted-foreground text-sm">
-      <p className="mx-auto max-w-[60ch] text-balance">{children}</p>
+      <p className="mx-auto max-w-measure text-balance">{children}</p>
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );

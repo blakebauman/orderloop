@@ -1,4 +1,3 @@
-import { useContext } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -18,7 +17,7 @@ import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
 import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';
 import './app.css';
-import { NonceContext } from './lib/csp';
+import { useNonce } from './lib/csp';
 
 /** Running text and titles: fetched with the page rather than once the stylesheet is parsed. */
 const fontPreload = (href: string) =>
@@ -53,7 +52,7 @@ const THEME_COLOR = { light: '#ffffff', dark: '#0a0a0a' } as const;
 const THEME_SCRIPT = `(function(){var d=document.documentElement,m=window.matchMedia('(prefers-color-scheme: dark)'),t=document.createElement('meta');t.name='theme-color';document.head.prepend(t);function a(){var c='light';try{c=localStorage.getItem('ol-theme')||'light'}catch(e){c=d.dataset.themeChoice||'light'}d.dataset.themeChoice=c;d.dataset.theme=c==='system'?(m.matches?'dark':'light'):c;t.content=d.dataset.theme==='dark'?'${THEME_COLOR.dark}':'${THEME_COLOR.light}'}a();m.addEventListener('change',a);window.addEventListener('ol-theme',a)})()`;
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const nonce = useContext(NonceContext);
+  const nonce = useNonce();
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
@@ -68,7 +67,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content={THEME_COLOR.dark} />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Meta />
-        <Links />
+        <Links nonce={nonce} />
       </head>
       <body>
         {children}

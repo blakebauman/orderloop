@@ -40,6 +40,7 @@ import { RECORD_KINDS, type RecordKind, type RecordRow, recordTone } from '~/lib
 import { recentRecords } from '~/lib/records.server';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
+import { isOverdue } from '~/lib/where';
 import type { Route } from './+types/commerce';
 
 export const meta = () => [{ title: 'Commerce · OrderLoop' }];
@@ -100,6 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     events,
     // Every order waiting on one, not just those read: the header counts them all.
     waitingTotal: waiting.total,
+    waitingOverdue: waiting.overdue,
     shownOrders: states.length,
     emails,
     mailboxes,
@@ -153,6 +155,7 @@ export default function Commerce() {
     pricing,
     events: allEvents,
     waitingTotal,
+    waitingOverdue,
     shownOrders,
     emails,
     mailboxes,
@@ -255,9 +258,9 @@ export default function Commerce() {
               ['#email-intake', 'Email intake'],
               ['#stock', 'Inventory'],
               ['#stores', 'Stores'],
+              ['#sellers', 'Marketplace sellers'],
               ['#pricing', 'Pricing'],
               ['#customers', 'Customers'],
-              ['#sellers', 'Marketplace sellers'],
             ].map(([href, label]) => (
               <li key={href}>
                 <a href={href} className="inline-block py-2.5 text-link hover:underline sm:py-1">
@@ -273,11 +276,15 @@ export default function Commerce() {
           className="xl:col-span-2"
           actions={
             partial ? (
-              <span className="font-medium text-wait text-xs tabular">
-                {plural(waitingTotal, 'order')} waiting
-              </span>
+              <WaitingCount
+                waiting={`${plural(waitingTotal, 'order')} waiting`}
+                overdue={waitingOverdue}
+              />
             ) : open ? (
-              <span className="font-medium text-wait text-xs tabular">{open} waiting</span>
+              <WaitingCount
+                waiting={`${open} waiting`}
+                dues={events.filter((e) => !recorded.has(eventKey(e))).map((e) => e.due)}
+              />
             ) : null
           }
           flush
@@ -303,7 +310,7 @@ export default function Commerce() {
           )}
           {partial ? (
             <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-              <span className="block max-w-[75ch]">
+              <span className="block max-w-measure">
                 Showing the {shownOrders} most recently updated of {count(waitingTotal)} orders
                 waiting on an outside event.{' '}
                 <Link to="/orders?status=waiting" className="text-link hover:underline">
@@ -340,7 +347,7 @@ export default function Commerce() {
                   </li>
                 ))}
               </ul>
-              <p className="max-w-[75ch] text-muted-foreground text-xs">
+              <p className="max-w-measure text-muted-foreground text-xs">
                 Mail is accepted from customers’ own addresses, their company domains and senders an
                 administrator has allowed.
               </p>
@@ -401,7 +408,7 @@ export default function Commerce() {
           flush
         >
           <p className="border-b px-4 py-2 text-muted-foreground text-xs">
-            <span className="block max-w-[75ch]">
+            <span className="block max-w-measure">
               Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws
               from the store. Reserved stock is held by running orders.
             </span>
@@ -482,90 +489,142 @@ export default function Commerce() {
           <Pager list={inventory} listKey="inventory" hash="stock" label="Inventory" />
           {canAdmin ? <ProductIndexUpdate /> : null}
         </Section>
-        <Section id="stores" title="Stores" flush>
-          {stores.length ? (
-            <Table stack="cards" scroll caption="Stores">
-              <TableHead>
-                <Tr>
-                  <Th>Item</Th>
-                  <Th numeric>Available</Th>
-                  <Th numeric>Reserved</Th>
-                  <Th numeric>On hand</Th>
-                </Tr>
-              </TableHead>
-              {stores.map((l) => (
-                <TableBody
-                  key={l.id}
-                  className="divide-y-0 border-b last:border-b-0 [&>tr:last-child>td]:pb-2.5"
-                >
+        {/* Inventory runs long; Stores and Sellers stack beside it, so the two columns end near
+            each other. Customers, as long again, takes the full width below Pricing. */}
+        <div className="grid min-w-0 content-start gap-6">
+          <Section id="stores" title="Stores" flush>
+            {stores.length ? (
+              <Table stack="cards" scroll caption="Stores">
+                <TableHead>
                   <Tr>
-                    <Th
-                      scope="rowgroup"
-                      colSpan={4}
-                      className="whitespace-normal pt-2 pb-0.5 normal-case tracking-normal"
-                    >
-                      <span className="font-medium text-foreground text-sm">{l.name}</span>
-                      <span className="ml-2 font-normal text-muted-foreground text-xs">
-                        {[l.pickup ? 'Pickup' : null, l.ships ? 'Ships orders' : null]
-                          .filter(Boolean)
-                          .join(' · ') || 'In-store sales only'}
-                      </span>
-                    </Th>
+                    <Th>Item</Th>
+                    <Th numeric>Available</Th>
+                    <Th numeric>Reserved</Th>
+                    <Th numeric>On hand</Th>
                   </Tr>
-                  {l.stock.total ? (
-                    l.stock.rows.map((s) => (
-                      <Tr key={s.sku}>
-                        <Td className="py-1 pl-8">
-                          {s.name ?? s.sku}
-                          <a
-                            href={`#sku-${s.sku}`}
-                            className="ml-1.5 whitespace-nowrap font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
-                          >
-                            {s.sku}
-                          </a>
-                        </Td>
-                        <Td numeric label="Available" className="py-1">
-                          {count(s.stock - s.reserved)}
-                        </Td>
-                        <Td numeric label="Reserved" className="py-1 text-muted-foreground">
-                          <Held sku={s.sku} n={s.reserved} />
-                        </Td>
-                        <Td numeric label="On hand" className="py-1 text-muted-foreground">
-                          {count(s.stock)}
+                </TableHead>
+                {stores.map((l) => (
+                  <TableBody
+                    key={l.id}
+                    className="divide-y-0 border-b last:border-b-0 [&>tr:last-child>td]:pb-2.5"
+                  >
+                    <Tr>
+                      <Th
+                        scope="rowgroup"
+                        colSpan={4}
+                        className="whitespace-normal pt-2 pb-0.5 normal-case tracking-normal"
+                      >
+                        <span className="font-medium text-foreground text-sm">{l.name}</span>
+                        <span className="ml-2 font-normal text-muted-foreground text-xs">
+                          {[l.pickup ? 'Pickup' : null, l.ships ? 'Ships orders' : null]
+                            .filter(Boolean)
+                            .join(' · ') || 'In-store sales only'}
+                        </span>
+                      </Th>
+                    </Tr>
+                    {l.stock.total ? (
+                      l.stock.rows.map((s) => (
+                        <Tr key={s.sku}>
+                          <Td className="py-1 pl-8">
+                            {s.name ?? s.sku}
+                            <a
+                              href={`#sku-${s.sku}`}
+                              className="ml-1.5 whitespace-nowrap font-mono text-muted-foreground text-xs hover:text-foreground hover:underline"
+                            >
+                              {s.sku}
+                            </a>
+                          </Td>
+                          <Td numeric label="Available" className="py-1">
+                            {count(s.stock - s.reserved)}
+                          </Td>
+                          <Td numeric label="Reserved" className="py-1 text-muted-foreground">
+                            <Held sku={s.sku} n={s.reserved} />
+                          </Td>
+                          <Td numeric label="On hand" className="py-1 text-muted-foreground">
+                            {count(s.stock)}
+                          </Td>
+                        </Tr>
+                      ))
+                    ) : (
+                      <Tr>
+                        <Td colSpan={4} className="py-1 pl-8 text-muted-foreground text-xs">
+                          {q ? 'Nothing here matches.' : 'No stock held here.'}
                         </Td>
                       </Tr>
-                    ))
-                  ) : (
-                    <Tr>
-                      <Td colSpan={4} className="py-1 pl-8 text-muted-foreground text-xs">
-                        {q ? 'Nothing here matches.' : 'No stock held here.'}
+                    )}
+                    {l.stock.total > l.stock.size ? (
+                      <Tr>
+                        <Td colSpan={4} className="p-0">
+                          <Pager
+                            list={l.stock}
+                            listKey={storeKey(l.id)}
+                            hash="stores"
+                            label={`${l.name} stock`}
+                            inset
+                          />
+                        </Td>
+                      </Tr>
+                    ) : null}
+                  </TableBody>
+                ))}
+              </Table>
+            ) : (
+              <Empty>No stores yet.</Empty>
+            )}
+          </Section>
+          <Section
+            id="sellers"
+            title="Marketplace sellers"
+            actions={<Total list={sellers} noun="seller" />}
+            flush
+          >
+            {sellers.total || q ? (
+              <Table stack="cards" scroll caption="Marketplace sellers">
+                <TableHead>
+                  <Tr>
+                    <Th>Seller</Th>
+                    <Th>Accepts orders</Th>
+                    <Th numeric>Commission</Th>
+                  </Tr>
+                </TableHead>
+                <TableBody>
+                  {sellers.rows.map((s) => (
+                    <Tr key={s.id}>
+                      <Td>
+                        <Link
+                          to={`/commerce?q=${encodeURIComponent(s.name)}#records`}
+                          className={cn('hover:underline', !s.active && 'text-muted-foreground')}
+                          title={`Seller orders and payouts for ${s.name}`}
+                        >
+                          {s.name}
+                        </Link>
+                        {s.active ? null : <Off />}
+                        <div className="break-all text-muted-foreground text-xs">{s.email}</div>
+                      </Td>
+                      <Td label="Accepts orders">
+                        {s.autoAccept ? 'Automatically' : 'Asked per order'}
+                      </Td>
+                      <Td numeric label="Commission">
+                        {Math.round(s.commissionPct * 1000) / 10}%
                       </Td>
                     </Tr>
-                  )}
-                  {l.stock.total > l.stock.size ? (
-                    <Tr>
-                      <Td colSpan={4} className="p-0">
-                        <Pager
-                          list={l.stock}
-                          listKey={storeKey(l.id)}
-                          hash="stores"
-                          label={`${l.name} stock`}
-                          inset
-                        />
-                      </Td>
-                    </Tr>
+                  ))}
+                  {q && !sellers.total ? (
+                    <TableEmpty colSpan={3}>Nothing here matches “{q}”.</TableEmpty>
                   ) : null}
                 </TableBody>
-              ))}
-            </Table>
-          ) : (
-            <Empty>No stores yet.</Empty>
-          )}
-        </Section>
+              </Table>
+            ) : (
+              <Empty>No marketplace sellers yet.</Empty>
+            )}
+            <Pager list={sellers} listKey="sellers" hash="sellers" label="Sellers" />
+          </Section>
+        </div>
         <Pricing pricing={pricing} />
         <Section
           id="customers"
           title="Customers"
+          className="xl:col-span-2"
           actions={<Total list={customers} noun="customer" />}
           flush
         >
@@ -630,55 +689,36 @@ export default function Commerce() {
           )}
           <Pager list={customers} listKey="customers" hash="customers" label="Customers" />
         </Section>
-        <Section
-          id="sellers"
-          title="Marketplace sellers"
-          actions={<Total list={sellers} noun="seller" />}
-          flush
-        >
-          {sellers.total || q ? (
-            <Table stack="cards" scroll caption="Marketplace sellers">
-              <TableHead>
-                <Tr>
-                  <Th>Seller</Th>
-                  <Th>Accepts orders</Th>
-                  <Th numeric>Commission</Th>
-                </Tr>
-              </TableHead>
-              <TableBody>
-                {sellers.rows.map((s) => (
-                  <Tr key={s.id}>
-                    <Td>
-                      <Link
-                        to={`/commerce?q=${encodeURIComponent(s.name)}#records`}
-                        className={cn('hover:underline', !s.active && 'text-muted-foreground')}
-                        title={`Seller orders and payouts for ${s.name}`}
-                      >
-                        {s.name}
-                      </Link>
-                      {s.active ? null : <Off />}
-                      <div className="break-all text-muted-foreground text-xs">{s.email}</div>
-                    </Td>
-                    <Td label="Accepts orders">
-                      {s.autoAccept ? 'Automatically' : 'Asked per order'}
-                    </Td>
-                    <Td numeric label="Commission">
-                      {Math.round(s.commissionPct * 1000) / 10}%
-                    </Td>
-                  </Tr>
-                ))}
-                {q && !sellers.total ? (
-                  <TableEmpty colSpan={3}>Nothing here matches “{q}”.</TableEmpty>
-                ) : null}
-              </TableBody>
-            </Table>
-          ) : (
-            <Empty>No marketplace sellers yet.</Empty>
-          )}
-          <Pager list={sellers} listKey="sellers" hash="sellers" label="Sellers" />
-        </Section>
       </div>
     </>
+  );
+}
+
+/**
+ * How many orders wait on an outside event, muted: a count is not a warning. Beside it, in the wait
+ * colour, how many of them are past their step's deadline (The Overdue Rule, DESIGN.md): checked
+ * live against the rows' `dues` when the page shows them all, else the index's `overdue` count when
+ * the page loaded.
+ */
+function WaitingCount({
+  waiting,
+  dues,
+  overdue: counted = 0,
+}: {
+  waiting: string;
+  dues?: (number | null)[];
+  overdue?: number;
+}) {
+  const now = useNow(dues ? 30_000 : null);
+  const overdue = dues ? dues.filter((d) => isOverdue(d, now)).length : counted;
+  return (
+    <span className="text-xs tabular">
+      <span className="text-muted-foreground">{waiting}</span>
+      {/* The server's clock and the browser's can disagree on a deadline just passed. */}
+      <span className="ml-2 font-medium text-wait empty:hidden" suppressHydrationWarning>
+        {overdue ? `${count(overdue)} overdue` : ''}
+      </span>
+    </span>
   );
 }
 
@@ -1102,7 +1142,7 @@ function Pricing({ pricing }: Pick<Office, 'pricing'>) {
         </li>
       </ol>
       <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-        <span className="block max-w-[75ch]">
+        <span className="block max-w-measure">
           Prices are in {BASE_CURRENCY}. Orders in another currency convert at the rate below, fixed
           when the order is priced. Promotion codes are on the{' '}
           <Link to="/promotions" className="text-link hover:underline">
