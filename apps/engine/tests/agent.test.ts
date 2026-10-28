@@ -79,6 +79,26 @@ describe('OrderAgent reports', () => {
     expect(s.nodes.reserve!.status).toBe('rolled_back');
   });
 
+  it('keeps a short reason and the full error on the step', async () => {
+    const agent = env.ORDER_AGENT.getByName('agent-reason');
+    await agent.init({ ...order, id: 'ord_agent_reason' }, flow, 'ord_agent_reason-g1');
+    const error = `Failed query: select "sku" from "products" where "sku" in (${'?, '.repeat(3000)}?)`;
+    await agent.report({
+      generation: 1,
+      node: { id: 'extract', status: 'failed', error, endedAt: 1 },
+    });
+    // A reporter that sends a raw message anyway (an instance started before the Workflow summed
+    // up failures) still leaves a short reason.
+    await agent.report({ generation: 1, status: 'failed', reason: `Extract: ${error}` });
+    // A replayed report changes nothing.
+    await agent.report({ generation: 1, status: 'failed', reason: `Extract: ${error}` });
+    const s = (await agent.snapshot()) as OrderState;
+    expect(s.status).toBe('failed');
+    expect(s.reason).toBe('Database error at Extract');
+    expect(s.nodes.extract!.error).toBe(error);
+    expect(s.timeline.filter((t) => t.message.startsWith('Order failed'))).toHaveLength(1);
+  });
+
   it('broadcasts a small state and keeps the flow and whole timeline for snapshots', async () => {
     const agent = env.ORDER_AGENT.getByName('agent-slim');
     await agent.init({ ...order, id: 'ord_agent_slim' }, flow, 'ord_agent_slim-g1');

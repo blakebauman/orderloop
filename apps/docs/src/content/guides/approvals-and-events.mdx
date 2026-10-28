@@ -107,8 +107,8 @@ waiting.
   records it by hand, such as **Mark as collected** for `pickup.collected` or **Record payment** for
   `payment.received` (payload `{ "source": "dashboard", "amount": <order total> }`). The event name
   and the API endpoint are under **For developers**.
-- **Commerce page**: lists the events the 20 most recently updated waiting orders wait for, with each
-  order's customer and total, and the same button as the order page. Nothing is sent for five
+- **Commerce page**: lists the events the 20 most recently updated orders waiting on an outside event
+  wait for (it says how many wait in all when there are more), with each order's customer and total, and the same button as the order page. Nothing is sent for five
   seconds, so **Undo** takes it back; leaving the page sends it at once. The payload is
   `{ "source": "commerce" }`. Seller responses on a marketplace order are recorded per seller on
   the order page.

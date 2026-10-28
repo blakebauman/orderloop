@@ -2,9 +2,12 @@ import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
 import {
   ago,
+  channelLabel,
+  clip,
   dateTime,
   duration,
   money,
+  plural,
   statusColor,
   waitingForLabel,
   waitLabel,
@@ -47,6 +50,23 @@ describe('format', () => {
     expect(waitingForLabel('event:invoice.signed')).toBe('invoice.signed');
     expect(waitingForLabel('person:manager · person:manager')).toBe('Manager');
     expect(waitingForLabel(null)).toBe('');
+    // Assignees are named, not humanized from their ids.
+    expect(waitingForLabel('person:ap · person:trust_safety')).toBe(
+      'Accounts payable, Trust and safety',
+    );
+    expect(waitingForLabel('person:qa')).toBe('QA');
+    expect(waitingForLabel('person:returns_desk')).toBe('Returns desk');
+  });
+
+  it('labels channels and clips free text to a line', () => {
+    expect(channelLabel('pos')).toBe('Point of sale');
+    expect(channelLabel('bench')).toBe('Other channel');
+    expect(clip('Database error at\n  Supplier cost')).toBe('Database error at Supplier cost');
+    const reason = clip(`Supplier cost: Failed query: select ${'"sku", '.repeat(2000)}`);
+    expect(reason.length).toBeLessThanOrEqual(160);
+    expect(reason.endsWith('…')).toBe(true);
+    expect(plural(1, 'reservation')).toBe('1 reservation');
+    expect(plural(1200, 'line')).toBe('1,200 lines');
   });
 
   it('formats money and relative time', () => {

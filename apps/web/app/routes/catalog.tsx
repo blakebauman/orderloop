@@ -122,7 +122,7 @@ export default function Catalog() {
               ))}
             </Segmented>
             {canEdit ? (
-              <p className="mb-3 hidden text-muted-foreground text-xs fine:lg:block">
+              <p className="mb-3 hidden max-w-[75ch] text-muted-foreground text-xs fine:lg:block">
                 Keyboard: <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd>{' '}
                 move between cards, <kbd className="font-mono">Enter</kbd> opens one,{' '}
                 <kbd className="font-mono">D</kbd> drafts it, <kbd className="font-mono">A</kbd>{' '}

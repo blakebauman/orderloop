@@ -23,7 +23,7 @@ import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
-import { count, humanize } from '~/lib/format';
+import { count, humanize, plural } from '~/lib/format';
 import { addOne, describeIssues, parseLines, summarizeFlow } from '~/lib/new-order';
 import { commerceData, currencies, demoAvailable, publishedFlowGraphs } from '~/lib/orders.server';
 import { nodeRegistry } from '~/lib/plugins.server';
@@ -548,7 +548,7 @@ function FlowSummary({
         ))}
       </dl>
       <p className="mt-2 text-muted-foreground text-xs">
-        {count(summary.steps)} steps.{' '}
+        {plural(summary.steps, 'step')}.{' '}
         <Link to={`/flows/${flowId}`} className="text-link hover:underline">
           Open the flow
         </Link>

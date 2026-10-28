@@ -415,6 +415,6 @@ describe('orders with a Stripe invoice', () => {
     const [row] = await invoiceRows(orderId);
     expect(row!.status).toBe('void');
     expect(stripe.invoices.get(row!.externalId!)!.status).toBe('void');
-    expect((await state(orderId)).timeline.at(-1)!.message).toMatch(/voided 1 invoices/);
+    expect((await state(orderId)).timeline.at(-1)!.message).toMatch(/voided 1 invoice,/);
   });
 });

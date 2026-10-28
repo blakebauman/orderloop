@@ -43,6 +43,7 @@ import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from './principal';
 import { separationRefusal } from './separation';
 import { releaseHold } from './ucp/payments';
 import { syncUcpOrder, ucpMetaOf } from './ucp/webhooks';
+import { orderReason, plural } from './words';
 
 export type Report = {
   /** Plan snapshots are sequenced per generation; stale ones are dropped. */
@@ -202,7 +203,9 @@ export class OrderAgent extends Agent<Env, State> {
           ...timers.map(() => 'timer'),
         ].join(' · ') || null,
       stoppedAt: ended && failed.length ? failed.join(' · ') : null,
-      reason: ended ? (s.reason ?? null) : null,
+      // Shown on one line in the overview and the list; orders that ended before reasons were
+      // capped are capped here when they next sync.
+      reason: ended && s.reason ? orderReason(s.reason) : null,
     };
     const key = JSON.stringify(row);
     if (key === this.indexed) return;
@@ -304,7 +307,8 @@ export class OrderAgent extends Agent<Env, State> {
     }
     if (r.status && (fresh || !sequenced) && !TERMINAL_ORDER_STATUSES.includes(s.status)) {
       next.status = r.status;
-      if (r.reason !== undefined) next.reason = r.reason;
+      // Capped here too, whoever reported it: the order page, list and webhooks show it whole.
+      if (r.reason !== undefined) next.reason = orderReason(r.reason);
       if (r.status !== s.status) {
         next.timeline = this.log(
           {
@@ -681,7 +685,7 @@ export class OrderAgent extends Agent<Env, State> {
       waits: [],
       timeline: this.log({
         kind: 'order',
-        message: `Cancelled: ${reason}${undone ? ` (released ${undone.released}, voided ${undone.voided}, cancelled ${undone.cancelled} shipments${undone.restored ? `, restocked ${undone.restored} lines` : ''}${undone.invoicesVoided ? `, voided ${undone.invoicesVoided} invoices` : ''}${undone.invoicesPaid.length ? `, left paid invoices ${undone.invoicesPaid.join(', ')}` : ''}${undone.unbilled ? `, reversed ${undone.unbilled} account charges` : ''}${undone.sellerOrdersCancelled ? `, ${undone.sellerOrdersCancelled} seller orders` : ''}${undone.payoutsReversed ? `, reversed ${undone.payoutsReversed} payouts` : ''}${undone.revoked ? `, revoked ${undone.revoked} codes` : ''}${undone.labelsNotVoided ? `; ${undone.labelsNotVoided} labels could not be voided with their provider` : ''})` : ''}`,
+        message: `Cancelled: ${reason}${undone ? ` (${undoneText(undone)})` : ''}`,
       }),
     });
     await this.syncIndex();
@@ -820,4 +824,24 @@ export class OrderAgent extends Agent<Env, State> {
     if (pending && p.attempt < WEBHOOK_RETRIES)
       await this.schedule(10 * 2 ** p.attempt, 'emitWebhook', { ...p, attempt: p.attempt + 1 });
   }
+}
+
+/** What cancelling undid, for the timeline: "released 2 reservations, voided 1 authorization, …". */
+function undoneText(u: Awaited<ReturnType<typeof compensateOrder>>) {
+  const parts = [
+    `released ${plural(u.released, 'reservation')}`,
+    `voided ${plural(u.voided, 'authorization')}`,
+    `cancelled ${plural(u.cancelled, 'shipment')}`,
+  ];
+  if (u.restored) parts.push(`restocked ${plural(u.restored, 'line')}`);
+  if (u.invoicesVoided) parts.push(`voided ${plural(u.invoicesVoided, 'invoice')}`);
+  if (u.invoicesPaid.length) parts.push(`left paid invoices ${u.invoicesPaid.join(', ')}`);
+  if (u.unbilled) parts.push(`reversed ${plural(u.unbilled, 'account charge')}`);
+  if (u.sellerOrdersCancelled) parts.push(plural(u.sellerOrdersCancelled, 'seller order'));
+  if (u.payoutsReversed) parts.push(`reversed ${plural(u.payoutsReversed, 'payout')}`);
+  if (u.revoked) parts.push(`revoked ${plural(u.revoked, 'code')}`);
+  const text = parts.join(', ');
+  return u.labelsNotVoided
+    ? `${text}; ${plural(u.labelsNotVoided, 'label')} could not be voided with the label provider`
+    : text;
 }

@@ -39,7 +39,7 @@ so recover from a bad engine deploy by rolling forward.
 | `timeline` | `TimelineEntry`s, capped at the last 400 (`TIMELINE_CAP`); the newest 50 in the synced state |
 | `instanceId`, `generation` | The Workflow instance driving the order and its generation |
 | `rollback` | `{ outcome: 'complete' \| 'failed', error }` once a failed run has settled |
-| `reason` | Why it was cancelled, declined or failed |
+| `reason` | Why it was cancelled, declined or failed: one line of at most 200 characters (`orderReason` in `apps/engine/src/words.ts`), with a database error cut back to where it happened ("Database error at Supplier cost"). The full error stays on the failed step's `NodeRun.error` |
 
 `validateStateChange` throws for any change whose source is not the server: browsers may read
 state and call methods, never write state.

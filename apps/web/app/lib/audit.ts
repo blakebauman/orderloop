@@ -108,18 +108,60 @@ export const isAuditGroup = (v: unknown): v is AuditGroup =>
 export type AuditEvent = {
   action: string;
   actor: string | null;
+  /** `user`, `token`, `open`, or a machine such as an integration key. */
+  actorKind?: string | null;
   target: string | null;
   detail: Record<string, unknown> | null;
 };
 
 const role = (v: unknown) => ROLE_LABELS[v as Role] ?? String(v);
 
+/**
+ * Who acted, as people read it. An API token is stored by its principal name, `token:<name>`;
+ * the log shows the token's name and says it is one.
+ */
+export function actorLabel(e: Pick<AuditEvent, 'actor' | 'actorKind'>): string | null {
+  if (!e.actor) return null;
+  const token = /^token:(.+)$/.exec(e.actor);
+  return token || e.actorKind === 'token' ? `${token ? token[1] : e.actor} (API token)` : e.actor;
+}
+
+/** Ids the app has a page for, by prefix. Other targets (emails, names, URLs) are shown as text. */
+const TARGET_PAGES: [RegExp, (id: string) => string][] = [
+  [/^ord_[\w-]+$/, (id) => `/orders/${id}`],
+  [/^cart_[\w-]+$/, (id) => `/carts/${id}`],
+  [/^cus_[\w-]+$/, (id) => `/customers/${id}`],
+];
+
+/** The page for what an event acted on, when there is one: an order, a cart, a customer, a flow. */
+export function targetHref(e: Pick<AuditEvent, 'action' | 'target'>): string | null {
+  if (!e.target) return null;
+  // A flow's id has no prefix of its own (seeded ones are `tpl-…`); the action says it is one.
+  if (e.action.startsWith('flow.')) return `/flows/${encodeURIComponent(e.target)}`;
+  const page = TARGET_PAGES.find(([re]) => re.test(e.target!));
+  return page ? page[1](e.target) : null;
+}
+
 /** What happened, in one line: "Changed a role: ann@example.com, Viewer → Approver". */
 export function describe(e: AuditEvent): string {
+  const { label, target, details } = describeParts(e);
+  const parts = target ? [target, ...details] : details;
+  return parts.length ? `${label}: ${parts.join(', ')}` : label;
+}
+
+/**
+ * `describe`'s pieces, so the log can link the target: the action's label, what it acted on, and
+ * the rest of the detail in order.
+ */
+export function describeParts(e: AuditEvent): {
+  label: string;
+  target: string | null;
+  details: string[];
+} {
   const label = AUDIT_ACTIONS[e.action as AuditAction] ?? e.action;
   const d = e.detail ?? {};
   const parts: string[] = [];
-  if (e.target) parts.push(e.target);
+  const n = (v: unknown, one: string, many = `${one}s`) => `${v} ${v === 1 ? one : many}`;
   if (e.action === 'team.role_changed' && d.from && d.to)
     parts.push(`${role(d.from)} → ${role(d.to)}`);
   else if (e.action === 'team.sso_settings') {
@@ -139,7 +181,9 @@ export function describe(e: AuditEvent): string {
   if (d.via === 'scim') parts.push('by SCIM provisioning');
   if (typeof d.kept === 'string') parts.push(`kept: ${d.kept}`);
   if (e.action === 'team.user_disabled' && typeof d.sessions === 'number')
-    parts.push(`${d.sessions} sessions, ${d.apps ?? 0} apps and ${d.tokens ?? 0} tokens ended`);
+    parts.push(
+      `${n(d.sessions, 'session')}, ${n(d.apps ?? 0, 'app')} and ${n(d.tokens ?? 0, 'token')} ended`,
+    );
   if (e.action === 'scim.token_created' && d.replaced) parts.push('replacing the old one');
   if (d.passkeys === 'removed') parts.push('passkeys removed');
   if (e.action === 'auth.recovery_code_used' && typeof d.left === 'number')
@@ -163,7 +207,6 @@ export function describe(e: AuditEvent): string {
     else if (d.status === 'busy') parts.push('skipped, another run was going');
     else if (d.status === 'no_index') parts.push('skipped, no index');
   }
-  const n = (v: unknown, one: string, many = `${one}s`) => `${v} ${v === 1 ? one : many}`;
   if (e.action === 'catalog.edits_staged' && typeof d.staged === 'number')
     parts.push(
       `${n(d.staged, 'edit')} to ${n(d.products, 'product')}${d.fromDrafts ? `, ${d.fromDrafts} from drafts` : ''}${d.refused ? `, ${d.refused} refused` : ''}`,
@@ -181,5 +224,5 @@ export function describe(e: AuditEvent): string {
     parts.push(`${n(d.products, 'product')} read`);
   if (typeof d.via === 'string' && Object.hasOwn(AUDIT_VIA, d.via))
     parts.push(`via ${AUDIT_VIA[d.via as AuditVia]}`);
-  return parts.length ? `${label}: ${parts.join(', ')}` : label;
+  return { label, target: e.target || null, details: parts };
 }

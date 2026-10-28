@@ -4,9 +4,17 @@ import { X } from 'lucide-react';
 import { Form, Link, useLoaderData, useSubmit } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
-import { AUDIT_GROUPS, describe, isAuditGroup } from '~/lib/audit';
+import {
+  AUDIT_GROUPS,
+  type AuditEvent,
+  actorLabel,
+  describeParts,
+  isAuditGroup,
+  targetHref,
+} from '~/lib/audit';
 import { listAudit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
+import { orderRef } from '~/lib/format';
 import type { Route } from './+types/audit';
 
 export const meta = () => [{ title: 'Audit log · OrderLoop' }];
@@ -83,7 +91,7 @@ export default function Audit() {
                       <Ago ms={e.at} />
                     </Td>
                     <Td label="Who">
-                      {e.actor ?? <span className="text-muted-foreground">—</span>}
+                      {actorLabel(e) ?? <span className="text-muted-foreground">—</span>}
                     </Td>
                     <Td label="What">
                       {/* Something refused or failed: a sign-in, a step-up, an API call. */}
@@ -94,10 +102,10 @@ export default function Audit() {
                             className="size-3 shrink-0 self-center"
                             strokeWidth={2.5}
                           />
-                          {describe(e)}
+                          <What e={e} />
                         </span>
                       ) : (
-                        describe(e)
+                        <What e={e} />
                       )}
                     </Td>
                     <Td label="From" className="font-mono text-muted-foreground text-xs">
@@ -124,6 +132,30 @@ export default function Audit() {
           </Link>
         ) : null}
       </div>
+    </>
+  );
+}
+
+/**
+ * What happened, with what it acted on linked to its page when it has one. An order or cart reads
+ * by its short reference ("#qcs34m"), as everywhere else in the app.
+ */
+function What({ e }: { e: AuditEvent }) {
+  const { label, target, details } = describeParts(e);
+  const href = targetHref(e);
+  const short = target && /^(ord|cart)_/.test(target) ? orderRef(target) : target;
+  if (!target) return <>{details.length ? `${label}: ${details.join(', ')}` : label}</>;
+  return (
+    <>
+      {label}:{' '}
+      {href ? (
+        <Link to={href} title={target} className="text-link hover:underline">
+          {short}
+        </Link>
+      ) : (
+        target
+      )}
+      {details.length ? `, ${details.join(', ')}` : ''}
     </>
   );
 }

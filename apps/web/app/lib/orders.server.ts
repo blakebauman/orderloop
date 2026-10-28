@@ -85,11 +85,54 @@ export async function listOrders(f: OrderFilters = {}, limit = 200) {
   return ordersQuery(db(), f, limit);
 }
 
+/** The most orders `countOrders` counts; past it the list says "10,000+". */
+export const COUNT_CAP = 10_000;
+
+/**
+ * How many orders a filter picks across every page, for the list's "Newest 200 of 960". It reads
+ * at most `cap + 1` rows, so a large index costs the same as a capped one; `more` says there were
+ * more than `cap`.
+ */
+export async function countOrders(f: OrderFilters = {}, cap = COUNT_CAP) {
+  const { after: _, ...filters } = f;
+  const picked = db()
+    .select({ one: sql<number>`1`.as('one') })
+    .from(orders)
+    .leftJoin(customers, eq(customers.id, orders.customerId))
+    .where(ordersWhere(filters))
+    .limit(cap + 1)
+    .as('picked');
+  const row = await db().select({ n: sql<number>`count(*)` }).from(picked).get();
+  const n = Number(row?.n ?? 0);
+  return { n: Math.min(n, cap), more: n > cap };
+}
+
 /** The orders a filter picks, as a query to run alone or in a batch. */
 function ordersQuery(d: Db, f: OrderFilters, limit: number) {
+  const order =
+    f.sort === 'oldest'
+      ? [asc(orders.createdAt), asc(orders.id)]
+      : f.sort === 'total'
+        ? [desc(sql`${orders.total} / ${orders.fxRate}`), desc(orders.id)]
+        : f.sort === 'updated'
+          ? [desc(orders.updatedAt), desc(orders.id)]
+          : f.sort === 'waiting'
+            ? [sql`${orders.waitingSince} is null`, asc(orders.waitingSince), desc(orders.id)]
+            : [desc(orders.createdAt), desc(orders.id)];
+  return d
+    .select(getTableColumns(orders))
+    .from(orders)
+    .leftJoin(customers, eq(customers.id, orders.customerId))
+    .where(ordersWhere(f))
+    .orderBy(...order)
+    .limit(limit);
+}
+
+/** What a filter picks; `q` also matches the customer's name, so the query joins customers. */
+function ordersWhere(f: OrderFilters) {
   // "#idz7qp" is how the app writes an order's reference (`orderRef`); search its id without the #.
   const q = f.q?.trim().replace(/^#/, '');
-  const where = and(
+  return and(
     f.after
       ? or(
           lt(orders.createdAt, f.after.createdAt),
@@ -138,23 +181,6 @@ function ordersQuery(d: Db, f: OrderFilters, limit: number) {
         )
       : undefined,
   );
-  const order =
-    f.sort === 'oldest'
-      ? [asc(orders.createdAt), asc(orders.id)]
-      : f.sort === 'total'
-        ? [desc(sql`${orders.total} / ${orders.fxRate}`), desc(orders.id)]
-        : f.sort === 'updated'
-          ? [desc(orders.updatedAt), desc(orders.id)]
-          : f.sort === 'waiting'
-            ? [sql`${orders.waitingSince} is null`, asc(orders.waitingSince), desc(orders.id)]
-            : [desc(orders.createdAt), desc(orders.id)];
-  return d
-    .select(getTableColumns(orders))
-    .from(orders)
-    .leftJoin(customers, eq(customers.id, orders.customerId))
-    .where(where)
-    .orderBy(...order)
-    .limit(limit);
 }
 
 /**
@@ -674,15 +700,21 @@ export async function commerceData() {
   };
 }
 
-export async function waitingOrders() {
-  return db()
-    .select()
-    .from(orders)
-    .where(
-      and(inArray(orders.status, ['waiting', 'running']), sql`${orders.waitingOn} is not null`),
-    )
-    .orderBy(desc(orders.updatedAt))
-    .limit(50);
+/**
+ * Orders waiting on an outside event (the index's `waiting_for` names one), the `limit` most
+ * recently updated, and how many there are in all.
+ */
+export async function waitingOnEvents(limit: number) {
+  const d = db();
+  const where = and(
+    inArray(orders.status, ['waiting', 'running']),
+    contains(orders.waitingFor, 'event:'),
+  );
+  const [rows, all] = await d.batch([
+    d.select().from(orders).where(where).orderBy(desc(orders.updatedAt)).limit(limit),
+    d.select({ n: sql<number>`count(*)` }).from(orders).where(where),
+  ]);
+  return { orders: rows, total: Number(all[0]?.n ?? rows.length) };
 }
 
 export async function publishedFlows() {

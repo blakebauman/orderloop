@@ -419,7 +419,7 @@ export function openApiDocument(serverUrl: string) {
           summary: 'Cancel a cart (operator)',
           parameters: [cartId],
           responses: {
-            '200': cart('Canceled'),
+            '200': cart('Cancelled'),
             '409': ok('The cart has already ended', '#/components/schemas/Error'),
             ...errors,
           },

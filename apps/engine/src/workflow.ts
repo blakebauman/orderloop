@@ -48,6 +48,7 @@ import { EXECUTORS, type NodeResult, ROLLBACKS, scaled } from './nodes';
 import { instanceExists } from './orders';
 import { emit, orderSummary } from './outbox';
 import { execPluginNode, flowManifests, pluginRollback, usesPlugins } from './plugins';
+import { capReason, failureReason } from './words';
 
 export type OrderLoopParams = {
   orderId: string;
@@ -336,7 +337,8 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
           | 'declined'
           | 'cancelled'
           | 'failed';
-        const reason = interpolate(str(config.reason), ctx);
+        // Interpolated from the order's data, which can be any length.
+        const reason = capReason(interpolate(str(config.reason), ctx));
         await report(
           { node: { id: node.id, summary: reason || outcome, endedAt: Date.now() } },
           true,
@@ -468,7 +470,8 @@ export class OrderLoop extends WorkflowEntrypoint<Env, OrderLoopParams> {
         },
         true,
       );
-      const reason = `${node.label}: ${message}`;
+      // The order's reason is a short summary; the full message stays on the step's run above.
+      const reason = failureReason(node.label, message);
       await report({ status: 'failed', reason });
       // A thrown node fails the instance without reaching an End node, so announce it here.
       await emitStep(step, env, key, fx, p.orderId, 'order.failed', {

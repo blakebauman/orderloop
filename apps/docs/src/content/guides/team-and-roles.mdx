@@ -323,7 +323,9 @@ an app that uses both is connected twice. See [MCP server](/reference/mcp/) and
 
 Admins see security and business events at **Audit log** (under **More**, Workspace, and linked from the Team page, `/audit`), newest first,
 filtered by kind, and through [`GET /api/v1/audit-events`](/reference/rest-api/#audit-events).
-Each event records when, who acted, what they acted on, details and the address:
+Each event records when, who acted, what they acted on, details and the address. The page names
+an API token by its name ("ERP sync (API token)"), and links an order, cart, customer or flow it
+acted on to its page:
 
 | Kind | Actions |
 |---|---|

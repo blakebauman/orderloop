@@ -67,6 +67,7 @@ import * as cx from './connectors';
 import { extractCatalog } from './product-index';
 import { provide } from './providers';
 import { customerTaxCertificates } from './tax-certificates';
+import { plural } from './words';
 
 export type NodeResult = {
   branches?: string[];
@@ -1071,7 +1072,7 @@ export const EXECUTORS: Record<string, Exec> = {
       vars: supplier ? { supplier } : {},
       output: { ...value, ...via },
       summary: lines.length
-        ? `${lines.length} SKUs to reorder (${via.source})`
+        ? `${plural(lines.length, 'SKU')} to reorder (${via.source})`
         : 'Stock is healthy',
     };
   },
@@ -1176,7 +1177,7 @@ export const ROLLBACKS: Record<
   (env: Env, orderId: string, output: unknown, stepKey: string) => Promise<string>
 > = {
   'commerce.reserve_inventory': async (env, orderId) =>
-    `Released ${await cx.releaseInventory(env, orderId)} reservations`,
+    `Released ${plural(await cx.releaseInventory(env, orderId), 'reservation')}`,
   'commerce.discount': async (env, orderId) => {
     const n = await cx.releaseRedemptions(env, orderId);
     return n
@@ -1184,18 +1185,18 @@ export const ROLLBACKS: Record<
       : 'No promotions to give back';
   },
   'commerce.authorize_payment': async (env, orderId) =>
-    `Voided ${await cx.voidAuthorizations(env, orderId)} authorizations`,
+    `Voided ${plural(await cx.voidAuthorizations(env, orderId), 'authorization')}`,
   'commerce.pickup_ready': async (env, _orderId, output) => {
     const id = (output as { shipmentId?: string } | undefined)?.shipmentId;
     if (id) await cx.cancelShipment(env, id);
     return id ? `Cancelled pickup ${id}` : 'No pickup to cancel';
   },
   'commerce.deliver_digital': async (env, orderId) =>
-    `Revoked ${await cx.revokeEntitlements(env, orderId)} codes`,
+    `Revoked ${plural(await cx.revokeEntitlements(env, orderId), 'code')}`,
   'commerce.split_by_seller': async (env, orderId) =>
-    `Cancelled ${await cx.cancelSellerOrders(env, orderId)} seller orders`,
+    `Cancelled ${plural(await cx.cancelSellerOrders(env, orderId), 'seller order')}`,
   'commerce.payout': async (env, orderId) =>
-    `Reversed ${await cx.reversePayouts(env, orderId)} payouts`,
+    `Reversed ${plural(await cx.reversePayouts(env, orderId), 'payout')}`,
   'commerce.ship': async (env, orderId, output, stepKey) => {
     const o = output as { shipmentId?: string; shipments?: { shipmentId: string }[] } | undefined;
     const ids = o?.shipments?.map((s) => s.shipmentId) ?? (o?.shipmentId ? [o.shipmentId] : []);
@@ -1205,13 +1206,13 @@ export const ROLLBACKS: Record<
     for (const id of ids) if (!kept.has(id)) await cx.cancelShipment(env, id);
     if (!ids.length) return 'No shipment to cancel';
     const restored = await cx.restoreShippedStock(env, orderId);
-    return `Cancelled ${ids.join(', ')}${voided ? `, voided ${voided} labels` : ''}${failed ? `; ${failed} labels could not be voided with their provider (retried daily)` : ''}${restored ? `, restocked ${restored} lines` : ''}`;
+    return `Cancelled ${ids.join(', ')}${voided ? `, voided ${plural(voided, 'label')}` : ''}${failed ? `; ${plural(failed, 'label')} could not be voided with the label provider (retried daily)` : ''}${restored ? `, restocked ${plural(restored, 'line')}` : ''}`;
   },
   'commerce.invoice': async (env, orderId) => {
     // Void first: an invoice Stripe reports paid keeps its account charge, which the payment settles.
     const { voided, paid } = await billing.voidInvoices(env, orderId);
     const reversed = await cx.reverseBalance(env, orderId);
-    return `Voided ${voided} invoices${paid.length ? `, left paid ${paid.join(', ')}` : ''}, reversed ${reversed} account charges`;
+    return `Voided ${plural(voided, 'invoice')}${paid.length ? `, left paid ${paid.join(', ')}` : ''}, reversed ${plural(reversed, 'account charge')}`;
   },
 };
 

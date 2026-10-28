@@ -79,8 +79,13 @@ attempt (`limit + 1`). The AI nodes pass it to the model call as `AiCall.retry`:
 retries with its backoff, and only the last attempt stores the heuristic's answer. A malformed,
 empty or truncated answer is not retried. A node with `retries: 0` falls back at once.
 
-A thrown executor, once its retries are exhausted, reports the node `failed`, reports the order
-`failed`, emits `order.failed` with the node and its error, and rethrows, which fails the instance.
+A thrown executor, once its retries are exhausted, reports the node `failed` with its whole error,
+reports the order `failed`, emits `order.failed` with the node and its error, and rethrows, which
+fails the instance. The order's reason is a summary (`failureReason` in `apps/engine/src/words.ts`):
+`<step label>: <first line of the error>`, capped at 200 characters, or "Database error at
+<step label>" for a database error, whose message is the SQL statement and its parameters. It is
+shown on one line in the overview and the orders list, so it never carries a statement or a stack;
+the full error is on the step's run (`NodeRun.error`) and in the timeline.
 
 ## Interpreted nodes
 
@@ -96,7 +101,7 @@ Waiting and control nodes are handled in `runNode` itself:
 - **`control.loop`.** One step decides `next = runs <= maxIterations && truthy(while)`; the
   outcome goes to `completeLoop`.
 - **`control.end`.** Reports, emits `order.${outcome}`, and ends the run with that outcome and the
-  interpolated reason.
+  interpolated reason, capped at 200 characters.
 - **`control.continue_as_new`.** See below.
 
 ## Reports to the agent

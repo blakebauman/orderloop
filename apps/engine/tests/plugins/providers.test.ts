@@ -165,7 +165,7 @@ describe('a plugin as provider', () => {
     const { orderId, done } = await run('test-providers-fail');
     expect(done.status).toBe('rolled_back');
     expect(done.nodes.ship!.status).toBe('rolled_back');
-    expect(done.nodes.ship!.summary).toMatch(/voided 1 labels/);
+    expect(done.nodes.ship!.summary).toMatch(/voided 1 label\b/);
     expect((await labels(orderId)).map((l) => l.voided)).toEqual([1]);
     const rows = await db().select().from(shipments).where(eq(shipments.orderId, orderId));
     expect(rows.map((r) => r.status)).toEqual(['cancelled']);
@@ -183,7 +183,7 @@ describe('a plugin as provider', () => {
       meta: { shipTo, simulate: 'void_fails' },
     });
     expect(done.status).toBe('rolled_back');
-    expect(done.nodes.ship!.summary).toMatch(/1 labels could not be voided with their provider/);
+    expect(done.nodes.ship!.summary).toMatch(/1 label could not be voided with the label provider/);
     // The saga went on: the stock it held is released.
     const held = await db().select().from(reservations).where(eq(reservations.orderId, orderId));
     expect(held.map((r) => r.status)).not.toContain('held');
