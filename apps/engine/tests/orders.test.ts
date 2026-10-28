@@ -37,7 +37,7 @@ import {
   webhookSubscriptions,
   workspaceSettings,
 } from '@orderloop/db';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copilotHeuristic, extractHeuristic } from '../src/ai';
 import { EngineApi } from '../src/api';
@@ -579,6 +579,46 @@ describe('reorder', () => {
     await waitingOn(orderId, (x) => x.waits.some((w) => w.event === 'goods.received'), 'receipt');
     await agent(orderId).deliver('goods.received');
     expect((await settled(orderId)).status).toBe('completed');
+  });
+
+  // D1 binds at most 100 parameters a statement: the order's products are read in runs.
+  it('prices a reorder of more products than one query can name', {
+    timeout: 120_000,
+  }, async () => {
+    await introspect();
+    const db = createDb(env.DB);
+    const low = Array.from({ length: 150 }, (_, i) => ({
+      sku: `LOW-${String(i).padStart(3, '0')}`,
+      name: `Low stock part ${i}`,
+      price: 10,
+      cost: 6,
+      stock: 0,
+      reorderPoint: 5,
+      reorderQty: 10,
+      supplier: 'Acme',
+    }));
+    for (let i = 0; i < low.length; i += 10) await db.insert(products).values(low.slice(i, i + 10));
+    try {
+      const { orderId } = await startOrder(env, {
+        flowId: 'tpl-reorder',
+        input: input({ model: 'replenishment', customerId: 'cus_internal' }),
+      });
+      // The step that read every line's product in one query, and failed past 100 of them.
+      const s = await waitingOn(
+        orderId,
+        (x) =>
+          !!x.nodes.price &&
+          x.nodes.price.status !== 'pending' &&
+          x.nodes.price.status !== 'running',
+        'supplier pricing',
+        90_000,
+      );
+      expect(s.nodes.price?.status).toBe('succeeded');
+      expect(s.order!.lines.filter((l) => l.sku.startsWith('LOW-'))).toHaveLength(150);
+      expect(s.order!.total).toBeGreaterThanOrEqual(150 * 10 * 6);
+    } finally {
+      await db.delete(products).where(like(products.sku, 'LOW-%'));
+    }
   });
 });
 

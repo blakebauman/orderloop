@@ -95,9 +95,16 @@ export async function findCustomerByName(env: Env, name: string) {
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/** D1 binds at most 100 parameters a statement, so a long SKU list is read in runs of this many. */
+const SKUS_PER_QUERY = 90;
+
 export async function getProducts(env: Env, skus?: string[]) {
-  const q = db(env).select().from(products);
-  return skus ? q.where(inArray(products.sku, skus)) : q;
+  if (!skus) return db(env).select().from(products);
+  const runs = chunk([...new Set(skus)], SKUS_PER_QUERY);
+  const found = await Promise.all(
+    runs.map((run) => db(env).select().from(products).where(inArray(products.sku, run))),
+  );
+  return found.flat();
 }
 
 /** The promotions with these codes, as the discount node reads them. */
