@@ -76,6 +76,7 @@ import {
 } from '~/components/ai-elements/queue';
 import { Shimmer } from '~/components/ai-elements/shimmer';
 import { Suggestion, Suggestions } from '~/components/ai-elements/suggestion';
+import { Trace } from '~/components/ai-elements/trace';
 import { contextLabel, useAssistant } from '~/lib/assistant';
 import { coarse, useMedia, useShortcutLabel, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
@@ -87,7 +88,8 @@ import {
   type Previewer,
   ProposalCard,
   Prose,
-  ReadRow,
+  ReadLine,
+  ReasoningLine,
   statusWords,
 } from './parts';
 
@@ -657,6 +659,38 @@ function WaitingBar({ pending }: { pending: Waiting[] }) {
   );
 }
 
+type Indexed = { p: Message['parts'][number]; i: number };
+type Segment = { at: number } & (
+  | { trace: Indexed[]; part?: never }
+  | { part: Indexed; trace?: never }
+);
+
+/** A read the assistant made, not an action, proposal or draft (those have cards of their own). */
+const isRead = (p: Message['parts'][number]) => {
+  if (!isToolUIPart(p)) return false;
+  const name = getToolName(p);
+  return (
+    isAssistantTool(name) &&
+    !ACTION.has(name) &&
+    name !== 'propose_flow_change' &&
+    name !== 'draft_plugin'
+  );
+};
+
+/** A message's parts in order, with each run of thinking and reads gathered into one segment. */
+export function segments(parts: Message['parts']): Segment[] {
+  const out: Segment[] = [];
+  parts.forEach((p, i) => {
+    if (p.type === 'reasoning' || isRead(p)) {
+      const last = out.at(-1);
+      if (last?.trace) last.trace.push({ p, i });
+      else out.push({ at: i, trace: [{ p, i }] });
+    } else if (p.type !== 'step-start' && !(p.type === 'text' && !p.text.trim()))
+      out.push({ at: i, part: { p, i } });
+  });
+  return out;
+}
+
 function AssistantMessage({
   m,
   streaming,
@@ -678,7 +712,25 @@ function AssistantMessage({
   return (
     <MessageFrame from="assistant">
       <MessageContent className="space-y-2">
-        {parts.map((p, i) => {
+        {segments(parts).map((seg) => {
+          // Thinking and reads that run together share one Trace.
+          if (seg.trace)
+            return (
+              <Trace key={seg.at}>
+                {seg.trace.map(({ p, i }) =>
+                  p.type === 'reasoning' ? (
+                    <ReasoningLine
+                      key={i}
+                      text={p.text}
+                      running={streaming && p.state === 'streaming'}
+                    />
+                  ) : isToolUIPart(p) ? (
+                    <ReadLine key={p.toolCallId} part={p} streaming={streaming} />
+                  ) : null,
+                )}
+              </Trace>
+            );
+          const { p, i } = seg.part;
           if (p.type === 'text')
             return p.text.trim() ? (
               <Prose key={i} text={p.text} streaming={streaming && i === lastText} />
@@ -696,9 +748,10 @@ function AssistantMessage({
                   replaced={replaced.has(actionKey(m.id, i))}
                 />
               );
-            if (name === 'propose_flow_change') return <ProposalCard key={p.toolCallId} part={p} />;
-            if (name === 'draft_plugin') return <PluginDraftCard key={p.toolCallId} part={p} />;
-            if (isAssistantTool(name)) return <ReadRow key={p.toolCallId} part={p} />;
+            if (name === 'propose_flow_change')
+              return <ProposalCard key={p.toolCallId} part={p} streaming={streaming} />;
+            if (name === 'draft_plugin')
+              return <PluginDraftCard key={p.toolCallId} part={p} streaming={streaming} />;
           }
           return null;
         })}

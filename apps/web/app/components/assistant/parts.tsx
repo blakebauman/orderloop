@@ -1,7 +1,8 @@
 /**
- * How the assistant's messages read: prose, the tools it used as ruled rows, actions waiting for a
- * person as confirm cards that state the resolved consequence, and flow proposals that hand off to
- * the editor. A declined action is neutral (the person chose it), never a failure.
+ * How the assistant's messages read: prose, its thinking and the tools it read with as Trace lines,
+ * actions waiting for a person as confirm cards that state the resolved consequence, and flow
+ * proposals that hand off to the editor. A declined action is neutral (the person chose it), never
+ * a failure.
  */
 
 import {
@@ -20,6 +21,7 @@ import {
   ArrowUpRight,
   Ban,
   Boxes,
+  Brain,
   CircleAlert,
   FileText,
   Inbox,
@@ -34,6 +36,16 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Confirmation, ConfirmationActions } from '~/components/ai-elements/confirmation';
 import { MessageResponse } from '~/components/ai-elements/message';
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from '~/components/ai-elements/trace';
 import { useAssistant } from '~/lib/assistant';
 import { plural } from '~/lib/format';
 
@@ -100,6 +112,7 @@ const RUNNING: Record<string, string> = {
   needs_attention: 'Checking what needs attention',
   find_orders: 'Searching orders',
   get_order: 'Reading the order',
+  assess_order: 'Assessing the order',
   find_products: 'Looking up stock',
   list_carts: 'Listing carts',
   get_cart: 'Reading the cart',
@@ -181,13 +194,44 @@ function age(iso: string): string {
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 }
 
-/** A tool the assistant used to read, as one ruled row. An order read links to its step. */
-export function ReadRow({ part }: { part: Part }) {
+/**
+ * A tool the assistant used to read, as one Trace line: what it is doing while the turn streams,
+ * then what it found. An order read links to its step. A read that failed, or that the turn left
+ * unfinished, says so in `bad` and opens to show why.
+ */
+export function ReadLine({ part, streaming }: { part: Part; streaming: boolean }) {
   const name = getToolName(part);
   const Icon = ICONS[name] ?? Search;
   const label = isAssistantTool(name) ? ASSISTANT_TOOLS[name].label : name;
-  const running = part.state === 'input-streaming' || part.state === 'input-available';
-  const failed = part.state === 'output-error';
+  const doing = RUNNING[name] ?? label;
+  const unfinished = part.state === 'input-streaming' || part.state === 'input-available';
+  if (unfinished && streaming)
+    return (
+      <TraceLine status="running">
+        <TraceIcon>
+          <Icon />
+        </TraceIcon>
+        <TraceTitle>{doing}</TraceTitle>
+      </TraceLine>
+    );
+  if (unfinished || part.state === 'output-error')
+    return (
+      <TraceCollapsible defaultOpen>
+        <TraceCollapsibleTrigger>
+          <TraceLine status="error">
+            <TraceIcon>
+              <CircleAlert />
+            </TraceIcon>
+            <TraceTitle>
+              {doing} {unfinished ? 'stopped' : 'failed'}
+            </TraceTitle>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          {part.state === 'output-error' ? part.errorText : 'The reply ended before this finished.'}
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    );
   const out =
     part.state === 'output-available' ? ((part.output ?? {}) as Record<string, unknown>) : null;
   const result = out ? found(name, out) : null;
@@ -196,34 +240,50 @@ export function ReadRow({ part }: { part: Part }) {
     out && name === 'get_order' && typeof out.href === 'string'
       ? `${out.href}${node ? `?node=${encodeURIComponent(node)}` : ''}`
       : null;
-  return (
-    <div className="flex min-h-7 items-center gap-2 border-rule border-y border-dashed py-1 text-[12.5px] text-muted-foreground [&+&]:border-t-0">
-      <Icon className="size-3.5 shrink-0" aria-hidden="true" />
-      {running ? (
-        <span className="flex items-center gap-1.5">
-          {RUNNING[name] ?? label}
-          <span aria-hidden="true" className="ol-dots" />
-        </span>
-      ) : (
-        // The label is short and stays whole; a long result truncates instead.
-        <span className="shrink-0">{label}</span>
-      )}
-      {result && href ? (
-        <Link
-          to={href}
-          className="hit-area ml-auto min-w-0 truncate text-foreground/80 tabular hover:text-foreground hover:underline"
-        >
+  const line = (
+    <TraceLine>
+      <TraceIcon>
+        <Icon />
+      </TraceIcon>
+      {/* The label is short and stays whole; a long result truncates instead. */}
+      <TraceTitle className="shrink-0">{label}</TraceTitle>
+      {result ? (
+        <TraceDescription className="min-w-0 shrink truncate text-foreground/80">
           {result}
-        </Link>
-      ) : result ? (
-        <span className="ml-auto min-w-0 truncate text-foreground/80 tabular">{result}</span>
+        </TraceDescription>
       ) : null}
-      {failed ? (
-        <span className="ml-auto min-w-0 truncate text-bad" title={part.errorText}>
-          {part.errorText}
-        </span>
-      ) : null}
-    </div>
+    </TraceLine>
+  );
+  return href ? (
+    <Link to={href} className="hit-area">
+      {line}
+    </Link>
+  ) : (
+    line
+  );
+}
+
+/**
+ * The model's thinking before it answered, as one line that opens to show it. It shimmers while
+ * the thinking streams and stays a plain line until there is text to show.
+ */
+export function ReasoningLine({ text, running }: { text: string; running: boolean }) {
+  const line = (
+    <TraceLine status={running ? 'running' : undefined}>
+      <TraceIcon>
+        <Brain />
+      </TraceIcon>
+      <TraceTitle>{running ? 'Thinking' : 'Thought'}</TraceTitle>
+    </TraceLine>
+  );
+  if (!text.trim()) return line;
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="whitespace-pre-wrap">
+        {text.trim()}
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }
 
@@ -480,9 +540,14 @@ export function draftStatus(d: Pick<PluginDraftResult, 'cases'>): string {
 }
 
 /** A drafted plugin. Reviewing, testing and approving happen on the Plugins page. */
-export function PluginDraftCard({ part }: { part: Part }) {
+export function PluginDraftCard({ part, streaming }: { part: Part; streaming: boolean }) {
   const navigate = useNavigate();
-  if (part.state !== 'output-available') return <ReadRow part={part} />;
+  if (part.state !== 'output-available')
+    return (
+      <Trace>
+        <ReadLine part={part} streaming={streaming} />
+      </Trace>
+    );
   const d = part.output as PluginDraftResult;
   const allPass = d.cases.total > 0 && d.cases.passed === d.cases.total;
   return (
@@ -522,10 +587,15 @@ export function PluginDraftCard({ part }: { part: Part }) {
 // ── Flow proposals ─────────────────────────────────────────────────────────
 
 /** A drafted flow change. Applying happens in the editor, where undo and publish already live. */
-export function ProposalCard({ part }: { part: Part }) {
+export function ProposalCard({ part, streaming }: { part: Part; streaming: boolean }) {
   const { offerProposal } = useAssistant();
   const navigate = useNavigate();
-  if (part.state !== 'output-available') return <ReadRow part={part} />;
+  if (part.state !== 'output-available')
+    return (
+      <Trace>
+        <ReadLine part={part} streaming={streaming} />
+      </Trace>
+    );
   const pr = part.output as FlowProposal;
   const diff = describeDiff(pr.changes);
   // Nothing drafted: say so, and offer nothing to review.

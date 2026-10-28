@@ -69,9 +69,12 @@ waits at and since when, steps run, recent activity),
 [cart's](/guides/carts/) lines with their ids, its price with shipping and tax, promotion codes,
 its ship-to and the shipping options on offer, the problems its price
 found, and why it can't be submitted yet), `list_flows` and `get_flow` (a saved
-draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a row in the
-conversation. An order's row names the step it waits at or stopped at, and opens that step on the
-order's graph; answers about an order say the same.
+draft with its validation problems). Text, customer and SKU searches match `%` and `_` literally, not as LIKE wildcards. Reads run without asking, and each shows as a line in the
+conversation: what it is doing while the reply streams, then what it found. An order's line names
+the step it waits at or stopped at, and opens that step on the order's graph; answers about an order
+say the same. A read that failed, or that a reply ended before it finished, says so and shows why.
+When the model thinks before it answers, a **Thought** line above its reads opens to show that
+thinking.
 
 ## Actions that ask first
 
