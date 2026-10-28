@@ -1,8 +1,9 @@
 /**
  * Fills a local catalog with a small demo shop whose Catalog page has a card in every column and
  * every kind of gap, so the board can be seen and tried without a feed of your own. Local only: it
- * calls `/api/v1/catalog` on the dev server, which answers without a token while no people are
- * added. See docs/local-development.md, "Catalog demo data".
+ * calls `/api/v1/catalog` on the dev server, with `ORDERLOOP_API_TOKEN` (or the dev admin's token
+ * from `pnpm db:seed:records`) once people are added. See docs/local-development.md, "Catalog demo
+ * data".
  *
  *   pnpm db:seed:catalog [http://localhost:5173]
  *
@@ -13,11 +14,14 @@
  * shows then depends on what you did with the cards since.
  */
 
+import { readLocalLogin } from './seed-lib';
+
 type Json = Record<string, unknown>;
 
 // `pnpm db:seed:catalog <url>` passes a `--` before the URL.
 const origin = process.argv.slice(2).find((a) => a !== '--') ?? 'http://localhost:5173';
 const base = `${origin.replace(/\/$/, '')}/api/v1/catalog`;
+const token = process.env.ORDERLOOP_API_TOKEN ?? readLocalLogin()?.token;
 
 async function call<T = Json>(
   method: string,
@@ -27,7 +31,7 @@ async function call<T = Json>(
 ): Promise<T> {
   const res = await fetch(`${base}/${path}`, {
     method,
-    headers: { 'content-type': type },
+    headers: { 'content-type': type, ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: body === undefined || typeof body === 'string' ? body : JSON.stringify(body),
   });
   const text = await res.text();
