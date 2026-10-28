@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -7,8 +8,12 @@ import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
 import {
   healthCheckKey,
+  foreignJobsReaching,
   keysProblem,
+  LOG_FIELDS,
   loadDeployments,
+  logpushJob,
+  logpushToken,
   matrix,
   missingPluginSecrets,
   names,
@@ -29,6 +34,7 @@ import {
   toDeployment,
   WRITE_CHECK_ATTEMPT_MS,
   WRITE_CHECK_DEADLINE_MS,
+  tokenMatches,
   workerPlugins,
 } from './fleet.ts';
 
@@ -325,7 +331,12 @@ test('workflow AI nodes see personal data only where the registry says send', ()
 });
 
 test("a customer's personalDataRetentionDays sets the sweep's, at least 30 days", () => {
-  const short = toDeployment({ ...acme, personalDataRetentionDays: 365 });
+  // `acme` already carries the default logRetentionDays (400), longer than this: leave it out.
+  const short = toDeployment({
+    ...acme,
+    personalDataRetentionDays: 365,
+    logRetentionDays: undefined,
+  });
   assert.equal(renderEngine(base('engine'), short).vars.PERSONAL_DATA_RETENTION_DAYS, '365');
   assert.equal(
     renderEngine(base('engine'), toDeployment(acme)).vars.PERSONAL_DATA_RETENTION_DAYS,
@@ -957,4 +968,233 @@ test('the deploy refuses a shared key too short to sign with', () => {
     keysProblem({ PRINCIPAL_KEY: 'short', DATA_KEY: key, DATA_KEY_PREVIOUS: 'x'.repeat(31) }) ?? '',
     /^PRINCIPAL_KEY, DATA_KEY_PREVIOUS must be at least 32 characters/,
   );
+});
+
+test('logRetentionDays sets how long the logs bucket keeps pushed logs, at least 30', () => {
+  assert.equal(toDeployment(acme).logRetentionDays, 400);
+  assert.equal(shellVars(toDeployment(acme)).LOG_RETENTION_DAYS, '400');
+  assert.equal(shellVars(toDeployment(acme)).LOGS_R2, 'orderloop-logs-acme');
+  const month = toDeployment({ ...acme, logRetentionDays: 30 });
+  assert.equal(shellVars(month).LOG_RETENTION_DAYS, '30');
+  // Workers Logs already keeps 7 days; a week or two more is not worth a bucket.
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: 7 }), /at least 30/);
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: 90.5 }), /logRetentionDays/);
+  assert.throws(() => toDeployment({ ...acme, logRetentionDays: '400' }), /logRetentionDays/);
+});
+
+test("every Worker of a deployment sends its trace events to Logpush, plugins' too", () => {
+  const demo = toDeployment({ ...acme, id: 'acme-demo', demo: true });
+  for (const d of [...loadDeployments().filter((x) => x.d1Id && x.catalogKvId), acme, demo]) {
+    for (const [app, render] of [
+      ['engine', renderEngine],
+      ['web', renderWeb],
+      ['catalog', renderCatalog],
+      ['catalog-edge', renderCatalogEdge],
+    ] as const)
+      assert.equal(render(base(app), d).logpush, true, `${d.id}: ${app}`);
+  }
+  const pluginBase = { name: 'orderloop-plugin-ledger', d1_databases: [{ binding: 'DB' }] };
+  assert.equal(renderPlugin(pluginBase, withLedger, 'ledger').logpush, true);
+  // The deployment decides, not the plugin.
+  assert.throws(
+    () => renderPlugin({ ...pluginBase, logpush: false }, withLedger, 'ledger'),
+    /may not declare logpush/,
+  );
+});
+
+test("a deployment's Logpush job takes only its own Workers, without the request", () => {
+  const d = toDeployment({
+    ...acme,
+    plugins: { ledger: { d1Id: 'd1-ledger' }, carrier: { runtime: 'sandboxed' } },
+  });
+  const job = logpushJob(d);
+  assert.equal(job.name, 'orderloop-workers-acme');
+  assert.equal(job.bucket, 'orderloop-logs-acme');
+  // A sandboxed plugin runs in the engine: no Worker of its own to name.
+  assert.deepEqual(job.scripts, [
+    'orderloop-web-acme',
+    'orderloop-engine-acme',
+    'orderloop-catalog-acme',
+    'orderloop-catalog-edge-acme',
+    'orderloop-plugin-ledger-acme',
+  ]);
+  assert.deepEqual(JSON.parse(job.filter), {
+    where: { key: 'ScriptName', operator: 'in', value: job.scripts },
+  });
+  assert.deepEqual(job.output_options.field_names, LOG_FIELDS);
+  assert.ok(LOG_FIELDS.includes('Logs') && LOG_FIELDS.includes('Exceptions'));
+  // The request's URL, headers and client details stay out of the bucket.
+  assert.ok(!LOG_FIELDS.includes('Event'));
+  // On a shared account each job is filtered to its own deployment's Workers, so none takes
+  // another's, and no two deployments share a job or a bucket.
+  const all = [...loadDeployments(), d];
+  const seen = new Map<string, string>();
+  for (const x of all)
+    for (const s of logpushJob(x).scripts) {
+      assert.equal(seen.get(s), undefined, `${s} is in ${seen.get(s)}'s job and ${x.id}'s`);
+      seen.set(s, x.id);
+    }
+  assert.equal(new Set(all.map((x) => logpushJob(x).name)).size, all.length);
+  assert.equal(new Set(all.map((x) => logpushJob(x).bucket)).size, all.length);
+});
+
+test("a Logpush filter past Logpush's 1,000 bytes is refused before provisioning", () => {
+  const plugins = Object.fromEntries(
+    Array.from({ length: 30 }, (_, i) => [`plugin-number-${i}`, { d1Id: `d1-${i}` }]),
+  );
+  assert.throws(() => logpushJob(toDeployment({ ...acme, plugins })), /Logpush filter/);
+});
+
+test('provision.sh parses', () => {
+  execFileSync('bash', ['-n', join(import.meta.dirname, 'provision.sh')]);
+});
+
+test('logs never outlast the personal data the sweep erases', () => {
+  // With personalDataRetentionDays, logRetentionDays defaults to it rather than 400.
+  const unset = { ...acme, logRetentionDays: undefined };
+  assert.equal(toDeployment({ ...unset, personalDataRetentionDays: 90 }).logRetentionDays, 90);
+  assert.equal(
+    toDeployment({ ...acme, personalDataRetentionDays: 90, logRetentionDays: 60 }).logRetentionDays,
+    60,
+  );
+  assert.throws(
+    () => toDeployment({ ...acme, personalDataRetentionDays: 90, logRetentionDays: 400 }),
+    /can't be longer than personalDataRetentionDays/,
+  );
+  assert.equal(toDeployment({ ...acme, logRetentionDays: 800 }).logRetentionDays, 800);
+});
+
+test("provisioning finds any other Logpush job that would take the deployment's logs", () => {
+  const d = toDeployment(acme);
+  const where = (w: unknown) => JSON.stringify({ where: w });
+  const jobs = [
+    // Its own job, by name.
+    { id: 1, name: 'orderloop-workers-acme', filter: logpushJob(d).filter },
+    // Another project's job, filtered to its own Workers.
+    { id: 2, name: 'blog', filter: where({ key: 'ScriptName', operator: 'in', value: ['blog'] }) },
+    // Another deployment's job.
+    { id: 3, name: 'orderloop-workers', filter: logpushJob(loadDeployments()[0]!).filter },
+    // One that keeps out every orderloop Worker.
+    {
+      id: 4,
+      name: 'not-ours',
+      filter: where({ key: 'ScriptName', operator: '!startsWith', value: 'orderloop-' }),
+    },
+    // No filter at all: every Worker that sets logpush.
+    { id: 5, name: 'everything', filter: '' },
+    { id: 6, name: 'null filter', filter: null },
+    // Names one of ours.
+    {
+      id: 7,
+      name: 'snoop',
+      filter: where({ key: 'ScriptName', operator: 'eq', value: 'orderloop-engine-acme' }),
+    },
+    // Filters on something else only: still every Worker.
+    {
+      id: 8,
+      name: 'errors',
+      filter: where({ key: 'Outcome', operator: 'eq', value: 'exception' }),
+    },
+    // An `or` with a branch that lets ours in.
+    {
+      id: 9,
+      name: 'mixed',
+      filter: where({
+        or: [
+          { key: 'ScriptName', operator: 'eq', value: 'blog' },
+          { key: 'ScriptName', operator: 'startsWith', value: 'orderloop-web' },
+        ],
+      }),
+    },
+    // An `and` that keeps them out.
+    {
+      id: 10,
+      name: 'blog errors',
+      filter: where({
+        and: [
+          { key: 'ScriptName', operator: 'eq', value: 'blog' },
+          { key: 'Outcome', operator: 'eq', value: 'exception' },
+        ],
+      }),
+    },
+    // A filter that doesn't parse is taken as none.
+    { id: 11, name: 'garbled', filter: '{where' },
+  ];
+  assert.deepEqual(
+    foreignJobsReaching(jobs, d).map((j) => j.id),
+    [5, 6, 7, 8, 9, 11],
+  );
+  assert.deepEqual(foreignJobsReaching(jobs.slice(0, 4), d), []);
+});
+
+test("Logpush's R2 token writes objects in the logs bucket and nothing else", () => {
+  const account = 'f'.repeat(32);
+  const groups = [
+    { id: 'g-read', name: 'Workers R2 Storage Bucket Item Read' },
+    { id: 'g-write', name: 'Workers R2 Storage Bucket Item Write' },
+    { id: 'g-admin', name: 'Workers R2 Storage Write' },
+  ];
+  const plain = toDeployment({ ...acme, jurisdiction: undefined });
+  const t = logpushToken(plain, account, groups);
+  assert.deepEqual(t, {
+    name: 'orderloop-logpush-acme',
+    policies: [
+      {
+        effect: 'allow',
+        resources: {
+          [`com.cloudflare.edge.r2.bucket.${account}_default_orderloop-logs-acme`]: '*',
+        },
+        permission_groups: [{ id: 'g-write' }],
+      },
+    ],
+  });
+  // An EU bucket's resource names its jurisdiction.
+  assert.deepEqual(Object.keys(logpushToken(acme, account, groups).policies[0]!.resources), [
+    `com.cloudflare.edge.r2.bucket.${account}_eu_orderloop-logs-acme`,
+  ]);
+  // The group is taken by its exact name, and only when there is exactly one.
+  assert.throws(() => logpushToken(acme, account, groups.slice(0, 1)), /found 0/);
+  assert.throws(
+    () => logpushToken(acme, account, [...groups, { id: 'g-2', name: groups[1]!.name }]),
+    /found 2/,
+  );
+  assert.throws(() => logpushToken(acme, 'not-an-account', groups), /account id/);
+
+  // An existing token is rolled only when it holds exactly that policy.
+  const details = (policies: unknown[], name = t.name) => ({ name, policies });
+  const named = (p: (typeof t.policies)[0]) => ({
+    id: 'policy-1',
+    ...p,
+    permission_groups: p.permission_groups.map((g) => ({ ...g, name: groups[1]!.name })),
+  });
+  assert.equal(tokenMatches(details([named(t.policies[0]!)]), t), true);
+  assert.equal(tokenMatches(details([named(t.policies[0]!)], 'other'), t), false);
+  assert.equal(tokenMatches(details([]), t), false);
+  assert.equal(tokenMatches(details([named(t.policies[0]!), named(t.policies[0]!)]), t), false);
+  assert.equal(
+    tokenMatches(details([{ ...named(t.policies[0]!), resources: { '*': '*' } }]), t),
+    false,
+  );
+  assert.equal(
+    tokenMatches(
+      details([
+        {
+          ...named(t.policies[0]!),
+          resources: { ...t.policies[0]!.resources, 'com.cloudflare.edge.r2.bucket.x': '*' },
+        },
+      ]),
+      t,
+    ),
+    false,
+  );
+  assert.equal(
+    tokenMatches(
+      details([
+        { ...named(t.policies[0]!), permission_groups: [{ id: 'g-write' }, { id: 'g-admin' }] },
+      ]),
+      t,
+    ),
+    false,
+  );
+  assert.equal(tokenMatches(details([{ ...named(t.policies[0]!), effect: 'deny' }]), t), false);
 });

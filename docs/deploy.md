@@ -18,7 +18,7 @@ database too, to write variant names and prices into `products`, but not the R2 
 
 ```bash
 pnpm exec wrangler login
-./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, Vectorize `orderloop-products`, the feed-parts, purge and changes queues and their dead-letter queues (each keeping messages 14 days), 30-day expiries for `feeds/`, `dlq/` and `restores/` in `orderloop-catalog`, and a `catalogBackupDays` expiry and lock rule for its `backups/`, lock rules on `audit/` and `plugins/` in `orderloop-docs`, the AI Gateway and the GitHub environment; safe to re-run
+./scripts/provision.sh orderloop               # creates D1 `orderloop`, R2 `orderloop-docs` and `orderloop-catalog`, KV `orderloop-catalog-cards`, Vectorize `orderloop-products`, the feed-parts, purge and changes queues and their dead-letter queues (each keeping messages 14 days), 30-day expiries for `feeds/`, `dlq/` and `restores/` in `orderloop-catalog`, and a `catalogBackupDays` expiry and lock rule for its `backups/`, lock rules on `audit/` and `plugins/` in `orderloop-docs`, R2 `orderloop-logs` with a `logRetentionDays` expiry and the Logpush job `orderloop-workers` that fills it, the AI Gateway and the GitHub environment; safe to re-run
 pnpm --filter @orderloop/web db:migrate:remote
 pnpm run deploy                                # catalog, then catalog-edge, then engine (web binds to it), then web
 ```
@@ -30,6 +30,10 @@ dashboard's demo scenarios are hidden and only `USD` orders are accepted until a
 `deployments/orderloop.jsonc`; put the first in the `d1_databases` entry of both the engine's and the web
 app's `wrangler.jsonc`, and the second in the `CARDS` entry of the catalog's, since `orderloop`
 renders them unchanged (`pnpm test:fleet` fails when they differ).
+The Logpush job and the AI Gateway are made through the API, so `provision.sh` needs
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for them (without, it says what it skipped); for
+the job the token needs Logs Write and, the first time, Account API Tokens Write, which CI's token
+should not have. See [Logs](operations.md#logs).
 Change the web app's `routes` to your own hostname. To add a customer's deployment instead, see
 [Operations](operations.md#adding-a-customer).
 

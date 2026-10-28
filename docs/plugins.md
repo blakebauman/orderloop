@@ -115,6 +115,8 @@ install it) and build on `@orderloop/plugin-sdk`. It has:
   `workers_dev`, `preview_urls`, `observability`, `upload_source_maps`, `vars`, `d1_databases`) and
   at most one D1 binding, named `DB`. Service bindings, Durable Objects, buckets, queues, routes and
   the rest are refused, since they could reach the engine or another deployment's resources.
+  `logpush` is refused too: the fleet sets it to `true` on every plugin Worker, so its trace
+  events reach the deployment's logs bucket with the apps' ([Logs](operations.md#logs)).
 - `src/index.ts`: `export default definePlugin<Env>({ manifest, nodes, events, pages })`.
   `definePlugin` returns the `PluginRpc` entrypoint class and checks the definition when the Worker
   loads, so a mistake fails the deploy rather than an order: the manifest must parse

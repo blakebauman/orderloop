@@ -209,4 +209,12 @@ waits, such as model calls, don't count against it. Both app Workers set `placem
 app runs near D1 and the engine rather than near the visitor, and the engine runs near D1 rather
 than near the web app (keep it only while Observability shows lower D1 latency).
 
-Each audit write logs one JSON line, `{"type":"audit_event", …}` with the sealed row, to Workers Logs, where Logpush can carry it to a SIEM; a failed write logs `{"type":"audit_write_failed","action":…,"error":…}` instead, to alert on. Writing still never throws.
+All four, and every plugin Worker (`renderPlugin` sets it), set `logpush: true`: their trace
+events go to Workers Logpush too, whose per-deployment job (`orderloop-workers<suffix>`, made by
+`provision.sh`) keeps them in the logs bucket `orderloop-logs<suffix>` for `logRetentionDays`.
+A deploy never waits on the job. Without it the logs are kept nowhere of ours, but another
+unfiltered `workers_trace_events` job on a shared account would still collect them;
+`provision.sh` refuses to run while one exists. What is kept, what is
+left out and how to read it: [Logs](operations.md#logs).
+
+Each audit write logs one JSON line, `{"type":"audit_event", …}` with the sealed row, to Workers Logs, and through Logpush to the logs bucket; a failed write logs `{"type":"audit_write_failed","action":…,"error":…}` instead, to alert on. Writing still never throws.
