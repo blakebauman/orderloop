@@ -12,6 +12,7 @@ import {
   useSearchParams,
 } from 'react-router';
 import { Mark } from '~/components/mark';
+import { Turnstile } from '~/components/turnstile';
 import {
   authEnabled,
   principal,
@@ -25,12 +26,17 @@ import { nextPath, withNext } from '~/lib/next-path';
 import { oauthApi } from '~/lib/oauth.server';
 import { ssoOnlyInEffect } from '~/lib/settings.server';
 import { ssoConfig } from '~/lib/sso.server';
+import { checkTurnstile, turnstileSiteKey, withTurnstilePolicy } from '~/lib/turnstile.server';
 import type { Route } from './+types/login';
 
 export const meta = () => [{ title: 'Sign in · OrderLoop' }];
 
-/** Lets a throttled sign-in's Retry-After reach the response. */
-export const headers: Route.HeadersFunction = ({ actionHeaders }) => actionHeaders;
+/**
+ * Lets a throttled sign-in's Retry-After reach the response, and the page load Turnstile when the
+ * deployment uses it.
+ */
+export const headers: Route.HeadersFunction = ({ actionHeaders }) =>
+  withTurnstilePolicy(actionHeaders);
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await authEnabled()) || (await principal(request))) throw redirect(nextPath(request));
@@ -49,7 +55,13 @@ export async function loader({ request }: Route.LoaderArgs) {
             .catch(() => null)
         )?.clientName ?? null;
   }
-  return { app, demo: isDemo(), sso: !!ssoConfig(), ssoOnly: await ssoOnlyInEffect() };
+  return {
+    app,
+    demo: isDemo(),
+    sso: !!ssoConfig(),
+    ssoOnly: await ssoOnlyInEffect(),
+    turnstile: turnstileSiteKey(),
+  };
 }
 
 /** What the sign-in page says after single sign-on sent someone back without a session. */
@@ -66,6 +78,9 @@ export async function action({ request }: Route.ActionArgs) {
     return redirect(nextPath(request), { headers: { 'set-cookie': await signInDemo(request) } });
   if (await ssoOnlyInEffect())
     return { error: 'This workspace signs in with single sign-on only. Use the button above.' };
+  // Before the password is looked at: a refused attempt costs no hash and locks no one out.
+  const refused = await checkTurnstile(request, form, 'login');
+  if (refused) return data({ error: refused.error }, { status: refused.status });
   const email = String(form.get('email') ?? '');
   let result: SignInResult | null;
   try {
@@ -87,12 +102,13 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Login() {
-  const { app, demo, sso, ssoOnly } = useLoaderData<typeof loader>();
+  const { app, demo, sso, ssoOnly, turnstile } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const busy = useNavigation().state === 'submitting';
   const password = useRef<HTMLInputElement>(null);
   const passkey = usePasskeySignIn();
+  const [checked, setChecked] = useState(false);
   const error = passkey.error ?? result?.error ?? SSO_ERRORS[params.get('sso') ?? ''] ?? undefined;
   const ssoHref = `/login/sso${params.get('next') ? `?next=${encodeURIComponent(params.get('next')!)}` : ''}`;
   // After a refusal, the password is ready to retype.
@@ -176,12 +192,19 @@ export default function Login() {
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'sign-in-error' : undefined}
             />
+            {turnstile ? (
+              <Turnstile siteKey={turnstile} action="login" reset={result} onSolved={setChecked} />
+            ) : null}
             {error ? (
               <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
                 {error}
               </p>
             ) : null}
-            <Button type="submit" className="mt-4 w-full" disabled={busy || passkey.busy}>
+            <Button
+              type="submit"
+              className="mt-4 w-full"
+              disabled={busy || passkey.busy || (!!turnstile && !checked)}
+            >
               {busy ? 'Signing in…' : 'Sign in'}
             </Button>
             {passkey.supported ? (
