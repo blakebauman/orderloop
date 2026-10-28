@@ -7,7 +7,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const PORT = Number(process.env.E2E_PORT ?? 5390);
 if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535)
-  throw new Error(`E2E_PORT must be a port number from 1024 to 65535, not "${process.env.E2E_PORT}"`);
+  throw new Error(
+    `E2E_PORT must be a port number from 1024 to 65535, not "${process.env.E2E_PORT}"`,
+  );
 const state = '.wrangler/e2e';
 
 /**
