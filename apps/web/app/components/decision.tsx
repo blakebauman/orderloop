@@ -226,7 +226,7 @@ export function DecisionControls({
     const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
     return (
       <div
-        className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/50 px-3 py-2 text-sm"
+        className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/50 px-3 py-2 text-sm"
         aria-live="polite"
       >
         <span>

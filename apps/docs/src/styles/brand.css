@@ -1,5 +1,5 @@
 /*
- * Ledger (the app's design, on shadcn's base-luma preset) in the docs: the web app's components carried into Starlight. Hand-written and safe to
+ * Ledger (the app's design, on shadcn's base-maia preset) in the docs: the web app's components carried into Starlight. Hand-written and safe to
  * edit. Colours come only from theme.css (generated from @orderloop/design, never hand-edited):
  * Starlight's slots, plus `--ol-*` for the app's own tokens. Each block names the app component
  * it follows, so a change there has an obvious counterpart here. See apps/docs/DESIGN.md.
@@ -78,19 +78,19 @@ header.header {
   width: auto;
 }
 
-/* Search reads as one of the app's inputs: a filled pill with no edge until hovered. */
+/* Search reads as one of the app's inputs: a pill with a hairline edge and a faint fill. */
 site-search > button[data-open-modal] {
   height: 2rem;
-  border: 1px solid transparent;
+  border: 1px solid var(--ol-input);
   border-radius: var(--ol-pill);
-  background: color-mix(in oklch, var(--ol-input) 50%, transparent);
+  background: color-mix(in oklch, var(--ol-input) 30%, transparent);
   color: var(--ol-muted-foreground);
   font-size: 0.8125rem;
   box-shadow: none;
 }
 
 site-search > button[data-open-modal]:hover {
-  border-color: var(--ol-input);
+  background: color-mix(in oklch, var(--ol-input) 50%, transparent);
   color: var(--ol-ink);
 }
 
@@ -300,7 +300,8 @@ mobile-starlight-toc a[aria-current="true"] {
 .starlight-aside {
   --ol-aside: var(--ol-ink);
   border: 1px solid color-mix(in oklch, var(--ol-aside) 30%, var(--ol-paper));
-  border-radius: var(--ol-r);
+  /* The app's alerts: rounded-lg. */
+  border-radius: var(--ol-radius);
   background: color-mix(in oklch, var(--ol-aside) 5%, var(--ol-paper));
   color: var(--sl-color-text);
 }
@@ -366,29 +367,20 @@ mobile-starlight-toc a[aria-current="true"] {
   padding-inline: 0.25rem;
 }
 
-/* ── Cards (page.tsx Section, the app's `card`): very round, no border, a faint ring and soft
-   shadow ─────────────────────────────────────────────────────────────── */
+/* ── Cards (page.tsx Section, the app's `card`): rounded, no border and no shadow, a faint ring
+   ─────────────────────────────────────────────────────────────────────── */
 
 .sl-link-card,
 .card {
   border: 0;
-  border-radius: calc(var(--ol-radius) * 2.6);
+  border-radius: calc(var(--ol-radius) * 1.8);
   background: var(--ol-card);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--ol-ink) 5%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06),
-    0 2px 4px -2px rgb(0 0 0 / 0.06);
-}
-
-:root[data-theme="dark"] :is(.sl-link-card, .card) {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--ol-ink) 10%, transparent);
 }
 
 .sl-link-card:hover {
   background: var(--ol-card);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--ol-ink) 25%, transparent),
-    0 4px 6px -1px rgb(0 0 0 / 0.06);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ol-ink) 25%, transparent);
 }
 
 .sl-link-card .title {
@@ -402,17 +394,17 @@ mobile-starlight-toc a[aria-current="true"] {
   color: var(--ol-muted-foreground);
 }
 
-/* Previous / next: the app's outline buttons. */
+/* Previous / next: the app's outline treatment (an input edge over a faint input fill). */
 .pagination-links a {
-  border: 1px solid var(--ol-rule);
-  border-radius: var(--ol-r);
-  background: var(--ol-card);
+  border: 1px solid var(--ol-input);
+  border-radius: var(--ol-radius);
+  background: color-mix(in oklch, var(--ol-input) 30%, transparent);
   box-shadow: none;
   color: var(--ol-muted-foreground);
 }
 
 .pagination-links a:hover {
-  border-color: var(--ol-ink);
+  background: color-mix(in oklch, var(--ol-input) 50%, transparent);
 }
 
 .pagination-links .link-title {
@@ -496,7 +488,8 @@ mobile-starlight-toc a[aria-current="true"] {
 .ol-run {
   margin: 0.5rem 0 2.5rem;
   border: 1px solid var(--ol-rule);
-  border-radius: var(--ol-r);
+  /* The app's flow canvas: rounded-2xl. */
+  border-radius: calc(var(--ol-radius) * 1.8);
   background: var(--ol-card);
   overflow: hidden;
   container-type: inline-size;

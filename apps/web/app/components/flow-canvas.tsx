@@ -47,7 +47,7 @@ const nodeTypes = { flow: FlowNodeView };
 export const DRAG_TYPE = 'application/orderloop-node';
 
 const surface =
-  'relative h-full min-h-[360px] w-full overflow-hidden rounded-md border bg-[var(--sheet)]';
+  'relative h-full min-h-[360px] w-full overflow-hidden rounded-2xl border bg-[var(--sheet)]';
 
 const toolbarButton =
   'hit-area inline-flex items-center gap-1.5 card px-2.5 py-1 font-medium text-muted-foreground text-xs transition hover:bg-muted hover:text-foreground';

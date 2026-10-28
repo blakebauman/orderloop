@@ -436,14 +436,74 @@ test('payments are mocked unless the registry says stripe, with its publishable 
 });
 
 test('a Stripe deployment needs STRIPE_SECRET_KEY in the same mode as its publishable key', () => {
-  assert.equal(secretsProblem(acme, {}), null);
+  assert.equal(secretsProblem(acme, {}, 'engine'), null);
   const stripe = toDeployment({ ...acme, payments: 'stripe', stripePublishableKey: 'pk_test_abc' });
-  assert.match(secretsProblem(stripe, {}) ?? '', /STRIPE_SECRET_KEY/);
+  assert.match(secretsProblem(stripe, {}, 'engine') ?? '', /STRIPE_SECRET_KEY/);
   assert.match(
-    secretsProblem(stripe, { STRIPE_SECRET_KEY: 'sk_live_x' }) ?? '',
+    secretsProblem(stripe, { STRIPE_SECRET_KEY: 'sk_live_x' }, 'engine') ?? '',
     /both test or both live/,
   );
-  assert.equal(secretsProblem(stripe, { STRIPE_SECRET_KEY: 'rk_test_x' }), null);
+  assert.equal(secretsProblem(stripe, { STRIPE_SECRET_KEY: 'rk_test_x' }, 'engine'), null);
+  // The web Worker doesn't take payments.
+  assert.equal(secretsProblem(stripe, {}, 'web'), null);
+});
+
+test("a customer's turnstileSiteKey turns on the web Worker's Turnstile check", () => {
+  const key = '0x4AAAAAAABkMYinukE8nzY';
+  const guarded = toDeployment({ ...acme, turnstileSiteKey: key });
+  assert.equal(renderWeb(base('web'), guarded).vars.TURNSTILE_SITE_KEY, key);
+  // Always rendered, so a deployment without one never keeps another's.
+  assert.equal(renderWeb(base('web'), acme).vars.TURNSTILE_SITE_KEY, '');
+  assert.equal(shellVars(guarded).TURNSTILE_SITE_KEY, key);
+  assert.equal(shellVars(acme).TURNSTILE_SITE_KEY, '');
+  for (const bad of ['', 'pk_live_abc', '0x4AAA AAAA', '0x1', 42, '0x4AAAAAAABkMYinukE8nzY;'])
+    assert.throws(() => toDeployment({ ...acme, turnstileSiteKey: bad }), /turnstileSiteKey/);
+});
+
+test("Cloudflare's Turnstile test keys are refused in production and on customers", () => {
+  const test = '1x00000000000000000000AA';
+  const production = {
+    id: 'orderloop',
+    ring: 'internal',
+    slot: 1,
+    domain: 'orderloop.app',
+    suffix: '',
+    environment: 'production',
+  };
+  for (const k of [test, '2x00000000000000000000AB', '3x00000000000000000000FF']) {
+    assert.throws(() => toDeployment({ ...production, turnstileSiteKey: k }), /test key/);
+    assert.throws(() => toDeployment({ ...acme, turnstileSiteKey: k }), /test key/);
+  }
+  assert.equal(
+    toDeployment({ ...production, turnstileSiteKey: '0x4AAAAAAABkMYinukE8nzY' }).turnstileSiteKey,
+    '0x4AAAAAAABkMYinukE8nzY',
+  );
+});
+
+test('a demo may use a Turnstile test key', () => {
+  const demo = { id: 'demo', ring: 'internal', slot: 5, domain: 'demo.orderloop.app', demo: true };
+  const d = toDeployment({ ...demo, turnstileSiteKey: '1x00000000000000000000AA' });
+  assert.equal(d.turnstileSiteKey, '1x00000000000000000000AA');
+  assert.equal(
+    renderWeb(base('web'), { ...d, d1Id: 'd1-demo' }).vars.TURNSTILE_SITE_KEY,
+    '1x00000000000000000000AA',
+  );
+  assert.throws(
+    () => toDeployment({ ...demo, turnstileSiteKey: '4x00000000000000000000AA' }),
+    /turnstileSiteKey/,
+  );
+});
+
+test('a deployment with a Turnstile site key needs its secret to deploy', () => {
+  const guarded = toDeployment({ ...acme, turnstileSiteKey: '0x4AAAAAAABkMYinukE8nzY' });
+  assert.match(
+    secretsProblem(guarded, {}, 'web') ?? '',
+    /TURNSTILE_SECRET_KEY to the deploy-acme GitHub environment/,
+  );
+  assert.equal(secretsProblem(guarded, { TURNSTILE_SECRET_KEY: '0x4AAAAAAAsecret' }, 'web'), null);
+  // Only the web Worker checks tokens.
+  assert.equal(secretsProblem(guarded, {}, 'engine'), null);
+  assert.equal(secretsProblem(acme, {}, 'web'), null);
 });
 
 const withLedger = toDeployment({
