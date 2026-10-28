@@ -526,7 +526,9 @@ function Group({
   // Undo all leaves with the last held decision; keep focus in this group, not on the page.
   const holdingBatch = progress?.phase === 'holding';
   const wasHolding = useRef(false);
+  const undoAllButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    if (!wasHolding.current && holdingBatch) undoAllButton.current?.focus();
     if (wasHolding.current && !holdingBatch) {
       const at = document.activeElement;
       if (!at || at === document.body) headingRef.current?.focus();
@@ -627,7 +629,13 @@ function Group({
               {batch.decision === 'approved' ? 'Approving' : 'Rejecting'} {progress.held} in{' '}
               <span className="tabular">{left}s</span>
             </span>
-            <Button size="sm" variant="outline" onClick={undoAll} autoFocus aria-keyshortcuts="Z">
+            <Button
+              ref={undoAllButton}
+              size="sm"
+              variant="outline"
+              onClick={undoAll}
+              aria-keyshortcuts="Z"
+            >
               Undo all
             </Button>
           </div>
