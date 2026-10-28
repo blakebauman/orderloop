@@ -69,7 +69,7 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
   return (
     <div
       className={cn(
-        'relative w-[220px] rounded-md border bg-[var(--node)] text-left shadow-[0_1px_0_var(--rule)] transition-[border-color,box-shadow,opacity]',
+        'relative w-[220px] rounded-md border bg-[var(--node)] text-left shadow-[0_1px_0_var(--rule)] transition-[border-color,box-shadow,opacity] duration-(--motion-move)',
         selected
           ? 'border-[var(--ink)] shadow-[0_0_0_2px_var(--ring)]'
           : 'border-[var(--node-border)]',
@@ -80,7 +80,8 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
       {/* Status rule */}
       <span
         className={cn(
-          'absolute inset-y-0 left-0 w-[3px] rounded-l-md',
+          // The status rule cross-fades as the step changes state, in step with its edges.
+          'absolute inset-y-0 left-0 w-[3px] rounded-l-md transition-[background-color] duration-(--motion-move)',
           live && 'motion-safe:animate-pulse',
         )}
         style={{ background: color ?? 'transparent' }}

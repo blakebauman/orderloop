@@ -33,6 +33,7 @@ import { Body, Empty, PageHeader } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { type BoardView, type CardPage, loadBoard, loadSheet } from '~/lib/catalog-board.server';
 import { count } from '~/lib/format';
+import { EASE, MOTION } from '~/lib/motion';
 import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/catalog';
@@ -795,8 +796,8 @@ function useFlip(root: RefObject<HTMLDivElement | null>, dep: unknown) {
       const dy = was.y - at.y;
       if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
       card.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0 0' }], {
-        duration: 200,
-        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        duration: MOTION.move,
+        easing: EASE.arrive,
       });
     }
     last.current = next;

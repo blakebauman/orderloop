@@ -28,7 +28,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        'fixed inset-0 z-50 bg-black/80 supports-backdrop-filter:backdrop-blur-xs data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
+        'fixed inset-0 z-50 bg-black/80 duration-(--motion-move) supports-backdrop-filter:backdrop-blur-xs data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
         className,
       )}
       {...props}
@@ -53,7 +53,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          'fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500',
+          'fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition ease-arrive data-[state=closed]:animate-out data-[state=closed]:duration-(--motion-move) data-[state=closed]:ease-leave data-[state=open]:animate-in data-[state=open]:duration-(--motion-travel)',
           // A side drawer runs the full height of the screen, so on a phone it meets
           // the status bar, the notch and the home indicator. The insets are 0
           // everywhere else; the `*-safe` utilities are defined in the app's CSS.
