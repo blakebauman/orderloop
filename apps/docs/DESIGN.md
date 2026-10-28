@@ -227,9 +227,11 @@ other shadows (search, pagination) are removed.
 
 - **Pill** (`--ol-pill`): buttons, the header button, the search field, as the app's `rounded-4xl`
   buttons and fields.
-- **18px** (1.8 × `--ol-radius`, the app's `rounded-2xl` `card`): link cards and other cards.
-- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): callouts, node cards, code
-  blocks, the sidebar's current page.
+- **18px** (1.8 × `--ol-radius`, the app's `rounded-2xl` `card` and flow canvas): link cards and
+  other cards, the run figure.
+- **10px** (`--ol-radius`, the app's `rounded-lg` alerts): callouts, previous / next.
+- **8px** (`--ol-r`, the app's `rounded-md`, 0.8 × its 10px `--radius`): node cards, code blocks,
+  the sidebar's current page.
 - **3px**: inline code, focus rings.
 - **2px**: status stamps and output handles.
 - Borders are 1px. The node card's 3px status rule is the one thicker line, and it is the app's
@@ -270,7 +272,7 @@ column labels on no fill, a hairline under each row, a soft muted hover, tabular
 
 ### Callouts
 
-1px border at 30% of the hue, a 5% flat tint into paper, 8px corners. Note is ink (neutral), tip
+1px border at 30% of the hue, a 5% flat tint into paper, 10px corners. Note is ink (neutral), tip
 is `ok`, caution is `wait`, danger is `bad`. Never a thick coloured edge.
 
 ### Buttons

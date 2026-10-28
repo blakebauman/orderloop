@@ -242,7 +242,7 @@ export default function Orders() {
             />
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border px-1 font-sans text-2xs text-muted-foreground touch:hidden"
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm bg-muted px-1 font-sans text-2xs text-muted-foreground touch:hidden"
             >
               /
             </span>

@@ -343,8 +343,11 @@ New order).
 ## Shapes
 
 Generous and round. The radius base is 0.625rem on a multiplying scale: cards are 2xl, tiles and
-rows inside a card xl, one-line fields 4xl, text areas xl, menus 2xl. Buttons, one-line fields, badges, segmented controls and icon buttons are
-pills. Hairlines divide rows inside a card; cards themselves have no border.
+rows inside a card xl, the flow canvas 2xl, one-line fields 4xl, text areas xl, menus 2xl, and
+bordered notices, option tiles and bordered lists lg (the preset's alert and item). Buttons, one-line
+fields, badges, segmented controls, filter links and icon buttons are pills. Checkboxes are 6px
+boxes and radios round, both native and drawn by app.css. Hairlines divide rows inside a card; cards
+themselves have no border.
 
 **The Pill Rule.** Anything you press or that labels a status is fully round. Square corners are
 for code and data blocks only.

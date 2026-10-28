@@ -661,7 +661,7 @@ function CardRow({
           checked={tick.on}
           onChange={tick.toggle}
           aria-label={`Publish ${c.title}`}
-          className="hit-area relative z-10 mt-1 size-4 shrink-0 accent-foreground max-lg:hidden"
+          className="hit-area relative z-10 mt-1 size-4 shrink-0 max-lg:hidden"
         />
       ) : null}
       <div className="min-w-0 flex-1">

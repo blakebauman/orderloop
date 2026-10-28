@@ -72,7 +72,7 @@ export function Connections({
                   {edges.map((e) => (
                     <li
                       key={e.id}
-                      className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-sm"
+                      className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-sm"
                     >
                       <span className="min-w-0 truncate">{label(e.target)}</span>
                       <button
