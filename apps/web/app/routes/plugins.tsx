@@ -110,7 +110,7 @@ export default function Plugins() {
     <>
       <PageHeader
         title="Plugins"
-        subtitle="Optional features on this workspace, each running on its own. What they add to flows, what they are sent, and whether they are answering. Install one from a file signed by a publisher this workspace trusts."
+        subtitle="Optional features on this workspace, each running on its own. What they add to flows, what they are sent, and whether they are answering."
       />
       <Body className="space-y-4">
         {result ? (
@@ -121,8 +121,7 @@ export default function Plugins() {
             {result.ok ? result.done : result.error}
           </p>
         ) : null}
-        {/* Without a trusted publisher every upload would be refused, so there is no form. */}
-        {publishers.length ? <Upload publishers={publishers} /> : null}
+        <Upload publishers={publishers} />
         {pending.map((i) => (
           <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
         ))}
@@ -174,9 +173,22 @@ const busyWith = (state: ReturnType<typeof useNavigation>, intent: string, key: 
   state.formData?.get('intent') === intent &&
   (state.formData.get('sha') ?? state.formData.get('id')) === key;
 
-function Upload({ publishers }: { publishers: string[] }) {
+export function Upload({ publishers }: { publishers: string[] }) {
   const nav = useNavigation();
   const busy = nav.state !== 'idle' && nav.formData?.get('intent') === 'upload';
+  // Without a trusted publisher every upload would be refused, so there is no form: say why, and
+  // who can change it, since this page can't.
+  if (!publishers.length)
+    return (
+      <Section title="Install from a file">
+        <p className="max-w-[65ch] text-muted-foreground text-sm">
+          Installing from a file is off: this workspace doesn’t trust any plugin publisher yet. A
+          plugin file installs only when it is signed by a publisher the workspace trusts, and that
+          list is part of the workspace’s setup, not this page. To install one, ask whoever runs
+          your OrderLoop workspace to trust its publisher; the upload appears here once they have.
+        </p>
+      </Section>
+    );
   return (
     <Section title="Install from a file">
       <Form method="post" encType="multipart/form-data" className="flex flex-wrap items-end gap-3">

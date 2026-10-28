@@ -11,6 +11,7 @@ import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { ToneBadge } from '~/components/status';
 import { audit } from '~/lib/audit.server';
@@ -70,6 +71,12 @@ export default function CustomerPage() {
   const canOperate = useCan('operator');
   const now = useNow(60_000);
   const business = c.kind === 'business';
+  // A certificate added closes the form; a refusal keeps it open with what was typed.
+  const sheet = useFormSheet(result, (r) => 'ok' in r && r.intent === 'add');
+  const addError =
+    sheet.result && 'error' in sheet.result && sheet.result.intent === 'add'
+      ? sheet.result.error
+      : null;
   return (
     <>
       <PageHeader
@@ -96,7 +103,23 @@ export default function CustomerPage() {
         }
       />
       <Body className="grid gap-4">
-        <Section title="Tax exemption certificates" flush>
+        <Section
+          title="Tax exemption certificates"
+          flush
+          actions={
+            canOperate ? (
+              <FormSheet
+                open={sheet.open}
+                onOpenChange={sheet.onOpenChange}
+                label="Add certificate"
+                title="Add a certificate"
+                description="It exempts orders once someone verifies it with the issuer."
+              >
+                <AddCertificate nextId={nextId} error={addError} busy={busy} />
+              </FormSheet>
+            ) : null
+          }
+        >
           {certificates.length ? (
             <Table stack="cards" caption="Tax exemption certificates">
               <TableHead>
@@ -172,71 +195,6 @@ export default function CustomerPage() {
             </p>
           ) : null}
         </Section>
-        {canOperate ? (
-          <Section title="Add a certificate">
-            {/* Keyed by the count, so the fields clear once a certificate is added (not on a refusal). */}
-            <Form
-              key={certificates.length}
-              method="post"
-              encType="multipart/form-data"
-              className="grid max-w-xl gap-3 text-sm"
-            >
-              <input type="hidden" name="intent" value="add" />
-              <input type="hidden" name="id" value={nextId} />
-              <div className="grid gap-1">
-                <label htmlFor="cert-number" className="caption">
-                  Certificate number
-                </label>
-                <Input id="cert-number" name="number" required maxLength={64} className="h-8" />
-              </div>
-              <div className="grid gap-1">
-                <label htmlFor="cert-regions" className="caption">
-                  Covers (a country, or a region of one: US, US-CA, CA-ON)
-                </label>
-                <Input
-                  id="cert-regions"
-                  name="regions"
-                  required
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  placeholder="US-CA, US-NV"
-                  className="h-8"
-                />
-              </div>
-              <div className="grid gap-1">
-                <label htmlFor="cert-expires" className="caption">
-                  Last day it is valid (optional)
-                </label>
-                <Input id="cert-expires" name="expires" type="date" className="h-8 w-48" />
-              </div>
-              <div className="grid gap-1">
-                <label htmlFor="cert-file" className="caption">
-                  The certificate (PDF or image, up to 10 MB; optional)
-                </label>
-                <input
-                  id="cert-file"
-                  name="file"
-                  type="file"
-                  accept="application/pdf,image/png,image/jpeg,image/webp"
-                  className="text-base"
-                />
-              </div>
-              <p className="text-muted-foreground text-xs">
-                It exempts orders once someone verifies it with the issuer.
-              </p>
-              {result && 'error' in result && result.intent === 'add' ? (
-                <p role="alert" className="text-bad">
-                  {result.error}
-                </p>
-              ) : null}
-              <div>
-                <Button type="submit" size="sm" disabled={busy}>
-                  Add certificate
-                </Button>
-              </div>
-            </Form>
-          </Section>
-        ) : null}
       </Body>
     </>
   );
@@ -263,6 +221,72 @@ function CertificateButton({
       >
         {intent === 'verify' ? 'Verify' : 'Revoke'}
       </Button>
+    </Form>
+  );
+}
+
+/** A new certificate's fields; the id is minted by the loader, so a form sent twice adds it once. */
+function AddCertificate({
+  nextId,
+  error,
+  busy,
+}: {
+  nextId: string;
+  error?: string | null;
+  busy: boolean;
+}) {
+  return (
+    <Form method="post" encType="multipart/form-data" className="grid gap-3 text-sm">
+      <input type="hidden" name="intent" value="add" />
+      <input type="hidden" name="id" value={nextId} />
+      <div className="grid gap-1">
+        <label htmlFor="cert-number" className="caption">
+          Certificate number
+        </label>
+        <Input id="cert-number" name="number" required maxLength={64} className="h-8" />
+      </div>
+      <div className="grid gap-1">
+        <label htmlFor="cert-regions" className="caption">
+          Covers (a country, or a region of one: US, US-CA, CA-ON)
+        </label>
+        <Input
+          id="cert-regions"
+          name="regions"
+          required
+          autoCapitalize="characters"
+          autoCorrect="off"
+          placeholder="US-CA, US-NV"
+          className="h-8"
+        />
+      </div>
+      <div className="grid gap-1">
+        <label htmlFor="cert-expires" className="caption">
+          Last day it is valid (optional)
+        </label>
+        <Input id="cert-expires" name="expires" type="date" className="h-8 w-48" />
+      </div>
+      <div className="grid gap-1">
+        <label htmlFor="cert-file" className="caption">
+          The certificate (PDF or image, up to 10 MB; optional)
+        </label>
+        <input
+          id="cert-file"
+          name="file"
+          type="file"
+          accept="application/pdf,image/png,image/jpeg,image/webp"
+          className="text-base"
+        />
+      </div>
+      {error ? (
+        <p role="alert" className="text-bad">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button type="submit" size="sm" disabled={busy}>
+          Add certificate
+        </Button>
+      </div>
     </Form>
   );
 }

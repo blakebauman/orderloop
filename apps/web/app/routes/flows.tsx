@@ -18,7 +18,6 @@ import {
 } from '@orderloop/ui/native-select';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
-import { Plus } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Form,
@@ -30,6 +29,7 @@ import {
   useSearchParams,
 } from 'react-router';
 import { Ago } from '~/components/ago';
+import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Field } from '~/components/inspector';
 import { PageHeader } from '~/components/page';
 import { audit } from '~/lib/audit.server';
@@ -221,9 +221,10 @@ export default function Flows() {
     nav.formMethod === 'POST' &&
     !['archive', 'restore', 'duplicate'].includes(String(nav.formData?.get('intent') ?? ''));
   const hintId = useId();
-  const nameRef = useRef<HTMLInputElement>(null);
   const alertRef = useRef<HTMLParagraphElement>(null);
-  const formError = data && !data.flowId ? data : null;
+  // A new flow redirects to its editor; a refusal keeps the sheet open with what was typed.
+  const sheet = useFormSheet(data ?? undefined, () => false);
+  const formError = sheet.result && !sheet.result.flowId ? sheet.result : null;
   // After the submit settles (the button it disabled gives focus up), take focus to what went wrong.
   useEffect(() => {
     if (!formError) return;
@@ -269,19 +270,114 @@ export default function Flows() {
         subtitle="The process each kind of order follows. Orders keep the version they started on, so edits never change a running order."
         actions={
           canOperate && !archived ? (
-            <Button
-              size="sm"
-              onClick={() => {
-                document.getElementById('new-flow')?.scrollIntoView({ block: 'start' });
-                nameRef.current?.focus({ preventScroll: true });
-              }}
-            >
-              <Plus aria-hidden="true" /> New flow
-            </Button>
+            <FormSheet open={sheet.open} onOpenChange={sheet.onOpenChange} label="New flow">
+              <Form method="post" className="space-y-4" noValidate>
+                <Field label="Name" hint={start === 'generate' ? 'Optional' : undefined}>
+                  <Input
+                    name="name"
+                    placeholder="e.g. Weekend flash sale"
+                    className="h-8"
+                    required={start !== 'generate'}
+                    aria-invalid={formError?.field === 'name' || undefined}
+                  />
+                </Field>
+                <Field label="Commerce model">
+                  <NativeSelect
+                    name="model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value as OrderModel)}
+                    wrapperClassName="w-full"
+                    className="h-8 w-full"
+                  >
+                    {(
+                      [
+                        ['Selling', SELLING],
+                        ['Buying', BUY_SIDE_MODELS],
+                      ] as const
+                    ).map(([group, models]) => (
+                      <NativeSelectOptGroup key={group} label={group}>
+                        {models.map((m: OrderModel) => (
+                          <NativeSelectOption key={m} value={m}>
+                            {ORDER_MODEL_LABELS[m]}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelectOptGroup>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <fieldset aria-describedby={hintId}>
+                  <legend className="caption mb-1.5">Start from</legend>
+                  <Segmented
+                    name="start"
+                    aria-label="Start from"
+                    value={start}
+                    onValueChange={(v) => setStart(v as typeof start)}
+                    className="grid w-full"
+                  >
+                    {STARTS.map((o) => (
+                      <SegmentedItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SegmentedItem>
+                    ))}
+                  </Segmented>
+                  <p
+                    id={hintId}
+                    className="mt-1.5 text-muted-foreground text-xs"
+                    aria-live="polite"
+                  >
+                    {hint}
+                  </p>
+                </fieldset>
+                {start === 'generate' ? (
+                  <Field label="What should happen">
+                    <Textarea
+                      name="prompt"
+                      rows={5}
+                      className="text-base md:text-sm"
+                      placeholder={EXAMPLES[model]}
+                      aria-invalid={formError?.field === 'prompt' || undefined}
+                    />
+                  </Field>
+                ) : null}
+                {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
+                <input type="hidden" name="intent" value={start === 'generate' ? 'generate' : ''} />
+                <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
+                {formError ? (
+                  <p
+                    ref={alertRef}
+                    tabIndex={-1}
+                    className="text-bad text-sm outline-none"
+                    role="alert"
+                  >
+                    {formError.error}
+                  </p>
+                ) : null}
+                <Button type="submit" size="sm" disabled={creating}>
+                  {start === 'generate'
+                    ? creating
+                      ? 'Drafting…'
+                      : 'Draft the flow'
+                    : creating
+                      ? 'Creating…'
+                      : 'Create flow'}
+                </Button>
+                <p className="sr-only" aria-live="polite">
+                  {creating
+                    ? start === 'generate'
+                      ? 'Drafting the flow.'
+                      : 'Creating the flow.'
+                    : ''}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  A new flow gets no inbound orders until it is published and routed to; you can
+                  always start orders on it by hand.
+                </p>
+              </Form>
+            </FormSheet>
           ) : null
         }
       />
-      <div className="mx-auto grid max-w-page gap-6 px-4 pb-10 sm:px-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
             <Input
@@ -355,115 +451,6 @@ export default function Flows() {
             </p>
           )}
         </div>
-
-        <aside id="new-flow" className="min-w-0 scroll-mt-20">
-          {canOperate && !archived ? (
-            <Form method="post" className="space-y-4 card p-4" noValidate>
-              <h2 className="section-title">New flow</h2>
-              <Field label="Name" hint={start === 'generate' ? 'Optional' : undefined}>
-                <Input
-                  ref={nameRef}
-                  name="name"
-                  placeholder="e.g. Weekend flash sale"
-                  className="h-8"
-                  required={start !== 'generate'}
-                  aria-invalid={formError?.field === 'name' || undefined}
-                />
-              </Field>
-              <Field label="Commerce model">
-                <NativeSelect
-                  name="model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value as OrderModel)}
-                  wrapperClassName="w-full"
-                  className="h-8 w-full"
-                >
-                  {(
-                    [
-                      ['Selling', SELLING],
-                      ['Buying', BUY_SIDE_MODELS],
-                    ] as const
-                  ).map(([group, models]) => (
-                    <NativeSelectOptGroup key={group} label={group}>
-                      {models.map((m: OrderModel) => (
-                        <NativeSelectOption key={m} value={m}>
-                          {ORDER_MODEL_LABELS[m]}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelectOptGroup>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <fieldset aria-describedby={hintId}>
-                <legend className="caption mb-1.5">Start from</legend>
-                <Segmented
-                  name="start"
-                  aria-label="Start from"
-                  value={start}
-                  onValueChange={(v) => setStart(v as typeof start)}
-                  className="grid w-full"
-                >
-                  {STARTS.map((o) => (
-                    <SegmentedItem key={o.id} value={o.id}>
-                      {o.label}
-                    </SegmentedItem>
-                  ))}
-                </Segmented>
-                <p id={hintId} className="mt-1.5 text-muted-foreground text-xs" aria-live="polite">
-                  {hint}
-                </p>
-              </fieldset>
-              {start === 'generate' ? (
-                <Field label="What should happen">
-                  <Textarea
-                    name="prompt"
-                    rows={5}
-                    className="text-base md:text-sm"
-                    placeholder={EXAMPLES[model]}
-                    aria-invalid={formError?.field === 'prompt' || undefined}
-                  />
-                </Field>
-              ) : null}
-              {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
-              <input type="hidden" name="intent" value={start === 'generate' ? 'generate' : ''} />
-              <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
-              {formError ? (
-                <p
-                  ref={alertRef}
-                  tabIndex={-1}
-                  className="text-bad text-sm outline-none"
-                  role="alert"
-                >
-                  {formError.error}
-                </p>
-              ) : null}
-              <Button type="submit" size="sm" disabled={creating}>
-                {start === 'generate'
-                  ? creating
-                    ? 'Drafting…'
-                    : 'Draft the flow'
-                  : creating
-                    ? 'Creating…'
-                    : 'Create flow'}
-              </Button>
-              <p className="sr-only" aria-live="polite">
-                {creating
-                  ? start === 'generate'
-                    ? 'Drafting the flow.'
-                    : 'Creating the flow.'
-                  : ''}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                A new flow gets no inbound orders until it is published and routed to; you can
-                always start orders on it by hand.
-              </p>
-            </Form>
-          ) : !canOperate ? (
-            <p className="card p-4 text-muted-foreground text-sm">
-              Operators create and edit flows.
-            </p>
-          ) : null}
-        </aside>
       </div>
     </>
   );

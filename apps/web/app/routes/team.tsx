@@ -1,9 +1,17 @@
 import { isRole, ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@orderloop/ui/dropdown-menu';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
+import { Ellipsis } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   data,
@@ -285,8 +293,11 @@ function RoleGuide() {
   );
 }
 
-/** A person's role, saved from their row; making them an admin asks who you are first. */
-function RoleForm({
+/**
+ * A person's role, saved from their row; making them an admin asks who you are first. Save shows
+ * only once the role is changed, so a row at rest is just its role.
+ */
+export function RoleForm({
   id,
   name,
   role,
@@ -306,9 +317,17 @@ function RoleForm({
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="who" value={name} />
       <RoleSelect value={role} label={`Role for ${name}`} compact onChange={setChosen} />
-      <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
-        Save
-      </Button>
+      {chosen !== role ? (
+        <Button
+          size="sm"
+          variant="outline"
+          type="submit"
+          aria-label={`Save role for ${name}`}
+          disabled={fetcher.state !== 'idle'}
+        >
+          Save
+        </Button>
+      ) : null}
       {chosen === 'admin' && role !== 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
     </fetcher.Form>
   );
@@ -362,13 +381,13 @@ export default function Team() {
   const done = shown && 'done' in shown ? shown.done : null;
   const [asking, setAsking] = useState<{ id: string; intent: Asked } | null>(null);
   const ask = (id: string, intent: Asked) => setAsking({ id, intent });
-  // Keep returns to the button that asked; nothing is lost if the person changes their mind.
+  // Keep returns to the row's actions menu; nothing is lost if the person changes their mind.
   const keep = () => {
     const was = asking;
     setAsking(null);
     if (was)
       requestAnimationFrame(() =>
-        document.querySelector<HTMLElement>(`[data-ask="${was.id}:${was.intent}"]`)?.focus(),
+        document.querySelector<HTMLElement>(`[data-ask="${was.id}"]`)?.focus(),
       );
   };
   useEffect(() => {
@@ -452,7 +471,7 @@ export default function Team() {
                       <Th>Person</Th>
                       <Th>Role</Th>
                       <Th>Last sign-in</Th>
-                      <Th className="text-right">
+                      <Th className="w-0 text-right">
                         <span className="sr-only">Actions</span>
                       </Th>
                     </Tr>
@@ -462,11 +481,11 @@ export default function Team() {
                       <Fragment key={p.id}>
                         <Tr
                           className={cn(
-                            'block space-y-2 px-4 py-3 md:table-row md:space-y-0 md:p-0',
+                            'relative block space-y-2 px-4 py-3 md:table-row md:space-y-0 md:p-0',
                             p.disabledAt && 'text-muted-foreground',
                           )}
                         >
-                          <Td className="block md:table-cell">
+                          <Td className="block max-md:pr-10 md:table-cell">
                             {p.name}
                             {p.id === me.id ? (
                               <span className="ml-1.5 text-muted-foreground text-xs">you</span>
@@ -480,6 +499,8 @@ export default function Team() {
                           </Td>
                           <Td className="block md:table-cell">
                             <RoleForm
+                              // Saved (here or elsewhere), the row starts again from the new role.
+                              key={p.role}
                               id={p.id}
                               name={p.name}
                               role={p.role as Role}
@@ -493,35 +514,16 @@ export default function Team() {
                             </span>
                             {p.lastLoginAt ? <Ago ms={p.lastLoginAt} /> : 'Never'}
                           </Td>
-                          <Td className="block md:table-cell">
-                            {/* Disabling sits apart from the resets, so a thumb aimed at one
-                                doesn't land on the other. */}
-                            <div className="-ml-3 flex flex-wrap gap-x-5 gap-y-1.5 md:ml-0 md:justify-end md:gap-x-3">
-                              <div className="flex flex-wrap gap-1.5">
-                                <AskButton id={p.id} intent="reset" asking={asking} ask={ask}>
-                                  Reset password…
-                                </AskButton>
-                                {p.twoFactorAt && p.id !== me.id ? (
-                                  <AskButton
-                                    id={p.id}
-                                    intent="reset-two-factor"
-                                    asking={asking}
-                                    ask={ask}
-                                  >
-                                    Reset two-factor…
-                                  </AskButton>
-                                ) : null}
-                              </div>
-                              {p.id === me.id ? null : p.disabledAt ? (
-                                <AskButton id={p.id} intent="enable" asking={asking} ask={ask}>
-                                  Enable…
-                                </AskButton>
-                              ) : (
-                                <AskButton id={p.id} intent="disable" asking={asking} ask={ask}>
-                                  Disable…
-                                </AskButton>
-                              )}
-                            </div>
+                          {/* On a phone the menu sits in the person's top corner, beside their name. */}
+                          <Td className="absolute top-2 right-2 block md:static md:table-cell md:text-right">
+                            <RowActions
+                              id={p.id}
+                              name={p.name}
+                              self={p.id === me.id}
+                              twoFactor={!!p.twoFactorAt}
+                              disabled={!!p.disabledAt}
+                              ask={ask}
+                            />
                           </Td>
                         </Tr>
                         {/* The question gets its own line under the person, so their row keeps its
@@ -721,32 +723,73 @@ const ACTIONS: Record<Asked, string> = {
   enable: 'Enable',
 };
 
-/** Opens the confirmation for an action that can't be taken back. */
-function AskButton({
+/**
+ * A person's other actions, in one menu so each row has the same shape. Each opens its
+ * confirmation under the row, which takes focus; keeping returns it to this menu's button.
+ */
+export function RowActions({
   id,
-  intent,
-  asking,
+  name,
+  self,
+  twoFactor,
+  disabled,
   ask,
-  children,
 }: {
   id: string;
-  intent: Asked;
-  asking: { id: string; intent: Asked } | null;
+  name: string;
+  self: boolean;
+  twoFactor: boolean;
+  disabled: boolean;
   ask: (id: string, intent: Asked) => void;
-  children: React.ReactNode;
 }) {
-  const open = asking?.id === id && asking.intent === intent;
+  // Picking an item hands focus to the confirmation, so the menu mustn't take it back on close.
+  const picked = useRef(false);
+  const pick = (intent: Asked) => () => {
+    picked.current = true;
+    ask(id, intent);
+  };
+  // A finger gets a 44px row; a pointer keeps the menu's drawn size.
+  const item = 'touch:min-h-11';
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      type="button"
-      data-ask={`${id}:${intent}`}
-      aria-expanded={open}
-      onClick={() => ask(id, intent)}
-    >
-      {children}
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon-sm" variant="ghost" data-ask={id} aria-label={`Actions for ${name}`}>
+          <Ellipsis aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(e) => {
+          if (!picked.current) return;
+          picked.current = false;
+          e.preventDefault();
+        }}
+      >
+        <DropdownMenuItem className={item} onSelect={pick('reset')}>
+          Reset password…
+        </DropdownMenuItem>
+        {twoFactor && !self ? (
+          <DropdownMenuItem className={item} onSelect={pick('reset-two-factor')}>
+            Reset two-factor…
+          </DropdownMenuItem>
+        ) : null}
+        {/* Disabling sits apart from the resets, so a thumb aimed at one doesn't land on the other. */}
+        {self ? null : (
+          <>
+            <DropdownMenuSeparator />
+            {disabled ? (
+              <DropdownMenuItem className={item} onSelect={pick('enable')}>
+                Enable…
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem className={item} variant="destructive" onSelect={pick('disable')}>
+                Disable…
+              </DropdownMenuItem>
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

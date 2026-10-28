@@ -578,7 +578,8 @@ decides who that is.
 publisher's Ed25519 public key (base64url, the raw 32 bytes):
 `"pluginInstalls": { "publishers": { "orderloop": "…43 characters…" } }`. `renderEngine` writes it
 to the engine's `PLUGIN_PUBLISHERS`. A deployment without it has runtime installs off: the Plugins page
-shows no upload form (`pluginPublishers`, the names only, never the keys), and an upload is still
+shows no upload form but says installing from a file is off and that whoever runs the workspace
+can trust a publisher (`pluginPublishers`, the names only, never the keys), and an upload is still
 refused with `Runtime installs are off for this deployment`. Adding or rotating a key is a reviewed
 registry change ([Operations](operations.md#plugin-publishers)).
 
