@@ -26,6 +26,7 @@ import {
 import { Ago } from '~/components/ago';
 import { Confirm } from '~/components/confirm';
 import { CopyButton } from '~/components/copy-button';
+import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StepUpField } from '~/components/step-up-field';
@@ -368,14 +369,23 @@ function RoleSelect({
 export default function Team() {
   const { people, tokens, me, now, twoFactorRequired, separated, sso, scim, signInUrl, stepUp } =
     useLoaderData<typeof loader>();
-  const [newRole, setNewRole] = useState<Role>('viewer');
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
   const secret = shown && 'secret' in shown ? shown.secret : null;
   const error = shown && 'error' in shown ? shown.error : null;
   const busy = fetcher.state !== 'idle';
-  const [tokenRole, setTokenRole] = useState<Role>('viewer');
+  // Each create form closes once its secret comes back, and the page shows the secret once. A
+  // refusal (a failed step-up, an address already on the team) keeps the sheet open with what
+  // was typed. Nothing else on the page can be submitted while a sheet is open.
+  const addPerson = useFormSheet(
+    shown,
+    (r) => 'secret' in r && (r.secret as Secret).kind === 'password',
+  );
+  const addToken = useFormSheet(
+    shown,
+    (r) => 'secret' in r && (r.secret as Secret).kind === 'token',
+  );
   const secretRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef<HTMLParagraphElement>(null);
   const done = shown && 'done' in shown ? shown.done : null;
@@ -393,14 +403,16 @@ export default function Team() {
   useEffect(() => {
     if (done) doneRef.current?.focus();
   }, [done]);
-  const addPerson = useRef<HTMLFormElement>(null);
-  const addToken = useRef<HTMLFormElement>(null);
-  // A new secret takes focus (it's what to act on next) and the form that made it starts fresh.
+  // A new secret takes focus: it's what to act on next. Made in a sheet, it takes it as the sheet
+  // closes, instead of the button that opened it (`toSecret`).
   useEffect(() => {
-    if (!secret) return;
-    secretRef.current?.focus();
-    (secret.kind === 'token' ? addToken : addPerson).current?.reset();
+    if (secret) secretRef.current?.focus();
   }, [secret]);
+  const toSecret = (e: Event) => {
+    if (!secret) return;
+    e.preventDefault();
+    secretRef.current?.focus();
+  };
   if (me.kind === 'open') return <FirstAdmin error={error} />;
   return (
     <>
@@ -449,7 +461,8 @@ export default function Team() {
               </div>
             </div>
           ) : null}
-          {error ? (
+          {/* A sheet's refusal shows in the sheet, under its fields. */}
+          {error && !addPerson.open && !addToken.open ? (
             <p role="alert" className="text-destructive text-sm">
               {error}
             </p>
@@ -460,7 +473,26 @@ export default function Team() {
             </p>
           ) : null}
 
-          <Section title="People" flush>
+          <Section
+            title="People"
+            flush
+            actions={
+              <FormSheet
+                open={addPerson.open}
+                onOpenChange={addPerson.onOpenChange}
+                onCloseAutoFocus={toSecret}
+                label="Add person"
+                description="They get a temporary password, shown once, to send them with the sign-in page."
+              >
+                <AddPersonForm
+                  fetcher={fetcher}
+                  stepUp={stepUp}
+                  busy={busy}
+                  error={sheetError(addPerson.result)}
+                />
+              </FormSheet>
+            }
+          >
             {people.length ? (
               <div>
                 {/* A table on wide screens; on a phone each person stacks into a block, so the
@@ -568,39 +600,8 @@ export default function Team() {
                 </Table>
               </div>
             ) : (
-              <Empty>Nobody is on the team yet. Add the first person below.</Empty>
+              <Empty>Nobody is on the team yet.</Empty>
             )}
-            <fetcher.Form
-              ref={addPerson}
-              method="post"
-              className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem_auto]"
-            >
-              <input type="hidden" name="intent" value="add-user" />
-              <Field label="Email">
-                {/* Someone else's address: keep a password manager from offering yours. */}
-                <Input
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="off"
-                  placeholder="name@company.com"
-                />
-              </Field>
-              <Field label="Name" hint="Optional">
-                <Input name="name" autoComplete="off" />
-              </Field>
-              <Field label="Role">
-                <RoleSelect onChange={setNewRole} />
-              </Field>
-              <Button type="submit" disabled={busy}>
-                Add person
-              </Button>
-              {newRole === 'admin' ? (
-                <div className="sm:col-span-4">
-                  <StepUpField method={stepUp} next="/team" />
-                </div>
-              ) : null}
-            </fetcher.Form>
           </Section>
 
           <TwoFactorRequirementForm
@@ -622,7 +623,27 @@ export default function Team() {
 
           <ApprovalSeparationForm separated={separated} />
 
-          <Section title="API tokens" flush>
+          <Section
+            title="API tokens"
+            flush
+            actions={
+              <FormSheet
+                open={addToken.open}
+                onOpenChange={addToken.onOpenChange}
+                onCloseAutoFocus={toSecret}
+                label="Create token"
+                title="Create an API token"
+                description="For a system that calls the REST API. The token is shown once."
+              >
+                <AddTokenForm
+                  fetcher={fetcher}
+                  stepUp={stepUp}
+                  busy={busy}
+                  error={sheetError(addToken.result)}
+                />
+              </FormSheet>
+            }
+          >
             {tokens.length ? (
               <ul className="divide-y text-sm">
                 {tokens.map((t) => (
@@ -660,46 +681,6 @@ export default function Team() {
             ) : (
               <Empty>No API tokens. Systems that call the REST API need one.</Empty>
             )}
-            <fetcher.Form
-              ref={addToken}
-              method="post"
-              className="grid items-end gap-3 border-t p-4 sm:grid-cols-[minmax(0,1fr)_10rem_9rem_auto]"
-            >
-              <input type="hidden" name="intent" value="add-token" />
-              <Field label="Used by">
-                <Input name="name" required placeholder="e.g. ERP sync" />
-              </Field>
-              <Field label="Role">
-                <RoleSelect value="viewer" onChange={setTokenRole} />
-              </Field>
-              <Field label="Expires after">
-                <NativeSelect
-                  name="lifetime"
-                  defaultValue={DEFAULT_LIFETIME}
-                  className="h-9 w-full"
-                >
-                  {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
-                    <NativeSelectOption key={k} value={k}>
-                      {label}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Button type="submit" disabled={busy}>
-                Create token
-              </Button>
-              <div className="sm:col-span-4">
-                <StepUpField method={stepUp} next="/team" />
-              </div>
-              {/* The role is the boundary: say what this token will be able to do before it exists. */}
-              <p
-                className="max-w-[65ch] text-muted-foreground text-xs sm:col-span-4"
-                aria-live="polite"
-              >
-                A token with the {ROLE_LABELS[tokenRole].toLowerCase()} role:{' '}
-                {ROLE_GUIDE[tokenRole].charAt(0).toLowerCase() + ROLE_GUIDE[tokenRole].slice(1)}
-              </p>
-            </fetcher.Form>
           </Section>
         </div>
       </div>
@@ -708,6 +689,111 @@ export default function Team() {
 }
 
 type Asked = 'reset' | 'reset-two-factor' | 'disable' | 'enable';
+
+/** A refusal that came back while a create sheet was open, to show under its fields. */
+const sheetError = (r: unknown) =>
+  r && typeof r === 'object' && 'error' in r ? String(r.error) : null;
+
+/** The fields of a new person; the action checks them (`addUser`). */
+function AddPersonForm({
+  fetcher,
+  stepUp,
+  busy,
+  error,
+}: {
+  fetcher: ReturnType<typeof useFetcher<typeof action>>;
+  stepUp: StepUpMethod | null;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [role, setRole] = useState<Role>('viewer');
+  return (
+    <fetcher.Form method="post" className="grid gap-3">
+      <input type="hidden" name="intent" value="add-user" />
+      <Field label="Email">
+        {/* Someone else's address: keep a password manager from offering yours. */}
+        <Input
+          name="email"
+          type="email"
+          required
+          autoComplete="off"
+          placeholder="name@company.com"
+        />
+      </Field>
+      <Field label="Name (optional)">
+        <Input name="name" autoComplete="off" />
+      </Field>
+      <Field label="Role">
+        <RoleSelect onChange={setRole} />
+      </Field>
+      {/* Making an admin is what needs proof it's you. */}
+      {role === 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
+      {error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button type="submit" disabled={busy}>
+          Add person
+        </Button>
+      </div>
+    </fetcher.Form>
+  );
+}
+
+/** The fields of a new API token; the action checks them (`createToken`). */
+function AddTokenForm({
+  fetcher,
+  stepUp,
+  busy,
+  error,
+}: {
+  fetcher: ReturnType<typeof useFetcher<typeof action>>;
+  stepUp: StepUpMethod | null;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [role, setRole] = useState<Role>('viewer');
+  return (
+    <fetcher.Form method="post" className="grid gap-3">
+      <input type="hidden" name="intent" value="add-token" />
+      <Field label="Used by">
+        <Input name="name" required placeholder="e.g. ERP sync" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Role">
+          <RoleSelect value="viewer" onChange={setRole} />
+        </Field>
+        <Field label="Expires after">
+          <NativeSelect name="lifetime" defaultValue={DEFAULT_LIFETIME} className="h-9 w-full">
+            {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
+              <NativeSelectOption key={k} value={k}>
+                {label}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      </div>
+      {/* The role is the boundary: say what this token will be able to do before it exists. */}
+      <p className="max-w-[65ch] text-muted-foreground text-xs" aria-live="polite">
+        A token with the {ROLE_LABELS[role].toLowerCase()} role:{' '}
+        {ROLE_GUIDE[role].charAt(0).toLowerCase() + ROLE_GUIDE[role].slice(1)}
+      </p>
+      <StepUpField method={stepUp} next="/team" />
+      {error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button type="submit" disabled={busy}>
+          Create token
+        </Button>
+      </div>
+    </fetcher.Form>
+  );
+}
 
 const QUESTIONS: Record<Asked, (name: string) => string> = {
   reset: (n) => `Give ${n} a temporary password and sign them out everywhere?`,
@@ -819,7 +905,7 @@ function FirstAdmin({ error }: { error: string | null }) {
                   placeholder="name@company.com"
                 />
               </Field>
-              <Field label="Name" hint="Optional">
+              <Field label="Name (optional)">
                 <Input name="name" />
               </Field>
               <Field label="Password" hint="At least 10 characters">

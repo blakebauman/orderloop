@@ -23,6 +23,7 @@ export function FormSheet({
   label,
   title,
   description,
+  onCloseAutoFocus,
   children,
 }: {
   open: boolean;
@@ -32,6 +33,8 @@ export function FormSheet({
   /** The sheet's heading, when it says more than the button. */
   title?: string;
   description?: ReactNode;
+  /** Where focus goes as it closes, when not back to its button: `preventDefault` and move it. */
+  onCloseAutoFocus?: (e: Event) => void;
   children: ReactNode;
 }) {
   const phone = useMedia('(max-width: 639px)');
@@ -45,6 +48,7 @@ export function FormSheet({
       <SheetContent
         side={phone ? 'bottom' : 'right'}
         className="gap-0 overflow-y-auto sm:max-w-md"
+        onCloseAutoFocus={onCloseAutoFocus}
         // With no description, say so, rather than point at one that isn't there.
         {...(description ? {} : { 'aria-describedby': undefined })}
       >

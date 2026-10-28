@@ -243,7 +243,12 @@ export interface EngineRpc {
     note?: string,
   ): Promise<
     | { ok: true }
-    | { ok: false; reason: 'not_found' | 'not_waiting' | 'own_order' | 'forbidden'; error?: string }
+    | {
+        ok: false;
+        /** `no_run`: the order is recorded but the engine has no run for it to resume. */
+        reason: 'not_found' | 'no_run' | 'not_waiting' | 'own_order' | 'forbidden';
+        error?: string;
+      }
   >;
   /** `finished` when the order had already ended, so there was nothing to cancel. */
   cancel(

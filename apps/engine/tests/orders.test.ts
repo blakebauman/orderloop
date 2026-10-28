@@ -426,6 +426,33 @@ describe('cancel', () => {
     expect(await api.intakeMailboxes()).toMatchObject({ orders: 'tpl-b2b-order' });
   });
 
+  it('refuses a decision on an order recorded with no run, and decides nothing', async () => {
+    // As the volume seed writes them: a row in D1 and no OrderAgent or Workflow behind it.
+    const orderId = 'ord_norun';
+    await db().insert(orders).values({
+      id: orderId,
+      model: 'procurement',
+      status: 'waiting',
+      flowId: 'tpl-purchase-request',
+      flowVersion: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const api = new EngineApi(createExecutionContext(), env);
+    for (const decision of ['approved', 'rejected'] as const)
+      expect(await api.decide(orderId, 'mgr', decision, await apiActor(orderId))).toEqual({
+        ok: false,
+        reason: 'no_run',
+      });
+    // Asking didn't start one.
+    expect((await state(orderId)).orderId).toBeFalsy();
+    // An order D1 has never heard of is still just not found.
+    expect(await api.decide('ord_never', 'mgr', 'approved', await apiActor('ord_never'))).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+  });
+
   it('keeps whoever started an order from deciding it, once the workspace separates duties', async () => {
     await introspect();
     const api = new EngineApi(createExecutionContext(), env);

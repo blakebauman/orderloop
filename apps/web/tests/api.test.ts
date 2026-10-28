@@ -166,13 +166,19 @@ describe('order actions over REST', () => {
     for (const fn of Object.values(engine)) fn.mockReset();
   });
 
-  it('answers 404 for an unknown order and 409 for a step that is not waiting', async () => {
+  it('answers 404 for an unknown order, 409 for a step not waiting or an order with no run', async () => {
     engine.decide.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
     expect((await post('orders/ord_x/approvals/mgr', { decision: 'approved' })).status).toBe(404);
     engine.decide.mockResolvedValueOnce({ ok: false, reason: 'not_waiting' });
     const busy = await post('orders/ord_x/approvals/mgr', { decision: 'approved' });
     expect(busy.status).toBe(409);
     expect(await busy.json()).toEqual({ error: 'mgr is not waiting for an approval' });
+    engine.decide.mockResolvedValueOnce({ ok: false, reason: 'no_run' });
+    const recorded = await post('orders/ord_x/approvals/mgr', { decision: 'approved' });
+    expect(recorded.status).toBe(409);
+    expect(await recorded.json()).toEqual({
+      error: 'The order has no live run, so its approvals can’t be decided',
+    });
     engine.decide.mockResolvedValueOnce({ ok: true });
     expect((await post('orders/ord_x/approvals/mgr', { decision: 'approved' })).status).toBe(200);
   });

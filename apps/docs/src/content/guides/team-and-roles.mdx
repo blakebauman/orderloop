@@ -57,7 +57,7 @@ people, revoking tokens and the approvals setting don't ask: they take access aw
 hand it out. A wrong answer is refused,
 counted against the same limit as other step-ups and audited as `auth.step_up_failed`.
 
-- **Add person:** email, optional name and role. The page shows a generated 20-character
+- **Add person** (beside **People**): email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
   privately.
 - **Role:** pick a new one and **Save** appears beside it. You can't lower your own role. Lowering
@@ -298,7 +298,7 @@ Systems that call the [REST API](/reference/rest-api/) use a token:
 curl https://orderloop.app/api/v1/orders -H "Authorization: Bearer ol_live_…"
 ```
 
-Create one on the Team page with a name (what will use it), a role (`viewer` is preselected) and how long it lasts: 30 days,
+Create one on the Team page with **Create token** (beside **API tokens**), giving a name (what will use it), a role (`viewer` is preselected) and how long it lasts: 30 days,
 90 days (the default) or 1 year. Every token expires. The token is shown once and stored only as a hash; the
 list shows its first 12 characters, who created it, when it was last used and when it expires,
 highlighting tokens that expire within 14 days. Revoke it there. An expired token gets `401` with

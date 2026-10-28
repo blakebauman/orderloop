@@ -6,13 +6,16 @@
 import { ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
+import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader } from '~/components/page';
 import { type Tone, ToneBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
+import { cartOpens } from '~/lib/carts';
 import { cartFlows, isCartStatus, listCarts } from '~/lib/carts.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
@@ -31,12 +34,15 @@ const STATUS_LABELS = {
 } as const;
 type CartStatus = keyof typeof STATUS_LABELS;
 
-/** An open or locked cart waits on its buyer; submitted and returned ones are done with. */
+/**
+ * An open or locked cart waits on its buyer; a submitted one became an order. Returned (sent back
+ * to the buyer's system) and cancelled ones are over without succeeding at anything, so neutral.
+ */
 const CART_TONE: Record<CartStatus, Tone> = {
   open: 'wait',
   locked: 'wait',
   submitted: 'ok',
-  returned: 'ok',
+  returned: 'idle',
   canceled: 'idle',
 };
 
@@ -50,7 +56,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     commerceData(),
   ]);
   return {
-    carts: rows,
+    // A row with no CartAgent behind it would open on "Not found": listed, but not linked.
+    carts: rows.map((c) => ({ ...c, opens: cartOpens(c.id) })),
     names: await customerNames(rows.map((c) => c.customerId)),
     flows,
     customers: office.customers.map(({ id, name }) => ({ id, name })),
@@ -77,69 +84,29 @@ export default function Carts() {
   const busy = useNavigation().state === 'submitting';
   const canOperate = useCan('operator');
 
+  // A new cart's page opens once it's made, so success never comes back here; a refusal keeps the
+  // sheet open with what was typed.
+  const sheet = useFormSheet(result, () => false);
+
   return (
     <>
       <PageHeader
         title="Carts"
         subtitle="Build an order together: everyone with a cart open sees each change as it happens, and it is priced by its flow before it is submitted."
+        actions={
+          canOperate ? (
+            <FormSheet open={sheet.open} onOpenChange={sheet.onOpenChange} label="New cart">
+              <NewCart
+                flows={flows}
+                customers={customers}
+                error={sheet.result?.error ?? null}
+                busy={busy}
+              />
+            </FormSheet>
+          ) : null
+        }
       />
       <Body className="grid gap-4">
-        {canOperate ? (
-          <Form method="post" className="flex flex-wrap items-end gap-2 card p-4">
-            <div className="grid gap-1 text-sm">
-              <label htmlFor="cart-title" className="caption">
-                Title
-              </label>
-              <Input
-                id="cart-title"
-                name="title"
-                required
-                maxLength={120}
-                placeholder="Q4 restock"
-                className="h-8 w-64"
-              />
-            </div>
-            <div className="grid gap-1 text-sm">
-              <label htmlFor="cart-flow" className="caption">
-                Flow
-              </label>
-              <NativeSelect id="cart-flow" name="flowId" required className="h-8 w-56">
-                {flows.map((f) => (
-                  <NativeSelectOption key={f.id} value={f.id}>
-                    {f.name} · {ORDER_MODEL_LABELS[f.model as OrderModel] ?? f.model}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className="grid gap-1 text-sm">
-              <label htmlFor="cart-customer" className="caption">
-                Customer
-              </label>
-              <NativeSelect id="cart-customer" name="customerId" className="h-8 w-56">
-                <NativeSelectOption value="">No customer</NativeSelectOption>
-                {customers.map((c) => (
-                  <NativeSelectOption key={c.id} value={c.id}>
-                    {c.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <Button type="submit" size="sm" disabled={busy || !flows.length}>
-              New cart
-            </Button>
-            {!flows.length ? (
-              <p className="w-full text-muted-foreground text-xs">
-                Publish a flow with a Price lines step to open carts on it.
-              </p>
-            ) : null}
-            {result?.error ? (
-              <p role="alert" className="w-full text-bad text-sm">
-                {result.error}
-              </p>
-            ) : null}
-          </Form>
-        ) : null}
-
         <nav aria-label="Filter by status" className="flex flex-wrap gap-1 text-sm">
           <FilterLink to="/carts" active={!status}>
             All
@@ -164,18 +131,30 @@ export default function Carts() {
               </TableHead>
               <TableBody>
                 {carts.map((c) => (
-                  // On a phone the row is a card, and the whole card opens the cart.
+                  // On a phone the row is a card, and the whole card opens the cart (if it opens).
                   <Tr
                     key={c.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-muted/40 max-md:relative max-md:active:bg-muted/60 md:table-row md:p-0"
+                    className={cn(
+                      'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 max-md:relative md:table-row md:p-0',
+                      c.opens && 'hover:bg-muted/40 max-md:active:bg-muted/60',
+                    )}
                   >
                     <Td className="min-w-0">
-                      <Link
-                        to={`/carts/${c.id}`}
-                        className="font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
-                      >
-                        {c.title}
-                      </Link>
+                      {c.opens ? (
+                        <Link
+                          to={`/carts/${c.id}`}
+                          className="font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
+                        >
+                          {c.title}
+                        </Link>
+                      ) : (
+                        <>
+                          <span className="font-medium">{c.title}</span>
+                          <div className="text-muted-foreground text-xs">
+                            Recorded only: no live cart to open.
+                          </div>
+                        </>
+                      )}
                       {c.orderId ? (
                         <div className="text-muted-foreground text-xs">
                           Became{' '}
@@ -214,6 +193,77 @@ export default function Carts() {
         )}
       </Body>
     </>
+  );
+}
+
+/** The fields of a new cart; the engine checks them (`createCart`). */
+function NewCart({
+  flows,
+  customers,
+  error,
+  busy,
+}: {
+  flows: { id: string; name: string; model: string }[];
+  customers: { id: string; name: string }[];
+  error: string | null;
+  busy: boolean;
+}) {
+  return (
+    <Form method="post" className="grid gap-3 text-sm">
+      <div className="grid gap-1">
+        <label htmlFor="cart-title" className="caption">
+          Title
+        </label>
+        <Input
+          id="cart-title"
+          name="title"
+          required
+          maxLength={120}
+          placeholder="Q4 restock"
+          className="h-8"
+        />
+      </div>
+      <div className="grid gap-1">
+        <label htmlFor="cart-flow" className="caption">
+          Flow
+        </label>
+        <NativeSelect id="cart-flow" name="flowId" required className="h-8 w-full">
+          {flows.map((f) => (
+            <NativeSelectOption key={f.id} value={f.id}>
+              {f.name} · {ORDER_MODEL_LABELS[f.model as OrderModel] ?? f.model}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </div>
+      <div className="grid gap-1">
+        <label htmlFor="cart-customer" className="caption">
+          Customer
+        </label>
+        <NativeSelect id="cart-customer" name="customerId" className="h-8 w-full">
+          <NativeSelectOption value="">No customer</NativeSelectOption>
+          {customers.map((c) => (
+            <NativeSelectOption key={c.id} value={c.id}>
+              {c.name}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </div>
+      {!flows.length ? (
+        <p className="text-muted-foreground text-xs">
+          Publish a flow with a Price lines step to open carts on it.
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-bad">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button type="submit" size="sm" disabled={busy || !flows.length}>
+          Open cart
+        </Button>
+      </div>
+    </Form>
   );
 }
 
