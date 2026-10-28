@@ -59,6 +59,13 @@ export function varsSummary(vars: Record<string, unknown>): string {
   return words.join(', ') || 'Nothing set';
 }
 
+/**
+ * Why a line can't be bought in the quantity asked: "Organic cotton tee is out of stock" when none
+ * is left, else "Only 2 of Organic cotton tee are available".
+ */
+export const stockShort = (name: string, available: number): string =>
+  available > 0 ? `Only ${available} of ${name} are available.` : `${name} is out of stock.`;
+
 /** "next_cycle" → "Next cycle". */
 const sentenceCase = (s: string) => {
   const t = s.replace(/[_-]+/g, ' ').trim();

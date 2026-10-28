@@ -9,7 +9,7 @@ import type { NodeCategory, NodeRun } from '@orderloop/core';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';
 import { memo } from 'react';
-import { statusColor, statusLabel } from '~/lib/format';
+import { plainSummary, statusColor, statusLabel } from '~/lib/format';
 import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
@@ -65,6 +65,8 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
         : statusColor(shown);
   const live = status === 'running' || status === 'waiting';
   const tags = [spec?.rollback ? 'undo' : null, spec?.waits ? 'waits' : null].filter(Boolean);
+  const note =
+    data.run?.error ?? data.issue ?? (data.run?.summary ? plainSummary(data.run.summary) : null);
 
   return (
     <div
@@ -138,15 +140,15 @@ function FlowNodeCard({ id, data, selected, draggable }: NodeProps<FlowRfNode>) 
         <div className="truncate font-mono text-2xs text-[var(--muted-foreground)]">{id}</div>
       </div>
 
-      {data.run?.summary || data.run?.error || data.issue ? (
+      {note ? (
         <div
           className={cn(
             'mx-3 mt-1.5 line-clamp-2 border-[var(--rule)] border-t border-dashed pt-1 text-[12px] text-[var(--muted-foreground)] leading-snug',
             (data.run?.error || data.issue) && 'text-[var(--bad)]',
           )}
-          title={data.run?.error ?? data.issue ?? data.run?.summary}
+          title={note}
         >
-          {data.run?.error ?? data.issue ?? data.run?.summary}
+          {note}
         </div>
       ) : null}
 

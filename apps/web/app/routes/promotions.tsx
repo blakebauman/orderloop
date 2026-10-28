@@ -16,7 +16,7 @@ import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { ToneBadge } from '~/components/status';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
-import { dateTime, money } from '~/lib/format';
+import { dateTime, money, plural } from '~/lib/format';
 import { customerNames } from '~/lib/orders.server';
 import { promotionState } from '~/lib/promotions';
 import {
@@ -127,13 +127,13 @@ export default function Promotions() {
                   const state = promotionState(p, now);
                   const limits: ReactNode[] = [
                     p.minSubtotal ? `over ${money(p.minSubtotal)}` : null,
-                    p.skus ? `${JSON.parse(p.skus).length} SKUs` : null,
+                    p.skus ? plural(JSON.parse(p.skus).length, 'SKU') : null,
                     p.customerId ? (
                       <Link to={`/customers/${p.customerId}`} className="text-link hover:underline">
                         {customers[p.customerId] ?? p.customerId}
                       </Link>
                     ) : null,
-                    p.maxRedemptions ? `${p.maxRedemptions} uses` : null,
+                    p.maxRedemptions ? plural(p.maxRedemptions, 'use') : null,
                     p.perCustomerLimit ? `${p.perCustomerLimit} per customer` : null,
                     p.validTo
                       ? `${state === 'ended' ? 'ended' : 'until'} ${dateTime(p.validTo, 'UTC')}`

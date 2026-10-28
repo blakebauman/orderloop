@@ -1240,10 +1240,10 @@ function Promos({
             aria-label="Promotion code"
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="WELCOME15"
+            placeholder="Code"
             maxLength={32}
             autoCapitalize="characters"
-            className="h-8 w-44 font-mono uppercase"
+            className="h-8 w-44 font-mono uppercase placeholder:font-sans placeholder:normal-case"
           />
           <Button type="submit" size="sm" variant="outline" disabled={!code.trim()}>
             Apply

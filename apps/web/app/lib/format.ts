@@ -233,19 +233,35 @@ const EVENT_KEY = /([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)/;
 /** An event key in words, for where no step names it: "return.requested" → "Return requested". */
 export const eventName = (key: string) => humanize(key.replace(/\./g, ' '));
 
+const EMPTY = new Set(['null', 'undefined', '']);
+
 /**
  * A step's variables as a `control.set` step reports them ("cycle=2, year=null"), in words:
- * "Cycle 2". A variable with no value is left out; null when the text isn't such a list.
+ * "Cycle 2". A variable with no value is left out; null when the text isn't such a list. Text
+ * already in words that still names an empty value ("Cycle 0, Year null") loses that value too.
  */
 export function plainVars(s: string): string | null {
-  const pairs = s.split(', ').map((p) => /^([A-Za-z_]\w*)=(.*)$/.exec(p));
-  if (!pairs.every(Boolean)) return null;
-  const words = pairs
-    .map((m) => [m![1]!, m![2]!.replace(/^"(.*)"$/, '$1')] as const)
-    .filter(([, v]) => v !== 'null' && v !== '' && v !== 'undefined')
-    .map(([k, v]) => `${humanize(k)} ${v}`);
-  return words.join(', ') || 'Nothing set';
+  const parts = s.split(', ');
+  const pairs = parts.map((p) => /^([A-Za-z_]\w*)=(.*)$/.exec(p));
+  if (pairs.every(Boolean)) {
+    const words = pairs
+      .map((m) => [m![1]!, m![2]!.replace(/^"(.*)"$/, '$1')] as const)
+      .filter(([, v]) => !EMPTY.has(v))
+      .map(([k, v]) => `${humanize(k)} ${v}`);
+    return words.join(', ') || 'Nothing set';
+  }
+  const named = parts.map((p) => /^([A-Z][a-z]*(?: [a-z]+)*) (\S+)$/.exec(p));
+  if (!named.every(Boolean) || !named.some((m) => EMPTY.has(m![2]!))) return null;
+  return (
+    named
+      .filter((m) => !EMPTY.has(m![2]!))
+      .map((m) => m![0])
+      .join(', ') || 'Nothing set'
+  );
 }
+
+/** A step's last summary as the graph and inspector show it: its variables in words, if it is a list of them. */
+export const plainSummary = (s: string) => plainVars(s.trim()) ?? s;
 
 /**
  * Engine log lines in operator words: drops ids ("ord_…", "cus_…"), names assignees in

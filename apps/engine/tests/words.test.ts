@@ -5,6 +5,7 @@ import {
   orderReason,
   plural,
   REASON_MAX,
+  stockShort,
   varsSummary,
 } from '../src/words';
 
@@ -61,5 +62,10 @@ describe('order reasons', () => {
     expect(varsSummary({ cycle: 0, year: null })).toBe('Cycle 0');
     expect(varsSummary({ next_tier: 'gold', limit: 5 })).toBe('Next tier gold, Limit 5');
     expect(varsSummary({ year: null })).toBe('Nothing set');
+  });
+
+  it('says a line is out of stock rather than "only 0"', () => {
+    expect(stockShort('Organic cotton tee', 0)).toBe('Organic cotton tee is out of stock.');
+    expect(stockShort('Organic cotton tee', 2)).toBe('Only 2 of Organic cotton tee are available.');
   });
 });

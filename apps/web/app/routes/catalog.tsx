@@ -31,7 +31,13 @@ import { ProductSheetView } from '~/components/catalog/sheet';
 import { CATALOG_ACTION, refusal, useCatalogAction } from '~/components/catalog/use-action';
 import { Body, Empty, PageHeader } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
-import { type BoardView, type CardPage, loadBoard, loadSheet } from '~/lib/catalog-board.server';
+import {
+  attributeLabels,
+  type BoardView,
+  type CardPage,
+  loadBoard,
+  loadSheet,
+} from '~/lib/catalog-board.server';
 import { count } from '~/lib/format';
 import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
@@ -43,7 +49,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const key = new URL(request.url).searchParams.get('product');
   const [board, sheet] = await Promise.all([loadBoard(), key ? loadSheet(key) : null]);
-  return { board, sheet, missing: key && !sheet ? key : null };
+  const labels = sheet ? await attributeLabels(sheet.product.type) : {};
+  return { board, sheet, attributeLabels: labels, missing: key && !sheet ? key : null };
 }
 
 /** Each column's mark: the status it is, or none. Green is for live only. */
@@ -58,7 +65,7 @@ const COLUMN_DOT: Record<BoardColumn, string | null> = {
 const REFRESH_MS = 20_000;
 
 export default function Catalog() {
-  const { board, sheet, missing } = useLoaderData<typeof loader>();
+  const { board, sheet, attributeLabels: labels, missing } = useLoaderData<typeof loader>();
   const canEdit = useCan('operator');
   const [params, setParams] = useSearchParams();
   const { revalidate } = useRevalidator();
@@ -169,7 +176,13 @@ export default function Catalog() {
         )}
       </Body>
       {sheet ? (
-        <ProductSheetView key={sheet.product.key} sheet={sheet} canEdit={canEdit} onClose={close} />
+        <ProductSheetView
+          key={sheet.product.key}
+          sheet={sheet}
+          attributeLabels={labels}
+          canEdit={canEdit}
+          onClose={close}
+        />
       ) : null}
       {missing ? (
         <p role="alert" className="sr-only">

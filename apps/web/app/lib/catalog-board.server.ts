@@ -86,6 +86,21 @@ export async function loadCards(
 export const loadSheet = (key: string): Promise<ProductSheet | null> =>
   catalog().getProductSheet(key);
 
+/**
+ * The labels a product type gives its attributes, by code, in English where it has one. Types only
+ * add attributes between versions, so the latest version names every code a product of it uses.
+ */
+export async function attributeLabels(type: string): Promise<Record<string, string>> {
+  const code = type.split('@')[0];
+  const def = (await catalog().listTypes()).find((t) => t.code === code);
+  const labels: Record<string, string> = {};
+  for (const a of def?.attributes ?? []) {
+    const label = a.label?.en ?? Object.values(a.label ?? {})[0];
+    if (label) labels[a.code] = label;
+  }
+  return labels;
+}
+
 const by = (me: Principal) => me.email ?? me.id;
 
 /** Stages edits as `me`; answers per edit. Accepting a draft is staging it with `source: 'assistant'`. */

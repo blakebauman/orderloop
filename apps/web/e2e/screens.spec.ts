@@ -107,6 +107,38 @@ test('below lg the order page shows one view at a time', async ({ page }, info) 
   }).toPass({ timeout: 40_000 });
 });
 
+test('on an iPhone a long-titled order fits the screen, and Cancel order is in the ⋯ menu', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'iphone', 'iPhone upright');
+  test.setTimeout(60_000);
+  await open(page, '/orders/scenarios');
+  // A purchase request waits on approvals, so it stays cancellable while the test looks.
+  await page.getByRole('button', { name: 'Run Purchase request' }).click();
+  await expect(page).toHaveURL(/\/orders\/ord_/, { timeout: 30_000 });
+  const title = page.locator('h1').first();
+  await expect(title).toContainText('Laptops for the new support team');
+  const [scroll, width] = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(scroll, `page is ${scroll}px wide in a ${width}px viewport`).toBeLessThanOrEqual(width);
+  // The title wraps rather than truncating: nothing of it is cut off.
+  const cut = await title
+    .locator('span')
+    .first()
+    .evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(cut).toBe(false);
+  await expect(page.getByRole('button', { name: 'Cancel order' })).toBeHidden();
+  await page.getByRole('button', { name: 'More order actions' }).tap();
+  await page.getByRole('menuitem', { name: 'Cancel order…' }).tap();
+  // The same inline confirmation as the desktop's button, with its reason field focused.
+  await expect(page.getByText('Cancel this order?')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /Reason/ })).toBeFocused();
+  await page.getByRole('button', { name: 'Keep order' }).tap();
+  await expect(page.getByText('Cancel this order?')).toHaveCount(0);
+});
+
 test('the assistant composer stays above the on-screen keyboard', async ({ page }, info) => {
   test.skip(info.project.name !== 'iphone', 'iPhone upright');
   await installKeyboard(page);

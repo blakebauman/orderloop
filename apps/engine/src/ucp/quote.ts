@@ -27,6 +27,7 @@ import {
 import { getProducts } from '../connectors';
 import { EXECUTORS } from '../nodes';
 import { providerOfError } from '../providers';
+import { stockShort } from '../words';
 
 export type Quoted = { quote: CheckoutQuote | null; issues: CheckoutIssue[] };
 
@@ -113,7 +114,7 @@ export async function quoteCheckout(
       issues.push(
         issue(
           'out_of_stock',
-          `Only ${Math.max(0, p.stock - p.reserved)} of ${p.name} are available.`,
+          stockShort(p.name, Math.max(0, p.stock - p.reserved)),
           `$.line_items[${i}].quantity`,
         ),
       );

@@ -316,6 +316,9 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
   same URL parameters as the bar's from md.
 - **Order page:** at lg the graph sits beside Actions, Activity, Details and Node. Below lg the
   graph is a tab of its own, so each view has the screen and the page is the one scroll region.
+  Its header's title wraps; the totals ("N lines · tax") stay on one line and, with Ask and Share,
+  wrap below the title as a group. Below md Cancel order moves into a ghost `⋯` menu ("More order
+  actions") at the group's end, opening the same Cancel panel under the header.
 - **Tables:** below md, `table-stack` makes each row a card: its first cell on a line of its own,
   the others wrapping beneath it, each named by its `data-label`. A table that already fits keeps
   its rows.
