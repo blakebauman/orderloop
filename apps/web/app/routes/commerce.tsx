@@ -6,6 +6,14 @@ import {
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableEmpty, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Check, Mail, RefreshCw, Zap } from 'lucide-react';
@@ -273,6 +281,7 @@ export default function Commerce() {
         <Section
           id="outside-events"
           title="Outside events"
+          description="Orders waiting for an outside event, such as a payment or a delivery."
           className="xl:col-span-2"
           actions={
             partial ? (
@@ -287,10 +296,9 @@ export default function Commerce() {
               />
             ) : null
           }
-          flush
         >
           {events.length ? (
-            <ul className="divide-y">
+            <ul className="flex flex-col gap-2">
               {events.map((e) => (
                 <EventRow
                   key={eventKey(e)}
@@ -309,7 +317,7 @@ export default function Commerce() {
             </Empty>
           )}
           {partial ? (
-            <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
+            <p className="mt-3 text-muted-foreground text-xs">
               <span className="block max-w-measure">
                 Showing the {shownOrders} most recently updated of {count(waitingTotal)} orders
                 waiting on an outside event.{' '}
@@ -322,97 +330,101 @@ export default function Commerce() {
           ) : null}
         </Section>
         <Records records={records} q={q} />
-        <Section id="email-intake" title="Email intake" className="xl:col-span-2" flush>
-          <div className="flex items-start gap-3 border-b px-4 py-2.5 text-sm">
-            <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0 space-y-1">
-              <ul className="flex flex-wrap gap-x-5 gap-y-1">
-                {mailboxes.map((m) => (
-                  <li key={m.address} className="min-w-0">
-                    <a
-                      href={`mailto:${m.address}`}
-                      className="break-all font-mono text-link hover:underline"
-                    >
-                      {m.address}
-                    </a>{' '}
-                    <span className="text-muted-foreground">
-                      starts{' '}
-                      <Link
-                        to={`/flows/${m.flowId}`}
-                        className="hover:text-foreground hover:underline"
+        <Section
+          id="email-intake"
+          title="Email intake"
+          description="Mail is accepted from customers’ own addresses, their company domains and senders an administrator has allowed."
+          className="xl:col-span-2"
+        >
+          {/* Each address and the flow it starts; then what arrived, newest first. */}
+          <ul className="grid gap-2 md:grid-cols-2">
+            {mailboxes.map((m) => (
+              <Item asChild key={m.address} variant="muted" size="sm" className="min-w-0">
+                <li>
+                  <ItemMedia variant="icon">
+                    <Mail className="text-muted-foreground" aria-hidden="true" />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="w-full">
+                      <a
+                        href={`mailto:${m.address}`}
+                        className="break-all font-mono font-normal text-link hover:underline"
                       >
+                        {m.address}
+                      </a>
+                    </ItemTitle>
+                    <ItemDescription>
+                      starts{' '}
+                      <Link to={`/flows/${m.flowId}`} className="hover:text-foreground">
                         {m.flowName ?? m.flowId}
                       </Link>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="max-w-measure text-muted-foreground text-xs">
-                Mail is accepted from customers’ own addresses, their company domains and senders an
-                administrator has allowed.
-              </p>
-            </div>
-          </div>
-          {emails.length ? (
-            <ul className="divide-y">
-              {emails.map((e) => (
-                <li
-                  key={e.id}
-                  className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm"
-                >
-                  <span
-                    className={`w-20 shrink-0 font-medium text-xs ${
-                      e.status === 'accepted'
-                        ? 'text-ok'
-                        : e.status === 'duplicate'
-                          ? 'text-muted-foreground'
-                          : 'text-bad'
-                    }`}
-                  >
-                    {humanize(e.status)}
-                  </span>
-                  <span className="min-w-0 flex-1 basis-56">
-                    <span className="font-medium">{e.subject || '(no subject)'}</span>{' '}
-                    <span className="break-words text-muted-foreground">
-                      from {e.sender} to {e.mailbox}
-                      {e.attachments ? ` · ${plural(e.attachments, 'attachment')}` : ''}
-                      {e.reason ? ` · ${e.reason}` : ''}
-                    </span>
-                  </span>
-                  <span className="ml-auto flex shrink-0 items-baseline gap-3 text-xs">
-                    {e.orderId ? (
-                      <Link
-                        to={`/orders/${e.orderId}`}
-                        className="font-mono text-link hover:underline"
-                      >
-                        {orderRef(e.orderId)}
-                      </Link>
-                    ) : null}
-                    <span className="text-muted-foreground">
-                      <Ago ms={e.receivedAt} />
-                    </span>
-                  </span>
+                    </ItemDescription>
+                  </ItemContent>
                 </li>
+              </Item>
+            ))}
+          </ul>
+          {emails.length ? (
+            <ul className="-mx-2 mt-3 flex flex-col gap-1">
+              {emails.map((e) => (
+                <Item
+                  asChild
+                  key={e.id}
+                  size="xs"
+                  className="flex-nowrap items-start px-2 hover:bg-muted/60 max-sm:flex-wrap"
+                >
+                  <li>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="line-clamp-none w-full flex-wrap gap-x-2 gap-y-0">
+                        <span
+                          className={`font-medium text-xs ${
+                            e.status === 'accepted'
+                              ? 'text-ok'
+                              : e.status === 'duplicate'
+                                ? 'text-muted-foreground'
+                                : 'text-bad'
+                          }`}
+                        >
+                          {humanize(e.status)}
+                        </span>
+                        <span className="min-w-0 break-words">{e.subject || '(no subject)'}</span>
+                      </ItemTitle>
+                      <ItemDescription className="line-clamp-none break-words text-xs">
+                        from {e.sender} to {e.mailbox}
+                        {e.attachments ? ` · ${plural(e.attachments, 'attachment')}` : ''}
+                        {e.reason ? ` · ${e.reason}` : ''}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions className="shrink-0 items-baseline gap-3 self-start text-xs">
+                      {e.orderId ? (
+                        <Link
+                          to={`/orders/${e.orderId}`}
+                          className="font-mono text-link hover:underline"
+                        >
+                          {orderRef(e.orderId)}
+                        </Link>
+                      ) : null}
+                      <span className="text-muted-foreground">
+                        <Ago ms={e.receivedAt} />
+                      </span>
+                    </ItemActions>
+                  </li>
+                </Item>
               ))}
             </ul>
           ) : (
-            <Empty>
+            <p className="mt-3 text-muted-foreground text-sm">
               No email received yet. Send a purchase order to one of the addresses above.
-            </Empty>
+            </p>
           )}
         </Section>
         <Section
           id="stock"
           title="Inventory"
+          description="Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from the store. Reserved stock is held by running orders."
           actions={<Total list={inventory} noun="item" />}
           flush
         >
-          <p className="border-b px-4 py-2 text-muted-foreground text-xs">
-            <span className="block max-w-measure">
-              Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws
-              from the store. Reserved stock is held by running orders.
-            </span>
-          </p>
           {inventory.total || q ? (
             <Table stack="cards" scroll caption="Inventory">
               <TableHead>
@@ -492,7 +504,12 @@ export default function Commerce() {
         {/* Inventory runs long; Stores and Sellers stack beside it, so the two columns end near
             each other. Customers, as long again, takes the full width below Pricing. */}
         <div className="grid min-w-0 content-start gap-6">
-          <Section id="stores" title="Stores" flush>
+          <Section
+            id="stores"
+            title="Stores"
+            description="Each store’s own stock, for pickup and store sales."
+            flush
+          >
             {stores.length ? (
               <Table stack="cards" scroll caption="Stores">
                 <TableHead>
@@ -575,6 +592,7 @@ export default function Commerce() {
           <Section
             id="sellers"
             title="Marketplace sellers"
+            description="Who sells through the marketplace, and how each accepts orders."
             actions={<Total list={sellers} noun="seller" />}
             flush
           >
@@ -624,6 +642,7 @@ export default function Commerce() {
         <Section
           id="customers"
           title="Customers"
+          description="Each customer’s terms, balance and credit limit."
           className="xl:col-span-2"
           actions={<Total list={customers} noun="customer" />}
           flush
@@ -786,12 +805,18 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
   const rows = records[kind];
   const tablistId = useId();
   return (
-    <Section id="records" title="Records" className="xl:col-span-2" flush>
+    <Section
+      id="records"
+      title="Records"
+      description="What orders did to the outside world, by kind, newest first."
+      className="xl:col-span-2"
+      flush
+    >
       <div
         role="tablist"
         aria-label="Kinds of record"
         id={tablistId}
-        className="flex flex-wrap gap-1 border-b px-3 py-2"
+        className="mx-(--card-spacing) my-3 flex w-fit max-w-[calc(100%-2*var(--card-spacing))] flex-wrap gap-1 rounded-3xl bg-muted p-1"
       >
         {RECORD_KINDS.map((k) => (
           <button
@@ -803,10 +828,10 @@ function Records({ records, q }: { records: Record<RecordKind, RecordRow[]>; q: 
             aria-controls={`${tablistId}-panel`}
             onClick={() => setKind(k.id)}
             className={cn(
-              'min-h-8 rounded-md px-2.5 py-1 text-ui',
+              'hit-area min-h-7 rounded-full border border-transparent px-3 py-1 text-ui outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
               kind === k.id
-                ? 'bg-primary font-medium text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                ? 'bg-background font-medium text-foreground shadow-sm dark:bg-input/30'
+                : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {k.label}{' '}
@@ -958,8 +983,11 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
   const label = eventAction(e.event);
 
   return (
-    <li
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5"
+    <Item
+      asChild
+      variant="muted"
+      size="sm"
+      className="gap-x-4 gap-y-2"
       onKeyDown={(k) => {
         if (pendingAt !== null && k.key === 'Escape') {
           k.preventDefault();
@@ -967,87 +995,91 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
         }
       }}
     >
-      <div className="min-w-0 flex-1 basis-64 text-sm">
-        <Link id={titleId} to={`/orders/${e.orderId}`} className="font-medium hover:underline">
-          {e.title || 'Order'}{' '}
-          <span className="font-mono font-normal text-muted-foreground text-xs">
-            ref {e.orderId.slice(-6)}
-          </span>
-        </Link>
-        <p id={waitId} className="text-muted-foreground">
-          <WaitingAt
-            at={`Waits for ${eventWaiting(e.event)}`}
-            since={e.since}
-            on={null}
-            due={e.due}
-          />
-        </p>
-        {e.customer || e.amount ? (
-          <p className="text-muted-foreground text-xs tabular">
-            {[e.customer, e.amount ? money(e.amount, e.currency) : null]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-        ) : null}
-        {f.data?.error ? (
-          <p className="mt-1 text-bad text-sm" role="alert">
-            {f.data.error}
-          </p>
-        ) : null}
-        {missed ? (
-          <p className="mt-1 text-sm" role="status">
-            Nothing was recorded: the order had already stopped waiting for this. It may have
-            arrived from a connected system. Open the order to see where it is now.
-          </p>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-2 text-sm">
-        {!canOperate ? (
-          <span className="text-muted-foreground text-xs">An operator records this.</span>
-        ) : e.event === 'seller.responded' ? (
-          // Each seller answers for their own part; the order page asks per seller.
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/orders/${e.orderId}`} aria-describedby={`${titleId} ${waitId}`}>
-              Answer per seller
-            </Link>
-          </Button>
-        ) : delivered ? (
-          <span role="status" className="inline-flex items-center gap-1.5 font-medium text-ok">
-            <Check className="size-4" aria-hidden="true" /> Recorded
-          </span>
-        ) : missed ? null : pendingAt !== null ? (
-          <div className="flex items-center gap-3">
-            {/* Said once; the ticking number stays out of the live region. */}
-            <span className="sr-only" role="status">
-              {label} in {UNDO_MS / 1000} seconds. Press Undo or Escape to take it back.
-            </span>
-            <span aria-hidden="true">
-              {label} in{' '}
-              <span className="tabular" suppressHydrationWarning>
-                {Math.max(1, Math.ceil((pendingAt + UNDO_MS - now) / 1000))}s
+      <li>
+        <ItemContent className="min-w-0 basis-64">
+          <ItemTitle className="line-clamp-none">
+            <Link id={titleId} to={`/orders/${e.orderId}`} className="hover:underline">
+              {e.title || 'Order'}{' '}
+              <span className="font-mono font-normal text-muted-foreground text-xs">
+                ref {e.orderId.slice(-6)}
               </span>
-            </span>
-            <Button size="sm" variant="outline" onClick={undo} autoFocus>
-              Undo
+            </Link>
+          </ItemTitle>
+          <p id={waitId} className="text-muted-foreground">
+            <WaitingAt
+              at={`Waits for ${eventWaiting(e.event)}`}
+              since={e.since}
+              on={null}
+              due={e.due}
+            />
+          </p>
+          {e.customer || e.amount ? (
+            <p className="text-muted-foreground text-xs tabular">
+              {[e.customer, e.amount ? money(e.amount, e.currency) : null]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          ) : null}
+          {f.data?.error ? (
+            <p className="mt-1 text-bad text-sm" role="alert">
+              {f.data.error}
+            </p>
+          ) : null}
+          {missed ? (
+            <p className="mt-1 text-sm" role="status">
+              Nothing was recorded: the order had already stopped waiting for this. It may have
+              arrived from a connected system. Open the order to see where it is now.
+            </p>
+          ) : null}
+        </ItemContent>
+        <ItemActions className="shrink-0">
+          {!canOperate ? (
+            <span className="text-muted-foreground text-xs">An operator records this.</span>
+          ) : e.event === 'seller.responded' ? (
+            // Each seller answers for their own part; the order page asks per seller.
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/orders/${e.orderId}`} aria-describedby={`${titleId} ${waitId}`}>
+                Answer per seller
+              </Link>
             </Button>
-          </div>
-        ) : f.state !== 'idle' ? (
-          <span className="text-muted-foreground" aria-live="polite">
-            Recording…
-          </span>
-        ) : (
-          <Button
-            ref={recordRef}
-            size="sm"
-            variant="outline"
-            aria-describedby={`${titleId} ${waitId}`}
-            onClick={() => setPendingAt(Date.now())}
-          >
-            <Zap /> {f.data?.error ? `Try again: ${label.toLowerCase()}` : label}
-          </Button>
-        )}
-      </div>
-    </li>
+          ) : delivered ? (
+            <span role="status" className="inline-flex items-center gap-1.5 font-medium text-ok">
+              <Check className="size-4" aria-hidden="true" /> Recorded
+            </span>
+          ) : missed ? null : pendingAt !== null ? (
+            <div className="flex items-center gap-3">
+              {/* Said once; the ticking number stays out of the live region. */}
+              <span className="sr-only" role="status">
+                {label} in {UNDO_MS / 1000} seconds. Press Undo or Escape to take it back.
+              </span>
+              <span aria-hidden="true">
+                {label} in{' '}
+                <span className="tabular" suppressHydrationWarning>
+                  {Math.max(1, Math.ceil((pendingAt + UNDO_MS - now) / 1000))}s
+                </span>
+              </span>
+              <Button size="sm" variant="outline" onClick={undo} autoFocus>
+                Undo
+              </Button>
+            </div>
+          ) : f.state !== 'idle' ? (
+            <span className="text-muted-foreground" aria-live="polite">
+              Recording…
+            </span>
+          ) : (
+            <Button
+              ref={recordRef}
+              size="sm"
+              variant="outline"
+              aria-describedby={`${titleId} ${waitId}`}
+              onClick={() => setPendingAt(Date.now())}
+            >
+              <Zap /> {f.data?.error ? `Try again: ${label.toLowerCase()}` : label}
+            </Button>
+          )}
+        </ItemActions>
+      </li>
+    </Item>
   );
 }
 
@@ -1070,7 +1102,13 @@ function Pricing({ pricing }: Pick<Office, 'pricing'>) {
       price: r.price != null ? money(r.price) : `${r.discountPct}% off list`,
     }));
   return (
-    <Section id="pricing" title="Pricing" className="xl:col-span-2" flush>
+    <Section
+      id="pricing"
+      title="Pricing"
+      description="Price sources in the order a Price lines step runs them, each with its entries."
+      className="xl:col-span-2"
+      flush
+    >
       <ol className="divide-y">
         {pricing.sources.map((s, i) => {
           const rows = entries(s.entries.rows);

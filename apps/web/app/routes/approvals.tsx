@@ -7,9 +7,19 @@ import {
   toBase,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
+import { Item, ItemActions, ItemContent, ItemMedia } from '@orderloop/ui/item';
+import { Kbd } from '@orderloop/ui/kbd';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
-import { ArrowRight, Check, ChevronRight, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronRight, Inbox, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -21,7 +31,7 @@ import {
   type DecisionHandle,
   sendDecision,
 } from '~/components/decision';
-import { Empty, PageHeader } from '~/components/page';
+import { Empty, PageHeader, Section } from '~/components/page';
 import { ApprovalBadge } from '~/components/status';
 import {
   type ApprovalContext,
@@ -114,8 +124,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-type Item = Omit<Awaited<ReturnType<typeof listApprovals>>['rows'][number], 'startedBy' | 'total'>;
-type Shown = { r: Item; gone?: number };
+type Approval = Omit<
+  Awaited<ReturnType<typeof listApprovals>>['rows'][number],
+  'startedBy' | 'total'
+>;
+type Shown = { r: Approval; gone?: number };
 type Result = { ok: boolean; error?: string };
 
 /**
@@ -123,7 +136,7 @@ type Result = { ok: boolean; error?: string };
  * stays for a minute marked as resolved instead of vanishing under the reader; new ones join at the
  * end rather than reshuffling the list.
  */
-function useStableRows(rows: Item[], status: string, view: string) {
+function useStableRows(rows: Approval[], status: string, view: string) {
   const [shown, setShown] = useState<Shown[]>(() => rows.map((r) => ({ r })));
   const lastView = useRef(view);
   useEffect(() => {
@@ -248,7 +261,7 @@ export default function Approvals() {
         )
       : undefined,
   );
-  const past = (r: Item) => {
+  const past = (r: Approval) => {
     const d = ctxs[r.id]?.deadline;
     return pending && d !== undefined && lockAt(d) <= now && !held.has(r.id) && !sent.has(r.id);
   };
@@ -358,6 +371,9 @@ export default function Approvals() {
         actions={
           <Segmented
             aria-label="Show approvals"
+            // Five filters don't fit a small phone at equal widths: each takes its own, and the
+            // track scrolls sideways rather than squeezing the words together.
+            className="max-w-full overflow-x-auto [scrollbar-width:none] max-sm:max-w-[calc(100vw-2rem)] max-sm:auto-cols-max"
             value={status}
             onValueChange={(s) => setParams({ status: s })}
           >
@@ -389,20 +405,18 @@ export default function Approvals() {
               </p>
             ) : anyOpen ? (
               <p className="mb-3 hidden text-muted-foreground text-xs fine:block">
-                Keyboard: <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd>{' '}
-                move between rows, <kbd className="font-mono">A</kbd> approves,{' '}
-                <kbd className="font-mono">R</kbd> rejects, <kbd className="font-mono">Z</kbd>{' '}
-                undoes
+                Keyboard: <Kbd>J</Kbd> and <Kbd>K</Kbd> move between rows, <Kbd>A</Kbd> approves,{' '}
+                <Kbd>R</Kbd> rejects, <Kbd>Z</Kbd> undoes
                 {anyBatch ? (
                   <>
-                    , <kbd className="font-mono">X</kbd> selects a row for its group’s batch
+                    , <Kbd>X</Kbd> selects a row for its group’s batch
                   </>
                 ) : null}
                 .
               </p>
             ) : null}
             {/* J / K (or arrows) move between open rows across groups; rows take A / R / Z / X. */}
-            <div ref={queueRef} data-queue className={pending ? 'space-y-4' : undefined}>
+            <div ref={queueRef} data-queue className={pending ? 'flex flex-col gap-4' : undefined}>
               {pending ? (
                 groups.map((g) => (
                   <Group
@@ -422,11 +436,14 @@ export default function Approvals() {
                   </Group>
                 ))
               ) : (
-                <ul className="divide-y card overflow-hidden">
-                  {queue.map((s) => (
-                    <Row key={s.r.id} {...rowProps(s)} />
-                  ))}
-                </ul>
+                // Decided approvals are a record, read one at a time: quiet rows in one card.
+                <Section title={status === 'all' ? 'All approvals' : outcomeLabel(status)}>
+                  <ul className="-mx-2 flex flex-col gap-1">
+                    {queue.map((s) => (
+                      <Row key={s.r.id} {...rowProps(s)} />
+                    ))}
+                  </ul>
+                </Section>
               )}
             </div>
             <Pages
@@ -439,8 +456,9 @@ export default function Approvals() {
             />
           </>
         ) : (
-          <div className="card overflow-hidden">
+          <Card className="py-0">
             <Empty
+              icon={<Inbox aria-hidden="true" />}
               action={
                 paged ? (
                   <Link to={base} className="text-link text-sm hover:underline">
@@ -467,7 +485,7 @@ export default function Approvals() {
                       ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
                       : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
             </Empty>
-          </div>
+          </Card>
         )}
         {closed.length ? <ClosedLine items={closed} ctxs={ctxs} /> : null}
         {status === 'pending' && !recorded && undecidable ? <RecordedLine n={undecidable} /> : null}
@@ -611,30 +629,72 @@ function Group({
   const someOn = chosen.length > 0 && !allOn;
   const left = batch ? Math.max(0, Math.ceil((batch.ends - now) / 1000)) : 0;
 
+  const controls =
+    progress?.phase === 'holding' && batch ? (
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span>
+          {batch.decision === 'approved' ? 'Approving' : 'Rejecting'} {progress.held} in{' '}
+          <span className="tabular">{left}s</span>
+        </span>
+        <Button
+          ref={undoAllButton}
+          size="sm"
+          variant="outline"
+          onClick={undoAll}
+          aria-keyshortcuts="Z"
+        >
+          Undo all
+        </Button>
+      </div>
+    ) : progress?.phase === 'sending' ? (
+      <span className="text-muted-foreground text-sm">Recording decisions…</span>
+    ) : chosen.length ? (
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">{chosen.length} selected</span>
+        <Button size="sm" onClick={() => start('approved')}>
+          <Check aria-hidden="true" /> Approve selected
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => start('rejected')}>
+          <X aria-hidden="true" /> Reject selected
+        </Button>
+      </div>
+    ) : batching ? (
+      <span className="hidden text-muted-foreground text-xs sm:inline">
+        Select rows to decide them together
+      </span>
+    ) : null;
+  const ticking = batching && !batch;
+
+  // A card per rule: the header says it once (with the batch's controls as the card's action),
+  // and each approval under it is an item of its own.
   return (
-    <section
-      aria-labelledby={headingId}
-      className={cn('card overflow-hidden', arrived && 'animate-arrive')}
-    >
-      <div ref={barRef} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
-        {batching && !batch ? (
-          <input
-            type="checkbox"
-            checked={allOn}
-            ref={(el) => {
-              if (el) el.indeterminate = someOn;
-            }}
-            onChange={() => setSelected(allOn ? new Set() : new Set(selectable))}
-            aria-label={`Select all in this group: ${name}`}
-            disabled={!selectable.length}
-            className="hit-area relative size-4 shrink-0 accent-foreground"
-          />
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="section-title outline-none">
-            {name}
-          </h2>
-          <p className="text-muted-foreground text-xs">
+    <section aria-labelledby={headingId} className={cn('min-w-0', arrived && 'animate-arrive')}>
+      <Card className="gap-4 [--card-spacing:--spacing(5)]">
+        <CardHeader ref={barRef}>
+          <CardTitle className="flex min-w-0 items-center gap-3">
+            {ticking ? (
+              <input
+                type="checkbox"
+                checked={allOn}
+                ref={(el) => {
+                  if (el) el.indeterminate = someOn;
+                }}
+                onChange={() => setSelected(allOn ? new Set() : new Set(selectable))}
+                aria-label={`Select all in this group: ${name}`}
+                disabled={!selectable.length}
+                className="hit-area relative size-4 shrink-0 accent-foreground"
+              />
+            ) : null}
+            <h2
+              id={headingId}
+              ref={headingRef}
+              tabIndex={-1}
+              className="section-title min-w-0 outline-none"
+            >
+              {name}
+            </h2>
+          </CardTitle>
+          <CardDescription className={cn('text-xs', ticking && 'pl-7')}>
             {plural(g.ids.length, 'approval')}
             {g.soonest !== undefined && lockAt(g.soonest) > Date.now() ? (
               <>
@@ -643,47 +703,22 @@ function Group({
               </>
             ) : null}
             {g.title ? <> · all for “{g.title}”</> : null}
+          </CardDescription>
+          {controls ? (
+            // Beside the rule where there is room; under it on a phone.
+            <CardAction className="self-center max-sm:col-span-full max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start">
+              {controls}
+            </CardAction>
+          ) : null}
+          {/* Said once per batch: when it starts and when it is done, never per row. */}
+          <p className="sr-only" aria-live="polite">
+            {said}
           </p>
-        </div>
-        {progress?.phase === 'holding' && batch ? (
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span>
-              {batch.decision === 'approved' ? 'Approving' : 'Rejecting'} {progress.held} in{' '}
-              <span className="tabular">{left}s</span>
-            </span>
-            <Button
-              ref={undoAllButton}
-              size="sm"
-              variant="outline"
-              onClick={undoAll}
-              aria-keyshortcuts="Z"
-            >
-              Undo all
-            </Button>
-          </div>
-        ) : progress?.phase === 'sending' ? (
-          <span className="text-muted-foreground text-sm">Recording decisions…</span>
-        ) : chosen.length ? (
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-muted-foreground">{chosen.length} selected</span>
-            <Button size="sm" onClick={() => start('approved')}>
-              <Check aria-hidden="true" /> Approve selected
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => start('rejected')}>
-              <X aria-hidden="true" /> Reject selected
-            </Button>
-          </div>
-        ) : batching ? (
-          <span className="hidden text-muted-foreground text-xs sm:inline">
-            Select rows to decide them together
-          </span>
-        ) : null}
-        {/* Said once per batch: when it starts and when it is done, never per row. */}
-        <p className="sr-only" aria-live="polite">
-          {said}
-        </p>
-      </div>
-      <ul className="divide-y">{children(select)}</ul>
+        </CardHeader>
+        <CardContent>
+          <ul className="flex flex-col gap-2">{children(select)}</ul>
+        </CardContent>
+      </Card>
     </section>
   );
 }
@@ -814,7 +849,7 @@ function Row({
   tracking,
   select,
 }: {
-  r: Item;
+  r: Approval;
   ctx?: ApprovalContext;
   /** The group it's listed in (pending only): what the row needn't repeat. */
   group?: ApprovalGroup;
@@ -890,36 +925,43 @@ function Row({
           : ''}
     </p>
   );
+  const column = !!select && ('on' in select || 'why' in select);
   return (
-    <li
-      ref={ref}
-      tabIndex={decidable || gone ? 0 : undefined}
-      aria-labelledby={titleId}
-      aria-describedby={reason ? reasonId : undefined}
-      aria-keyshortcuts={decidable && !refused ? (tick ? 'A R Z X' : 'A R Z') : undefined}
+    // A decision waiting in a group is a muted item of its own; a decided one in the record is a
+    // quiet row. One that resolves holds its place and drops to an outline, never jumping away.
+    <Item
+      asChild
+      size="sm"
+      variant={gone ? 'outline' : group ? 'muted' : 'default'}
       className={cn(
-        // A row that resolves holds its place and fades to the resolved tint, never jumping away.
-        'flex items-start gap-3 px-4 py-3 transition-[background-color] duration-(--motion-move)',
-        gone && 'bg-muted/40',
+        'items-start gap-y-2 transition-[background-color,border-color] duration-(--motion-move)',
         arrived && 'animate-arrive',
       )}
     >
-      {select && ('on' in select || 'why' in select) ? (
-        tick ? (
-          <input
-            type="checkbox"
-            checked={tick.on}
-            onChange={tick.toggle}
-            aria-label={`Select ${orderRef(r.orderId)}, ${amount}`}
-            className="hit-area relative mt-0.5 size-4 shrink-0 accent-foreground"
-          />
-        ) : (
-          // Holds the column, so rows that can't be ticked still line up with those that can.
-          <span className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        )
-      ) : null}
-      <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-        <div className="min-w-0">
+      <li
+        ref={ref}
+        tabIndex={decidable || gone ? 0 : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={reason ? reasonId : undefined}
+        aria-keyshortcuts={decidable && !refused ? (tick ? 'A R Z X' : 'A R Z') : undefined}
+      >
+        {column ? (
+          <ItemMedia className="mt-0.5 self-start">
+            {tick ? (
+              <input
+                type="checkbox"
+                checked={tick.on}
+                onChange={tick.toggle}
+                aria-label={`Select ${orderRef(r.orderId)}, ${amount}`}
+                className="hit-area relative size-4 shrink-0 accent-foreground"
+              />
+            ) : (
+              // Holds the column, so rows that can't be ticked still line up with those that can.
+              <span className="size-4 shrink-0" aria-hidden="true" />
+            )}
+          </ItemMedia>
+        ) : null}
+        <ItemContent className="min-w-0 gap-0">
           <p id={titleId} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {group && open && ctx?.deadline !== undefined ? (
               <DecisionDeadline
@@ -1018,8 +1060,14 @@ function Row({
               {error}
             </p>
           ) : null}
-        </div>
-        <div className="flex flex-col items-start gap-2 sm:items-end">
+        </ItemContent>
+        {/* Under the row's words on a phone, lined up with them past the checkbox column. */}
+        <ItemActions
+          className={cn(
+            'flex-col items-start gap-2 self-start max-sm:basis-full sm:items-end',
+            column && 'max-sm:ps-7.5',
+          )}
+        >
           <span aria-hidden="true" className="hidden text-right font-semibold tabular sm:block">
             {amount}
             {inBase ? (
@@ -1099,8 +1147,8 @@ function Row({
           ) : (
             <ApprovalBadge status={r.status} />
           )}
-        </div>
-      </div>
-    </li>
+        </ItemActions>
+      </li>
+    </Item>
   );
 }

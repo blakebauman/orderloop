@@ -7,12 +7,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
-import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { Ellipsis } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Ellipsis, KeyRound, UserRound } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import {
   data,
   Form,
@@ -27,7 +42,6 @@ import { Ago } from '~/components/ago';
 import { Confirm } from '~/components/confirm';
 import { CopyButton } from '~/components/copy-button';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
-import { Field } from '~/components/inspector';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StepUpField } from '~/components/step-up-field';
 import { audit } from '~/lib/audit.server';
@@ -281,9 +295,15 @@ const ROLE_GUIDE: Record<Role, string> = {
     'Also manages this page (people, API tokens, sign-in rules), webhooks and integrations, and reads the audit log.',
 };
 
-function RoleGuide() {
+/** The roles in words. `stacked` lists them in one column, for a rail or a half-width card. */
+function RoleGuide({ stacked = false }: { stacked?: boolean }) {
   return (
-    <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+    <dl
+      className={cn(
+        'grid gap-x-6 gap-y-3 text-sm',
+        stacked ? 'max-lg:sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-4',
+      )}
+    >
       {ROLES.map((r) => (
         <div key={r}>
           <dt className="font-medium">{ROLE_LABELS[r]}</dt>
@@ -335,12 +355,14 @@ export function RoleForm({
 }
 
 function RoleSelect({
+  id,
   name = 'role',
   value,
   onChange,
   label,
   compact,
 }: {
+  id?: string;
   name?: string;
   value?: string;
   onChange?: (role: Role) => void;
@@ -351,6 +373,7 @@ function RoleSelect({
 }) {
   return (
     <NativeSelect
+      id={id}
       aria-label={label}
       name={name}
       defaultValue={value ?? 'viewer'}
@@ -429,17 +452,15 @@ export default function Team() {
           </>
         }
       />
-      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
-        <div className="max-w-[1000px] space-y-6">
-          <Section title="Roles">
-            <RoleGuide />
-          </Section>
-
+      {/* People and tokens first, then the sign-in rules; the role guide is reference, so wide
+          screens keep it in a rail beside them and phones read it last. */}
+      <div className="mx-auto grid max-w-page items-start gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-6">
           {secret ? (
             <div
               ref={secretRef}
               tabIndex={-1}
-              className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              className="rounded-2xl border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
               <p className="font-medium">{secret.label}</p>
               <p className="mt-0.5 max-w-measure text-muted-foreground text-xs">
@@ -475,7 +496,7 @@ export default function Team() {
 
           <Section
             title="People"
-            flush
+            description="Everyone who can sign in, with their role and last sign-in."
             actions={
               <FormSheet
                 open={addPerson.open}
@@ -494,113 +515,173 @@ export default function Team() {
             }
           >
             {people.length ? (
-              <div>
-                {/* A table on wide screens; on a phone each person stacks into a block, so the
-                    role select keeps its width and nothing pushes the page sideways. */}
-                <Table stack="rows" caption="People">
-                  <TableHead>
-                    <Tr>
-                      <Th>Person</Th>
-                      <Th>Role</Th>
-                      <Th>Last sign-in</Th>
-                      <Th className="w-0 text-right">
-                        <span className="sr-only">Actions</span>
-                      </Th>
-                    </Tr>
-                  </TableHead>
-                  <TableBody>
-                    {people.map((p) => (
-                      <Fragment key={p.id}>
-                        <Tr
-                          className={cn(
-                            'relative block space-y-2 px-4 py-3 md:table-row md:space-y-0 md:p-0',
-                            p.disabledAt && 'text-muted-foreground',
-                          )}
-                        >
-                          <Td className="block max-md:pr-10 md:table-cell">
-                            {p.name}
-                            {p.id === me.id ? (
-                              <span className="ml-1.5 text-muted-foreground text-xs">you</span>
-                            ) : null}
-                            <div className="text-muted-foreground text-xs">
-                              {p.email}
-                              {p.twoFactorAt ? ' · two-factor' : ''}
-                              {p.passwordChangeDue ? ' · temporary password' : ''}
-                              {p.disabledAt ? ' · disabled' : ''}
-                            </div>
-                          </Td>
-                          <Td className="block md:table-cell">
-                            <RoleForm
-                              // Saved (here or elsewhere), the row starts again from the new role.
-                              key={p.role}
-                              id={p.id}
-                              name={p.name}
-                              role={p.role as Role}
-                              stepUp={stepUp}
-                              fetcher={fetcher}
-                            />
-                          </Td>
-                          <Td className="block text-muted-foreground text-xs md:table-cell">
-                            <span aria-hidden="true" className="md:hidden">
-                              Last sign-in:{' '}
+              <ul aria-label="People" className="-mx-2 flex flex-col gap-1">
+                {people.map((p) => (
+                  <Item
+                    key={p.id}
+                    asChild
+                    size="sm"
+                    variant={asking?.id === p.id ? 'muted' : 'default'}
+                    className={cn('items-start', p.disabledAt && 'text-muted-foreground')}
+                  >
+                    <li>
+                      <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                        <UserRound className="text-muted-foreground" aria-hidden="true" />
+                      </ItemMedia>
+                      <ItemContent className="min-w-0 basis-40 self-center">
+                        <ItemTitle className="block">
+                          {p.name}
+                          {p.id === me.id ? (
+                            <span className="ml-1.5 font-normal text-muted-foreground text-xs">
+                              you
                             </span>
-                            {p.lastLoginAt ? <Ago ms={p.lastLoginAt} /> : 'Never'}
-                          </Td>
-                          {/* On a phone the menu sits in the person's top corner, beside their name. */}
-                          <Td className="absolute top-2 right-2 block md:static md:table-cell md:text-right">
-                            <RowActions
-                              id={p.id}
-                              name={p.name}
-                              self={p.id === me.id}
-                              twoFactor={!!p.twoFactorAt}
-                              disabled={!!p.disabledAt}
-                              ask={ask}
-                            />
-                          </Td>
-                        </Tr>
-                        {/* The question gets its own line under the person, so their row keeps its
-                          shape and the name stays beside what's being asked. */}
-                        {asking?.id === p.id ? (
-                          <Tr className="block md:table-row">
-                            <Td colSpan={4} className="block px-4 pt-0 pb-3 md:table-cell">
-                              <fetcher.Form
-                                method="post"
-                                className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2"
-                                onSubmit={() => setAsking(null)}
-                              >
-                                <input type="hidden" name="intent" value={asking.intent} />
-                                <input type="hidden" name="id" value={p.id} />
-                                <input type="hidden" name="who" value={p.name} />
-                                <Confirm
-                                  message={QUESTIONS[asking.intent](p.name)}
-                                  cancelLabel="Keep"
-                                  onCancel={keep}
-                                  className="flex-1"
-                                >
-                                  {asking.intent === 'disable' ||
-                                  (asking.intent === 'enable' && p.role === 'viewer') ? null : (
-                                    <StepUpField method={stepUp} next="/team" />
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    type="submit"
-                                    disabled={busy}
-                                  >
-                                    {ACTIONS[asking.intent]}
-                                  </Button>
-                                </Confirm>
-                              </fetcher.Form>
-                            </Td>
-                          </Tr>
-                        ) : null}
-                      </Fragment>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                          ) : null}
+                        </ItemTitle>
+                        <ItemDescription className="break-all text-xs">
+                          {p.email}
+                          {p.twoFactorAt ? ' · two-factor' : ''}
+                          {p.passwordChangeDue ? ' · temporary password' : ''}
+                          {p.disabledAt ? ' · disabled' : ''}
+                        </ItemDescription>
+                        <ItemDescription className="text-xs">
+                          Last sign-in: {p.lastLoginAt ? <Ago ms={p.lastLoginAt} /> : 'Never'}
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions className="items-start">
+                        <RoleForm
+                          // Saved (here or elsewhere), the row starts again from the new role.
+                          key={p.role}
+                          id={p.id}
+                          name={p.name}
+                          role={p.role as Role}
+                          stepUp={stepUp}
+                          fetcher={fetcher}
+                        />
+                        <RowActions
+                          id={p.id}
+                          name={p.name}
+                          self={p.id === me.id}
+                          twoFactor={!!p.twoFactorAt}
+                          disabled={!!p.disabledAt}
+                          ask={ask}
+                        />
+                      </ItemActions>
+                      {/* The question gets its own line under the person, so the name stays
+                          beside what's being asked. */}
+                      {asking?.id === p.id ? (
+                        <fetcher.Form
+                          method="post"
+                          className="flex basis-full flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2"
+                          onSubmit={() => setAsking(null)}
+                        >
+                          <input type="hidden" name="intent" value={asking.intent} />
+                          <input type="hidden" name="id" value={p.id} />
+                          <input type="hidden" name="who" value={p.name} />
+                          <Confirm
+                            message={QUESTIONS[asking.intent](p.name)}
+                            cancelLabel="Keep"
+                            onCancel={keep}
+                            className="flex-1"
+                          >
+                            {asking.intent === 'disable' ||
+                            (asking.intent === 'enable' && p.role === 'viewer') ? null : (
+                              <StepUpField method={stepUp} next="/team" />
+                            )}
+                            <Button size="sm" variant="destructive" type="submit" disabled={busy}>
+                              {ACTIONS[asking.intent]}
+                            </Button>
+                          </Confirm>
+                        </fetcher.Form>
+                      ) : null}
+                    </li>
+                  </Item>
+                ))}
+              </ul>
             ) : (
               <Empty>Nobody is on the team yet.</Empty>
+            )}
+          </Section>
+
+          <Section
+            title="API tokens"
+            description="For a system that calls the REST API, each with its own role."
+            actions={
+              <FormSheet
+                open={addToken.open}
+                onOpenChange={addToken.onOpenChange}
+                onCloseAutoFocus={toSecret}
+                label="Create token"
+                title="Create an API token"
+                description="For a system that calls the REST API. The token is shown once."
+              >
+                <AddTokenForm
+                  fetcher={fetcher}
+                  stepUp={stepUp}
+                  busy={busy}
+                  error={sheetError(addToken.result)}
+                />
+              </FormSheet>
+            }
+          >
+            {tokens.length ? (
+              <ul aria-label="API tokens" className="-mx-2 flex flex-col gap-1">
+                {tokens.map((t) => {
+                  const state = tokenState(t, now);
+                  return (
+                    <Item
+                      key={t.id}
+                      asChild
+                      size="sm"
+                      className={
+                        state === 'revoked' || state === 'expired'
+                          ? 'text-muted-foreground'
+                          : undefined
+                      }
+                    >
+                      <li>
+                        <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                          <KeyRound className="text-muted-foreground" aria-hidden="true" />
+                        </ItemMedia>
+                        <ItemContent className="min-w-0">
+                          <ItemTitle className="flex-wrap">
+                            {t.name}
+                            <code className="font-mono font-normal text-muted-foreground text-xs">
+                              {t.prefix}…
+                            </code>
+                          </ItemTitle>
+                          <ItemDescription className="text-xs">
+                            <span className="text-foreground">{ROLE_LABELS[t.role as Role]}</span> ·
+                            by {t.createdBy} ·{' '}
+                            {t.lastUsedAt ? (
+                              <>
+                                used <Ago ms={t.lastUsedAt} />
+                              </>
+                            ) : (
+                              'never used'
+                            )}
+                            {t.revokedAt ? ' · revoked' : ''}
+                            {state === 'revoked' ? null : ' · '}
+                            <TokenExpiry state={state} expiresAt={t.expiresAt} />
+                          </ItemDescription>
+                        </ItemContent>
+                        {t.revokedAt ? null : (
+                          <ItemActions>
+                            <fetcher.Form method="post">
+                              <input type="hidden" name="intent" value="revoke" />
+                              <input type="hidden" name="id" value={t.id} />
+                              <Button size="sm" variant="ghost" type="submit" disabled={busy}>
+                                Revoke
+                              </Button>
+                            </fetcher.Form>
+                          </ItemActions>
+                        )}
+                      </li>
+                    </Item>
+                  );
+                })}
+              </ul>
+            ) : (
+              <Empty>No API tokens. Systems that call the REST API need one.</Empty>
             )}
           </Section>
 
@@ -622,67 +703,13 @@ export default function Team() {
           <ScimSection {...scim} stepUp={stepUp} fetcher={fetcher} now={now} />
 
           <ApprovalSeparationForm separated={separated} />
-
-          <Section
-            title="API tokens"
-            flush
-            actions={
-              <FormSheet
-                open={addToken.open}
-                onOpenChange={addToken.onOpenChange}
-                onCloseAutoFocus={toSecret}
-                label="Create token"
-                title="Create an API token"
-                description="For a system that calls the REST API. The token is shown once."
-              >
-                <AddTokenForm
-                  fetcher={fetcher}
-                  stepUp={stepUp}
-                  busy={busy}
-                  error={sheetError(addToken.result)}
-                />
-              </FormSheet>
-            }
-          >
-            {tokens.length ? (
-              <ul className="divide-y text-sm">
-                {tokens.map((t) => (
-                  <li
-                    key={t.id}
-                    className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 ${tokenState(t, now) === 'revoked' || tokenState(t, now) === 'expired' ? 'text-muted-foreground' : ''}`}
-                  >
-                    <span className="font-medium">{t.name}</span>
-                    <code className="font-mono text-muted-foreground text-xs">{t.prefix}…</code>
-                    <span className="text-xs">{ROLE_LABELS[t.role as Role]}</span>
-                    <span className="text-muted-foreground text-xs">
-                      by {t.createdBy} ·{' '}
-                      {t.lastUsedAt ? (
-                        <>
-                          used <Ago ms={t.lastUsedAt} />
-                        </>
-                      ) : (
-                        'never used'
-                      )}
-                      {t.revokedAt ? ' · revoked' : ''}
-                    </span>
-                    <TokenExpiry state={tokenState(t, now)} expiresAt={t.expiresAt} />
-                    {t.revokedAt ? null : (
-                      <fetcher.Form method="post" className="ml-auto">
-                        <input type="hidden" name="intent" value="revoke" />
-                        <input type="hidden" name="id" value={t.id} />
-                        <Button size="sm" variant="ghost" type="submit" disabled={busy}>
-                          Revoke
-                        </Button>
-                      </fetcher.Form>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <Empty>No API tokens. Systems that call the REST API need one.</Empty>
-            )}
-          </Section>
         </div>
+
+        <aside aria-label="Roles" className="min-w-0">
+          <Section title="Roles" description="What each role may do, for people and tokens alike.">
+            <RoleGuide stacked />
+          </Section>
+        </aside>
       </div>
     </>
   );
@@ -708,36 +735,40 @@ function AddPersonForm({
 }) {
   const [role, setRole] = useState<Role>('viewer');
   return (
-    <fetcher.Form method="post" className="grid gap-3">
+    <fetcher.Form method="post">
       <input type="hidden" name="intent" value="add-user" />
-      <Field label="Email">
-        {/* Someone else's address: keep a password manager from offering yours. */}
-        <Input
-          name="email"
-          type="email"
-          required
-          autoComplete="off"
-          placeholder="name@company.com"
-        />
-      </Field>
-      <Field label="Name (optional)">
-        <Input name="name" autoComplete="off" />
-      </Field>
-      <Field label="Role">
-        <RoleSelect onChange={setRole} />
-      </Field>
-      {/* Making an admin is what needs proof it's you. */}
-      {role === 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
-      <div>
-        <Button type="submit" disabled={busy}>
-          Add person
-        </Button>
-      </div>
+      <FieldGroup className="gap-4">
+        <Field>
+          <FieldLabel htmlFor="add-person-email">Email</FieldLabel>
+          {/* Someone else's address: keep a password manager from offering yours. */}
+          <Input
+            id="add-person-email"
+            name="email"
+            type="email"
+            required
+            autoComplete="off"
+            placeholder="name@company.com"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="add-person-name">
+            Name <span className="font-normal text-muted-foreground">(optional)</span>
+          </FieldLabel>
+          <Input id="add-person-name" name="name" autoComplete="off" />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="add-person-role">Role</FieldLabel>
+          <RoleSelect id="add-person-role" onChange={setRole} />
+        </Field>
+        {/* Making an admin is what needs proof it's you. */}
+        {role === 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
+        {error ? <FieldError>{error}</FieldError> : null}
+        <div>
+          <Button type="submit" disabled={busy}>
+            Add person
+          </Button>
+        </div>
+      </FieldGroup>
     </fetcher.Form>
   );
 }
@@ -756,41 +787,47 @@ function AddTokenForm({
 }) {
   const [role, setRole] = useState<Role>('viewer');
   return (
-    <fetcher.Form method="post" className="grid gap-3">
+    <fetcher.Form method="post">
       <input type="hidden" name="intent" value="add-token" />
-      <Field label="Used by">
-        <Input name="name" required placeholder="e.g. ERP sync" />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Role">
-          <RoleSelect value="viewer" onChange={setRole} />
+      <FieldGroup className="gap-4">
+        <Field>
+          <FieldLabel htmlFor="add-token-name">Used by</FieldLabel>
+          <Input id="add-token-name" name="name" required placeholder="e.g. ERP sync" />
         </Field>
-        <Field label="Expires after">
-          <NativeSelect name="lifetime" defaultValue={DEFAULT_LIFETIME} className="h-9 w-full">
-            {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
-              <NativeSelectOption key={k} value={k}>
-                {label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-      </div>
-      {/* The role is the boundary: say what this token will be able to do before it exists. */}
-      <p className="max-w-measure text-muted-foreground text-xs" aria-live="polite">
-        A token with the {ROLE_LABELS[role].toLowerCase()} role:{' '}
-        {ROLE_GUIDE[role].charAt(0).toLowerCase() + ROLE_GUIDE[role].slice(1)}
-      </p>
-      <StepUpField method={stepUp} next="/team" />
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
-      <div>
-        <Button type="submit" disabled={busy}>
-          Create token
-        </Button>
-      </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field>
+            <FieldLabel htmlFor="add-token-role">Role</FieldLabel>
+            <RoleSelect id="add-token-role" value="viewer" onChange={setRole} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="add-token-lifetime">Expires after</FieldLabel>
+            <NativeSelect
+              id="add-token-lifetime"
+              name="lifetime"
+              defaultValue={DEFAULT_LIFETIME}
+              className="h-9 w-full"
+            >
+              {Object.entries(TOKEN_LIFETIMES).map(([k, label]) => (
+                <NativeSelectOption key={k} value={k}>
+                  {label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+        </div>
+        {/* The role is the boundary: say what this token will be able to do before it exists. */}
+        <FieldDescription className="-mt-2 max-w-measure text-xs" aria-live="polite">
+          A token with the {ROLE_LABELS[role].toLowerCase()} role:{' '}
+          {ROLE_GUIDE[role].charAt(0).toLowerCase() + ROLE_GUIDE[role].slice(1)}
+        </FieldDescription>
+        <StepUpField method={stepUp} next="/team" />
+        {error ? <FieldError>{error}</FieldError> : null}
+        <div>
+          <Button type="submit" disabled={busy}>
+            Create token
+          </Button>
+        </div>
+      </FieldGroup>
     </fetcher.Form>
   );
 }
@@ -890,47 +927,56 @@ function FirstAdmin({ error }: { error: string | null }) {
       />
       <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
         <div className="grid max-w-[1000px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <Section title="Create your admin account">
-            <Form method="post" className="space-y-3">
+          <Section
+            title="Create your admin account"
+            description="Once it exists, everyone signs in, and you add people and API tokens here."
+          >
+            <Form method="post">
               <input type="hidden" name="intent" value="first-admin" />
-              <p className="text-muted-foreground text-sm">
-                Once it exists, everyone signs in, and you add people and API tokens here.
-              </p>
-              <Field label="Email">
-                <Input
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="username"
-                  placeholder="name@company.com"
-                />
-              </Field>
-              <Field label="Name (optional)">
-                <Input name="name" />
-              </Field>
-              <Field label="Password" hint="At least 10 characters">
-                <Input
-                  name="password"
-                  type="password"
-                  required
-                  minLength={10}
-                  autoComplete="new-password"
-                />
-              </Field>
-              {error ? (
-                <p role="alert" className="text-destructive text-sm">
-                  {error}
-                </p>
-              ) : null}
-              <Button type="submit" disabled={creating}>
-                {creating ? 'Creating…' : 'Create account and sign in'}
-              </Button>
+              <FieldGroup className="gap-4">
+                <Field>
+                  <FieldLabel htmlFor="first-admin-email">Email</FieldLabel>
+                  <Input
+                    id="first-admin-email"
+                    name="email"
+                    type="email"
+                    required
+                    autoComplete="username"
+                    placeholder="name@company.com"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="first-admin-name">
+                    Name <span className="font-normal text-muted-foreground">(optional)</span>
+                  </FieldLabel>
+                  <Input id="first-admin-name" name="name" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="first-admin-password">Password</FieldLabel>
+                  <Input
+                    id="first-admin-password"
+                    name="password"
+                    type="password"
+                    required
+                    minLength={10}
+                    autoComplete="new-password"
+                    aria-describedby="first-admin-password-hint"
+                  />
+                  <FieldDescription id="first-admin-password-hint" className="text-xs">
+                    At least 10 characters
+                  </FieldDescription>
+                </Field>
+                {error ? <FieldError>{error}</FieldError> : null}
+                <div>
+                  <Button type="submit" disabled={creating}>
+                    {creating ? 'Creating…' : 'Create account and sign in'}
+                  </Button>
+                </div>
+              </FieldGroup>
             </Form>
           </Section>
           <Section title="Roles you can give people and tokens">
-            <div className="[&_dl]:sm:grid-cols-1">
-              <RoleGuide />
-            </div>
+            <RoleGuide stacked />
           </Section>
         </div>
       </div>
@@ -987,109 +1033,108 @@ function ScimSection({
       return next;
     });
   return (
-    <Section title="SCIM provisioning">
-      <p className="max-w-measure text-muted-foreground text-xs">
-        Your identity provider can add people, update them and turn them off here. Turning someone
-        off signs them out everywhere and disconnects their apps and the API tokens they made. Give
-        it the endpoint and a token.
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground">Endpoint</span>
-        <code className="select-all break-all rounded-sm bg-card px-2 py-1 font-mono">
-          {endpoint}
-        </code>
-        <CopyButton text={endpoint} />
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-sm">
-          {token ? (
-            <>
-              Token made <Ago ms={token.updatedAt} /> by {token.updatedBy}.{' '}
-              {now - token.updatedAt >= SCIM_TOKEN_MS
-                ? 'It has expired: provisioning is off until you replace it.'
-                : 'It works for a year; replace it before then.'}
-            </>
-          ) : (
-            'No token: provisioning is off.'
-          )}
-        </span>
-        <fetcher.Form method="post" className="flex flex-wrap items-end gap-2">
-          <input type="hidden" name="intent" value="scim-token" />
-          <StepUpField method={stepUp} next="/team" />
-          <Button size="sm" variant="outline" type="submit" disabled={busy}>
-            {token ? 'Replace token' : 'Make a token'}
-          </Button>
-        </fetcher.Form>
-        {token ? (
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="scim-revoke" />
+    <Section
+      title="SCIM provisioning"
+      description="Your identity provider can add people, update them and turn them off here. Turning someone off signs them out everywhere and disconnects their apps and the API tokens they made. Give it the endpoint and a token."
+    >
+      <FieldGroup className="gap-5">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Endpoint</span>
+          <code className="min-w-0 select-all break-all rounded-sm bg-muted px-2 py-1 font-mono">
+            {endpoint}
+          </code>
+          <CopyButton text={endpoint} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm">
+            {token ? (
+              <>
+                Token made <Ago ms={token.updatedAt} /> by {token.updatedBy}.{' '}
+                {now - token.updatedAt >= SCIM_TOKEN_MS
+                  ? 'It has expired: provisioning is off until you replace it.'
+                  : 'It works for a year; replace it before then.'}
+              </>
+            ) : (
+              'No token: provisioning is off.'
+            )}
+          </span>
+          <fetcher.Form method="post" className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="intent" value="scim-token" />
+            <StepUpField method={stepUp} next="/team" />
             <Button size="sm" variant="outline" type="submit" disabled={busy}>
-              Revoke
+              {token ? 'Replace token' : 'Make a token'}
             </Button>
           </fetcher.Form>
-        ) : null}
-      </div>
-      {groups.length ? (
-        <roles.Form method="post" className="mt-4">
-          <input type="hidden" name="intent" value="scim-roles" />
-          <p className="text-sm">Groups from your identity provider</p>
-          {/* Ruled rows like the card's other lists, not a box inside the card. */}
-          <ul className="mt-2 divide-y border-y text-sm">
-            {groups.map((g) => (
-              <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span>
-                  {g.displayName}{' '}
-                  <span className="text-muted-foreground text-xs">
-                    {g.members} {g.members === 1 ? 'member' : 'members'}
-                  </span>
-                </span>
-                <NativeSelect
-                  name={`role:${g.id}`}
-                  defaultValue={g.role ?? ''}
-                  className="h-8"
-                  aria-label={`Role for ${g.displayName}`}
-                  onChange={(e) => pick(g.id, e.target.value)}
-                >
-                  <NativeSelectOption value="">Gives no role</NativeSelectOption>
-                  {ROLES.map((r) => (
-                    <NativeSelectOption key={r} value={r}>
-                      Gives {ROLE_LABELS[r]}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </li>
-            ))}
-          </ul>
-          {admins.size ? (
-            <div className="mt-2">
-              <StepUpField method={stepUp} next="/team" />
-            </div>
+          {token ? (
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="scim-revoke" />
+              <Button size="sm" variant="outline" type="submit" disabled={busy}>
+                Revoke
+              </Button>
+            </fetcher.Form>
           ) : null}
-          <Button
-            size="sm"
-            variant="outline"
-            type="submit"
-            className="mt-2"
-            disabled={roles.state !== 'idle'}
-          >
-            Save group roles
-          </Button>
-          {rolesError ? (
-            <p role="alert" className="mt-2 text-destructive text-sm">
-              {rolesError}
-            </p>
-          ) : null}
-          <p className="mt-2 max-w-measure text-muted-foreground text-xs">
-            Someone in a group that gives a role has the highest role of their groups, or Viewer
-            when none of theirs gives one. Their role follows changes to their groups, and the last
-            active admin always stays an admin.
+        </div>
+        {groups.length ? (
+          <roles.Form method="post">
+            <input type="hidden" name="intent" value="scim-roles" />
+            <p className="font-medium text-sm">Groups from your identity provider</p>
+            <ul aria-label="Groups" className="-mx-2 mt-2 flex flex-col gap-1">
+              {groups.map((g) => (
+                <Item key={g.id} asChild size="xs" className="flex-nowrap">
+                  <li>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="block truncate font-normal">{g.displayName}</ItemTitle>
+                      <ItemDescription className="text-xs">
+                        {g.members} {g.members === 1 ? 'member' : 'members'}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <NativeSelect
+                        name={`role:${g.id}`}
+                        defaultValue={g.role ?? ''}
+                        className="h-8"
+                        aria-label={`Role for ${g.displayName}`}
+                        onChange={(e) => pick(g.id, e.target.value)}
+                      >
+                        <NativeSelectOption value="">Gives no role</NativeSelectOption>
+                        {ROLES.map((r) => (
+                          <NativeSelectOption key={r} value={r}>
+                            Gives {ROLE_LABELS[r]}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    </ItemActions>
+                  </li>
+                </Item>
+              ))}
+            </ul>
+            {admins.size ? (
+              <div className="mt-2">
+                <StepUpField method={stepUp} next="/team" />
+              </div>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              type="submit"
+              className="mt-2"
+              disabled={roles.state !== 'idle'}
+            >
+              Save group roles
+            </Button>
+            {rolesError ? <FieldError className="mt-2">{rolesError}</FieldError> : null}
+            <FieldDescription className="mt-2 max-w-measure text-xs">
+              Someone in a group that gives a role has the highest role of their groups, or Viewer
+              when none of theirs gives one. Their role follows changes to their groups, and the
+              last active admin always stays an admin.
+            </FieldDescription>
+          </roles.Form>
+        ) : token ? (
+          <p className="text-muted-foreground text-xs">
+            Groups your identity provider pushes appear here, to map to roles.
           </p>
-        </roles.Form>
-      ) : token ? (
-        <p className="mt-3 text-muted-foreground text-xs">
-          Groups your identity provider pushes appear here, to map to roles.
-        </p>
-      ) : null}
+        ) : null}
+      </FieldGroup>
     </Section>
   );
 }
@@ -1109,64 +1154,75 @@ function SsoForm({
   const fetcher = useFetcher<typeof action>();
   const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
   return (
-    <Section title="Single sign-on">
-      <p className="max-w-measure text-muted-foreground text-xs">
-        People can sign in through your identity provider,{' '}
-        <span className="font-mono">{issuer}</span>. Someone already on the team is matched by email
-        on their first sign-in.
-      </p>
-      <fetcher.Form method="post" className="mt-3 grid max-w-xl gap-3">
+    <Section
+      title="Single sign-on"
+      description={
+        <>
+          People can sign in through your identity provider,{' '}
+          <span className="font-mono">{issuer}</span>. Someone already on the team is matched by
+          email on their first sign-in.
+        </>
+      }
+    >
+      <fetcher.Form method="post" className="max-w-xl">
         <input type="hidden" name="intent" value="sso-settings" />
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="sso-jit" className="text-sm">
-            Someone not on the team
-          </label>
-          <NativeSelect
-            id="sso-jit"
-            name="jit"
-            defaultValue={settings.jitRole ?? 'off'}
-            className="h-8"
-          >
-            <NativeSelectOption value="off">Is refused</NativeSelectOption>
-            {ROLES.filter((r) => r !== 'admin').map((r) => (
-              <NativeSelectOption key={r} value={r}>
-                Joins as {ROLE_LABELS[r]}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </div>
-        <Field label="From these email domains">
-          <Input
-            id="sso-domains"
-            name="domains"
-            defaultValue={settings.domains.join(', ')}
-            placeholder="example.com, example.co.uk"
-            className="h-8"
-          />
-        </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="only" value="on" defaultChecked={settings.ssoOnly} />
-          Single sign-on only: turn off passwords and passkeys
-        </label>
-        <StepUpField method={stepUp} next="/team" />
-        <div>
-          <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
-            Save
-          </Button>
-        </div>
-        {error ? (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        ) : null}
+        <FieldGroup className="gap-5">
+          <Field>
+            <FieldLabel htmlFor="sso-jit">Someone not on the team</FieldLabel>
+            <NativeSelect
+              id="sso-jit"
+              name="jit"
+              defaultValue={settings.jitRole ?? 'off'}
+              className="h-9 w-full"
+            >
+              <NativeSelectOption value="off">Is refused</NativeSelectOption>
+              {ROLES.filter((r) => r !== 'admin').map((r) => (
+                <NativeSelectOption key={r} value={r}>
+                  Joins as {ROLE_LABELS[r]}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="sso-domains">From these email domains</FieldLabel>
+            <Input
+              id="sso-domains"
+              name="domains"
+              defaultValue={settings.domains.join(', ')}
+              placeholder="example.com, example.co.uk"
+            />
+          </Field>
+          <Field orientation="horizontal">
+            <input
+              id="sso-only"
+              type="checkbox"
+              name="only"
+              value="on"
+              defaultChecked={settings.ssoOnly}
+            />
+            <FieldContent>
+              <FieldLabel htmlFor="sso-only" className="font-normal">
+                Single sign-on only: turn off passwords and passkeys
+              </FieldLabel>
+              <FieldDescription className="text-xs">
+                With single sign-on only, your identity provider handles two-factor sign-in, and a
+                person disabled there can’t sign in here once their session ends; disable them here
+                to end it now.
+                {linked
+                  ? ' If the provider stops working, a setup code recovers access and turns passwords back on.'
+                  : ' To turn passwords off, first sign in with single sign-on yourself.'}
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+          <StepUpField method={stepUp} next="/team" />
+          {error ? <FieldError>{error}</FieldError> : null}
+          <div>
+            <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+              Save
+            </Button>
+          </div>
+        </FieldGroup>
       </fetcher.Form>
-      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
-        With single sign-on only, your identity provider handles two-factor sign-in, and a person
-        disabled there can’t sign in here once their session ends; disable them here to end it now.
-        {linked
-          ? ' If the provider stops working, a setup code recovers access and turns passwords back on.'
-          : ' To turn passwords off, first sign in with single sign-on yourself.'}
-      </p>
     </Section>
   );
 }
@@ -1175,30 +1231,37 @@ function SsoForm({
 function ApprovalSeparationForm({ separated }: { separated: boolean }) {
   const fetcher = useFetcher();
   return (
-    <Section title="Approvals">
-      <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+    <Section
+      title="Approvals"
+      description="Whether whoever started an order may also decide its approvals."
+    >
+      <fetcher.Form method="post" className="max-w-xl">
         <input type="hidden" name="intent" value="approval-separation" />
-        <label htmlFor="separated" className="text-sm">
-          Who started an order
-        </label>
-        <NativeSelect
-          id="separated"
-          name="separated"
-          defaultValue={separated ? 'on' : 'off'}
-          className="h-8"
-        >
-          <NativeSelectOption value="off">May approve it</NativeSelectOption>
-          <NativeSelectOption value="on">Can’t approve it</NativeSelectOption>
-        </NativeSelect>
-        <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
-          Save
-        </Button>
+        <FieldGroup className="gap-5">
+          <Field>
+            <FieldLabel htmlFor="separated">Who started an order</FieldLabel>
+            <NativeSelect
+              id="separated"
+              name="separated"
+              defaultValue={separated ? 'on' : 'off'}
+              className="h-9 w-full"
+            >
+              <NativeSelectOption value="off">May approve it</NativeSelectOption>
+              <NativeSelectOption value="on">Can’t approve it</NativeSelectOption>
+            </NativeSelect>
+            <FieldDescription className="text-xs">
+              Separates duties: the person or API token that started an order can’t approve or
+              reject its steps, so a second person always decides. Orders from channels, email and
+              the stock review have no starter, and anyone with the Approver role may decide them.
+            </FieldDescription>
+          </Field>
+          <div>
+            <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+              Save
+            </Button>
+          </div>
+        </FieldGroup>
       </fetcher.Form>
-      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
-        Separates duties: the person or API token that started an order can’t approve or reject its
-        steps, so a second person always decides. Orders from channels, email and the stock review
-        have no starter, and anyone with the Approver role may decide them.
-      </p>
     </Section>
   );
 }
@@ -1216,36 +1279,44 @@ function TwoFactorRequirementForm({
   const fetcher = useFetcher<typeof action>();
   const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
   return (
-    <Section title="Two-factor sign-in">
-      <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+    <Section
+      title="Two-factor sign-in"
+      description="Which roles must use two-factor sign-in; people without it are sent to set it up."
+    >
+      <fetcher.Form method="post" className="max-w-xl">
         <input type="hidden" name="intent" value="two-factor-requirement" />
-        <label htmlFor="tf-required" className="text-sm">
-          Required for
-        </label>
-        <NativeSelect id="tf-required" name="required" defaultValue={required} className="h-8">
-          {Object.entries(TWO_FACTOR_REQUIREMENTS).map(([k, label]) => (
-            <NativeSelectOption key={k} value={k}>
-              {label}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <StepUpField method={stepUp} next="/team" />
-        <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
-          Save
-        </Button>
+        <FieldGroup className="gap-5">
+          <Field>
+            <FieldLabel htmlFor="tf-required">Required for</FieldLabel>
+            <NativeSelect
+              id="tf-required"
+              name="required"
+              defaultValue={required}
+              className="h-9 w-full"
+            >
+              {Object.entries(TWO_FACTOR_REQUIREMENTS).map(([k, label]) => (
+                <NativeSelectOption key={k} value={k}>
+                  {label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <FieldDescription className="text-xs">
+              People in these roles without two-factor sign-in can only use their Account page until
+              they set it up, and can’t turn it off. API tokens aren’t affected.
+              {required !== 'off' && missing
+                ? ` ${missing} ${missing === 1 ? 'person hasn’t' : 'people haven’t'} set it up yet.`
+                : ''}
+            </FieldDescription>
+          </Field>
+          <StepUpField method={stepUp} next="/team" />
+          {error ? <FieldError>{error}</FieldError> : null}
+          <div>
+            <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
+              Save
+            </Button>
+          </div>
+        </FieldGroup>
       </fetcher.Form>
-      {error ? (
-        <p role="alert" className="mt-2 text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
-      <p className="mt-2 max-w-measure text-muted-foreground text-xs">
-        People in these roles without two-factor sign-in can only use their Account page until they
-        set it up, and can’t turn it off. API tokens aren’t affected.
-        {required !== 'off' && missing
-          ? ` ${missing} ${missing === 1 ? 'person hasn’t' : 'people haven’t'} set it up yet.`
-          : ''}
-      </p>
     </Section>
   );
 }

@@ -1,8 +1,18 @@
 import { isRole, ROLE_LABELS } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
-import { Download } from 'lucide-react';
+import { Download, Monitor, Plug } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   data,
@@ -174,44 +184,54 @@ export default function Account() {
         } · ${ROLE_LABELS[me.role]}`}
       />
       <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
-        <div className="max-w-[560px]">
+        <div className="max-w-2xl space-y-6">
           {/* Not alerts: they are there when the page loads, so they're read in order. */}
           {me.passwordChangeDue ? (
-            <p className="mb-6 rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
+            <p className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Choose your own password to continue.</span> You signed
               in with a temporary password an admin gave you; the rest of OrderLoop opens once you
               replace it.
             </p>
           ) : null}
           {me.twoFactorDue ? (
-            <p className="mb-6 rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
+            <p className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
               <span className="font-medium">Set up two-factor sign-in to continue.</span> Your role
               needs it in this workspace; the rest of OrderLoop opens once it is on.
             </p>
           ) : null}
           {result && 'ok' in result && result.welcome ? (
-            <div role="status" className="mb-6 card p-4">
-              <p className="font-medium">Your password is set. OrderLoop is open.</p>
-              <p className="mt-1 text-muted-foreground text-sm">
-                You’re {/^[aeiou]/i.test(ROLE_LABELS[me.role]) ? 'an' : 'a'} {ROLE_LABELS[me.role]}.
-                Two-factor sign-in, where you’re signed in and connected apps are below.
-              </p>
-              <Button asChild size="sm" className="mt-3">
-                <Link to="/" ref={welcomeLink}>
-                  Go to the overview
-                </Link>
-              </Button>
-            </div>
+            <Card role="status" size="sm">
+              <CardHeader>
+                <CardTitle>Your password is set. OrderLoop is open.</CardTitle>
+                <CardDescription>
+                  You’re {/^[aeiou]/i.test(ROLE_LABELS[me.role]) ? 'an' : 'a'}{' '}
+                  {ROLE_LABELS[me.role]}. Two-factor sign-in, where you’re signed in and connected
+                  apps are below.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild size="sm">
+                  <Link to="/" ref={welcomeLink}>
+                    Go to the overview
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
           ) : null}
           {me.passwordChangeDue || me.twoFactorDue ? null : <InstallHint />}
-          <Section title={password ? 'Password' : 'Sign-in'}>
+          <Section
+            title={password ? 'Password' : 'Sign-in'}
+            description={
+              me.kind === 'user' && password ? 'Change the password you sign in with.' : undefined
+            }
+          >
             {me.kind === 'user' && !password ? (
               <p className="text-muted-foreground text-sm">
                 You sign in with single sign-on. Your organization’s identity provider looks after
                 your password and two-factor sign-in.
               </p>
             ) : me.kind === 'user' ? (
-              <Form method="post" className="space-y-3" ref={passwordForm}>
+              <Form method="post" ref={passwordForm}>
                 <input type="hidden" name="intent" value="password" />
                 {/* Lets a password manager save the new password against this account. */}
                 <input
@@ -222,59 +242,63 @@ export default function Account() {
                   readOnly
                   hidden
                 />
-                <label className="block text-sm" htmlFor="current">
-                  {me.passwordChangeDue
-                    ? 'The temporary password you just used'
-                    : 'Current password'}
-                </label>
-                <Input
-                  id="current"
-                  name="current"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  autoFocus={me.passwordChangeDue}
-                  aria-invalid={passwordError ? true : undefined}
-                  aria-describedby={passwordError ? 'password-error' : undefined}
-                />
-                <label className="block text-sm" htmlFor="next">
-                  New password
-                </label>
-                <Input
-                  id="next"
-                  name="next"
-                  type="password"
-                  required
-                  minLength={10}
-                  autoComplete="new-password"
-                  aria-describedby={`password-hint${passwordError ? ' password-error' : ''}`}
-                />
-                <p id="password-hint" className="text-muted-foreground text-xs">
-                  At least 10 characters, not a common password and not your email address.
-                </p>
-                {passwordError ? (
-                  <p id="password-error" role="alert" className="text-destructive text-sm">
-                    {passwordError}
-                  </p>
-                ) : null}
-                {result && 'ok' in result && !result.welcome ? (
-                  <p role="status" className="text-sm">
-                    Password changed.
-                    {result.ended
-                      ? ` ${result.ended === 1 ? 'Your other session was' : 'Your other sessions were'} signed out.`
-                      : ''}
-                    {result.apps
-                      ? ` ${result.apps === 1 ? 'Your connected app was' : 'Your connected apps were'} disconnected; connect again to keep using them.`
-                      : ''}
-                  </p>
-                ) : null}
-                <Button type="submit" disabled={changing}>
-                  {changing
-                    ? 'Changing…'
-                    : me.passwordChangeDue
-                      ? 'Set my password'
-                      : 'Change password'}
-                </Button>
+                <FieldGroup className="gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="current">
+                      {me.passwordChangeDue
+                        ? 'The temporary password you just used'
+                        : 'Current password'}
+                    </FieldLabel>
+                    <Input
+                      id="current"
+                      name="current"
+                      type="password"
+                      required
+                      autoComplete="current-password"
+                      autoFocus={me.passwordChangeDue}
+                      aria-invalid={passwordError ? true : undefined}
+                      aria-describedby={passwordError ? 'password-error' : undefined}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="next">New password</FieldLabel>
+                    <Input
+                      id="next"
+                      name="next"
+                      type="password"
+                      required
+                      minLength={10}
+                      autoComplete="new-password"
+                      aria-describedby={`password-hint${passwordError ? ' password-error' : ''}`}
+                    />
+                    <FieldDescription id="password-hint" className="text-xs">
+                      At least 10 characters, not a common password and not your email address.
+                    </FieldDescription>
+                  </Field>
+                  {passwordError ? (
+                    <FieldError id="password-error">{passwordError}</FieldError>
+                  ) : null}
+                  {result && 'ok' in result && !result.welcome ? (
+                    <p role="status" className="text-sm">
+                      Password changed.
+                      {result.ended
+                        ? ` ${result.ended === 1 ? 'Your other session was' : 'Your other sessions were'} signed out.`
+                        : ''}
+                      {result.apps
+                        ? ` ${result.apps === 1 ? 'Your connected app was' : 'Your connected apps were'} disconnected; connect again to keep using them.`
+                        : ''}
+                    </p>
+                  ) : null}
+                  <div>
+                    <Button type="submit" disabled={changing}>
+                      {changing
+                        ? 'Changing…'
+                        : me.passwordChangeDue
+                          ? 'Set my password'
+                          : 'Change password'}
+                    </Button>
+                  </div>
+                </FieldGroup>
               </Form>
             ) : (
               <p className="text-muted-foreground text-sm">
@@ -295,8 +319,7 @@ export default function Account() {
           {me.kind === 'user' && !me.passwordChangeDue ? (
             <Section
               title="Where you're signed in"
-              className="mt-6"
-              flush
+              description="A session ends 30 days after sign-in, or after 7 days without use."
               actions={
                 others ? (
                   <end.Form method="post">
@@ -308,94 +331,96 @@ export default function Account() {
                 ) : undefined
               }
             >
-              <ul className="divide-y text-sm">
+              <ul className="-mx-2 flex flex-col gap-1">
                 {sessions.map((x) => (
-                  <li key={x.ref} className="flex items-center gap-3 px-4 py-2.5">
-                    <div className="min-w-0 flex-1">
-                      <div>
-                        {x.device}
-                        {x.current ? (
-                          <span className="ml-1.5 font-medium text-xs">· this browser</span>
-                        ) : null}
-                      </div>
-                      <div className="text-muted-foreground text-xs">
-                        {x.ip ? <span className="font-mono">{x.ip}</span> : null}
-                        {x.ip ? ' · ' : ''}signed in {formatTime(x.createdAt)}
-                        {x.current ? null : (
-                          <>
-                            {' '}
-                            · active <Ago ms={x.lastSeenAt} />
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {x.current ? null : (
-                      <end.Form method="post">
-                        <input type="hidden" name="intent" value="end-session" />
-                        <input type="hidden" name="ref" value={x.ref} />
-                        <Button size="sm" variant="ghost" disabled={end.state !== 'idle'}>
-                          Sign out
-                        </Button>
-                      </end.Form>
-                    )}
-                  </li>
+                  <Item key={x.ref} asChild size="sm" variant={x.current ? 'muted' : 'default'}>
+                    <li>
+                      <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                        <Monitor className="text-muted-foreground" aria-hidden="true" />
+                      </ItemMedia>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle>
+                          {x.device}
+                          {x.current ? (
+                            <span className="font-medium text-xs">· this browser</span>
+                          ) : null}
+                        </ItemTitle>
+                        <ItemDescription className="text-xs">
+                          {x.ip ? <span className="font-mono">{x.ip}</span> : null}
+                          {x.ip ? ' · ' : ''}signed in {formatTime(x.createdAt)}
+                          {x.current ? null : (
+                            <>
+                              {' '}
+                              · active <Ago ms={x.lastSeenAt} />
+                            </>
+                          )}
+                        </ItemDescription>
+                      </ItemContent>
+                      {x.current ? null : (
+                        <ItemActions>
+                          <end.Form method="post">
+                            <input type="hidden" name="intent" value="end-session" />
+                            <input type="hidden" name="ref" value={x.ref} />
+                            <Button size="sm" variant="ghost" disabled={end.state !== 'idle'}>
+                              Sign out
+                            </Button>
+                          </end.Form>
+                        </ItemActions>
+                      )}
+                    </li>
+                  </Item>
                 ))}
               </ul>
-              <p className="border-t px-4 py-2.5 text-muted-foreground text-xs">
-                <span className="block max-w-measure">
-                  A session ends 30 days after sign-in, or after 7 days without use.
-                </span>
-              </p>
               {end.data && 'error' in end.data ? (
-                <p role="alert" className="px-4 pb-2.5 text-destructive text-sm">
+                <p role="alert" className="mt-3 text-destructive text-sm">
                   {end.data.error}
                 </p>
               ) : null}
               {end.data && 'ended' in end.data ? (
-                <p role="status" className="border-t px-4 py-2.5 text-sm">
+                <p role="status" className="mt-3 text-sm">
                   {end.data.said}
                 </p>
               ) : null}
             </Section>
           ) : null}
           {me.passwordChangeDue ? null : (
-            <Section title="Connected apps" className="mt-6" flush>
+            <Section
+              title="Connected apps"
+              description="AI clients and agents you approved to act as you."
+            >
               {apps.length ? (
-                <ul className="divide-y text-sm">
+                <ul className="-mx-2 flex flex-col gap-1">
                   {apps.map((a) => (
-                    <li
-                      key={a.id}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{a.name}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {a.channel
-                            ? `${a.channel === 'A2A' ? 'Agent (A2A)' : 'AI client (MCP)'} · `
-                            : ''}
-                          {a.host ? <span className="font-mono">{a.host}</span> : null}
-                          {a.host ? ' · ' : ''}
-                          acts as {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
-                        </div>
-                      </div>
-                      <Disconnect app={a.name} id={a.id} end={end} />
-                    </li>
+                    <Item key={a.id} asChild size="sm">
+                      <li>
+                        <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                          <Plug className="text-muted-foreground" aria-hidden="true" />
+                        </ItemMedia>
+                        <ItemContent className="min-w-0">
+                          <ItemTitle className="block truncate">{a.name}</ItemTitle>
+                          <ItemDescription className="text-xs">
+                            {a.channel
+                              ? `${a.channel === 'A2A' ? 'Agent (A2A)' : 'AI client (MCP)'} · `
+                              : ''}
+                            {a.host ? <span className="font-mono">{a.host}</span> : null}
+                            {a.host ? ' · ' : ''}
+                            acts as {ROLE_LABELS[a.role]} · connected {formatTime(a.createdAt)}
+                          </ItemDescription>
+                        </ItemContent>
+                        <Disconnect app={a.name} id={a.id} end={end} />
+                      </li>
+                    </Item>
                   ))}
                 </ul>
               ) : (
-                <p className="px-4 py-2.5 text-muted-foreground text-sm">
+                <p className="text-muted-foreground text-sm">
                   No apps are connected. MCP clients such as Claude connect at{' '}
                   <code className="font-mono">/mcp</code>, and A2A agents at{' '}
                   <code className="font-mono">/a2a</code>; each asks you here to approve it.
                 </p>
               )}
               {end.data && 'disconnected' in end.data ? (
-                <p
-                  ref={appsSaid}
-                  tabIndex={-1}
-                  role="status"
-                  className="border-t px-4 py-2.5 text-sm outline-none"
-                >
+                <p ref={appsSaid} tabIndex={-1} role="status" className="mt-3 text-sm outline-none">
                   {end.data.said}
                 </p>
               ) : null}
@@ -406,6 +431,8 @@ export default function Account() {
     </>
   );
 }
+
+const TWO_FACTOR_DESCRIPTION = 'A code from an app on your phone, asked for after your password.';
 
 function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLeft: number } }) {
   const tf = useFetcher<typeof action>();
@@ -449,16 +476,12 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
     setLastIntent(intent ?? new FormData(e.currentTarget).get('intent')?.toString() ?? null);
   };
   const errorFor = (intent: string) =>
-    error && lastIntent === intent ? (
-      <p id={`${intent}-error`} role="alert" className="text-destructive text-sm">
-        {error}
-      </p>
-    ) : null;
+    error && lastIntent === intent ? <FieldError id={`${intent}-error`}>{error}</FieldError> : null;
 
   if (showCodes) {
     const text = codes.join('\n');
     return (
-      <Section title="Two-factor sign-in" className="mt-6">
+      <Section title="Two-factor sign-in" description={TWO_FACTOR_DESCRIPTION}>
         <div className="space-y-3">
           <h3 ref={headingRef} tabIndex={-1} className="font-medium text-sm outline-none">
             {status.enabledAt && lastIntent === 'two-factor-codes'
@@ -513,7 +536,7 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
   }
 
   return (
-    <Section title="Two-factor sign-in" className="mt-6">
+    <Section title="Two-factor sign-in" description={TWO_FACTOR_DESCRIPTION}>
       {status.enabledAt ? (
         <div className="space-y-5">
           {/* A state, not a success: ink, not green. */}
@@ -538,17 +561,19 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
             <p className="text-muted-foreground text-xs">
               Replaces your codes; the old ones stop working.
             </p>
-            <label className="block text-sm" htmlFor="tf-codes-password">
-              Your password, to make new codes
-            </label>
-            <Input
-              id="tf-codes-password"
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              aria-describedby={errorFor('two-factor-codes') ? 'two-factor-codes-error' : undefined}
-            />
+            <Field>
+              <FieldLabel htmlFor="tf-codes-password">Your password, to make new codes</FieldLabel>
+              <Input
+                id="tf-codes-password"
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                aria-describedby={
+                  errorFor('two-factor-codes') ? 'two-factor-codes-error' : undefined
+                }
+              />
+            </Field>
             {errorFor('two-factor-codes')}
             <Button type="submit" variant="outline" size="sm" disabled={busy}>
               Make new codes
@@ -563,20 +588,20 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
                   Sign-in will need only your password. If your role requires two-factor sign-in,
                   you’ll be asked to set it up again.
                 </p>
-                <label className="block text-sm" htmlFor="tf-off-password">
-                  Your password, to turn it off
-                </label>
-                <Input
-                  id="tf-off-password"
-                  name="password"
-                  type="password"
-                  required
-                  autoFocus
-                  autoComplete="current-password"
-                  aria-describedby={
-                    errorFor('two-factor-disable') ? 'two-factor-disable-error' : undefined
-                  }
-                />
+                <Field>
+                  <FieldLabel htmlFor="tf-off-password">Your password, to turn it off</FieldLabel>
+                  <Input
+                    id="tf-off-password"
+                    name="password"
+                    type="password"
+                    required
+                    autoFocus
+                    autoComplete="current-password"
+                    aria-describedby={
+                      errorFor('two-factor-disable') ? 'two-factor-disable-error' : undefined
+                    }
+                  />
+                </Field>
                 {errorFor('two-factor-disable')}
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" variant="destructive" size="sm" disabled={busy}>
@@ -630,38 +655,44 @@ function TwoFactor({ status }: { status: { enabledAt: number | null; recoveryLef
               </code>
             </div>
           </div>
-          <label className="block text-sm" htmlFor="tf-code">
-            Code from the app
-          </label>
-          <Input
-            ref={codeField}
-            id="tf-code"
-            name="code"
-            required
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            className="font-mono"
-            aria-invalid={
-              error && lastIntent === 'two-factor-enable' && /code/i.test(error) ? true : undefined
-            }
-            aria-describedby={errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined}
-          />
-          <label className="block text-sm" htmlFor="tf-password">
-            Your password
-          </label>
-          <Input
-            id="tf-password"
-            name="password"
-            type="password"
-            required
-            autoComplete="current-password"
-            aria-invalid={
-              error && lastIntent === 'two-factor-enable' && /password/i.test(error)
-                ? true
-                : undefined
-            }
-            aria-describedby={errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined}
-          />
+          <Field>
+            <FieldLabel htmlFor="tf-code">Code from the app</FieldLabel>
+            <Input
+              ref={codeField}
+              id="tf-code"
+              name="code"
+              required
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              className="font-mono"
+              aria-invalid={
+                error && lastIntent === 'two-factor-enable' && /code/i.test(error)
+                  ? true
+                  : undefined
+              }
+              aria-describedby={
+                errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined
+              }
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="tf-password">Your password</FieldLabel>
+            <Input
+              id="tf-password"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              aria-invalid={
+                error && lastIntent === 'two-factor-enable' && /password/i.test(error)
+                  ? true
+                  : undefined
+              }
+              aria-describedby={
+                errorFor('two-factor-enable') ? 'two-factor-enable-error' : undefined
+              }
+            />
+          </Field>
           {errorFor('two-factor-enable')}
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={busy}>
@@ -708,15 +739,17 @@ function Disconnect({
   };
   return (
     <>
-      <Button
-        ref={trigger}
-        size="sm"
-        variant="ghost"
-        aria-expanded={confirming}
-        onClick={() => setConfirming(true)}
-      >
-        Disconnect
-      </Button>
+      <ItemActions>
+        <Button
+          ref={trigger}
+          size="sm"
+          variant="ghost"
+          aria-expanded={confirming}
+          onClick={() => setConfirming(true)}
+        >
+          Disconnect
+        </Button>
+      </ItemActions>
       {/* Its own line under the row, so the app it names stays readable beside the question. */}
       {confirming ? (
         <end.Form

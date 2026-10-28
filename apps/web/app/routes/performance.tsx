@@ -1,6 +1,6 @@
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { useLoaderData, useNavigation, useSearchParams } from 'react-router';
-import { PageHeader, Section } from '~/components/page';
+import { PageHeader } from '~/components/page';
 import { PerformanceDetail } from '~/components/performance';
 import { Trends } from '~/components/trends';
 import { requireUser } from '~/lib/auth.server';
@@ -47,12 +47,19 @@ export default function Performance() {
         }
       />
       <div className="mx-auto max-w-page space-y-6 px-4 pb-10 sm:px-6" aria-busy={busy}>
-        <Section title="Day by day">
+        {/* Each window figure heads its own card, over the day-by-day chart that adds up to it. */}
+        <section aria-labelledby="day-by-day" className="space-y-3">
+          <h2 id="day-by-day" className="section-title">
+            Day by day
+          </h2>
           <Trends daily={p.daily} totals={p.totals} days={p.days} />
-        </Section>
-        <Section title="Over the period">
+        </section>
+        <section aria-labelledby="over-the-period" className="space-y-3">
+          <h2 id="over-the-period" className="section-title">
+            Over the period
+          </h2>
           <PerformanceDetail p={p} />
-        </Section>
+        </section>
       </div>
     </>
   );

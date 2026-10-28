@@ -36,7 +36,7 @@ export default function Chart({
   const id = useId().replace(/:/g, '');
   const keys = Object.keys(config);
   return (
-    <ChartContainer config={config} className="mt-3 aspect-auto h-44 w-full" aria-hidden="true">
+    <ChartContainer config={config} className="aspect-auto h-44 w-full" aria-hidden="true">
       <AreaChart data={days} margin={{ left: 4, right: 4, top: 4 }} accessibilityLayer={false}>
         <defs>
           {keys.map((k) => (

@@ -1,3 +1,19 @@
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
+import {
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  Empty as EmptyRoot,
+  EmptyTitle,
+} from '@orderloop/ui/empty';
 import { cn } from '@orderloop/ui/lib/utils';
 
 export function PageHeader({
@@ -36,9 +52,14 @@ export function Body({ children, className }: { children: React.ReactNode; class
   );
 }
 
+/**
+ * A card with a title (Maia's Card: CardHeader, CardTitle, CardAction, CardContent). `flush` lets
+ * content that brings its own rows (tables, ruled lists) run to the card's edges under a rule.
+ */
 export function Section({
   id,
   title,
+  description,
   children,
   className,
   actions,
@@ -47,6 +68,7 @@ export function Section({
   /** An in-page link target; it clears the sticky top bar (and a sticky jump bar) when jumped to. */
   id?: string;
   title: React.ReactNode;
+  description?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   actions?: React.ReactNode;
@@ -54,39 +76,54 @@ export function Section({
   flush?: boolean;
 }) {
   return (
-    <section
+    <Card
       id={id}
       className={cn(
-        // Flush content runs to the edges, so the card clips it to its corners. Clip, not hidden:
-        // hidden would make the card a scroll container and stop a sticky table header at its top.
-        // Relative, so it also clips what's positioned inside it (a sort link's hit area, a header's
-        // sr-only text), which would otherwise widen the page at large text sizes.
-        'card min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)]',
-        flush && 'relative overflow-clip',
+        // Clip, not hidden: hidden would make the card a scroll container and stop a sticky table
+        // header at its top. Relative, so it also clips what's positioned inside it (a sort link's
+        // hit area, a header's sr-only text), which would otherwise widen the page at large text.
+        'relative min-w-0 scroll-mt-[calc(var(--shell-h)+3.5rem)] gap-4 overflow-clip [--card-spacing:--spacing(5)]',
+        flush && 'pb-0',
         className,
       )}
     >
-      <div className="flex min-h-14 items-center justify-between gap-3 px-5 pt-4 pb-2">
-        <h2 className="section-title">{title}</h2>
-        {actions}
-      </div>
-      <div className={flush ? 'border-t' : 'px-5 pb-5'}>{children}</div>
-    </section>
+      <CardHeader>
+        <CardTitle className="section-title">
+          <h2>{title}</h2>
+        </CardTitle>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+        {actions ? <CardAction className="self-center">{actions}</CardAction> : null}
+      </CardHeader>
+      {flush ? <div className="border-t">{children}</div> : <CardContent>{children}</CardContent>}
+    </Card>
   );
 }
 
-/** An empty state: what is (not) here, and optionally the next useful step. */
+/**
+ * An empty state (Maia's Empty): what is (not) here, and optionally the next useful step. Inside a
+ * card it stays compact; give it an `icon` and a `title` where the empty state is the page's news.
+ */
 export function Empty({
   children,
   action,
+  icon,
+  title,
+  className,
 }: {
   children: React.ReactNode;
   action?: React.ReactNode;
+  icon?: React.ReactNode;
+  title?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="px-4 py-8 text-center text-muted-foreground text-sm">
-      <p className="mx-auto max-w-measure text-balance">{children}</p>
-      {action ? <div className="mt-3">{action}</div> : null}
-    </div>
+    <EmptyRoot className={cn('gap-3 p-6', className)}>
+      <EmptyHeader className="max-w-measure">
+        {icon ? <EmptyMedia variant="icon">{icon}</EmptyMedia> : null}
+        {title ? <EmptyTitle className="font-semibold text-base">{title}</EmptyTitle> : null}
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </EmptyRoot>
   );
 }

@@ -7,6 +7,8 @@
 
 import { newId, taxCertificateState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardTitle } from '@orderloop/ui/card';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
@@ -18,7 +20,7 @@ import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { addCertificate, changeCertificate, customerById } from '~/lib/customers.server';
 import { engine } from '~/lib/env.server';
-import { dateTime, humanize, money } from '~/lib/format';
+import { count, dateTime, humanize, money } from '~/lib/format';
 import { CERTIFICATE_STATES, expiryDay, placesLabel } from '~/lib/tax-certificates';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
@@ -77,6 +79,30 @@ export default function CustomerPage() {
     sheet.result && 'error' in sheet.result && sheet.result.intent === 'add'
       ? sheet.result.error
       : null;
+  const states = certificates.map((t) => taxCertificateState(t, now));
+  const exempting = states.filter((s) => s === 'active').length;
+  const over = business && !!c.creditLimit && c.balance > c.creditLimit;
+  // Close enough that one more order could tip it over, as Commerce's customer list marks it.
+  const near = business && !over && !!c.creditLimit && c.balance >= c.creditLimit * 0.9;
+  const figures: Figure[] = [
+    ...(business
+      ? [
+          {
+            label: 'Balance',
+            value: money(c.balance),
+            note: over ? 'Over limit' : near ? 'Near limit' : undefined,
+            tone: over ? 'text-bad' : near ? 'text-wait' : undefined,
+          },
+          { label: 'Credit limit', value: c.creditLimit ? money(c.creditLimit) : 'No limit' },
+        ]
+      : []),
+    { label: 'Terms', value: business ? humanize(c.terms) : 'Pays at checkout' },
+    {
+      label: 'Exempting certificates',
+      value: count(exempting),
+      note: `of ${count(certificates.length)} on file`,
+    },
+  ];
   return (
     <>
       <PageHeader
@@ -102,9 +128,19 @@ export default function CustomerPage() {
           </Button>
         }
       />
-      <Body className="grid gap-4">
+      <Body className="grid gap-4 lg:gap-6">
+        {/* The account as the commerce steps read it, figure by figure (the preview cards' tiles). */}
+        <section
+          aria-label="Account"
+          className={cn('grid grid-cols-2 gap-4', business && 'lg:grid-cols-4')}
+        >
+          {figures.map((f) => (
+            <FigureCard key={f.label} f={f} />
+          ))}
+        </section>
         <Section
           title="Tax exemption certificates"
+          description="Only a verified, unexpired certificate covering an order’s ship-to exempts it from tax."
           flush
           actions={
             canOperate ? (
@@ -134,8 +170,8 @@ export default function CustomerPage() {
                 </Tr>
               </TableHead>
               <TableBody>
-                {certificates.map((t) => {
-                  const state = taxCertificateState(t, now);
+                {certificates.map((t, i) => {
+                  const state = states[i] ?? taxCertificateState(t, now);
                   const shown = CERTIFICATE_STATES[state];
                   return (
                     <Tr key={t.id} className={cn(state === 'revoked' && 'text-muted-foreground')}>
@@ -200,6 +236,27 @@ export default function CustomerPage() {
   );
 }
 
+type Figure = { label: string; value: string; note?: string; tone?: string };
+
+/** One account figure: its label, the value set large, and a muted note under it. */
+function FigureCard({ f }: { f: Figure }) {
+  return (
+    <Card size="sm" className="min-w-0 gap-1">
+      <CardContent className="flex flex-1 flex-col gap-1">
+        <CardDescription>{f.label}</CardDescription>
+        <CardTitle className={cn('font-semibold text-2xl tabular max-md:text-xl', f.tone)}>
+          {f.value}
+        </CardTitle>
+        {f.note ? (
+          <CardDescription className={cn('text-xs tabular', f.tone && 'font-medium', f.tone)}>
+            {f.note}
+          </CardDescription>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CertificateButton({
   id,
   intent,
@@ -236,57 +293,52 @@ function AddCertificate({
   busy: boolean;
 }) {
   return (
-    <Form method="post" encType="multipart/form-data" className="grid gap-3 text-sm">
+    <Form method="post" encType="multipart/form-data">
       <input type="hidden" name="intent" value="add" />
       <input type="hidden" name="id" value={nextId} />
-      <div className="grid gap-1">
-        <label htmlFor="cert-number" className="caption">
-          Certificate number
-        </label>
-        <Input id="cert-number" name="number" required maxLength={64} className="h-8" />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="cert-regions" className="caption">
-          Covers (a country, or a region of one: US, US-CA, CA-ON)
-        </label>
-        <Input
-          id="cert-regions"
-          name="regions"
-          required
-          autoCapitalize="characters"
-          autoCorrect="off"
-          placeholder="US-CA, US-NV"
-          className="h-8"
-        />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="cert-expires" className="caption">
-          Last day it is valid (optional)
-        </label>
-        <Input id="cert-expires" name="expires" type="date" className="h-8 w-48" />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="cert-file" className="caption">
-          The certificate (PDF or image, up to 10 MB; optional)
-        </label>
-        <input
-          id="cert-file"
-          name="file"
-          type="file"
-          accept="application/pdf,image/png,image/jpeg,image/webp"
-          className="text-base"
-        />
-      </div>
-      {error ? (
-        <p role="alert" className="text-bad">
-          {error}
-        </p>
-      ) : null}
-      <div>
-        <Button type="submit" size="sm" disabled={busy}>
-          Add certificate
-        </Button>
-      </div>
+      <FieldGroup className="gap-5">
+        <Field className="gap-2">
+          <FieldLabel htmlFor="cert-number">Certificate number</FieldLabel>
+          <Input id="cert-number" name="number" required maxLength={64} />
+        </Field>
+        <Field className="gap-2">
+          <FieldLabel htmlFor="cert-regions">Covers</FieldLabel>
+          <Input
+            id="cert-regions"
+            name="regions"
+            required
+            autoCapitalize="characters"
+            autoCorrect="off"
+            placeholder="US-CA, US-NV"
+            aria-describedby="cert-regions-hint"
+          />
+          <FieldDescription id="cert-regions-hint">
+            A country, or a region of one: US, US-CA, CA-ON.
+          </FieldDescription>
+        </Field>
+        <Field className="gap-2">
+          <FieldLabel htmlFor="cert-expires">Last day it is valid (optional)</FieldLabel>
+          <Input id="cert-expires" name="expires" type="date" className="max-w-48" />
+        </Field>
+        <Field className="gap-2">
+          <FieldLabel htmlFor="cert-file">The certificate (optional)</FieldLabel>
+          <input
+            id="cert-file"
+            name="file"
+            type="file"
+            accept="application/pdf,image/png,image/jpeg,image/webp"
+            aria-describedby="cert-file-hint"
+            className="text-base"
+          />
+          <FieldDescription id="cert-file-hint">PDF or image, up to 10 MB.</FieldDescription>
+        </Field>
+        {error ? <FieldError>{error}</FieldError> : null}
+        <div>
+          <Button type="submit" size="sm" disabled={busy}>
+            Add certificate
+          </Button>
+        </div>
+      </FieldGroup>
     </Form>
   );
 }

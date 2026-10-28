@@ -58,11 +58,11 @@ test('on a phone the overview puts the decision first, clear of New order', asyn
   await open(page, '/');
   const decision = page
     .getByRole('heading', { name: /Needs a decision/ })
-    .or(page.getByText('No decisions waiting.'));
-  const strip = page.getByRole('heading', { name: 'Open now' });
+    .or(page.getByText('No decisions waiting', { exact: true }));
+  const strip = page.getByRole('region', { name: 'Open now' });
   const [d, s] = [await decision.boundingBox(), await strip.boundingBox()];
   expect(d!.y, 'the decision comes before the status strip').toBeLessThan(s!.y);
-  // The status strip is a line per group on a phone, not a block of tiles.
+  // The figures are a line per group on a phone, not a block of tiles.
   const figures = page.getByRole('navigation', { name: 'Orders by status' }).getByRole('link');
   const heights = await figures.evaluateAll((els) =>
     els.map((el) => el.getBoundingClientRect().height),

@@ -13,12 +13,17 @@ import {
 } from '@orderloop/core';
 import { users } from '@orderloop/db';
 import { Button } from '@orderloop/ui/button';
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
+import { Separator } from '@orderloop/ui/separator';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
+import { Textarea } from '@orderloop/ui/textarea';
 import { inArray } from 'drizzle-orm';
+import { Puzzle } from 'lucide-react';
+import { useId } from 'react';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
-import { Field } from '~/components/inspector';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { StepUpField } from '~/components/step-up-field';
@@ -112,57 +117,62 @@ export default function Plugins() {
         title="Plugins"
         subtitle="Optional features on this workspace, each running on its own. What they add to flows, what they are sent, and whether they are answering."
       />
-      <Body className="space-y-4">
-        {result ? (
-          <p
-            role={result.ok ? 'status' : 'alert'}
-            className={result.ok ? 'text-sm' : 'text-destructive text-sm'}
-          >
-            {result.ok ? result.done : result.error}
-          </p>
-        ) : null}
-        <Upload publishers={publishers} />
-        {pending.map((i) => (
-          <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
-        ))}
-        {plugins.length || off.length ? (
-          <>
-            {plugins.map((p) => (
-              <PluginSection
-                key={p.id}
-                plugin={p}
-                installs={installs.filter((i) => i.id === p.id)}
-                stepUp={stepUp}
-              />
-            ))}
-            {off.map((i) => (
-              <Section
-                key={i.id}
-                title={
-                  <>
-                    {i.manifest.name}{' '}
-                    <span className="font-normal text-muted-foreground text-xs">
-                      {i.id} · version {i.version}
+      {/* Uploads waiting for a decision first, then what is installed; installing from a file sits
+          in a rail on wide screens and last on a phone. */}
+      <Body className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-6">
+          {result ? (
+            <p
+              role={result.ok ? 'status' : 'alert'}
+              className={result.ok ? 'text-sm' : 'text-destructive text-sm'}
+            >
+              {result.ok ? result.done : result.error}
+            </p>
+          ) : null}
+          {pending.map((i) => (
+            <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
+          ))}
+          {plugins.length || off.length ? (
+            <>
+              {plugins.map((p) => (
+                <PluginSection
+                  key={p.id}
+                  plugin={p}
+                  installs={installs.filter((i) => i.id === p.id)}
+                  stepUp={stepUp}
+                />
+              ))}
+              {off.map((i) => (
+                <Section
+                  key={i.id}
+                  title={i.manifest.name}
+                  description={`${i.id} · version ${i.version}`}
+                  actions={
+                    <span className="flex items-center gap-1.5 text-sm">
+                      <StatusDot status="cancelled" />
+                      Off
                     </span>
-                  </>
-                }
-                actions={
-                  <span className="flex items-center gap-1.5 text-sm">
-                    <StatusDot status="cancelled" />
-                    Off
-                  </span>
-                }
-              >
-                <ManifestDetails m={i.manifest} runtime="sandboxed" secrets={i.secrets} />
-                <InstallControls installs={installs.filter((x) => x.id === i.id)} stepUp={stepUp} />
-              </Section>
-            ))}
-          </>
-        ) : (
-          <Section title="Installed">
-            <Empty>No plugins are installed on this workspace.</Empty>
-          </Section>
-        )}
+                  }
+                >
+                  <ManifestDetails m={i.manifest} runtime="sandboxed" secrets={i.secrets} />
+                  <InstallControls
+                    installs={installs.filter((x) => x.id === i.id)}
+                    stepUp={stepUp}
+                  />
+                </Section>
+              ))}
+            </>
+          ) : (
+            <Section title="Installed">
+              <Empty icon={<Puzzle aria-hidden="true" />}>
+                No plugins are installed on this workspace.
+              </Empty>
+            </Section>
+          )}
+        </div>
+        <div className="min-w-0">
+          <Upload publishers={publishers} />
+        </div>
       </Body>
     </>
   );
@@ -191,17 +201,29 @@ export function Upload({ publishers }: { publishers: string[] }) {
     );
   return (
     <Section title="Install from a file">
-      <Form method="post" encType="multipart/form-data" className="flex flex-wrap items-end gap-3">
+      <Form method="post" encType="multipart/form-data">
         <input type="hidden" name="intent" value="upload" />
-        <Field
-          label="Plugin file"
-          hint={`A .olplugin signed by ${publishers.join(', ')}, which this workspace trusts. Nothing runs until you approve it.`}
-        >
-          <Input type="file" name="bundle" accept=".olplugin,application/json" required />
-        </Field>
-        <Button type="submit" disabled={busy}>
-          {busy ? 'Checking…' : 'Upload for review'}
-        </Button>
+        <FieldGroup className="gap-4">
+          <Field>
+            <FieldLabel htmlFor="plugin-bundle">Plugin file</FieldLabel>
+            <Input
+              id="plugin-bundle"
+              type="file"
+              name="bundle"
+              accept=".olplugin,application/json"
+              required
+              aria-describedby="plugin-bundle-hint"
+            />
+            <FieldDescription id="plugin-bundle-hint" className="text-xs">
+              {`A .olplugin signed by ${publishers.join(', ')}, which this workspace trusts. Nothing runs until you approve it.`}
+            </FieldDescription>
+          </Field>
+          <div>
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Checking…' : 'Upload for review'}
+            </Button>
+          </div>
+        </FieldGroup>
       </Form>
     </Section>
   );
@@ -219,25 +241,33 @@ function SecretForm({
   /** For a plugin that runs: changing its credentials asks who it is first. */
   stepUp?: StepUpMethod | null;
 }) {
+  const field = useId();
   return (
     <Form method="post" className="flex flex-wrap items-end gap-2">
       <input type="hidden" name="intent" value="secret" />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="name" value={name} />
-      <Field label={name} hint={set ? 'Set. Enter a new value to replace it.' : 'Not set'}>
+      <Field className="w-64 max-w-full gap-1.5">
+        <FieldLabel htmlFor={field} className="font-mono text-xs">
+          {name}
+        </FieldLabel>
         <Input
+          id={field}
           name="value"
           type="password"
           autoComplete="off"
           required
           maxLength={4096}
-          className="w-64"
+          aria-describedby={`${field}-hint`}
         />
       </Field>
       {stepUp !== undefined ? <StepUpField method={stepUp} next="/plugins" /> : null}
       <Button type="submit" size="sm" variant="outline">
         {set ? 'Replace' : 'Set'}
       </Button>
+      <FieldDescription id={`${field}-hint`} className="basis-full text-xs">
+        {set ? 'Set. Enter a new value to replace it.' : 'Not set'}
+      </FieldDescription>
     </Form>
   );
 }
@@ -266,22 +296,21 @@ function Review({
   return (
     <Section
       id={i.id}
-      title={
+      title={`Review ${m.name}`}
+      description={
         <>
-          Review {m.name}{' '}
-          <span className="font-normal text-muted-foreground text-xs">
+          <span className="font-mono text-xs">
             {i.id} · version {i.version} · {i.sha.slice(0, 12)}
+          </span>
+          <span className="block">
+            {drafted
+              ? `Drafted by the assistant for ${by ?? 'an admin'}`
+              : `Signed by ${i.publisher}`}{' '}
+            · {drafted ? 'drafted' : `uploaded${by ? ` by ${by}` : ''}`} <Ago ms={i.uploadedAt} />
           </span>
         </>
       }
-      actions={
-        <span className="text-muted-foreground text-sm">
-          {drafted
-            ? `Drafted by the assistant for ${by ?? 'an admin'}`
-            : `Signed by ${i.publisher}`}{' '}
-          · {drafted ? 'drafted' : `uploaded${by ? ` by ${by}` : ''}`} <Ago ms={i.uploadedAt} />
-        </span>
-      }
+      className="ring-wait/40"
     >
       <p className="mb-3 text-sm">
         Not running yet. Check what it adds and what it reaches before you approve it: once
@@ -301,8 +330,8 @@ function Review({
       <ManifestDetails m={m} runtime="sandboxed" secrets={i.secrets} />
       {drafted ? <DraftReview install={i} /> : null}
       {m.secrets.length ? (
-        <div className="mt-4 grid gap-3 border-t pt-3">
-          <h3 className="caption">Secrets</h3>
+        <div className="mt-4 grid gap-3 border-t pt-4">
+          <h3 className="font-medium text-sm">Secrets</h3>
           {m.secrets.map((x) => (
             <SecretForm
               key={x.name}
@@ -313,18 +342,25 @@ function Review({
           ))}
         </div>
       ) : null}
-      <Form method="post" className="mt-4 flex flex-wrap items-end gap-3 border-t pt-3">
+      <Form method="post" className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4">
         <input type="hidden" name="intent" value="approve" />
         <input type="hidden" name="id" value={i.id} />
         <input type="hidden" name="sha" value={i.sha} />
         {m.personalData === 'send' ? (
-          <label className="flex w-full items-start gap-2 text-sm">
-            <input type="checkbox" name="personalData" className="mt-1" />
-            <span>
-              Send it buyer details (names, emails, addresses).{' '}
-              <span className="text-muted-foreground">It doesn’t run without them.</span>
-            </span>
-          </label>
+          <Field orientation="horizontal" className="w-full items-start">
+            <input
+              id={`${i.sha}-personal-data`}
+              type="checkbox"
+              name="personalData"
+              className="mt-0.5"
+            />
+            <FieldContent>
+              <FieldLabel htmlFor={`${i.sha}-personal-data`} className="font-normal">
+                Send it buyer details (names, emails, addresses).
+              </FieldLabel>
+              <FieldDescription>It doesn’t run without them.</FieldDescription>
+            </FieldContent>
+          </Field>
         ) : null}
         <StepUpField method={stepUp} next="/plugins" />
         <Button
@@ -365,7 +401,7 @@ const editableCases = (cases: PluginCaseResult[] | null) =>
 function DraftReview({ install: i }: { install: PluginInstallView }) {
   const nav = useNavigation();
   return (
-    <div className="mt-4 grid gap-3 border-t pt-3 text-sm">
+    <div className="mt-4 grid gap-3 border-t pt-4 text-sm">
       <details>
         <summary className="cursor-pointer">Rule code, as the assistant wrote it</summary>
         <pre className="mt-2 max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
@@ -373,7 +409,7 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
         </pre>
       </details>
       <div>
-        <h3 className="caption mb-1.5">Test cases</h3>
+        <h3 className="mb-1.5 font-medium text-sm">Test cases</h3>
         {i.cases?.length ? (
           <Table edge="flush" caption="Test cases" className="text-xs">
             <TableHead>
@@ -411,16 +447,20 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
         <input type="hidden" name="intent" value="cases" />
         <input type="hidden" name="id" value={i.id} />
         <input type="hidden" name="sha" value={i.sha} />
-        <Field
-          label="Edit the cases"
-          hint="Each case: a name, the step, the order fields that matter (the rest are a one-line US order of 100 USD), its settings, and the branch it must take."
-        >
-          <textarea
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor={`${i.sha}-cases`}>Edit the cases</FieldLabel>
+          <FieldDescription id={`${i.sha}-cases-hint`} className="text-xs">
+            Each case: a name, the step, the order fields that matter (the rest are a one-line US
+            order of 100 USD), its settings, and the branch it must take.
+          </FieldDescription>
+          <Textarea
+            id={`${i.sha}-cases`}
             name="cases"
             defaultValue={editableCases(i.cases)}
             rows={10}
             spellCheck={false}
-            className="w-full rounded-xl border border-input bg-input/30 p-3 font-mono text-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            aria-describedby={`${i.sha}-cases-hint`}
+            className="font-mono text-xs"
           />
         </Field>
         <div>
@@ -451,7 +491,7 @@ function InstallControls({
   const earlier = installs.filter((i) => i.status === 'superseded');
   const on = current.status === 'active';
   return (
-    <div className="mt-4 grid gap-4 border-t pt-3 text-sm">
+    <div className="mt-4 grid gap-4 border-t pt-4 text-sm">
       <p className="text-muted-foreground">
         Installed here from a file signed by {current.publisher}
         {current.approvedAt ? (
@@ -463,44 +503,51 @@ function InstallControls({
       </p>
       {current.manifest.secrets.length ? (
         <div className="grid gap-3">
-          <h3 className="caption">Secrets</h3>
+          <h3 className="font-medium text-sm">Secrets</h3>
           {current.secrets.map((x) => (
             <SecretForm key={x.name} id={current.id} name={x.name} set={x.set} stepUp={stepUp} />
           ))}
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Form method="post" className="flex flex-wrap items-end gap-3">
-          <input type="hidden" name="intent" value={on ? 'disable' : 'enable'} />
-          <input type="hidden" name="id" value={current.id} />
-          <StepUpField method={stepUp} next="/plugins" />
-          <Button type="submit" size="sm" variant="outline">
-            {on ? 'Turn off' : 'Turn on'}
-          </Button>
-        </Form>
-      </div>
+      <Form method="post" className="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="intent" value={on ? 'disable' : 'enable'} />
+        <input type="hidden" name="id" value={current.id} />
+        <StepUpField method={stepUp} next="/plugins" />
+        <Button type="submit" size="sm" variant="outline">
+          {on ? 'Turn off' : 'Turn on'}
+        </Button>
+      </Form>
       {earlier.length ? (
-        <div className="grid gap-2">
-          <h3 className="caption">Earlier versions</h3>
-          {earlier.map((v) => (
-            <Form key={v.sha} method="post" className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="intent" value="rollback" />
-              <input type="hidden" name="id" value={v.id} />
-              <input type="hidden" name="sha" value={v.sha} />
-              <span>
-                Version {v.version}{' '}
-                <span className="text-muted-foreground text-xs">
-                  {v.sha.slice(0, 12)} · uploaded <Ago ms={v.uploadedAt} />
-                </span>
-              </span>
-              <StepUpField method={stepUp} next="/plugins" />
-              <Button type="submit" size="sm" variant="outline">
-                Roll back to {v.version}
-              </Button>
-            </Form>
-          ))}
+        <div className="grid gap-1">
+          <h3 className="font-medium text-sm">Earlier versions</h3>
+          <ul className="-mx-2 flex flex-col gap-1">
+            {earlier.map((v) => (
+              <Item key={v.sha} asChild size="xs">
+                <li>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="font-normal">Version {v.version}</ItemTitle>
+                    <ItemDescription className="text-xs">
+                      {v.sha.slice(0, 12)} · uploaded <Ago ms={v.uploadedAt} />
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Form method="post" className="flex flex-wrap items-end gap-3">
+                      <input type="hidden" name="intent" value="rollback" />
+                      <input type="hidden" name="id" value={v.id} />
+                      <input type="hidden" name="sha" value={v.sha} />
+                      <StepUpField method={stepUp} next="/plugins" />
+                      <Button type="submit" size="sm" variant="outline">
+                        Roll back to {v.version}
+                      </Button>
+                    </Form>
+                  </ItemActions>
+                </li>
+              </Item>
+            ))}
+          </ul>
         </div>
       ) : null}
+      <Separator />
       <Form method="post" className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="intent" value="uninstall" />
         <input type="hidden" name="id" value={current.id} />
@@ -529,19 +576,10 @@ function PluginSection({
 }) {
   const m = p.manifest;
   const current = installs.find((i) => i.status === 'active');
-  const title = m ? (
-    <>
-      {m.name}{' '}
-      <span className="font-normal text-muted-foreground text-xs">
-        {m.id} · version {m.version}
-      </span>
-    </>
-  ) : (
-    p.id
-  );
   return (
     <Section
-      title={title}
+      title={m ? m.name : p.id}
+      description={m ? `${m.id} · version ${m.version}` : undefined}
       actions={
         <span className="flex items-center gap-1.5 text-sm">
           <StatusDot status={p.healthy ? 'completed' : 'failed'} />
@@ -665,7 +703,7 @@ function ManifestDetails({
         ) : null}
       </dl>
       <div>
-        <h3 className="caption mb-1.5">Flow steps</h3>
+        <h3 className="mb-1.5 font-medium text-sm">Flow steps</h3>
         {m.nodes.length ? (
           <ul className="space-y-1">
             {m.nodes.map((n) => (
@@ -688,8 +726,8 @@ function ManifestDetails({
 
 function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
   return (
-    <div className="mt-4 border-t pt-3 text-sm">
-      <h3 className="caption mb-1.5">In use</h3>
+    <div className="mt-4 border-t pt-4 text-sm">
+      <h3 className="mb-1.5 font-medium text-sm">In use</h3>
       {usage.flows.length || usage.orders.length || usage.labels.length ? (
         <p>
           {usage.flows.map((f, i) => (
@@ -724,8 +762,8 @@ function Usage({ usage }: { usage: NonNullable<Plugin['usage']> }) {
 
 function Errors({ errors }: { errors: Plugin['errors'] }) {
   return (
-    <div className="mt-4 border-t pt-3 text-sm">
-      <h3 className="caption mb-1.5">Recent errors</h3>
+    <div className="mt-4 border-t pt-4 text-sm">
+      <h3 className="mb-1.5 font-medium text-sm">Recent errors</h3>
       <ul className="grid gap-1">
         {errors.map((e) => (
           <li key={e.id} className="flex gap-3">
@@ -742,8 +780,8 @@ function Errors({ errors }: { errors: Plugin['errors'] }) {
 
 function Deliveries({ deliveries }: { deliveries: Plugin['deliveries'] }) {
   return (
-    <div className="mt-4 border-t pt-3 text-sm">
-      <h3 className="caption mb-1.5">Recent events</h3>
+    <div className="mt-4 border-t pt-4 text-sm">
+      <h3 className="mb-1.5 font-medium text-sm">Recent events</h3>
       {deliveries.length ? (
         <ul className="space-y-1">
           {deliveries.map((d) => (

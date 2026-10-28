@@ -1,4 +1,13 @@
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldSeparator,
+} from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser';
 import { useEffect, useRef, useState } from 'react';
@@ -119,111 +128,130 @@ export default function Login() {
   return (
     <main className="grid min-h-dvh content-start justify-items-center gap-4 bg-background px-4 pt-[16vh]">
       {demo && !connecting ? (
-        <Form method="post" className="w-full max-w-sm card p-6">
-          <input type="hidden" name="intent" value="demo" />
-          <h2 className="font-semibold tracking-title text-2xl">OrderLoop demo</h2>
-          <p className="mt-1 text-muted-foreground text-sm">
-            A sample workspace with customers, a catalog and stores. Run scenarios, edit flows and
-            decide approvals as an operator. It resets every night.
-          </p>
-          <Button type="submit" className="mt-4 w-full" disabled={busy}>
-            {busy ? 'Opening…' : 'Explore the demo'}
-          </Button>
-        </Form>
-      ) : null}
-      <Form method="post" className="h-fit w-full max-w-sm card p-6">
-        {params.get('signed-out') && !error ? (
-          <p role="status" className="mb-4 text-muted-foreground text-sm">
-            You’ve signed out.
-          </p>
-        ) : null}
-        <Mark className="size-7" />
-        <h1 className="mt-4 font-semibold tracking-title text-2xl">OrderLoop</h1>
-        <p className="mt-1 text-muted-foreground text-sm">
-          {connecting
-            ? app
-              ? `Sign in to connect “${app}” to OrderLoop.`
-              : 'Sign in to connect an app to OrderLoop.'
-            : ssoOnly
-              ? 'Sign in with your organization’s account.'
-              : 'Sign in with your work email.'}
-        </p>
-        {sso ? (
-          <Button asChild variant={ssoOnly ? 'default' : 'outline'} className="mt-5 w-full">
-            <a href={ssoHref}>Sign in with single sign-on</a>
-          </Button>
-        ) : null}
-        {ssoOnly ? (
-          error ? (
-            <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
-              {error}
-            </p>
-          ) : null
-        ) : (
-          <>
-            {sso ? (
-              <p className="mt-4 text-center text-muted-foreground text-xs">or with a password</p>
-            ) : null}
-            <label className={`${sso ? 'mt-2' : 'mt-5'} block text-sm`} htmlFor="email">
-              Email
-            </label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              required
-              autoFocus={!sso}
-              autoComplete="username"
-              className="mt-1"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'sign-in-error' : undefined}
-            />
-            <label className="mt-3 block text-sm" htmlFor="password">
-              Password
-            </label>
-            <Input
-              ref={password}
-              id="password"
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              className="mt-1"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'sign-in-error' : undefined}
-            />
-            {turnstile ? (
-              <Turnstile siteKey={turnstile} action="login" reset={result} onSolved={setChecked} />
-            ) : null}
-            {error ? (
-              <p id="sign-in-error" className="mt-2 text-destructive text-sm" role="alert">
-                {error}
-              </p>
-            ) : null}
-            <Button
-              type="submit"
-              className="mt-4 w-full"
-              disabled={busy || passkey.busy || (!!turnstile && !checked)}
-            >
-              {busy ? 'Signing in…' : 'Sign in'}
-            </Button>
-            {passkey.supported ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-2 w-full"
-                disabled={busy || passkey.busy}
-                onClick={() => void passkey.start(params.toString())}
-              >
-                {passkey.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="font-semibold tracking-title text-2xl">OrderLoop demo</h2>
+            </CardTitle>
+            <CardDescription>
+              A sample workspace with customers, a catalog and stores. Run scenarios, edit flows and
+              decide approvals as an operator. It resets every night.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form method="post">
+              <input type="hidden" name="intent" value="demo" />
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? 'Opening…' : 'Explore the demo'}
               </Button>
-            ) : null}
-            <p className="mt-3 text-muted-foreground text-xs">
-              Forgot your password? Ask an admin to reset it on the Team page.
+            </Form>
+          </CardContent>
+        </Card>
+      ) : null}
+      <Card className="h-fit w-full max-w-sm">
+        <CardHeader>
+          {params.get('signed-out') && !error ? (
+            <p role="status" className="mb-2 text-muted-foreground text-sm">
+              You’ve signed out.
             </p>
-          </>
-        )}
-      </Form>
+          ) : null}
+          <Mark className="size-7" />
+          <CardTitle className="mt-2">
+            <h1 className="font-semibold tracking-title text-2xl">OrderLoop</h1>
+          </CardTitle>
+          <CardDescription>
+            {connecting
+              ? app
+                ? `Sign in to connect “${app}” to OrderLoop.`
+                : 'Sign in to connect an app to OrderLoop.'
+              : ssoOnly
+                ? 'Sign in with your organization’s account.'
+                : 'Sign in with your work email.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form method="post">
+            <FieldGroup className="gap-4">
+              {sso ? (
+                <Button asChild variant={ssoOnly ? 'default' : 'outline'} className="w-full">
+                  <a href={ssoHref}>Sign in with single sign-on</a>
+                </Button>
+              ) : null}
+              {ssoOnly ? (
+                error ? (
+                  <FieldError id="sign-in-error">{error}</FieldError>
+                ) : null
+              ) : (
+                <>
+                  {sso ? (
+                    <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+                      or with a password
+                    </FieldSeparator>
+                  ) : null}
+                  <Field>
+                    <FieldLabel htmlFor="email">Email</FieldLabel>
+                    <Input
+                      id="email"
+                      name="email"
+                      type="email"
+                      required
+                      autoFocus={!sso}
+                      autoComplete="username"
+                      aria-invalid={error ? true : undefined}
+                      aria-describedby={error ? 'sign-in-error' : undefined}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="password">Password</FieldLabel>
+                    <Input
+                      ref={password}
+                      id="password"
+                      name="password"
+                      type="password"
+                      required
+                      autoComplete="current-password"
+                      aria-invalid={error ? true : undefined}
+                      aria-describedby={error ? 'sign-in-error' : undefined}
+                    />
+                  </Field>
+                  {turnstile ? (
+                    <Turnstile
+                      siteKey={turnstile}
+                      action="login"
+                      reset={result}
+                      onSolved={setChecked}
+                    />
+                  ) : null}
+                  {error ? <FieldError id="sign-in-error">{error}</FieldError> : null}
+                  <Field className="gap-2">
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={busy || passkey.busy || (!!turnstile && !checked)}
+                    >
+                      {busy ? 'Signing in…' : 'Sign in'}
+                    </Button>
+                    {passkey.supported ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        disabled={busy || passkey.busy}
+                        onClick={() => void passkey.start(params.toString())}
+                      >
+                        {passkey.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+                      </Button>
+                    ) : null}
+                    <FieldDescription className="text-xs">
+                      Forgot your password? Ask an admin to reset it on the Team page.
+                    </FieldDescription>
+                  </Field>
+                </>
+              )}
+            </FieldGroup>
+          </Form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

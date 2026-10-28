@@ -24,6 +24,8 @@ import {
   AlertDialogTitle,
 } from '@orderloop/ui/alert-dialog';
 import { Button } from '@orderloop/ui/button';
+import { Card } from '@orderloop/ui/card';
+import { Field, FieldDescription, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
@@ -105,10 +107,7 @@ function View({ view, base }: { view: CheckedPluginView; base: string }) {
       <Body className="grid gap-4">
         {view.blocks.map((b, i) =>
           b.type === 'section' ? (
-            <Section key={`${b.title}-${i}`} title={b.title}>
-              {b.description ? (
-                <p className="mb-3 text-muted-foreground text-sm">{b.description}</p>
-              ) : null}
+            <Section key={`${b.title}-${i}`} title={b.title} description={b.description}>
               <div className="grid gap-4">
                 {b.blocks.map((x, j) => (
                   <Block key={`${x.type}-${j}`} block={x} base={base} />
@@ -140,19 +139,22 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
       );
     case 'stats':
       return (
+        // Figures as small cards: the label, then the value large (as the Overview's figures).
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {b.items.map((s) => (
-            <div key={s.label} className="card px-3 py-2">
-              <dt className="caption">{s.label}</dt>
-              <dd className="font-semibold text-lg tabular-nums">{s.value}</dd>
+            <Card key={s.label} size="sm" className="min-w-0 gap-1 px-(--card-spacing)">
+              <dt className="text-muted-foreground text-xs">{s.label}</dt>
+              <dd className="break-words font-semibold text-2xl tabular-nums tracking-title">
+                {s.value}
+              </dd>
               {s.hint ? <dd className="text-muted-foreground text-xs">{s.hint}</dd> : null}
-            </div>
+            </Card>
           ))}
         </dl>
       );
     case 'table':
       return b.rows.length ? (
-        <div className="card relative overflow-clip">
+        <Card className="relative gap-0 overflow-clip py-0">
           {/* A plugin's columns stack under their labels on a phone, as the core's tables do. */}
           <Table stack="cards" scroll>
             <TableHead>
@@ -195,18 +197,18 @@ function Block({ block: b, base }: { block: Leaf; base: string }) {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Card>
       ) : (
-        <div className="card overflow-hidden">
+        <Card className="py-0">
           <Empty>{b.empty ?? 'Nothing here yet.'}</Empty>
-        </div>
+        </Card>
       );
     case 'form':
       return <FormBlock form={b} href={href} />;
     case 'code':
       return (
-        <div className="grid gap-1">
-          {b.label ? <span className="caption">{b.label}</span> : null}
+        <div className="grid gap-1.5">
+          {b.label ? <span className="font-medium text-sm">{b.label}</span> : null}
           <pre className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">
             {b.text}
           </pre>
@@ -270,7 +272,11 @@ function FormBlock({
       ref={ref}
       method="post"
       action={href(form.action)}
-      className={inline ? 'inline' : 'grid max-w-xl gap-3 card p-4'}
+      className={
+        inline
+          ? 'inline'
+          : 'grid max-w-xl gap-4 card p-(--card-spacing) [--card-spacing:--spacing(5)]'
+      }
       onSubmit={(e) => {
         if (!form.confirm || confirmed.current) return;
         e.preventDefault();
@@ -308,9 +314,10 @@ function FormBlock({
         const fid = `${id}-${f.name}`;
         const value = f.value === undefined ? undefined : String(f.value);
         return (
-          <div
+          <Field
             key={f.name}
-            className={f.kind === 'checkbox' ? 'flex items-center gap-2' : 'grid gap-1'}
+            orientation={f.kind === 'checkbox' ? 'horizontal' : 'vertical'}
+            className={cn('gap-1.5', f.kind === 'checkbox' && 'flex-wrap gap-x-2')}
           >
             {f.kind === 'checkbox' ? (
               <input
@@ -321,9 +328,9 @@ function FormBlock({
                 defaultChecked={f.value === true || f.value === 'on'}
               />
             ) : null}
-            <label htmlFor={fid} className={f.kind === 'checkbox' ? 'text-sm' : 'caption'}>
+            <FieldLabel htmlFor={fid} className={f.kind === 'checkbox' ? 'font-normal' : undefined}>
               {f.label}
-            </label>
+            </FieldLabel>
             {f.kind === 'textarea' ? (
               <Textarea
                 id={fid}
@@ -359,8 +366,10 @@ function FormBlock({
                 className="h-8"
               />
             )}
-            {f.hint ? <p className="text-muted-foreground text-xs">{f.hint}</p> : null}
-          </div>
+            {f.hint ? (
+              <FieldDescription className="text-xs basis-full">{f.hint}</FieldDescription>
+            ) : null}
+          </Field>
         );
       })}
       <div>

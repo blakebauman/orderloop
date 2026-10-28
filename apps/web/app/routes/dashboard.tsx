@@ -5,8 +5,26 @@ import {
   type OrderState,
   toBase,
 } from '@orderloop/core';
+import { Badge } from '@orderloop/ui/badge';
+import { Button } from '@orderloop/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
-import { ArrowRight, ChevronRight, Play } from 'lucide-react';
+import { ArrowRight, ChevronRight, Inbox, Play, ReceiptText } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import { Form, Link, useLoaderData, useNavigation, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -174,6 +192,7 @@ export default function Dashboard() {
       to: since('cancelled'),
     },
   ];
+  const completed = day('completed');
   return (
     <>
       <PageHeader
@@ -187,22 +206,44 @@ export default function Dashboard() {
           </>
         }
       />
-      {/* A column of sections. On a phone the two grids below dissolve into it (`contents`), so the
-          decision can come first, above the status strip, while the first screen still has room. */}
-      <div className="mx-auto flex max-w-page flex-col gap-6 px-4 pb-10 sm:px-6">
+      {/* A column of cards. On a phone the two grids below dissolve into it (`contents`), so the
+          decision can come first, above the figures, while the first screen still has room. */}
+      <div className="mx-auto flex max-w-page flex-col gap-4 px-4 pb-10 sm:px-6 lg:gap-6">
         {/* Open work now, then the last day's endings: each figure opens the matching orders. */}
-        <nav aria-label="Orders by status" className="grid gap-x-4 gap-y-3 lg:grid-cols-[2fr_5fr]">
-          <Strip title="Open now" figures={now} cols="grid-cols-2" lead />
-          <Strip
-            title="Ended in the last 24 hours"
-            figures={lastDay}
-            cols="grid-cols-2 sm:grid-cols-5"
-          />
+        <nav aria-label="Orders by status" className="grid gap-4 lg:grid-cols-[2fr_5fr]">
+          <section aria-label="Open now" className="grid grid-cols-2 gap-4">
+            {now.map((f) => (
+              <FigureCard key={f.status} f={f} />
+            ))}
+          </section>
+          <Card size="sm" className="min-w-0 gap-2">
+            <CardHeader>
+              <CardDescription>
+                <h2>Ended in the last 24 hours</h2>
+              </CardDescription>
+              {completed?.n ? (
+                <CardAction>
+                  <Badge variant="secondary" className="tabular">
+                    {money(completed.total ?? 0, BASE_CURRENCY)} completed
+                  </Badge>
+                </CardAction>
+              ) : null}
+            </CardHeader>
+            <CardContent className="px-2 max-md:overflow-x-auto">
+              <ul className="grid grid-cols-5 gap-1 max-md:flex">
+                {lastDay.map((f) => (
+                  <li key={f.status} className="min-w-0 max-md:shrink-0">
+                    <Ending f={f} />
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
         </nav>
 
-        {/* Phones read decisions (moved above the strip), then where orders wait, then what ended
-            badly, then recent orders; wide screens put what ended badly in the rail beside the rest. */}
-        <div className="grid gap-6 max-md:contents lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+        {/* Phones read decisions (moved above the figures), then where orders wait, then what
+            ended badly, then recent orders; wide screens put what ended badly in the rail. */}
+        <div className="grid gap-4 max-md:contents lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
           <div className="min-w-0 max-md:contents md:space-y-6 lg:col-start-1">
             {decisions.length ? (
               <Section
@@ -210,47 +251,51 @@ export default function Dashboard() {
                 title={
                   <span className="flex items-center gap-2">
                     Needs a decision
-                    <span className="rounded-full bg-wait/15 px-2 py-px font-medium text-2xs text-wait tabular">
+                    <Badge className="border-transparent bg-wait/15 text-wait tabular">
                       {decisions.length + moreDecisions}
-                    </span>
+                    </Badge>
                   </span>
                 }
+                description="Each of these orders is paused until someone decides."
                 actions={
-                  <Link to="/approvals" className="hit-area text-link text-xs hover:underline">
-                    Open the queue
-                  </Link>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to="/approvals">Open the queue</Link>
+                  </Button>
                 }
-                flush
               >
-                <ul className="divide-y">
+                <ul className="flex flex-col gap-2">
                   {decisions.map((d) => (
-                    <DecisionCard key={d.id} d={d} />
+                    <DecisionItem key={d.id} d={d} />
                   ))}
-                  {moreDecisions ? (
-                    <li className="px-4 py-2.5 text-sm">
-                      <Link to="/approvals" className="text-link hover:underline">
-                        {moreDecisions} more in the queue
-                      </Link>
-                    </li>
-                  ) : null}
                 </ul>
+                {moreDecisions ? (
+                  <Link
+                    to="/approvals"
+                    className="mt-3 inline-block text-link text-sm hover:underline"
+                  >
+                    {moreDecisions} more in the queue
+                  </Link>
+                ) : null}
               </Section>
             ) : (
-              <p className="flex items-center gap-2 card px-5 py-3 text-sm max-md:-order-1">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-ok" />
-                <span>
-                  <span className="font-medium">No decisions waiting.</span>{' '}
-                  <span className="text-muted-foreground">
-                    Approvals that need you appear here.
-                  </span>
-                </span>
-                <Link
-                  to="/approvals?status=all"
-                  className="hit-area ml-auto shrink-0 text-link text-xs hover:underline"
-                >
-                  Past approvals
-                </Link>
-              </p>
+              <Card size="sm" className="max-md:-order-1">
+                <CardContent>
+                  <Item size="sm" className="p-0">
+                    <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                      <Inbox className="text-muted-foreground" aria-hidden="true" />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>No decisions waiting</ItemTitle>
+                      <ItemDescription>Approvals that need you appear here.</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link to="/approvals?status=all">Past approvals</Link>
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                </CardContent>
+              </Card>
             )}
 
             <WaitingTrails trails={trails} moving={moving} />
@@ -258,73 +303,73 @@ export default function Dashboard() {
 
           <aside
             aria-label="Ended badly"
-            className="min-w-0 space-y-6 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+            className="min-w-0 space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:space-y-6"
           >
             <EndedBadly steps={stopped} />
 
             {canOperate && demo ? (
-              <details className="group card overflow-hidden">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3">
-                  <span className="section-title">Demo scenarios</span>
-                  <ChevronRight
-                    className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
-                    aria-hidden="true"
-                  />
-                </summary>
-                <div className="space-y-0.5 border-t p-2">
-                  {SCENARIOS.map((s) => (
-                    <Form method="post" key={s.id}>
-                      <input type="hidden" name="scenario" value={s.id} />
-                      <button
-                        type="submit"
-                        disabled={nav.state !== 'idle'}
-                        className="group/s flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
-                      >
-                        <Play
-                          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block font-medium text-sm">{s.label}</span>
-                          <span className="block text-muted-foreground text-xs leading-snug">
-                            {s.blurb}
-                          </span>
-                        </span>
-                        <ArrowRight
-                          className="mt-0.5 size-3.5 opacity-0 transition group-hover/s:opacity-60"
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </Form>
-                  ))}
-                  <Link
-                    to="/orders/scenarios"
-                    className="block px-3 pt-1.5 pb-1 text-link text-sm hover:underline"
-                  >
-                    See what each one fails on, or edit one first
-                  </Link>
-                </div>
-              </details>
+              <Card size="sm" className="gap-0 py-0">
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-(--card-spacing) py-3">
+                    <span className="section-title">Demo scenarios</span>
+                    <ChevronRight
+                      className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
+                      aria-hidden="true"
+                    />
+                  </summary>
+                  <div className="flex flex-col gap-1 border-t p-2">
+                    {SCENARIOS.map((s) => (
+                      <Form method="post" key={s.id}>
+                        <input type="hidden" name="scenario" value={s.id} />
+                        <Item asChild size="xs" className="group/s text-left hover:bg-muted">
+                          <button
+                            type="submit"
+                            disabled={nav.state !== 'idle'}
+                            className="disabled:opacity-60"
+                          >
+                            <ItemMedia variant="icon">
+                              <Play className="text-muted-foreground" aria-hidden="true" />
+                            </ItemMedia>
+                            <ItemContent>
+                              <ItemTitle>{s.label}</ItemTitle>
+                              <ItemDescription className="text-xs leading-snug">
+                                {s.blurb}
+                              </ItemDescription>
+                            </ItemContent>
+                            <ArrowRight
+                              className="size-3.5 opacity-0 transition group-hover/s:opacity-60"
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </Item>
+                      </Form>
+                    ))}
+                    <Link
+                      to="/orders/scenarios"
+                      className="block px-3 pt-1.5 pb-1 text-link text-sm hover:underline"
+                    >
+                      See what each one fails on, or edit one first
+                    </Link>
+                  </div>
+                </details>
+              </Card>
             ) : null}
           </aside>
 
           <div className="min-w-0 lg:col-start-1">
             <Section
               title="Recently updated"
+              description="The orders that changed last, and where each one is."
               actions={
-                <Link
-                  to="/orders?sort=updated"
-                  className="hit-area text-link text-xs hover:underline"
-                >
-                  All orders
-                </Link>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/orders?sort=updated">All orders</Link>
+                </Button>
               }
-              flush
             >
               {recent.length ? (
-                <ul className="divide-y">
+                <ul className="-mx-2 flex flex-col gap-1">
                   {recent.map((o) => (
-                    <RecentRow
+                    <RecentItem
                       key={o.id}
                       o={o}
                       customer={(o.customerId && names[o.customerId]) || o.customerId}
@@ -334,13 +379,16 @@ export default function Dashboard() {
                 </ul>
               ) : (
                 <Empty
+                  icon={<ReceiptText aria-hidden="true" />}
+                  title="No orders yet"
                   action={
-                    <Link to="/orders/new" className="text-link text-sm hover:underline">
-                      Start an order
-                    </Link>
+                    <Button size="sm" asChild>
+                      <Link to="/orders/new">Start an order</Link>
+                    </Button>
                   }
                 >
-                  No orders yet.
+                  Orders from the API, your storefronts, email and this console appear here as they
+                  change.
                 </Empty>
               )}
             </Section>
@@ -351,69 +399,73 @@ export default function Dashboard() {
   );
 }
 
-/**
- * A group of figures in the status strip. `lead` is open work, set larger: it is what can still be
- * acted on. A bad ending with any orders takes its status colour, so a failure isn't drawn like a
- * completion. On a phone each group is one line of figures, label then count, that scrolls sideways
- * when it doesn't fit, so the strip doesn't push the decision queue off the first screen.
- */
-function Strip({
-  title,
-  figures,
-  cols,
-  lead,
-}: {
-  title: string;
-  figures: Figure[];
-  cols: string;
-  lead?: boolean;
-}) {
+/** A figure's colour when it should carry one: a bad ending with orders in it. */
+const badFigure = (f: Figure) => f.n > 0 && (f.status === 'failed' || f.status === 'rolled_back');
+
+/** The label of a figure: its status dot and words. */
+function FigureLabel({ f }: { f: Figure }) {
   return (
-    <section aria-label={title} className="min-w-0">
-      <h2 className="caption mb-1.5">{title}</h2>
-      <div className={`card grid ${cols} gap-1 p-1.5 max-md:flex max-md:overflow-x-auto`}>
-        {figures.map((f) => {
-          const bad = f.n > 0 && (f.status === 'failed' || f.status === 'rolled_back');
-          return (
-            <Link
-              key={f.status}
-              to={f.to}
-              aria-label={`${f.label}: ${f.n} ${f.n === 1 ? 'order' : 'orders'}${f.note ? `, ${f.note}` : ''}`}
-              className="min-w-0 rounded-xl px-4 py-2.5 hover:bg-muted max-md:flex max-md:min-h-11 max-md:shrink-0 max-md:items-center max-md:gap-2 max-md:px-3 max-md:py-1"
-            >
-              <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs">
-                <span
-                  aria-hidden="true"
-                  className="size-1.5 rounded-full"
-                  style={{ background: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] }}
-                />
-                {f.label}
-              </span>
-              <span className="mt-0.5 flex items-baseline gap-2 max-md:mt-0">
-                <span
-                  className={cn(
-                    'tabular',
-                    lead ? 'font-semibold text-2xl' : 'font-medium text-lg',
-                    'max-md:text-base',
-                    bad && 'font-semibold',
-                  )}
-                  style={
-                    bad ? { color: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] } : undefined
-                  }
-                >
-                  {f.n}
-                </span>
-                {f.note ? (
-                  <span className="truncate text-muted-foreground text-xs tabular max-md:hidden">
-                    {f.note}
-                  </span>
-                ) : null}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </section>
+    <span className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs">
+      <span
+        aria-hidden="true"
+        className="size-1.5 rounded-full"
+        style={{ background: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] }}
+      />
+      {f.label}
+    </span>
+  );
+}
+
+const figureName = (f: Figure) =>
+  `${f.label}: ${f.n} ${f.n === 1 ? 'order' : 'orders'}${f.note ? `, ${f.note}` : ''}`;
+
+/**
+ * Open work, as a card of its own (the preview cards' balance tiles): set large, since it is what
+ * can still be acted on. The whole card opens those orders.
+ */
+function FigureCard({ f }: { f: Figure }) {
+  return (
+    <Card size="sm" className="relative gap-1 transition-colors hover:bg-muted/40">
+      <CardContent className="flex flex-1 flex-col justify-between gap-1">
+        <CardDescription>
+          <Link
+            to={f.to}
+            aria-label={figureName(f)}
+            className="after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+          >
+            <FigureLabel f={f} />
+          </Link>
+        </CardDescription>
+        <CardTitle className="font-semibold text-2xl tabular max-md:text-xl">{f.n}</CardTitle>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * One ending in the last day's card. A bad ending with any orders takes its status colour, so a
+ * failure isn't drawn like a completion. On a phone the row scrolls sideways when it doesn't fit,
+ * so it doesn't push the decision queue off the first screen.
+ */
+function Ending({ f }: { f: Figure }) {
+  const bad = badFigure(f);
+  return (
+    <Link
+      to={f.to}
+      aria-label={figureName(f)}
+      className="block min-w-0 rounded-xl px-3 py-2 hover:bg-muted max-md:flex max-md:min-h-11 max-md:items-center max-md:gap-2 max-md:py-1"
+    >
+      <FigureLabel f={f} />
+      <span
+        className={cn(
+          'mt-0.5 block font-medium text-lg tabular max-md:mt-0 max-md:text-base',
+          bad && 'font-semibold',
+        )}
+        style={bad ? { color: STATUS_COLOR[f.status as keyof typeof STATUS_COLOR] } : undefined}
+      >
+        {f.n}
+      </span>
+    </Link>
   );
 }
 
@@ -444,65 +496,67 @@ function Amount({
 
 /**
  * One approval waiting on a person, read as the inbox reads it: the order, then its deadline and
- * reason on one line. The card opens the order, where the figures are. When decisions close it says
+ * reason on one line. The item opens the order, where the figures are. When decisions close it says
  * so in place, in ink: amber is for overdue ages.
  */
-function DecisionCard({ d }: { d: Data['decisions'][number] }) {
-  const titleId = useId();
+function DecisionItem({ d }: { d: Data['decisions'][number] }) {
   const detailId = useId();
   const deadline = d.ctx.deadline;
   const name =
     d.orderTitle || (d.orderModel ? ORDER_MODEL_LABELS[d.orderModel as OrderModel] : 'Order');
   return (
-    <li className="relative flex items-start gap-3 px-4 py-3 hover:bg-muted/40">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <Link
-            id={titleId}
-            to={`/orders/${d.orderId}`}
-            aria-describedby={detailId}
-            className="font-medium after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-          >
-            {name}{' '}
-            <span className="font-mono font-normal text-muted-foreground text-xs">
-              {orderRef(d.orderId)}
+    <Item asChild variant="muted" size="sm" className="relative items-start hover:bg-muted">
+      <li>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full flex-wrap gap-x-2 gap-y-0">
+            <Link
+              to={`/orders/${d.orderId}`}
+              aria-describedby={detailId}
+              className="after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+            >
+              {name}{' '}
+              <span className="font-mono font-normal text-muted-foreground text-xs">
+                {orderRef(d.orderId)}
+              </span>
+            </Link>
+            <span className="font-normal text-muted-foreground">
+              {d.customerName ?? d.customerId}
             </span>
-          </Link>
-          <span className="text-muted-foreground text-sm">{d.customerName ?? d.customerId}</span>
-        </div>
-        <div id={detailId}>
-          {deadline !== undefined || d.ctx.reason ? (
-            <p className="mt-1 flex min-w-0 items-baseline gap-x-2 text-sm">
-              {deadline !== undefined ? (
-                <DecisionDeadline
-                  deadline={deadline}
-                  onTimeout={d.ctx.onTimeout}
-                  className="shrink-0"
-                />
-              ) : null}
-              {d.ctx.reason ? (
-                <span className="min-w-0 truncate font-medium" title={d.ctx.reason}>
-                  {d.ctx.reason}
-                </span>
-              ) : null}
-            </p>
-          ) : null}
-          {d.noRun ? (
-            <p className="mt-1 text-muted-foreground text-sm">
-              No live run for this order, so it can’t be decided here.
-            </p>
-          ) : null}
-          <p className="mt-1 text-muted-foreground text-xs">
-            {d.ctx.step ? `${d.ctx.step} · assigned to` : 'Assigned to'}{' '}
-            {assigneeLabel(d.assignee) || 'any approver'} · requested <Ago ms={d.requestedAt} />
-          </p>
-        </div>
-      </div>
-      <span className="font-semibold">
-        <Amount amount={d.amount} currency={d.currency} fxRate={d.fxRate} />
-      </span>
-      <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-    </li>
+          </ItemTitle>
+          <div id={detailId} className="flex flex-col gap-1">
+            {deadline !== undefined || d.ctx.reason ? (
+              <p className="flex min-w-0 items-baseline gap-x-2 text-sm">
+                {deadline !== undefined ? (
+                  <DecisionDeadline
+                    deadline={deadline}
+                    onTimeout={d.ctx.onTimeout}
+                    className="shrink-0"
+                  />
+                ) : null}
+                {d.ctx.reason ? (
+                  <span className="min-w-0 truncate font-medium" title={d.ctx.reason}>
+                    {d.ctx.reason}
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
+            {d.noRun ? (
+              <ItemDescription>
+                No live run for this order, so it can’t be decided here.
+              </ItemDescription>
+            ) : null}
+            <ItemDescription className="text-xs">
+              {d.ctx.step ? `${d.ctx.step} · assigned to` : 'Assigned to'}{' '}
+              {assigneeLabel(d.assignee) || 'any approver'} · requested <Ago ms={d.requestedAt} />
+            </ItemDescription>
+          </div>
+        </ItemContent>
+        <ItemActions className="self-start font-semibold text-sm">
+          <Amount amount={d.amount} currency={d.currency} fxRate={d.fxRate} />
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </ItemActions>
+      </li>
+    </Item>
   );
 }
 
@@ -514,7 +568,8 @@ function Position({ o, status }: { o: Data['recent'][number]; status: string }) 
       <>
         Waiting at {o.waitingAt ?? o.waitingOn}
         {o.waitingSince ? (
-          <span className="text-muted-foreground">
+          // `useNow` reads the render's clock, so server and browser can differ by a second.
+          <span className="text-muted-foreground" suppressHydrationWarning>
             {' '}
             · {duration(Math.max(0, now - o.waitingSince))}
           </span>
@@ -540,7 +595,7 @@ function Position({ o, status }: { o: Data['recent'][number]; status: string }) 
  * One recently updated order, led by where it is (its step, or where it ended) rather than a
  * badge: the loop, not just a status. The dot carries the status colour; the words carry the rest.
  */
-function RecentRow({
+function RecentItem({
   o,
   customer,
   status,
@@ -555,36 +610,42 @@ function RecentRow({
   const tone =
     status === 'failed' ? 'text-bad' : status === 'rolled_back' ? 'text-undo' : 'text-foreground';
   return (
-    <li className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 px-5 py-2.5 hover:bg-muted/40">
-      <StatusDot status={status} className="mt-1.5" />
-      <span className="min-w-0">
-        <Link
-          to={`/orders/${o.id}`}
-          aria-describedby={detailId}
-          className="block truncate font-medium text-sm after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-        >
-          {name}{' '}
-          <span className="font-mono font-normal text-muted-foreground text-xs">
-            {orderRef(o.id)}
+    <Item asChild size="xs" className="relative items-start px-2 hover:bg-muted/60">
+      <li>
+        <ItemMedia className="mt-1.5 self-start">
+          <StatusDot status={status} />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full">
+            <Link
+              to={`/orders/${o.id}`}
+              aria-describedby={detailId}
+              className="truncate after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+            >
+              {name}{' '}
+              <span className="font-mono font-normal text-muted-foreground text-xs">
+                {orderRef(o.id)}
+              </span>
+            </Link>
+          </ItemTitle>
+          <span id={detailId} className="block">
+            <span className={cn('block truncate text-ui', tone)}>
+              <Position o={o} status={status} />
+            </span>
+            <span className="block truncate text-muted-foreground text-xs">
+              {customer || (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')}
+              {o.title || o.externalId ? ` · ${model}` : ''}
+            </span>
           </span>
-        </Link>
-        <span id={detailId} className="block">
-          <span className={cn('block truncate text-ui', tone)}>
-            <Position o={o} status={status} />
+        </ItemContent>
+        <ItemActions className="flex-col items-end gap-0 self-start text-sm">
+          <Amount amount={o.total} currency={o.currency} fxRate={o.fxRate} />
+          <span className="text-muted-foreground text-xs">
+            <Ago ms={o.updatedAt} />
           </span>
-          <span className="block truncate text-muted-foreground text-xs">
-            {customer || (o.contactEmail ? `Guest · ${o.contactEmail}` : 'No customer')}
-            {o.title || o.externalId ? ` · ${model}` : ''}
-          </span>
-        </span>
-      </span>
-      <span className="text-sm">
-        <Amount amount={o.total} currency={o.currency} fxRate={o.fxRate} />
-        <span className="block text-right text-muted-foreground text-xs">
-          <Ago ms={o.updatedAt} />
-        </span>
-      </span>
-    </li>
+        </ItemActions>
+      </li>
+    </Item>
   );
 }
 
@@ -599,13 +660,11 @@ function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number
   return (
     <Section
       title="Where orders are waiting"
+      description="Each flow's waiting steps, in the order the flow runs them."
       actions={
-        <Link
-          to="/orders?status=waiting&sort=waiting"
-          className="hit-area text-link text-xs hover:underline"
-        >
-          See all
-        </Link>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/orders?status=waiting&sort=waiting">See all</Link>
+        </Button>
       }
     >
       {trails.length ? (
@@ -637,24 +696,33 @@ function WaitingTrails({ trails, moving }: { trails: WaitTrail[]; moving: number
                           className="mx-1 w-3 self-center border-t border-dashed sm:w-5"
                         />
                       ) : null}
-                      <Link
-                        to={`/orders?flow=${encodeURIComponent(t.flowId)}&step=${encodeURIComponent(s.step)}&status=waiting&sort=waiting`}
-                        className="tile block min-w-0 max-w-[16rem] px-3.5 py-2 hover:bg-muted"
+                      <Item
+                        asChild
+                        variant="muted"
+                        size="xs"
+                        className="w-auto min-w-0 max-w-[16rem] flex-col items-start gap-0 hover:bg-muted"
                       >
-                        <span className="flex items-baseline gap-2">
-                          <span className="font-semibold text-lg tabular">{s.n}</span>
-                          <span className="truncate text-sm">{s.step}</span>
-                        </span>
-                        <span className="block truncate text-muted-foreground text-xs">
-                          {s.overdue ? (
-                            <span className="font-medium text-wait">{s.overdue} overdue</span>
-                          ) : null}
-                          {s.overdue && (age !== null || s.on) ? ' · ' : null}
-                          {age !== null ? `oldest ${duration(age)}` : null}
-                          {age !== null && s.on ? ' · ' : null}
-                          {s.on ? `on ${s.on}` : null}
-                        </span>
-                      </Link>
+                        <Link
+                          to={`/orders?flow=${encodeURIComponent(t.flowId)}&step=${encodeURIComponent(s.step)}&status=waiting&sort=waiting`}
+                        >
+                          <span className="flex max-w-full items-baseline gap-2">
+                            <span className="font-semibold text-lg tabular">{s.n}</span>
+                            <span className="truncate text-sm">{s.step}</span>
+                          </span>
+                          <span
+                            className="block max-w-full truncate text-muted-foreground text-xs"
+                            suppressHydrationWarning
+                          >
+                            {s.overdue ? (
+                              <span className="font-medium text-wait">{s.overdue} overdue</span>
+                            ) : null}
+                            {s.overdue && (age !== null || s.on) ? ' · ' : null}
+                            {age !== null ? `oldest ${duration(age)}` : null}
+                            {age !== null && s.on ? ' · ' : null}
+                            {s.on ? `on ${s.on}` : null}
+                          </span>
+                        </Link>
+                      </Item>
                     </li>
                   );
                 })}
@@ -684,61 +752,67 @@ function EndedBadly({ steps }: { steps: StoppedStep[] }) {
   return (
     <Section
       title="Ended badly this week"
+      description="Failed or rolled back, by the step they stopped at."
       actions={
-        <Link
-          to="/orders?attention=1&within=7d&sort=updated"
-          className="hit-area text-link text-xs hover:underline"
-        >
-          See all
-        </Link>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/orders?attention=1&within=7d&sort=updated">See all</Link>
+        </Button>
       }
-      flush
     >
       {steps.length ? (
         <>
-          <ul className="divide-y" aria-label={`${total} failed or rolled back`}>
+          <ul className="-mx-2 flex flex-col gap-1" aria-label={`${total} failed or rolled back`}>
             {steps.slice(0, 8).map((s) => (
-              <li key={`${s.flowId}-${s.step}`} className="relative px-5 py-2.5 hover:bg-muted/40">
-                <div className="flex items-baseline gap-3">
-                  <Link
-                    to={`/orders?flow=${encodeURIComponent(s.flowId)}&step=${encodeURIComponent(s.step)}&attention=1&within=7d&sort=updated`}
-                    className="min-w-0 flex-1 truncate text-sm after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-                  >
-                    <span className="font-medium">{s.step}</span>
-                    <span className="text-muted-foreground"> · {s.name}</span>
-                  </Link>
-                  <span className="shrink-0 text-muted-foreground text-xs tabular">
-                    <span className="font-semibold text-bad text-sm">{s.n}</span>{' '}
-                    {s.n === 1 ? 'order' : 'orders'}
-                  </span>
-                </div>
-                {s.reason ? (
-                  <p className="truncate text-muted-foreground text-xs" title={clip(s.reason, 500)}>
-                    {clip(s.reason)}
-                  </p>
-                ) : null}
-                <p className="text-muted-foreground text-xs">
-                  {s.rolledBack ? (
-                    <span className="text-undo">{s.rolledBack} rolled back · </span>
-                  ) : null}
-                  latest <Ago ms={s.latest} />
-                </p>
-              </li>
+              <Item
+                asChild
+                size="xs"
+                key={`${s.flowId}-${s.step}`}
+                className="relative px-2 hover:bg-muted/60"
+              >
+                <li>
+                  <ItemContent className="min-w-0 gap-0">
+                    <ItemTitle className="w-full">
+                      <Link
+                        to={`/orders?flow=${encodeURIComponent(s.flowId)}&step=${encodeURIComponent(s.step)}&attention=1&within=7d&sort=updated`}
+                        className="min-w-0 truncate after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+                      >
+                        {s.step}
+                        <span className="font-normal text-muted-foreground"> · {s.name}</span>
+                      </Link>
+                    </ItemTitle>
+                    {s.reason ? (
+                      <ItemDescription className="line-clamp-1 text-xs" title={clip(s.reason, 500)}>
+                        {clip(s.reason)}
+                      </ItemDescription>
+                    ) : null}
+                    <ItemDescription className="text-xs">
+                      {s.rolledBack ? (
+                        <span className="text-undo">{s.rolledBack} rolled back · </span>
+                      ) : null}
+                      latest <Ago ms={s.latest} />
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions className="self-start text-muted-foreground text-xs tabular">
+                    <span>
+                      <span className="font-semibold text-bad text-sm">{s.n}</span>{' '}
+                      {s.n === 1 ? 'order' : 'orders'}
+                    </span>
+                  </ItemActions>
+                </li>
+              </Item>
             ))}
           </ul>
           {steps.length > 8 ? (
             <Link
               to="/orders?attention=1&within=7d&sort=updated"
-              className="hit-area block border-t px-5 py-2.5 text-link text-xs hover:underline"
+              className="mt-3 inline-block text-link text-xs hover:underline"
             >
               {steps.length - 8} more steps
             </Link>
           ) : null}
         </>
       ) : (
-        <p className="px-5 pb-4 text-muted-foreground text-sm">
-          Nothing failed or rolled back this week.
-        </p>
+        <p className="text-muted-foreground text-sm">Nothing failed or rolled back this week.</p>
       )}
     </Section>
   );

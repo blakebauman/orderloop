@@ -11,14 +11,16 @@ import {
   type OrderModel,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription } from '@orderloop/ui/item';
+import { Kbd } from '@orderloop/ui/kbd';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useMemo, useRef, useState } from 'react';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
-import { Field } from '~/components/inspector';
-import { PageHeader } from '~/components/page';
+import { Body, PageHeader, Section } from '~/components/page';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
@@ -200,10 +202,10 @@ export default function NewOrder() {
           ) : null
         }
       />
-      <div className="mx-auto grid max-w-page gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Body className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-6">
         <Form
           method="post"
-          className="min-w-0 divide-y card overflow-hidden"
+          className="flex min-w-0 flex-col gap-4 lg:gap-6"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -219,79 +221,91 @@ export default function NewOrder() {
           }}
         >
           {from ? (
-            <p className="px-5 py-3 text-muted-foreground text-sm">
-              Filled in from the “{from.label}” scenario, without its simulated failure.{' '}
-              <Link to="/orders/new" className="text-link hover:underline">
-                Start blank
-              </Link>
-            </p>
+            <Item variant="muted" size="sm">
+              <ItemContent>
+                <ItemDescription>
+                  Filled in from the “{from.label}” scenario, without its simulated failure.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button asChild variant="ghost" size="sm" className="hit-area">
+                  <Link to="/orders/new">Start blank</Link>
+                </Button>
+              </ItemActions>
+            </Item>
           ) : null}
 
-          <fieldset className="space-y-3 p-5">
-            <legend className="sr-only">Flow</legend>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
-              <Field label="Flow" hint="The steps this order runs">
-                <NativeSelect
-                  name="flowId"
-                  value={flowId}
-                  onChange={(e) => setFlowId(e.target.value)}
-                  aria-invalid={!!serverError('flowId') || undefined}
-                  aria-describedby="flow-summary"
-                  wrapperClassName="w-full"
-                  className="h-9 w-full"
-                >
-                  {flows.map((fl) => (
-                    <NativeSelectOption key={fl.id} value={fl.id}>
-                      {flowLabel(fl.name, fl.model as OrderModel)} · v{fl.version}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field label="Came in by">
-                <NativeSelect
-                  name="channel"
-                  defaultValue={input?.channel ?? 'manual'}
-                  wrapperClassName="w-full"
-                  className="h-9 w-full"
-                >
-                  {ORDER_CHANNELS.map((c) => (
-                    <NativeSelectOption key={c} value={c}>
-                      {ORDER_CHANNEL_LABELS[c]}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-            </div>
-            <FieldError id="flowId-error" message={serverError('flowId')} />
-            {flow && summary ? (
-              <FlowSummary id="flow-summary" flowId={flow.id} summary={summary} />
-            ) : (
-              <p id="flow-summary" className="text-muted-foreground text-sm">
-                No flow is published yet.{' '}
-                <Link to="/flows" className="text-link hover:underline">
-                  Publish one
-                </Link>{' '}
-                to start orders on it.
-              </p>
-            )}
-          </fieldset>
-
-          <fieldset className="space-y-3 p-5">
-            <legend className="section-title float-left mb-3 w-full">Buyer</legend>
-            <Segmented
-              name="buyer"
-              aria-label="Buyer"
-              value={buyer}
-              onValueChange={(v) => setBuyer(v as typeof buyer)}
-              className="clear-left grid w-full sm:w-80"
-            >
-              <SegmentedItem value="account">Customer account</SegmentedItem>
-              <SegmentedItem value="guest">Guest</SegmentedItem>
-            </Segmented>
-            {buyer === 'account' ? (
-              <div>
-                <Field label="Customer">
+          <Section title="Flow" description="The steps this order runs, and where it came in.">
+            <FieldGroup className="gap-4">
+              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+                <Field>
+                  <FieldLabel htmlFor="new-flowId">Flow</FieldLabel>
                   <NativeSelect
+                    id="new-flowId"
+                    name="flowId"
+                    value={flowId}
+                    onChange={(e) => setFlowId(e.target.value)}
+                    aria-invalid={!!serverError('flowId') || undefined}
+                    aria-describedby="flowId-error flow-summary"
+                    wrapperClassName="w-full"
+                    className="h-9 w-full"
+                  >
+                    {flows.map((fl) => (
+                      <NativeSelectOption key={fl.id} value={fl.id}>
+                        {flowLabel(fl.name, fl.model as OrderModel)} · v{fl.version}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-channel">Came in by</FieldLabel>
+                  <NativeSelect
+                    id="new-channel"
+                    name="channel"
+                    defaultValue={input?.channel ?? 'manual'}
+                    wrapperClassName="w-full"
+                    className="h-9 w-full"
+                  >
+                    {ORDER_CHANNELS.map((c) => (
+                      <NativeSelectOption key={c} value={c}>
+                        {ORDER_CHANNEL_LABELS[c]}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+              </div>
+              <FieldMessage id="flowId-error" message={serverError('flowId')} />
+              {flow && summary ? (
+                <FlowSummary id="flow-summary" flowId={flow.id} summary={summary} />
+              ) : (
+                <p id="flow-summary" className="text-muted-foreground text-sm">
+                  No flow is published yet.{' '}
+                  <Link to="/flows" className="text-link hover:underline">
+                    Publish one
+                  </Link>{' '}
+                  to start orders on it.
+                </p>
+              )}
+            </FieldGroup>
+          </Section>
+
+          <Section title="Buyer" description="A customer account, or a guest by email.">
+            <FieldGroup className="gap-4">
+              <Segmented
+                name="buyer"
+                aria-label="Buyer"
+                value={buyer}
+                onValueChange={(v) => setBuyer(v as typeof buyer)}
+                className="grid w-full sm:w-80"
+              >
+                <SegmentedItem value="account">Customer account</SegmentedItem>
+                <SegmentedItem value="guest">Guest</SegmentedItem>
+              </Segmented>
+              {buyer === 'account' ? (
+                <Field>
+                  <FieldLabel htmlFor="new-customerId">Customer</FieldLabel>
+                  <NativeSelect
+                    id="new-customerId"
                     name="customerId"
                     defaultValue={input?.customerId ?? ''}
                     aria-invalid={!!serverError('customerId') || undefined}
@@ -308,42 +322,48 @@ export default function NewOrder() {
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
+                  <FieldMessage id="customerId-error" message={serverError('customerId')} />
                 </Field>
-                <FieldError id="customerId-error" message={serverError('customerId')} />
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Field label="Email" hint="Order emails go here">
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="new-contactEmail">Email</FieldLabel>
                     <Input
+                      id="new-contactEmail"
                       name="contactEmail"
                       type="email"
                       required
                       autoComplete="off"
                       defaultValue={input?.contact?.email ?? ''}
                       aria-invalid={!!serverError('contactEmail') || undefined}
-                      aria-describedby="contactEmail-error"
+                      aria-describedby="contactEmail-hint contactEmail-error"
                     />
+                    <FieldDescription id="contactEmail-hint">Order emails go here</FieldDescription>
+                    <FieldMessage id="contactEmail-error" message={serverError('contactEmail')} />
                   </Field>
-                  <FieldError id="contactEmail-error" message={serverError('contactEmail')} />
+                  <Field>
+                    <FieldLabel htmlFor="new-contactName">Name</FieldLabel>
+                    <Input
+                      id="new-contactName"
+                      name="contactName"
+                      autoComplete="off"
+                      defaultValue={input?.contact?.name ?? ''}
+                      aria-describedby="contactName-hint"
+                    />
+                    <FieldDescription id="contactName-hint">Optional</FieldDescription>
+                  </Field>
                 </div>
-                <Field label="Name" hint="Optional">
-                  <Input
-                    name="contactName"
-                    autoComplete="off"
-                    defaultValue={input?.contact?.name ?? ''}
-                  />
-                </Field>
-              </div>
-            )}
-          </fieldset>
+              )}
+            </FieldGroup>
+          </Section>
 
-          <fieldset className="space-y-3 p-5">
-            <legend className="section-title float-left mb-3 w-full">Lines</legend>
-            <div className="clear-left">
-              <Field label="One per row" hint="SKU x qty, e.g. WID-100 x 5">
+          <Section title="Lines" description="What the order is for.">
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="new-lines">One per row</FieldLabel>
                 <Textarea
                   ref={linesRef}
+                  id="new-lines"
                   name="lines"
                   rows={4}
                   spellCheck={false}
@@ -352,48 +372,55 @@ export default function NewOrder() {
                   value={lines}
                   onChange={(e) => setLines(e.target.value)}
                   aria-invalid={!!linesError || undefined}
-                  aria-describedby="lines-status"
+                  aria-describedby="lines-hint lines-status"
+                />
+                <FieldDescription id="lines-hint">SKU x qty, e.g. WID-100 x 5</FieldDescription>
+                <LinesStatus
+                  id="lines-status"
+                  error={linesError}
+                  lines={preview.lines}
+                  short={short.map((l) => l.sku)}
+                  available={available}
+                  readsDocument={!!summary?.readsDocument}
                 />
               </Field>
-              <LinesStatus
-                id="lines-status"
-                error={linesError}
-                lines={preview.lines}
-                short={short.map((l) => l.sku)}
-                available={available}
-                readsDocument={!!summary?.readsDocument}
-              />
-            </div>
-            <details className="group lg:hidden">
-              <summary className="caption flex min-h-9 cursor-pointer list-none items-center hover:text-foreground">
-                Add from the catalog
-              </summary>
-              <Catalog products={products} onAdd={(sku) => setLines((t) => addOne(t, sku))} />
-            </details>
-            {summary?.readsDocument ? (
-              <Field
-                label="Inbound document"
-                hint="Paste the email or PO. With no lines above, the flow's AI extract step reads them from this."
-              >
-                <Textarea
-                  name="documentText"
-                  rows={6}
-                  className="text-base md:text-sm"
-                  defaultValue={input?.documentText ?? ''}
-                />
-              </Field>
-            ) : null}
-          </fieldset>
+              <details className="group lg:hidden">
+                <summary className="caption flex min-h-9 cursor-pointer list-none items-center hover:text-foreground">
+                  Add from the catalog
+                </summary>
+                <Catalog products={products} onAdd={(sku) => setLines((t) => addOne(t, sku))} />
+              </details>
+              {summary?.readsDocument ? (
+                <Field>
+                  <FieldLabel htmlFor="new-documentText">Inbound document</FieldLabel>
+                  <Textarea
+                    id="new-documentText"
+                    name="documentText"
+                    rows={6}
+                    className="text-base md:text-sm"
+                    defaultValue={input?.documentText ?? ''}
+                    aria-describedby="documentText-hint"
+                  />
+                  <FieldDescription id="documentText-hint">
+                    Paste the email or PO. With no lines above, the flow's AI extract step reads
+                    them from this.
+                  </FieldDescription>
+                </Field>
+              ) : null}
+            </FieldGroup>
+          </Section>
 
           {summary?.routesFulfillment ? (
-            <fieldset className="space-y-3 p-5">
-              <legend className="section-title float-left mb-3 w-full">Fulfillment</legend>
-              <div className="clear-left grid gap-4 md:grid-cols-2">
-                <Field label="Method" hint="Leave it to the flow to route">
+            <Section title="Fulfillment" description="How the order reaches the buyer.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="new-fulfillment">Method</FieldLabel>
                   <NativeSelect
+                    id="new-fulfillment"
                     name="fulfillment"
                     value={method}
                     onChange={(e) => setMethod(e.target.value)}
+                    aria-describedby="fulfillment-hint"
                     wrapperClassName="w-full"
                     className="h-9 w-full"
                   >
@@ -404,75 +431,83 @@ export default function NewOrder() {
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
+                  <FieldDescription id="fulfillment-hint">
+                    Leave it to the flow to route
+                  </FieldDescription>
                 </Field>
                 {atStore ? (
-                  <div>
-                    <Field label="Store">
-                      <NativeSelect
-                        name="locationId"
-                        required
-                        defaultValue={input?.fulfillment?.locationId ?? ''}
-                        aria-invalid={!!serverError('locationId') || undefined}
-                        aria-describedby="locationId-error"
-                        wrapperClassName="w-full"
-                        className="h-9 w-full"
-                      >
-                        <NativeSelectOption value="" disabled>
-                          Choose a store
+                  <Field>
+                    <FieldLabel htmlFor="new-locationId">Store</FieldLabel>
+                    <NativeSelect
+                      id="new-locationId"
+                      name="locationId"
+                      required
+                      defaultValue={input?.fulfillment?.locationId ?? ''}
+                      aria-invalid={!!serverError('locationId') || undefined}
+                      aria-describedby="locationId-error"
+                      wrapperClassName="w-full"
+                      className="h-9 w-full"
+                    >
+                      <NativeSelectOption value="" disabled>
+                        Choose a store
+                      </NativeSelectOption>
+                      {stores.map((l) => (
+                        <NativeSelectOption key={l.id} value={l.id}>
+                          {l.name}
                         </NativeSelectOption>
-                        {stores.map((l) => (
-                          <NativeSelectOption key={l.id} value={l.id}>
-                            {l.name}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <FieldError id="locationId-error" message={serverError('locationId')} />
-                  </div>
+                      ))}
+                    </NativeSelect>
+                    <FieldMessage id="locationId-error" message={serverError('locationId')} />
+                  </Field>
                 ) : null}
               </div>
-            </fieldset>
+            </Section>
           ) : null}
 
-          <fieldset className="space-y-3 p-5">
-            <legend className="section-title float-left mb-3 w-full">Details</legend>
-            <div className="clear-left grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
-              <Field label="Title" hint="Optional">
+          <Section title="Details" description="A title to find it by, and the currency it's in.">
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+              <Field>
+                <FieldLabel htmlFor="new-title">Title</FieldLabel>
                 <Input
+                  id="new-title"
                   name="title"
                   defaultValue={input?.title ?? ''}
                   placeholder="e.g. Spring restock"
+                  aria-describedby="title-hint"
                 />
+                <FieldDescription id="title-hint">Optional</FieldDescription>
               </Field>
-              <div>
-                <Field label="Currency" hint={`Converted from ${BASE_CURRENCY}`}>
-                  <NativeSelect
-                    name="currency"
-                    defaultValue={input?.currency ?? BASE_CURRENCY}
-                    aria-invalid={!!serverError('currency') || undefined}
-                    aria-describedby="currency-error"
-                    wrapperClassName="w-full"
-                    className="h-9 w-full"
-                  >
-                    {codes.map((c) => (
-                      <NativeSelectOption key={c} value={c}>
-                        {c}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <FieldError id="currency-error" message={serverError('currency')} />
-              </div>
+              <Field>
+                <FieldLabel htmlFor="new-currency">Currency</FieldLabel>
+                <NativeSelect
+                  id="new-currency"
+                  name="currency"
+                  defaultValue={input?.currency ?? BASE_CURRENCY}
+                  aria-invalid={!!serverError('currency') || undefined}
+                  aria-describedby="currency-hint currency-error"
+                  wrapperClassName="w-full"
+                  className="h-9 w-full"
+                >
+                  {codes.map((c) => (
+                    <NativeSelectOption key={c} value={c}>
+                      {c}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <FieldDescription id="currency-hint">
+                  Converted from {BASE_CURRENCY}
+                </FieldDescription>
+                <FieldMessage id="currency-error" message={serverError('currency')} />
+              </Field>
             </div>
-          </fieldset>
+          </Section>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 p-5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <Button type="submit" disabled={busy || !flow}>
               {busy ? 'Starting…' : 'Start order'}
             </Button>
-            <span className="text-muted-foreground text-xs touch:hidden">
-              <kbd className="font-sans">⌘</kbd> or <kbd className="font-sans">Ctrl</kbd> +{' '}
-              <kbd className="font-sans">Enter</kbd>
+            <span className="hidden items-center gap-1 text-muted-foreground text-xs fine:inline-flex">
+              <Kbd>⌘</Kbd> or <Kbd>Ctrl</Kbd> + <Kbd>Enter</Kbd>
             </span>
             {data?.error && !data.field ? (
               <p className="w-full text-bad text-sm" role="alert">
@@ -482,16 +517,15 @@ export default function NewOrder() {
           </div>
         </Form>
 
-        <aside className="hidden min-w-0 lg:block">
-          <div className="sticky top-20 card p-4">
-            <h2 className="section-title">Catalog</h2>
-            <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
-              Click to add one; click again for more. Numbers are units available.
-            </p>
+        <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block">
+          <Section
+            title="Catalog"
+            description="Click to add one; click again for more. Numbers are units available."
+          >
             <Catalog products={products} onAdd={(sku) => setLines((t) => addOne(t, sku))} />
-          </div>
+          </Section>
         </aside>
-      </div>
+      </Body>
     </>
   );
 }
@@ -502,9 +536,10 @@ function flowLabel(name: string, model: OrderModel) {
   return name.toLowerCase().includes(type.toLowerCase()) ? name : `${name} (${type})`;
 }
 
-function FieldError({ id, message }: { id: string; message?: string }) {
+/** A field's error from the server, where `aria-describedby` already points. */
+function FieldMessage({ id, message }: { id: string; message?: string }) {
   return message ? (
-    <p id={id} className="mt-1 text-bad text-xs" role="alert">
+    <p id={id} className="text-bad text-xs" role="alert">
       {message}
     </p>
   ) : null;
@@ -573,7 +608,7 @@ function LinesStatus({
   readsDocument: boolean;
 }) {
   return (
-    <div id={id} className="mt-1.5 space-y-0.5 text-xs" aria-live="polite">
+    <div id={id} className="space-y-0.5 text-xs" aria-live="polite">
       {lines.length ? (
         <p className="text-muted-foreground">
           {lines.map((l) => `${count(l.qty)} × ${l.sku}`).join(' · ')}

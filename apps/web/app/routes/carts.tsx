@@ -5,14 +5,24 @@
 
 import { ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card } from '@orderloop/ui/card';
+import { Field, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
-import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
+import { ShoppingCart } from 'lucide-react';
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
-import { Body, Empty, PageHeader } from '~/components/page';
+import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { type Tone, ToneBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { cartOpens } from '~/lib/carts';
@@ -119,80 +129,93 @@ export default function Carts() {
         </nav>
 
         {carts.length ? (
-          <div className="card relative overflow-clip">
-            <Table stack="rows" caption="Carts">
-              <TableHead>
-                <Tr>
-                  <Th>Cart</Th>
-                  <Th>Status</Th>
-                  <Th>Customer</Th>
-                  <Th numeric>Updated</Th>
-                </Tr>
-              </TableHead>
-              <TableBody>
-                {carts.map((c) => (
-                  // On a phone the row is a card, and the whole card opens the cart (if it opens).
-                  <Tr
-                    key={c.id}
-                    className={cn(
-                      'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 max-md:relative md:table-row md:p-0',
-                      c.opens && 'hover:bg-muted/40 max-md:active:bg-muted/60',
-                    )}
-                  >
-                    <Td className="min-w-0">
-                      {c.opens ? (
-                        <Link
-                          to={`/carts/${c.id}`}
-                          className="font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
-                        >
-                          {c.title}
-                        </Link>
-                      ) : (
-                        <>
-                          <span className="font-medium">{c.title}</span>
-                          <div className="text-muted-foreground text-xs">
-                            Recorded only: no live cart to open.
-                          </div>
-                        </>
-                      )}
-                      {c.orderId ? (
-                        <div className="text-muted-foreground text-xs">
-                          Became{' '}
-                          <Link
-                            to={`/orders/${c.orderId}`}
-                            className="relative z-10 text-link hover:underline"
-                          >
-                            an order
-                          </Link>
-                        </div>
-                      ) : null}
-                    </Td>
-                    <Td className="col-start-2 row-start-1 text-right md:text-left">
-                      <ToneBadge
-                        tone={CART_TONE[c.status as CartStatus] ?? 'idle'}
-                        label={STATUS_LABELS[c.status as CartStatus] ?? c.status}
-                      />
-                    </Td>
-                    <Td className="truncate text-muted-foreground text-xs md:text-sm">
-                      {(c.customerId && names[c.customerId]) || 'No customer'}
-                    </Td>
-                    <Td numeric className="text-muted-foreground text-xs md:text-sm">
-                      <Ago ms={c.updatedAt} />
-                    </Td>
-                  </Tr>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <Section
+            title={status ? `${STATUS_LABELS[status]} carts` : 'All carts'}
+            description="Most recently changed first."
+          >
+            <ul className="-mx-2 flex flex-col gap-1">
+              {carts.map((c) => (
+                <CartItem
+                  key={c.id}
+                  c={c}
+                  customer={(c.customerId && names[c.customerId]) || 'No customer'}
+                />
+              ))}
+            </ul>
+          </Section>
         ) : (
-          <div className="card overflow-hidden">
-            <Empty>
+          <Card className="py-0">
+            <Empty icon={<ShoppingCart aria-hidden="true" />}>
               {status ? `No ${STATUS_LABELS[status].toLowerCase()} carts.` : 'No carts yet.'}
             </Empty>
-          </div>
+          </Card>
         )}
       </Body>
     </>
+  );
+}
+
+/**
+ * One cart, read as a row: its title (the whole item opens the cart, if it opens), who it is for
+ * and what became of it, then its status and when it last changed.
+ */
+function CartItem({
+  c,
+  customer,
+}: {
+  c: ReturnType<typeof useLoaderData<typeof loader>>['carts'][number];
+  customer: string;
+}) {
+  return (
+    <Item
+      asChild
+      size="xs"
+      className={cn('relative items-start px-2', c.opens && 'hover:bg-muted/60')}
+    >
+      <li>
+        <ItemMedia variant="icon" className="mt-0.5 self-start text-muted-foreground">
+          <ShoppingCart aria-hidden="true" />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full">
+            {c.opens ? (
+              <Link
+                to={`/carts/${c.id}`}
+                className="truncate after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+              >
+                {c.title}
+              </Link>
+            ) : (
+              <span className="truncate">{c.title}</span>
+            )}
+          </ItemTitle>
+          <ItemDescription className="text-xs">
+            {customer}
+            {c.opens ? null : ' · Recorded only: no live cart to open.'}
+            {c.orderId ? (
+              <>
+                {' · Became '}
+                <Link
+                  to={`/orders/${c.orderId}`}
+                  className="relative z-10 text-link no-underline! hover:underline!"
+                >
+                  an order
+                </Link>
+              </>
+            ) : null}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions className="flex-col items-end gap-1 self-start">
+          <ToneBadge
+            tone={CART_TONE[c.status as CartStatus] ?? 'idle'}
+            label={STATUS_LABELS[c.status as CartStatus] ?? c.status}
+          />
+          <span className="text-muted-foreground text-xs">
+            <Ago ms={c.updatedAt} />
+          </span>
+        </ItemActions>
+      </li>
+    </Item>
   );
 }
 
@@ -209,45 +232,41 @@ function NewCart({
   busy: boolean;
 }) {
   return (
-    <Form method="post" className="grid gap-3 text-sm">
-      <div className="grid gap-1">
-        <label htmlFor="cart-title" className="caption">
-          Title
-        </label>
-        <Input
-          id="cart-title"
-          name="title"
-          required
-          maxLength={120}
-          placeholder="Q4 restock"
-          className="h-8"
-        />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="cart-flow" className="caption">
-          Flow
-        </label>
-        <NativeSelect id="cart-flow" name="flowId" required className="h-8 w-full">
-          {flows.map((f) => (
-            <NativeSelectOption key={f.id} value={f.id}>
-              {f.name} · {ORDER_MODEL_LABELS[f.model as OrderModel] ?? f.model}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="cart-customer" className="caption">
-          Customer
-        </label>
-        <NativeSelect id="cart-customer" name="customerId" className="h-8 w-full">
-          <NativeSelectOption value="">No customer</NativeSelectOption>
-          {customers.map((c) => (
-            <NativeSelectOption key={c.id} value={c.id}>
-              {c.name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </div>
+    <Form method="post" className="grid gap-4 text-sm">
+      <FieldGroup className="gap-4">
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="cart-title">Title</FieldLabel>
+          <Input
+            id="cart-title"
+            name="title"
+            required
+            maxLength={120}
+            placeholder="Q4 restock"
+            className="h-8"
+          />
+        </Field>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="cart-flow">Flow</FieldLabel>
+          <NativeSelect id="cart-flow" name="flowId" required className="h-8 w-full">
+            {flows.map((f) => (
+              <NativeSelectOption key={f.id} value={f.id}>
+                {f.name} · {ORDER_MODEL_LABELS[f.model as OrderModel] ?? f.model}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="cart-customer">Customer</FieldLabel>
+          <NativeSelect id="cart-customer" name="customerId" className="h-8 w-full">
+            <NativeSelectOption value="">No customer</NativeSelectOption>
+            {customers.map((c) => (
+              <NativeSelectOption key={c.id} value={c.id}>
+                {c.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      </FieldGroup>
       {!flows.length ? (
         <p className="text-muted-foreground text-xs">
           Publish a flow with a Price lines step to open carts on it.

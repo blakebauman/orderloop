@@ -1,4 +1,5 @@
 import { BASE_CURRENCY } from '@orderloop/core';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
 import type { ChartConfig } from '@orderloop/ui/chart';
 import { lazy, Suspense } from 'react';
 import { Empty } from '~/components/page';
@@ -10,7 +11,7 @@ const base = (n: number) => money(n, BASE_CURRENCY);
 // Recharts arrives after the rest of the page; until then each chart holds its height.
 const LazyChart = lazy(() => import('./trends-chart'));
 const Chart = (props: React.ComponentProps<typeof LazyChart>) => (
-  <Suspense fallback={<div className="mt-3 h-44" aria-hidden="true" />}>
+  <Suspense fallback={<div className="h-44" aria-hidden="true" />}>
     <LazyChart {...props} />
   </Suspense>
 );
@@ -36,7 +37,7 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
   const ended = completed + stopped + failed;
   const period = `in the last ${days} days`;
   return (
-    <div className="grid gap-3 xl:grid-cols-3">
+    <div className="grid gap-4 xl:grid-cols-3">
       <Panel
         title="Revenue"
         figure={base(revenue)}
@@ -74,6 +75,10 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
   );
 }
 
+/**
+ * One window figure as a card (the preview cards' stock tile): its label, the figure set large, and
+ * under it the chart that adds up to it.
+ */
 function Panel({
   title,
   figure,
@@ -86,11 +91,15 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="tile min-w-0 p-4">
-      <h3 className="caption">{title}</h3>
-      <div className="font-semibold text-xl tabular">{figure}</div>
-      <p className="sr-only">{summary}</p>
-      {children}
-    </div>
+    <Card size="sm" className="min-w-0">
+      <CardHeader className="gap-1">
+        <CardDescription>
+          <h3>{title}</h3>
+        </CardDescription>
+        <CardTitle className="font-semibold text-2xl tabular max-md:text-xl">{figure}</CardTitle>
+        <p className="sr-only">{summary}</p>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }

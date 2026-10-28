@@ -13,10 +13,21 @@ import {
   type GapKind,
   gapGroup,
 } from '@orderloop/core/product';
+import { Badge } from '@orderloop/ui/badge';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardAction, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
+import { Kbd } from '@orderloop/ui/kbd';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, PackageCheck } from 'lucide-react';
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -107,13 +118,13 @@ export default function Catalog() {
           </p>
         ) : null}
         {empty ? (
-          <div className="card">
-            <Empty>
-              Nothing is waiting. {board.summary.lastFeed ? 'The last feed left no gaps, ' : ''}
-              no drafts are waiting for review and nothing is staged. Products a feed leaves without
-              a title or a translation show up here.
+          <Card>
+            <Empty icon={<PackageCheck aria-hidden="true" />} title="Nothing is waiting">
+              {board.summary.lastFeed ? 'The last feed left no gaps, no' : 'No'} drafts are waiting
+              for review and nothing is staged. Products a feed leaves without a title or a
+              translation show up here.
             </Empty>
-          </div>
+          </Card>
         ) : (
           <>
             <Segmented
@@ -130,12 +141,10 @@ export default function Catalog() {
               ))}
             </Segmented>
             {canEdit ? (
-              <p className="mb-3 hidden max-w-[75ch] text-muted-foreground text-xs fine:lg:block">
-                Keyboard: <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd>{' '}
-                move between cards, <kbd className="font-mono">Enter</kbd> opens one,{' '}
-                <kbd className="font-mono">D</kbd> drafts it, <kbd className="font-mono">A</kbd>{' '}
-                accepts its drafts, <kbd className="font-mono">X</kbd> ticks it for publishing and{' '}
-                <kbd className="font-mono">⌘Enter</kbd> publishes what’s ticked.
+              <p className="mb-3 hidden max-w-[75ch] text-muted-foreground text-xs leading-6 fine:lg:block">
+                Keyboard: <Kbd>J</Kbd> and <Kbd>K</Kbd> move between cards, <Kbd>Enter</Kbd> opens
+                one, <Kbd>D</Kbd> drafts it, <Kbd>A</Kbd> accepts its drafts, <Kbd>X</Kbd> ticks it
+                for publishing and <Kbd>⌘Enter</Kbd> publishes what’s ticked.
               </p>
             ) : null}
             <div
@@ -228,6 +237,19 @@ function FeedLine({ summary }: { summary: BoardView['summary'] }) {
   );
 }
 
+/** What each column holds, under its title. */
+const COLUMN_DESCRIPTION: Record<BoardColumn, string> = {
+  gaps: 'What the last feed left wrong or missing.',
+  drafted: 'The assistant’s drafts, to review.',
+  staged: 'Edits waiting to publish.',
+  published: 'Published in the last day.',
+};
+
+/**
+ * A column of the board, as a card: its header (the status dot, title and count, what it holds, and
+ * its one action), then its rows. Below lg one column shows at a time under the segmented control,
+ * which names it, so the header is for screen readers only.
+ */
 function ColumnShell({
   column,
   total,
@@ -243,23 +265,35 @@ function ColumnShell({
 }) {
   const dot = COLUMN_DOT[column];
   return (
-    <section
-      aria-labelledby={`col-${column}`}
-      className={cn('card relative min-w-0 overflow-clip', hidden && 'max-lg:hidden')}
-    >
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4 py-2.5 max-lg:sr-only">
-        <h2 id={`col-${column}`} className="section-title flex items-center gap-2">
-          {dot ? (
-            <span aria-hidden="true" className="size-2 rounded-full" style={{ background: dot }} />
-          ) : (
-            <span aria-hidden="true" className="size-2 rounded-full border border-foreground/60" />
-          )}
-          {COLUMN_LABEL[column]}
-          <span className="font-normal text-muted-foreground text-sm tabular">{count(total)}</span>
-        </h2>
-        {actions}
-      </div>
-      {children}
+    <section aria-labelledby={`col-${column}`} className={cn('min-w-0', hidden && 'max-lg:hidden')}>
+      {/* Clip, not hidden: rows glide in from other columns, and a hidden card would scroll. */}
+      <Card size="sm" className="relative gap-3 overflow-clip pb-2 max-lg:pt-2">
+        <CardHeader className="max-lg:sr-only">
+          <CardTitle className="section-title">
+            <h2 id={`col-${column}`} className="flex items-center gap-2">
+              {dot ? (
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ background: dot }}
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full border border-foreground/60"
+                />
+              )}
+              {COLUMN_LABEL[column]}
+              <Badge variant="secondary" className="tabular">
+                {count(total)}
+              </Badge>
+            </h2>
+          </CardTitle>
+          <CardDescription className="text-xs">{COLUMN_DESCRIPTION[column]}</CardDescription>
+          {actions ? <CardAction className="self-center">{actions}</CardAction> : null}
+        </CardHeader>
+        <div className="min-w-0">{children}</div>
+      </Card>
     </section>
   );
 }
@@ -420,7 +454,7 @@ function GapSection({
         </p>
       ) : null}
       {closed ? null : (
-        <ul className="pb-1">
+        <ul className="flex flex-col gap-0.5 px-1.5 pb-1">
           {cards.map((c) => (
             <CardRow key={c.key} card={c} canEdit={canEdit} flip state={batch?.rows[c.key]} />
           ))}
@@ -485,7 +519,7 @@ function CardColumn({
   return (
     <ColumnShell column={column} total={total} hidden={hidden}>
       {cards.length ? (
-        <ul className="py-1">
+        <ul className="flex flex-col gap-0.5 px-1.5">
           {cards.map((c) => (
             <CardRow key={c.key} card={c} canEdit={canEdit} flip />
           ))}
@@ -586,18 +620,18 @@ function StagedColumn({
       }
     >
       {results || refusal(answer) ? (
-        <p role="status" className="border-b px-4 py-2 text-xs">
+        <p role="status" className="mx-4 mb-2 rounded-xl bg-muted/50 px-3 py-2 text-xs">
           {refusal(answer) ??
             `Published ${published}.${failed ? ` ${failed} didn’t; they stay here with why.` : ''}`}
         </p>
       ) : null}
       {canEdit && cards.length ? (
-        <p className="px-4 pt-2 text-muted-foreground text-xs lg:hidden">
+        <p className="px-4 pb-1 text-muted-foreground text-xs lg:hidden">
           Publishing is on a larger screen.
         </p>
       ) : null}
       {cards.length ? (
-        <ul className="py-1">
+        <ul className="flex flex-col gap-0.5 px-1.5">
           {cards.map((c) => (
             <CardRow
               key={c.key}
@@ -648,115 +682,129 @@ function CardRow({
   const draft = () => act.run({ intent: 'draft', key: c.key });
   const accept = () => act.run({ intent: 'accept', key: c.key });
   return (
-    <li
-      data-card={c.key}
-      data-flip={flip ? c.key : undefined}
-      aria-busy={busy || undefined}
-      className="group relative mx-1.5 flex items-start gap-3 rounded-xl px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
-      onKeyDown={(e) => {
-        // The card's link has focus; Enter follows it on its own.
-        if (!(e.target instanceof HTMLAnchorElement) || e.metaKey || e.ctrlKey || e.altKey) return;
-        const k = e.key.toLowerCase();
-        if (k === 'd' && canDraft && !busy && window.matchMedia('(min-width: 1024px)').matches) {
-          e.preventDefault();
-          draft();
-        } else if (k === 'a' && canAccept && !busy) {
-          e.preventDefault();
-          accept();
-        } else if (k === 'x' && tick) {
-          e.preventDefault();
-          tick.toggle();
-        }
-      }}
+    <Item
+      asChild
+      size="xs"
+      className="relative flex-nowrap items-start px-2.5 py-2 hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50"
     >
-      {tick ? (
-        <input
-          type="checkbox"
-          checked={tick.on}
-          onChange={tick.toggle}
-          aria-label={`Publish ${c.title}`}
-          className="hit-area relative z-10 mt-1 size-4 shrink-0 max-lg:hidden"
-        />
-      ) : null}
-      <div className="min-w-0 flex-1">
-        <Link
-          to={href}
-          preventScrollReset
-          data-card-link
-          aria-keyshortcuts={keys || undefined}
-          className="block truncate font-medium text-sm outline-none after:absolute after:inset-0 after:rounded-xl"
-        >
-          {c.title}
-        </Link>
-        <span className="block truncate font-mono text-2xs text-muted-foreground">{c.key}</span>
-        <p
-          className={cn(
-            'mt-0.5 line-clamp-2 text-xs',
-            c.failure && c.column === 'staged' ? 'text-bad' : 'text-muted-foreground',
-          )}
-        >
-          {c.column === 'drafted' ? (
-            <span
-              aria-hidden="true"
-              className="mr-1.5 inline-block size-1.5 rounded-full bg-ai align-middle"
+      <li
+        data-card={c.key}
+        data-flip={flip ? c.key : undefined}
+        aria-busy={busy || undefined}
+        onKeyDown={(e) => {
+          // The card's link has focus; Enter follows it on its own.
+          if (!(e.target instanceof HTMLAnchorElement) || e.metaKey || e.ctrlKey || e.altKey)
+            return;
+          const k = e.key.toLowerCase();
+          if (k === 'd' && canDraft && !busy && window.matchMedia('(min-width: 1024px)').matches) {
+            e.preventDefault();
+            draft();
+          } else if (k === 'a' && canAccept && !busy) {
+            e.preventDefault();
+            accept();
+          } else if (k === 'x' && tick) {
+            e.preventDefault();
+            tick.toggle();
+          }
+        }}
+      >
+        {tick ? (
+          <ItemMedia className="mt-0.5 self-start max-lg:hidden">
+            <input
+              type="checkbox"
+              checked={tick.on}
+              onChange={tick.toggle}
+              aria-label={`Publish ${c.title}`}
+              className="hit-area relative z-10 size-4 shrink-0"
             />
-          ) : null}
-          {cardReason(c)}
-          {c.column === 'published' ? (
-            <>
-              {' '}
-              <Ago ms={c.at} />
-              {missingText(c) ? ` · still missing ${missingText(c)}` : ''}
-            </>
-          ) : null}
-          {(c.column === 'gaps' || c.column === 'published') && c.locales.length ? (
-            <span className="whitespace-nowrap">
-              {' in '}
-              <span className="font-mono">{c.locales.join(' ')}</span>
-            </span>
-          ) : null}
-          {c.column === 'gaps' && (c.drafts || c.staged) ? (
-            <span className="text-muted-foreground">
-              {c.drafts ? ` · ${c.drafts} drafted` : ''}
-              {c.staged ? ` · ${c.staged} staged` : ''}
-            </span>
-          ) : null}
-        </p>
-        {state === 'running' || (act.busy && !error) ? (
-          <p className="mt-0.5 text-ai text-xs" role="status">
-            Drafting…
-          </p>
-        ) : error ? (
-          <p className="mt-0.5 text-bad text-xs" role="alert">
-            {error}
-          </p>
+          </ItemMedia>
         ) : null}
-      </div>
-      {canDraft ? (
-        <Button
-          size="xs"
-          variant="ghost"
-          className="relative z-10 shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-lg:hidden touch:opacity-100"
-          disabled={busy}
-          onClick={draft}
-          aria-label={`Draft the missing text of ${c.title}`}
-        >
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
-          Draft
-        </Button>
-      ) : canAccept ? (
-        <Button
-          size="xs"
-          variant="outline"
-          className="relative z-10 shrink-0"
-          disabled={busy}
-          onClick={accept}
-          aria-label={`Accept the drafts of ${c.title}`}
-        >
-          Accept
-        </Button>
-      ) : null}
-    </li>
+        <ItemContent className="min-w-0 gap-0">
+          <ItemTitle className="w-full">
+            <Link
+              to={href}
+              preventScrollReset
+              data-card-link
+              aria-keyshortcuts={keys || undefined}
+              className="block min-w-0 truncate outline-none after:absolute after:inset-0 after:rounded-2xl"
+            >
+              {c.title}
+            </Link>
+          </ItemTitle>
+          <span className="block truncate font-mono text-2xs text-muted-foreground">{c.key}</span>
+          <ItemDescription
+            className={cn(
+              'mt-0.5 text-xs',
+              c.failure && c.column === 'staged' ? 'text-bad' : 'text-muted-foreground',
+            )}
+          >
+            {c.column === 'drafted' ? (
+              <span
+                aria-hidden="true"
+                className="mr-1.5 inline-block size-1.5 rounded-full bg-ai align-middle"
+              />
+            ) : null}
+            {cardReason(c)}
+            {c.column === 'published' ? (
+              <>
+                {' '}
+                <Ago ms={c.at} />
+                {missingText(c) ? ` · still missing ${missingText(c)}` : ''}
+              </>
+            ) : null}
+            {(c.column === 'gaps' || c.column === 'published') && c.locales.length ? (
+              <span className="whitespace-nowrap">
+                {' in '}
+                <span className="font-mono">{c.locales.join(' ')}</span>
+              </span>
+            ) : null}
+            {c.column === 'gaps' && (c.drafts || c.staged) ? (
+              <span className="text-muted-foreground">
+                {c.drafts ? ` · ${c.drafts} drafted` : ''}
+                {c.staged ? ` · ${c.staged} staged` : ''}
+              </span>
+            ) : null}
+          </ItemDescription>
+          {state === 'running' || (act.busy && !error) ? (
+            <p className="mt-0.5 text-ai text-xs" role="status">
+              Drafting…
+            </p>
+          ) : error ? (
+            <p className="mt-0.5 text-bad text-xs" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </ItemContent>
+        {canDraft ? (
+          <ItemActions className="max-lg:hidden">
+            <Button
+              size="xs"
+              variant="ghost"
+              className="relative z-10 shrink-0 opacity-0 group-focus-within/item:opacity-100 group-hover/item:opacity-100 touch:opacity-100"
+              disabled={busy}
+              onClick={draft}
+              aria-label={`Draft the missing text of ${c.title}`}
+            >
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
+              Draft
+            </Button>
+          </ItemActions>
+        ) : canAccept ? (
+          <ItemActions>
+            <Button
+              size="xs"
+              variant="outline"
+              className="relative z-10 shrink-0"
+              disabled={busy}
+              onClick={accept}
+              aria-label={`Accept the drafts of ${c.title}`}
+            >
+              Accept
+            </Button>
+          </ItemActions>
+        ) : null}
+      </li>
+    </Item>
   );
 }
 

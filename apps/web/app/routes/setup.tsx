@@ -5,6 +5,8 @@
  */
 
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { useState } from 'react';
 import { data, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
@@ -61,90 +63,96 @@ export default function Setup() {
   const [checked, setChecked] = useState(false);
   return (
     <main className="grid min-h-dvh content-start justify-items-center bg-background px-4 pt-[16vh]">
-      <div className="w-full max-w-sm card p-6">
-        <Mark className="size-7" />
-        <h1 className="mt-4 font-semibold tracking-title text-2xl">
-          {team ? 'Recover admin access' : 'Set up OrderLoop'}
-        </h1>
-        {open ? (
-          <Form method="post">
-            <p className="mt-1 text-muted-foreground text-sm">
-              {team
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <Mark className="size-7" />
+          <CardTitle className="mt-2">
+            <h1 className="font-semibold tracking-title text-2xl">
+              {team ? 'Recover admin access' : 'Set up OrderLoop'}
+            </h1>
+          </CardTitle>
+          <CardDescription>
+            {open
+              ? team
                 ? 'Enter the recovery code you were given to create a new admin account.'
-                : 'Enter the setup code you were given, and create your admin account. You add the rest of your team after.'}
-            </p>
-            <label className="mt-5 block text-sm" htmlFor="code">
-              Setup code
-            </label>
-            <Input
-              id="code"
-              name="code"
-              required
-              autoFocus
-              autoComplete="one-time-code"
-              spellCheck={false}
-              className="mt-1 font-mono"
-            />
-            <label className="mt-3 block text-sm" htmlFor="email">
-              Email
-            </label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              required
-              autoComplete="username"
-              className="mt-1"
-            />
-            <label className="mt-3 block text-sm" htmlFor="name">
-              Name <span className="text-muted-foreground">(optional)</span>
-            </label>
-            <Input id="name" name="name" autoComplete="name" className="mt-1" />
-            <label className="mt-3 block text-sm" htmlFor="password">
-              Password
-            </label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              minLength={10}
-              autoComplete="new-password"
-              className="mt-1"
-              aria-describedby="password-hint"
-            />
-            <p id="password-hint" className="mt-1.5 text-muted-foreground text-xs">
-              At least 10 characters.
-            </p>
-            {turnstile ? (
-              <Turnstile siteKey={turnstile} action="setup" reset={result} onSolved={setChecked} />
+                : 'Enter the setup code you were given, and create your admin account. You add the rest of your team after.'
+              : team
+                ? 'This workspace is set up. Sign in, or ask an admin to add you on the Team page.'
+                : 'This workspace isn’t set up yet, and has no setup code. Ask whoever runs it for one.'}
+          </CardDescription>
+        </CardHeader>
+        {open || team ? (
+          <CardContent>
+            {open ? (
+              <Form method="post">
+                <FieldGroup className="gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="code">Setup code</FieldLabel>
+                    <Input
+                      id="code"
+                      name="code"
+                      required
+                      autoFocus
+                      autoComplete="one-time-code"
+                      spellCheck={false}
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="email">Email</FieldLabel>
+                    <Input id="email" name="email" type="email" required autoComplete="username" />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="name">
+                      Name <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <Input id="name" name="name" autoComplete="name" />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="password">Password</FieldLabel>
+                    <Input
+                      id="password"
+                      name="password"
+                      type="password"
+                      required
+                      minLength={10}
+                      autoComplete="new-password"
+                      aria-describedby="password-hint"
+                    />
+                    <FieldDescription id="password-hint" className="text-xs">
+                      At least 10 characters.
+                    </FieldDescription>
+                  </Field>
+                  {turnstile ? (
+                    <Turnstile
+                      siteKey={turnstile}
+                      action="setup"
+                      reset={result}
+                      onSolved={setChecked}
+                    />
+                  ) : null}
+                  {error ? <FieldError>{error}</FieldError> : null}
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={busy || (!!turnstile && !checked)}
+                  >
+                    {busy ? 'Creating…' : 'Create admin account'}
+                  </Button>
+                </FieldGroup>
+              </Form>
             ) : null}
-            {error ? (
-              <p className="mt-2 text-destructive text-sm" role="alert">
-                {error}
-              </p>
+            {team ? (
+              <a
+                href="/login"
+                className={`${open ? 'mt-4 ' : ''}inline-block text-link text-sm hover:underline`}
+              >
+                Go to sign-in
+              </a>
             ) : null}
-            <Button
-              type="submit"
-              className="mt-4 w-full"
-              disabled={busy || (!!turnstile && !checked)}
-            >
-              {busy ? 'Creating…' : 'Create admin account'}
-            </Button>
-          </Form>
-        ) : (
-          <p className="mt-1 text-muted-foreground text-sm">
-            {team
-              ? 'This workspace is set up. Sign in, or ask an admin to add you on the Team page.'
-              : 'This workspace isn’t set up yet, and has no setup code. Ask whoever runs it for one.'}
-          </p>
-        )}
-        {team ? (
-          <a href="/login" className="mt-4 inline-block text-link text-sm hover:underline">
-            Go to sign-in
-          </a>
+          </CardContent>
         ) : null}
-      </div>
+      </Card>
     </main>
   );
 }

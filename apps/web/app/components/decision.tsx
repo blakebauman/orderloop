@@ -313,7 +313,7 @@ export function DecisionControls({
     const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
     return (
       <div
-        className="relative flex animate-arrive flex-wrap items-center gap-3 overflow-hidden rounded-lg border bg-muted/50 px-3 py-2 text-sm"
+        className="relative flex animate-arrive flex-wrap items-center gap-3 overflow-hidden rounded-xl border bg-background px-3 py-2 text-sm"
         aria-live={pending.quiet ? undefined : 'polite'}
       >
         {/* The window running out, drained over exactly this decision's window (shorter near a

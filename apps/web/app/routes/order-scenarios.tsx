@@ -1,9 +1,19 @@
 import { ORDER_MODEL_LABELS, ORDER_MODELS, type OrderModel } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
+import { Play, TriangleAlert } from 'lucide-react';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
-import { PageHeader, Section } from '~/components/page';
+import { Body, PageHeader, Section } from '~/components/page';
 import { requireUser } from '~/lib/auth.server';
 import { ensureSeeded } from '~/lib/flows.server';
+import { plural } from '~/lib/format';
 import { demoAvailable, publishedFlows } from '~/lib/orders.server';
 import { SCENARIOS } from '~/lib/scenarios';
 import { startScenario } from '~/lib/scenarios.server';
@@ -71,57 +81,74 @@ export default function Scenarios() {
         }
         subtitle="Each one starts a real order on the demo data and takes a different path through its flow. Some fail on purpose, to show what happens then."
       />
-      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
-        <div className="max-w-[1000px] space-y-6">
+      <Body>
+        <div className="flex max-w-[1000px] flex-col gap-4 lg:gap-6">
           {groups.map((g) => (
-            <Section key={g.model} title={ORDER_MODEL_LABELS[g.model as OrderModel]} flush>
-              <ul className="divide-y">
+            <Section
+              key={g.model}
+              title={ORDER_MODEL_LABELS[g.model as OrderModel]}
+              description={describe(g.items)}
+            >
+              <ul className="flex flex-col gap-2">
                 {g.items.map((s) => (
-                  <li key={s.id} className="flex flex-wrap items-start gap-x-6 gap-y-2 px-4 py-3">
-                    <div className="min-w-0 flex-1 basis-80">
-                      <h3 className="font-medium text-sm">{s.label}</h3>
-                      <p className="mt-0.5 max-w-measure text-muted-foreground text-sm">
-                        {s.blurb}
-                      </p>
-                      <p className="mt-1 text-xs">
-                        <span className="text-muted-foreground">
-                          {s.flow ?? 'Flow not published'}
-                        </span>
-                        {s.fails ? <span className="text-bad"> · Fails: {s.fails}</span> : null}
-                      </p>
-                      {data?.id === s.id && data.error ? (
-                        <p className="mt-1 text-bad text-xs" role="alert">
-                          {data.error}
+                  <Item key={s.id} asChild variant="muted" size="sm" className="items-start">
+                    <li>
+                      <ItemMedia variant="icon" className="mt-0.5 self-start">
+                        {s.fails ? (
+                          <TriangleAlert className="text-bad" aria-hidden="true" />
+                        ) : (
+                          <Play className="text-muted-foreground" aria-hidden="true" />
+                        )}
+                      </ItemMedia>
+                      <ItemContent className="min-w-0 basis-64">
+                        <ItemTitle>
+                          <h3>{s.label}</h3>
+                        </ItemTitle>
+                        <ItemDescription className="max-w-measure">{s.blurb}</ItemDescription>
+                        <p className="text-xs">
+                          <span className="text-muted-foreground">
+                            {s.flow ?? 'Flow not published'}
+                          </span>
+                          {s.fails ? <span className="text-bad"> · Fails: {s.fails}</span> : null}
                         </p>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Link
-                        to={`/orders/new?scenario=${s.id}`}
-                        className="text-link text-sm hover:underline"
-                      >
-                        Edit first
-                      </Link>
-                      <Form method="post">
-                        <input type="hidden" name="scenario" value={s.id} />
-                        <Button
-                          type="submit"
-                          size="sm"
-                          variant="outline"
-                          disabled={!s.flow || !!running}
-                          aria-label={`Run ${s.label}`}
-                        >
-                          {running === s.id ? 'Starting…' : 'Run'}
+                        {data?.id === s.id && data.error ? (
+                          <p className="text-bad text-xs" role="alert">
+                            {data.error}
+                          </p>
+                        ) : null}
+                      </ItemContent>
+                      <ItemActions className="self-center">
+                        <Button asChild variant="ghost" size="sm" className="hit-area">
+                          <Link to={`/orders/new?scenario=${s.id}`}>Edit first</Link>
                         </Button>
-                      </Form>
-                    </div>
-                  </li>
+                        <Form method="post">
+                          <input type="hidden" name="scenario" value={s.id} />
+                          <Button
+                            type="submit"
+                            size="sm"
+                            variant="outline"
+                            className="hit-area"
+                            disabled={!s.flow || !!running}
+                            aria-label={`Run ${s.label}`}
+                          >
+                            {running === s.id ? 'Starting…' : 'Run'}
+                          </Button>
+                        </Form>
+                      </ItemActions>
+                    </li>
+                  </Item>
                 ))}
               </ul>
             </Section>
           ))}
         </div>
-      </div>
+      </Body>
     </>
   );
+}
+
+/** A group's line under its title: how many there are, and how many fail on purpose. */
+function describe(items: { fails?: string }[]) {
+  const failing = items.filter((s) => s.fails).length;
+  return `${plural(items.length, 'scenario')}${failing ? `, ${failing} failing on purpose` : ''}.`;
 }

@@ -5,6 +5,14 @@
 
 import { BASE_CURRENCY } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
@@ -107,7 +115,11 @@ export default function Promotions() {
         }
       />
       <Body className="grid gap-4">
-        <Section title="Codes" flush>
+        <Section
+          title="Codes"
+          description="What each code takes off, its limits and how often it has been used."
+          flush
+        >
           {promotions.length ? (
             <Table stack="cards" caption="Promotion codes">
               <TableHead>
@@ -209,69 +221,65 @@ export default function Promotions() {
   );
 }
 
-/** The fields of a new code; the action checks them (`promotionFrom`). */
+/**
+ * The fields of a new code: the code and what it takes off, then its limits, grouped. The action
+ * checks them (`promotionFrom`).
+ */
 function NewPromotion({ error, busy }: { error?: string | null; busy: boolean }) {
   return (
-    <Form method="post" className="grid gap-3 text-sm">
-      {[
-        ['code', 'Code', 'WELCOME15'],
-        ['name', 'Name (optional)', 'Welcome offer'],
-      ].map(([k, label, ph]) => (
-        <div key={k} className="grid gap-1">
-          <label htmlFor={`promo-${k}`} className="caption">
-            {label}
-          </label>
-          <Input id={`promo-${k}`} name={k} placeholder={ph} className="h-8" />
+    <Form method="post">
+      <FieldGroup className="gap-5">
+        {[
+          ['code', 'Code', 'WELCOME15'],
+          ['name', 'Name (optional)', 'Welcome offer'],
+        ].map(([k, label, ph]) => (
+          <Field key={k} className="gap-2">
+            <FieldLabel htmlFor={`promo-${k}`}>{label}</FieldLabel>
+            <Input id={`promo-${k}`} name={k} placeholder={ph} />
+          </Field>
+        ))}
+        <div className="grid grid-cols-2 gap-3">
+          <Field className="gap-2">
+            <FieldLabel htmlFor="promo-kind">Takes off</FieldLabel>
+            <NativeSelect id="promo-kind" name="kind">
+              <NativeSelectOption value="pct">A percentage</NativeSelectOption>
+              <NativeSelectOption value="amount">An amount ({BASE_CURRENCY})</NativeSelectOption>
+              <NativeSelectOption value="free_shipping">Shipping</NativeSelectOption>
+            </NativeSelect>
+          </Field>
+          <Field className="gap-2">
+            <FieldLabel htmlFor="promo-value">Percent or amount</FieldLabel>
+            <Input id="promo-value" name="value" inputMode="decimal" />
+          </Field>
         </div>
-      ))}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-1">
-          <label htmlFor="promo-kind" className="caption">
-            Takes off
-          </label>
-          <NativeSelect id="promo-kind" name="kind" className="h-8">
-            <NativeSelectOption value="pct">A percentage</NativeSelectOption>
-            <NativeSelectOption value="amount">An amount ({BASE_CURRENCY})</NativeSelectOption>
-            <NativeSelectOption value="free_shipping">Shipping</NativeSelectOption>
-          </NativeSelect>
+        <FieldSet className="gap-4">
+          <FieldLegend variant="label" className="mb-0">
+            Limits
+          </FieldLegend>
+          {[
+            ['minSubtotal', `Minimum subtotal (${BASE_CURRENCY}, optional)`],
+            ['skus', 'Only these SKUs (optional, comma separated)'],
+            ['customerId', 'Only this customer id (optional)'],
+            ['maxRedemptions', 'Uses in all (optional)'],
+            ['perCustomerLimit', 'Uses per customer (optional)'],
+          ].map(([k, label]) => (
+            <Field key={k} className="gap-2">
+              <FieldLabel htmlFor={`promo-${k}`}>{label}</FieldLabel>
+              <Input id={`promo-${k}`} name={k} />
+            </Field>
+          ))}
+          <Field className="gap-2">
+            <FieldLabel htmlFor="promo-validTo">Ends on (optional)</FieldLabel>
+            <Input id="promo-validTo" name="validTo" type="date" className="max-w-48" />
+          </Field>
+        </FieldSet>
+        {error ? <FieldError>{error}</FieldError> : null}
+        <div>
+          <Button type="submit" size="sm" disabled={busy}>
+            Add promotion
+          </Button>
         </div>
-        <div className="grid gap-1">
-          <label htmlFor="promo-value" className="caption">
-            Percent or amount
-          </label>
-          <Input id="promo-value" name="value" inputMode="decimal" className="h-8" />
-        </div>
-      </div>
-      {[
-        ['minSubtotal', `Minimum subtotal (${BASE_CURRENCY}, optional)`],
-        ['skus', 'Only these SKUs (optional, comma separated)'],
-        ['customerId', 'Only this customer id (optional)'],
-        ['maxRedemptions', 'Uses in all (optional)'],
-        ['perCustomerLimit', 'Uses per customer (optional)'],
-      ].map(([k, label]) => (
-        <div key={k} className="grid gap-1">
-          <label htmlFor={`promo-${k}`} className="caption">
-            {label}
-          </label>
-          <Input id={`promo-${k}`} name={k} className="h-8" />
-        </div>
-      ))}
-      <div className="grid gap-1">
-        <label htmlFor="promo-validTo" className="caption">
-          Ends on (optional)
-        </label>
-        <Input id="promo-validTo" name="validTo" type="date" className="h-8 w-48" />
-      </div>
-      {error ? (
-        <p role="alert" className="text-bad">
-          {error}
-        </p>
-      ) : null}
-      <div>
-        <Button type="submit" size="sm" disabled={busy}>
-          Add promotion
-        </Button>
-      </div>
+      </FieldGroup>
     </Form>
   );
 }

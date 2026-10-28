@@ -1,5 +1,7 @@
 import type { Role } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { useEffect, useRef } from 'react';
 import {
@@ -93,48 +95,53 @@ export default function LoginSsoLink() {
   }, [error]);
   return (
     <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
-      <Form method="post" className="h-fit w-full max-w-sm card p-6">
-        <Mark className="size-7" />
-        <h1 className="mt-4 font-semibold tracking-title text-2xl">Link single sign-on</h1>
-        <p className="mt-1 text-muted-foreground text-sm">
-          Your identity provider signed you in as {email}, which already has a password here. Enter
-          it once to link the two; after that, single sign-on is enough.
-        </p>
-        {/* For password managers: the account this password belongs to. */}
-        <input type="hidden" name="email" autoComplete="username" value={email} />
-        <label className="mt-5 block text-sm" htmlFor="password">
-          Password
-        </label>
-        <Input
-          ref={password}
-          id="password"
-          name="password"
-          type="password"
-          required
-          autoFocus
-          autoComplete="current-password"
-          className="mt-1"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'password-error' : undefined}
-        />
-        {error ? (
-          <p id="password-error" className="mt-2 text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <Button type="submit" className="mt-4 w-full" disabled={busy}>
-          {busy ? 'Checking…' : 'Link and sign in'}
-        </Button>
-        <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
-          <p>Forgot your password? Ask an admin to reset it on the Team page.</p>
-          <Link
-            to="/login"
-            className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
-          >
-            Back to sign-in
-          </Link>
-        </div>
-      </Form>
+      <Card className="h-fit w-full max-w-sm">
+        <CardHeader>
+          <Mark className="size-7" />
+          <CardTitle className="mt-2">
+            <h1 className="font-semibold tracking-title text-2xl">Link single sign-on</h1>
+          </CardTitle>
+          <CardDescription>
+            Your identity provider signed you in as {email}, which already has a password here.
+            Enter it once to link the two; after that, single sign-on is enough.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form method="post">
+            {/* For password managers: the account this password belongs to. */}
+            <input type="hidden" name="email" autoComplete="username" value={email} />
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="password">Password</FieldLabel>
+                <Input
+                  ref={password}
+                  id="password"
+                  name="password"
+                  type="password"
+                  required
+                  autoFocus
+                  autoComplete="current-password"
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? 'password-error' : undefined}
+                />
+                {error ? <FieldError id="password-error">{error}</FieldError> : null}
+              </Field>
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? 'Checking…' : 'Link and sign in'}
+              </Button>
+              <div className="space-y-1.5 text-muted-foreground text-xs">
+                <p>Forgot your password? Ask an admin to reset it on the Team page.</p>
+                <Link
+                  to="/login"
+                  className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
+                >
+                  Back to sign-in
+                </Link>
+              </div>
+            </FieldGroup>
+          </Form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

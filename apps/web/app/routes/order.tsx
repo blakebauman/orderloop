@@ -16,13 +16,25 @@ import {
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent } from '@orderloop/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
+import { Field, FieldDescription, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemHeader,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableFoot, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { useAgent } from 'agents/react';
@@ -32,9 +44,12 @@ import {
   Ellipsis,
   ExternalLink,
   FileText,
+  Mail,
   MessageSquareText,
+  MousePointerClick,
   RotateCcw,
   Undo2,
+  Workflow,
   Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -51,7 +66,7 @@ import { Ago } from '~/components/ago';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
-import { Empty } from '~/components/page';
+import { Empty, Section } from '~/components/page';
 import { ShareButton } from '~/components/share-button';
 import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
@@ -507,9 +522,9 @@ function OrderView() {
             hidden={shown === 'graph'}
             className="min-h-0 flex-1 p-4 lg:overflow-y-auto"
           >
-            {/* Stays mounted while hidden so an open undo window survives a tab switch. */}
-            <div hidden={shown !== 'actions'}>
-              <Compensation state={state} records={records} onSelect={select} />
+            {/* Stays mounted while hidden so an open undo window survives a tab switch. What waits
+                on a person comes first, then what a rollback undid. */}
+            <div hidden={shown !== 'actions'} className="space-y-4">
               <Actions
                 state={state}
                 busy={busy}
@@ -520,6 +535,7 @@ function OrderView() {
                 messages={records.messages}
                 onActivity={() => setTab('activity')}
               />
+              <Compensation state={state} records={records} onSelect={select} />
             </div>
             {shown === 'activity' ? <Activity state={state} onSelect={select} /> : null}
             {shown === 'details' ? <Details state={state} records={records} /> : null}
@@ -527,7 +543,9 @@ function OrderView() {
               node ? (
                 <Inspector node={node} run={state.nodes[node.id]} />
               ) : (
-                <Empty>Select a step on the graph to see its settings and last result.</Empty>
+                <Empty icon={<MousePointerClick aria-hidden="true" />}>
+                  Select a step on the graph to see its settings and last result.
+                </Empty>
               )
             ) : null}
           </div>
@@ -619,23 +637,25 @@ function CancelPanel({
         if (e.key === 'Escape') onKeep();
       }}
     >
-      <div className="min-w-0 flex-1 basis-72">
-        <p className="font-medium text-sm">Cancel this order?</p>
-        <p className="text-muted-foreground text-xs">
-          The flow stops, and completed steps that can be undone (reservations, card authorizations,
-          shipments) are reversed.
-        </p>
-        <label htmlFor={id} className="caption mt-2 block">
+      <Field className="min-w-0 flex-1 basis-72 gap-2">
+        <div>
+          <p className="font-medium text-sm">Cancel this order?</p>
+          <FieldDescription className="text-xs">
+            The flow stops, and completed steps that can be undone (reservations, card
+            authorizations, shipments) are reversed.
+          </FieldDescription>
+        </div>
+        <FieldLabel htmlFor={id} className="caption">
           Reason, kept in the order history
-        </label>
+        </FieldLabel>
         <Input
           id={id}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          className="mt-1 h-8 max-w-md"
+          className="h-8 max-w-md"
           autoFocus
         />
-      </div>
+      </Field>
       <div className="flex gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onKeep}>
           Keep order
@@ -680,80 +700,85 @@ function Compensation({
     .reduce((s, p) => s + p.amount, 0);
   const failed = state.rollback?.outcome === 'failed';
 
+  // A region of its own, so the rollback and what to do next read as one part of the panel.
   return (
-    <section aria-labelledby="rollback-title" className="mb-6">
-      <h2 id="rollback-title" className="section-title flex items-center gap-2">
-        <Undo2 className="size-4 text-undo" aria-hidden="true" />
-        {failed ? 'Rollback incomplete' : state.rollback ? 'Rolled back' : 'Rolling back'}
-      </h2>
-      {!cause && state.reason ? (
-        <p className="mt-1 text-sm">{sentence(readableReason(state.reason))}</p>
-      ) : null}
-      {cause ? (
-        <p className="mt-1 text-sm">
-          Stopped at{' '}
-          <button
-            type="button"
-            className="font-medium text-link hover:underline"
-            onClick={() => onSelect(cause[0])}
-          >
-            {label(cause[0])}
-          </button>
-          {cause[1].error ? (
-            <span className="text-muted-foreground">: {clip(cause[1].error)}</span>
-          ) : null}
-        </p>
-      ) : null}
-      <Table edge="flush" className="mt-3" caption="Steps reversed, in the order they were undone">
-        <TableHead>
-          <Tr>
-            <Th>Step</Th>
-            <Th>Reversed</Th>
-          </Tr>
-        </TableHead>
-        <TableBody>
-          {reversed.length ? (
-            reversed.map(([id, r]) => (
-              <Tr key={id}>
-                <Td className="py-2">
-                  <button
-                    type="button"
-                    className="text-left hover:underline"
-                    onClick={() => onSelect(id)}
-                  >
-                    {label(id)}
-                  </button>
-                </Td>
-                <Td className="py-2 text-muted-foreground">
-                  {noop(r.summary) ? 'Nothing to undo yet' : (r.summary ?? 'Reversed')}
+    <section aria-labelledby="rollback-title" className="space-y-4">
+      <Section
+        title={
+          <span id="rollback-title" className="flex items-center gap-2">
+            <Undo2 className="size-4 text-undo" aria-hidden="true" />
+            {failed ? 'Rollback incomplete' : state.rollback ? 'Rolled back' : 'Rolling back'}
+          </span>
+        }
+        description={
+          cause ? (
+            <>
+              Stopped at{' '}
+              <button
+                type="button"
+                className="font-medium text-link hover:underline"
+                onClick={() => onSelect(cause[0])}
+              >
+                {label(cause[0])}
+              </button>
+              {cause[1].error ? <span>: {clip(cause[1].error)}</span> : null}
+            </>
+          ) : state.reason ? (
+            sentence(readableReason(state.reason))
+          ) : undefined
+        }
+      >
+        <Table edge="flush" caption="Steps reversed, in the order they were undone">
+          <TableHead>
+            <Tr>
+              <Th>Step</Th>
+              <Th>Reversed</Th>
+            </Tr>
+          </TableHead>
+          <TableBody>
+            {reversed.length ? (
+              reversed.map(([id, r]) => (
+                <Tr key={id}>
+                  <Td className="py-2">
+                    <button
+                      type="button"
+                      className="text-left hover:underline"
+                      onClick={() => onSelect(id)}
+                    >
+                      {label(id)}
+                    </button>
+                  </Td>
+                  <Td className="py-2 text-muted-foreground">
+                    {noop(r.summary) ? 'Nothing to undo yet' : (r.summary ?? 'Reversed')}
+                  </Td>
+                </Tr>
+              ))
+            ) : (
+              <Tr>
+                <Td colSpan={2} className="py-2 text-muted-foreground">
+                  Nothing had been done that needed undoing.
                 </Td>
               </Tr>
-            ))
-          ) : (
-            <Tr>
-              <Td colSpan={2} className="py-2 text-muted-foreground">
-                Nothing had been done that needed undoing.
+            )}
+          </TableBody>
+          <TableFoot>
+            <Tr className="double-rule border-t">
+              <Td className="pt-2 font-medium">
+                {undone ? `${plural(undone, 'step')} reversed` : 'Nothing needed undoing'}
+              </Td>
+              <Td numeric className="pt-2 font-medium">
+                {voided ? `${money(voided, currency)} released to the card` : ''}
               </Td>
             </Tr>
-          )}
-        </TableBody>
-        <TableFoot>
-          <Tr className="double-rule border-t">
-            <Td className="pt-2 font-medium">
-              {undone ? `${plural(undone, 'step')} reversed` : 'Nothing needed undoing'}
-            </Td>
-            <Td numeric className="pt-2 font-medium">
-              {voided ? `${money(voided, currency)} released to the card` : ''}
-            </Td>
-          </Tr>
-        </TableFoot>
-      </Table>
-      {failed ? (
-        <p className="mt-3 text-bad text-sm">
-          {state.rollback?.error ? `${state.rollback.error}. ` : ''}Check Payments and Shipments
-          under Details and settle what is left by hand.
-        </p>
-      ) : null}
+          </TableFoot>
+        </Table>
+        {failed ? (
+          <p className="mt-3 text-bad text-sm">
+            {state.rollback?.error ? `${state.rollback.error}. ` : ''}Check Payments and Shipments
+            under Details and settle what is left by hand.
+          </p>
+        ) : null}
+      </Section>
       {state.rollback ? (
         <NextSteps orderId={state.orderId!} customer={state.order?.customerId} />
       ) : null}
@@ -772,9 +797,20 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
       navigate(`/orders/${restart.data.orderId}`);
   }, [restart.state, restart.data, navigate]);
   return (
-    <div className="mt-5 border-t pt-4">
-      <h3 className="section-title">Next</h3>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+    <Section
+      title="Next"
+      description={
+        <>
+          The new order runs on the flow’s current version; this one stays as it is, for the record.
+          To see what blocked it,{' '}
+          <Link to="/commerce" className="text-link hover:underline">
+            check stock and credit
+          </Link>
+          .
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
         {confirming ? (
           <restart.Form
             method="post"
@@ -801,20 +837,12 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
           </Button>
         ) : null}
       </div>
-      <p className="mt-2 text-muted-foreground text-xs">
-        The new order runs on the flow’s current version; this one stays as it is, for the record.
-        To see what blocked it,{' '}
-        <Link to="/commerce" className="text-link hover:underline">
-          check stock and credit
-        </Link>
-        .
-      </p>
       {restart.data?.error ? (
         <p className="mt-2 text-bad text-sm" role="alert">
           {restart.data.error}
         </p>
       ) : null}
-    </div>
+    </Section>
   );
 }
 
@@ -843,56 +871,79 @@ function Outcome({
   const ran = runs.filter((r) => !['pending', 'skipped'].includes(r.status)).length;
   const skipped = runs.filter((r) => r.status === 'skipped').length;
   return (
-    <div className="space-y-5">
-      <section>
-        <h2 className="section-title">Where it ended</h2>
-        <p className="mt-1 text-sm">
-          {end ? (
-            <>
-              <span className="text-muted-foreground">Final step:</span>{' '}
+    <>
+      <Section title="Where it ended">
+        <Facts>
+          <Fact label="Final step">
+            {end ? (
               <button
                 type="button"
-                className="font-medium underline-offset-2 hover:underline"
+                className="text-left font-medium underline-offset-2 hover:underline"
                 onClick={() => onSelect(end.id)}
               >
                 {end.label}
               </button>
-              {endedAt ? (
-                <span className="text-muted-foreground"> · {formatTime(endedAt)}</span>
-              ) : null}
-            </>
-          ) : (
-            'Stopped before reaching an end step.'
-          )}
-        </p>
-        <p className="mt-0.5 text-muted-foreground text-xs tabular">
-          {plural(ran, 'step')} ran, {skipped} skipped on {flow.name} v{flow.version}
-        </p>
-      </section>
-      <section>
-        <h2 className="section-title">Who was told</h2>
+            ) : (
+              'Stopped before reaching an end step.'
+            )}
+          </Fact>
+          {endedAt ? <Fact label="Ended">{formatTime(endedAt)}</Fact> : null}
+          <Fact label="Steps">
+            <span className="tabular">
+              {plural(ran, 'step')} ran, {skipped} skipped
+            </span>
+          </Fact>
+          <Fact label="Flow">
+            {flow.name} v{flow.version}
+          </Fact>
+        </Facts>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={onActivity}>
+            See every step
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to={`/flows/${flow.id}`}>Open the flow</Link>
+          </Button>
+        </div>
+      </Section>
+      <Section title="Who was told">
         {messages.length ? (
-          <ul className="mt-1.5 divide-y text-sm">
+          <ul className="-mx-2 flex flex-col gap-1">
             {messages.map((m) => (
-              <li key={m.id} className="py-1.5">
-                <div>{m.subject}</div>
-                <div className="text-muted-foreground text-xs">{m.recipient}</div>
-              </li>
+              <Item key={m.id} asChild size="xs" className="items-start px-2">
+                <li>
+                  <ItemMedia variant="icon" className="mt-0.5 text-muted-foreground">
+                    <Mail aria-hidden="true" />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="line-clamp-none font-normal">{m.subject}</ItemTitle>
+                    <ItemDescription className="text-xs">{m.recipient}</ItemDescription>
+                  </ItemContent>
+                </li>
+              </Item>
             ))}
           </ul>
         ) : (
-          <p className="mt-1 text-muted-foreground text-sm">No one was sent a notice.</p>
+          <p className="text-muted-foreground text-sm">No one was sent a notice.</p>
         )}
-      </section>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={onActivity}>
-          See every step
-        </Button>
-        <Button asChild variant="ghost" size="sm">
-          <Link to={`/flows/${flow.id}`}>Open the flow</Link>
-        </Button>
-      </div>
-    </div>
+      </Section>
+    </>
+  );
+}
+
+/** Facts as label and value: a label column sized to its longest label, the values beside it. */
+function Facts({ children }: { children: React.ReactNode }) {
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">{children}</dl>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
+    </>
   );
 }
 
@@ -925,124 +976,139 @@ function Actions({
         <Outcome state={state} messages={messages} onSelect={onSelect} onActivity={onActivity} />
       );
     return (
-      <Empty>
+      <Empty icon={<Workflow aria-hidden="true" />}>
         Nothing is waiting on a person or an outside event. The flow is running on its own.
       </Empty>
     );
   }
   const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
   return (
-    <div className="space-y-3">
-      {state.waits.map((w) => (
-        <div key={w.eventType} className="rounded-lg border border-wait/35 bg-wait/[0.06] p-3">
-          <div className="flex items-center gap-2 text-wait text-xs">
-            <StatusDot status="waiting" />
-            {w.kind === 'approval'
-              ? `Approval for ${assigneeLabel(w.assignee) || 'anyone'}`
-              : 'Waiting for an outside event'}
-            <span className="ml-auto text-muted-foreground">
-              since <Ago ms={w.since} />
-            </span>
-          </div>
-          <button
-            type="button"
-            className="mt-1.5 text-left font-medium text-sm hover:underline"
-            onClick={() => onSelect(w.nodeId)}
-          >
-            {label(w.nodeId)}
-          </button>
-          {w.kind === 'approval' ? (
-            <>
-              <DecisionContext ctx={approvalContext(state, w.nodeId)} className="mt-1" />
-              <div className="mt-3">
-                {canApprove ? (
-                  <DecisionControls
-                    deadline={w.deadline}
-                    onTimeout={approvalContext(state, w.nodeId).onTimeout}
-                    busy={busy === 'decide'}
-                    disabled={!!busy}
-                    onDecide={(decision, note) =>
-                      void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
-                    }
-                    onFlush={(decision, note) =>
-                      sendDecision(state.orderId!, w.nodeId, decision, note)
-                    }
-                  />
+    <Section
+      title="Waiting"
+      description="The order is paused at these steps until a person or an outside event answers."
+    >
+      <ul className="flex flex-col gap-2">
+        {state.waits.map((w) => (
+          <Item key={w.eventType} asChild variant="muted" size="sm" className="items-start">
+            <li>
+              <ItemHeader className="text-xs">
+                <span className="flex items-center gap-2 text-wait">
+                  <StatusDot status="waiting" />
+                  {w.kind === 'approval'
+                    ? `Approval for ${assigneeLabel(w.assignee) || 'anyone'}`
+                    : 'Waiting for an outside event'}
+                </span>
+                <span className="whitespace-nowrap text-muted-foreground">
+                  since <Ago ms={w.since} />
+                </span>
+              </ItemHeader>
+              <ItemContent className="min-w-0">
+                <ItemTitle className="line-clamp-none">
+                  <button
+                    type="button"
+                    className="text-left hover:underline"
+                    onClick={() => onSelect(w.nodeId)}
+                  >
+                    {label(w.nodeId)}
+                  </button>
+                </ItemTitle>
+                {w.kind === 'approval' ? (
+                  <DecisionContext ctx={approvalContext(state, w.nodeId)} />
                 ) : (
-                  <p className="text-muted-foreground text-xs">An approver decides this.</p>
+                  <>
+                    <p className="text-muted-foreground text-xs">
+                      Waiting for {eventWaiting(w.event!)}
+                      {w.deadline ? `; times out ${formatTime(w.deadline)}` : ''}.
+                    </p>
+                    {/* Connected systems send the event themselves; the API detail is for developers. */}
+                    <details className="group text-muted-foreground text-xs">
+                      <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
+                        <ChevronRight
+                          className="size-3.5 transition-transform group-open:rotate-90"
+                          aria-hidden="true"
+                        />
+                        For developers
+                      </summary>
+                      <p className="mt-1">
+                        Systems send <span className="font-mono text-foreground">{w.event}</span> to{' '}
+                        <span className="break-all font-mono">
+                          POST /api/v1/orders/{state.orderId}/events
+                        </span>
+                        .
+                      </p>
+                    </details>
+                  </>
                 )}
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="mt-1 text-muted-foreground text-xs">
-                Waiting for {eventWaiting(w.event!)}
-                {w.deadline ? `; times out ${formatTime(w.deadline)}` : ''}.
-              </p>
-              {/* Connected systems send the event themselves; the API detail is for developers. */}
-              <details className="group mt-1.5 text-muted-foreground text-xs">
-                <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
-                  <ChevronRight
-                    className="size-3.5 transition-transform group-open:rotate-90"
-                    aria-hidden="true"
-                  />
-                  For developers
-                </summary>
-                <p className="mt-1">
-                  Systems send <span className="font-mono text-foreground">{w.event}</span> to{' '}
-                  <span className="break-all font-mono">
-                    POST /api/v1/orders/{state.orderId}/events
-                  </span>
-                  .
-                </p>
-              </details>
-              {canOperate && w.event === 'seller.responded' ? (
-                <div className="mt-3 space-y-1.5">
-                  {sellers
-                    .filter((s) => s.status === 'pending')
-                    .map((s) => (
-                      <div key={s.sellerId} className="flex flex-wrap items-center gap-1.5">
-                        <span className="mr-auto text-xs">{s.name}</span>
-                        {(['accepted', 'rejected'] as const).map((decision) => (
-                          <Button
-                            key={decision}
-                            size="sm"
-                            variant="outline"
-                            disabled={!!busy}
-                            onClick={() =>
-                              call('event', 'deliver', [
-                                w.event,
-                                { source: 'dashboard', sellerId: s.sellerId, decision },
-                              ])
-                            }
-                          >
-                            <Zap /> {decision === 'accepted' ? 'Accepts' : 'Rejects'}
-                          </Button>
-                        ))}
-                      </div>
-                    ))}
-                </div>
+              </ItemContent>
+              {w.kind === 'approval' ? (
+                <ItemFooter className="block">
+                  {canApprove ? (
+                    <DecisionControls
+                      deadline={w.deadline}
+                      onTimeout={approvalContext(state, w.nodeId).onTimeout}
+                      busy={busy === 'decide'}
+                      disabled={!!busy}
+                      onDecide={(decision, note) =>
+                        void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
+                      }
+                      onFlush={(decision, note) =>
+                        sendDecision(state.orderId!, w.nodeId, decision, note)
+                      }
+                    />
+                  ) : (
+                    <p className="text-muted-foreground text-xs">An approver decides this.</p>
+                  )}
+                </ItemFooter>
+              ) : canOperate && w.event === 'seller.responded' ? (
+                <ItemFooter className="block">
+                  <ul className="space-y-1.5">
+                    {sellers
+                      .filter((s) => s.status === 'pending')
+                      .map((s) => (
+                        <li key={s.sellerId} className="flex flex-wrap items-center gap-1.5">
+                          <span className="mr-auto text-xs">{s.name}</span>
+                          {(['accepted', 'rejected'] as const).map((decision) => (
+                            <Button
+                              key={decision}
+                              size="sm"
+                              variant="outline"
+                              disabled={!!busy}
+                              onClick={() =>
+                                call('event', 'deliver', [
+                                  w.event,
+                                  { source: 'dashboard', sellerId: s.sellerId, decision },
+                                ])
+                              }
+                            >
+                              <Zap /> {decision === 'accepted' ? 'Accepts' : 'Rejects'}
+                            </Button>
+                          ))}
+                        </li>
+                      ))}
+                  </ul>
+                </ItemFooter>
               ) : canOperate ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  disabled={!!busy}
-                  onClick={() =>
-                    call('event', 'deliver', [
-                      w.event,
-                      { source: 'dashboard', amount: state.order?.total },
-                    ])
-                  }
-                >
-                  {eventAction(w.event!)}
-                </Button>
+                <ItemActions className="basis-full">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!!busy}
+                    onClick={() =>
+                      call('event', 'deliver', [
+                        w.event,
+                        { source: 'dashboard', amount: state.order?.total },
+                      ])
+                    }
+                  >
+                    {eventAction(w.event!)}
+                  </Button>
+                </ItemActions>
               ) : null}
-            </>
-          )}
-        </div>
-      ))}
-    </div>
+            </li>
+          </Item>
+        ))}
+      </ul>
+    </Section>
   );
 }
 
@@ -1074,45 +1140,58 @@ function Activity({ state, onSelect }: { state: OrderState; onSelect: (id: strin
   const start = state.timeline[0]?.at ?? 0;
   const label = (id: string) => state.flow?.nodes.find((n) => n.id === id)?.label ?? id;
   if (!items.length) return <Empty>Nothing has happened yet.</Empty>;
+  // Quiet rows, read one at a time: the time since the order started, then what happened.
   return (
-    <ol className="space-y-2.5">
-      {items.map(({ t, key }) => (
-        <li key={key} className={cn('flex gap-3 text-sm', arrived(key) && 'animate-arrive')}>
-          <time
-            dateTime={new Date(t.at).toISOString()}
-            title={formatTime(t.at)}
-            className="w-14 shrink-0 pt-px text-right text-muted-foreground text-xs tabular"
+    <Section title="Timeline" description="What happened on this order, newest first.">
+      <ol className="-mx-2 flex flex-col">
+        {items.map(({ t, key }) => (
+          <Item
+            key={key}
+            asChild
+            size="xs"
+            className={cn('items-start gap-3 px-2 py-1.5', arrived(key) && 'animate-arrive')}
           >
-            {offset(t.at, start)}
-          </time>
-          <span className={cn('min-w-0 flex-1', KIND_TONE[t.kind])}>
-            {t.nodeId ? (
-              <button
-                type="button"
-                className="mr-1.5 font-medium text-foreground hover:underline"
-                onClick={() => onSelect(t.nodeId!)}
-              >
-                {label(t.nodeId)}
-              </button>
-            ) : null}
-            {t.nodeId
-              ? plainLog(t.message.replace(`${label(t.nodeId)}: `, ''), label(t.nodeId))
-              : plainLog(t.message)}
-          </span>
-        </li>
-      ))}
-    </ol>
+            <li>
+              <ItemMedia className="w-14 justify-end self-start">
+                <time
+                  dateTime={new Date(t.at).toISOString()}
+                  title={formatTime(t.at)}
+                  className="pt-px text-muted-foreground text-xs tabular"
+                >
+                  {offset(t.at, start)}
+                </time>
+              </ItemMedia>
+              <ItemContent className={cn('min-w-0 text-sm', KIND_TONE[t.kind])}>
+                <span>
+                  {t.nodeId ? (
+                    <button
+                      type="button"
+                      className="mr-1.5 font-medium text-foreground hover:underline"
+                      onClick={() => onSelect(t.nodeId!)}
+                    >
+                      {label(t.nodeId)}
+                    </button>
+                  ) : null}
+                  {t.nodeId
+                    ? plainLog(t.message.replace(`${label(t.nodeId)}: `, ''), label(t.nodeId))
+                    : plainLog(t.message)}
+                </span>
+              </ItemContent>
+            </li>
+          </Item>
+        ))}
+      </ol>
+    </Section>
   );
 }
 
 function Details({ state, records }: { state: OrderState; records: Records }) {
   const o = state.order!;
   return (
-    <div className="space-y-6 text-sm">
-      <section>
-        <h2 className="section-title mb-2">Lines</h2>
+    <div className="space-y-4">
+      <Section title="Lines" flush>
         {o.lines.length ? (
-          <Table edge="flush" caption="Lines">
+          <Table caption="Lines">
             <TableHead>
               <Tr>
                 <Th>Item</Th>
@@ -1167,22 +1246,26 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
             </TableFoot>
           </Table>
         ) : (
-          <p className="text-muted-foreground">No lines yet.</p>
+          <p className="px-5 py-4 text-muted-foreground text-sm">No lines yet.</p>
         )}
-      </section>
+      </Section>
       <RecordSections records={records} currency={o.currency} />
-      <details className="group">
-        <summary className="caption flex cursor-pointer list-none items-center gap-1 hover:text-foreground">
-          <ChevronRight
-            className="size-3.5 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          />
-          Flow variables (for debugging)
-        </summary>
-        <pre className="mt-2 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
-          {JSON.stringify(state.vars, null, 2)}
-        </pre>
-      </details>
+      <Card size="sm" className="gap-0 py-0">
+        <details className="group">
+          <summary className="caption flex cursor-pointer list-none items-center gap-1 px-(--card-spacing) py-3 hover:text-foreground">
+            <ChevronRight
+              className="size-3.5 transition-transform group-open:rotate-90"
+              aria-hidden="true"
+            />
+            Flow variables (for debugging)
+          </summary>
+          <CardContent className="pb-(--card-spacing)">
+            <pre className="overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
+              {JSON.stringify(state.vars, null, 2)}
+            </pre>
+          </CardContent>
+        </details>
+      </Card>
     </div>
   );
 }
@@ -1192,47 +1275,68 @@ function RecordSections({ records, currency }: { records: Records; currency: str
   return (
     <>
       {records.documents.length || records.invoices.length ? (
-        <section>
-          <h2 className="section-title mb-2">Documents</h2>
-          <ul className="space-y-1">
+        <Section title="Documents">
+          <ul className="-mx-2 flex flex-col gap-1">
             {records.invoices.map((inv) => (
-              <li key={inv.id} className="flex flex-wrap items-center gap-x-1.5">
-                {inv.hostedUrl ? (
-                  <a
-                    href={inv.hostedUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-link hover:underline"
-                  >
-                    <ExternalLink className="size-3.5" aria-hidden="true" /> Stripe invoice
-                    {inv.number ? ` ${inv.number}` : ''}
-                  </a>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    <FileText className="size-3.5" aria-hidden="true" /> Stripe invoice
-                    {inv.number ? ` ${inv.number}` : ''}
-                  </span>
-                )}
-                <span className="text-muted-foreground">
-                  · {humanize(inv.status)} · {money(inv.amount, inv.currency)}
-                </span>
-              </li>
+              <Item
+                key={inv.id}
+                asChild
+                size="xs"
+                className={cn('relative px-2', inv.hostedUrl && 'hover:bg-muted/60')}
+              >
+                <li>
+                  <ItemMedia variant="icon" className="text-muted-foreground">
+                    {inv.hostedUrl ? (
+                      <ExternalLink aria-hidden="true" />
+                    ) : (
+                      <FileText aria-hidden="true" />
+                    )}
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="line-clamp-none">
+                      {inv.hostedUrl ? (
+                        <a
+                          href={inv.hostedUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-link after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+                        >
+                          Stripe invoice{inv.number ? ` ${inv.number}` : ''}
+                        </a>
+                      ) : (
+                        <>Stripe invoice{inv.number ? ` ${inv.number}` : ''}</>
+                      )}
+                    </ItemTitle>
+                    <ItemDescription className="text-xs">
+                      {humanize(inv.status)} · {money(inv.amount, inv.currency)}
+                    </ItemDescription>
+                  </ItemContent>
+                </li>
+              </Item>
             ))}
             {records.documents.map((d) => (
-              <li key={d.id}>
-                <a
-                  href={`/docs/${d.r2Key}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-link hover:underline"
-                >
-                  <FileText className="size-3.5" aria-hidden="true" /> {humanize(d.kind)} ·{' '}
-                  {d.r2Key.split('/').pop()}
-                </a>
-              </li>
+              <Item key={d.id} asChild size="xs" className="relative px-2 hover:bg-muted/60">
+                <li>
+                  <ItemMedia variant="icon" className="text-muted-foreground">
+                    <FileText aria-hidden="true" />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="line-clamp-none [overflow-wrap:anywhere]">
+                      <a
+                        href={`/docs/${d.r2Key}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-link after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+                      >
+                        {humanize(d.kind)} · {d.r2Key.split('/').pop()}
+                      </a>
+                    </ItemTitle>
+                  </ItemContent>
+                </li>
+              </Item>
             ))}
           </ul>
-        </section>
+        </Section>
       ) : null}
       <Ledger
         title="Payments"
@@ -1274,12 +1378,12 @@ function RecordSections({ records, currency }: { records: Records; currency: str
   );
 }
 
+/** A record as a flush table in its own card: rows to compare, figures on the right. */
 function Ledger({ title, rows }: { title: string; rows: [string, string, string][] }) {
   if (!rows.length) return null;
   return (
-    <section>
-      <h2 className="section-title mb-2">{title}</h2>
-      <Table edge="flush" caption={title}>
+    <Section title={title} flush>
+      <Table caption={title}>
         <TableBody>
           {rows.map((r, i) => (
             <Tr key={`${title}-${i}`}>
@@ -1290,7 +1394,7 @@ function Ledger({ title, rows }: { title: string; rows: [string, string, string]
           ))}
         </TableBody>
       </Table>
-    </section>
+    </Section>
   );
 }
 
@@ -1382,17 +1486,24 @@ function RecordedOrderView() {
       </div>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <aside className="min-h-0 space-y-6 p-4 text-sm lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:border-l">
+        {/* What it waits on first, then what a rollback undid, then the record of every step. */}
+        <aside className="min-h-0 space-y-4 p-4 text-sm lg:col-start-2 lg:row-start-1 lg:overflow-y-auto lg:border-l">
           {!terminal && o.waitingOn ? (
-            <section className="rounded-lg border border-wait/30 bg-wait/5 p-3">
-              <h2 className="section-title mb-1 text-wait">Waiting</h2>
-              <p>{o.waitingOn}</p>
-              {o.waitingSince ? (
-                <p className="mt-1 text-muted-foreground text-xs">
-                  {o.waitingAt ? `At ${o.waitingAt} · ` : ''}since <Ago ms={o.waitingSince} />
-                </p>
-              ) : null}
-            </section>
+            <Section title="Waiting">
+              <Item variant="muted" size="sm" className="items-start">
+                <ItemMedia className="mt-1.5 self-start">
+                  <StatusDot status="waiting" />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="line-clamp-none font-normal">{o.waitingOn}</ItemTitle>
+                  {o.waitingSince ? (
+                    <ItemDescription className="text-xs">
+                      {o.waitingAt ? `At ${o.waitingAt} · ` : ''}since <Ago ms={o.waitingSince} />
+                    </ItemDescription>
+                  ) : null}
+                </ItemContent>
+              </Item>
+            </Section>
           ) : null}
           {!wide && flow ? (
             <Button variant="outline" size="sm" onClick={() => setGraphOpen((v) => !v)}>
@@ -1400,10 +1511,9 @@ function RecordedOrderView() {
             </Button>
           ) : null}
           {reversed ? <RecordedRollback reversed={reversed} cause={cause} /> : null}
-          <section>
-            <h2 className="section-title mb-2">Steps</h2>
+          <Section title="Steps" flush>
             {steps.length ? (
-              <Table edge="flush" caption="Steps">
+              <Table caption="Steps">
                 <TableHead>
                   <Tr>
                     <Th>Step</Th>
@@ -1434,9 +1544,9 @@ function RecordedOrderView() {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-muted-foreground">No steps recorded.</p>
+              <p className="px-5 py-4 text-muted-foreground">No steps recorded.</p>
             )}
-          </section>
+          </Section>
           {approvals.length ? (
             <Ledger
               title="Approvals"
@@ -1472,35 +1582,42 @@ function RecordedRollback({
 }) {
   return (
     <section aria-labelledby="recorded-rollback-title">
-      <h2 id="recorded-rollback-title" className="section-title flex items-center gap-2">
-        <Undo2 className="size-4 text-undo" aria-hidden="true" />
-        Rolled back
-      </h2>
-      {cause ? (
-        <p className="mt-1">
-          Stopped at <span className="font-medium">{cause.label}</span>
-        </p>
-      ) : null}
-      {reversed.length ? (
-        <Table edge="flush" className="mt-3" caption="Steps the records show were reversed">
-          <TableHead>
-            <Tr>
-              <Th>Step</Th>
-              <Th>Reversed</Th>
-            </Tr>
-          </TableHead>
-          <TableBody>
-            {reversed.map((r) => (
-              <Tr key={r.nodeId}>
-                <Td className="py-2">{r.label}</Td>
-                <Td className="py-2 text-muted-foreground">{r.text}</Td>
+      <Section
+        title={
+          <span id="recorded-rollback-title" className="flex items-center gap-2">
+            <Undo2 className="size-4 text-undo" aria-hidden="true" />
+            Rolled back
+          </span>
+        }
+        description={
+          cause ? (
+            <>
+              Stopped at <span className="font-medium text-foreground">{cause.label}</span>
+            </>
+          ) : undefined
+        }
+      >
+        {reversed.length ? (
+          <Table edge="flush" caption="Steps the records show were reversed">
+            <TableHead>
+              <Tr>
+                <Th>Step</Th>
+                <Th>Reversed</Th>
               </Tr>
-            ))}
-          </TableBody>
-        </Table>
-      ) : (
-        <p className="mt-1 text-muted-foreground">Reversals weren’t recorded for this order.</p>
-      )}
+            </TableHead>
+            <TableBody>
+              {reversed.map((r) => (
+                <Tr key={r.nodeId}>
+                  <Td className="py-2">{r.label}</Td>
+                  <Td className="py-2 text-muted-foreground">{r.text}</Td>
+                </Tr>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="text-muted-foreground">Reversals weren’t recorded for this order.</p>
+        )}
+      </Section>
     </section>
   );
 }
