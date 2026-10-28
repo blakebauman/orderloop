@@ -12,73 +12,79 @@ import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
 import { Ago } from '~/components/ago';
-import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
+import { DecisionContext, DecisionControls, lockAt, sendDecision } from '~/components/decision';
 import { Empty, PageHeader } from '~/components/page';
 import { ApprovalBadge } from '~/components/status';
-import { type ApprovalContext, approvalContext } from '~/lib/approvals';
+import { type ApprovalContext, byUrgency, rowContext } from '~/lib/approvals';
 import { requireUser } from '~/lib/auth.server';
+import { decodeCursor, encodeCursor } from '~/lib/cursor';
 import { engine } from '~/lib/env.server';
-import { humanize, money, orderRef, outcomeLabel } from '~/lib/format';
+import { count, humanize, money, orderRef, outcomeLabel } from '~/lib/format';
 import { listApprovals } from '~/lib/orders.server';
 import { approvalSeparation } from '~/lib/settings.server';
 import { pageShortcut } from '~/lib/shortcuts';
 import { useCan } from '~/lib/use-me';
+import { useNow } from '~/lib/use-now';
 import type { Route } from './+types/approvals';
 
 export const meta = () => [{ title: 'Approvals · OrderLoop' }];
 
 const FILTERS = ['pending', 'approved', 'rejected', 'escalated', 'all'] as const;
 
-/** Orders whose live state is read for context, pending ones first. */
-const CONTEXT_ORDERS = 60;
-
 export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request);
-  const status = new URL(request.url).searchParams.get('status') ?? 'pending';
-  const [rows, separate] = await Promise.all([listApprovals(status), approvalSeparation()]);
-  // Each row carries the reason, figures and escalation clock from its order's live state; the
-  // pending queue comes first, then decided rows, so history says what it was about too.
-  const ids = [
-    ...new Set(
-      [...rows]
-        .sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
-        .map((r) => r.orderId),
-    ),
-  ].slice(0, CONTEXT_ORDERS);
+  const params = new URL(request.url).searchParams;
+  const status = params.get('status') ?? 'pending';
+  // Pages are keyed by their last row; the cursor is the orders list's, read as request time + id.
+  const cursor = decodeCursor(params.get('after'));
+  const after = cursor ? { requestedAt: cursor.createdAt, id: cursor.id } : null;
+  const [page, separate] = await Promise.all([listApprovals(status, after), approvalSeparation()]);
+  const { rows } = page;
+  // Each row on the page carries the reason, figures and escalation clock from its order's live
+  // state: one read per order, at most a page's worth. A run that isn't there (null) is a fact
+  // about the order; a read that failed says nothing, so that row keeps its buttons.
   const states = new Map(
     await Promise.all(
-      ids.map(
+      [...new Set(rows.map((r) => r.orderId))].map(
         async (id) =>
           [
             id,
             (await engine()
               .snapshot(id)
-              .catch(() => null)) as OrderState | null,
+              .catch(() => undefined)) as OrderState | null | undefined,
           ] as const,
       ),
     ),
   );
   const context: Record<string, ApprovalContext> = {};
+  // Orders with no live run: their approvals can't be decided from here.
+  const noRun: Record<string, true> = {};
   // Said before anyone acts, not after the undo window: who may not decide which rows.
   const refused: Record<string, string> = {};
   for (const r of rows) {
     const s = states.get(r.orderId);
-    if (s) context[r.id] = approvalContext(s, r.nodeId);
+    if (s === null) noRun[r.orderId] = true;
+    context[r.id] = rowContext(s, r);
     const why = r.status === 'pending' ? ownOrderRefusal(separate, r.startedBy, me.id) : null;
     if (why) refused[r.id] = why;
   }
-  // Most urgent first: the soonest escalation, then the oldest request.
-  if (status === 'pending')
-    rows.sort(
-      (a, b) =>
-        (context[a.id]?.deadline ?? Number.POSITIVE_INFINITY) -
-          (context[b.id]?.deadline ?? Number.POSITIVE_INFINITY) || a.requestedAt - b.requestedAt,
-    );
-  // Who started each order stays on the server; the page only needs `refused`.
-  return { status, rows: rows.map(({ startedBy: _, ...r }) => r), context, refused };
+  // Most urgent first within the page: the soonest escalation, then the oldest request.
+  if (status === 'pending') byUrgency(rows, context, noRun);
+  return {
+    status,
+    // Who started each order stays on the server; the page only needs `refused`.
+    rows: rows.map(({ startedBy: _, total: __, ...r }) => r),
+    context,
+    refused,
+    noRun,
+    total: page.total,
+    from: page.from,
+    paged: !!after,
+    next: page.next ? encodeCursor({ createdAt: page.next.requestedAt, id: page.next.id }) : null,
+  };
 }
 
-type Item = Omit<Awaited<ReturnType<typeof listApprovals>>[number], 'startedBy'>;
+type Item = Omit<Awaited<ReturnType<typeof listApprovals>>['rows'][number], 'startedBy' | 'total'>;
 type Shown = { r: Item; gone?: number };
 
 /**
@@ -86,13 +92,14 @@ type Shown = { r: Item; gone?: number };
  * stays for a minute marked as resolved instead of vanishing under the reader; new ones join at the
  * end rather than reshuffling the list.
  */
-function useStableRows(rows: Item[], status: string) {
+function useStableRows(rows: Item[], status: string, view: string) {
   const [shown, setShown] = useState<Shown[]>(() => rows.map((r) => ({ r })));
-  const lastStatus = useRef(status);
+  const lastView = useRef(view);
   useEffect(() => {
     setShown((prev) => {
-      if (status !== 'pending' || lastStatus.current !== status) {
-        lastStatus.current = status;
+      // Another filter or page starts afresh; only a refresh of the same page holds rows in place.
+      if (status !== 'pending' || lastView.current !== view) {
+        lastView.current = view;
         return rows.map((r) => ({ r }));
       }
       const now = Date.now();
@@ -116,15 +123,17 @@ function useStableRows(rows: Item[], status: string) {
       });
       return [...placed, ...added.map((r) => ({ r }))];
     });
-  }, [rows, status]);
+  }, [rows, status, view]);
   return shown;
 }
 
 export default function Approvals() {
-  const { rows, status, context, refused } = useLoaderData<typeof loader>();
+  const { rows, status, context, refused, noRun, total, from, paged, next } =
+    useLoaderData<typeof loader>();
   const canApprove = useCan('approver');
-  const anyOpen = rows.some((r) => r.status === 'pending' && !refused[r.id]);
-  const shown = useStableRows(rows, status);
+  const anyOpen = rows.some((r) => r.status === 'pending' && !refused[r.id] && !noRun[r.orderId]);
+  const [params, setParams] = useSearchParams();
+  const shown = useStableRows(rows, status, `${status}:${params.get('after') ?? ''}`);
   // J or K from anywhere on the page (outside fields) starts the keyboard path at the first row.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -141,7 +150,6 @@ export default function Approvals() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const [, setParams] = useSearchParams();
   const { revalidate } = useRevalidator();
   // Rows must not move under someone mid-decision: hold the refresh while any undo window is open.
   const holds = useRef(0);
@@ -212,17 +220,33 @@ export default function Approvals() {
                   r={r}
                   ctx={context[r.id] ?? undefined}
                   refused={refused[r.id]}
+                  noRun={!!noRun[r.orderId]}
                   onHold={hold}
                   gone={!!gone}
                 />
               ))}
             </ul>
+            <Pages
+              status={status}
+              total={total}
+              from={from}
+              shown={rows.length}
+              paged={paged}
+              next={next}
+            />
           </>
         ) : (
           <div className="card overflow-hidden">
             <Empty
               action={
-                status !== 'all' ? (
+                paged ? (
+                  <Link
+                    to={`?status=${encodeURIComponent(status)}`}
+                    className="text-link text-sm hover:underline"
+                  >
+                    Back to the first page
+                  </Link>
+                ) : status !== 'all' ? (
                   <button
                     type="button"
                     className="text-link text-sm hover:underline"
@@ -233,11 +257,13 @@ export default function Approvals() {
                 ) : null
               }
             >
-              {status === 'pending'
-                ? 'Nothing is waiting on a decision.'
-                : status === 'all'
-                  ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
-                  : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
+              {paged
+                ? 'Nothing is left on this page.'
+                : status === 'pending'
+                  ? 'Nothing is waiting on a decision.'
+                  : status === 'all'
+                    ? 'No approvals yet. Orders ask for one when a flow reaches an approval step.'
+                    : `No approvals ${outcomeLabel(status).toLowerCase()}.`}
             </Empty>
           </div>
         )}
@@ -246,10 +272,61 @@ export default function Approvals() {
   );
 }
 
+/**
+ * Where this page sits in the list, and the way on. Pages are keyed by their last row, so the way
+ * back is to the first page rather than one page back.
+ */
+function Pages({
+  status,
+  total,
+  from,
+  shown,
+  paged,
+  next,
+}: {
+  status: string;
+  total: number;
+  from: number;
+  shown: number;
+  paged: boolean;
+  next: string | null;
+}) {
+  if (!paged && !next) return null;
+  return (
+    <nav
+      aria-label="Pages"
+      className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-muted-foreground text-sm"
+    >
+      <span className="tabular">
+        {count(from + 1)}–{count(from + shown)} of {count(total)}
+      </span>
+      <span className="ml-auto flex items-center gap-4">
+        {paged ? (
+          <Link
+            to={`?status=${encodeURIComponent(status)}`}
+            className="hit-area text-link hover:underline"
+          >
+            First page
+          </Link>
+        ) : null}
+        {next ? (
+          <Link
+            to={`?status=${encodeURIComponent(status)}&after=${encodeURIComponent(next)}`}
+            className="hit-area inline-flex items-center gap-1 text-link hover:underline"
+          >
+            Next page <ArrowRight className="size-3.5" aria-hidden="true" />
+          </Link>
+        ) : null}
+      </span>
+    </nav>
+  );
+}
+
 function Row({
   r,
   ctx: liveCtx,
   refused,
+  noRun,
   onHold,
   gone,
 }: {
@@ -257,6 +334,8 @@ function Row({
   ctx?: ApprovalContext;
   /** Why this person may not decide it (separation of duties), said before they try. */
   refused?: string;
+  /** The order has no live run, so a decision here would have nothing to resume. */
+  noRun?: boolean;
   onHold: (on: boolean) => void;
   /** No longer in the pending queue (escalated or decided elsewhere); kept in place briefly. */
   gone?: boolean;
@@ -273,6 +352,13 @@ function Row({
   const decided = fetcher.data?.ok;
   const [made, setMade] = useState<'approved' | 'rejected' | null>(null);
   const open = r.status === 'pending' && !decided && !gone;
+  // Only an open row the engine can resume takes part in the keyboard path.
+  const decidable = open && !noRun;
+  const deadline = ctx?.deadline;
+  const now = useNow(open && deadline ? 1000 : null);
+  // Past the point where a decision could still arrive. The controls say so themselves; rows
+  // without them say it here.
+  const overdue = open && deadline !== undefined && lockAt(deadline) <= now;
   const orderName =
     r.orderTitle || (r.orderModel ? ORDER_MODEL_LABELS[r.orderModel as OrderModel] : '');
   const amount = money(r.amount, r.currency ?? undefined);
@@ -288,10 +374,10 @@ function Row({
   return (
     <li
       ref={ref}
-      tabIndex={open || gone ? 0 : undefined}
+      tabIndex={decidable || gone ? 0 : undefined}
       aria-labelledby={titleId}
       aria-describedby={ctx?.reason ? reasonId : undefined}
-      aria-keyshortcuts={open && !refused ? 'A R Z' : undefined}
+      aria-keyshortcuts={decidable && !refused ? 'A R Z' : undefined}
       className={cn(
         'grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
         gone && 'bg-muted/40',
@@ -319,10 +405,14 @@ function Row({
             <DecisionContext ctx={ctx} clock={open} className="mt-1.5" />
           </div>
         ) : null}
+        {overdue && (!canApprove || refused || noRun) ? (
+          <p className="mt-1 font-medium text-sm text-wait">
+            Decisions closed{ctx?.onTimeout ? `; it goes to ${ctx.onTimeout}` : ''}.
+          </p>
+        ) : null}
         <p className="mt-1 text-muted-foreground text-xs">
-          {ctx?.step ? `${ctx.step} · ` : ''}
-          assigned to {humanize(r.assignee) || 'any approver'} · requested{' '}
-          <Ago ms={r.requestedAt} />
+          {ctx?.step ? `${ctx.step} · assigned to` : 'Assigned to'}{' '}
+          {humanize(r.assignee) || 'any approver'} · requested <Ago ms={r.requestedAt} />
           {r.status === 'escalated'
             ? ` · nobody decided in time${ctx?.onTimeout ? `, so it went to ${ctx.onTimeout}` : ''}`
             : r.decidedBy
@@ -348,7 +438,19 @@ function Row({
             <span className="block font-normal text-muted-foreground text-xs">{inBase}</span>
           ) : null}
         </span>
-        {open && canApprove && refused ? (
+        {open && noRun ? (
+          <div className="flex max-w-64 flex-col items-start gap-1 sm:items-end">
+            <p className="text-muted-foreground text-sm sm:text-right">
+              No live run for this order, so it can’t be decided here.
+            </p>
+            <Link
+              to={`/orders/${r.orderId}`}
+              className="hit-area inline-flex items-center gap-1 text-link text-sm hover:underline"
+            >
+              Open the order <ArrowRight className="size-3.5" aria-hidden="true" />
+            </Link>
+          </div>
+        ) : open && canApprove && refused ? (
           <p className="max-w-64 text-muted-foreground text-sm sm:text-right">{refused}</p>
         ) : open && canApprove ? (
           <DecisionControls

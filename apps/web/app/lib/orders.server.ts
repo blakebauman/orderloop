@@ -34,7 +34,21 @@ import {
   sellers,
   shipments,
 } from '@orderloop/db';
-import { and, asc, desc, eq, getTableColumns, gte, inArray, lt, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  gte,
+  inArray,
+  lt,
+  not,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
 import { plural } from './format';
@@ -162,7 +176,8 @@ export async function overview(now = Date.now()) {
         .where(inArray(orders.status, ['queued', 'running', 'waiting']))
         .groupBy(orders.status),
       ordersQuery(d, { sort: 'updated' }, 8),
-      approvalsQuery(d, 'pending'),
+      // The longest-waiting few; the queue's size comes with them.
+      approvalsQuery(d, 'pending', { limit: 5 }),
       // What ended in the last 24 hours, by status (an ended order's last update is its end).
       d
         .select({
@@ -215,6 +230,7 @@ export async function overview(now = Date.now()) {
     open,
     recent,
     approvals: approvalRows,
+    pendingApprovals: approvalRows[0]?.total ?? 0,
     ended24h,
     declined24h: declined24h[0]?.n ?? 0,
     waitsByFlow,
@@ -222,11 +238,53 @@ export async function overview(now = Date.now()) {
   };
 }
 
-export async function listApprovals(status = 'pending') {
-  return approvalsQuery(db(), status);
+/** How many approvals the inbox shows at once; each costs one read of its order's live state. */
+export const APPROVALS_PAGE = 50;
+
+/** Where a page of approvals ended: the last row's request time and id (ids break ties). */
+export type ApprovalCursor = { requestedAt: number; id: string };
+
+/**
+ * One page of the approvals inbox, with how many rows match and how many came before this page.
+ * Pending approvals read oldest request first (the longest wait is the most urgent); history reads
+ * newest first. Pages are keyed by the last row, so a decision taken meanwhile shifts nothing.
+ */
+export async function listApprovals(
+  status = 'pending',
+  after: ApprovalCursor | null = null,
+  limit = APPROVALS_PAGE,
+) {
+  const d = db();
+  const later = status === 'pending' ? gt : lt;
+  const past = after
+    ? or(
+        later(approvals.requestedAt, after.requestedAt),
+        and(eq(approvals.requestedAt, after.requestedAt), later(approvals.id, after.id)),
+      )
+    : undefined;
+  const page = approvalsQuery(d, status, { where: past, limit: limit + 1 });
+  // How many rows the pages before this one held, so the page can say where it starts.
+  const [rows, before] = past
+    ? await d.batch([
+        page,
+        d
+          .select({ n: sql<number>`count(*)` })
+          .from(approvals)
+          .where(and(status === 'all' ? undefined : eq(approvals.status, status), not(past))),
+      ])
+    : [await page, [{ n: 0 }]];
+  const shown = rows.slice(0, limit);
+  const last = shown.at(-1);
+  const from = before[0]?.n ?? 0;
+  return {
+    rows: shown,
+    from,
+    total: rows[0]?.total ?? from,
+    next: rows.length > limit && last ? { requestedAt: last.requestedAt, id: last.id } : null,
+  };
 }
 
-function approvalsQuery(d: Db, status: string) {
+function approvalsQuery(d: Db, status: string, { where, limit }: { where?: SQL; limit: number }) {
   return d
     .select({
       id: approvals.id,
@@ -244,18 +302,35 @@ function approvalsQuery(d: Db, status: string) {
       // Aliased: D1's batch returns rows keyed by column name, so a second `title` would overwrite
       // the approval's and shift every later column (the overview's currency became a customer id).
       orderTitle: sql<string | null>`${orders.title}`.as('order_title'),
+      // The approval step's label from the flow version the order pinned, so a row still names
+      // its step when the order's live state can't be read.
+      stepLabel: sql<
+        string | null
+      >`(select json_extract(n.value, '$.label') from flow_versions fv, json_each(fv.flow_json, '$.nodes') n where fv.flow_id = orders.flow_id and fv.version = orders.flow_version and json_extract(n.value, '$.id') = approvals.node_id limit 1)`.as(
+        'step_label',
+      ),
       currency: orders.currency,
       customerId: orders.customerId,
       customerName: customers.name,
       fxRate: orders.fxRate,
       startedBy: orders.startedBy,
+      // How many approvals have this status, so a short list can count the rest. Uncorrelated, so
+      // SQLite counts once from the status index; a window count would read every matching row.
+      total: (status === 'all'
+        ? sql<number>`(select count(*) from approvals)`
+        : sql<number>`(select count(*) from approvals q where q.status = ${status})`
+      ).as('total'),
     })
     .from(approvals)
     .leftJoin(orders, eq(orders.id, approvals.orderId))
     .leftJoin(customers, eq(customers.id, orders.customerId))
-    .where(status === 'all' ? undefined : eq(approvals.status, status))
-    .orderBy(desc(approvals.requestedAt))
-    .limit(200);
+    .where(and(status === 'all' ? undefined : eq(approvals.status, status), where))
+    .orderBy(
+      ...(status === 'pending'
+        ? [asc(approvals.requestedAt), asc(approvals.id)]
+        : [desc(approvals.requestedAt), desc(approvals.id)]),
+    )
+    .limit(limit);
 }
 
 /** An order's D1 records, in one round trip (a D1 batch). */
