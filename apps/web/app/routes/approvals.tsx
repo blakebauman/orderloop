@@ -23,6 +23,7 @@ import { assigneeLabel, count, money, orderRef, outcomeLabel, plural } from '~/l
 import { listApprovals, pendingApprovalCounts } from '~/lib/orders.server';
 import { approvalSeparation } from '~/lib/settings.server';
 import { pageShortcut } from '~/lib/shortcuts';
+import { useArrivals } from '~/lib/use-arrivals';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
 import type { Route } from './+types/approvals';
@@ -144,10 +145,12 @@ export default function Approvals() {
   const canApprove = useCan('approver');
   const anyOpen = rows.some((r) => r.status === 'pending' && !refused[r.id] && !noRun[r.orderId]);
   const [params, setParams] = useSearchParams();
-  const shown = useStableRows(
-    rows,
-    status,
-    `${status}:${recorded ? 'recorded' : ''}:${params.get('after') ?? ''}`,
+  const view = `${status}:${recorded ? 'recorded' : ''}:${params.get('after') ?? ''}`;
+  const shown = useStableRows(rows, status, view);
+  // Approvals that join while the inbox is open fade in at the end; another view is a new list.
+  const arrived = useArrivals(
+    shown.map(({ r }) => r.id),
+    { scope: view },
   );
   // Where this list's pages and "first page" go: the recorded list keeps its own scope.
   const base = `?status=${encodeURIComponent(status)}${recorded ? '&recorded=1' : ''}`;
@@ -251,6 +254,7 @@ export default function Approvals() {
                   noRun={!!noRun[r.orderId]}
                   onHold={hold}
                   gone={!!gone}
+                  arrived={arrived(r.id)}
                 />
               ))}
             </ul>
@@ -377,6 +381,7 @@ function Row({
   noRun,
   onHold,
   gone,
+  arrived,
 }: {
   r: Item;
   ctx?: ApprovalContext;
@@ -387,6 +392,8 @@ function Row({
   onHold: (on: boolean) => void;
   /** No longer in the pending queue (escalated or decided elsewhere); kept in place briefly. */
   gone?: boolean;
+  /** Joined the list while it was open: it fades in. */
+  arrived?: boolean;
 }) {
   const canApprove = useCan('approver');
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -427,13 +434,15 @@ function Row({
       aria-describedby={ctx?.reason ? reasonId : undefined}
       aria-keyshortcuts={decidable && !refused ? 'A R Z' : undefined}
       className={cn(
-        'grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
+        // A row that resolves holds its place and fades to the resolved tint, never jumping away.
+        'grid gap-3 px-4 py-3.5 transition-[background-color] duration-(--motion-move) sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
         gone && 'bg-muted/40',
+        arrived && 'animate-arrive',
       )}
     >
       <div className="min-w-0">
         <div id={titleId} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <Link to={`/orders/${r.orderId}`} className="font-medium hover:underline">
+          <Link to={`/orders/${r.orderId}`} viewTransition className="font-medium hover:underline">
             {orderName}
           </Link>
           <span className="font-mono font-normal text-muted-foreground text-xs">
