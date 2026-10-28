@@ -66,6 +66,11 @@ export const orders = sqliteTable(
     /** When the oldest open wait began. */
     waitingSince: integer('waiting_since'),
     /**
+     * When the soonest open wait times out: the deadline its step set. Null when no open wait has
+     * one (a timer); a wait past it is overdue.
+     */
+    waitingDue: integer('waiting_due'),
+    /**
      * What the open waits are on, joined with ` · `: `person:<role>` (role empty when unassigned),
      * `event:<name>` or `timer`.
      */

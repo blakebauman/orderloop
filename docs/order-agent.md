@@ -85,10 +85,11 @@ synced state against the full snapshot.
 `syncIndex` updates the order's D1 `orders` row from state: `status`, `total`, `customer_id`,
 `title`, `fx_rate`, `instance_id`, `generation`, `waiting_on` (the titles of open waits joined with ` · `),
 `waiting_at` (the labels of the steps holding them, including a `control.wait` timer, which has no
-pending wait), `waiting_since` (when the oldest began), `waiting_for` (what each wait is on:
+pending wait), `waiting_since` (when the oldest began), `waiting_due` (the soonest open wait's
+`deadline`; null when none has one, as for a timer), `waiting_for` (what each wait is on:
 `person:<assignee>`, `event:<name>` or `timer`), and, once the order fails, rolls back, is declined or
 cancelled, `stopped_at` (the steps that failed, or else the end step it reached, such as "Out of
-stock") and `reason`; then `updated_at`. It writes only when one of those indexed fields changed since its last write, so `updated_at` moves on a meaningful change, not on every report. The orders list's **Where** column shows the step, how long and on whom (`waitingForLabel` in `apps/web/app/lib/format.ts`), or where and why an order ended; **Needs attention** lists failed and rolled-back orders and those with a pending approval. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
+stock") and `reason`; then `updated_at`. It writes only when one of those indexed fields changed since its last write, so `updated_at` moves on a meaningful change, not on every report. The orders list's **Where** column shows the step, how long (marked overdue, in the wait colour, once `waiting_due` has passed) and on whom (`waitingForLabel` in `apps/web/app/lib/format.ts`), or where and why an order ended; **Needs attention** lists failed and rolled-back orders and those with a pending approval. The dashboard and `GET /api/v1/orders` read that row; `GET /api/v1/orders/:id` reads
 the agent.
 
 ## Waits

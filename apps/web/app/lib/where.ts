@@ -16,6 +16,8 @@ export type WaitRow = {
   for: string | null;
   n: number;
   oldest: number | null;
+  /** How many are past their step's deadline (the index's `waiting_due`) when it was read. */
+  overdue: number;
 };
 
 export type StoppedRow = {
@@ -26,6 +28,15 @@ export type StoppedRow = {
   latest: number;
   reason: string | null;
 };
+
+/**
+ * Whether a wait is overdue: past the deadline its step set (an approval's escalation or an event's
+ * timeout). Only an overdue wait is drawn in the wait colour; one on time reads as any other figure.
+ * A wait without a deadline (a timer) is never overdue.
+ */
+export function isOverdue(due: number | null | undefined, now: number): boolean {
+  return due != null && due <= now;
+}
 
 /** What a wait is on, in words: a person's role, an outside event, or a timer. */
 export function waitingOn(forValue: string | null): string | null {
@@ -50,7 +61,13 @@ const rank = (steps: string[], at: string) => {
   return i < 0 ? Number.MAX_SAFE_INTEGER : i;
 };
 
-export type WaitStep = { step: string; n: number; oldest: number | null; on: string | null };
+export type WaitStep = {
+  step: string;
+  n: number;
+  oldest: number | null;
+  overdue: number;
+  on: string | null;
+};
 export type WaitTrail = { flowId: string; name: string; open: number; steps: WaitStep[] };
 
 /** Each flow with orders waiting, most waiting first; its steps in the order the flow runs them. */
@@ -71,6 +88,7 @@ export function waitTrails(rows: WaitRow[], flows: FlowSteps[]): WaitTrail[] {
     const on = waitingOn(r.for);
     if (same) {
       same.n += r.n;
+      same.overdue += r.overdue;
       same.oldest =
         same.oldest === null
           ? r.oldest
@@ -78,7 +96,7 @@ export function waitTrails(rows: WaitRow[], flows: FlowSteps[]): WaitTrail[] {
             ? same.oldest
             : Math.min(same.oldest, r.oldest);
       if (on && same.on !== on) same.on = same.on ? `${same.on} or ${on}` : on;
-    } else trail.steps.push({ step, n: r.n, oldest: r.oldest, on });
+    } else trail.steps.push({ step, n: r.n, oldest: r.oldest, overdue: r.overdue, on });
     trails.set(r.flowId, trail);
   }
   return [...trails.values()]

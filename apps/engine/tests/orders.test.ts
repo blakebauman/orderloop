@@ -224,9 +224,11 @@ describe('B2B order', () => {
     expect(s.nodes.credit!.branches).toEqual(['over_limit']);
     const pending = await db().select().from(approvals).where(eq(approvals.orderId, orderId));
     expect(pending).toMatchObject([{ status: 'pending', assignee: 'sales_ops' }]);
-    // The orders list says who the wait is on.
+    // The orders list says who the wait is on, and when it times out (so it can say it's overdue).
     const listed = await db().select().from(orders).where(eq(orders.id, orderId)).get();
     expect(listed).toMatchObject({ waitingFor: 'person:sales_ops', stoppedAt: null, reason: null });
+    expect(listed!.waitingDue).toBe(s.waits.find((w) => w.kind === 'approval')!.deadline);
+    expect(listed!.waitingDue).toBeGreaterThan(listed!.waitingSince!);
 
     await agent(orderId).decide('approval', 'rejected', 'dana', 'Over limit');
     const done = await settled(orderId);
@@ -249,7 +251,11 @@ describe('B2B order', () => {
     const done = await settled(orderId);
     expect([done.status, done.reason]).toEqual(['declined', 'No approval decision in time']);
     const listed = await db().select().from(orders).where(eq(orders.id, orderId)).get();
-    expect(listed).toMatchObject({ waitingFor: null, reason: 'No approval decision in time' });
+    expect(listed).toMatchObject({
+      waitingFor: null,
+      waitingDue: null,
+      reason: 'No approval decision in time',
+    });
     expect(done.nodes.approval!.branches).toEqual(['escalated']);
     expect(done.nodes.declined!.status).toBe('skipped');
   });

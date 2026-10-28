@@ -552,7 +552,7 @@ function Where({ order: o, status }: { order: Row; status: string }) {
       <>
         <div className="truncate text-foreground" title={o.waitingAt ?? undefined}>
           <span className="sr-only">Waiting at </span>
-          <WaitingAt at={o.waitingAt} since={o.waitingSince} on={o.waitingOn} />
+          <WaitingAt at={o.waitingAt} since={o.waitingSince} on={o.waitingOn} due={o.waitingDue} />
         </div>
         {who && !same ? (
           <div className="truncate text-muted-foreground" title={`On ${who}`}>
