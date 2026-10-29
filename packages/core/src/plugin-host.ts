@@ -208,6 +208,7 @@ export const RESERVED_ORDER_KEY_PREFIXES = [
   'order:',
   'email:',
   'a2a:',
+  'assistant:',
   'replenish:',
 ] as const;
 

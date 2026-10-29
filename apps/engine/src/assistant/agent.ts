@@ -20,6 +20,7 @@ import {
   fingerprintOf,
   flowGraphSchema,
   isAssistantTool,
+  isPageOnly,
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
@@ -156,6 +157,28 @@ export class AssistantAgent extends AIChatAgent<Env> {
       .map(([k]) => k);
     const gone = [...new Set([...declined, ...old])];
     if (gone.length) await this.ctx.storage.delete(gone);
+    // A page's card left unanswered for a day is let go, as if declined: its input (a guest's
+    // address, a pasted PO) isn't kept past then, only its ids.
+    const lapsed = new Set(
+      old.filter((k) => k.startsWith('direct:')).map((k) => k.slice('direct:'.length)),
+    );
+    if (lapsed.size)
+      await this.persistMessages(
+        this.messages.map((m) => ({
+          ...m,
+          parts: m.parts.map((x) => {
+            const t = x as { toolCallId?: string; state?: string; input?: unknown };
+            if (!t.toolCallId || !lapsed.has(t.toolCallId) || t.state !== 'approval-requested')
+              return x;
+            return {
+              ...x,
+              input: idsOf(t.input),
+              state: 'output-denied',
+              approval: { id: t.toolCallId, approved: false },
+            } as UIMessage['parts'][number];
+          }),
+        })),
+      );
   }
 
   /**
@@ -174,6 +197,7 @@ export class AssistantAgent extends AIChatAgent<Env> {
     if (typeof name !== 'string' || !isAssistantTool(name)) throw new Error(`Not a tool: ${name}`);
     requireRole(p, name);
     const input = TOOL_INPUTS[name].parse(raw ?? {}) as ToolInput<typeof name>;
+    await this.pruneShown();
     const toolCallId = `${DIRECT}${crypto.randomUUID()}`;
     const confirm = ASSISTANT_TOOLS[name].confirm;
     const base = {
@@ -247,8 +271,9 @@ export class AssistantAgent extends AIChatAgent<Env> {
                   ...m,
                   parts: m.parts.map((x) => {
                     if ((x as { toolCallId?: string }).toolCallId !== callId) return x;
+                    // Answered, the card no longer states its input: only its ids stay stored.
                     const { errorText: _e, output: _o, ...rest } = x as Record<string, unknown>;
-                    return { ...rest, ...part } as UIMessage['parts'][number];
+                    return { ...rest, input: idsOf(input), ...part } as UIMessage['parts'][number];
                   }),
                 }
               : m,
@@ -264,6 +289,7 @@ export class AssistantAgent extends AIChatAgent<Env> {
         const output = await runTool(this.env, p, name, input, {
           via: 'assistant',
           direct: true,
+          key: callId,
           confirmed: await this.shown(callId, name, input),
         });
         await write({ state: 'output-available', approval, output: kept(output) });
@@ -343,8 +369,8 @@ export class AssistantAgent extends AIChatAgent<Env> {
    * actions stop for them to confirm first, and `runAction` re-checks everything when they do.
    */
   private tools(p: Principal, context: AssistantContext): ToolSet {
-    const names = (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).filter((name) =>
-      atLeast(p.role, ASSISTANT_TOOLS[name].role),
+    const names = (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).filter(
+      (name) => atLeast(p.role, ASSISTANT_TOOLS[name].role) && !isPageOnly(name),
     );
     return Object.fromEntries(
       names.map((name) => {

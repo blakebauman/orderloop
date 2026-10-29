@@ -1,3 +1,4 @@
+import { SCENARIOS } from '@orderloop/core';
 import { data } from 'react-router';
 import { audit } from '~/lib/audit.server';
 import { actor, requireUser } from '~/lib/auth.server';
@@ -5,7 +6,6 @@ import { BodyTooLarge, readText } from '~/lib/body';
 import { engine } from '~/lib/env.server';
 import { getFlow, parseFlow, publish, sameGraph, saveFlow } from '~/lib/flows.server';
 import { demoAvailable } from '~/lib/orders.server';
-import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/flow-action';
 
 /** JSON actions from the flow editor: save, publish, test. */

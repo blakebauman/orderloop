@@ -1,4 +1,4 @@
-import { orderInputSchema, TEMPLATES, validateGraph } from '@orderloop/core';
+import { orderInputSchema, SCENARIOS, TEMPLATES, validateGraph } from '@orderloop/core';
 import { describe, expect, it } from 'vitest';
 import {
   ago,
@@ -13,7 +13,6 @@ import {
   waitingForLabel,
   waitLabel,
 } from '../app/lib/format';
-import { SCENARIOS } from '../app/lib/scenarios';
 
 const templates = Object.values(TEMPLATES).map((t) => t());
 

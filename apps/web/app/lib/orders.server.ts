@@ -4,6 +4,8 @@ import {
   isBackEdge,
   type NodeRun,
   type NodeStatus,
+  SCENARIO_CUSTOMERS,
+  SCENARIO_SKUS,
   TERMINAL_ORDER_STATUSES,
 } from '@orderloop/core';
 import {
@@ -54,7 +56,6 @@ import {
 import type { OrderCursor } from './cursor';
 import { db } from './env.server';
 import { plural } from './format';
-import { SCENARIO_CUSTOMERS, SCENARIO_SKUS } from './scenarios';
 
 export type OrderFilters = {
   model?: string;

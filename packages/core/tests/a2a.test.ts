@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   A2A_SKILLS,
   agentCard,
+  isA2ASkill,
   isLegacyA2AVersion,
   legacyAgentCard,
   ORDER_TASK_STATES,
@@ -9,7 +10,7 @@ import {
   TERMINAL_TASK_STATES,
 } from '../src/a2a';
 import { EMPTY_ORDER_STATE } from '../src/api';
-import { ASSISTANT_TOOLS } from '../src/assistant';
+import { ASSISTANT_TOOLS, type AssistantTool, isPageOnly } from '../src/assistant';
 import { ORDER_STATUSES, TERMINAL_ORDER_STATUSES } from '../src/types';
 
 describe('A2A', () => {
@@ -43,9 +44,10 @@ describe('A2A', () => {
     expect(text).toContain('{ "event": "payment.received" }');
   });
 
-  it('offers every tool as a skill at the same role', () => {
+  it('offers every tool as a skill at the same role, except those only a page calls', () => {
     for (const [name, t] of Object.entries(ASSISTANT_TOOLS))
-      expect(A2A_SKILLS[name as keyof typeof A2A_SKILLS].role).toBe(t.role);
+      if (isPageOnly(name as AssistantTool)) expect(isA2ASkill(name), name).toBe(false);
+      else expect(A2A_SKILLS[name as keyof typeof A2A_SKILLS].role).toBe(t.role);
     expect(A2A_SKILLS.place_order.role).toBe('operator');
     // A write is tagged one whether or not it waits for a confirm.
     for (const name of ['create_cart', 'change_cart', 'draft_plugin', 'submit_cart'] as const)

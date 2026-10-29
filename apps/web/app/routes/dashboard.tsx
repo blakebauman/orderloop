@@ -3,6 +3,7 @@ import {
   ORDER_MODEL_LABELS,
   type OrderModel,
   type OrderState,
+  SCENARIOS,
   toBase,
 } from '@orderloop/core';
 import { Badge } from '@orderloop/ui/badge';
@@ -26,12 +27,13 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { ArrowRight, ChevronRight, Inbox, Play, ReceiptText } from 'lucide-react';
 import { useEffect, useId } from 'react';
-import { Form, Link, useLoaderData, useNavigation, useRevalidator } from 'react-router';
+import { Link, useLoaderData, useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
 import { DecisionDeadline } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { rowContext } from '~/lib/approvals';
+import { useStartOrder } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import { ensureSeeded, flowSteps } from '~/lib/flows.server';
@@ -47,8 +49,6 @@ import {
   statusLabel,
 } from '~/lib/format';
 import { customerNames, declinedOrderIds, demoAvailable, overview } from '~/lib/orders.server';
-import { SCENARIOS } from '~/lib/scenarios';
-import { startScenario } from '~/lib/scenarios.server';
 import { useDateTime } from '~/lib/use-date-time';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
@@ -103,11 +103,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
-  return startScenario(request, me, String((await request.formData()).get('scenario') ?? ''));
-}
-
 /** How often the overview refreshes while it is in view. */
 const REFRESH_MS = 15_000;
 
@@ -129,7 +124,8 @@ export default function Dashboard() {
     demo,
     at,
   } = useLoaderData<typeof loader>();
-  const nav = useNavigation();
+  // A demo scenario starts through the assistant and opens its order.
+  const scenario = useStartOrder();
   const canOperate = useCan('operator');
   const formatTime = useDateTime();
   const { revalidate, state: refreshing } = useRevalidator();
@@ -319,31 +315,41 @@ export default function Dashboard() {
                   </summary>
                   <div className="flex flex-col gap-1 border-t p-2">
                     {SCENARIOS.map((s) => (
-                      <Form method="post" key={s.id}>
-                        <input type="hidden" name="scenario" value={s.id} />
-                        <Item asChild size="xs" className="group/s text-left hover:bg-muted">
-                          <button
-                            type="submit"
-                            disabled={nav.state !== 'idle'}
-                            className="disabled:opacity-60"
-                          >
-                            <ItemMedia variant="icon">
-                              <Play className="text-muted-foreground" aria-hidden="true" />
-                            </ItemMedia>
-                            <ItemContent>
-                              <ItemTitle>{s.label}</ItemTitle>
-                              <ItemDescription className="text-xs leading-snug">
-                                {s.blurb}
-                              </ItemDescription>
-                            </ItemContent>
-                            <ArrowRight
-                              className="size-3.5 opacity-0 transition group-hover/s:opacity-60"
-                              aria-hidden="true"
-                            />
-                          </button>
-                        </Item>
-                      </Form>
+                      <Item
+                        key={s.id}
+                        asChild
+                        size="xs"
+                        className="group/s text-left hover:bg-muted"
+                      >
+                        <button
+                          type="button"
+                          disabled={!!scenario.busy}
+                          className="disabled:opacity-60"
+                          onClick={() =>
+                            void scenario.start(s.id, 'start_scenario', { scenarioId: s.id })
+                          }
+                        >
+                          <ItemMedia variant="icon">
+                            <Play className="text-muted-foreground" aria-hidden="true" />
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle>{s.label}</ItemTitle>
+                            <ItemDescription className="text-xs leading-snug">
+                              {s.blurb}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ArrowRight
+                            className="size-3.5 opacity-0 transition group-hover/s:opacity-60"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </Item>
                     ))}
+                    {scenario.error ? (
+                      <p className="px-3 pt-1 text-bad text-xs" role="alert">
+                        {scenario.error.message}
+                      </p>
+                    ) : null}
                     <Link
                       to="/orders/scenarios"
                       className="block px-3 pt-1.5 pb-1 text-link text-sm hover:underline"
