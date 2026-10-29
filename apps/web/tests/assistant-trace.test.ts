@@ -152,6 +152,49 @@ describe('ReadLine', () => {
   });
 });
 
+describe('a line for an action the page ran', () => {
+  const ran = (name: string, output: Record<string, unknown>) =>
+    ({
+      type: `tool-${name}`,
+      toolCallId: `c-${name}`,
+      state: 'output-available',
+      input: {},
+      output,
+    }) as unknown as Tool;
+
+  it('says what it did in the past tense and links to what it made', () => {
+    const out = html(
+      createElement(ReadLine, {
+        part: ran('start_scenario', { done: 'Started #nxb697', href: '/orders/ord_x' }),
+        streaming: false,
+      }),
+    );
+    expect(out).toContain('Ran a demo scenario');
+    expect(out).toContain('Started #nxb697');
+    expect(out).toContain('href="/orders/ord_x"');
+    // Starting an order isn't a search.
+    expect(out).not.toContain('lucide-search');
+    expect(out).toContain('lucide-play');
+  });
+
+  it('links only to a path in the app', () => {
+    const out = html(
+      createElement(ReadLine, {
+        part: ran('archive_flow', { done: 'Archived Checkout', href: 'https://example.com' }),
+        streaming: false,
+      }),
+    );
+    expect(out).toContain('Archived Checkout');
+    expect(out).not.toContain('href=');
+  });
+
+  it('draws a tool it has no icon for with a neutral one, not a search', () => {
+    const out = html(createElement(ReadLine, { part: ran('some_new_tool', {}), streaming: false }));
+    expect(out).not.toContain('lucide-search');
+    expect(out).toContain('lucide-wrench');
+  });
+});
+
 describe('ReasoningLine', () => {
   it('is a plain line until there is thinking to show', () => {
     const out = html(createElement(ReasoningLine, { text: '', running: true }));
