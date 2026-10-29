@@ -24,6 +24,7 @@ import { Puzzle } from 'lucide-react';
 import { useId } from 'react';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { Ago } from '~/components/ago';
+import { Code } from '~/components/code';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot } from '~/components/status';
 import { StepUpField } from '~/components/step-up-field';
@@ -404,9 +405,11 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
     <div className="mt-4 grid gap-3 border-t pt-4 text-sm">
       <details>
         <summary className="cursor-pointer">Rule code, as the assistant wrote it</summary>
-        <pre className="mt-2 max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-          {i.code ?? 'Not available'}
-        </pre>
+        {i.code ? (
+          <Code value={i.code} language="javascript" className="mt-2" contentClassName="max-h-96" />
+        ) : (
+          <p className="mt-2 text-muted-foreground text-xs">Not available</p>
+        )}
       </details>
       <div>
         <h3 className="mb-1.5 font-medium text-sm">Test cases</h3>

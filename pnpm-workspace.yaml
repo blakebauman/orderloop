@@ -37,6 +37,8 @@ catalog:
   '@ai-sdk/react': 4.0.142
   '@ai-sdk/provider': 4.0.27
   streamdown: 2.7.0
+  # The code block's highlighter (app/lib/highlighter.tsx), loaded only when a block shows.
+  shiki: 4.5.0
 
   # Build toolchain
   typescript: ^6.0.3
