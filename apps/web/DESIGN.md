@@ -456,7 +456,10 @@ for code and data blocks only.
   files). Forms are `FieldGroup`/`Field`/`FieldLabel` with hints as `FieldDescription` tied by
   `aria-describedby`. Settings pages are one column of settings cards with reference material
   (roles, install from a file) in a rail at lg, last on phones. Sign-in, setup, two-factor, the
-  single-sign-on link and OAuth consent are one centred Card.
+  single-sign-on link and OAuth consent are one centred Card, and so is sign-out. The flow
+  editor's inspector, connections and checks are Fields, Items and Sections in its side panel;
+  the assistant's confirmations, drafts and proposals are small Cards in the conversation. Error
+  pages (no access, not found, a refused cart) are an Empty with an icon.
 - **Item** (`item.tsx`, radix-maia): a row with media, content (title, description) and actions;
   `default`, `outline` and `muted`, in `default`, `sm` and `xs`. A list of Items is a `<ul>` of
   `Item asChild` `<li>`s (ItemGroup carries no list role). A row that opens something links its

@@ -1,4 +1,12 @@
 import { Button } from '@orderloop/ui/button';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { Share, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { isIos, isStandalone } from '~/lib/device';
@@ -21,32 +29,38 @@ export function InstallHint() {
   }, []);
   if (!show) return null;
   return (
-    <aside
-      aria-label="Add to Home Screen"
-      className="mb-6 flex items-start gap-3 rounded-lg border bg-card p-4"
-    >
-      <Share className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <p className="min-w-0 flex-1 text-sm">
-        <span className="font-medium">Put OrderLoop on your Home Screen.</span> In Safari, tap
-        Share, then <span className="font-medium">Add to Home Screen</span>. It opens on its own,
-        like an app, without Safari’s bars.
-      </p>
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        aria-label="Not now"
-        onClick={() => {
-          try {
-            localStorage.setItem(DISMISSED, '1');
-          } catch {
-            // Private browsing: it asks again next visit, which is fine.
-          }
-          setShow(false);
-        }}
-      >
-        <X />
-      </Button>
-    </aside>
+    <Item asChild variant="outline" className="mb-6 items-start bg-card">
+      <aside aria-label="Add to Home Screen">
+        <ItemMedia variant="icon" className="text-muted-foreground">
+          <Share aria-hidden="true" />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="line-clamp-none">Put OrderLoop on your Home Screen.</ItemTitle>
+          <ItemDescription className="line-clamp-none">
+            In Safari, tap Share, then{' '}
+            <span className="font-medium text-foreground">Add to Home Screen</span>. It opens on its
+            own, like an app, without Safari’s bars.
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Not now"
+            onClick={() => {
+              try {
+                localStorage.setItem(DISMISSED, '1');
+              } catch {
+                // Private browsing: it asks again next visit, which is fine.
+              }
+              setShow(false);
+            }}
+          >
+            <X />
+          </Button>
+        </ItemActions>
+      </aside>
+    </Item>
   );
 }

@@ -4,42 +4,53 @@
  */
 
 import type { ConfigField, FlowNode, NodeRun } from '@orderloop/core';
+import {
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  Field as FieldRoot,
+} from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@orderloop/ui/item';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
-import { useEffect, useState } from 'react';
+import { cloneElement, useEffect, useId, useState } from 'react';
 import { Code } from '~/components/code';
 import { plainSummary, statusLabel } from '~/lib/format';
 import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 
-const SHORT_HINT = 32;
-
-export function Field({
+/**
+ * One setting: its label, the control (given the label's id, and the hint as its description) and
+ * the hint beneath it. `*:w-auto` lets a control keep its own width; inputs fill by default.
+ */
+function Field({
   label,
   hint,
   children,
 }: {
   label: string;
   hint?: string;
-  children: React.ReactNode;
+  children: React.ReactElement<{ id?: string; 'aria-describedby'?: string }>;
 }) {
+  const id = useId();
+  const hintId = useId();
+  const controlId = children.props.id ?? id;
   return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children, inside the label
-    <label className="block min-w-0">
-      <span className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="caption">{label}</span>
-        {hint && hint.length <= SHORT_HINT ? (
-          <span className="truncate text-muted-foreground text-xs">{hint}</span>
-        ) : null}
-      </span>
-      {/* A hint too long for the label's line wraps beneath it rather than being cut off. */}
-      {hint && hint.length > SHORT_HINT ? (
-        <span className="mb-1.5 block text-muted-foreground text-xs leading-snug">{hint}</span>
+    <FieldRoot className="min-w-0 gap-1.5 *:w-auto">
+      <FieldLabel htmlFor={controlId}>{label}</FieldLabel>
+      {cloneElement(children, {
+        id: controlId,
+        'aria-describedby': hint ? hintId : undefined,
+      })}
+      {hint ? (
+        <FieldDescription id={hintId} className="text-xs leading-snug">
+          {hint}
+        </FieldDescription>
       ) : null}
-      {children}
-    </label>
+    </FieldRoot>
   );
 }
 
@@ -60,74 +71,78 @@ export function Inspector({
     onChange?.({ ...node, config: { ...node.config, [key]: value } });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start gap-2.5">
+    <div className="flex flex-col gap-6">
+      {/* The step's own name leads; its type and what the type does sit beneath. */}
+      <Item size="xs" className="items-start p-0">
         {spec ? (
-          <span
-            className="grid size-8 shrink-0 place-items-center rounded-md"
+          <ItemMedia
+            className="size-8 rounded-md"
             style={{
               background: `color-mix(in oklch, ${CATEGORY_COLOR[spec.category]} 16%, transparent)`,
               color: CATEGORY_COLOR[spec.category],
             }}
           >
             <NodeIcon name={spec.icon} className="size-4" />
-          </span>
+          </ItemMedia>
         ) : null}
-        {/* The step's own name leads; its type and what the type does sit beneath. */}
-        <div className="min-w-0">
-          <div className="font-semibold text-sm">{node.label || spec?.label || node.type}</div>
-          <p className="text-muted-foreground text-xs leading-snug">
+        <ItemContent className="min-w-0">
+          <ItemTitle className="line-clamp-none font-semibold">
+            {node.label || spec?.label || node.type}
+          </ItemTitle>
+          <ItemDescription className="line-clamp-none text-xs leading-snug">
             <span className="font-medium text-foreground/80">{spec?.label ?? node.type}</span>
             {spec?.description ? ` · ${spec.description}` : ''}
-          </p>
-        </div>
-      </div>
+          </ItemDescription>
+        </ItemContent>
+      </Item>
 
-      <Field label="Label">
-        <Input
-          value={node.label}
-          disabled={readOnly}
-          onChange={(e) => onChange?.({ ...node, label: e.target.value })}
-          className="h-8"
-        />
-      </Field>
-      <Field label="Node id" hint="used in expressions: nodes.<id>">
-        <Input value={node.id} disabled className="h-8 font-mono text-xs" />
-      </Field>
+      <FieldGroup className="gap-4">
+        <Field label="Label">
+          <Input
+            value={node.label}
+            disabled={readOnly}
+            onChange={(e) => onChange?.({ ...node, label: e.target.value })}
+            className="h-8"
+          />
+        </Field>
+        <Field label="Node id" hint="used in expressions: nodes.<id>">
+          <Input value={node.id} disabled className="h-8 font-mono text-xs" />
+        </Field>
 
-      {spec?.fields.map((f) => (
-        <ConfigInput
-          key={`${node.id}:${f.key}`}
-          field={f}
-          value={config[f.key]}
-          readOnly={readOnly}
-          onChange={(v) => set(f.key, v)}
-        />
-      ))}
+        {spec?.fields.map((f) => (
+          <ConfigInput
+            key={`${node.id}:${f.key}`}
+            field={f}
+            value={config[f.key]}
+            readOnly={readOnly}
+            onChange={(v) => set(f.key, v)}
+          />
+        ))}
 
-      {spec?.category === 'commerce' || spec?.category === 'ai' ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Retries">
-            <Input
-              type="number"
-              min={0}
-              max={10}
-              disabled={readOnly}
-              value={node.retries ?? spec.retries ?? 3}
-              onChange={(e) => onChange?.({ ...node, retries: Number(e.target.value) })}
-              className="h-8"
-            />
-          </Field>
-          <Field label="Timeout">
-            <Input
-              disabled={readOnly}
-              value={node.timeout ?? '5 minutes'}
-              onChange={(e) => onChange?.({ ...node, timeout: e.target.value })}
-              className="h-8"
-            />
-          </Field>
-        </div>
-      ) : null}
+        {spec?.category === 'commerce' || spec?.category === 'ai' ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Retries">
+              <Input
+                type="number"
+                min={0}
+                max={10}
+                disabled={readOnly}
+                value={node.retries ?? spec.retries ?? 3}
+                onChange={(e) => onChange?.({ ...node, retries: Number(e.target.value) })}
+                className="h-8"
+              />
+            </Field>
+            <Field label="Timeout">
+              <Input
+                disabled={readOnly}
+                value={node.timeout ?? '5 minutes'}
+                onChange={(e) => onChange?.({ ...node, timeout: e.target.value })}
+                className="h-8"
+              />
+            </Field>
+          </div>
+        ) : null}
+      </FieldGroup>
 
       <div>
         <h2 className="section-title mb-1.5">Outputs</h2>
@@ -151,25 +166,31 @@ export function Inspector({
       </div>
 
       {run && run.status !== 'pending' ? (
-        <div className="rounded-lg border bg-muted/30 p-3">
-          <h2 className="section-title">Last run</h2>
-          <div className="mt-1 text-sm">
-            {statusLabel(run.status)}
-            {run.runs > 1 ? ` · ${run.runs} runs` : ''}
-            {run.branches?.length ? ` · took ${run.branches.join(', ')}` : ''}
-          </div>
-          {run.summary ? (
-            <div className="mt-1 text-muted-foreground text-xs">{plainSummary(run.summary)}</div>
-          ) : null}
-          {run.error ? <div className="mt-1 text-bad text-sm">{run.error}</div> : null}
-          {run.output !== undefined ? (
-            <Code
-              value={JSON.stringify(run.output, null, 2)}
-              language="json"
-              className="mt-2"
-              contentClassName="max-h-56"
-            />
-          ) : null}
+        <div>
+          <h2 className="section-title mb-1.5">Last run</h2>
+          <Item variant="muted" size="sm" className="items-start">
+            <ItemContent className="min-w-0">
+              <ItemTitle className="line-clamp-none font-normal">
+                {statusLabel(run.status)}
+                {run.runs > 1 ? ` · ${run.runs} runs` : ''}
+                {run.branches?.length ? ` · took ${run.branches.join(', ')}` : ''}
+              </ItemTitle>
+              {run.summary ? (
+                <ItemDescription className="line-clamp-none text-xs">
+                  {plainSummary(run.summary)}
+                </ItemDescription>
+              ) : null}
+              {run.error ? <p className="text-bad text-sm">{run.error}</p> : null}
+              {run.output !== undefined ? (
+                <Code
+                  value={JSON.stringify(run.output, null, 2)}
+                  language="json"
+                  className="mt-1"
+                  contentClassName="max-h-56"
+                />
+              ) : null}
+            </ItemContent>
+          </Item>
         </div>
       ) : null}
     </div>
@@ -198,7 +219,8 @@ function ProviderSelect({
         disabled={readOnly}
         value={current}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 w-full"
+        className="h-8"
+        wrapperClassName="w-full"
       >
         <NativeSelectOption value="builtin">Built in</NativeSelectOption>
         {providers.map((p) => (
@@ -229,20 +251,7 @@ function ConfigInput({
     case 'provider':
       return <ProviderSelect field={f} value={value} readOnly={readOnly} onChange={onChange} />;
     case 'boolean':
-      return (
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <Field label={f.label} hint={f.hint}>
-              <span />
-            </Field>
-          </div>
-          <Switch
-            checked={Boolean(value)}
-            disabled={readOnly}
-            onCheckedChange={(v) => onChange(v)}
-          />
-        </div>
-      );
+      return <BooleanInput field={f} value={value} readOnly={readOnly} onChange={onChange} />;
     case 'number':
       return (
         <Field label={f.label} hint={f.hint}>
@@ -263,7 +272,8 @@ function ConfigInput({
             disabled={readOnly}
             value={String(value ?? '')}
             onChange={(e) => onChange(e.target.value)}
-            className="h-8 w-full"
+            className="h-8"
+            wrapperClassName="w-full"
           >
             {(f.options ?? []).map((o) => (
               <NativeSelectOption key={o} value={o}>
@@ -346,28 +356,66 @@ function JsonInput({
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setText(JSON.stringify(value ?? null, null, 2)), [value]);
   return (
-    <Field
-      label={f.label}
-      hint={f.kind === 'logic' ? 'JSON Logic over {order, nodes, vars}' : f.hint}
-    >
-      <Textarea
+    <div className="flex flex-col gap-1">
+      <Field
+        label={f.label}
+        hint={f.kind === 'logic' ? 'JSON Logic over {order, nodes, vars}' : f.hint}
+      >
+        <Textarea
+          disabled={readOnly}
+          value={text}
+          rows={Math.min(8, text.split('\n').length + 1)}
+          spellCheck={false}
+          onChange={(e) => {
+            setText(e.target.value);
+            try {
+              const v = JSON.parse(e.target.value);
+              setError(null);
+              onChange(v);
+            } catch {
+              setError('Not valid JSON yet');
+            }
+          }}
+          className="font-mono text-xs"
+        />
+      </Field>
+      {error ? <span className="block text-wait text-xs">{error}</span> : null}
+    </div>
+  );
+}
+
+/** A switch beside its label and hint, which name and describe it. */
+function BooleanInput({
+  field: f,
+  value,
+  readOnly,
+  onChange,
+}: {
+  field: ConfigField;
+  value: unknown;
+  readOnly: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const id = useId();
+  const hintId = useId();
+  return (
+    <FieldRoot orientation="horizontal" className="min-w-0 items-start justify-between">
+      <FieldContent className="min-w-0">
+        <FieldLabel htmlFor={id}>{f.label}</FieldLabel>
+        {f.hint ? (
+          <FieldDescription id={hintId} className="text-xs leading-snug">
+            {f.hint}
+          </FieldDescription>
+        ) : null}
+      </FieldContent>
+      <Switch
+        id={id}
+        checked={Boolean(value)}
         disabled={readOnly}
-        value={text}
-        rows={Math.min(8, text.split('\n').length + 1)}
-        spellCheck={false}
-        onChange={(e) => {
-          setText(e.target.value);
-          try {
-            const v = JSON.parse(e.target.value);
-            setError(null);
-            onChange(v);
-          } catch {
-            setError('Not valid JSON yet');
-          }
-        }}
-        className="font-mono text-xs"
+        onCheckedChange={(v) => onChange(v)}
+        aria-describedby={f.hint ? hintId : undefined}
+        className="mt-0.5"
       />
-      {error ? <span className="mt-1 block text-wait text-xs">{error}</span> : null}
-    </Field>
+    </FieldRoot>
   );
 }

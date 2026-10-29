@@ -3,6 +3,7 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from '@orderloop/ui/sheet';
@@ -52,14 +53,14 @@ export function FormSheet({
         // With no description, say so, rather than point at one that isn't there.
         {...(description ? {} : { 'aria-describedby': undefined })}
       >
-        <div className="border-b px-4 pt-4 pb-3 pr-14">
+        <SheetHeader className="gap-1 border-b pt-4 pr-14 pb-3">
           <SheetTitle className="font-semibold text-base tracking-title">
             {title ?? label}
           </SheetTitle>
           {description ? (
             <SheetDescription className="text-xs">{description}</SheetDescription>
           ) : null}
-        </div>
+        </SheetHeader>
         <div className="p-4">{children}</div>
       </SheetContent>
     </Sheet>

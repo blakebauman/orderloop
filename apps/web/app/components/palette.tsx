@@ -1,6 +1,7 @@
 import { CATEGORY_LABELS, NODE_SPECS, type NodeCategory, type NodeSpec } from '@orderloop/core';
 import { Input } from '@orderloop/ui/input';
-import { useState } from 'react';
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@orderloop/ui/item';
+import { useId, useState } from 'react';
 import { useNodes } from '~/lib/nodes';
 import { DRAG_TYPE } from './flow-canvas';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
@@ -9,6 +10,7 @@ import { CATEGORY_COLOR, NodeIcon } from './node-icon';
 export function Palette({ onPick }: { onPick: (type: string) => void }) {
   const [q, setQ] = useState('');
   const nodes = useNodes();
+  const baseId = useId();
   const needle = q.toLowerCase();
   const cats = Object.keys(CATEGORY_LABELS) as NodeCategory[];
   const matches = (s: NodeSpec) =>
@@ -42,31 +44,49 @@ export function Palette({ onPick }: { onPick: (type: string) => void }) {
           if (!items.length) return null;
           return (
             <section key={key}>
-              <h2 className="caption mb-1.5">{title}</h2>
-              <div className="space-y-1">
-                {items.map((s) => (
-                  <button
-                    key={s.type}
-                    type="button"
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(DRAG_TYPE, s.type);
-                      e.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onClick={() => onPick(s.type)}
-                    title={s.description}
-                    // On a touch screen dragging is unreliable (iPadOS), so a tap adds it.
-                    className="flex w-full cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-ui hover:border-border hover:bg-muted/60 active:cursor-grabbing touch:cursor-default touch:py-2.5"
-                  >
-                    <NodeIcon
-                      name={s.icon}
-                      className="size-3.5 shrink-0"
-                      style={{ color: CATEGORY_COLOR[s.category] }}
-                    />
-                    <span className="truncate">{s.label}</span>
-                  </button>
-                ))}
-              </div>
+              <h2 className="caption mb-1.5 px-1">{title}</h2>
+              <ul className="flex flex-col gap-0.5">
+                {items.map((s) => {
+                  const descId = `${baseId}-${s.type}`;
+                  return (
+                    <li key={s.type}>
+                      <Item
+                        asChild
+                        size="xs"
+                        // On a touch screen dragging is unreliable (iPadOS), so a tap adds it.
+                        className="cursor-grab flex-nowrap items-start gap-2 px-2 py-1.5 text-left hover:border-border hover:bg-muted/60 active:cursor-grabbing touch:cursor-default touch:py-2.5"
+                      >
+                        <button
+                          type="button"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData(DRAG_TYPE, s.type);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onClick={() => onPick(s.type)}
+                          title={s.description}
+                          aria-label={s.label}
+                          aria-describedby={descId}
+                        >
+                          <ItemMedia>
+                            <NodeIcon
+                              name={s.icon}
+                              className="size-3.5 shrink-0"
+                              style={{ color: CATEGORY_COLOR[s.category] }}
+                            />
+                          </ItemMedia>
+                          <ItemContent className="min-w-0 gap-0">
+                            <ItemTitle className="text-ui font-normal">{s.label}</ItemTitle>
+                            <ItemDescription id={descId} className="line-clamp-1 text-xs">
+                              {s.description}
+                            </ItemDescription>
+                          </ItemContent>
+                        </button>
+                      </Item>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
           );
         })}
