@@ -117,11 +117,12 @@ const AssistantPanel = lazy(() => loadPanel().then((m) => ({ default: m.Assistan
 
 /** Mounts the assistant panel once it has been opened, and preloads it when the page is idle. */
 function LazyAssistantPanel() {
-  const { open } = useAssistant();
+  // A page's edit goes through the assistant too, so it mounts the panel (closed) to send it.
+  const { open, acts } = useAssistant();
   const [wanted, setWanted] = useState(open);
   useEffect(() => {
-    if (open) setWanted(true);
-  }, [open]);
+    if (open || acts.length) setWanted(true);
+  }, [open, acts.length]);
   useEffect(() => {
     const preload = () => void loadPanel();
     if ('requestIdleCallback' in window) {

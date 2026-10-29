@@ -923,10 +923,3 @@
     animation: none;
   }
 }
-
-/* The undo window running out: a hairline that drains over exactly the decision's window. */
-@keyframes ol-drain {
-  to {
-    scale: 0 1;
-  }
-}

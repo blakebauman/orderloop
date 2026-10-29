@@ -21,22 +21,19 @@ import { cn } from '@orderloop/ui/lib/utils';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { ArrowRight, Check, ChevronRight, Inbox, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { Link, useFetcher, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
+import { Link, useLoaderData, useRevalidator, useSearchParams } from 'react-router';
 import { Ago } from '~/components/ago';
 import {
   type Decision,
   DecisionContext,
   DecisionControls,
   DecisionDeadline,
-  type DecisionHandle,
-  sendDecision,
 } from '~/components/decision';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { ApprovalBadge } from '~/components/status';
 import {
   type ApprovalContext,
   type ApprovalGroup,
-  batchProgress,
   byUrgency,
   cannotSelect,
   groupApprovals,
@@ -44,6 +41,7 @@ import {
   lockAt,
   rowContext,
 } from '~/lib/approvals';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { decodeCursor, encodeCursor } from '~/lib/cursor';
 import { engine } from '~/lib/env.server';
@@ -204,7 +202,7 @@ function useWakeAt(at: number | undefined) {
 
 /** What every row and group on the page reports to, and reads back. */
 type Tracking = {
-  /** Rows with a decision in its undo window. */
+  /** Rows with a decision waiting on its card in the assistant. */
   held: ReadonlySet<string>;
   /** Rows whose decision has been sent. */
   sent: ReadonlySet<string>;
@@ -342,7 +340,7 @@ export default function Approvals() {
     return () => el.removeEventListener('keydown', onKey);
   });
   const { revalidate } = useRevalidator();
-  // Rows must not move under someone mid-decision: hold the refresh while any undo window is open.
+  // Rows must not move under someone mid-decision: hold the refresh while any card waits.
   const holding = useRef(0);
   holding.current = held.size;
   useEffect(() => {
@@ -495,16 +493,13 @@ export default function Approvals() {
 }
 
 /** How a row takes part in its group's batch: a checkbox, why it can't, or neither. */
-type Select =
-  | { on: boolean; toggle: () => void; handle: (h: DecisionHandle | null) => void }
-  | { why: string; handle: (h: DecisionHandle | null) => void }
-  | { handle: (h: DecisionHandle | null) => void };
+type Select = { on: boolean; toggle: () => void } | { why: string } | Record<string, never>;
 
 /**
  * Approvals that share a flow, a step and the rule that fired: said once in the header, with the
  * count and the soonest deadline, so the rows only say what differs. With two or more rows a person
  * can decide, rows can be selected and decided together; a batch never reaches past its group, and
- * is each selected row's own held decision, each with its own undo, plus Undo all while any is held.
+ * is one confirm card in the assistant that decides each selected row on its own.
  */
 function Group({
   g,
@@ -523,146 +518,102 @@ function Group({
   tracking: Tracking;
   children: (select: (s: Shown) => Select) => React.ReactNode;
 }) {
-  const { held, sent, results } = tracking;
+  const { onHold, onSent, onResult } = tracking;
   const headingId = useId();
   const name = groupName(g);
-  const handles = useRef(new Map<string, DecisionHandle>());
+  const { act } = useAssistant();
+  // The rows a batch can name, by id: the batch asks for each by its order and step.
+  const rowsById = useRef(new Map<string, Approval>());
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const [batch, setBatch] = useState<{ decision: Decision; ids: string[]; ends: number } | null>(
-    null,
-  );
+  const [batch, setBatch] = useState<{ decision: Decision; ids: string[] } | null>(null);
   const [said, setSaid] = useState('');
   const headingRef = useRef<HTMLHeadingElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const now = useNow(batch ? 250 : null);
 
   const selectable = g.ids.filter((id) => why[id] === null);
   const batching = canApprove && selectable.length + (batch?.ids.length ?? 0) > 1;
   const chosen = selectable.filter((id) => selected.has(id));
 
-  // A batch's rows count as held until they report it: the report lands a render after the batch.
-  const everHeld = useRef(new Set<string>());
-  for (const id of held) everHeld.current.add(id);
-  const progress = batch
-    ? batchProgress(
-        batch.decision,
-        batch.ids.map((id) => ({
-          held: held.has(id) || (!everHeld.current.has(id) && !sent.has(id)),
-          sent: sent.has(id),
-          result: results[id],
-        })),
-      )
-    : null;
-  const done = progress?.phase === 'done';
-  const message = progress?.message;
-  useEffect(() => {
-    if (!done) return;
-    setSaid(message ?? '');
-    setBatch(null);
-  }, [done, message]);
-  // Undo all leaves with the last held decision; keep focus in this group, not on the page.
-  const holdingBatch = progress?.phase === 'holding';
-  const wasHolding = useRef(false);
-  const undoAllButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!wasHolding.current && holdingBatch) undoAllButton.current?.focus();
-    if (wasHolding.current && !holdingBatch) {
+  // One card in the assistant for the whole batch: it lists every approval it decides and any it
+  // skips, and each is decided on its own once the person confirms.
+  const start = async (decision: Decision) => {
+    const ids = chosen.filter((id) => rowsById.current.has(id));
+    setSelected(new Set());
+    if (!ids.length) return;
+    setBatch({ decision, ids });
+    for (const id of ids) onHold(id, true);
+    const verb = decision === 'approved' ? 'Approved' : 'Rejected';
+    try {
+      const r = await act('decide_approvals', {
+        decision,
+        approvals: ids.map((id) => {
+          const row = rowsById.current.get(id)!;
+          return { orderId: row.orderId, nodeId: row.nodeId };
+        }),
+      });
+      if ('declined' in r) {
+        setSaid('Left as they were. You declined.');
+        return;
+      }
+      const out = (r.output ?? {}) as {
+        results?: { orderId: string; nodeId: string; ok: boolean; error?: string }[];
+      };
+      const results = out.results ?? [];
+      for (const id of ids) {
+        const row = rowsById.current.get(id)!;
+        const res = results.find((x) => x.orderId === row.orderId && x.nodeId === row.nodeId);
+        if (!res) continue;
+        onSent(id);
+        onResult(id, { ok: res.ok, error: res.error });
+      }
+      const ok = results.filter((x) => x.ok).length;
+      const refusedN = results.length - ok;
+      setSaid(`${verb} ${ok}.${refusedN ? ` ${refusedN} not recorded; each row says why.` : ''}`);
+    } catch (err) {
+      setSaid(err instanceof Error ? err.message : String(err));
+    } finally {
+      for (const id of ids) onHold(id, false);
+      setBatch(null);
       const at = document.activeElement;
       if (!at || at === document.body) headingRef.current?.focus();
     }
-    wasHolding.current = holdingBatch;
-  }, [holdingBatch]);
-
-  const start = (decision: Decision) => {
-    let ends = 0;
-    const ids = chosen.filter((id) => {
-      const at = handles.current.get(id)?.decide(decision, { quiet: true });
-      if (at == null) return false;
-      ends = Math.max(ends, at);
-      return true;
-    });
-    setSelected(new Set());
-    if (!ids.length) return;
-    for (const id of ids) everHeld.current.delete(id);
-    setBatch({ decision, ids, ends });
-    setSaid(
-      `${decision === 'approved' ? 'Approving' : 'Rejecting'} ${plural(ids.length, 'approval')}. Undo all takes them back.`,
-    );
   };
-  const undoAll = () => {
-    for (const id of batch?.ids ?? []) handles.current.get(id)?.undo();
-  };
-  // Z (or Escape) in the header takes the whole batch back while any of it is held.
-  const undoAllRef = useRef(undoAll);
-  undoAllRef.current = undoAll;
-  useEffect(() => {
-    const el = barRef.current;
-    if (!el || !holdingBatch) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key.toLowerCase() === 'z' || e.key === 'Escape') {
-        e.preventDefault();
-        undoAllRef.current();
-      }
-    };
-    el.addEventListener('keydown', onKey);
-    return () => el.removeEventListener('keydown', onKey);
-  }, [holdingBatch]);
 
   const select = (s: Shown): Select => {
     const id = s.r.id;
-    const handle = (h: DecisionHandle | null) => {
-      if (h) handles.current.set(id, h);
-      else handles.current.delete(id);
-    };
-    if (!batching) return { handle };
+    rowsById.current.set(id, s.r);
+    if (!batching) return {};
     const not = why[id];
-    if (not !== null) return not ? { why: not, handle } : { handle };
+    if (not !== null) return not ? { why: not } : {};
     return {
       on: selected.has(id),
       toggle: () => setSelected((x) => toggled(x, id, !x.has(id))),
-      handle,
     };
   };
 
   const allOn = chosen.length > 0 && chosen.length === selectable.length;
   const someOn = chosen.length > 0 && !allOn;
-  const left = batch ? Math.max(0, Math.ceil((batch.ends - now) / 1000)) : 0;
 
-  const controls =
-    progress?.phase === 'holding' && batch ? (
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span>
-          {batch.decision === 'approved' ? 'Approving' : 'Rejecting'} {progress.held} in{' '}
-          <span className="tabular">{left}s</span>
-        </span>
-        <Button
-          ref={undoAllButton}
-          size="sm"
-          variant="outline"
-          onClick={undoAll}
-          aria-keyshortcuts="Z"
-        >
-          Undo all
-        </Button>
-      </div>
-    ) : progress?.phase === 'sending' ? (
-      <span className="text-muted-foreground text-sm">Recording decisions…</span>
-    ) : chosen.length ? (
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground">{chosen.length} selected</span>
-        <Button size="sm" onClick={() => start('approved')}>
-          <Check aria-hidden="true" /> Approve selected
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => start('rejected')}>
-          <X aria-hidden="true" /> Reject selected
-        </Button>
-      </div>
-    ) : batching ? (
-      <span className="hidden text-muted-foreground text-xs sm:inline">
-        Select rows to decide them together
-      </span>
-    ) : null;
+  const controls = batch ? (
+    <span className="text-muted-foreground text-sm">
+      Confirm {batch.decision === 'approved' ? 'approving' : 'rejecting'}{' '}
+      {plural(batch.ids.length, 'approval')} in the assistant
+    </span>
+  ) : chosen.length ? (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-muted-foreground">{chosen.length} selected</span>
+      <Button size="sm" onClick={() => void start('approved')}>
+        <Check aria-hidden="true" /> Approve selected
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => void start('rejected')}>
+        <X aria-hidden="true" /> Reject selected
+      </Button>
+    </div>
+  ) : batching ? (
+    <span className="hidden text-muted-foreground text-xs sm:inline">
+      Select rows to decide them together
+    </span>
+  ) : null;
   const ticking = batching && !batch;
 
   // A card per rule: the header says it once (with the batch's controls as the card's action),
@@ -866,13 +817,16 @@ function Row({
   select?: Select;
 }) {
   const canApprove = useCan('approver');
-  const fetcher = useFetcher<Result>();
+  const { act } = useAssistant();
+  const [result, setResult] = useState<Result | null>(null);
+  const [asking, setAsking] = useState(false);
   const ref = useRef<HTMLLIElement>(null);
   const titleId = useId();
   const reasonId = useId();
   const detailsId = useId();
   const [expanded, setExpanded] = useState(false);
-  const decided = fetcher.data?.ok;
+  // Decided here, or by the group's batch.
+  const decided = result?.ok || tracking.results[r.id]?.ok;
   const [made, setMade] = useState<Decision | null>(null);
   const open = r.status === 'pending' && !decided && !gone;
   // Only an open row the engine can resume takes part in the keyboard path.
@@ -888,15 +842,38 @@ function Row({
   // ("Over credit limit by $2,332" under "Over credit limit").
   const reason = group && ctx?.reason === group.rule ? undefined : ctx?.reason;
   const { onHold, onSent, onResult } = tracking;
-  const hold = useCallback((on: boolean) => onHold(r.id, on), [onHold, r.id]);
   // A refused decision comes back after focus moved on: bring it back to the row that says why.
-  const error = fetcher.data?.error;
+  const error = result?.error ?? tracking.results[r.id]?.error;
   useEffect(() => {
     if (error) ref.current?.focus();
   }, [error]);
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) onResult(r.id, fetcher.data);
-  }, [fetcher.state, fetcher.data, onResult, r.id]);
+  // Asked through the assistant: its card says what this decides, and the person confirms there.
+  const decide = async (decision: Decision, note: string) => {
+    setMade(decision);
+    setAsking(true);
+    onHold(r.id, true);
+    // Keep the keyboard flow going: the next open row takes focus.
+    if (ref.current?.contains(document.activeElement)) focusNextRow(ref.current);
+    try {
+      const res = await act('decide_approval', {
+        orderId: r.orderId,
+        nodeId: r.nodeId,
+        decision,
+        ...(note ? { note } : {}),
+      });
+      if ('declined' in res) return;
+      onSent(r.id);
+      setResult({ ok: true });
+      onResult(r.id, { ok: true });
+    } catch (err) {
+      const failed = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      setResult(failed);
+      onResult(r.id, failed);
+    } finally {
+      setAsking(false);
+      onHold(r.id, false);
+    }
+  };
   const tick = select && 'on' in select ? select : null;
   // X (or Space on the row itself) ticks it for the group's batch.
   useEffect(() => {
@@ -1092,28 +1069,12 @@ function Row({
             <DecisionControls
               compact
               withNote={expanded}
-              handle={select?.handle}
               deadline={ctx?.deadline}
               onTimeout={ctx?.onTimeout}
               shortcuts={ref}
-              onPendingChange={hold}
-              onFlush={(decision, note) => sendDecision(r.orderId, r.nodeId, decision, note)}
-              busy={fetcher.state !== 'idle'}
+              busy={asking || tracking.held.has(r.id)}
               label={`${orderRef(r.orderId)}, ${amount}`}
-              onDecide={(decision, note) => {
-                setMade(decision);
-                onSent(r.id);
-                // Keep the keyboard flow going: the next open row takes focus.
-                if (ref.current?.contains(document.activeElement)) focusNextRow(ref.current);
-                fetcher.submit(
-                  {
-                    intent: decision === 'approved' ? 'approve' : 'reject',
-                    nodeId: r.nodeId,
-                    note,
-                  },
-                  { method: 'post', action: `/orders/${r.orderId}/action` },
-                );
-              }}
+              onDecide={(decision, note) => void decide(decision, note)}
             />
           ) : decided ? (
             <Link

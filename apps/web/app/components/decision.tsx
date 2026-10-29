@@ -1,45 +1,21 @@
 /**
- * Approve / reject with a note and a short undo window. Nothing is sent until the window closes, so
- * "Undo" is real: the order's Workflow never hears about a decision that was taken back.
- * Shared by the approvals inbox and the order page; each passes its own transport.
+ * Approve / reject with a note. Pressing one asks for it through the assistant: its confirm card
+ * states what the decision does, and the decision is recorded only once the person confirms there.
+ * Shared by the approvals inbox and the order page.
  */
 
 import { Button } from '@orderloop/ui/button';
 import { Field, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
-import { Item, ItemActions, ItemContent } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Check, X } from 'lucide-react';
-import {
-  useEffect,
-  useId,
-  useImperativeHandle,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
-import { type ApprovalContext, deadlineWords, lockAt, SEND_MS, WARN_MS } from '~/lib/approvals';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { type ApprovalContext, deadlineWords, lockAt, WARN_MS } from '~/lib/approvals';
 import { until } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
 
-const UNDO_MS = 5000;
-
 export type Decision = 'approved' | 'rejected';
-
-/**
- * What a list can ask of one row's controls: a batch decides each selected row through its own
- * controls, so every decision in it gets that row's undo window, note and refusals.
- */
-export type DecisionHandle = {
-  /**
-   * Holds `decision` as if its button were pressed. `quiet` leaves focus and the announcement to the
-   * batch. Returns when its undo window ends, or null if nothing was held (closed, busy, already held).
-   */
-  decide: (decision: Decision, opts?: { quiet?: boolean }) => number | null;
-  /** Takes back a held decision; nothing is sent. */
-  undo: () => void;
-};
 
 const noSubscribe = () => () => {};
 
@@ -156,57 +132,32 @@ export function DecisionControls({
   busy,
   compact,
   shortcuts,
-  onPendingChange,
-  onFlush,
   label,
   defaultNote = '',
   withNote = true,
-  handle,
 }: {
+  /** Asks for the decision: the assistant's confirm card says what it does and records it. */
   onDecide: (decision: Decision, note: string) => void;
-  /** When the step times out. The undo window never runs past it. */
+  /** When the step times out. Decisions close just before it. */
   deadline?: number;
   /** What the flow does on timeout, e.g. "Decline order". */
   onTimeout?: string;
   disabled?: boolean;
-  /** The decision has been sent and is being recorded. */
+  /** The decision waits on its card, or is being recorded. */
   busy?: boolean;
   compact?: boolean;
-  /** Listen for A / R / Z on this element's row (inbox keyboard path). */
+  /** Listen for A / R on this element's row (inbox keyboard path). */
   shortcuts?: React.RefObject<HTMLElement | null>;
-  /** Told when an undo window opens and closes, so a list can hold still meanwhile. */
-  onPendingChange?: (pending: boolean) => void;
-  /**
-   * Sends a decision whose undo window was cut short (the control unmounted or the page is being
-   * left). It must survive navigation, so use `sendDecision` rather than page-bound transports.
-   */
-  onFlush?: (decision: Decision, note: string) => void;
   /** What the buttons decide, for their accessible names, e.g. "#agszfp, $9,760.00". */
   label?: string;
   defaultNote?: string;
   /** Show the note field. Hidden, a note already typed is kept and still sent. */
   withNote?: boolean;
-  /** For a list that decides several rows at once (`DecisionHandle`). */
-  handle?: React.Ref<DecisionHandle>;
 }) {
   const [note, setNote] = useState(defaultNote);
-  // `ms` is this decision's undo window: shorter than usual when the step is about to time out.
-  // A quiet one was made by a batch, which takes focus and speaks for all of its rows.
-  const [pending, setPending] = useState<{
-    decision: Decision;
-    at: number;
-    ms: number;
-    quiet?: boolean;
-  } | null>(null);
   // Near the deadline, tick so the controls lock before a decision could arrive too late.
-  const nearDeadline = deadline !== undefined && deadline - Date.now() < UNDO_MS + 60_000;
-  const now = useNow(pending ? 250 : nearDeadline ? 1000 : null);
-  /** The undo window a decision made at `at` gets, or null once decisions have closed. */
-  const windowFor = (at: number) => {
-    if (deadline === undefined) return UNDO_MS;
-    if (at > lockAt(deadline)) return null;
-    return Math.min(UNDO_MS, deadline - at - SEND_MS);
-  };
+  const nearDeadline = deadline !== undefined && deadline - Date.now() < 60_000;
+  const now = useNow(nearDeadline ? 1000 : null);
   const locked = deadline !== undefined && now > lockAt(deadline);
   const warning = deadline !== undefined && !locked && lockAt(deadline) - now <= WARN_MS;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -226,62 +177,13 @@ export function DecisionControls({
   useEffect(() => {
     if (locked && focusWithin.current) closedRef.current?.focus();
   }, [locked]);
-  const decide = (decision: Decision, quiet?: boolean) => {
-    const at = Date.now();
-    const ms = windowFor(at);
-    if (ms !== null) setPending({ decision, at, ms, quiet });
-    return ms === null ? null : at + ms;
-  };
-  const decideRef = useRef(decide);
-  decideRef.current = decide;
-  const held = useRef(false);
-  held.current = !!pending;
-  useImperativeHandle(
-    handle,
-    () => ({
-      decide: (decision, opts) =>
-        held.current || busy || disabled ? null : decideRef.current(decision, opts?.quiet),
-      undo: () => setPending(null),
-    }),
-    [busy, disabled],
-  );
   const noteId = useId();
-  const commit = useRef(onDecide);
-  commit.current = onDecide;
-  const report = useRef(onPendingChange);
-  report.current = onPendingChange;
-  // A decision the person made is never silently dropped: if the window is cut short, send it now.
-  const latest = useRef({ pending, note, flush: onFlush });
-  latest.current = { pending, note, flush: onFlush };
-  useEffect(() => {
-    const flush = () => {
-      const { pending: p, note: n, flush: f } = latest.current;
-      if (!p) return;
-      latest.current.pending = null;
-      (f ?? commit.current)(p.decision, n.trim());
-    };
-    window.addEventListener('pagehide', flush);
-    return () => {
-      window.removeEventListener('pagehide', flush);
-      flush();
-    };
-  }, []);
-  const isPending = !!pending;
-  useEffect(() => {
-    if (!isPending) return;
-    report.current?.(true);
-    return () => report.current?.(false);
-  }, [isPending]);
-
-  useEffect(() => {
-    if (!pending) return;
-    const t = window.setTimeout(() => {
-      latest.current.pending = null;
-      commit.current(pending.decision, note.trim());
-      setPending(null);
-    }, pending.ms);
-    return () => window.clearTimeout(t);
-  }, [pending, note]);
+  const latest = useRef({ onDecide, note, closed: false });
+  latest.current = { onDecide, note, closed: !!(disabled || busy || locked) };
+  const decide = (decision: Decision) => {
+    const l = latest.current;
+    if (!l.closed) l.onDecide(decision, l.note.trim());
+  };
 
   useEffect(() => {
     const el = shortcuts?.current;
@@ -291,62 +193,20 @@ export function DecisionControls({
       const typing = e.target instanceof HTMLInputElement && e.target.type !== 'checkbox';
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (pending && (k === 'z' || k === 'escape')) {
+      if (k === 'a' || k === 'r') {
         e.preventDefault();
-        setPending(null);
-      } else if (!pending && !disabled && !busy && (k === 'a' || k === 'r')) {
-        e.preventDefault();
-        decideRef.current(k === 'a' ? 'approved' : 'rejected');
+        decide(k === 'a' ? 'approved' : 'rejected');
       }
     };
     el.addEventListener('keydown', onKey);
     return () => el.removeEventListener('keydown', onKey);
-  }, [shortcuts, pending, disabled, busy]);
+  }, [shortcuts]);
 
   if (busy) {
     return (
       <p className="animate-arrive text-muted-foreground text-sm" aria-live="polite">
-        Recording decision…
+        Confirm it in the assistant
       </p>
-    );
-  }
-
-  if (pending) {
-    const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
-    return (
-      <Item
-        variant="outline"
-        size="xs"
-        className="relative animate-arrive overflow-hidden bg-background"
-        aria-live={pending.quiet ? undefined : 'polite'}
-      >
-        {/* The window running out, drained over exactly this decision's window (shorter near a
-            deadline). Hidden where motion is reduced: the seconds say the same. */}
-        <span
-          key={pending.at}
-          aria-hidden="true"
-          className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-foreground/35 motion-reduce:hidden"
-          style={{ animation: `ol-drain ${pending.ms}ms linear forwards` }}
-        />
-        <ItemContent className="block min-w-0">
-          {pending.decision === 'approved' ? 'Approving' : 'Rejecting'} in{' '}
-          <span className="tabular">{left}s</span>
-          {note.trim() ? <span className="text-muted-foreground"> · with note</span> : null}
-          {pending.ms < UNDO_MS ? (
-            <span className="text-muted-foreground"> · shorter undo, the step times out soon</span>
-          ) : null}
-        </ItemContent>
-        <ItemActions className="ml-auto">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setPending(null)}
-            autoFocus={!pending.quiet}
-          >
-            Undo
-          </Button>
-        </ItemActions>
-      </Item>
     );
   }
 
@@ -445,19 +305,5 @@ function DecisionForm({
         </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * Records a decision through the order's action route with `keepalive`, so it still arrives when
- * the page is being closed or navigated away from.
- */
-export function sendDecision(orderId: string, nodeId: string, decision: Decision, note: string) {
-  const body = new FormData();
-  body.set('intent', decision === 'approved' ? 'approve' : 'reject');
-  body.set('nodeId', nodeId);
-  if (note) body.set('note', note);
-  void fetch(`/orders/${orderId}/action`, { method: 'POST', body, keepalive: true }).catch(
-    () => {},
   );
 }

@@ -14,6 +14,7 @@ import {
   type AuditVia,
   atLeast,
   BASE_CURRENCY,
+  boundText,
   describeDiff,
   type Flow,
   type FlowGraph,
@@ -454,6 +455,20 @@ export async function proposeFlowChange(
 
 // ── Actions that wait for a person ─────────────────────────────────────────
 
+/** A payload as the audit trail keeps it: each value one bounded line. */
+const boundPayload = (p: EventPayload) =>
+  Object.fromEntries(
+    Object.entries(p).map(([k, v]) => [k, typeof v === 'string' ? boundText(v, 120) : v]),
+  );
+
+/** A batch's approvals, each once. */
+const batchOf = (i: ActionInput['decide_approvals']) => [
+  ...new Map(i.approvals.map((a) => [`${a.orderId} ${a.nodeId}`, a])).values(),
+];
+
+/** What an event carries besides its name: flat values only (a seller's answer, an amount). */
+export type EventPayload = Record<string, string | number | boolean | null>;
+
 export type ActionInput = {
   decide_approval: {
     orderId: string;
@@ -461,7 +476,12 @@ export type ActionInput = {
     decision: 'approved' | 'rejected';
     note?: string;
   };
-  deliver_event: { orderId: string; event: string };
+  decide_approvals: {
+    decision: 'approved' | 'rejected';
+    note?: string;
+    approvals: { orderId: string; nodeId: string }[];
+  };
+  deliver_event: { orderId: string; event: string; payload?: EventPayload };
   cancel_order: { orderId: string; reason: string };
   submit_cart: { cartId: string; cartVersion?: number };
   publish_flow: { flowId: string };
@@ -521,6 +541,30 @@ export async function previewAction<T extends ActionTool>(
                 : 'Nothing on this order is waiting for an approval now.'),
         };
       }
+      case 'decide_approvals': {
+        const i = input as ActionInput['decide_approvals'];
+        const rows = await Promise.all(
+          batchOf(i).map(async (a) => ({
+            a,
+            p: await previewAction(env, p, 'decide_approval', { ...a, decision: i.decision }),
+          })),
+        );
+        const going = rows.filter((r) => !r.p.blocked);
+        const verb = i.decision === 'approved' ? 'Approve' : 'Reject';
+        return {
+          title: `${verb} ${going.length === 1 ? '1 approval' : `${going.length} approvals`}`,
+          href: '/approvals',
+          consequences: [
+            ...going.map((r) => r.p.title.replace(/^(Approve|Reject) /, '')),
+            ...rows
+              .filter((r) => r.p.blocked)
+              .map((r) => `Skipped ${orderRef(r.a.orderId)}: ${r.p.blocked}`),
+            i.note ? `Note on each: “${boundText(i.note, 300)}”` : 'No note',
+          ],
+          blocked:
+            roleBlock ?? (going.length ? undefined : (rows[0]?.p.blocked ?? 'Nothing to decide.')),
+        };
+      }
       case 'deliver_event': {
         const i = input as ActionInput['deliver_event'];
         const { id, s } = await loadOrder(env, i.orderId);
@@ -530,7 +574,15 @@ export async function previewAction<T extends ActionTool>(
           title: `Deliver ${i.event} to ${orderRef(id)}`,
           href: `/orders/${id}`,
           consequences: w
-            ? [`Resumes ${w.title}`, next ? `Then ${next} runs` : 'The order continues from there']
+            ? [
+                `Resumes ${w.title}`,
+                next ? `Then ${next} runs` : 'The order continues from there',
+                // Text a caller sent: quoted and bounded, never read as the card's own words.
+                ...Object.entries(i.payload ?? {}).map(
+                  ([k, v]) =>
+                    `With ${boundText(k, 60) ?? '?'}: “${boundText(String(v), 120) ?? ''}”`,
+                ),
+              ]
             : [],
           blocked:
             roleBlock ??
@@ -637,6 +689,8 @@ export async function runAction<T extends ActionTool>(
   input: ActionInput[T],
   channel: Channel = 'assistant',
   confirmed?: Confirmed,
+  /** A page's own button made the call (`act`), not a model. */
+  direct?: boolean,
 ) {
   requireRole(p, tool);
   const preview = await previewAction(env, p, tool, input);
@@ -647,6 +701,7 @@ export async function runAction<T extends ActionTool>(
   const trail = {
     via: AUDIT_CHANNEL[channel],
     tool,
+    ...(direct ? { direct: true } : {}),
     ...(app.grant ? { grant: app.grant } : {}),
     ...(app.client ? { client: app.client } : {}),
   };
@@ -668,15 +723,55 @@ export async function runAction<T extends ActionTool>(
       });
       return { done: preview.title, href: preview.href };
     }
+    case 'decide_approvals': {
+      // Each one on its own, with its own checks and audit row: one refused doesn't stop the rest.
+      const i = input as ActionInput['decide_approvals'];
+      const results: { orderId: string; nodeId: string; ok: boolean; error?: string }[] = [];
+      for (const a of batchOf(i)) {
+        try {
+          await runAction(
+            env,
+            p,
+            'decide_approval',
+            { ...a, decision: i.decision, note: i.note },
+            channel,
+            undefined,
+            direct,
+          );
+          results.push({ ...a, ok: true });
+        } catch (err) {
+          if (!(err instanceof Refused)) throw err;
+          results.push({ ...a, ok: false, error: err.message });
+        }
+      }
+      const ok = results.filter((r) => r.ok).length;
+      if (!ok) throw new Refused(results[0]?.error ?? 'Nothing was decided.');
+      const verb = i.decision === 'approved' ? 'Approved' : 'Rejected';
+      return {
+        done: `${verb} ${ok} of ${results.length}`,
+        href: '/approvals',
+        results,
+      };
+    }
     case 'deliver_event': {
       const i = input as ActionInput['deliver_event'];
       const { id } = await loadOrder(env, i.orderId);
-      const r = await orderAgent(env, id).deliver(i.event, { by });
+      // Its source and `by` last: the payload never names who or what delivered it.
+      const r = await orderAgent(env, id).deliver(i.event, {
+        ...i.payload,
+        source: AUDIT_CHANNEL[channel],
+        by,
+      });
       if (!r.delivered) throw new Refused(`Nothing on ${orderRef(id)} was waiting for ${i.event}.`);
       await recordAudit(env, 'order.event_delivered', {
         actor: p,
         target: id,
-        detail: { event: i.event, nodeId: r.nodeId, ...trail },
+        detail: {
+          event: i.event,
+          nodeId: r.nodeId,
+          ...(i.payload ? { payload: boundPayload(i.payload) } : {}),
+          ...trail,
+        },
       });
       return { done: preview.title, href: preview.href };
     }

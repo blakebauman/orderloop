@@ -47,12 +47,18 @@ export const MCP_PATH = '/mcp';
 /** Actions that can't be taken back by calling them again: a client should confirm them. */
 const DESTRUCTIVE = new Set<AssistantTool>([
   'decide_approval',
+  'decide_approvals',
   'cancel_order',
   'submit_cart',
   'publish_flow',
 ]);
 /** Calling these twice with the same input does nothing more the second time. */
-const IDEMPOTENT = new Set<AssistantTool>(['decide_approval', 'cancel_order', 'submit_cart']);
+const IDEMPOTENT = new Set<AssistantTool>([
+  'decide_approval',
+  'decide_approvals',
+  'cancel_order',
+  'submit_cart',
+]);
 /**
  * These reach outside OrderLoop: cancelling voids payments and cancels shipments with the
  * carrier, a submitted cart's order runs its flow (payments, shipping), the stock review places
@@ -185,7 +191,9 @@ async function createServer(p: Principal) {
             });
           if (!action)
             return result(
-              (await runTool(env, p, name, raw, { via: 'MCP' })) as Record<string, unknown>,
+              (await runTool(env, p, name, raw as ToolInput<typeof name>, {
+                via: 'MCP',
+              })) as Record<string, unknown>,
             );
           const { confirmation, ...input } = raw;
           if (canElicit(ctx)) {

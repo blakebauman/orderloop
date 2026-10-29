@@ -52,6 +52,22 @@ const orderId = z.string().describe('The order id (ord_…) or its #reference, e
 const cartId = z.string().max(100).describe('The cart id (cart_…)');
 
 /** Each tool's input. Built once per isolate. */
+/**
+ * What an event's own source writes: who delivered it, when, the outcome, and a provider's
+ * receipt. A caller's payload can't set them, so a hand delivery never reads as a verified one.
+ */
+export const RESERVED_EVENT_FIELDS = new Set([
+  'by',
+  'event',
+  'at',
+  'outcome',
+  'source',
+  'provider',
+  'invoiceId',
+  'paymentIntentId',
+  'note',
+]);
+
 export const TOOL_INPUTS = {
   needs_attention: z.object({}),
   find_orders: z.object({
@@ -135,7 +151,32 @@ export const TOOL_INPUTS = {
     decision: z.enum(['approved', 'rejected']),
     note: z.string().optional(),
   }),
-  deliver_event: z.object({ orderId, event: z.string() }),
+  decide_approvals: z.object({
+    decision: z.enum(['approved', 'rejected']),
+    note: z.string().max(2000).optional(),
+    approvals: z
+      .array(z.object({ orderId, nodeId: z.string().min(1).max(200) }))
+      .min(1)
+      .max(25)
+      .describe('Each approval to decide: its order and the approval step'),
+  }),
+  deliver_event: z.object({
+    orderId,
+    event: z.string(),
+    // Values no longer than the card shows; never a field that says who or what sent it.
+    payload: z
+      .record(
+        z.string().min(1).max(60),
+        z.union([z.string().max(120), z.number(), z.boolean(), z.null()]),
+      )
+      .refine((r) => Object.keys(r).length <= 20, 'At most 20 fields')
+      .refine(
+        (r) => !Object.keys(r).some((k) => RESERVED_EVENT_FIELDS.has(k)),
+        `None of ${[...RESERVED_EVENT_FIELDS].join(', ')}`,
+      )
+      .optional()
+      .describe('What the event carries, e.g. { "sellerId": "…", "decision": "accepted" }'),
+  }),
   cancel_order: z.object({ orderId, reason: z.string() }),
   submit_cart: z.object({
     cartId,
@@ -296,6 +337,19 @@ export const TOOL_OUTPUTS = {
   create_cart: cartOutput,
   change_cart: cartOutput.extend({ applied: z.number().describe('Ops applied') }),
   decide_approval: actionOutput,
+  decide_approvals: actionOutput.extend({
+    results: z
+      .array(
+        row({
+          orderId: z.string(),
+          nodeId: z.string(),
+          ok: z.boolean(),
+          error: z.string().optional(),
+        }),
+      )
+      .optional()
+      .describe('How each approval went, once confirmed'),
+  }),
   deliver_event: actionOutput,
   cancel_order: actionOutput,
   submit_cart: actionOutput,
@@ -305,6 +359,7 @@ export const TOOL_OUTPUTS = {
 
 export const ACTION_TOOLS: ActionTool[] = [
   'decide_approval',
+  'decide_approvals',
   'deliver_event',
   'cancel_order',
   'submit_cart',
@@ -318,17 +373,26 @@ export const isActionTool = (name: AssistantTool): name is ActionTool =>
 /**
  * Runs a tool as `p`. `via` names the channel in the order's audit trail ("… via MCP");
  * `context` is the assistant panel's page, which only the flow draft uses; `confirmed` is what
- * an action's confirm was held to (`runAction`).
+ * an action's confirm was held to (`runAction`); `direct` marks a call a page's own button made
+ * through the assistant (`act`), so the audit trail tells it apart from one a model proposed.
  */
 export async function runTool<T extends AssistantTool>(
   env: Env,
   p: Principal,
   name: T,
   input: ToolInput<T>,
-  opts: { via: Channel; context?: AssistantContext; confirmed?: Confirmed },
+  opts: { via: Channel; context?: AssistantContext; confirmed?: Confirmed; direct?: boolean },
 ): Promise<unknown> {
   if (isActionTool(name))
-    return runAction(env, p, name, input as ActionInput[typeof name], opts.via, opts.confirmed);
+    return runAction(
+      env,
+      p,
+      name,
+      input as ActionInput[typeof name],
+      opts.via,
+      opts.confirmed,
+      opts.direct,
+    );
   requireRole(p, name);
   switch (name) {
     case 'needs_attention':
@@ -353,7 +417,7 @@ export async function runTool<T extends AssistantTool>(
       return openCart(env, p, input as ToolInput<'create_cart'>, opts.via);
     case 'change_cart': {
       const i = input as ToolInput<'change_cart'>;
-      return changeCart(env, p, i.cartId, i.ops, opts.via);
+      return changeCart(env, p, i.cartId, i.ops, opts.via, opts.direct);
     }
     case 'list_flows':
       return listFlows(env);

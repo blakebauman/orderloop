@@ -5,7 +5,12 @@
  * navigation between pages.
  */
 
-import type { AssistantContext, FlowProposal } from '@orderloop/core';
+import {
+  ASSISTANT_TOOLS,
+  type AssistantContext,
+  type AssistantTool,
+  type FlowProposal,
+} from '@orderloop/core';
 import {
   createContext,
   useCallback,
@@ -20,6 +25,17 @@ import {
 type PageContext = () => AssistantContext;
 
 type Scope = 'page' | 'workspace';
+
+/** How a page's edit ended: what the tool returned, or the person declined its card. */
+export type ActResult = { output: unknown } | { declined: true };
+
+/** An edit a page handed to the assistant, waiting for the panel to send it. */
+export type QueuedAct = {
+  tool: AssistantTool;
+  input: unknown;
+  resolve: (r: ActResult) => void;
+  reject: (err: Error) => void;
+};
 
 type AssistantState = {
   open: boolean;
@@ -38,6 +54,18 @@ type AssistantState = {
   scope: Scope;
   setScope: (s: Scope) => void;
   register: (read: PageContext) => () => void;
+  /**
+   * Makes an edit through the assistant: the exact tool call, with no model. An action opens the
+   * panel at its confirm card and settles once the person answers it; anything else runs without
+   * opening the panel and is kept in the conversation as a line.
+   */
+  act: (tool: AssistantTool, input: unknown) => Promise<ActResult>;
+  /** Edits waiting for the panel to send them (the panel mounts while there are any). */
+  acts: QueuedAct[];
+  takeActs: () => QueuedAct[];
+  /** A card `act` made, waiting for the person's answer, and the page waiting on it. */
+  awaitAnswer: (callId: string, act: QueuedAct) => void;
+  answered: (callId: string, r: ActResult | Error) => void;
   /** A proposal handed to the flow editor; the editor takes it when it is open on that flow. */
   proposal: FlowProposal | null;
   offerProposal: (p: FlowProposal) => void;
@@ -60,6 +88,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const reader = useRef<PageContext | null>(null);
   const [proposal, setProposal] = useState<FlowProposal | null>(null);
   const [proposalToken, setProposalToken] = useState(0);
+  // The queue itself lives in a ref, so taking it empties it at once: an effect that runs twice
+  // (React's strict mode, a remount) never sends the same edit twice. `acts` re-renders the panel.
+  const queue = useRef<QueuedAct[]>([]);
+  const [acts, setActs] = useState<QueuedAct[]>([]);
+  const waiting = useRef(new Map<string, QueuedAct>());
 
   // Reopen the panel on the next visit if it was open; a convenience, so storage may fail.
   useEffect(() => {
@@ -106,6 +139,28 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         setOpen(true);
         setFocusToken((n) => n + 1);
       },
+      act: (tool, input) =>
+        new Promise<ActResult>((resolve, reject) => {
+          queue.current = [...queue.current, { tool, input, resolve, reject }];
+          setActs(queue.current);
+          if (ASSISTANT_TOOLS[tool].confirm) setOpen(true);
+        }),
+      acts,
+      takeActs: () => {
+        const q = queue.current;
+        queue.current = [];
+        if (q.length) setActs([]);
+        return q;
+      },
+      awaitAnswer: (callId, act) => {
+        waiting.current.set(callId, act);
+      },
+      answered: (callId, r) => {
+        const act = waiting.current.get(callId);
+        waiting.current.delete(callId);
+        if (r instanceof Error) act?.reject(r);
+        else act?.resolve(r);
+      },
       pendingAsk,
       takeAsk: () => {
         const t = pendingAsk;
@@ -130,7 +185,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       },
       proposalToken,
     }),
-    [open, setOpen, pendingAsk, focusToken, page, scope, register, proposal, proposalToken],
+    [open, setOpen, acts, pendingAsk, focusToken, page, scope, register, proposal, proposalToken],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -139,6 +194,11 @@ export function useAssistant(): AssistantState {
   const v = useContext(Ctx);
   if (!v) throw new Error('useAssistant needs AssistantProvider (the shell renders it)');
   return v;
+}
+
+/** The assistant where the shell provides one; null on pages outside it (the buyer's cart). */
+export function useAssistantIfAny(): AssistantState | null {
+  return useContext(Ctx);
 }
 
 /**
