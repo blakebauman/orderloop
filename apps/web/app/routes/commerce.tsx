@@ -17,7 +17,7 @@ import {
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableEmpty, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Check, Mail, RefreshCw, Zap } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   Form,
   Link,
@@ -125,17 +125,12 @@ export async function action({ request }: Route.ActionArgs) {
   return null;
 }
 
-/**
- * Recording an outside event keeps its row, with its outcome, until the page is next loaded: a
- * refresh would drop the order from the list and the confirmation with it.
- */
+/** Updating the product index changes nothing the page shows. */
 export function shouldRevalidate({
   formData,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
-  // Nor does updating the product index change anything the page shows.
-  if (formData?.get('intent') === 'event' || formData?.get('intent') === 'product-index')
-    return false;
+  if (formData?.get('intent') === 'product-index') return false;
   return defaultShouldRevalidate;
 }
 
@@ -913,86 +908,36 @@ function Off() {
   return <span className="ml-1.5 text-muted-foreground text-xs">Off</span>;
 }
 
-/** How long a recorded event can be taken back before it is sent, as with decisions. */
-const UNDO_MS = 5000;
-
 /**
- * One order waiting on the outside world. Recording the event opens a short undo window and sends
- * nothing until it closes, so "Undo" is real. Leaving the page sends it at once rather than drop it.
+ * One order waiting on the outside world. Recording the event asks through the assistant: its card
+ * says what the event resumes, and nothing is delivered until the person confirms there.
  */
 function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
   const canOperate = useCan('operator');
-  const f = useFetcher<{ ok: boolean; delivered?: boolean; error?: string }>();
-  const [pendingAt, setPendingAt] = useState<number | null>(null);
-  const now = useNow(pendingAt === null ? null : 250);
+  const { act } = useAssistant();
+  const [asking, setAsking] = useState(false);
+  const [delivered, setDelivered] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const titleId = useId();
   const waitId = useId();
-  const recordRef = useRef<HTMLButtonElement>(null);
-  const action = `/orders/${e.orderId}/action`;
-  const latest = useRef({ pending: false, e, submit: f.submit });
-  latest.current.e = e;
-  latest.current.submit = f.submit;
-  latest.current.pending = pendingAt !== null;
-
-  useEffect(() => {
-    const body = () => {
-      const b = new FormData();
-      b.set('intent', 'event');
-      b.set('event', latest.current.e.event);
-      return b;
-    };
-    const flush = () => {
-      if (!latest.current.pending) return;
-      latest.current.pending = false;
-      void fetch(action, { method: 'POST', body: body(), keepalive: true }).catch(() => {});
-    };
-    window.addEventListener('pagehide', flush);
-    return () => {
-      window.removeEventListener('pagehide', flush);
-      flush();
-    };
-  }, [action]);
-
-  useEffect(() => {
-    if (pendingAt === null) return;
-    const t = window.setTimeout(() => {
-      latest.current.pending = false;
-      setPendingAt(null);
-      latest.current.submit(
-        { intent: 'event', event: latest.current.e.event },
-        { method: 'post', action },
-      );
-    }, UNDO_MS);
-    return () => window.clearTimeout(t);
-  }, [pendingAt, action]);
-
-  const delivered = f.data?.delivered === true;
-  // The order stopped waiting before this reached it: someone or a connected system got there first.
-  const missed = f.state === 'idle' && f.data?.ok === true && !delivered;
-  useEffect(() => {
-    if (delivered || missed) onRecorded();
-  }, [delivered, missed, onRecorded]);
-
-  const undo = () => {
-    setPendingAt(null);
-    // Undo unmounts itself; hand focus back to the control that started this.
-    requestAnimationFrame(() => recordRef.current?.focus());
+  const record = async () => {
+    setAsking(true);
+    setError(null);
+    try {
+      const r = await act('deliver_event', { orderId: e.orderId, event: e.event });
+      if ('declined' in r) return;
+      setDelivered(true);
+      onRecorded();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAsking(false);
+    }
   };
   const label = eventAction(e.event);
 
   return (
-    <Item
-      asChild
-      variant="muted"
-      size="sm"
-      className="gap-x-4 gap-y-2"
-      onKeyDown={(k) => {
-        if (pendingAt !== null && k.key === 'Escape') {
-          k.preventDefault();
-          undo();
-        }
-      }}
-    >
+    <Item asChild variant="muted" size="sm" className="gap-x-4 gap-y-2">
       <li>
         <ItemContent className="min-w-0 basis-64">
           <ItemTitle className="line-clamp-none">
@@ -1018,15 +963,9 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
                 .join(' · ')}
             </p>
           ) : null}
-          {f.data?.error ? (
+          {error ? (
             <p className="mt-1 text-bad text-sm" role="alert">
-              {f.data.error}
-            </p>
-          ) : null}
-          {missed ? (
-            <p className="mt-1 text-sm" role="status">
-              Nothing was recorded: the order had already stopped waiting for this. It may have
-              arrived from a connected system. Open the order to see where it is now.
+              {error}
             </p>
           ) : null}
         </ItemContent>
@@ -1044,35 +983,18 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
             <span role="status" className="inline-flex items-center gap-1.5 font-medium text-ok">
               <Check className="size-4" aria-hidden="true" /> Recorded
             </span>
-          ) : missed ? null : pendingAt !== null ? (
-            <div className="flex items-center gap-3">
-              {/* Said once; the ticking number stays out of the live region. */}
-              <span className="sr-only" role="status">
-                {label} in {UNDO_MS / 1000} seconds. Press Undo or Escape to take it back.
-              </span>
-              <span aria-hidden="true">
-                {label} in{' '}
-                <span className="tabular" suppressHydrationWarning>
-                  {Math.max(1, Math.ceil((pendingAt + UNDO_MS - now) / 1000))}s
-                </span>
-              </span>
-              <Button size="sm" variant="outline" onClick={undo} autoFocus>
-                Undo
-              </Button>
-            </div>
-          ) : f.state !== 'idle' ? (
+          ) : asking ? (
             <span className="text-muted-foreground" aria-live="polite">
-              Recording…
+              Confirm it in the assistant
             </span>
           ) : (
             <Button
-              ref={recordRef}
               size="sm"
               variant="outline"
               aria-describedby={`${titleId} ${waitId}`}
-              onClick={() => setPendingAt(Date.now())}
+              onClick={() => void record()}
             >
-              <Zap /> {f.data?.error ? `Try again: ${label.toLowerCase()}` : label}
+              <Zap /> {error ? `Try again: ${label.toLowerCase()}` : label}
             </Button>
           )}
         </ItemActions>

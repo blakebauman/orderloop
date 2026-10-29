@@ -215,8 +215,8 @@ The page still gets the full result. `runTool(…, { direct: true })` adds `dire
 audit trail. `answeredOnly` leaves a direct card that is still waiting out of what the model reads.
 
 Approval decisions go through these cards too, including the inbox's batch, as one
-`decide_approvals` card that runs `decide_approval` for each row. Recorded outside events on
-Commerce still use their undo window.
+`decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
+Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.
 
 A preview can also carry `bound`: what the person is shown that can change before they confirm
 (for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that

@@ -5,11 +5,11 @@ import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
 import type { Route } from './+types/order-action';
 
-/** Form posts from pages without a live agent connection (Commerce, restarting an order). */
+/** Form posts from pages without a live agent connection (restarting an order). */
 export async function action({ request, params }: Route.ActionArgs) {
   const f = await request.formData();
   const intent = String(f.get('intent'));
-  // Delivering events and restarting need operator. Decisions go through the assistant.
+  // Restarting needs operator. Decisions and events go through the assistant.
   const me = await requireUser(request, 'operator');
   const record = (action: BusinessAuditAction, detail: Record<string, unknown>, target?: string) =>
     audit(request, action, {
@@ -18,12 +18,6 @@ export async function action({ request, params }: Route.ActionArgs) {
       detail: { ...detail, via: 'app' },
     });
   try {
-    if (intent === 'event') {
-      const event = String(f.get('event'));
-      const res = await engine().sendEvent(params.orderId, event, { source: 'commerce' });
-      if (res.delivered) await record('order.event_delivered', { event, nodeId: res.nodeId });
-      return { ok: true, ...res };
-    }
     if (intent === 'restart') {
       // A fresh order with the same customer and lines, on the flow's current version. Demo
       // failure switches are dropped so the retry runs for real.

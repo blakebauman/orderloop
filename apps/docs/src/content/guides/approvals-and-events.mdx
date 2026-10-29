@@ -140,13 +140,14 @@ waiting.
 
 - **Order page**: the open wait says what it waits for in plain words and has a button that
   records it by hand, such as **Mark as collected** for `pickup.collected` or **Record payment** for
-  `payment.received` (payload `{ "source": "dashboard", "amount": <order total> }`). The event name
-  and the API endpoint are under **For developers**.
+  `payment.received` (payload `{ "amount": <order total> }`). The button opens the
+  [assistant](/guides/assistant/#edits-from-a-page)'s confirm card, and nothing is delivered until
+  you confirm there. The delivery's `source` is `assistant` and `by` names you. The event name and
+  the API endpoint are under **For developers**.
 - **Commerce page**: lists the events the 20 most recently updated orders waiting on an outside event
-  wait for (it says how many wait in all when there are more), with each order's customer and total, and the same button as the order page. Nothing is sent for five
-  seconds, so **Undo** takes it back; leaving the page sends it at once. The payload is
-  `{ "source": "commerce" }`. Seller responses on a marketplace order are recorded per seller on
-  the order page.
+  wait for (it says how many wait in all when there are more), with each order's customer and total, and the same button as the order page, which asks on the same
+  confirm card. If the order stopped waiting before you confirm, the card says so and offers no
+  confirm. Seller responses on a marketplace order are recorded per seller on the order page.
 
 The Commerce page's **Records** section shows what orders have done outside the flow, newest first:
 money (payments, invoices and seller payouts), shipments, stock holds, seller orders, messages sent
