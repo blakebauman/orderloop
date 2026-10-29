@@ -2,9 +2,10 @@ import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
-import { segments } from '../app/components/assistant/panel';
+import { segments, unanswered } from '../app/components/assistant/panel';
 import {
   ActionCard,
+  NoAnswerLine,
   ReadLine,
   ReasoningLine,
   SourcesLine,
@@ -211,5 +212,53 @@ describe('sources', () => {
     expect(html(createElement(ReadLine, { part: flow, streaming: false }))).toContain(
       'href="/flows/f1"',
     );
+  });
+});
+
+describe('a turn with no answer', () => {
+  const thought = {
+    type: 'reasoning',
+    text: 'Let me get the details of that flow.',
+    state: 'done',
+  };
+  const model = { source: 'model' as const };
+  const turn = (
+    parts: unknown[],
+    metadata: { source?: 'model' | 'heuristic' | 'direct' } = model,
+  ) => ({ parts, metadata }) as unknown as Parameters<typeof unanswered>[0];
+
+  it('is a model turn of thinking and reads that ends without text', () => {
+    // Seen live: Kimi thought "let me get the details", then stopped without calling anything.
+    expect(
+      unanswered(turn([{ type: 'step-start' }, thought, read('output-available'), thought])),
+    ).toBe(true);
+    expect(unanswered(turn([thought, { type: 'text', text: '  ' }]))).toBe(true);
+  });
+
+  it('is not one with text, an action, a proposal or a draft, nor one the model did not write', () => {
+    expect(unanswered(turn([thought, { type: 'text', text: 'Point-of-sale sale.' }]))).toBe(false);
+    const action = (state: string) => ({
+      type: 'tool-cancel_order',
+      toolCallId: 'c',
+      state,
+      input: {},
+    });
+    expect(unanswered(turn([thought, action('approval-requested')]))).toBe(false);
+    expect(unanswered(turn([thought, action('output-available')]))).toBe(false);
+    expect(
+      unanswered(
+        turn([{ type: 'tool-propose_flow_change', toolCallId: 'p', state: 'output-available' }]),
+      ),
+    ).toBe(false);
+    expect(
+      unanswered(turn([{ type: 'tool-draft_plugin', toolCallId: 'd', state: 'output-available' }])),
+    ).toBe(false);
+    expect(unanswered(turn([thought], { source: 'direct' }))).toBe(false);
+    expect(unanswered(turn([thought], {}))).toBe(false);
+  });
+
+  it('says so in a Trace line', () => {
+    expect(html(createElement(NoAnswerLine))).toContain('Stopped without an answer');
+    expect(html(createElement(NoAnswerLine))).toContain('data-status="error"');
   });
 });

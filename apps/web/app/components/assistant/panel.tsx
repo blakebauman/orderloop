@@ -91,6 +91,7 @@ import { useMe } from '~/lib/use-me';
 import {
   ActionCard,
   actionVerb,
+  NoAnswerLine,
   PluginDraftCard,
   type Previewer,
   ProposalCard,
@@ -741,6 +742,18 @@ export function segments(
   return out;
 }
 
+/**
+ * The model's turn ended with no answer: no text, and nothing but thinking and reads (an action,
+ * a proposal or a draft is an answer in itself).
+ */
+export function unanswered(m: Pick<Message, 'parts' | 'metadata'>) {
+  const answers = (p: Message['parts'][number]) =>
+    p.type === 'text'
+      ? p.text.trim() !== ''
+      : isToolUIPart(p) && (ACTION.has(getToolName(p)) || !isLine(p, false));
+  return m.metadata?.source === 'model' && !m.parts.some(answers);
+}
+
 function AssistantMessage({
   m,
   streaming,
@@ -816,6 +829,11 @@ function AssistantMessage({
           }
           return null;
         })}
+        {!streaming && unanswered(m) ? (
+          <Trace>
+            <NoAnswerLine />
+          </Trace>
+        ) : null}
         {!streaming && sources.length > 1 ? (
           <Trace>
             <SourcesLine sources={sources} />
