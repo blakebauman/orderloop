@@ -71,6 +71,8 @@ export type OrderFilters = {
   attention?: boolean;
   /** Only orders on this flow, any version. */
   flow?: string;
+  /** Only this customer's orders. */
+  customer?: string;
   /** Only orders waiting at, or stopped at, this step (by its label). */
   step?: string;
   /** Only orders updated within this window: for ended orders, ended within it. */
@@ -155,6 +157,7 @@ function ordersWhere(f: OrderFilters) {
     f.model ? eq(orders.model, f.model) : undefined,
     f.channel ? eq(orders.channel, f.channel) : undefined,
     f.flow ? eq(orders.flowId, f.flow) : undefined,
+    f.customer ? eq(orders.customerId, f.customer) : undefined,
     // A step's label as the index stores it: one label, or several joined with " · ".
     f.step
       ? or(
