@@ -35,12 +35,21 @@ function locked(bucket: R2Bucket, puts: string[] = [], failAfter = Infinity): R2
   });
 }
 
-/** `count` product keys that all live on one shard, and that shard. */
-function sameShard(prefix: string, count: number): { n: number; keys: string[] } {
+/**
+ * `count` product keys that all live on one shard, and that shard: one holding no products yet, so
+ * a test can count its rows exactly whatever an earlier test wrote.
+ */
+async function sameShard(prefix: string, count: number): Promise<{ n: number; keys: string[] }> {
   const by = new Map<number, string[]>();
+  const empty = new Map<number, boolean>();
   for (let i = 0; ; i++) {
     const key = `${prefix}-${i}`;
     const n = productShard(key);
+    if (!empty.has(n)) {
+      const page = await stubOf(env, `shard-${n}`).backupPage('products', 0, 1);
+      empty.set(n, page.rows.length === 0);
+    }
+    if (!empty.get(n)) continue;
     const list = by.get(n) ?? [];
     list.push(key);
     by.set(n, list);
@@ -89,7 +98,7 @@ describe('catalog backups', () => {
   });
 
   it('resumes a copy cut short without writing over any chunk the lock keeps', async () => {
-    const { n, keys } = sameShard(`lock${Date.now().toString(36)}`, 6);
+    const { n, keys } = await sameShard(`lock${Date.now().toString(36)}`, 6);
     await api.putProducts(
       keys
         .slice(0, 5)
