@@ -170,6 +170,45 @@ test('the assistant composer stays above the on-screen keyboard', async ({ page 
   await expect(page.locator('html[data-keyboard]')).toHaveCount(0);
 });
 
+test('the assistant brings a new question to the top and offers the way back to the latest', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'the docked panel');
+  // A short window, so two turns are taller than the panel and there is somewhere to scroll.
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await open(page, '/orders');
+  await page.locator('header button[aria-pressed]').click();
+  const box = page.locator('textarea[aria-label="Message the assistant"]');
+  await expect(box).toBeVisible({ timeout: 15_000 });
+  const viewport = page.getByRole('region', { name: 'Conversation' });
+  const items = viewport.locator('[data-slot="message-scroller-item"]');
+  // One question and its answer: two more items, and the answer done (it can be asked again).
+  const ask = async (text: string) => {
+    const before = await items.count();
+    await box.fill(text);
+    await box.press('Enter');
+    await expect(items).toHaveCount(before + 2, { timeout: 15_000 });
+    await expect(items.last().getByRole('button', { name: 'Answer again' })).toBeVisible({
+      timeout: 15_000,
+    });
+  };
+  await ask('What needs attention?');
+  const question = `Find failed orders ${Date.now()}`;
+  await ask(question);
+  // The new turn's question sits near the top of the conversation, its reply below it.
+  const frame = (await viewport.boundingBox())!;
+  await expect
+    .poll(async () => (await page.getByText(question).boundingBox())!.y - frame.y)
+    .toBeLessThan(frame.height / 3);
+  // Away from the latest, a button goes back to it.
+  const latest = page.getByRole('button', { name: 'Scroll to the latest' });
+  await viewport.evaluate((el) => el.scrollTo({ top: 0 }));
+  await viewport.dispatchEvent('wheel', { deltaY: -100 });
+  await expect(latest).toBeVisible();
+  await latest.click();
+  await expect(page.getByText(question)).toBeInViewport();
+});
+
 test('a cart finds a product by name and adds it with a quantity', async ({ page }, info) => {
   await open(page, '/carts');
   await page.getByRole('button', { name: 'New cart' }).click();
