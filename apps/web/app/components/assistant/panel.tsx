@@ -51,16 +51,19 @@ import {
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
-  ConversationContent,
-  Conversation as ConversationLog,
-  ConversationScrollButton,
-} from '~/components/ai-elements/conversation';
-import {
   MessageAction,
   MessageActions,
   MessageContent,
   Message as MessageFrame,
 } from '~/components/ai-elements/message';
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '~/components/ai-elements/message-scroller';
 import {
   PromptInput,
   PromptInputFooter,
@@ -387,60 +390,65 @@ function Conversation() {
         </p>
       ) : null}
       {/* Not live: streamed text would be read out a fragment at a time. A finished reply, and an
-          action that needs an answer, are announced once each instead (`useAnnouncement`). */}
-      <ConversationLog className="ol-scroll min-h-0" aria-live="off">
-        <ConversationContent>
-          {messages.length === 0 ? (
-            <FirstRun onAsk={send} />
-          ) : (
-            <ol className="space-y-3">
-              {messages.map((m, i) => (
-                <li key={m.id}>
-                  {m.role === 'user' ? (
-                    <UserMessage m={m} busy={busy} onEdit={i > lastAction ? edit : undefined} />
-                  ) : (
-                    <AssistantMessage
-                      m={m}
-                      streaming={busy && i === messages.length - 1}
-                      preview={preview}
-                      respond={respond}
-                      replaced={replaced}
-                      // Only the latest reply can be asked again, and not while one is running.
-                      onRegenerate={
-                        i === lastAssistant &&
-                        i === messages.length - 1 &&
-                        i !== lastAction &&
-                        !busy
-                          ? () => void regenerate()
-                          : undefined
-                      }
-                    />
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
-          {thinking ? (
-            <div role="status" className="flex items-center gap-2 text-ui">
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
-              <Shimmer as="span">
-                {chat.isRecovering ? 'Picking up where it left off' : 'Working on it'}
-              </Shimmer>
-            </div>
-          ) : null}
-          {error && !busy ? (
-            <TurnError
-              message={error.message}
-              onRetry={() => {
-                clearError();
-                void regenerate();
-              }}
-              onDismiss={clearError}
-            />
-          ) : null}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </ConversationLog>
+          action that needs an answer, are announced once each instead (`useAnnouncement`). Each
+          question anchors its turn: it rises near the top while the reply streams in below, and a
+          saved thread opens on the last one. */}
+      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport aria-label="Conversation">
+            <MessageScrollerContent aria-live="off" className="gap-3">
+              {messages.length === 0 ? (
+                <FirstRun onAsk={send} />
+              ) : (
+                // Items are the content's own children: the scroller finds each turn's anchor there.
+                messages.map((m, i) => (
+                  <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.role === 'user'}>
+                    {m.role === 'user' ? (
+                      <UserMessage m={m} busy={busy} onEdit={i > lastAction ? edit : undefined} />
+                    ) : (
+                      <AssistantMessage
+                        m={m}
+                        streaming={busy && i === messages.length - 1}
+                        preview={preview}
+                        respond={respond}
+                        replaced={replaced}
+                        // Only the latest reply can be asked again, and not while one is running.
+                        onRegenerate={
+                          i === lastAssistant &&
+                          i === messages.length - 1 &&
+                          i !== lastAction &&
+                          !busy
+                            ? () => void regenerate()
+                            : undefined
+                        }
+                      />
+                    )}
+                  </MessageScrollerItem>
+                ))
+              )}
+              {thinking ? (
+                <div role="status" className="flex items-center gap-2 text-ui">
+                  <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
+                  <Shimmer as="span">
+                    {chat.isRecovering ? 'Picking up where it left off' : 'Working on it'}
+                  </Shimmer>
+                </div>
+              ) : null}
+              {error && !busy ? (
+                <TurnError
+                  message={error.message}
+                  onRetry={() => {
+                    clearError();
+                    void regenerate();
+                  }}
+                  onDismiss={clearError}
+                />
+              ) : null}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton />
+        </MessageScroller>
+      </MessageScrollerProvider>
       <p className="sr-only" role="status">
         {announcement}
       </p>
