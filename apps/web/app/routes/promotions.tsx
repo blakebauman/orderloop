@@ -17,22 +17,24 @@ import { Input } from '@orderloop/ui/input';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { Fragment, type ReactNode } from 'react';
-import { Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRevalidator,
+} from 'react-router';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { ToneBadge } from '~/components/status';
-import { audit } from '~/lib/audit.server';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { dateTime, money, plural } from '~/lib/format';
 import { customerNames } from '~/lib/orders.server';
 import { promotionState } from '~/lib/promotions';
-import {
-  createPromotion,
-  listPromotions,
-  promotionFrom,
-  setPromotionStatus,
-} from '~/lib/promotions.server';
+import { listPromotions, promotionFrom } from '~/lib/promotions.server';
 import { useCan } from '~/lib/use-me';
 import type { Route } from './+types/promotions';
 
@@ -50,32 +52,23 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
-  const f = await request.formData();
-  if (f.get('intent') === 'status') {
-    const id = String(f.get('id') ?? '');
-    const status = f.get('status') === 'paused' ? 'paused' : 'active';
-    await setPromotionStatus(id, status);
-    await audit(request, 'promotion.saved', {
-      actor: me,
-      target: id,
-      detail: { status, via: 'app' },
-    });
-    return { ok: true as const };
-  }
-  const p = promotionFrom(f);
+  await requireUser(request, 'operator');
+  // Checked here; the page then adds it through the assistant (`create_promotion`), whose card
+  // says what the code does, and the person confirms it there.
+  const p = promotionFrom(await request.formData());
   if (typeof p === 'string') return { error: p };
-  try {
-    const id = await createPromotion(p, me.id);
-    await audit(request, 'promotion.saved', {
-      actor: me,
-      target: id,
-      detail: { code: p.code, kind: p.kind, value: p.value, via: 'app' },
-    });
-    return { ok: true as const };
-  } catch {
-    return { error: `${p.code} already exists.` };
-  }
+  const { customerId, minSubtotal, skus, validTo, maxRedemptions, perCustomerLimit, ...rest } = p;
+  return {
+    create: {
+      ...rest,
+      ...(customerId ? { customerId } : {}),
+      ...(minSubtotal !== null ? { minSubtotal } : {}),
+      ...(skus ? { skus } : {}),
+      ...(validTo !== null ? { validTo } : {}),
+      ...(maxRedemptions !== null ? { maxRedemptions } : {}),
+      ...(perCustomerLimit !== null ? { perCustomerLimit } : {}),
+    },
+  };
 }
 
 const describe = (p: { kind: string; value: number; currency: string | null }) =>
@@ -87,11 +80,37 @@ const describe = (p: { kind: string; value: number; currency: string | null }) =
 
 export default function Promotions() {
   const { promotions, customers, now } = useLoaderData<typeof loader>();
-  const result = useActionData<typeof action>();
-  const busy = useNavigation().state === 'submitting';
+  const answer = useActionData<typeof action>();
+  const nav = useNavigation();
   const canOperate = useCan('operator');
-  // A code added closes the form; a refusal keeps it open with what was typed. Nothing else on the
-  // page can be submitted while the sheet is open, so an `ok` then is the new code.
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  // A checked form is added through the assistant; its answer closes the form or says why not.
+  const [asking, setAsking] = useState(false);
+  const [outcome, setOutcome] = useState<{ ok: true } | { error: string } | null>(null);
+  const create = answer && 'create' in answer ? answer.create : undefined;
+  useEffect(() => {
+    if (!create) return;
+    let live = true;
+    setAsking(true);
+    setOutcome(null);
+    act('create_promotion', create)
+      .then((r) => {
+        if (!live || 'declined' in r) return;
+        setOutcome({ ok: true });
+        revalidate();
+      })
+      .catch(
+        (e: unknown) => live && setOutcome({ error: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => live && setAsking(false));
+    return () => {
+      live = false;
+    };
+  }, [create]);
+  const result = outcome ?? (answer && 'error' in answer ? answer : undefined);
+  const busy = nav.state === 'submitting' || asking;
+  // A code added closes the form; a refusal keeps it open with what was typed.
   const sheet = useFormSheet(result, (r) => 'ok' in r);
   return (
     <>
@@ -188,23 +207,7 @@ export default function Promotions() {
                             {canOperate ? ' To run it again, add a new code.' : null}
                           </p>
                         ) : canOperate ? (
-                          <Form method="post">
-                            <input type="hidden" name="intent" value="status" />
-                            <input type="hidden" name="id" value={p.id} />
-                            <input
-                              type="hidden"
-                              name="status"
-                              value={paused ? 'active' : 'paused'}
-                            />
-                            <Button
-                              type="submit"
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`${paused ? 'Resume' : 'Pause'} ${p.code}`}
-                            >
-                              {paused ? 'Resume' : 'Pause'}
-                            </Button>
-                          </Form>
+                          <StatusButton id={p.id} code={p.code} paused={paused} />
                         ) : null}
                       </Td>
                     </Tr>
@@ -281,5 +284,46 @@ function NewPromotion({ error, busy }: { error?: string | null; busy: boolean })
         </div>
       </FieldGroup>
     </Form>
+  );
+}
+
+/** Pauses or resumes a code through the assistant: its card says what changes for buyers. */
+function StatusButton({ id, code, paused }: { id: string; code: string; paused: boolean }) {
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act('set_promotion_status', {
+        promotionId: id,
+        status: paused ? 'active' : 'paused',
+      });
+      if (!('declined' in r)) revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        aria-label={`${paused ? 'Resume' : 'Pause'} ${code}`}
+        onClick={() => void run()}
+      >
+        {busy ? 'Confirm it in the assistant' : paused ? 'Resume' : 'Pause'}
+      </Button>
+      {error ? (
+        <span role="alert" className="text-bad text-xs">
+          {error}
+        </span>
+      ) : null}
+    </span>
   );
 }

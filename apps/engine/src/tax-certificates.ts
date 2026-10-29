@@ -180,7 +180,7 @@ export async function revokeTaxCertificate(
 }
 
 /** The workspace's `approval_separation` setting is on. */
-async function separated(env: Env) {
+export async function separated(env: Env) {
   const row = await createDb(env.DB)
     .select({ value: workspaceSettings.value })
     .from(workspaceSettings)

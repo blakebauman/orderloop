@@ -13,13 +13,23 @@ import { Input } from '@orderloop/ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { useState } from 'react';
+import {
+  data,
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRevalidator,
+} from 'react-router';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusBadge, ToneBadge } from '~/components/status';
+import { useAssistant } from '~/lib/assistant';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
-import { addCertificate, changeCertificate, customerById } from '~/lib/customers.server';
+import { addCertificate, customerById } from '~/lib/customers.server';
 import { engine } from '~/lib/env.server';
 import { count, dateTime, humanize, liveStatus, money, orderRef } from '~/lib/format';
 import { countOrders, listOrders } from '~/lib/orders.server';
@@ -61,22 +71,17 @@ export async function action({ request, params }: Route.ActionArgs) {
   const customerId = params.customerId;
   const f = await request.formData();
   const intent = f.get('intent');
-  const r =
-    intent === 'verify' || intent === 'revoke'
-      ? await changeCertificate(customerId, String(f.get('id') ?? ''), intent, me)
-      : await addCertificate(customerId, me, f);
+  // Verifying and revoking go through the assistant (`CertificateButton`); adding stays here,
+  // since it stores the certificate's file first.
+  const r = await addCertificate(customerId, me, f);
   if (!r.ok) return { intent: String(intent ?? 'add'), error: r.error };
   // A repeat (a form sent twice, verifying what's verified) did nothing to record.
   if (r.changed)
-    await audit(
-      request,
-      intent === 'verify'
-        ? 'tax_certificate.verified'
-        : intent === 'revoke'
-          ? 'tax_certificate.revoked'
-          : 'tax_certificate.added',
-      { actor: me, target: customerId, detail: { certificate: r.id, via: 'app' } },
-    );
+    await audit(request, 'tax_certificate.added', {
+      actor: me,
+      target: customerId,
+      detail: { certificate: r.id, via: 'app' },
+    });
   return { intent: String(intent ?? 'add'), ok: true as const };
 }
 
@@ -225,9 +230,19 @@ export default function CustomerPage() {
                         {canOperate && t.status === 'active' ? (
                           <div className="flex gap-1">
                             {state === 'unverified' ? (
-                              <CertificateButton id={t.id} intent="verify" number={t.number} />
+                              <CertificateButton
+                                customerId={c.id}
+                                id={t.id}
+                                intent="verify"
+                                number={t.number}
+                              />
                             ) : null}
-                            <CertificateButton id={t.id} intent="revoke" number={t.number} />
+                            <CertificateButton
+                              customerId={c.id}
+                              id={t.id}
+                              intent="revoke"
+                              number={t.number}
+                            />
                           </div>
                         ) : null}
                       </Td>
@@ -333,28 +348,57 @@ function FigureCard({ f }: { f: Figure }) {
   );
 }
 
+/** Verifies or revokes a certificate through the assistant: its card says what changes in tax. */
 function CertificateButton({
+  customerId,
   id,
   intent,
   number,
 }: {
+  customerId: string;
   id: string;
   intent: 'verify' | 'revoke';
   number: string;
 }) {
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act(
+        intent === 'verify' ? 'verify_tax_certificate' : 'revoke_tax_certificate',
+        {
+          customerId,
+          certificateId: id,
+        },
+      );
+      if (!('declined' in r)) revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Form method="post">
-      <input type="hidden" name="intent" value={intent} />
-      <input type="hidden" name="id" value={id} />
+    <span className="inline-flex flex-col items-end gap-1">
       <Button
-        type="submit"
         variant="ghost"
         size="sm"
+        disabled={busy}
         aria-label={`${intent === 'verify' ? 'Verify' : 'Revoke'} certificate ${number}`}
+        onClick={() => void run()}
       >
-        {intent === 'verify' ? 'Verify' : 'Revoke'}
+        {busy ? 'Confirm it in the assistant' : intent === 'verify' ? 'Verify' : 'Revoke'}
       </Button>
-    </Form>
+      {error ? (
+        <span role="alert" className="text-bad text-xs">
+          {error}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

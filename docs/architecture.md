@@ -235,6 +235,14 @@ The `publish_flow` and `test_flow` previews carry `bound: { draft }`, a `fingerp
 
 The web route `flows/:flowId/action` is gone, along with `saveFlow`, `publish`, `setArchived` and `parseFlow` in `flows.server.ts`.
 
+Promotions and tax certificates (`apps/engine/src/assistant/commerce.ts`): `create_promotion` (the
+Promotions form is checked by `promotionFrom` on the server first), `set_promotion_status`,
+`verify_tax_certificate` and `revoke_tax_certificate` are confirm cards. A certificate's card shows
+only the last four characters of its number. Verify previews check approval separation
+(`separated`, `tax-certificates.ts`), which `verifyTaxCertificate` enforces again. An API token (`kind: 'token'`) can't verify, since its id is never its maker's, so separation couldn't tell them apart. `PERSON_CONFIRMS_TOOLS` keeps these four out of `A2A_SKILLS`, so a typed A2A message can't run them as `'direct'`; A2A chat still proposes them for `{ confirm: true }`. The `promotion.saved` audit records a code's whole reach. Adding a
+certificate stays on the customer page's form, because it stores the file first and an
+unverified certificate exempts nothing.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.

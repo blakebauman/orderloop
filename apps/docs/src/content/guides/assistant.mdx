@@ -25,7 +25,8 @@ so these edits work even when the model is unavailable. Each edit stays in your 
 line.
 
 - **An action** stops at its confirm card in the panel. The panel opens if it was closed. This
-  covers publishing the catalog, publishing or test-running a flow, deciding approvals (one or a batch), cancelling an order, delivering an event, starting
+  covers adding, pausing or resuming a promotion, verifying or revoking a tax certificate,
+  publishing the catalog, publishing or test-running a flow, deciding approvals (one or a batch), cancelling an order, delivering an event, starting
   an order from **New order** (the form checks its fields first), restarting an order,
   submitting or cancelling a cart and running the stock review. The page waits until you answer, and declining leaves everything as it
   was.
@@ -119,6 +120,14 @@ sent until you press the confirm button, and declining leaves everything as it w
 | `start_order` | `operator` | Starts an order on a published flow: its lines, and optionally a customer or guest contact, fulfilment, channel, currency, title and document text. The card lists everything the order acts on: its lines, the customer or the guest's email (where the flow's messages go), fulfilment, and any title, currency, channel or document text (its length and opening). It is blocked for an unpublished flow, an unknown SKU or customer, both a customer and a guest, a pickup or carry-out without a store, or a currency with no rate |
 | `restart_order` | `operator` | Starts a fresh order like an existing one, on its flow's current version, without demo failure switches; the old order stays as it is |
 | `cancel_cart` | `operator` | Cancels an open or locked cart; nothing is ordered |
+| `create_promotion` | `operator` | Adds a promotion code, active at once: a percentage or amount off, or free shipping, optionally limited by subtotal, SKUs, customer, end date and uses |
+| `set_promotion_status` | `operator` | Pauses a promotion code or reactivates it |
+| `verify_tax_certificate` | `operator` | Verifies a customer's tax exemption certificate, so their new orders are exempt in its regions. With approval separation on, whoever added it can't |
+| `revoke_tax_certificate` | `operator` | Revokes a customer's tax exemption certificate, so their new orders are taxed again |
+
+These four change what buyers pay or owe in tax, so a person always confirms them: on the panel's
+card, through an MCP confirmation, or with `{ "confirm": true }` in an A2A chat. They aren't typed
+A2A skills. Only a signed-in person verifies a certificate, never an API token.
 | `publish_catalog` | `operator` | Publishes up to 500 products' staged edits to the live catalog, each product all or none. The card lists each product and its staged fields, and is held to them |
 | `test_flow` | `operator` | Publishes a flow's saved draft when it changed since the live version, then starts a test order with a demo input; the card says which |
 

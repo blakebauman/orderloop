@@ -2,7 +2,7 @@
 
 import { normalizePromoCode, PROMOTION_KINDS, type PromotionKind } from '@orderloop/core';
 import { promotionRedemptions, promotions } from '@orderloop/db';
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { db } from './env.server';
 
 export async function listPromotions() {
@@ -68,24 +68,4 @@ export function promotionFrom(f: FormData): PromotionForm | string {
     maxRedemptions,
     perCustomerLimit,
   };
-}
-
-export async function createPromotion(p: PromotionForm, by: string) {
-  const now = Date.now();
-  const id = `promo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
-  await db()
-    .insert(promotions)
-    .values({
-      id,
-      ...p,
-      skus: p.skus ? JSON.stringify(p.skus) : null,
-      createdBy: by,
-      createdAt: now,
-      updatedAt: now,
-    });
-  return id;
-}
-
-export async function setPromotionStatus(id: string, status: 'active' | 'paused') {
-  await db().update(promotions).set({ status, updatedAt: Date.now() }).where(eq(promotions.id, id));
 }

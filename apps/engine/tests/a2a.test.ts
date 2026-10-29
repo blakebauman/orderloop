@@ -160,6 +160,13 @@ describe('A2A', () => {
     ]);
     expect(refused.status.state).toBe('TASK_STATE_REJECTED');
     expect(statusText(refused)).toContain('Operator');
+
+    // What changes what buyers pay or owe in tax is never a typed skill: a person confirms it.
+    const discount = await send(person('admin', 'promo-a2a@example.com'), [
+      { data: { skill: 'create_promotion', input: { code: 'ALLFREE', kind: 'pct', value: 100 } } },
+    ]);
+    expect(discount.status.state).toBe('TASK_STATE_REJECTED');
+    expect(statusText(discount)).toContain('There is no skill called create_promotion.');
   });
 
   it('keeps each caller’s tasks to themselves', async () => {

@@ -52,6 +52,15 @@ import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
 import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
 import { previewPublishCatalog, runPublishCatalog } from './catalog';
+import {
+  type PromotionInput,
+  previewCertificate,
+  previewCreatePromotion,
+  previewPromotionStatus,
+  runCertificate,
+  runCreatePromotion,
+  runPromotionStatus,
+} from './commerce';
 import { draftHash, heldToDraft, previewTestFlow, runTestFlow } from './flows';
 import { previewRestart, previewStart, runRestart, runStart, type StartInput } from './orders';
 
@@ -494,6 +503,10 @@ export type ActionInput = {
   cancel_cart: { cartId: string };
   test_flow: { flowId: string };
   publish_catalog: { keys: string[] };
+  create_promotion: PromotionInput;
+  set_promotion_status: { promotionId: string; status: 'active' | 'paused' };
+  verify_tax_certificate: { customerId: string; certificateId: string };
+  revoke_tax_certificate: { customerId: string; certificateId: string };
 };
 export type ActionTool = keyof ActionInput;
 
@@ -633,6 +646,27 @@ export async function previewAction<T extends ActionTool>(
       }
       case 'submit_cart':
         return await previewSubmit(env, p, input as ActionInput['submit_cart']);
+      case 'create_promotion':
+        return await previewCreatePromotion(
+          env,
+          input as ActionInput['create_promotion'],
+          roleBlock,
+        );
+      case 'set_promotion_status':
+        return await previewPromotionStatus(
+          env,
+          input as ActionInput['set_promotion_status'],
+          roleBlock,
+        );
+      case 'verify_tax_certificate':
+      case 'revoke_tax_certificate':
+        return await previewCertificate(
+          env,
+          p,
+          tool === 'verify_tax_certificate' ? 'verify' : 'revoke',
+          input as ActionInput['verify_tax_certificate'],
+          roleBlock,
+        );
       case 'publish_catalog':
         return await previewPublishCatalog(
           env,
@@ -822,6 +856,19 @@ export async function runAction<T extends ActionTool>(
       return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'cancel_cart':
       return runCancelCart(env, p, (input as ActionInput['cancel_cart']).cartId, trail);
+    case 'create_promotion':
+      return runCreatePromotion(env, p, input as ActionInput['create_promotion'], trail);
+    case 'set_promotion_status':
+      return runPromotionStatus(env, p, input as ActionInput['set_promotion_status'], trail);
+    case 'verify_tax_certificate':
+    case 'revoke_tax_certificate':
+      return runCertificate(
+        env,
+        p,
+        tool === 'verify_tax_certificate' ? 'verify' : 'revoke',
+        input as ActionInput['verify_tax_certificate'],
+        trail,
+      );
     case 'publish_catalog':
       return runPublishCatalog(
         env,

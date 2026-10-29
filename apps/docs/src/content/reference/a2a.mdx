@@ -64,7 +64,7 @@ A push URL registered over 0.3 receives 0.3 notifications: the whole task (`kind
 
 ## Skills
 
-Every assistant tool is a skill at the same role, except those only a page's own button runs (`start_scenario`; `save_flow_draft`, the flow editor's Save; and the Catalog page's `stage_product_edits`, `accept_product_drafts` and `discard_product_edits`). A skill the caller's role can't use is refused:
+Every assistant tool is a skill at the same role, except those only a page's own button runs (`start_scenario`; `save_flow_draft`, the flow editor's Save; and the Catalog page's `stage_product_edits`, `accept_product_drafts` and `discard_product_edits`), and those a person always confirms because they change what buyers pay or owe in tax (`create_promotion`, `set_promotion_status`, `verify_tax_certificate`, `revoke_tax_certificate`, reached through chat). A skill the caller's role can't use is refused:
 the task ends `TASK_STATE_REJECTED` with the reason.
 
 <A2aSkills />

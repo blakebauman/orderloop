@@ -7,7 +7,13 @@
  */
 
 import type { OrderState } from './api';
-import { ASSISTANT_TOOLS, type AssistantTool, isPageOnly, isWriteTool } from './assistant';
+import {
+  ASSISTANT_TOOLS,
+  type AssistantTool,
+  isPageOnly,
+  isWriteTool,
+  PERSON_CONFIRMS_TOOLS,
+} from './assistant';
 import { ROLES, type Role } from './roles';
 import type { OrderStatus } from './types';
 
@@ -50,7 +56,7 @@ export const A2A_SKILLS: Record<
   },
   ...(Object.fromEntries(
     (Object.keys(ASSISTANT_TOOLS) as AssistantTool[])
-      .filter((name) => !isPageOnly(name))
+      .filter((name) => !isPageOnly(name) && !PERSON_CONFIRMS_TOOLS.includes(name))
       .map((name) => {
         const t = ASSISTANT_TOOLS[name];
         return [
