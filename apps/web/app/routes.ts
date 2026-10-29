@@ -58,7 +58,6 @@ export default [
   route('flows/:flowId/action', 'routes/flow-action.ts'),
   route('catalog/action', 'routes/catalog-action.ts'),
   route('catalog/cards', 'routes/catalog-cards.ts'),
-  route('orders/:orderId/action', 'routes/order-action.ts'),
   route('orders/:orderId/records', 'routes/order-records.ts'),
   route('customers/:customerId/tax-certificates/:certificateId', 'routes/tax-certificate-file.ts'),
   route('account/passkeys', 'routes/account-passkeys.ts'),

@@ -50,7 +50,8 @@ import { assess, resolveImages } from '../clef';
 import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
-import { previewSubmit, runSubmit } from './carts';
+import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
+import { previewRestart, previewStart, runRestart, runStart, type StartInput } from './orders';
 
 export class Refused extends Error {}
 
@@ -486,6 +487,9 @@ export type ActionInput = {
   submit_cart: { cartId: string; cartVersion?: number };
   publish_flow: { flowId: string };
   run_stock_review: Record<string, never>;
+  start_order: StartInput;
+  restart_order: { orderId: string };
+  cancel_cart: { cartId: string };
 };
 export type ActionTool = keyof ActionInput;
 
@@ -625,6 +629,19 @@ export async function previewAction<T extends ActionTool>(
       }
       case 'submit_cart':
         return await previewSubmit(env, p, input as ActionInput['submit_cart']);
+      case 'cancel_cart':
+        return await previewCancelCart(
+          env,
+          (input as ActionInput['cancel_cart']).cartId,
+          roleBlock,
+        );
+      case 'start_order':
+        return await previewStart(env, input as ActionInput['start_order'], roleBlock);
+      case 'restart_order': {
+        const { id } = await loadOrder(env, (input as ActionInput['restart_order']).orderId);
+        return await previewRestart(env, id, roleBlock);
+      }
+
       case 'publish_flow': {
         const i = input as ActionInput['publish_flow'];
         const { row, flow } = await loadFlow(env, i.flowId);
@@ -691,7 +708,9 @@ export async function runAction<T extends ActionTool>(
   confirmed?: Confirmed,
   /** A page's own button made the call (`act`), not a model. */
   direct?: boolean,
-) {
+  /** What the confirm was for, unique to it: an order it starts is started once for it. */
+  key?: string,
+): Promise<Record<string, unknown>> {
   requireRole(p, tool);
   const preview = await previewAction(env, p, tool, input);
   if (preview.blocked) throw new Refused(preview.blocked);
@@ -788,6 +807,15 @@ export async function runAction<T extends ActionTool>(
     }
     case 'submit_cart':
       return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
+    case 'cancel_cart':
+      return runCancelCart(env, p, (input as ActionInput['cancel_cart']).cartId, trail);
+    case 'start_order':
+      return runStart(env, p, input as ActionInput['start_order'], key, trail);
+    case 'restart_order': {
+      const { id } = await loadOrder(env, (input as ActionInput['restart_order']).orderId);
+      return runRestart(env, p, id, key, trail);
+    }
+
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);

@@ -7,8 +7,8 @@ import {
   ORDER_CHANNELS,
   ORDER_MODEL_LABELS,
   type OrderChannel,
-  type OrderInput,
   type OrderModel,
+  SCENARIOS,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@orderloop/ui/field';
@@ -18,18 +18,16 @@ import { Kbd } from '@orderloop/ui/kbd';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
-import { useMemo, useRef, useState } from 'react';
-import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Form, Link, useActionData, useLoaderData, useNavigate, useNavigation } from 'react-router';
 import { Body, PageHeader, Section } from '~/components/page';
-import { audit } from '~/lib/audit.server';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
-import { engine } from '~/lib/env.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { count, humanize, plural } from '~/lib/format';
 import { addOne, describeIssues, parseLines, summarizeFlow } from '~/lib/new-order';
 import { commerceData, currencies, demoAvailable, publishedFlowGraphs } from '~/lib/orders.server';
 import { nodeRegistry } from '~/lib/plugins.server';
-import { SCENARIOS } from '~/lib/scenarios';
 import type { Route } from './+types/order-new';
 
 export const meta = () => [{ title: 'New order · OrderLoop' }];
@@ -63,7 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 type FieldName = 'flowId' | 'customerId' | 'contactEmail' | 'locationId' | 'currency' | 'lines';
-type ActionResult = { error: string; field?: FieldName };
+type ActionResult = { error: string; field?: FieldName; start?: never };
 
 const fail = (error: string, field?: FieldName): ActionResult => ({ error, field });
 
@@ -77,7 +75,7 @@ const methodOf = (v: FormDataEntryValue | null) => FULFILLMENT_METHODS.find((m) 
 const AT_STORE: FulfillmentMethod[] = ['pickup', 'carry_out'];
 
 export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
+  const _me = await requireUser(request, 'operator');
   const f = await request.formData();
   const str = (k: string) => String(f.get(k) ?? '').trim();
 
@@ -117,35 +115,23 @@ export async function action({ request }: Route.ActionArgs) {
   if (!(await currencies()).some((c) => c.currency === currency))
     return fail(`There is no exchange rate for ${currency}.`, 'currency');
 
-  // Simulated failures are for demo scenarios only, which start from the scenarios page.
-  const input: OrderInput = {
-    model: flow.model as OrderModel,
-    channel: channelOf(f.get('channel')),
-    title: str('title') || undefined,
-    customerId: customerId || undefined,
-    contact: contactEmail
-      ? { email: contactEmail, name: str('contactName') || undefined }
-      : undefined,
-    fulfillment: method ? { method, ...(locationId ? { locationId } : {}) } : undefined,
-    currency,
-    lines: parsed.lines,
-    documentText: documentText || undefined,
-    meta: {},
+  // Checked here field by field; the page then starts it through the assistant (`start_order`),
+  // whose card says what the order does. Simulated failures are for demo scenarios only.
+  return {
+    start: {
+      flowId,
+      channel: channelOf(f.get('channel')),
+      title: str('title') || undefined,
+      customerId: customerId || undefined,
+      contact: contactEmail
+        ? { email: contactEmail, name: str('contactName') || undefined }
+        : undefined,
+      fulfillment: method ? { method, ...(locationId ? { locationId } : {}) } : undefined,
+      currency,
+      lines: parsed.lines,
+      documentText: documentText || undefined,
+    },
   };
-  try {
-    const { orderId } = await engine().startOrder({ flowId, input, startedBy: me.id });
-    await audit(request, 'order.started', {
-      actor: me,
-      target: orderId,
-      detail: { flowId, via: 'app' },
-    });
-    return redirect(`/orders/${orderId}`);
-  } catch (err) {
-    console.error('order start failed', err);
-    return fail(
-      'The order could not be started: the engine did not accept it. Your entries are kept; try again in a moment.',
-    );
-  }
 }
 
 export default function NewOrder() {
@@ -158,9 +144,32 @@ export default function NewOrder() {
     demo,
     from,
   } = useLoaderData<typeof loader>();
-  const data = useActionData<typeof action>() as ActionResult | undefined;
+  const answer = useActionData<typeof action>();
+  const data = answer && 'error' in answer ? (answer as ActionResult) : undefined;
   const nav = useNavigation();
-  const busy = nav.state !== 'idle';
+  // A checked form is started through the assistant: the person confirms on its card.
+  const { act } = useAssistant();
+  const navigate = useNavigate();
+  const [asking, setAsking] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const start = answer && 'start' in answer ? answer.start : undefined;
+  useEffect(() => {
+    if (!start) return;
+    let live = true;
+    setAsking(true);
+    setStartError(null);
+    act('start_order', start)
+      .then((r) => {
+        const orderId = 'output' in r ? (r.output as { orderId?: string })?.orderId : undefined;
+        if (live && orderId) navigate(`/orders/${orderId}`);
+      })
+      .catch((e: unknown) => live && setStartError(e instanceof Error ? e.message : String(e)))
+      .finally(() => live && setAsking(false));
+    return () => {
+      live = false;
+    };
+  }, [start]);
+  const busy = nav.state !== 'idle' || asking;
   const input = from?.input;
 
   const [flowId, setFlowId] = useState(from?.flowId ?? flows[0]?.id ?? '');
@@ -504,14 +513,14 @@ export default function NewOrder() {
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <Button type="submit" disabled={busy || !flow}>
-              {busy ? 'Starting…' : 'Start order'}
+              {asking ? 'Confirm it in the assistant' : busy ? 'Checking…' : 'Start order'}
             </Button>
             <span className="hidden items-center gap-1 text-muted-foreground text-xs fine:inline-flex">
               <Kbd>⌘</Kbd> or <Kbd>Ctrl</Kbd> + <Kbd>Enter</Kbd>
             </span>
-            {data?.error && !data.field ? (
+            {(data?.error && !data.field) || startError ? (
               <p className="w-full text-bad text-sm" role="alert">
-                {data.error}
+                {startError ?? data?.error}
               </p>
             ) : null}
           </div>

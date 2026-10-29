@@ -113,7 +113,9 @@ again. A locked cart can still be submitted.
 address and the shipping option its price charged, and the cart then links to it. The order is priced again by its flow and goes through
 whatever the flow does next, approvals included: a cart is not approved on its own. A cart can be
 submitted only once its price is current and shows no problems, and only once: after that, and
-after **Cancel cart**, nothing changes it.
+after **Cancel cart**, nothing changes it. On a staff cart, **Submit as order** and **Cancel cart**
+go through the [assistant](/guides/assistant/#edits-from-a-page)'s confirm card; an external cart's
+cancel asks on the page.
 
 Orders started from a cart have the **Manual** channel, and their external id is the cart's id.
 

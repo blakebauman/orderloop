@@ -1,4 +1,4 @@
-import { ORDER_MODEL_LABELS, ORDER_MODELS, type OrderModel } from '@orderloop/core';
+import { ORDER_MODEL_LABELS, ORDER_MODELS, type OrderModel, SCENARIOS } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import {
   Item,
@@ -9,14 +9,13 @@ import {
   ItemTitle,
 } from '@orderloop/ui/item';
 import { Play, TriangleAlert } from 'lucide-react';
-import { Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { Link, useLoaderData } from 'react-router';
 import { Body, PageHeader, Section } from '~/components/page';
+import { useStartOrder } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { ensureSeeded } from '~/lib/flows.server';
 import { plural } from '~/lib/format';
 import { demoAvailable, publishedFlows } from '~/lib/orders.server';
-import { SCENARIOS } from '~/lib/scenarios';
-import { startScenario } from '~/lib/scenarios.server';
 import type { Route } from './+types/order-scenarios';
 
 export const meta = () => [{ title: 'Demo scenarios · OrderLoop' }];
@@ -54,17 +53,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
-  await requireDemo();
-  return startScenario(request, me, String((await request.formData()).get('scenario') ?? ''));
-}
-
 export default function Scenarios() {
   const { scenarios } = useLoaderData<typeof loader>();
-  const data = useActionData<typeof action>();
-  const nav = useNavigation();
-  const running = nav.state !== 'idle' ? String(nav.formData?.get('scenario') ?? '') : '';
+  // A scenario starts through the assistant, as one of its tool calls, and opens its order.
+  const { start, busy: running, error } = useStartOrder();
   const groups = ORDER_MODELS.map((m) => ({
     model: m,
     items: scenarios.filter((s) => s.model === m),
@@ -118,9 +110,9 @@ export default function Scenarios() {
                             </span>
                           ) : null}
                         </p>
-                        {data?.id === s.id && data.error ? (
+                        {error?.key === s.id ? (
                           <p className="text-bad text-xs" role="alert">
-                            {data.error}
+                            {error.message}
                           </p>
                         ) : null}
                       </ItemContent>
@@ -128,19 +120,16 @@ export default function Scenarios() {
                         <Button asChild variant="ghost" size="sm" className="hit-area">
                           <Link to={`/orders/new?scenario=${s.id}`}>Edit first</Link>
                         </Button>
-                        <Form method="post">
-                          <input type="hidden" name="scenario" value={s.id} />
-                          <Button
-                            type="submit"
-                            size="sm"
-                            variant="outline"
-                            className="hit-area"
-                            disabled={!s.flow || !!running}
-                            aria-label={`Run ${s.label}`}
-                          >
-                            {running === s.id ? 'Starting…' : 'Run'}
-                          </Button>
-                        </Form>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="hit-area"
+                          disabled={!s.flow || !!running}
+                          aria-label={`Run ${s.label}`}
+                          onClick={() => void start(s.id, 'start_scenario', { scenarioId: s.id })}
+                        >
+                          {running === s.id ? 'Starting…' : 'Run'}
+                        </Button>
                       </ItemActions>
                     </li>
                   </Item>

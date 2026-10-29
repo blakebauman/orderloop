@@ -7,7 +7,7 @@
  */
 
 import type { OrderState } from './api';
-import { ASSISTANT_TOOLS, type AssistantTool, isWriteTool } from './assistant';
+import { ASSISTANT_TOOLS, type AssistantTool, isPageOnly, isWriteTool } from './assistant';
 import { ROLES, type Role } from './roles';
 import type { OrderStatus } from './types';
 
@@ -49,19 +49,21 @@ export const A2A_SKILLS: Record<
     examples: ['{ "skill": "place_order", "input": { "flowId": "flow_b2b", "input": { … } } }'],
   },
   ...(Object.fromEntries(
-    (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).map((name) => {
-      const t = ASSISTANT_TOOLS[name];
-      return [
-        name,
-        {
-          role: t.role,
-          name: t.title,
-          description: t.description,
-          tags: ['orders', isWriteTool(name) ? 'write' : 'read'],
-          examples: [`{ "skill": "${name}", "input": { … } }`],
-        },
-      ];
-    }),
+    (Object.keys(ASSISTANT_TOOLS) as AssistantTool[])
+      .filter((name) => !isPageOnly(name))
+      .map((name) => {
+        const t = ASSISTANT_TOOLS[name];
+        return [
+          name,
+          {
+            role: t.role,
+            name: t.title,
+            description: t.description,
+            tags: ['orders', isWriteTool(name) ? 'write' : 'read'],
+            examples: [`{ "skill": "${name}", "input": { … } }`],
+          },
+        ];
+      }),
   ) as Record<AssistantTool, (typeof A2A_SKILLS)['chat']>),
 };
 
