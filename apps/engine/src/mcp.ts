@@ -71,6 +71,7 @@ const OPEN_WORLD = new Set<AssistantTool>([
   'run_stock_review',
   'start_order',
   'restart_order',
+  'test_flow',
   'start_scenario',
   'assess_order',
 ]);

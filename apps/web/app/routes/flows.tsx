@@ -1,11 +1,8 @@
 import {
-  autoLayout,
   BUY_SIDE_MODELS,
   DEFAULT_TEMPLATE,
-  type Flow,
   ORDER_MODEL_LABELS,
   ORDER_MODELS,
-  type OrderChannel,
   type OrderModel,
   TEMPLATES,
 } from '@orderloop/core';
@@ -48,19 +45,20 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Form,
   Link,
-  redirect,
   useActionData,
   useLoaderData,
+  useNavigate,
   useNavigation,
+  useRevalidator,
   useSearchParams,
 } from 'react-router';
 import { Ago } from '~/components/ago';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader } from '~/components/page';
-import { audit } from '~/lib/audit.server';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { getFlow, listFlows, orderRoutes, saveFlow, setArchived } from '~/lib/flows.server';
+import { listFlows, orderRoutes } from '~/lib/flows.server';
 import { count } from '~/lib/format';
 import { runningByFlow } from '~/lib/orders.server';
 import { receives } from '~/lib/routing';
@@ -101,7 +99,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-const slug = (name: string) =>
+const _slug = (name: string) =>
   `${
     name
       .toLowerCase()
@@ -121,43 +119,12 @@ const nameFrom = (prompt: string) => {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 };
 
-type ActionResult = { error: string; field?: 'name' | 'prompt' | 'model'; flowId?: string };
+type ActionResult = { error: string; field?: 'name' | 'prompt' | 'model'; create?: never };
 
 export async function action({ request }: Route.ActionArgs) {
-  const me = await requireUser(request, 'operator');
+  const _me = await requireUser(request, 'operator');
   const f = await request.formData();
   const intent = String(f.get('intent') ?? '');
-
-  // Archive and restore: only drafts that were never published, so nothing can be running on them.
-  if (intent === 'archive' || intent === 'restore') {
-    const flowId = String(f.get('flowId') ?? '');
-    if (!(await setArchived(flowId, intent === 'archive')))
-      return {
-        error: 'Only a draft that was never published can be archived.',
-        flowId,
-      } satisfies ActionResult;
-    await audit(request, intent === 'archive' ? 'flow.archived' : 'flow.restored', {
-      actor: me,
-      target: flowId,
-      detail: { via: 'app' },
-    });
-    return null;
-  }
-
-  // Duplicate: the flow's current draft as a new, unpublished flow.
-  if (intent === 'duplicate') {
-    const src = await getFlow(String(f.get('flowId') ?? ''));
-    if (!src) return { error: 'That flow no longer exists.' } satisfies ActionResult;
-    const name = `${src.flow.name} (copy)`;
-    const id = slug(name);
-    await saveFlow({ ...src.flow, id, name });
-    await audit(request, 'flow.saved', {
-      actor: me,
-      target: id,
-      detail: { name, from: src.flow.id, via: 'app' },
-    });
-    return redirect(`/flows/${id}`);
-  }
 
   const model = ORDER_MODELS.find((m) => m === f.get('model'));
   if (!model) return { error: 'Choose a commerce model.', field: 'model' } satisfies ActionResult;
@@ -171,41 +138,15 @@ export async function action({ request }: Route.ActionArgs) {
     } satisfies ActionResult;
   if (!name) return { error: 'Give the flow a name.', field: 'name' } satisfies ActionResult;
 
-  let graph: Pick<Flow, 'nodes' | 'edges'>;
-  let description = '';
-  let channels: OrderChannel[] = [];
-  if (generate) {
-    const res = await engine().copilot({ prompt, model });
-    if (!res.graph.nodes.length)
-      return {
-        error: `The assistant could not draft that. ${res.explanation}`,
-        field: 'prompt',
-      } satisfies ActionResult;
-    graph = autoLayout(res.graph);
-    description = prompt.slice(0, 300);
-  } else if (f.get('from') === 'template') {
-    const t = TEMPLATES[DEFAULT_TEMPLATE[model]]();
-    graph = { nodes: t.nodes, edges: t.edges };
-    description = t.description;
-    channels = t.channels;
-  } else {
-    graph = {
-      nodes: [
-        {
-          id: 'start',
-          type: 'trigger.manual',
-          label: 'Start',
-          config: {},
-          position: { x: 56, y: 160 },
-        },
-      ],
-      edges: [],
-    };
-  }
-  const id = slug(name);
-  await saveFlow({ id, name, description, model, channels, ...graph });
-  await audit(request, 'flow.saved', { actor: me, target: id, detail: { name, via: 'app' } });
-  return redirect(`/flows/${id}`);
+  // Checked here; the page then creates it through the assistant (`create_flow`) and opens it.
+  return {
+    create: {
+      name,
+      model,
+      start: generate ? 'describe' : f.get('from') === 'template' ? 'template' : 'blank',
+      ...(generate ? { prompt } : {}),
+    },
+  };
 }
 
 const STARTS = [
@@ -235,16 +176,43 @@ type FlowRow = Awaited<ReturnType<typeof loader>>['flows'][number];
 export default function Flows() {
   const canOperate = useCan('operator');
   const { flows, templates, archived, archivedCount } = useLoaderData<typeof loader>();
-  const data = useActionData<typeof action>() as ActionResult | null | undefined;
+  const answer = useActionData<typeof action>();
   const nav = useNavigation();
+  // A checked form is created through the assistant, then opened in the editor.
+  const { act } = useAssistant();
+  const navigate = useNavigate();
+  const [making, setMaking] = useState(false);
+  const [refused, setRefused] = useState<ActionResult | null>(null);
+  const create = answer && 'create' in answer ? answer.create : undefined;
+  useEffect(() => {
+    if (!create) return;
+    let live = true;
+    setMaking(true);
+    setRefused(null);
+    act('create_flow', create)
+      .then((r) => {
+        const id = 'output' in r ? (r.output as { id?: string } | null)?.id : undefined;
+        if (live && id) navigate(`/flows/${id}`);
+      })
+      .catch(
+        (e: unknown) =>
+          live &&
+          setRefused({
+            error: e instanceof Error ? e.message : String(e),
+            ...(create.start === 'describe' ? { field: 'prompt' as const } : {}),
+          }),
+      )
+      .finally(() => live && setMaking(false));
+    return () => {
+      live = false;
+    };
+  }, [create]);
+  const data = refused ?? (answer && 'error' in answer ? (answer as ActionResult) : undefined);
   const [, setParams] = useSearchParams();
   const [start, setStart] = useState<Start>('template');
   const [model, setModel] = useState<OrderModel>('b2c');
   const [filter, setFilter] = useState('');
-  const creating =
-    nav.state !== 'idle' &&
-    nav.formMethod === 'POST' &&
-    !['archive', 'restore', 'duplicate'].includes(String(nav.formData?.get('intent') ?? ''));
+  const creating = (nav.state !== 'idle' && nav.formMethod === 'POST') || making;
   const hintId = useId();
   const nameId = useId();
   const modelId = useId();
@@ -252,7 +220,7 @@ export default function Flows() {
   const alertRef = useRef<HTMLParagraphElement>(null);
   // A new flow redirects to its editor; a refusal keeps the sheet open with what was typed.
   const sheet = useFormSheet(data ?? undefined, () => false);
-  const formError = sheet.result && !sheet.result.flowId ? sheet.result : null;
+  const formError = sheet.result ?? null;
   // After the submit settles (the button it disabled gives focus up), take focus to what went wrong.
   useEffect(() => {
     if (!formError) return;
@@ -494,12 +462,7 @@ export default function Flows() {
                         <CardContent>
                           <ul className="flex flex-col gap-2">
                             {g.items.map((f) => (
-                              <FlowItem
-                                key={f.id}
-                                f={f}
-                                canOperate={canOperate}
-                                error={data?.flowId === f.id ? data.error : undefined}
-                              />
+                              <FlowItem key={f.id} f={f} canOperate={canOperate} />
                             ))}
                           </ul>
                         </CardContent>
@@ -531,7 +494,27 @@ export default function Flows() {
  * link, stretched over the Item), state, description and what it receives and runs, and its actions
  * in the footer, above the link.
  */
-function FlowItem({ f, canOperate, error }: { f: FlowRow; canOperate: boolean; error?: string }) {
+function FlowItem({ f, canOperate }: { f: FlowRow; canOperate: boolean }) {
+  // Duplicating and archiving go through the assistant, as tool calls of their own.
+  const { act } = useAssistant();
+  const navigate = useNavigate();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (tool: 'duplicate_flow' | 'archive_flow', input: unknown) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act(tool, input);
+      const id = 'output' in r ? (r.output as { id?: string } | null)?.id : undefined;
+      if (tool === 'duplicate_flow' && id) navigate(`/flows/${id}`);
+      else revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const titleId = useId();
   const running = Object.entries(f.running).map(([v, n]) => [Number(v), n] as const);
   const total = running.reduce((s, [, n]) => s + n, 0);
@@ -625,33 +608,25 @@ function FlowItem({ f, canOperate, error }: { f: FlowRow; canOperate: boolean; e
         </ItemContent>
         {canOperate ? (
           <ItemFooter className="relative z-10 justify-start border-t pt-2">
-            <Form method="post">
-              <input type="hidden" name="flowId" value={f.id} />
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              aria-label={`Duplicate ${f.name}`}
+              onClick={() => void run('duplicate_flow', { flowId: f.id })}
+            >
+              Duplicate
+            </Button>
+            {!f.publishedVersion ? (
               <Button
-                type="submit"
-                name="intent"
-                value="duplicate"
                 size="xs"
                 variant="ghost"
-                aria-label={`Duplicate ${f.name}`}
+                disabled={busy}
+                aria-label={`${f.archivedAt ? 'Restore' : 'Archive'} ${f.name}`}
+                onClick={() => void run('archive_flow', { flowId: f.id, archived: !f.archivedAt })}
               >
-                Duplicate
+                {f.archivedAt ? 'Restore' : 'Archive'}
               </Button>
-            </Form>
-            {!f.publishedVersion ? (
-              <Form method="post">
-                <input type="hidden" name="flowId" value={f.id} />
-                <Button
-                  type="submit"
-                  name="intent"
-                  value={f.archivedAt ? 'restore' : 'archive'}
-                  size="xs"
-                  variant="ghost"
-                  aria-label={`${f.archivedAt ? 'Restore' : 'Archive'} ${f.name}`}
-                >
-                  {f.archivedAt ? 'Restore' : 'Archive'}
-                </Button>
-              </Form>
             ) : null}
           </ItemFooter>
         ) : null}

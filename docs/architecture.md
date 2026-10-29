@@ -226,6 +226,15 @@ for a day as `output-denied` with its ids only. A restart drops `meta.simulate`,
 external cart's buyer sends it back themselves, so there's no staff tool for that. The web route
 `orders/:orderId/action` is gone, since nothing posts to it.
 
+Flows are edited the same way (`apps/engine/src/assistant/flows.ts`):
+- The editor's Save is `save_flow_draft`, which is page only, since it overwrites the draft.
+- Publish and Test run save first, then ask on the `publish_flow` or `test_flow` card. `test_flow` publishes the saved draft when it differs from the live version, then starts a keyed test order.
+- The flows list's create, duplicate, archive and restore are `create_flow`, `duplicate_flow` and `archive_flow`, with no card.
+
+The `publish_flow` and `test_flow` previews carry `bound: { draft }`, a `fingerprintOf` of the draft's name, description, model, channels and graph. `heldToDraft` refuses a confirm whose draft changed since (`DRAFT_CHANGED`). New ids get an 8-character suffix and are never reused (`freshId`), because `saveDraft` is an upsert. `create_flow` with `describe` checks the assistant budget first. The audit trail of the no-confirm writes (`trailOf`) carries the connected app's grant and client, as `runAction`'s does.
+
+The web route `flows/:flowId/action` is gone, along with `saveFlow`, `publish`, `setArchived` and `parseFlow` in `flows.server.ts`.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.

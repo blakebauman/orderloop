@@ -22,7 +22,8 @@ starting point:
 
 The flow id is a slug of the name plus a short suffix. A new flow is a draft until you publish it,
 and it gets no inbound orders until something routes to it (see below); you can always start orders
-on it by hand. **Duplicate** on a flow's card copies its current draft into a new, unpublished flow,
+on it by hand. Creating a flow, **Duplicate**, **Archive** and **Restore** go through the assistant too, with no
+card, since none of them changes what runs. **Duplicate** on a flow's card copies its current draft into a new, unpublished flow,
 which is also how to start from a built-in flow other than your model's default.
 
 ## The flows list
@@ -65,8 +66,13 @@ lists them, and **Restore** brings one back.
   comes back to the editor as a proposal that shows what it adds, removes, edits and rewires;
   nothing changes until you accept it, and accepting is one undoable edit.
 
-**Save** stores the draft and returns the current validation errors and warnings. **Publish**
-asks for confirmation, then publishes the next version. **Test run** publishes too when the graph
+**Save** stores the draft and returns the current validation errors and warnings. **Publish** and
+**Test run** save the draft first, then ask on the [assistant](/guides/assistant/#edits-from-a-page)'s
+confirm card. For a publish, the card shows what changed since the live version. For a test run,
+it says whether the run publishes a new version first and which input it starts with. **Not now**
+on the card leaves the draft saved and nothing published. The card holds the draft it showed: if
+the draft is saved again before you confirm (in another tab, or by someone else), the confirm is
+refused and nothing is published. An archived flow must be restored before a test run. **Test run** publishes when the draft
 differs from the published version, then starts a sample order on it: the input of the first
 [dashboard scenario](/guides/templates/#scenarios) that uses this flow, else the first one for its
 model, else an empty `manual` order. A workspace without the demo data has no scenarios, so the

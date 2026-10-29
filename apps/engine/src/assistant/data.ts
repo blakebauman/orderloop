@@ -51,6 +51,7 @@ import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
 import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
+import { draftHash, heldToDraft, previewTestFlow, runTestFlow } from './flows';
 import { previewRestart, previewStart, runRestart, runStart, type StartInput } from './orders';
 
 export class Refused extends Error {}
@@ -490,6 +491,7 @@ export type ActionInput = {
   start_order: StartInput;
   restart_order: { orderId: string };
   cancel_cart: { cartId: string };
+  test_flow: { flowId: string };
 };
 export type ActionTool = keyof ActionInput;
 
@@ -629,6 +631,8 @@ export async function previewAction<T extends ActionTool>(
       }
       case 'submit_cart':
         return await previewSubmit(env, p, input as ActionInput['submit_cart']);
+      case 'test_flow':
+        return await previewTestFlow(env, (input as ActionInput['test_flow']).flowId, roleBlock);
       case 'cancel_cart':
         return await previewCancelCart(
           env,
@@ -654,6 +658,7 @@ export async function previewAction<T extends ActionTool>(
           : 'First version';
         const next = (row.publishedVersion ?? 0) + 1;
         return {
+          bound: { draft: await draftHash(flow) },
           title: `Publish ${row.name} v${next}`,
           href: `/flows/${row.id}`,
           consequences: [
@@ -809,6 +814,8 @@ export async function runAction<T extends ActionTool>(
       return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'cancel_cart':
       return runCancelCart(env, p, (input as ActionInput['cancel_cart']).cartId, trail);
+    case 'test_flow':
+      return runTestFlow(env, p, (input as ActionInput['test_flow']).flowId, key, trail, confirmed);
     case 'start_order':
       return runStart(env, p, input as ActionInput['start_order'], key, trail);
     case 'restart_order': {
@@ -819,6 +826,7 @@ export async function runAction<T extends ActionTool>(
     case 'publish_flow': {
       const i = input as ActionInput['publish_flow'];
       const { flow } = await loadFlow(env, i.flowId);
+      await heldToDraft(confirmed, flow);
       const version = await publishFlow(
         createDb(env.DB),
         { ...flow, nodes: flow.nodes, edges: flow.edges },

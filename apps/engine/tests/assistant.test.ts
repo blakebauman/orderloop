@@ -8,7 +8,7 @@ import {
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
-import { approvals, auditEvents, createDb, sessions, users } from '@orderloop/db';
+import { approvals, auditEvents, createDb, flows, sessions, users } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type AssistantAgent, answeredOnly, DIRECT, readContext } from '../src/assistant/agent';
@@ -861,6 +861,102 @@ describe('assistant socket', () => {
       success: false,
       error: 'That demo scenario isn’t available here.',
     });
+    panel.close();
+  });
+
+  it('edits flows from their pages: save, create, duplicate, archive, and a test run on its card', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    const op = await who('operator', 'flows@example.com');
+    const panel = await socket(op.id, op);
+    const run = async (tool: string, input: unknown) => {
+      const r = await panel.call('act', [tool, input]);
+      if (!r.success) throw new Error(r.error);
+      return r.result as { callId: string; output?: Record<string, unknown> };
+    };
+
+    const made = await run('create_flow', { name: 'Edited here', model: 'b2b', start: 'template' });
+    const flowId = made.output!.id as string;
+    expect(flowId).toMatch(/^edited-here-/);
+    const stored = await db().select().from(flows).where(eq(flows.id, flowId)).get();
+    const flow = JSON.parse(stored!.graphJson) as {
+      nodes: { id: string; label: string }[];
+      edges: unknown[];
+    };
+
+    // The editor's Save writes the draft as on screen; nothing else may.
+    const renamed = flow.nodes.map((n, i) => (i === 0 ? { ...n, label: 'Renamed start' } : n));
+    const saved = await run('save_flow_draft', {
+      flowId,
+      name: 'Edited here',
+      model: 'b2b',
+      nodes: renamed,
+      edges: flow.edges,
+    });
+    expect(saved.output).toMatchObject({ id: flowId, errors: [] });
+    const row = await db().select().from(flows).where(eq(flows.id, flowId)).get();
+    expect(row!.graphJson).toContain('Renamed start');
+    await expect(
+      runTool(
+        env,
+        strip(op),
+        'save_flow_draft',
+        { flowId, name: 'x', model: 'b2b', nodes: [], edges: [] },
+        { via: 'MCP' },
+      ),
+    ).rejects.toThrow('This runs only from its page.');
+
+    const copy = await run('duplicate_flow', { flowId });
+    expect(copy.output!.id).not.toBe(flowId);
+    await run('archive_flow', { flowId: copy.output!.id, archived: true });
+    expect(
+      (await db()
+        .select()
+        .from(flows)
+        .where(eq(flows.id, copy.output!.id as string))
+        .get())!.archivedAt,
+    ).not.toBeNull();
+
+    // A card holds the draft it showed: saved again since, the confirm publishes nothing.
+    const stale = await run('test_flow', { flowId });
+    await panel.call('preview', ['test_flow', { flowId }, stale.callId]);
+    await run('save_flow_draft', {
+      flowId,
+      name: 'Edited here',
+      model: 'b2b',
+      nodes: renamed.map((n, i) => (i === 0 ? { ...n, label: 'Renamed again' } : n)),
+      edges: flow.edges,
+    });
+    expect(await panel.call('resolve', [stale.callId, true])).toMatchObject({
+      success: false,
+      error: 'The draft changed since you confirmed; look at it again.',
+    });
+    expect(
+      (await db().select().from(flows).where(eq(flows.id, flowId)).get())!.publishedVersion,
+    ).toBeNull();
+
+    // A test run publishes the saved draft first, says so, and starts its order once.
+    const asked = await run('test_flow', { flowId });
+    const card = (await panel.call('preview', ['test_flow', { flowId }, asked.callId])).result as {
+      consequences: string[];
+      blocked?: string;
+    };
+    expect(card.blocked).toBeUndefined();
+    expect(card.consequences[0]).toMatch(/^Publishes the saved draft as v1 first/);
+    const tested = (await panel.call('resolve', [asked.callId, true])).result as {
+      output: { orderId: string; version: number };
+    };
+    expect(tested.output).toMatchObject({ version: 1, orderId: expect.stringMatching(/^ord_/) });
+    // Published now: it can't be archived, and the next test runs the live version.
+    await expect(run('archive_flow', { flowId, archived: true })).rejects.toThrow(
+      'Only a draft that was never published can be archived.',
+    );
+    expect((await previewAction(env, strip(op), 'test_flow', { flowId })).consequences[0]).toBe(
+      'Runs v1, the live version; nothing is published',
+    );
     panel.close();
   });
 
