@@ -87,12 +87,24 @@ export function Section({
         className,
       )}
     >
-      <CardHeader>
+      {/* On a phone a description beside the actions would wrap a word to a line: the actions go
+          under it instead. */}
+      <CardHeader className={cn(description && actions && 'max-sm:grid-cols-1!')}>
         <CardTitle className="section-title">
           <h2>{title}</h2>
         </CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
-        {actions ? <CardAction className="self-center">{actions}</CardAction> : null}
+        {actions ? (
+          <CardAction
+            className={cn(
+              'self-center',
+              description &&
+                'max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-auto max-sm:justify-self-start',
+            )}
+          >
+            {actions}
+          </CardAction>
+        ) : null}
       </CardHeader>
       {flush ? <div className="border-t">{children}</div> : <CardContent>{children}</CardContent>}
     </Card>
