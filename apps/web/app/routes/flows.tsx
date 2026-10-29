@@ -472,8 +472,9 @@ export default function Flows() {
                 <h2 id={`side-${s.side}`} className="caption mb-3 uppercase tracking-wide">
                   {s.side}
                 </h2>
-                {/* A card per order model: its template in the header, then its flows. */}
-                <div className="grid items-start gap-4 md:grid-cols-2">
+                {/* A card per order model: its template in the header, then its flows. Cards of
+                    different heights stack in two columns, as shadcn's preview cards do. */}
+                <div className="gap-4 md:columns-2 *:mb-4 *:break-inside-avoid">
                   {s.models.map((g) => (
                     <section key={g.model} aria-labelledby={`model-${g.model}`} className="min-w-0">
                       <Card className="gap-4 [--card-spacing:--spacing(5)]">

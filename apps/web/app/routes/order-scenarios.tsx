@@ -82,7 +82,7 @@ export default function Scenarios() {
         subtitle="Each one starts a real order on the demo data and takes a different path through its flow. Some fail on purpose, to show what happens then."
       />
       <Body>
-        <div className="flex max-w-[1000px] flex-col gap-4 lg:gap-6">
+        <div className="gap-6 xl:columns-2 *:mb-4 *:break-inside-avoid lg:*:mb-6">
           {groups.map((g) => (
             <Section
               key={g.model}
