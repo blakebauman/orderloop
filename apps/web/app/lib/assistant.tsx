@@ -88,6 +88,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const reader = useRef<PageContext | null>(null);
   const [proposal, setProposal] = useState<FlowProposal | null>(null);
   const [proposalToken, setProposalToken] = useState(0);
+  // The queue itself lives in a ref, so taking it empties it at once: an effect that runs twice
+  // (React's strict mode, a remount) never sends the same edit twice. `acts` re-renders the panel.
+  const queue = useRef<QueuedAct[]>([]);
   const [acts, setActs] = useState<QueuedAct[]>([]);
   const waiting = useRef(new Map<string, QueuedAct>());
 
@@ -138,12 +141,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       },
       act: (tool, input) =>
         new Promise<ActResult>((resolve, reject) => {
-          setActs((q) => [...q, { tool, input, resolve, reject }]);
+          queue.current = [...queue.current, { tool, input, resolve, reject }];
+          setActs(queue.current);
           if (ASSISTANT_TOOLS[tool].confirm) setOpen(true);
         }),
       acts,
       takeActs: () => {
-        const q = acts;
+        const q = queue.current;
+        queue.current = [];
         if (q.length) setActs([]);
         return q;
       },
