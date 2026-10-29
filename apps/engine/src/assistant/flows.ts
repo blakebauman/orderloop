@@ -271,10 +271,15 @@ export const draftHash = (f: Flow) =>
 
 export const DRAFT_CHANGED = 'The draft changed since you confirmed; look at it again.';
 
-/** Refuses a publish whose card showed another draft (`bound`, held by the panel and MCP). */
+/**
+ * Refuses a publish whose card showed another draft (`bound`, held by the panel and MCP), and one
+ * held to nothing (a card never shown, or shown differently since). Only a typed A2A call, which
+ * the caller composed itself, isn't held.
+ */
 export async function heldToDraft(confirmed: Confirmed | undefined, f: Flow) {
-  if (!confirmed || confirmed === 'direct' || !confirmed.bound) return;
-  if (confirmed.bound.draft !== (await draftHash(f))) throw new Refused(DRAFT_CHANGED);
+  if (confirmed === 'direct') return;
+  const held = confirmed?.bound?.draft;
+  if (typeof held !== 'string' || held !== (await draftHash(f))) throw new Refused(DRAFT_CHANGED);
 }
 
 export async function previewTestFlow(

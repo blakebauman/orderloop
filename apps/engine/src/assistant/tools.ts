@@ -23,12 +23,16 @@ import {
   type Principal,
 } from '@orderloop/core';
 import {
+  EDIT_SOURCES,
   fieldRefSchema,
   MAX_DRAFT_FIELDS,
   PRODUCT_DRAFT_INSTRUCTION_MAX,
+  type StageEdit,
+  TEXT_MAX,
 } from '@orderloop/core/product';
 import { z } from 'zod';
 import { changeCart, getCart, listCarts, openCart } from './carts';
+import { acceptProductDrafts, discardProductEdits, stageProductEdits } from './catalog';
 import {
   type ActionInput,
   type ActionTool,
@@ -71,6 +75,7 @@ const auditVia = (via: Channel): AuditVia =>
 
 const orderId = z.string().describe('The order id (ord_…) or its #reference, e.g. #k3x9q2');
 const cartId = z.string().max(100).describe('The cart id (cart_…)');
+const productKey = z.string().min(1).max(128).describe('The product key');
 
 /** Each tool's input. Built once per isolate. */
 /**
@@ -265,6 +270,39 @@ export const TOOL_INPUTS = {
     archived: z.boolean().describe('false restores it'),
   }),
   test_flow: z.object({ flowId: z.string().max(60) }),
+  stage_product_edits: z.object({
+    edits: z
+      .array(
+        z.discriminatedUnion('op', [
+          z.object({
+            key: productKey,
+            ref: fieldRefSchema,
+            source: z.enum(EDIT_SOURCES).optional(),
+            op: z.literal('set'),
+            value: z.string().max(TEXT_MAX).nullable(),
+          }),
+          z.object({
+            key: productKey,
+            ref: fieldRefSchema,
+            source: z.enum(EDIT_SOURCES).optional(),
+            op: z.literal('clear'),
+          }),
+        ]),
+      )
+      .min(1)
+      .max(500),
+  }),
+  accept_product_drafts: z.object({ key: productKey }),
+  discard_product_edits: z.object({
+    what: z.enum(['staged', 'drafts']),
+    items: z
+      .array(z.object({ key: productKey, ref: fieldRefSchema.optional() }))
+      .min(1)
+      .max(500),
+  }),
+  publish_catalog: z.object({
+    keys: z.array(productKey).min(1).max(500).describe('Product keys whose staged edits publish'),
+  }),
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export type ToolInput<T extends AssistantTool> = z.infer<(typeof TOOL_INPUTS)[T]>;
@@ -446,6 +484,10 @@ export const TOOL_OUTPUTS = {
   duplicate_flow: row({ done: z.string(), href: z.string(), id: z.string() }),
   archive_flow: row({ done: z.string(), href: z.string(), id: z.string() }),
   test_flow: actionOutput,
+  stage_product_edits: row({ done: z.string(), href: z.string(), results: z.array(row({})) }),
+  accept_product_drafts: row({ done: z.string(), href: z.string(), results: z.array(row({})) }),
+  discard_product_edits: row({ done: z.string(), href: z.string(), discarded: z.number() }),
+  publish_catalog: actionOutput.extend({ results: z.array(row({})).optional() }),
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export const ACTION_TOOLS: ActionTool[] = [
@@ -460,6 +502,7 @@ export const ACTION_TOOLS: ActionTool[] = [
   'restart_order',
   'cancel_cart',
   'test_flow',
+  'publish_catalog',
 ];
 
 export const isActionTool = (name: AssistantTool): name is ActionTool =>
@@ -537,6 +580,24 @@ export async function runTool<T extends AssistantTool>(
     case 'draft_plugin': {
       const i = input as ToolInput<'draft_plugin'>;
       return draftPlugin(env, p, i.instruction, { pluginId: i.pluginId, via: auditVia(opts.via) });
+    }
+    case 'stage_product_edits':
+      return stageProductEdits(
+        env,
+        p,
+        (input as ToolInput<'stage_product_edits'>).edits as StageEdit[],
+        trailOf(p, name, opts),
+      );
+    case 'accept_product_drafts':
+      return acceptProductDrafts(
+        env,
+        p,
+        (input as ToolInput<'accept_product_drafts'>).key,
+        trailOf(p, name, opts),
+      );
+    case 'discard_product_edits': {
+      const i = input as ToolInput<'discard_product_edits'>;
+      return discardProductEdits(env, p, i.what, i.items, trailOf(p, name, opts));
     }
     case 'save_flow_draft':
       return saveFlowDraft(env, p, input as ToolInput<'save_flow_draft'>, trailOf(p, name, opts));

@@ -388,14 +388,10 @@ function Toolbar({
   const draft = useCatalogAction();
   const accept = useCatalogAction();
   const pub = useCatalogAction();
-  const requestId = useRef<string | null>(null);
   const done = draft.answer?.ok ? draft.answer.draft : undefined;
   const published = pub.answer?.ok
     ? (pub.answer.results?.[0] as { status?: string; issues?: string[] })
     : undefined;
-  useEffect(() => {
-    if (pub.answer) requestId.current = null;
-  }, [pub.answer]);
   const note =
     refusal(draft.answer) ??
     refusal(accept.answer) ??
@@ -439,10 +435,7 @@ function Toolbar({
           size="sm"
           className="max-lg:hidden"
           disabled={pub.busy}
-          onClick={() => {
-            requestId.current ??= crypto.randomUUID();
-            pub.run({ intent: 'publish', keys: [productKey], requestId: requestId.current });
-          }}
+          onClick={() => pub.run({ intent: 'publish', keys: [productKey] })}
         >
           {pub.busy ? 'Publishing…' : `Publish ${staged} ${staged === 1 ? 'edit' : 'edits'}`}
         </Button>
