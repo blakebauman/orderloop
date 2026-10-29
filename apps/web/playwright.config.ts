@@ -25,7 +25,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // On CI, one test at a time and two retries: the runner is small, and the dev server's Workers
   // runtime (with the orders the tests start still running in it) has crashed under two at once.
-  retries: process.env.CI ? 2 : 0,
+  // Locally, in parallel, it still crashes now and then; `open()` rides that out on a page load,
+  // but a test caught mid-action (a form submit) fails, so it gets one retry, reported as flaky.
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
