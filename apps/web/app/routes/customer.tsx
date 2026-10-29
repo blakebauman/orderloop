@@ -322,13 +322,12 @@ function AddCertificate({
         </Field>
         <Field className="gap-2">
           <FieldLabel htmlFor="cert-file">The certificate (optional)</FieldLabel>
-          <input
+          <Input
             id="cert-file"
             name="file"
             type="file"
             accept="application/pdf,image/png,image/jpeg,image/webp"
             aria-describedby="cert-file-hint"
-            className="text-base"
           />
           <FieldDescription id="cert-file-hint">PDF or image, up to 10 MB.</FieldDescription>
         </Field>

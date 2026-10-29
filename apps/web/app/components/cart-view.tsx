@@ -1371,7 +1371,7 @@ function Attachments({
           <label htmlFor={`attach-${cartId}`} className="caption">
             Add a file (PDF, image, CSV, text, Excel or Word; up to 10 MB)
           </label>
-          <input
+          <Input
             ref={input}
             id={`attach-${cartId}`}
             type="file"
@@ -1381,7 +1381,6 @@ function Attachments({
               const f = e.currentTarget.files?.[0];
               if (f) void upload(f);
             }}
-            className="text-sm"
           />
           {uploading ? <p className="text-muted-foreground text-xs">Uploading…</p> : null}
           {error ? (
