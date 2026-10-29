@@ -2,23 +2,12 @@ import { env } from 'cloudflare:workers';
 import {
   type Flow,
   type FlowGraph,
-  flowGraphSchema,
-  ORDER_CHANNELS,
-  ORDER_MODELS,
   type OrderChannel,
   type OrderModel,
   parseOrderRoutes,
   TEMPLATES,
-  validateGraph,
 } from '@orderloop/core';
-import {
-  flows,
-  flowVersions,
-  getFlowVersionJson,
-  publishFlow,
-  saveDraft,
-  seedFlows,
-} from '@orderloop/db';
+import { flows, flowVersions, getFlowVersionJson, seedFlows } from '@orderloop/db';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { isDemo } from './demo.server';
 import { db } from './env.server';
@@ -122,19 +111,6 @@ export async function flowName(id: string) {
   return row?.name ?? null;
 }
 
-/**
- * Archives or restores a draft. Only a flow that was never published: no order can be on it, and no
- * route can start one. Returns false for anything else.
- */
-export async function setArchived(id: string, archived: boolean) {
-  const res = await db()
-    .update(flows)
-    .set({ archivedAt: archived ? Date.now() : null })
-    .where(and(eq(flows.id, id), isNull(flows.publishedVersion)))
-    .returning({ id: flows.id });
-  return res.length > 0;
-}
-
 export async function getFlow(id: string) {
   await ensureSeeded();
   const row = await db().select().from(flows).where(eq(flows.id, id)).get();
@@ -170,46 +146,12 @@ export async function getFlow(id: string) {
   };
 }
 
-export function parseFlow(input: unknown): Flow {
-  const o = input as Record<string, unknown>;
-  const graph = flowGraphSchema.parse({ nodes: o.nodes, edges: o.edges });
-  const model = ORDER_MODELS.includes(o.model as OrderModel) ? (o.model as OrderModel) : 'b2c';
-  const channels = Array.isArray(o.channels)
-    ? ORDER_CHANNELS.filter((c) => (o.channels as unknown[]).includes(c))
-    : [];
-  return {
-    id:
-      String(o.id ?? '')
-        .replace(/[^\w-]/g, '')
-        .slice(0, 60) || `flow-${Date.now().toString(36)}`,
-    name: String(o.name ?? 'Untitled flow').slice(0, 80),
-    description: String(o.description ?? '').slice(0, 500),
-    model,
-    channels,
-    ...graph,
-  };
-}
-
-export async function saveFlow(flow: Flow) {
-  await saveDraft(db(), flow);
-  return validateGraph(flow, await nodeRegistry());
-}
-
-/** Publishes a new version, recording who published it (as the audit trail names them). */
-export async function publish(flow: Flow, publishedBy: string) {
-  const issues = validateGraph(flow, await nodeRegistry());
-  if (issues.errors.length) return { ...issues, version: null };
-  const version = await publishFlow(db(), flow, Date.now(), { publishedBy });
-  return { ...issues, version };
-}
-
 export async function flowCount() {
   const r = await db().select({ n: sql<number>`count(*)` }).from(flows).get();
   return r?.n ?? 0;
 }
-
 /** Same nodes and edges, ignoring array order (the editor appends; the store keeps insertion order). */
-export function sameGraph(a: FlowGraph, b: FlowGraph) {
+function sameGraph(a: FlowGraph, b: FlowGraph) {
   const norm = (g: FlowGraph) =>
     JSON.stringify({
       nodes: [...g.nodes].sort((x, y) => x.id.localeCompare(y.id)),

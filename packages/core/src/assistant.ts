@@ -69,7 +69,12 @@ export type AssistantTool =
   | 'start_order'
   | 'restart_order'
   | 'start_scenario'
-  | 'cancel_cart';
+  | 'cancel_cart'
+  | 'save_flow_draft'
+  | 'create_flow'
+  | 'duplicate_flow'
+  | 'archive_flow'
+  | 'test_flow';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -277,6 +282,45 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Cancel a cart',
     description: 'Cancel an open or locked cart. Nothing is ordered, and the cart ends.',
   },
+  save_flow_draft: {
+    role: 'operator',
+    // The editor's Save, and only it (`PAGE_ONLY_TOOLS`): it overwrites the draft.
+    confirm: false,
+    label: 'Saved the draft',
+    title: 'Save a flow draft',
+    description: 'Save a flow’s draft as the editor shows it. Nothing runs until it is published.',
+  },
+  create_flow: {
+    role: 'operator',
+    confirm: false,
+    label: 'Created a flow',
+    title: 'Create a flow',
+    description:
+      'Create a new, unpublished flow for a commerce model: from its template, a blank start, or drafted from a description of the steps. Nothing runs until it is published.',
+  },
+  duplicate_flow: {
+    role: 'operator',
+    confirm: false,
+    label: 'Duplicated a flow',
+    title: 'Duplicate a flow',
+    description: 'Copy a flow’s current draft as a new, unpublished flow.',
+  },
+  archive_flow: {
+    role: 'operator',
+    confirm: false,
+    label: 'Archived a flow',
+    title: 'Archive or restore a flow',
+    description:
+      'Archive (or restore) a draft that was never published, so it leaves the flows list. Published flows can’t be archived.',
+  },
+  test_flow: {
+    role: 'operator',
+    confirm: true,
+    label: 'Test a flow',
+    title: 'Test a flow',
+    description:
+      'Run a test order on a flow: publishes its saved draft first when it changed since the live version, then starts an order with a demo input where the demo data is loaded.',
+  },
 };
 
 /**
@@ -297,6 +341,9 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
   'create_cart',
   'change_cart',
   'start_scenario',
+  'create_flow',
+  'duplicate_flow',
+  'archive_flow',
 ];
 
 /**
@@ -304,7 +351,7 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
  * scenario starts a real order at one press; that press is the person's own, so nothing else may
  * make it without a confirm.
  */
-export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = ['start_scenario'];
+export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = ['start_scenario', 'save_flow_draft'];
 
 export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);
 

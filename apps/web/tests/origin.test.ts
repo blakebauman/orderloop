@@ -3,7 +3,7 @@ import { bearerApiCall, crossOrigin, isLocalHost } from '../app/lib/origin';
 
 const ORIGIN = 'https://orderloop.app';
 const req = (method: string, headers: Record<string, string> = {}) =>
-  new Request(`${ORIGIN}/flows/flw_1/action`, { method, headers });
+  new Request(`${ORIGIN}/carts`, { method, headers });
 
 describe('crossOrigin', () => {
   it('lets reads through from anywhere', () => {

@@ -14,6 +14,7 @@ import {
   CART_STATUSES,
   cartOpSchema,
   FULFILLMENT_METHODS,
+  flowGraphSchema,
   isPageOnly,
   MAX_CART_TITLE,
   ORDER_CHANNELS,
@@ -46,7 +47,22 @@ import {
   requireRole,
   runAction,
 } from './data';
+import { createFlow, duplicateFlow, saveFlowDraft, setFlowArchived } from './flows';
 import { startScenario } from './orders';
+
+/** The audit trail of a write that needs no confirm: the channel, the tool, a page's button. */
+const trailOf = (p: Principal, tool: AssistantTool, opts: { via: Channel; direct?: boolean }) => {
+  // A connected app's grant and client, as `runAction` records them.
+  const app = p as { grant?: string; client?: string };
+  return {
+    via: AUDIT_CHANNEL[opts.via],
+    tool,
+    ...(opts.direct ? { direct: true } : {}),
+    ...(app.grant ? { grant: app.grant } : {}),
+    ...(app.client ? { client: app.client } : {}),
+  };
+};
+
 import { draftPlugin } from './plugin-draft';
 import { draftProductContent } from './product-draft';
 
@@ -226,6 +242,29 @@ export const TOOL_INPUTS = {
   restart_order: z.object({ orderId }),
   start_scenario: z.object({ scenarioId: z.string().max(60).describe('A demo scenario id') }),
   cancel_cart: z.object({ cartId }),
+  save_flow_draft: z.object({
+    flowId: z.string().max(60),
+    name: z.string().min(1).max(80),
+    description: z.string().max(500).optional(),
+    model: z.enum(ORDER_MODELS),
+    channels: z.array(z.enum(ORDER_CHANNELS)).max(20).optional(),
+    nodes: flowGraphSchema.shape.nodes.max(500),
+    edges: flowGraphSchema.shape.edges.max(2000),
+  }),
+  create_flow: z.object({
+    name: z.string().min(1).max(80),
+    model: z.enum(ORDER_MODELS),
+    start: z
+      .enum(['template', 'blank', 'describe'])
+      .describe('The model’s template, a blank start, or drafted from `prompt`'),
+    prompt: z.string().max(4000).optional().describe('The steps, for start: describe'),
+  }),
+  duplicate_flow: z.object({ flowId: z.string().max(60) }),
+  archive_flow: z.object({
+    flowId: z.string().max(60),
+    archived: z.boolean().describe('false restores it'),
+  }),
+  test_flow: z.object({ flowId: z.string().max(60) }),
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export type ToolInput<T extends AssistantTool> = z.infer<(typeof TOOL_INPUTS)[T]>;
@@ -396,6 +435,17 @@ export const TOOL_OUTPUTS = {
   restart_order: actionOutput,
   start_scenario: actionOutput,
   cancel_cart: actionOutput,
+  save_flow_draft: row({
+    done: z.string(),
+    href: z.string(),
+    id: z.string(),
+    errors: z.array(row({ message: z.string() })),
+    warnings: z.array(row({ message: z.string() })),
+  }),
+  create_flow: row({ done: z.string(), href: z.string(), id: z.string() }),
+  duplicate_flow: row({ done: z.string(), href: z.string(), id: z.string() }),
+  archive_flow: row({ done: z.string(), href: z.string(), id: z.string() }),
+  test_flow: actionOutput,
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export const ACTION_TOOLS: ActionTool[] = [
@@ -409,6 +459,7 @@ export const ACTION_TOOLS: ActionTool[] = [
   'start_order',
   'restart_order',
   'cancel_cart',
+  'test_flow',
 ];
 
 export const isActionTool = (name: AssistantTool): name is ActionTool =>
@@ -487,12 +538,28 @@ export async function runTool<T extends AssistantTool>(
       const i = input as ToolInput<'draft_plugin'>;
       return draftPlugin(env, p, i.instruction, { pluginId: i.pluginId, via: auditVia(opts.via) });
     }
+    case 'save_flow_draft':
+      return saveFlowDraft(env, p, input as ToolInput<'save_flow_draft'>, trailOf(p, name, opts));
+    case 'create_flow':
+      return createFlow(env, p, input as ToolInput<'create_flow'>, trailOf(p, name, opts));
+    case 'duplicate_flow':
+      return duplicateFlow(
+        env,
+        p,
+        (input as ToolInput<'duplicate_flow'>).flowId,
+        trailOf(p, name, opts),
+      );
+    case 'archive_flow': {
+      const i = input as ToolInput<'archive_flow'>;
+      return setFlowArchived(env, p, i.flowId, i.archived, trailOf(p, name, opts));
+    }
     case 'start_scenario':
-      return startScenario(env, p, (input as ToolInput<'start_scenario'>).scenarioId, {
-        via: AUDIT_CHANNEL[opts.via],
-        tool: 'start_scenario',
-        ...(opts.direct ? { direct: true } : {}),
-      });
+      return startScenario(
+        env,
+        p,
+        (input as ToolInput<'start_scenario'>).scenarioId,
+        trailOf(p, name, opts),
+      );
     case 'draft_product_content': {
       const { key, ...request } = input as ToolInput<'draft_product_content'>;
       return draftProductContent(env, p, key, request, auditVia(opts.via));

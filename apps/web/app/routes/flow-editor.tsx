@@ -37,7 +37,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { data, Link, useBlocker, useFetcher, useLoaderData, useNavigate } from 'react-router';
+import { data, Link, useBlocker, useLoaderData, useNavigate } from 'react-router';
 import { Confirm } from '~/components/confirm';
 import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
@@ -62,14 +62,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!found) throw data('Flow not found', { status: 404 });
   return found;
 }
-
-type ActionResult = {
-  error?: string;
-  saved?: boolean;
-  version?: number | null;
-  orderId?: string;
-  errors?: { nodeId?: string; message: string }[];
-};
 
 export default function FlowEditor() {
   const canOperate = useCan('operator');
@@ -120,12 +112,13 @@ export default function FlowEditor() {
   const [published, setPublished] = useState(loaded.publishedVersion);
   // The graph as last published, to know whether Publish would change anything.
   const [publishedGraph, setPublishedGraph] = useState<FlowGraph | null>(loaded.publishedGraph);
-  // Publishing (directly or as part of a test run) always passes through one confirmation.
-  const [confirm, setConfirm] = useState<null | 'publish' | 'test'>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [proposal, setProposal] = useState<CopilotResult | null>(null);
 
-  const save = useFetcher<ActionResult>();
+  // Save, publish and test go through the assistant. Saving writes the draft at once; publishing
+  // and a test run save first, then stop at the assistant's card, which says what they do.
+  const { act } = useAssistant();
+  const [working, setWorking] = useState<null | 'save' | 'publish' | 'test'>(null);
 
   const dirty = JSON.stringify(flow) !== baseline;
   const nodes = useNodes();
@@ -145,37 +138,45 @@ export default function FlowEditor() {
   );
 
   const submit = useCallback(
-    (intent: 'save' | 'publish' | 'test') => {
-      save.submit(JSON.stringify({ intent, flow }), {
-        method: 'post',
-        action: `/flows/${flow.id}/action`,
-        encType: 'application/json',
-      });
-    },
-    [flow, save],
-  );
-
-  // Handle save / publish / test results.
-  // React to new results only.
-  useEffect(() => {
-    const d = save.data;
-    if (!d || save.state !== 'idle') return;
-    if (d.error) setNotice({ tone: 'err', text: d.error });
-    else if (d.version === null)
-      setNotice({
-        tone: 'err',
-        text: `Not published: ${d.errors?.[0]?.message ?? 'fix the errors first'}`,
-      });
-    else {
-      setBaseline(JSON.stringify(flow));
-      if (d.version) {
-        setPublished(d.version);
-        setPublishedGraph({ nodes: flow.nodes, edges: flow.edges });
+    async (intent: 'save' | 'publish' | 'test') => {
+      const f = flowRef.current;
+      setWorking(intent);
+      setNotice(null);
+      try {
+        await act('save_flow_draft', {
+          flowId: f.id,
+          name: f.name,
+          description: f.description,
+          model: f.model,
+          channels: f.channels,
+          nodes: f.nodes,
+          edges: f.edges,
+        });
+        setBaseline(JSON.stringify(f));
+        if (intent === 'save') {
+          setNotice({ tone: 'ok', text: 'Draft saved' });
+          return;
+        }
+        const r = await act(intent === 'publish' ? 'publish_flow' : 'test_flow', { flowId: f.id });
+        if ('declined' in r) {
+          setNotice({ tone: 'warn', text: 'Draft saved; nothing was published.' });
+          return;
+        }
+        const out = (r.output ?? {}) as { version?: number; orderId?: string };
+        if (out.version) {
+          setPublished(out.version);
+          setPublishedGraph({ nodes: f.nodes, edges: f.edges });
+        }
+        if (out.orderId) navigate(`/orders/${out.orderId}`);
+        else setNotice({ tone: 'ok', text: `Published v${out.version}` });
+      } catch (err) {
+        setNotice({ tone: 'err', text: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setWorking(null);
       }
-      setNotice({ tone: 'ok', text: d.version ? `Published v${d.version}` : 'Draft saved' });
-      if (d.orderId) navigate(`/orders/${d.orderId}`);
-    }
-  }, [save.data, save.state]);
+    },
+    [act, navigate],
+  );
 
   // The assistant drafts changes against the graph on screen, unsaved edits included, and hands
   // its proposal back here, where applying it is one undoable edit.
@@ -210,7 +211,7 @@ export default function FlowEditor() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === 's') {
         e.preventDefault();
-        submit('save');
+        void submit('save');
       }
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select');
       if (mod && e.key.toLowerCase() === 'z' && !typing) {
@@ -427,16 +428,16 @@ export default function FlowEditor() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={save.state !== 'idle'}
-                onClick={() => submit('save')}
+                disabled={!!working}
+                onClick={() => void submit('save')}
               >
                 <Save /> Save
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={save.state !== 'idle' || issues.errors.length > 0}
-                onClick={() => (unpublished ? setConfirm('test') : submit('test'))}
+                disabled={!!working || issues.errors.length > 0}
+                onClick={() => void submit('test')}
                 title={
                   unpublished
                     ? 'Publishes your changes as a new version, then starts a sample order on it'
@@ -459,8 +460,8 @@ export default function FlowEditor() {
               >
                 <Button
                   size="sm"
-                  disabled={save.state !== 'idle' || issues.errors.length > 0 || !unpublished}
-                  onClick={() => setConfirm('publish')}
+                  disabled={!!working || issues.errors.length > 0 || !unpublished}
+                  onClick={() => void submit('publish')}
                   aria-describedby={publishStatusId}
                 >
                   <Rocket /> Publish
@@ -484,37 +485,6 @@ export default function FlowEditor() {
         >
           <Button size="sm" variant="outline" onClick={() => blocker.proceed?.()}>
             Leave without saving
-          </Button>
-        </Confirm>
-      ) : null}
-
-      {/* Focus lands on the safe choice; publishing takes a deliberate tap, click or Tab. */}
-      {confirm ? (
-        <Confirm
-          message={
-            confirm === 'test'
-              ? `A test run publishes v${(published ?? 0) + 1} first.`
-              : `Publish v${(published ?? 0) + 1}?`
-          }
-          note={`${
-            publishedGraph
-              ? `${changes.summary} since v${published}. `
-              : 'This is the first version. '
-          }New ${ORDER_MODEL_LABELS[flow.model]} orders will run it; orders already running keep their version.`}
-          cancelLabel="Not yet"
-          onCancel={() => setConfirm(null)}
-          className="border-b bg-muted/60 px-5 py-2.5"
-        >
-          <Button
-            size="sm"
-            onClick={() => {
-              setConfirm(null);
-              submit(confirm);
-            }}
-          >
-            {confirm === 'test'
-              ? `Publish v${(published ?? 0) + 1} and test`
-              : `Publish v${(published ?? 0) + 1}`}
           </Button>
         </Confirm>
       ) : null}
