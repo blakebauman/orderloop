@@ -5,7 +5,7 @@
  */
 
 import { BASE_CURRENCY, type FlowNode, type OrderState, toBase } from '@orderloop/core';
-import { money, orderRef, until } from './format';
+import { clock, money, orderRef, until } from './format';
 
 /** Time a decision needs to reach the order before its step times out. */
 export const SEND_MS = 1500;
@@ -235,12 +235,7 @@ export function deadlineWords(deadline: number, now: number, timeZone?: string):
   if (left < 60 * 60_000) return { kind: 'in', when: until(lock, now) };
   const day = (ms: number) =>
     new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeZone }).format(ms);
-  const time = new Intl.DateTimeFormat('en-US', {
-    ...(day(lock) === day(now) ? {} : { weekday: 'short' }),
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone,
-  }).format(lock);
+  const time = clock(lock, timeZone, day(lock) !== day(now));
   return { kind: 'at', when: timeZone === 'UTC' ? `${time} UTC` : time };
 }
 
