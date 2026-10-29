@@ -662,6 +662,28 @@
   }
 }
 
+/* Syntax colour in a code block (Shiki's CSS-variables theme, lib/highlighter.tsx). Code only, kept
+   off the status hues so a token never reads as succeeded, waiting or failed: keywords take the link
+   blue, strings a teal, literals an indigo, and comments and punctuation recede. */
+[data-slot="code-block"] {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: transparent;
+  --shiki-token-keyword: var(--link);
+  --shiki-token-link: var(--link);
+  --shiki-token-string: oklch(0.48 0.09 200);
+  --shiki-token-string-expression: oklch(0.48 0.09 200);
+  --shiki-token-constant: oklch(0.47 0.13 280);
+  --shiki-token-function: var(--foreground);
+  --shiki-token-parameter: var(--foreground);
+  --shiki-token-comment: var(--muted-foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+}
+:root[data-theme="dark"] [data-slot="code-block"] {
+  --shiki-token-string: oklch(0.79 0.08 200);
+  --shiki-token-string-expression: oklch(0.79 0.08 200);
+  --shiki-token-constant: oklch(0.77 0.1 280);
+}
+
 /* A confirm card arrives with the shared rise, so a prepared action is noticed without a modal. */
 .ol-confirm {
   animation: var(--animate-arrive);

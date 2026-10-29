@@ -63,6 +63,7 @@ import {
   useSearchParams,
 } from 'react-router';
 import { Ago } from '~/components/ago';
+import { Code } from '~/components/code';
 import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
@@ -1260,9 +1261,7 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
             Flow variables (for debugging)
           </summary>
           <CardContent className="pb-(--card-spacing)">
-            <pre className="overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs">
-              {JSON.stringify(state.vars, null, 2)}
-            </pre>
+            <Code value={JSON.stringify(state.vars, null, 2)} language="json" />
           </CardContent>
         </details>
       </Card>

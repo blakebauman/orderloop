@@ -9,6 +9,7 @@ import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Switch } from '@orderloop/ui/switch';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useEffect, useState } from 'react';
+import { Code } from '~/components/code';
 import { plainSummary, statusLabel } from '~/lib/format';
 import { useNodes } from '~/lib/nodes';
 import { CATEGORY_COLOR, NodeIcon } from './node-icon';
@@ -162,9 +163,12 @@ export function Inspector({
           ) : null}
           {run.error ? <div className="mt-1 text-bad text-sm">{run.error}</div> : null}
           {run.output !== undefined ? (
-            <pre className="mt-2 max-h-56 overflow-auto rounded bg-background/60 p-2 font-mono text-xs">
-              {JSON.stringify(run.output, null, 2)}
-            </pre>
+            <Code
+              value={JSON.stringify(run.output, null, 2)}
+              language="json"
+              className="mt-2"
+              contentClassName="max-h-56"
+            />
           ) : null}
         </div>
       ) : null}
