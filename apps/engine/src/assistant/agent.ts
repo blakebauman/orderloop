@@ -28,6 +28,7 @@ import type { Connection, ConnectionContext } from 'agents';
 import { callable, getCurrentAgent } from 'agents';
 import {
   convertToModelMessages,
+  createUIMessageStreamResponse,
   pruneMessages,
   stepCountIs,
   streamText,
@@ -38,6 +39,7 @@ import {
 import type { z } from 'zod';
 import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
 import { assistantBudgetSpent, finishTurn } from '../usage';
+import { answerStream } from './answer';
 import {
   type ActionInput,
   type ActionTool,
@@ -333,7 +335,7 @@ export class AssistantAgent extends AIChatAgent<Env> {
   }
 
   override async onChatMessage(
-    onFinish: Parameters<AIChatAgent<Env>['onChatMessage']>[0],
+    _onFinish: Parameters<AIChatAgent<Env>['onChatMessage']>[0],
     options?: { abortSignal?: AbortSignal; body?: Record<string, unknown> },
   ) {
     let p: Principal;
@@ -367,36 +369,47 @@ export class AssistantAgent extends AIChatAgent<Env> {
           ...('reason' in route ? { reason: route.reason } : { tool: route.tool, yes: route.yes }),
         }),
       );
-    const result = streamText({
-      // One conversation per person: the agent is named for them.
-      model: routed
-        ? heuristicModel(context)
-        : await assistantModel(this.env, context, used, {
-            surface: 'panel',
-            principalId: p.id,
-            conversation: this.name,
-          }),
-      system: systemPrompt(p, context),
-      messages: pruneMessages({
+    // One conversation per person: the agent is named for them.
+    const model = routed
+      ? heuristicModel(context)
+      : await assistantModel(this.env, context, used, {
+          surface: 'panel',
+          principalId: p.id,
+          conversation: this.name,
+        });
+    // One usage record for the turn, however many tries it took (answer.ts).
+    let tokens = 0;
+    let finished = false;
+    const stream = answerStream(
+      (messages, steps) =>
+        streamText({
+          model,
+          system: systemPrompt(p, context),
+          messages,
+          tools,
+          stopWhen: stepCountIs(steps),
+          temperature: 0.2,
+          abortSignal: options?.abortSignal,
+          onFinish: (event) => {
+            tokens += event.totalUsage.totalTokens ?? 0;
+            finished = true;
+          },
+        }),
+      pruneMessages({
         messages: await convertToModelMessages(answeredOnly(this.messages)),
         reasoning: 'before-last-message',
         toolCalls: 'before-last-2-messages',
       }),
-      tools,
-      stopWhen: stepCountIs(6),
-      temperature: 0.2,
-      abortSignal: options?.abortSignal,
-      onFinish: async (event) => {
-        await finishTurn(this.env, p, used, event.totalUsage.totalTokens, started);
-        return onFinish(event as never);
+      {
+        steps: 6,
+        metadata: () => ({ source: routed ? 'decision' : used.source, at: Date.now() }),
+        signal: options?.abortSignal,
+        onDone: async () => {
+          if (finished) await finishTurn(this.env, p, used, tokens, started);
+        },
       },
-    });
-    return result.toUIMessageStreamResponse({
-      messageMetadata: ({ part }) =>
-        part.type === 'finish'
-          ? { source: routed ? 'decision' : used.source, at: Date.now() }
-          : undefined,
-    });
+    );
+    return createUIMessageStreamResponse({ stream });
   }
 
   /**
