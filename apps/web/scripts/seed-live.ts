@@ -10,7 +10,7 @@
  *   pnpm db:seed:live [http://localhost:5173]
  */
 
-import { SCENARIOS } from '../app/lib/scenarios';
+import { SCENARIOS } from '@orderloop/core';
 import { failWith, readLocalLogin } from './seed-lib';
 
 const fail: (message: string) => never = failWith('seed-live');

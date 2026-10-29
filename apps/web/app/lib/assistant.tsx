@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useNavigate } from 'react-router';
 
 /** The page's own context, read when a message is sent so it carries the latest unsaved graph. */
 type PageContext = () => AssistantContext;
@@ -217,4 +218,29 @@ export function contextLabel(c: AssistantContext): string {
   if (c.kind === 'order') return c.label;
   if (c.kind === 'flow') return c.label;
   return 'Everything';
+}
+
+/**
+ * Starts an order through the assistant and opens it: `key` names what was pressed, so a list can
+ * say which row is starting and which one failed.
+ */
+export function useStartOrder() {
+  const { act } = useAssistant();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<{ key: string; message: string } | null>(null);
+  const start = async (key: string, tool: AssistantTool, input: unknown) => {
+    setBusy(key);
+    setError(null);
+    try {
+      const r = await act(tool, input);
+      const orderId = 'output' in r ? (r.output as { orderId?: string } | null)?.orderId : null;
+      if (orderId) navigate(`/orders/${orderId}`);
+    } catch (e) {
+      setError({ key, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return { start, busy, error };
 }

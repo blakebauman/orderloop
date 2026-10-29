@@ -214,6 +214,18 @@ What is persisted is cut to what the line needs:
 The page still gets the full result. `runTool(…, { direct: true })` adds `direct: true` to the
 audit trail. `answeredOnly` leaves a direct card that is still waiting out of what the model reads.
 
+Orders start the same way: `start_order` (New order checks its form, then hands the parsed call to
+`act`), `restart_order` and `start_scenario` (no confirm, demo data only, page only) live in
+`apps/engine/src/assistant/orders.ts`. Each start goes through `startOrderOnce` keyed
+`assistant:<principal>:<key>`, where the key is the direct call id, so a retried answer replays
+the order instead of starting another. An answered card keeps only its `…Id` input fields. `pruneShown` drops a direct card left unanswered
+for a day as `output-denied` with its ids only. A restart drops `meta.simulate`, `ucp`, `cart` and
+`plugin`. `PAGE_ONLY_TOOLS` (`start_scenario`) are left out of `tools()`, MCP and `A2A_SKILLS`, and
+`runTool` refuses them without `direct`. `assistant:` is a reserved order-key prefix.
+`SCENARIOS` moved to core so the engine runs them. `cancel_cart` covers staff carts only. An
+external cart's buyer sends it back themselves, so there's no staff tool for that. The web route
+`orders/:orderId/action` is gone, since nothing posts to it.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.

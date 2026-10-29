@@ -65,7 +65,11 @@ export type AssistantTool =
   | 'cancel_order'
   | 'submit_cart'
   | 'publish_flow'
-  | 'run_stock_review';
+  | 'run_stock_review'
+  | 'start_order'
+  | 'restart_order'
+  | 'start_scenario'
+  | 'cancel_cart';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -241,6 +245,38 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Run the daily stock review now; it starts reorders for SKUs at or below their reorder point.',
   },
+  start_order: {
+    role: 'operator',
+    confirm: true,
+    label: 'Start an order',
+    title: 'Start an order',
+    description:
+      'Start a new order on a published flow: its lines (SKU and quantity), and optionally a customer or a guest contact, fulfilment (pickup and carry-out need a store), currency, title and document text for the flow to read. It runs the flow for real.',
+  },
+  restart_order: {
+    role: 'operator',
+    confirm: true,
+    label: 'Restart an order',
+    title: 'Restart an order',
+    description:
+      'Start a fresh order like an existing one: same customer, lines and fulfilment, on its flow’s current version. The old order stays as it is.',
+  },
+  start_scenario: {
+    role: 'operator',
+    // Fixed demo data, only where it is loaded, and only from its button (`PAGE_ONLY_TOOLS`).
+    confirm: false,
+    label: 'Run a demo scenario',
+    title: 'Run a demo scenario',
+    description:
+      'Start one of the workspace’s demo scenario orders by its id. Only where the demo data is loaded.',
+  },
+  cancel_cart: {
+    role: 'operator',
+    confirm: true,
+    label: 'Cancel a cart',
+    title: 'Cancel a cart',
+    description: 'Cancel an open or locked cart. Nothing is ordered, and the cart ends.',
+  },
 };
 
 /**
@@ -260,7 +296,17 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
   'draft_product_content',
   'create_cart',
   'change_cart',
+  'start_scenario',
 ];
+
+/**
+ * Tools only a page's own button calls (`act`): never offered to the model, MCP or A2A. A demo
+ * scenario starts a real order at one press; that press is the person's own, so nothing else may
+ * make it without a confirm.
+ */
+export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = ['start_scenario'];
+
+export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);
 
 /** Whether a tool changes anything: an action, or a write that needs no confirm. */
 export const isWriteTool = (name: AssistantTool) =>

@@ -1,4 +1,4 @@
-import type { OrderInput } from '@orderloop/core';
+import type { OrderInput } from './order-schemas';
 
 /** One-click demo orders. Each exercises a different path through a seeded flow. */
 export type Scenario = {
