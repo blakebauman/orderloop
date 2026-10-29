@@ -1,4 +1,5 @@
 import { isRole, ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
+import { Alert, AlertDescription, AlertTitle } from '@orderloop/ui/alert';
 import { Button } from '@orderloop/ui/button';
 import {
   DropdownMenu,
@@ -462,13 +463,16 @@ export default function Team() {
       <div className="mx-auto grid max-w-page items-start gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-6">
           {secret ? (
-            <div
+            <Alert
               ref={secretRef}
               tabIndex={-1}
-              className="rounded-2xl border border-wait/40 bg-wait/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              variant="warning"
+              role="note"
+              className="outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
-              <p className="font-medium">{secret.label}</p>
-              <p className="mt-0.5 max-w-measure text-muted-foreground text-xs">
+              <KeyRound aria-hidden="true" />
+              <AlertTitle>{secret.label}</AlertTitle>
+              <AlertDescription className="max-w-measure">
                 {secret.kind === 'password' ? (
                   <>
                     Send it to them privately, with the sign-in page{' '}
@@ -478,14 +482,14 @@ export default function Team() {
                 ) : (
                   'Copy it now. It is shown once and stored only as a hash.'
                 )}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              </AlertDescription>
+              <div className="col-start-2 mt-2 flex flex-wrap items-center gap-2">
                 <code className="min-w-0 flex-1 select-all break-all rounded-sm bg-card px-2 py-1.5 font-mono text-sm">
                   {secret.value}
                 </code>
                 <CopyButton text={secret.value} />
               </div>
-            </div>
+            </Alert>
           ) : null}
           {/* A sheet's refusal shows in the sheet, under its fields. */}
           {error && !addPerson.open && !addToken.open ? (

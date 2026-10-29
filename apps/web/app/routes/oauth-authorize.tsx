@@ -11,6 +11,7 @@ import {
   type ConsentDescription,
 } from '@cloudflare/workers-oauth-provider';
 import { atLeast, isRole, ROLE_LABELS, ROLES, type Role } from '@orderloop/core';
+import { Alert, AlertDescription, AlertTitle } from '@orderloop/ui/alert';
 import { Button } from '@orderloop/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
 import {
@@ -24,6 +25,7 @@ import {
   FieldSet,
   FieldTitle,
 } from '@orderloop/ui/field';
+import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { data, Form, Link, useActionData, useLoaderData, useLocation } from 'react-router';
 import { Mark } from '~/components/mark';
@@ -303,10 +305,13 @@ function Consent({
           <input type="hidden" name="handle" value={handle} />
           <FieldGroup className="gap-5">
             {details.redirectIsLoopback ? (
-              <p className="rounded-lg border border-wait/40 bg-wait/10 p-3 text-sm">
-                <span className="font-medium">This sends access to an app on your computer.</span>{' '}
-                Continue only if you just started connecting from it.
-              </p>
+              <Alert variant="warning" role="note">
+                <TriangleAlert aria-hidden="true" />
+                <AlertTitle>This sends access to an app on your computer.</AlertTitle>
+                <AlertDescription>
+                  Continue only if you just started connecting from it.
+                </AlertDescription>
+              </Alert>
             ) : null}
             <FieldSet className="gap-2">
               <FieldLegend variant="label" className="mb-1 font-normal">
