@@ -78,7 +78,11 @@ export type AssistantTool =
   | 'stage_product_edits'
   | 'accept_product_drafts'
   | 'discard_product_edits'
-  | 'publish_catalog';
+  | 'publish_catalog'
+  | 'create_promotion'
+  | 'set_promotion_status'
+  | 'verify_tax_certificate'
+  | 'revoke_tax_certificate';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -356,6 +360,37 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Publish the staged edits of up to 500 products to the live catalog, each product all or none.',
   },
+  create_promotion: {
+    role: 'operator',
+    confirm: true,
+    label: 'Add a promotion',
+    title: 'Add a promotion code',
+    description:
+      'Add a promotion code buyers and staff enter on carts and at checkout: a percentage or amount off, or free shipping, optionally limited by subtotal, SKUs, customer, end date and uses. Active at once.',
+  },
+  set_promotion_status: {
+    role: 'operator',
+    confirm: true,
+    label: 'Pause or reactivate a promotion',
+    title: 'Pause or reactivate a promotion',
+    description: 'Pause a promotion code so carts stop accepting it, or reactivate it.',
+  },
+  verify_tax_certificate: {
+    role: 'operator',
+    confirm: true,
+    label: 'Verify a tax certificate',
+    title: 'Verify a tax exemption certificate',
+    description:
+      'Verify a customer’s tax exemption certificate, so orders they start from now are exempt in its regions. With approval separation on, whoever added it can’t verify it.',
+  },
+  revoke_tax_certificate: {
+    role: 'operator',
+    confirm: true,
+    label: 'Revoke a tax certificate',
+    title: 'Revoke a tax exemption certificate',
+    description:
+      'Revoke a customer’s tax exemption certificate, so their new orders are taxed again.',
+  },
 };
 
 /**
@@ -398,6 +433,18 @@ export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = [
 ];
 
 export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);
+
+/**
+ * Actions that change what buyers pay or owe in tax: a person always confirms them on a card (the
+ * panel, MCP's confirmation, A2A chat's `{ confirm: true }`), never a typed A2A skill that runs
+ * as composed.
+ */
+export const PERSON_CONFIRMS_TOOLS: readonly AssistantTool[] = [
+  'create_promotion',
+  'set_promotion_status',
+  'verify_tax_certificate',
+  'revoke_tax_certificate',
+];
 
 /** Whether a tool changes anything: an action, or a write that needs no confirm. */
 export const isWriteTool = (name: AssistantTool) =>

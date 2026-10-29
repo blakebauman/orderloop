@@ -22,6 +22,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
+import { previewAction, runAction } from '../src/assistant/data';
 import { createCart } from '../src/cart/carts';
 import { ensureTemplates } from '../src/flows';
 import { EXECUTORS } from '../src/nodes';
@@ -525,5 +526,80 @@ describe('erasing an exempt customer', () => {
       ok: true,
       taxCertificates: 0,
     });
+  });
+});
+
+describe('through the assistant', () => {
+  const p = (a: typeof operator) => ({
+    kind: 'user' as const,
+    id: a.id,
+    name: a.name,
+    email: a.name,
+    role: a.role,
+  });
+
+  it('verifies and revokes on a card that names only the number’s last four', async () => {
+    const id = await customer();
+    const added = await api().addTaxCertificate(id, input({ number: 'RS-998877' }), await as(id));
+    if (!added.ok) throw new Error(added.error);
+    const certificateId = added.value.certificate.id;
+    const ask = { customerId: id, certificateId };
+
+    // With approval separation on, whoever added it can't verify it: the card says so first.
+    await db().insert(workspaceSettings).values({
+      key: APPROVAL_SEPARATION_KEY,
+      value: 'on',
+      updatedAt: Date.now(),
+      updatedBy: 'test',
+    });
+    try {
+      expect((await previewAction(env, p(operator), 'verify_tax_certificate', ask)).blocked).toBe(
+        'Someone other than whoever added the certificate must verify it.',
+      );
+      const card = await previewAction(env, p(checker), 'verify_tax_certificate', ask);
+      expect(card.title).toBe(`Verify certificate …8877 for Exempt ${id}`);
+      expect(JSON.stringify(card)).not.toContain('RS-998877');
+      expect(card.consequences[0]).toBe(
+        'Orders this customer starts from now are tax-exempt in US-CA',
+      );
+      const done = (await runAction(
+        env,
+        p(checker),
+        'verify_tax_certificate',
+        ask,
+        'assistant',
+      )) as {
+        done: string;
+      };
+      expect(done.done).toBe('Verified the certificate');
+    } finally {
+      await db()
+        .delete(workspaceSettings)
+        .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY));
+    }
+    expect((await previewAction(env, p(checker), 'verify_tax_certificate', ask)).blocked).toBe(
+      'It is already verified.',
+    );
+    // An API token never verifies: its id is its own, so separation couldn't tell its maker.
+    const other = await api().addTaxCertificate(id, input({ number: 'RS-554433' }), await as(id));
+    if (!other.ok) throw new Error(other.error);
+    await expect(
+      runAction(
+        env,
+        { kind: 'token', id: 'tok_tax', name: 'CI token', role: 'admin' },
+        'verify_tax_certificate',
+        { customerId: id, certificateId: other.value.certificate.id },
+        'MCP',
+      ),
+    ).rejects.toThrow(
+      'A person verifies a certificate, signed in as themselves, not with an API token.',
+    );
+    await runAction(env, p(operator), 'revoke_tax_certificate', ask, 'MCP');
+    const row = await db()
+      .select()
+      .from(taxCertificates)
+      .where(eq(taxCertificates.id, certificateId))
+      .get();
+    expect(row?.status).toBe('revoked');
   });
 });

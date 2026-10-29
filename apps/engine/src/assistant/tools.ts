@@ -17,9 +17,11 @@ import {
   flowGraphSchema,
   isPageOnly,
   MAX_CART_TITLE,
+  normalizePromoCode,
   ORDER_CHANNELS,
   ORDER_MODELS,
   ORDER_STATUSES,
+  PROMOTION_KINDS,
   type Principal,
 } from '@orderloop/core';
 import {
@@ -300,6 +302,48 @@ export const TOOL_INPUTS = {
       .min(1)
       .max(500),
   }),
+  create_promotion: z.object({
+    // As a cart reads it (`normalizePromoCode`), so the code made is the code buyers enter.
+    code: z
+      .string()
+      .max(64)
+      .transform((c, ctx) => {
+        const code = normalizePromoCode(c);
+        if (!code)
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Letters, digits, dashes and underscores, up to 32',
+          });
+        return code ?? '';
+      }),
+    name: z.string().max(120).optional(),
+    kind: z.enum(PROMOTION_KINDS),
+    value: z.number().nonnegative().optional().describe('The percentage or amount off'),
+    minSubtotal: z.number().nonnegative().optional(),
+    skus: z.array(z.string().min(1).max(100)).max(200).optional(),
+    customerId: z.string().max(100).optional(),
+    validTo: z
+      .number()
+      .int()
+      .positive()
+      .max(Date.UTC(9999, 0, 1))
+      .optional()
+      .describe('Ends at, epoch ms'),
+    maxRedemptions: z.number().int().positive().optional(),
+    perCustomerLimit: z.number().int().positive().optional(),
+  }),
+  set_promotion_status: z.object({
+    promotionId: z.string().max(60),
+    status: z.enum(['active', 'paused']),
+  }),
+  verify_tax_certificate: z.object({
+    customerId: z.string().max(100),
+    certificateId: z.string().max(100),
+  }),
+  revoke_tax_certificate: z.object({
+    customerId: z.string().max(100),
+    certificateId: z.string().max(100),
+  }),
   publish_catalog: z.object({
     keys: z.array(productKey).min(1).max(500).describe('Product keys whose staged edits publish'),
   }),
@@ -488,6 +532,10 @@ export const TOOL_OUTPUTS = {
   accept_product_drafts: row({ done: z.string(), href: z.string(), results: z.array(row({})) }),
   discard_product_edits: row({ done: z.string(), href: z.string(), discarded: z.number() }),
   publish_catalog: actionOutput.extend({ results: z.array(row({})).optional() }),
+  create_promotion: actionOutput,
+  set_promotion_status: actionOutput,
+  verify_tax_certificate: actionOutput,
+  revoke_tax_certificate: actionOutput,
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export const ACTION_TOOLS: ActionTool[] = [
@@ -503,6 +551,10 @@ export const ACTION_TOOLS: ActionTool[] = [
   'cancel_cart',
   'test_flow',
   'publish_catalog',
+  'create_promotion',
+  'set_promotion_status',
+  'verify_tax_certificate',
+  'revoke_tax_certificate',
 ];
 
 export const isActionTool = (name: AssistantTool): name is ActionTool =>

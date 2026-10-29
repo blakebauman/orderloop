@@ -109,21 +109,6 @@ export async function addCertificate(
   }
 }
 
-/** Verifies or revokes one certificate. */
-export async function changeCertificate(
-  customerId: string,
-  id: string,
-  change: 'verify' | 'revoke',
-  me: Principal,
-): Promise<Done> {
-  const actor = await certificateActor(me, customerId);
-  const r =
-    change === 'verify'
-      ? await engine().verifyTaxCertificate(customerId, id, actor)
-      : await engine().revokeTaxCertificate(customerId, id, actor);
-  return r.ok ? { ok: true, id, number: r.value.certificate.number, changed: r.value.changed } : r;
-}
-
 /** A certificate's file, if the customer holds that certificate and it has one. */
 export async function certificateFile(customerId: string, id: string) {
   const c = (await engine().taxCertificates(customerId))?.find((x) => x.id === id);

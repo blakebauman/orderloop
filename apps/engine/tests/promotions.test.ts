@@ -184,3 +184,67 @@ it('is a pricing node the checkout quote runs', async () => {
       expect.arrayContaining(['commerce.discount']),
     ]);
 });
+
+describe('through the assistant', () => {
+  const ops = {
+    kind: 'user' as const,
+    id: 'usr_promo_ops',
+    name: 'Ops',
+    email: 'ops@example.com',
+    role: 'operator' as const,
+  };
+  const viewer = { ...ops, id: 'usr_promo_viewer', role: 'viewer' as const };
+
+  it('adds, pauses and resumes a code on cards that say what it does', async () => {
+    await db().delete(promotions);
+    const { TOOL_INPUTS } = await import('../src/assistant/tools');
+    const { previewAction, runAction } = await import('../src/assistant/data');
+    // The code is read as a cart reads it.
+    const input = TOOL_INPUTS.create_promotion.parse({
+      code: ' spring10 ',
+      kind: 'pct',
+      value: 10,
+    });
+    expect(input.code).toBe('SPRING10');
+    expect(() =>
+      TOOL_INPUTS.create_promotion.parse({ code: 'no spaces', kind: 'pct', value: 1 }),
+    ).toThrow();
+
+    const many = TOOL_INPUTS.create_promotion.parse({
+      code: 'WIDE',
+      kind: 'pct',
+      value: 5,
+      skus: Array.from({ length: 10 }, (_, i) => `SKU-${i}`),
+    });
+    expect((await previewAction(env, ops, 'create_promotion', many)).consequences).toContain(
+      'Only on 10 SKUs: “SKU-0”, “SKU-1”, “SKU-2”, “SKU-3”, “SKU-4”, “SKU-5” and 4 more',
+    );
+    const card = await previewAction(env, ops, 'create_promotion', input);
+    expect(card.consequences).toEqual(
+      expect.arrayContaining(['10% off', 'For any buyer', 'No end date']),
+    );
+    expect((await previewAction(env, viewer, 'create_promotion', input)).blocked).toBe(
+      'This needs the Operator role.',
+    );
+    expect(
+      (await previewAction(env, ops, 'create_promotion', { ...input, value: 150 })).blocked,
+    ).toBe('A percentage is above 0 and at most 100.');
+    const made = (await runAction(env, ops, 'create_promotion', input, 'assistant')) as {
+      id: string;
+    };
+    expect((await previewAction(env, ops, 'create_promotion', input)).blocked).toBe(
+      'SPRING10 already exists.',
+    );
+
+    const pause = { promotionId: made.id, status: 'paused' as const };
+    expect((await previewAction(env, ops, 'set_promotion_status', pause)).title).toBe(
+      'Pause SPRING10',
+    );
+    await runAction(env, ops, 'set_promotion_status', pause, 'assistant');
+    const row = await db().select().from(promotions).where(eq(promotions.id, made.id)).get();
+    expect(row?.status).toBe('paused');
+    expect((await previewAction(env, ops, 'set_promotion_status', pause)).blocked).toBe(
+      'SPRING10 is already paused.',
+    );
+  });
+});
