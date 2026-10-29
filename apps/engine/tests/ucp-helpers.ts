@@ -85,6 +85,7 @@ export async function ucp(
     }),
     env,
   );
+  // biome-ignore lint/suspicious/noExplicitAny: a response body read as untyped JSON
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
 

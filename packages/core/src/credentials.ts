@@ -51,7 +51,7 @@ export function scrubCredentials(text: string, known: readonly string[] = []): s
   for (const k of [...known].filter((x) => x.length >= 4).sort((a, b) => b.length - a.length))
     out = out.split(k).join(MASK);
   for (const re of PATTERNS)
-    out = out.replace(re, (m, scheme) =>
+    out = out.replace(re, (_m, scheme) =>
       typeof scheme === 'string' && /^(bearer|basic)$/i.test(scheme) ? `${scheme} ${MASK}` : MASK,
     );
   out = out.replace(NAMED, (_m, name, sep) => `${name}${sep}${MASK}`);

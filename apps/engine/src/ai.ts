@@ -411,9 +411,14 @@ export async function riskScore(
         score += order.contact ? 15 : 30;
         reasons.push(order.contact ? 'Guest checkout' : 'Unknown customer');
       }
-      if ((order.baseTotal ?? order.total) > 20_000)
-        (score += 30), reasons.push('High order value');
-      if (order.lines.some((l) => l.qty > 1000)) (score += 20), reasons.push('Unusual quantity');
+      if ((order.baseTotal ?? order.total) > 20_000) {
+        score += 30;
+        reasons.push('High order value');
+      }
+      if (order.lines.some((l) => l.qty > 1000)) {
+        score += 20;
+        reasons.push('Unusual quantity');
+      }
       return { score: Math.min(score, 100), reasons };
     },
     call,

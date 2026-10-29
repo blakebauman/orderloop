@@ -75,6 +75,7 @@ const person = (role: Principal['role'], email: string): Principal => ({
   role,
 });
 
+// biome-ignore lint/suspicious/noExplicitAny: a response body read as untyped JSON
 type Json = Record<string, any>;
 
 let n = 0;

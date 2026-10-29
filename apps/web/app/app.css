@@ -555,9 +555,6 @@
 .react-flow .react-flow__attribution {
   background: transparent;
 }
-.react-flow .react-flow__attribution a {
-  color: var(--muted-foreground);
-}
 .react-flow__controls {
   border: 1px solid var(--rule);
   border-radius: var(--radius);
@@ -621,6 +618,10 @@
 }
 .ol-prose a:hover {
   text-decoration-color: currentColor;
+}
+/* After the prose links: Biome orders `a` rules by ascending specificity. */
+.react-flow .react-flow__attribution a {
+  color: var(--muted-foreground);
 }
 .ol-prose strong {
   font-weight: 600;

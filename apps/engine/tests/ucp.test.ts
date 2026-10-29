@@ -312,6 +312,7 @@ describe('UCP over MCP', () => {
       }),
       env,
     );
+    // biome-ignore lint/suspicious/noExplicitAny: a response body read as untyped JSON
     return { status: res.status, body: (await res.json()) as Record<string, any> };
   };
   const meta = () => ({ 'ucp-agent': { profile: alpha.profileUrl } });
