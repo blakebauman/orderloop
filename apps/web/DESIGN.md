@@ -475,8 +475,9 @@ for code and data blocks only.
   apart without colour.
 - **Counts** (pending approvals in the bars): `wait` pills.
 - **Sidebar** (`packages/ui/src/sidebar.tsx`): shadcn's, adapted; see The shell.
-- **Tooltip** (`packages/ui/src/tooltip.tsx`): an ink pill with paper text, 12px, after 300ms; only
-  where a name isn't on screen (the sidebar's rail).
+- **Tooltip** (`packages/ui/src/tooltip.tsx`): Maia's, ink with paper text, 12px: a 2xl-rounded
+  label with an arrow that slides in from its trigger and makes room for a Kbd; after 300ms (Maia
+  opens at once). Only where a name isn't on screen (the sidebar's rail).
 - **Confirm** (`components/confirm.tsx`): an "are you sure?" where the action was, never a modal.
   The safe choice has focus, Escape backs out of the newest one, and focus goes back to what
   asked. Its actions are children, so it sits inside the caller's form.
