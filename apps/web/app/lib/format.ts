@@ -132,16 +132,44 @@ export function money(n: number | null | undefined, currency = 'USD') {
 }
 
 /**
+ * A date's fields by type ("month", "hour", "dayPeriod", …). The formatters below lay the fields out
+ * themselves: ICU versions differ on the punctuation between them (", " or " at " between the date
+ * and the time, a narrow no-break space before AM), and the server's ICU need not be the browser's,
+ * so a whole-string format can differ between the server render and the hydrating one.
+ */
+function fields(ms: number, options: Intl.DateTimeFormatOptions) {
+  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(ms);
+  return Object.fromEntries(parts.map((p) => [p.type, p.value])) as Partial<
+    Record<Intl.DateTimeFormatPartTypes, string>
+  >;
+}
+
+/**
  * "Oct 13, 2026, 4:46 AM". Pass `timeZone` to pin the zone (server rendering uses UTC, so the
  * markup matches during hydration); omit it for the viewer's own zone. See `useDateTime`.
  */
 export function dateTime(ms: number, timeZone?: string) {
-  const s = new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+  const f = fields(ms, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
     timeZone,
-  }).format(ms);
+  });
+  const s = `${f.month} ${f.day}, ${f.year}, ${f.hour}:${f.minute} ${f.dayPeriod}`;
   return timeZone === 'UTC' ? `${s} UTC` : s;
+}
+
+/** "2:05 PM", or "Thu 2:05 PM" with `weekday`; laid out like `dateTime`. */
+export function clock(ms: number, timeZone?: string, weekday = false) {
+  const f = fields(ms, {
+    ...(weekday ? { weekday: 'short' } : {}),
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  });
+  return `${weekday ? `${f.weekday} ` : ''}${f.hour}:${f.minute} ${f.dayPeriod}`;
 }
 
 export function ago(ms: number | null | undefined, now = Date.now()) {

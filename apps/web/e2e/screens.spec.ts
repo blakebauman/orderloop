@@ -115,6 +115,27 @@ test('below lg the order page shows one view at a time', async ({ page }, info) 
   }).toPass({ timeout: 40_000 });
 });
 
+test('an order page with a deadline hydrates, so a dark theme stays dark', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'one engine is enough');
+  test.setTimeout(60_000);
+  // A wait's deadline ("times out Oct 29, 2026, 5:40 AM UTC") is rendered by workerd and again by
+  // WebKit. When their ICUs formatted it differently, hydration failed, React drew the page afresh
+  // and the theme script never ran: the page went light.
+  await page.addInitScript(() => localStorage.setItem('ol-theme', 'dark'));
+  await open(page, '/orders/scenarios');
+  await page.getByRole('button', { name: /^Run / }).first().click();
+  await expect(page).toHaveURL(/\/orders\/ord_/, { timeout: 30_000 });
+  const path = new URL(page.url()).pathname;
+  // Server-rendered with the wait in it: load again until the order has reached it.
+  await expect(async () => {
+    await open(page, path);
+    await expect(page.getByText(/times out/)).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 40_000 });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
+
 test('on an iPhone a long-titled order fits the screen, and Cancel order is in the ⋯ menu', async ({
   page,
 }, info) => {

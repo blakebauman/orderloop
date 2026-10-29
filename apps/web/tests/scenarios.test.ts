@@ -4,6 +4,7 @@ import {
   ago,
   channelLabel,
   clip,
+  clock,
   dateTime,
   duration,
   money,
@@ -83,6 +84,16 @@ describe('format', () => {
     const t = Date.UTC(2026, 9, 13, 4, 46);
     expect(dateTime(t, 'UTC')).toBe('Oct 13, 2026, 4:46 AM UTC');
     expect(dateTime(t, 'America/Los_Angeles')).toBe('Oct 12, 2026, 9:46 PM');
+  });
+
+  it('lays out date-times itself, whatever punctuation the ICU in use puts between the fields', () => {
+    // WebKit's ICU joins a date and a time with " at " where workerd's uses ", ", and some put a
+    // narrow no-break space before AM: a whole-string format broke hydration on the order page.
+    const t = Date.UTC(2026, 9, 29, 5, 40);
+    expect(dateTime(t, 'UTC')).toBe('Oct 29, 2026, 5:40 AM UTC');
+    expect(dateTime(t, 'UTC')).not.toMatch(/[\u202f\u00a0]/);
+    expect(clock(t, 'UTC')).toBe('5:40 AM');
+    expect(clock(t, 'UTC', true)).toBe('Thu 5:40 AM');
   });
 
   it('maps statuses to theme tokens', () => {
