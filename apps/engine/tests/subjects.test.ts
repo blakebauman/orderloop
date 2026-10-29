@@ -1,14 +1,23 @@
 import { introspectWorkflow } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { type OrderInput, type OrderState, TERMINAL_ORDER_STATUSES } from '@orderloop/core';
-import { createDb, customers, documents, inboundEmails, messages, orders } from '@orderloop/db';
+import {
+  createDb,
+  customerAddresses,
+  customers,
+  documents,
+  inboundEmails,
+  messages,
+  orders,
+} from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createCart } from '../src/cart/carts';
 import { storeDocument } from '../src/connectors';
+import { rememberAddress } from '../src/customer-addresses';
 import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
-import { expirePersonalData } from '../src/retention';
+import { expireAddresses, expirePersonalData } from '../src/retention';
 import { eraseDataSubject, exportDataSubject } from '../src/subjects';
 
 const db = () => createDb(env.DB);
@@ -71,7 +80,19 @@ describe('data subject requests', () => {
       stripeCustomerId: 'cus_stripe_erin',
     });
     const asCustomer = await finished(
-      order({ customerId: 'cus_erin', title: 'PO for Erin Example Ltd' }),
+      order({
+        customerId: 'cus_erin',
+        title: 'PO for Erin Example Ltd',
+        meta: {
+          shipTo: {
+            name: 'Erin',
+            line1: '4 Dock Rd',
+            city: 'Leeds',
+            postalCode: 'LS1 4AP',
+            country: 'GB',
+          },
+        },
+      }),
     );
     const asGuest = await finished(
       order({
@@ -117,9 +138,26 @@ describe('data subject requests', () => {
     expect(exported.messages.map((m) => m.id)).toEqual(['msg_erin']);
     expect(exported.inboundEmails.map((m) => m.id)).toEqual(['eml_erin']);
     expect(exported.documents.map((d) => d.kind)).toContain('packing');
+    // The customer page's address, from the order it started with.
+    expect(exported.addresses).toMatchObject([
+      { customerId: 'cus_erin', line1: '4 Dock Rd', orders: 1, lastOrderId: asCustomer },
+    ]);
 
     const erased = await eraseDataSubject(env, 'erin@example.com');
-    expect(erased).toMatchObject({ ok: true, done: true, orders: 2, customers: 1, messages: 1 });
+    expect(erased).toMatchObject({
+      ok: true,
+      done: true,
+      orders: 2,
+      customers: 1,
+      messages: 1,
+      addresses: 1,
+    });
+    expect(
+      await db()
+        .select()
+        .from(customerAddresses)
+        .where(eq(customerAddresses.customerId, 'cus_erin')),
+    ).toEqual([]);
 
     const guest = await state(asGuest);
     expect(guest.order!.contact).toBeUndefined();
@@ -196,6 +234,71 @@ describe('data subject requests', () => {
     expect((await exportDataSubject(env, email)).carts).toEqual([]);
     // Nothing left to remove: a repeat counts no cart.
     expect(await eraseDataSubject(env, email)).toMatchObject({ ok: true, carts: 0 });
+  });
+
+  it('keeps one address per place a customer ships to, counting its orders', async () => {
+    const customerId = `cus_adr_${crypto.randomUUID().slice(0, 6)}`;
+    const place = { line1: '1 Main St', city: 'Springfield', region: 'IL', postalCode: '62701' };
+    await rememberAddress(db(), {
+      id: 'ord_a1',
+      customerId,
+      shipTo: { ...place, name: 'Ann', country: 'US' },
+      at: 1,
+    });
+    await rememberAddress(db(), {
+      id: 'ord_a2',
+      customerId,
+      shipTo: { ...place, line1: '1  main st', name: 'Bo', country: 'USA' },
+      at: 2,
+    });
+    // Free text, a guest, and an address missing its city aren't kept.
+    await rememberAddress(db(), { id: 'ord_a3', customerId, shipTo: '1 Main St', at: 3 });
+    await rememberAddress(db(), { id: 'ord_a4', customerId: null, shipTo: place, at: 4 });
+    await rememberAddress(db(), {
+      id: 'ord_a5',
+      customerId,
+      shipTo: { line1: '9 Elm St', postalCode: '62701', country: 'US' },
+      at: 5,
+    });
+    const rows = await db()
+      .select()
+      .from(customerAddresses)
+      .where(eq(customerAddresses.customerId, customerId));
+    expect(rows).toMatchObject([
+      {
+        name: 'Bo',
+        line1: '1 Main St',
+        country: 'US',
+        orders: 2,
+        firstUsedAt: 1,
+        lastUsedAt: 2,
+        lastOrderId: 'ord_a2',
+      },
+    ]);
+  });
+
+  it('forgets addresses last shipped to before the personal data retention', async () => {
+    const customerId = `cus_old_${crypto.randomUUID().slice(0, 6)}`;
+    const now = Date.now();
+    const at = (line1: string, when: number) =>
+      rememberAddress(db(), {
+        id: `ord_${line1.slice(0, 1)}`,
+        customerId,
+        shipTo: { line1, city: 'York', postalCode: 'YO1 7HH', country: 'GB' },
+        at: when,
+      });
+    await at('1 Old Rd', now - 400 * 86_400_000);
+    await at('2 New Rd', now - 86_400_000);
+    expect(
+      await expireAddresses({ ...env, PERSONAL_DATA_RETENTION_DAYS: '' } as unknown as Env, now),
+    ).toBe(0);
+    const swept = { ...env, PERSONAL_DATA_RETENTION_DAYS: '365' } as unknown as Env;
+    expect(await expireAddresses(swept, now)).toBeGreaterThanOrEqual(1);
+    const left = await db()
+      .select({ line1: customerAddresses.line1 })
+      .from(customerAddresses)
+      .where(eq(customerAddresses.customerId, customerId));
+    expect(left).toEqual([{ line1: '2 New Rd' }]);
   });
 
   it('refuses while one of their orders is still running', async () => {

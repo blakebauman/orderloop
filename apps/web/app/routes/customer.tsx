@@ -1,5 +1,6 @@
 /**
- * One customer: the account as the commerce steps see it, and its tax exemption certificates.
+ * One customer: the account as the commerce steps see it, its recent orders and the places they
+ * ship to, and its tax exemption certificates.
  * Operators add a certificate (with its scan), verify it once checked with the issuer, and revoke
  * it; only a verified, unexpired certificate covering an order's ship-to exempts it from tax
  * (`commerce.tax`). Buyers never claim one.
@@ -23,13 +24,14 @@ import {
   useNavigation,
   useRevalidator,
 } from 'react-router';
+import { Ago } from '~/components/ago';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusBadge, ToneBadge } from '~/components/status';
 import { useAssistant } from '~/lib/assistant';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
-import { addCertificate, customerById } from '~/lib/customers.server';
+import { addCertificate, addressesOf, customerById } from '~/lib/customers.server';
 import { engine } from '~/lib/env.server';
 import { count, dateTime, humanize, liveStatus, money, orderRef } from '~/lib/format';
 import { countOrders, listOrders } from '~/lib/orders.server';
@@ -44,14 +46,17 @@ export const meta = ({ loaderData: d }: Route.MetaArgs) => [
 
 /** How many of the customer's orders the page lists, most recently changed first. */
 const RECENT_ORDERS = 6;
+/** How many of the places it ships to, most recently used first. */
+const ADDRESSES = 4;
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   await requireUser(request);
-  const [customer, certificates, recent, ordered] = await Promise.all([
+  const [customer, certificates, recent, ordered, addresses] = await Promise.all([
     customerById(params.customerId),
     engine().taxCertificates(params.customerId),
     listOrders({ customer: params.customerId, sort: 'updated' }, RECENT_ORDERS),
     countOrders({ customer: params.customerId }),
+    addressesOf(params.customerId, ADDRESSES),
   ]);
   if (!customer || !certificates) throw data('Customer not found', { status: 404 });
   const { stripeCustomerId: _c, stripePaymentMethodId: _pm, ...shown } = customer;
@@ -61,6 +66,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // An open order with no run reads "recorded", never waiting (`liveStatus`).
     recent: recent.map((o) => ({ ...o, status: liveStatus(o) })),
     ordered,
+    addresses,
     // The next certificate's id, minted here so a form sent twice adds it once.
     nextId: newId('txc'),
   };
@@ -86,7 +92,14 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function CustomerPage() {
-  const { customer: c, certificates, recent, ordered, nextId } = useLoaderData<typeof loader>();
+  const {
+    customer: c,
+    certificates,
+    recent,
+    ordered,
+    addresses,
+    nextId,
+  } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state === 'submitting';
   const canOperate = useCan('operator');
@@ -260,31 +273,53 @@ export default function CustomerPage() {
             </p>
           ) : null}
         </Section>
-        <Section
-          title="Recent orders"
-          description={
-            ordered.n
-              ? `The ${Math.min(recent.length, ordered.n)} most recently changed of ${ordered.more ? `${count(ordered.n)}+` : count(ordered.n)} orders.`
-              : undefined
-          }
-          actions={
-            ordered.n > recent.length ? (
-              <Button asChild variant="outline" size="sm">
-                <Link to={`/orders?q=${encodeURIComponent(c.name)}`}>All orders</Link>
-              </Button>
-            ) : undefined
-          }
-        >
-          {recent.length ? (
-            <ul className="-mx-2 flex flex-col gap-0.5">
-              {recent.map((o) => (
-                <OrderItem key={o.id} o={o} />
-              ))}
-            </ul>
-          ) : (
-            <Empty>No orders yet.</Empty>
-          )}
-        </Section>
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-6">
+          <Section
+            title="Recent orders"
+            description={
+              ordered.n
+                ? `The ${Math.min(recent.length, ordered.n)} most recently changed of ${ordered.more ? `${count(ordered.n)}+` : count(ordered.n)} orders.`
+                : undefined
+            }
+            actions={
+              ordered.n > recent.length ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/orders?q=${encodeURIComponent(c.name)}`}>All orders</Link>
+                </Button>
+              ) : undefined
+            }
+          >
+            {recent.length ? (
+              <ul className="-mx-2 flex flex-col gap-0.5">
+                {recent.map((o) => (
+                  <OrderItem key={o.id} o={o} />
+                ))}
+              </ul>
+            ) : (
+              <Empty>No orders yet.</Empty>
+            )}
+          </Section>
+          <Section
+            title="Addresses"
+            description={
+              addresses.list.length
+                ? addresses.more
+                  ? `The ${addresses.list.length} its orders shipped to most recently.`
+                  : 'Where its orders ship to, most recent first.'
+                : undefined
+            }
+          >
+            {addresses.list.length ? (
+              <ul className="-mx-2 flex flex-col gap-0.5">
+                {addresses.list.map((a) => (
+                  <AddressItem key={a.id} a={a} />
+                ))}
+              </ul>
+            ) : (
+              <Empty>No addresses yet. An order that ships to one adds it here.</Empty>
+            )}
+          </Section>
+        </div>
       </Body>
     </>
   );
@@ -322,6 +357,35 @@ function OrderItem({
           <span className="font-medium text-sm tabular">{money(o.total, o.currency)}</span>
           <StatusBadge status={o.status} />
         </ItemActions>
+      </li>
+    </Item>
+  );
+}
+
+/** A place the customer's orders ship to, with how many did and a link to the latest. */
+function AddressItem({
+  a,
+}: {
+  a: ReturnType<typeof useLoaderData<typeof loader>>['addresses']['list'][number];
+}) {
+  return (
+    <Item asChild size="xs" className="items-start px-2">
+      <li>
+        <ItemContent className="min-w-0">
+          <address className="text-sm not-italic">
+            {a.name ? <span className="block font-medium">{a.name}</span> : null}
+            <span className="block">{[a.line1, a.line2].filter(Boolean).join(', ')}</span>
+            <span className="block text-muted-foreground">
+              {[a.city, a.region, a.postalCode].filter(Boolean).join(' ')} · {a.country}
+            </span>
+          </address>
+          <ItemDescription className="text-xs">
+            {a.orders === 1 ? '1 order' : `${count(a.orders)} orders`}, last{' '}
+            <Link to={`/orders/${a.lastOrderId}`} className="hover:underline">
+              <Ago ms={a.lastUsedAt} />
+            </Link>
+          </ItemDescription>
+        </ItemContent>
       </li>
     </Item>
   );

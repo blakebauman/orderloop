@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkAddress } from '../src/address';
+import { checkAddress, rememberedAddress } from '../src/address';
 
 const clean = {
   line1: '1 Main St',
@@ -80,5 +80,28 @@ describe('checkAddress', () => {
   it('only checks that other countries have a postcode', () => {
     const fr = { line1: '5 Av. Anatole France', city: 'Paris', postalCode: '75007', country: 'FR' };
     expect(checkAddress(fr).status).toBe('valid');
+  });
+});
+
+describe('rememberedAddress', () => {
+  it('keys the normalised place, not its spelling or the recipient', () => {
+    const a = rememberedAddress({ ...clean, name: 'Ann' });
+    const b = rememberedAddress({
+      name: 'Bo',
+      line1: ' 1  main st ',
+      city: 'springfield',
+      region: 'Illinois',
+      postalCode: '62701',
+      country: 'USA',
+    });
+    expect(a?.key).toBe('1 main st||springfield|il|62701|us');
+    expect(b?.key).toBe(a?.key);
+    expect(b?.address.name).toBe('Bo');
+  });
+
+  it('remembers nothing it could not use', () => {
+    expect(rememberedAddress('1 Main St, Springfield')).toBeNull();
+    expect(rememberedAddress({ line1: '1 Main St' })).toBeNull();
+    expect(rememberedAddress(undefined)).toBeNull();
   });
 });

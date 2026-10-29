@@ -139,6 +139,8 @@ export type ErasureResult =
       carts: number;
       /** Their accounts' tax exemption certificates, deleted with their files. */
       taxCertificates: number;
+      /** The places their accounts' orders shipped to, as the customer page lists them. */
+      addresses: number;
       /** The address is also a team member's; remove them on the team page. */
       teamMember: boolean;
     }
@@ -162,6 +164,8 @@ export type SubjectExport = {
   carts: Record<string, unknown>[];
   /** Their accounts' tax exemption certificates (each file's key, not the file). */
   taxCertificates: Record<string, unknown>[];
+  /** The places their accounts' orders shipped to, as the customer page lists them. */
+  addresses: Record<string, unknown>[];
   /** True when there were more orders than one export holds. */
   truncated: boolean;
   teamMember: boolean;

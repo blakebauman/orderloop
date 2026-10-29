@@ -183,6 +183,37 @@ export const taxCertificates = sqliteTable(
   (t) => [index('tax_certificates_customer').on(t.customerId, t.createdAt)],
 );
 
+/**
+ * The places a customer's orders ship to (`rememberedAddress` in core), one row per `key`: written
+ * when an order with a customer and a usable ship-to starts; erasure and the personal data
+ * retention sweep delete them.
+ */
+export const customerAddresses = sqliteTable(
+  'customer_addresses',
+  {
+    id: text('id').primaryKey(),
+    customerId: text('customer_id').notNull(),
+    key: text('key').notNull(),
+    name: text('name'),
+    line1: text('line1').notNull(),
+    line2: text('line2'),
+    city: text('city').notNull(),
+    region: text('region'),
+    postalCode: text('postal_code').notNull(),
+    country: text('country').notNull(),
+    /** Orders that shipped here. */
+    orders: integer('orders').notNull().default(1),
+    firstUsedAt: integer('first_used_at').notNull(),
+    lastUsedAt: integer('last_used_at').notNull(),
+    lastOrderId: text('last_order_id').notNull(),
+  },
+  (t) => [
+    uniqueIndex('customer_addresses_key').on(t.customerId, t.key),
+    index('customer_addresses_last_used').on(t.customerId, t.lastUsedAt),
+    index('customer_addresses_used').on(t.lastUsedAt),
+  ],
+);
+
 export const products = sqliteTable('products', {
   sku: text('sku').primaryKey(),
   name: text('name').notNull(),

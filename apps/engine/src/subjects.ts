@@ -22,6 +22,7 @@ import {
   auditEvents,
   carts,
   createDb,
+  customerAddresses,
   customers,
   documents,
   inboundEmails,
@@ -117,16 +118,17 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
   );
   const byOrder = <T>(column: Parameters<typeof inArray>[0], q: (where: SQL) => Promise<T[]>) =>
     Promise.all(chunks(orderIds).map((c) => q(inArray(column, c)))).then((r) => r.flat());
-  const [msgs, sentTo, docs, inbound, certificates] = await Promise.all([
+  const byAccount = <T>(column: Parameters<typeof inArray>[0], q: (where: SQL) => Promise<T[]>) =>
+    Promise.all(chunks(s.accounts.map((c) => c.id)).map((c) => q(inArray(column, c)))).then((r) =>
+      r.flat(),
+    );
+  const [msgs, sentTo, docs, inbound, certificates, addresses] = await Promise.all([
     byOrder(messages.orderId, (w) => s.db.select().from(messages).where(w)),
     s.db.select().from(messages).where(lower(messages.recipient, s.email)),
     byOrder(documents.orderId, (w) => s.db.select().from(documents).where(w)),
     s.db.select().from(inboundEmails).where(lower(inboundEmails.sender, s.email)),
-    Promise.all(
-      chunks(s.accounts.map((c) => c.id)).map((c) =>
-        s.db.select().from(taxCertificates).where(inArray(taxCertificates.customerId, c)),
-      ),
-    ).then((r) => r.flat()),
+    byAccount(taxCertificates.customerId, (w) => s.db.select().from(taxCertificates).where(w)),
+    byAccount(customerAddresses.customerId, (w) => s.db.select().from(customerAddresses).where(w)),
   ]);
   const uniqueMessages = [...new Map([...msgs, ...sentTo].map((m) => [m.id, m])).values()];
   return {
@@ -171,6 +173,7 @@ export async function exportDataSubject(env: Env, raw: string): Promise<SubjectE
       ...c,
       regions: JSON.parse(regions) as unknown,
     })),
+    addresses: addresses.map(({ key: _key, ...a }) => a),
     truncated: rows.length > EXPORT_MAX,
     teamMember: s.teamMember,
   };
@@ -249,6 +252,7 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
     inboundEmails: 0,
     carts: 0,
     taxCertificates: 0,
+    addresses: 0,
     teamMember: s.teamMember,
   };
 
@@ -308,6 +312,12 @@ export async function eraseDataSubject(env: Env, raw: string): Promise<ErasureRe
         .delete(taxCertificates)
         .where(eq(taxCertificates.customerId, c.id))
         .returning({ id: taxCertificates.id })
+    ).length;
+    result.addresses += (
+      await s.db
+        .delete(customerAddresses)
+        .where(eq(customerAddresses.customerId, c.id))
+        .returning({ id: customerAddresses.id })
     ).length;
     await s.db
       .update(customers)

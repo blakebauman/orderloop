@@ -13,6 +13,7 @@ import {
 import { createDb, orders } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { storeDocument } from './connectors';
+import { rememberAddress } from './customer-addresses';
 import { loadFlowVersion } from './flows';
 import { orderAgent } from './namespaces';
 import type { OrderLoopParams } from './workflow';
@@ -127,6 +128,17 @@ async function start(
     const raced = await existing();
     if (raced) return replay(raced);
     throw err;
+  }
+  // For the customer page only: an order starts whether or not its address is kept.
+  try {
+    await rememberAddress(db, {
+      id: orderId,
+      customerId: input.customerId,
+      shipTo: input.meta.shipTo,
+      at: now,
+    });
+  } catch (err) {
+    console.error(JSON.stringify({ type: 'customer_address_failed', orderId, error: String(err) }));
   }
   await launch(env, req, flow, orderId, now);
   return { orderId };
