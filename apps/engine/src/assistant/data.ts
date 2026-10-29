@@ -51,6 +51,7 @@ import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
 import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
+import { previewPublishCatalog, runPublishCatalog } from './catalog';
 import { draftHash, heldToDraft, previewTestFlow, runTestFlow } from './flows';
 import { previewRestart, previewStart, runRestart, runStart, type StartInput } from './orders';
 
@@ -492,6 +493,7 @@ export type ActionInput = {
   restart_order: { orderId: string };
   cancel_cart: { cartId: string };
   test_flow: { flowId: string };
+  publish_catalog: { keys: string[] };
 };
 export type ActionTool = keyof ActionInput;
 
@@ -631,6 +633,12 @@ export async function previewAction<T extends ActionTool>(
       }
       case 'submit_cart':
         return await previewSubmit(env, p, input as ActionInput['submit_cart']);
+      case 'publish_catalog':
+        return await previewPublishCatalog(
+          env,
+          (input as ActionInput['publish_catalog']).keys,
+          roleBlock,
+        );
       case 'test_flow':
         return await previewTestFlow(env, (input as ActionInput['test_flow']).flowId, roleBlock);
       case 'cancel_cart':
@@ -814,6 +822,15 @@ export async function runAction<T extends ActionTool>(
       return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'cancel_cart':
       return runCancelCart(env, p, (input as ActionInput['cancel_cart']).cartId, trail);
+    case 'publish_catalog':
+      return runPublishCatalog(
+        env,
+        p,
+        (input as ActionInput['publish_catalog']).keys,
+        key,
+        trail,
+        confirmed,
+      );
     case 'test_flow':
       return runTestFlow(env, p, (input as ActionInput['test_flow']).flowId, key, trail, confirmed);
     case 'start_order':

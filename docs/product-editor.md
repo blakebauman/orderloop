@@ -81,8 +81,15 @@ applies: Conflicts, Rejected rows, Missing required, Missing text (`groupOf` in
 shown, one after another. A card opens the product's sheet (`?product=<key>`,
 `components/catalog/sheet.tsx`): every editable field in every locale side by side, each marked from
 feed, edited here, draft, staged, conflict or missing, opened on the field that put it on the board.
-Writes go to `/catalog/action` (`routes/catalog-action.ts`) as the signed-in operator, audited
-`via: 'app'` (`lib/catalog-board.server.ts`); more cards come from `/catalog/cards`. Below `lg` the
+Writes go through the assistant (`useCatalogAction` in `components/catalog/use-action.ts` calls
+`act`). Staging, accepting and discarding are page-only tools (`stage_product_edits`,
+`accept_product_drafts`, `discard_product_edits`) that run at once. Publishing is `publish_catalog`,
+which stops at a confirm card listing each product's staged fields. The card is held to those edits
+(`bound.staged`): a confirm held to other edits, or to nothing (a card never shown, or marked stale
+since), is refused. Only a typed A2A call, which its caller composed, is not held. The card's call
+id is the publish's `requestId`. All of them are audited `via:
+'assistant'`, `direct: true` (`apps/engine/src/assistant/catalog.ts`). More cards come from
+`/catalog/cards`. Below `lg` the
 columns are a segmented control, and editing and publishing say they need a larger screen; drafts can
 be accepted or dropped anywhere. Keys: J/K move, Enter opens, D drafts, A accepts, X ticks, ⌘Enter
 publishes. Cards glide to their new column (a FLIP, 200ms), at once with reduced motion.

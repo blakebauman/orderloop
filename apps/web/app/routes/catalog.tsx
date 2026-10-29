@@ -40,8 +40,9 @@ import {
   missingText,
 } from '~/components/catalog/labels';
 import { ProductSheetView } from '~/components/catalog/sheet';
-import { CATALOG_ACTION, refusal, useCatalogAction } from '~/components/catalog/use-action';
+import { catalogWrite, refusal, useCatalogAction } from '~/components/catalog/use-action';
 import { Body, Empty, PageHeader } from '~/components/page';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import {
   attributeLabels,
@@ -323,6 +324,7 @@ function GapsColumn({
   onDone: () => void;
 }) {
   const [closed, setClosed] = useState<Set<GapGroup>>(new Set());
+  const { act } = useAssistant();
   const draftAll = async (group: GapGroup, cards: BoardCard[]) => {
     const keys = cards.map((c) => c.key);
     setBatch({
@@ -333,17 +335,9 @@ function GapsColumn({
     });
     for (const key of keys) {
       let result: Batch['rows'][string];
-      try {
-        const res = await fetch(CATALOG_ACTION, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ intent: 'draft', key }),
-        });
-        const a = (await res.json()) as { ok: boolean; error?: string };
-        result = a.ok ? 'done' : { error: a.error ?? 'It couldn’t be drafted.' };
-      } catch {
-        result = { error: 'No answer; try again.' };
-      }
+      // One product at a time, each its own tool call through the assistant.
+      const a = await catalogWrite(act, { intent: 'draft', key });
+      result = a?.ok ? 'done' : { error: a?.error ?? 'It couldn’t be drafted.' };
       setBatch((b) => (b ? { ...b, done: b.done + 1, rows: { ...b.rows, [key]: result } } : b));
     }
     onDone();
@@ -564,16 +558,13 @@ function StagedColumn({
   const cards = [...page.cards, ...more.cards];
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const ticked = cards.filter((c) => !unticked.has(c.key)).map((c) => c.key);
+  // Publishing asks on the assistant's card, which lists what goes live; it is keyed by that card,
+  // so pressing again after a lost answer can't publish twice.
   const pub = useCatalogAction();
-  const requestId = useRef<string | null>(null);
   const answer = pub.answer;
-  useEffect(() => {
-    if (answer) requestId.current = null;
-  }, [answer]);
   const publish = useCallback(() => {
     if (!ticked.length || pub.busy) return;
-    requestId.current ??= crypto.randomUUID();
-    pub.run({ intent: 'publish', keys: ticked, requestId: requestId.current });
+    pub.run({ intent: 'publish', keys: ticked });
   }, [ticked, pub]);
   // ⌘Enter (Ctrl+Enter) publishes what is ticked, from anywhere on the board but a field or a sheet.
   useEffect(() => {

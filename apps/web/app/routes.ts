@@ -55,7 +55,6 @@ export default [
     ]),
   ]),
   // Resource routes the editor and order page post to.
-  route('catalog/action', 'routes/catalog-action.ts'),
   route('catalog/cards', 'routes/catalog-cards.ts'),
   route('orders/:orderId/records', 'routes/order-records.ts'),
   route('customers/:customerId/tax-certificates/:certificateId', 'routes/tax-certificate-file.ts'),

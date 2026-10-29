@@ -74,7 +74,11 @@ export type AssistantTool =
   | 'create_flow'
   | 'duplicate_flow'
   | 'archive_flow'
-  | 'test_flow';
+  | 'test_flow'
+  | 'stage_product_edits'
+  | 'accept_product_drafts'
+  | 'discard_product_edits'
+  | 'publish_catalog';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -321,6 +325,37 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Run a test order on a flow: publishes its saved draft first when it changed since the live version, then starts an order with a demo input where the demo data is loaded.',
   },
+  // The Catalog page's own buttons (`PAGE_ONLY_TOOLS`): each overwrites or drops what waits to
+  // publish. A model drafts instead (`draft_product_content`), and a person accepts.
+  stage_product_edits: {
+    role: 'operator',
+    confirm: false,
+    label: 'Staged catalog edits',
+    title: 'Stage product edits',
+    description: 'Stage edits to products’ fields; nothing is live until published.',
+  },
+  accept_product_drafts: {
+    role: 'operator',
+    confirm: false,
+    label: 'Accepted the drafts',
+    title: 'Accept a product’s drafts',
+    description: 'Stage the assistant’s drafts for a product, as the assistant’s text.',
+  },
+  discard_product_edits: {
+    role: 'operator',
+    confirm: false,
+    label: 'Discarded catalog edits',
+    title: 'Discard staged edits or drafts',
+    description: 'Drop staged edits or the assistant’s drafts, for one field or a whole product.',
+  },
+  publish_catalog: {
+    role: 'operator',
+    confirm: true,
+    label: 'Publish catalog edits',
+    title: 'Publish catalog edits',
+    description:
+      'Publish the staged edits of up to 500 products to the live catalog, each product all or none.',
+  },
 };
 
 /**
@@ -344,6 +379,9 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
   'create_flow',
   'duplicate_flow',
   'archive_flow',
+  'stage_product_edits',
+  'accept_product_drafts',
+  'discard_product_edits',
 ];
 
 /**
@@ -351,7 +389,13 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
  * scenario starts a real order at one press; that press is the person's own, so nothing else may
  * make it without a confirm.
  */
-export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = ['start_scenario', 'save_flow_draft'];
+export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = [
+  'start_scenario',
+  'save_flow_draft',
+  'stage_product_edits',
+  'accept_product_drafts',
+  'discard_product_edits',
+];
 
 export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);
 

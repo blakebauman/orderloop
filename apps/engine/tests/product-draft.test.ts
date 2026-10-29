@@ -12,6 +12,7 @@ import { auditEvents, createDb } from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { EngineApi } from '../src/api';
+import { previewAction, runAction } from '../src/assistant/data';
 import { describeResult, heuristicStep } from '../src/assistant/model';
 import { boundDrafts, draftProductContent } from '../src/assistant/product-draft';
 import { runTool } from '../src/assistant/tools';
@@ -436,6 +437,130 @@ describe('boundDrafts', () => {
     expect(boundDrafts({ drafts: 'nope' } as never, [slug])).toEqual({
       drafted: [],
       missing: [slug],
+    });
+  });
+});
+
+describe('catalog edits through the assistant', () => {
+  /** A catalog with one product, its staged edits and drafts held in memory. */
+  function editable(p: Product) {
+    const staged: ProductSheet['staged'] = [];
+    const drafts: ProductSheet['drafts'] = [
+      { ref: titleFr, value: 'T-shirt en coton', by: 'assistant', at: 1, stale: false } as never,
+    ];
+    const published: { keys: string[]; requestId: string }[] = [];
+    const rpc: Partial<ProductCatalogRpc> = {
+      getProductSheet: async (key) =>
+        key === p.key
+          ? ({
+              product: p,
+              feed: p,
+              overrides: [],
+              staged: [...staged],
+              drafts: [...drafts],
+              gaps: [],
+              rejection: null,
+              revisions: [],
+            } as ProductSheet)
+          : null,
+      stageEdits: async (edits, by) =>
+        edits.map((e) => {
+          staged.push({
+            ref: e.ref,
+            op: e.op,
+            value: e.op === 'set' ? e.value : null,
+            seen: null,
+            source: e.source ?? 'person',
+            by,
+            at: staged.length + 1,
+            failure: null,
+          } as never);
+          return { key: e.key, ref: e.ref, ok: true as const };
+        }),
+      discardStaged: async (items) => {
+        const n = staged.length;
+        staged.length = 0;
+        return { discarded: items.length ? n : 0 };
+      },
+      publishStaged: async (keys, opts) => {
+        published.push({ keys, requestId: opts.requestId });
+        const out = keys.map((key) => ({
+          key,
+          status: staged.length ? ('published' as const) : ('unchanged' as const),
+          version: 2,
+        }));
+        staged.length = 0;
+        return out;
+      },
+    };
+    return { rpc, staged, published };
+  }
+
+  it('stages and accepts only from the page, and publishes what its card listed', async () => {
+    const p = tee();
+    const { rpc, published } = editable(p);
+    const e = withCatalog(rpc);
+    const direct = { via: 'assistant' as const, direct: true };
+
+    // A model or MCP client never stages: it drafts, and a person accepts.
+    await expect(
+      runTool(e, ada, 'stage_product_edits', { edits: [] }, { via: 'MCP' }),
+    ).rejects.toThrow('This runs only from its page.');
+
+    const nothing = await previewAction(e, ada, 'publish_catalog', { keys: [p.key] });
+    expect(nothing.blocked).toBe('Nothing staged to publish.');
+
+    await runTool(e, ada, 'accept_product_drafts', { key: p.key }, direct);
+    const card = await previewAction(e, ada, 'publish_catalog', { keys: [p.key] });
+    expect(card.blocked).toBeUndefined();
+    expect(card.consequences).toEqual(
+      expect.arrayContaining([
+        '1 staged edit goes live on the storefront and in the feeds',
+        `${p.key} “Cotton tee”: title`,
+      ]),
+    );
+
+    // Something staged after the card was shown: the confirm publishes nothing.
+    await runTool(
+      e,
+      ada,
+      'stage_product_edits',
+      { edits: [{ key: p.key, ref: descFr, op: 'set', value: 'Doux.' }] },
+      direct,
+    );
+    await expect(
+      runAction(e, ada, 'publish_catalog', { keys: [p.key] }, 'assistant', { bound: card.bound! }),
+    ).rejects.toThrow('The staged edits changed since you confirmed; look at them again.');
+    expect(published).toEqual([]);
+    // Nor does a confirm held to nothing: a card never shown, or marked stale since.
+    await expect(
+      runAction(e, ada, 'publish_catalog', { keys: [p.key] }, 'assistant', { bound: null }),
+    ).rejects.toThrow('The staged edits changed since you confirmed; look at them again.');
+    expect(published).toEqual([]);
+
+    const seen = await previewAction(e, ada, 'publish_catalog', { keys: [p.key] });
+    const done = (await runAction(
+      e,
+      ada,
+      'publish_catalog',
+      { keys: [p.key] },
+      'assistant',
+      { bound: seen.bound! },
+      true,
+      'direct_call_1',
+    )) as { done: string };
+    expect(done.done).toBe('Published 1 of 1');
+    expect(published).toEqual([{ keys: [p.key], requestId: 'assistant:usr_ada:direct_call_1' }]);
+    const logged = await createDb(env.DB)
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, 'catalog.edits_published')))
+      .all();
+    expect(JSON.parse(logged.at(-1)!.detail!)).toMatchObject({
+      published: 1,
+      via: 'assistant',
+      tool: 'publish_catalog',
+      direct: true,
     });
   });
 });

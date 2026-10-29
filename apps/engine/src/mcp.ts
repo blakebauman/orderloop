@@ -52,6 +52,7 @@ const DESTRUCTIVE = new Set<AssistantTool>([
   'cancel_order',
   'submit_cart',
   'publish_flow',
+  'publish_catalog',
 ]);
 /** Calling these twice with the same input does nothing more the second time. */
 const IDEMPOTENT = new Set<AssistantTool>([
