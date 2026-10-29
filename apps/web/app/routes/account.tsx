@@ -752,24 +752,23 @@ function Disconnect({
       </ItemActions>
       {/* Its own line under the row, so the app it names stays readable beside the question. */}
       {confirming ? (
-        <end.Form
-          method="post"
-          className="flex basis-full flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2"
-        >
-          <input type="hidden" name="intent" value="disconnect-app" />
-          <input type="hidden" name="ref" value={id} />
-          <Confirm
-            message={`Disconnect ${app}?`}
-            note="It loses access now."
-            cancelLabel="Keep"
-            onCancel={keep}
-            className="flex-1"
-          >
-            <Button size="sm" variant="destructive" disabled={end.state !== 'idle'}>
-              Disconnect
-            </Button>
-          </Confirm>
-        </end.Form>
+        <Item asChild variant="outline" size="xs" className="basis-full bg-muted/40">
+          <end.Form method="post">
+            <input type="hidden" name="intent" value="disconnect-app" />
+            <input type="hidden" name="ref" value={id} />
+            <Confirm
+              message={`Disconnect ${app}?`}
+              note="It loses access now."
+              cancelLabel="Keep"
+              onCancel={keep}
+              className="flex-1"
+            >
+              <Button size="sm" variant="destructive" disabled={end.state !== 'idle'}>
+                Disconnect
+              </Button>
+            </Confirm>
+          </end.Form>
+        </Item>
       ) : null}
     </>
   );

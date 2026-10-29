@@ -569,29 +569,27 @@ export default function Team() {
                       {/* The question gets its own line under the person, so the name stays
                           beside what's being asked. */}
                       {asking?.id === p.id ? (
-                        <fetcher.Form
-                          method="post"
-                          className="flex basis-full flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2"
-                          onSubmit={() => setAsking(null)}
-                        >
-                          <input type="hidden" name="intent" value={asking.intent} />
-                          <input type="hidden" name="id" value={p.id} />
-                          <input type="hidden" name="who" value={p.name} />
-                          <Confirm
-                            message={QUESTIONS[asking.intent](p.name)}
-                            cancelLabel="Keep"
-                            onCancel={keep}
-                            className="flex-1"
-                          >
-                            {asking.intent === 'disable' ||
-                            (asking.intent === 'enable' && p.role === 'viewer') ? null : (
-                              <StepUpField method={stepUp} next="/team" />
-                            )}
-                            <Button size="sm" variant="destructive" type="submit" disabled={busy}>
-                              {ACTIONS[asking.intent]}
-                            </Button>
-                          </Confirm>
-                        </fetcher.Form>
+                        <Item asChild variant="outline" size="xs" className="basis-full bg-card">
+                          <fetcher.Form method="post" onSubmit={() => setAsking(null)}>
+                            <input type="hidden" name="intent" value={asking.intent} />
+                            <input type="hidden" name="id" value={p.id} />
+                            <input type="hidden" name="who" value={p.name} />
+                            <Confirm
+                              message={QUESTIONS[asking.intent](p.name)}
+                              cancelLabel="Keep"
+                              onCancel={keep}
+                              className="flex-1"
+                            >
+                              {asking.intent === 'disable' ||
+                              (asking.intent === 'enable' && p.role === 'viewer') ? null : (
+                                <StepUpField method={stepUp} next="/team" />
+                              )}
+                              <Button size="sm" variant="destructive" type="submit" disabled={busy}>
+                                {ACTIONS[asking.intent]}
+                              </Button>
+                            </Confirm>
+                          </fetcher.Form>
+                        </Item>
                       ) : null}
                     </li>
                   </Item>

@@ -1,5 +1,6 @@
 import { BASE_CURRENCY, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Progress } from '@orderloop/ui/progress';
 import { Separator } from '@orderloop/ui/separator';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Empty } from '~/components/page';
@@ -57,9 +58,11 @@ export function PerformanceDetail({ p }: { p: Figures }) {
                   </div>
                   {enough ? (
                     <>
-                      <div className="mt-1.5 h-1.5 rounded-full bg-muted" aria-hidden="true">
-                        <div className="h-1.5 rounded-full bg-ok" style={{ width: pct(rate) }} />
-                      </div>
+                      <Progress
+                        value={Math.round(rate * 100)}
+                        aria-hidden="true"
+                        className="mt-1.5 h-1.5 *:data-[slot=progress-indicator]:bg-ok"
+                      />
                       <div className="mt-1 text-muted-foreground text-xs tabular">
                         {count(c.completed)} of {count(c.finished)} ended orders completed
                       </div>

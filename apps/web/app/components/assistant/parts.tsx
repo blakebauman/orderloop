@@ -14,6 +14,15 @@ import {
   type PluginDraftResult,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
+import { Item, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import {
   type DynamicToolUIPart,
@@ -319,16 +328,27 @@ export function SourcesLine({ sources }: { sources: readonly Source[] }) {
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
-        <ul className="space-y-1.5">
+        <ul className="flex flex-col">
           {sources.map((s) => (
-            <li key={s.href} className="min-w-0 truncate">
-              <Link
-                to={s.href}
-                className="hit-area text-foreground/80 hover:text-foreground hover:underline"
-              >
-                {s.label || s.href}
-              </Link>
-            </li>
+            <Item
+              asChild
+              key={s.href}
+              size="xs"
+              className="relative flex-nowrap px-2 py-1 hover:bg-muted/60 touch:min-h-11"
+            >
+              <li>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="w-full font-normal text-[12.5px]">
+                    <Link
+                      to={s.href}
+                      className="truncate text-foreground/80 after:absolute after:inset-0 after:rounded-2xl hover:text-foreground hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+                    >
+                      {s.label || s.href}
+                    </Link>
+                  </ItemTitle>
+                </ItemContent>
+              </li>
+            </Item>
           ))}
         </ul>
       </TraceCollapsibleContent>
@@ -488,84 +508,96 @@ export function ActionCard({
   const approvalId = part.approval?.id;
   const verb = actionVerb(name, input);
   const blocked = p?.blocked;
-  // No `overflow-hidden`: it would clip the buttons' touch areas (`hit-area`). Escape leaves the
-  // card as it does anywhere else; declining is always a button press.
+  // No `overflow-hidden` on the card: it would clip the buttons' touch areas (`hit-area`). Escape
+  // leaves the card as it does anywhere else; declining is always a button press.
   return (
     <Confirmation
       approval={part.approval}
       state={part.state}
       aria-labelledby={titleId}
       data-action={actionKey}
-      className="ol-confirm my-1 scroll-my-4 rounded-2xl border border-input bg-card text-sm"
+      className="ol-confirm my-1 scroll-my-4"
     >
-      <div className="flex items-baseline gap-2 border-b px-3 py-2">
-        <h3 id={titleId} className="min-w-0 flex-1 font-semibold leading-snug">
-          {p?.title ?? fallbackTitle}
-        </h3>
-        {p?.href ? (
-          <Link
-            to={p.href}
-            className="hit-area shrink-0 text-link text-xs hover:underline"
-            aria-label={`Open ${p.title}`}
-          >
-            Open
-          </Link>
-        ) : null}
-      </div>
-      {p ? (
-        p.consequences.length ? (
-          <ul className="divide-y divide-dashed px-3 tabular">
-            {p.consequences.map((c) => (
-              <li key={c} className="py-1.5 text-ui leading-snug">
-                {c}
-              </li>
-            ))}
-          </ul>
-        ) : null
-      ) : (
-        <p className="px-3 py-2 text-muted-foreground text-xs">
-          {loadError
-            ? `Couldn’t check this against the order: ${loadError}`
-            : 'Checking what this will do'}
-          {loadError ? null : <span aria-hidden="true" className="ol-dots" />}
-        </p>
-      )}
-      <div className="space-y-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
-        {blocked ? (
-          <p className="text-ui text-wait leading-snug">{blocked}</p>
+      <Card size="sm" className="gap-3 overflow-visible pb-0">
+        <CardHeader>
+          <CardTitle>
+            <h3 id={titleId} className="min-w-0 font-semibold text-sm leading-snug">
+              {p?.title ?? fallbackTitle}
+            </h3>
+          </CardTitle>
+          {p?.href ? (
+            <CardAction>
+              <Link
+                to={p.href}
+                className="hit-area text-link text-xs hover:underline"
+                aria-label={`Open ${p.title}`}
+              >
+                Open
+              </Link>
+            </CardAction>
+          ) : null}
+        </CardHeader>
+        {p ? (
+          p.consequences.length ? (
+            <CardContent>
+              <ul className="-mx-3 flex flex-col tabular">
+                {p.consequences.map((c) => (
+                  <Item asChild key={c} size="xs" className="py-1.5">
+                    <li>
+                      <ItemContent className="min-w-0 text-ui leading-snug">{c}</ItemContent>
+                    </li>
+                  </Item>
+                ))}
+              </ul>
+            </CardContent>
+          ) : null
         ) : (
-          <p className="text-muted-foreground text-xs leading-snug">
-            Nothing is sent until you confirm, here or wherever else you’re signed in.
-          </p>
+          <CardContent>
+            <p className="text-muted-foreground text-xs">
+              {loadError
+                ? `Couldn’t check this against the order: ${loadError}`
+                : 'Checking what this will do'}
+              {loadError ? null : <span aria-hidden="true" className="ol-dots" />}
+            </p>
+          </CardContent>
         )}
-        <ConfirmationActions>
-          <Button
-            ref={safe}
-            size="sm"
-            variant="ghost"
-            disabled={!approvalId || sent}
-            onClick={() => {
-              setSent(true);
-              respond(approvalId!, false);
-            }}
-          >
-            {blocked ? 'Dismiss' : 'Not now'}
-          </Button>
-          {blocked ? null : (
+        <CardFooter className="flex-col items-stretch gap-2 rounded-b-2xl border-t bg-muted/40 pb-(--card-spacing)">
+          {blocked ? (
+            <p className="text-ui text-wait leading-snug">{blocked}</p>
+          ) : (
+            <p className="text-muted-foreground text-xs leading-snug">
+              Nothing is sent until you confirm, here or wherever else you’re signed in.
+            </p>
+          )}
+          <ConfirmationActions>
             <Button
+              ref={safe}
               size="sm"
-              variant={DESTRUCTIVE(name, input) ? 'destructive' : 'default'}
-              disabled={!approvalId || !p || sent}
+              variant="ghost"
+              disabled={!approvalId || sent}
               onClick={() => {
                 setSent(true);
-                respond(approvalId!, true);
+                respond(approvalId!, false);
               }}
             >
-              {verb}
+              {blocked ? 'Dismiss' : 'Not now'}
             </Button>
-          )}
-        </ConfirmationActions>
-      </div>
+            {blocked ? null : (
+              <Button
+                size="sm"
+                variant={DESTRUCTIVE(name, input) ? 'destructive' : 'default'}
+                disabled={!approvalId || !p || sent}
+                onClick={() => {
+                  setSent(true);
+                  respond(approvalId!, true);
+                }}
+              >
+                {verb}
+              </Button>
+            )}
+          </ConfirmationActions>
+        </CardFooter>
+      </Card>
     </Confirmation>
   );
 }
@@ -628,6 +660,7 @@ export function draftStatus(d: Pick<PluginDraftResult, 'cases'>): string {
 /** A drafted plugin. Reviewing, testing and approving happen on the Plugins page. */
 export function PluginDraftCard({ part, streaming }: { part: Part; streaming: boolean }) {
   const navigate = useNavigate();
+  const titleId = useId();
   if (part.state !== 'output-available')
     return (
       <Trace>
@@ -637,35 +670,55 @@ export function PluginDraftCard({ part, streaming }: { part: Part; streaming: bo
   const d = part.output as PluginDraftResult;
   const allPass = d.cases.total > 0 && d.cases.passed === d.cases.total;
   return (
-    <section className="my-1 rounded-2xl border border-input bg-card text-sm">
-      <div className="border-b px-3 py-2">
-        <h3 className="flex items-baseline gap-2 font-semibold leading-snug">
-          <AiDot />
-          Drafted {d.name}{' '}
-          <span className="font-normal text-muted-foreground text-xs">version {d.version}</span>
-        </h3>
-      </div>
-      <div className="space-y-1.5 px-3 py-2">
-        <p className="text-ui leading-snug">{d.explanation}</p>
-        <ul className="text-muted-foreground text-xs">
-          {d.nodes.map((n) => (
-            <li key={n.type}>
-              {n.label} <code>{n.type}</code>
-            </li>
-          ))}
-        </ul>
-        <p className={cn('text-xs tabular', allPass ? 'text-muted-foreground' : 'text-wait')}>
-          {draftStatus(d)}
-        </p>
-      </div>
-      <div className="flex items-center gap-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
-        <p className="min-w-0 flex-1 text-muted-foreground text-xs">
-          Nothing runs until an admin approves it.
-        </p>
-        <Button size="sm" onClick={() => navigate(d.href)}>
-          Review
-        </Button>
-      </div>
+    <section aria-labelledby={titleId} className="my-1">
+      <Card size="sm" className="gap-3 overflow-visible pb-0">
+        <CardHeader>
+          <CardTitle>
+            <h3
+              id={titleId}
+              className="flex items-baseline gap-2 font-semibold text-sm leading-snug"
+            >
+              <AiDot />
+              <span className="min-w-0">
+                Drafted {d.name}{' '}
+                <span className="font-normal text-muted-foreground text-xs">
+                  version {d.version}
+                </span>
+              </span>
+            </h3>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1.5">
+          <p className="text-ui leading-snug">{d.explanation}</p>
+          {d.nodes.length ? (
+            <ul className="-mx-3 flex flex-col">
+              {d.nodes.map((n) => (
+                <Item asChild key={n.type} size="xs" className="flex-nowrap py-1">
+                  <li>
+                    <ItemContent className="min-w-0 gap-0">
+                      <ItemTitle className="font-normal text-xs">{n.label}</ItemTitle>
+                      <ItemDescription className="truncate text-xs">
+                        <code>{n.type}</code>
+                      </ItemDescription>
+                    </ItemContent>
+                  </li>
+                </Item>
+              ))}
+            </ul>
+          ) : null}
+          <p className={cn('text-xs tabular', allPass ? 'text-muted-foreground' : 'text-wait')}>
+            {draftStatus(d)}
+          </p>
+        </CardContent>
+        <CardFooter className="gap-2 rounded-b-2xl border-t bg-muted/40 pb-(--card-spacing)">
+          <p className="min-w-0 flex-1 text-muted-foreground text-xs">
+            Nothing runs until an admin approves it.
+          </p>
+          <Button size="sm" onClick={() => navigate(d.href)}>
+            Review
+          </Button>
+        </CardFooter>
+      </Card>
     </section>
   );
 }
@@ -676,6 +729,7 @@ export function PluginDraftCard({ part, streaming }: { part: Part; streaming: bo
 export function ProposalCard({ part, streaming }: { part: Part; streaming: boolean }) {
   const { offerProposal } = useAssistant();
   const navigate = useNavigate();
+  const titleId = useId();
   if (part.state !== 'output-available')
     return (
       <Trace>
@@ -694,43 +748,50 @@ export function ProposalCard({ part, streaming }: { part: Part; streaming: boole
       </Trace>
     );
   return (
-    <section className="my-1 rounded-2xl border border-input bg-card text-sm">
-      <div className="border-b px-3 py-2">
-        <h3 className="flex items-baseline gap-2 font-semibold leading-snug">
-          <AiDot />
-          Proposed change to {pr.flowName}
-        </h3>
-      </div>
-      <div className="space-y-1.5 px-3 py-2">
-        <p className="text-ui leading-snug">{pr.explanation}</p>
-        <p className="text-muted-foreground text-xs tabular">
-          {diff}
-          {pr.errors.length ? (
-            <span className="text-bad">
-              {' '}
-              · {pr.errors.length} problem{pr.errors.length === 1 ? '' : 's'} to fix
-            </span>
-          ) : null}
-          {pr.warnings.length ? (
-            <span className="text-wait"> · {pr.warnings.length} to check</span>
-          ) : null}
-        </p>
-      </div>
-      <div className="flex items-center gap-2 rounded-b-2xl border-t bg-muted/40 px-3 py-2">
-        <p className="min-w-0 flex-1 text-muted-foreground text-xs">
-          Nothing changes until you apply it.
-        </p>
-        <Button
-          size="sm"
-          onClick={() => {
-            offerProposal(pr);
-            if (!window.location.pathname.startsWith(`/flows/${pr.flowId}`))
-              navigate(`/flows/${pr.flowId}`);
-          }}
-        >
-          Review in editor
-        </Button>
-      </div>
+    <section aria-labelledby={titleId} className="my-1">
+      <Card size="sm" className="gap-3 overflow-visible pb-0">
+        <CardHeader>
+          <CardTitle>
+            <h3
+              id={titleId}
+              className="flex items-baseline gap-2 font-semibold text-sm leading-snug"
+            >
+              <AiDot />
+              <span className="min-w-0">Proposed change to {pr.flowName}</span>
+            </h3>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1.5">
+          <p className="text-ui leading-snug">{pr.explanation}</p>
+          <p className="text-muted-foreground text-xs tabular">
+            {diff}
+            {pr.errors.length ? (
+              <span className="text-bad">
+                {' '}
+                · {pr.errors.length} problem{pr.errors.length === 1 ? '' : 's'} to fix
+              </span>
+            ) : null}
+            {pr.warnings.length ? (
+              <span className="text-wait"> · {pr.warnings.length} to check</span>
+            ) : null}
+          </p>
+        </CardContent>
+        <CardFooter className="gap-2 rounded-b-2xl border-t bg-muted/40 pb-(--card-spacing)">
+          <p className="min-w-0 flex-1 text-muted-foreground text-xs">
+            Nothing changes until you apply it.
+          </p>
+          <Button
+            size="sm"
+            onClick={() => {
+              offerProposal(pr);
+              if (!window.location.pathname.startsWith(`/flows/${pr.flowId}`))
+                navigate(`/flows/${pr.flowId}`);
+            }}
+          >
+            Review in editor
+          </Button>
+        </CardFooter>
+      </Card>
     </section>
   );
 }

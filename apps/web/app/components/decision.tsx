@@ -5,7 +5,9 @@
  */
 
 import { Button } from '@orderloop/ui/button';
+import { Field, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemActions, ItemContent } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Check, X } from 'lucide-react';
 import {
@@ -312,8 +314,10 @@ export function DecisionControls({
   if (pending) {
     const left = Math.max(0, Math.ceil((pending.at + pending.ms - now) / 1000));
     return (
-      <div
-        className="relative flex animate-arrive flex-wrap items-center gap-3 overflow-hidden rounded-xl border bg-background px-3 py-2 text-sm"
+      <Item
+        variant="outline"
+        size="xs"
+        className="relative animate-arrive overflow-hidden bg-background"
         aria-live={pending.quiet ? undefined : 'polite'}
       >
         {/* The window running out, drained over exactly this decision's window (shorter near a
@@ -324,24 +328,25 @@ export function DecisionControls({
           className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-foreground/35 motion-reduce:hidden"
           style={{ animation: `ol-drain ${pending.ms}ms linear forwards` }}
         />
-        <span>
+        <ItemContent className="block min-w-0">
           {pending.decision === 'approved' ? 'Approving' : 'Rejecting'} in{' '}
           <span className="tabular">{left}s</span>
           {note.trim() ? <span className="text-muted-foreground"> · with note</span> : null}
           {pending.ms < UNDO_MS ? (
             <span className="text-muted-foreground"> · shorter undo, the step times out soon</span>
           ) : null}
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-auto"
-          onClick={() => setPending(null)}
-          autoFocus={!pending.quiet}
-        >
-          Undo
-        </Button>
-      </div>
+        </ItemContent>
+        <ItemActions className="ml-auto">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPending(null)}
+            autoFocus={!pending.quiet}
+          >
+            Undo
+          </Button>
+        </ItemActions>
+      </Item>
     );
   }
 
@@ -401,19 +406,22 @@ function DecisionForm({
   return (
     <div className={cn('flex flex-wrap items-center gap-2', compact && 'sm:flex-nowrap')}>
       {withNote ? (
-        <>
-          <label htmlFor={noteId} className="sr-only">
+        <Field
+          data-disabled={disabled || undefined}
+          className={cn('gap-0', compact ? 'w-full sm:w-48' : 'w-full')}
+        >
+          <FieldLabel htmlFor={noteId} className="sr-only">
             Note for the order history
-          </label>
+          </FieldLabel>
           <Input
             id={noteId}
             placeholder="Note (optional)"
-            className={cn('h-8 text-sm', compact ? 'w-full sm:w-48' : 'w-full')}
+            className="h-8 text-sm"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             disabled={disabled}
           />
-        </>
+        </Field>
       ) : null}
       <div className="flex gap-2">
         <Button

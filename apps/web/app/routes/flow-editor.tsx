@@ -11,15 +11,19 @@ import {
   validateGraph,
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent } from '@orderloop/ui/card';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
+import { Field, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemContent, ItemMedia, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
+import { Textarea } from '@orderloop/ui/textarea';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -38,6 +42,7 @@ import { Confirm } from '~/components/confirm';
 import { Connections } from '~/components/connections';
 import { FlowCanvas, makeNode } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
+import { Section } from '~/components/page';
 import { Palette } from '~/components/palette';
 import { useAssistant, usePageContext } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
@@ -126,6 +131,7 @@ export default function FlowEditor() {
   const nodes = useNodes();
   const issues = useMemo(() => validateGraph(flow, nodes), [flow, nodes]);
   const publishStatusId = useId();
+  const descriptionId = useId();
   const nodeIssues = useMemo(
     () =>
       Object.fromEntries(issues.errors.filter((e) => e.nodeId).map((e) => [e.nodeId!, e.message])),
@@ -573,13 +579,17 @@ export default function FlowEditor() {
           )}
         >
           {node ? (
-            <div className="space-y-6">
-              <Inspector node={node} onChange={wide ? updateNode : undefined} />
+            <div className="flex flex-col gap-4">
+              <Card className="min-w-0 [--card-spacing:--spacing(5)]">
+                <CardContent>
+                  <Inspector node={node} onChange={wide ? updateNode : undefined} />
+                </CardContent>
+              </Card>
               {wide ? (
                 <>
                   <Connections node={node} graph={flow} onChange={setGraph} />
                   {/* The one destructive action, last and apart from the settings above it. */}
-                  <div className="border-t pt-4">
+                  <div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -593,51 +603,56 @@ export default function FlowEditor() {
               ) : null}
             </div>
           ) : (
-            <div className="space-y-5">
-              <label className="block">
-                <span className="section-title mb-1.5 block">Description</span>
-                <textarea
-                  value={flow.description}
-                  onChange={(e) => setFlow({ ...flow, description: e.target.value })}
-                  readOnly={!wide}
-                  rows={4}
-                  className="w-full rounded-xl border border-input bg-input/30 px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                />
-              </label>
-              <div>
-                <h2 className="section-title mb-1.5">Checks</h2>
+            // What to fix first, then the flow's description, then how the editor works.
+            <div className="flex flex-col gap-4">
+              <Section
+                title="Checks"
+                description="Errors block publishing; pick one to select its step."
+              >
                 {issues.errors.length === 0 ? (
                   <div className="flex items-center gap-1.5 text-ok text-sm">
                     <CheckCircle2 className="size-4" />{' '}
                     {unpublished ? 'Ready to publish' : `All checks pass; v${published} is live`}
                   </div>
                 ) : null}
-                <ul className="space-y-1.5">
-                  {issues.errors.map((e, i) => (
-                    <li key={`e${i}`}>
-                      <button
-                        type="button"
-                        onClick={() => e.nodeId && setSelected(e.nodeId)}
-                        className="flex gap-1.5 text-left text-bad text-sm hover:underline"
-                      >
-                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {e.message}
-                      </button>
-                    </li>
-                  ))}
-                  {issues.warnings.map((e, i) => (
-                    <li key={`w${i}`}>
-                      <button
-                        type="button"
-                        onClick={() => e.nodeId && setSelected(e.nodeId)}
-                        className="flex gap-1.5 text-left text-sm text-wait hover:underline"
-                      >
-                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {e.message}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="max-w-[65ch] space-y-2 text-muted-foreground text-sm leading-relaxed">
+                {issues.errors.length || issues.warnings.length ? (
+                  <ul className="flex flex-col gap-1">
+                    {issues.errors.map((e, i) => (
+                      <CheckItem
+                        key={`e${i}`}
+                        tone="bad"
+                        message={e.message}
+                        onPick={() => e.nodeId && setSelected(e.nodeId)}
+                      />
+                    ))}
+                    {issues.warnings.map((e, i) => (
+                      <CheckItem
+                        key={`w${i}`}
+                        tone="wait"
+                        message={e.message}
+                        onPick={() => e.nodeId && setSelected(e.nodeId)}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+              </Section>
+              <Card className="min-w-0 [--card-spacing:--spacing(5)]">
+                <CardContent>
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor={descriptionId} className="section-title">
+                      Description
+                    </FieldLabel>
+                    <Textarea
+                      id={descriptionId}
+                      value={flow.description}
+                      onChange={(e) => setFlow({ ...flow, description: e.target.value })}
+                      readOnly={!wide}
+                      rows={4}
+                    />
+                  </Field>
+                </CardContent>
+              </Card>
+              <div className="max-w-[65ch] space-y-2 px-1 text-muted-foreground text-sm leading-relaxed">
                 <p className="touch:hidden">
                   Drag nodes from the palette, connect an output dot to an input, and press Delete
                   to remove a selection. From the keyboard: Enter on a palette item adds it after
@@ -663,6 +678,45 @@ export default function FlowEditor() {
         </aside>
       </div>
     </div>
+  );
+}
+
+/** A check, as a row: picking it selects the step it is about. */
+function CheckItem({
+  tone,
+  message,
+  onPick,
+}: {
+  tone: 'bad' | 'wait';
+  message: string;
+  onPick: () => void;
+}) {
+  return (
+    <Item
+      asChild
+      variant={tone === 'bad' ? 'muted' : 'default'}
+      size="xs"
+      className="relative flex-nowrap items-start hover:bg-muted touch:py-3 has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
+    >
+      <li>
+        <ItemMedia variant="icon" className={tone === 'bad' ? 'text-bad' : 'text-wait'}>
+          <AlertTriangle className="size-3.5" aria-hidden="true" />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle
+            className={cn('line-clamp-none font-normal', tone === 'bad' ? 'text-bad' : 'text-wait')}
+          >
+            <button
+              type="button"
+              onClick={onPick}
+              className="text-left after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none"
+            >
+              {message}
+            </button>
+          </ItemTitle>
+        </ItemContent>
+      </li>
+    </Item>
   );
 }
 

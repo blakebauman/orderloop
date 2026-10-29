@@ -1,4 +1,5 @@
 import { Button } from '@orderloop/ui/button';
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from '@orderloop/ui/card';
 import { Form, redirect, useLoaderData } from 'react-router';
 import { Mark } from '~/components/mark';
 import { principal, signOut } from '~/lib/auth.server';
@@ -35,14 +36,22 @@ export default function Logout() {
   const { who } = useLoaderData<typeof loader>();
   return (
     <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
-      <Form method="post" reloadDocument className="h-fit w-full max-w-sm card p-6">
-        <Mark className="size-7" />
-        <h1 className="mt-4 font-semibold tracking-title text-2xl">Sign out?</h1>
-        <p className="mt-1 text-muted-foreground text-sm">You’re signed in as {who}.</p>
-        <Button type="submit" className="mt-4 w-full">
-          Sign out
-        </Button>
-      </Form>
+      <Card className="h-fit w-full max-w-sm">
+        <Form method="post" reloadDocument className="contents">
+          <CardHeader>
+            <Mark className="size-7" />
+            <CardTitle className="mt-2">
+              <h1 className="font-semibold tracking-title text-2xl">Sign out?</h1>
+            </CardTitle>
+            <CardDescription>You’re signed in as {who}.</CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button type="submit" className="w-full">
+              Sign out
+            </Button>
+          </CardFooter>
+        </Form>
+      </Card>
     </main>
   );
 }

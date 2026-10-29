@@ -34,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@orderloop/ui/dropdown-menu';
+import { Item, ItemContent, ItemMedia, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { useAgent } from 'agents/react';
 import { getToolName, isToolUIPart, type UIMessage } from 'ai';
@@ -43,6 +44,7 @@ import {
   CircleAlert,
   Copy,
   Info,
+  MessageSquareText,
   MoreHorizontal,
   Pencil,
   RotateCcw,
@@ -80,6 +82,7 @@ import {
 import { Shimmer } from '~/components/ai-elements/shimmer';
 import { Suggestion, Suggestions } from '~/components/ai-elements/suggestion';
 import { Trace } from '~/components/ai-elements/trace';
+import { Empty } from '~/components/page';
 import { contextLabel, useAssistant } from '~/lib/assistant';
 import { coarse, useMedia, useShortcutLabel, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
@@ -891,10 +894,7 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
         />
       </button>
       {open ? (
-        <ul
-          id={listId}
-          className="max-h-56 divide-y divide-dashed overflow-y-auto border-t px-4 text-[12.5px]"
-        >
+        <ul id={listId} className="flex max-h-56 flex-col overflow-y-auto border-t px-2 py-1">
           {data.approvals.map((x) => (
             <AttentionItem
               key={x.id}
@@ -925,17 +925,27 @@ function AttentionLine({ data, failed }: { data: Attention | null; failed: boole
             />
           ))}
           {approvals > data.approvals.length ? (
-            <li className="py-1.5">
-              <Link to="/approvals" className="text-link hover:underline">
-                All {approvals} approvals
-              </Link>
-            </li>
+            <Item asChild size="xs" className="relative px-2 py-1.5 touch:min-h-11">
+              <li>
+                <ItemContent>
+                  <ItemTitle className="font-normal text-[12.5px]">
+                    <Link to="/approvals" className={`text-link ${STRETCH}`}>
+                      All {approvals} approvals
+                    </Link>
+                  </ItemTitle>
+                </ItemContent>
+              </li>
+            </Item>
           ) : null}
         </ul>
       ) : null}
     </div>
   );
 }
+
+/** A row's link, stretched over the whole row so the row opens it. */
+const STRETCH =
+  'after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]';
 
 const capital = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
@@ -951,21 +961,34 @@ function AttentionItem({
   id: string;
 }) {
   return (
-    <li>
-      <Link to={to} className="flex items-center gap-2 py-1.5 hover:underline">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            tone === 'wait' ? 'bg-wait' : tone === 'bad' ? 'bg-bad' : 'bg-idle',
-          )}
-        />
-        <span className="min-w-0 flex-1 truncate">{what}</span>
-        <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
-          {orderRef(id)}
-        </span>
-      </Link>
-    </li>
+    <Item
+      asChild
+      size="xs"
+      className="relative flex-nowrap px-2 py-1.5 hover:bg-muted/60 touch:min-h-11"
+    >
+      <li>
+        <ItemMedia>
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              tone === 'wait' ? 'bg-wait' : tone === 'bad' ? 'bg-bad' : 'bg-idle',
+            )}
+          />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full font-normal text-[12.5px]">
+            {/* The ref stays inside the link: it is part of the row's name. */}
+            <Link to={to} className={`flex w-full min-w-0 items-center gap-2 ${STRETCH}`}>
+              <span className="min-w-0 flex-1 truncate">{what}</span>
+              <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
+                {orderRef(id)}
+              </span>
+            </Link>
+          </ItemTitle>
+        </ItemContent>
+      </li>
+    </Item>
   );
 }
 
@@ -997,20 +1020,21 @@ function FirstRun({ onAsk }: { onAsk: (text: string) => void }) {
             'Which SKUs are low on stock?',
           ];
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5 text-[13.5px] leading-relaxed">
-        <p>Ask about orders, approvals, stock and flows.</p>
-        <p className="text-muted-foreground">
-          It works within your role{me ? ` (${ROLE_LABELS[me.role].toLowerCase()})` : ''} and asks
-          you before anything that can’t be undone: decisions, cancellations, events and publishing.
-        </p>
-      </div>
-      <Suggestions>
-        {ideas.map((t) => (
-          <Suggestion key={t} suggestion={t} onClick={onAsk} />
-        ))}
-      </Suggestions>
-    </div>
+    <Empty
+      className="px-0 py-6"
+      icon={<MessageSquareText aria-hidden="true" />}
+      title="Ask about orders, approvals, stock and flows."
+      action={
+        <Suggestions className="items-center">
+          {ideas.map((t) => (
+            <Suggestion key={t} suggestion={t} onClick={onAsk} />
+          ))}
+        </Suggestions>
+      }
+    >
+      It works within your role{me ? ` (${ROLE_LABELS[me.role].toLowerCase()})` : ''} and asks you
+      before anything that can’t be undone: decisions, cancellations, events and publishing.
+    </Empty>
   );
 }
 

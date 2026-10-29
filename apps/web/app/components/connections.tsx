@@ -6,8 +6,11 @@
 
 import { type FlowGraph, type FlowNode, isBackEdge } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
+import { Item, ItemActions, ItemContent, ItemTitle } from '@orderloop/ui/item';
+import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { X } from 'lucide-react';
 import { useId, useState } from 'react';
+import { Section } from '~/components/page';
 import { useNodes } from '~/lib/nodes';
 import { edgeId, wouldCycle } from './flow-canvas';
 
@@ -23,6 +26,7 @@ export function Connections({
   const nodes = useNodes();
   const outputs = nodes.outputs(node.type, nodes.withDefaults(node.type, node.config));
   const baseId = useId();
+  const [picks, setPicks] = useState<Record<string, string>>({});
   if (!outputs.length) return null;
   const label = (id: string) => graph.nodes.find((n) => n.id === id)?.label ?? id;
   const forward = graph.edges.filter((e) => e.source === node.id && !isBackEdge(e));
@@ -39,15 +43,13 @@ export function Connections({
     // Keep keyboard focus in the same output instead of dropping it to the page.
     requestAnimationFrame(() => document.getElementById(`${baseId}-${output}`)?.focus());
   };
-  const [picks, setPicks] = useState<Record<string, string>>({});
 
   return (
-    <div>
-      <h2 className="section-title">Connections</h2>
-      <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
-        Where each output goes next. Same as dragging between dots on the canvas.
-      </p>
-      <ul className="space-y-3">
+    <Section
+      title="Connections"
+      description="Where each output goes next. Same as dragging between dots on the canvas."
+    >
+      <ul className="flex flex-col gap-4">
         {outputs.map((o) => {
           const edges = forward.filter((e) => (e.sourceHandle || 'out') === o);
           const taken = new Set(edges.map((e) => e.target));
@@ -60,7 +62,7 @@ export function Connections({
           );
           const selectId = `${baseId}-${o}`;
           return (
-            <li key={o}>
+            <li key={o} className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-mono text-xs">{o}</span>
                 {!edges.length ? (
@@ -68,45 +70,61 @@ export function Connections({
                 ) : null}
               </div>
               {edges.length ? (
-                <ul className="mt-1 space-y-1">
+                <ul className="flex flex-col gap-1">
                   {edges.map((e) => (
-                    <li
+                    <Item
                       key={e.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-sm"
+                      asChild
+                      variant="outline"
+                      size="xs"
+                      className="flex-nowrap py-1 pr-1"
                     >
-                      <span className="min-w-0 truncate">{label(e.target)}</span>
-                      <button
-                        type="button"
-                        onClick={() => disconnect(e.id, o)}
-                        className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                        aria-label={`Disconnect ${o} from ${label(e.target)}`}
-                      >
-                        <X className="size-3.5" aria-hidden="true" />
-                      </button>
-                    </li>
+                      <li>
+                        <ItemContent className="min-w-0">
+                          <ItemTitle className="block w-full truncate font-normal">
+                            {label(e.target)}
+                          </ItemTitle>
+                        </ItemContent>
+                        <ItemActions>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => disconnect(e.id, o)}
+                            className="text-muted-foreground hover:text-foreground"
+                            aria-label={`Disconnect ${o} from ${label(e.target)}`}
+                          >
+                            <X className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        </ItemActions>
+                      </li>
+                    </Item>
                   ))}
                 </ul>
               ) : null}
               {options.length ? (
-                <>
-                  <label htmlFor={selectId} className="sr-only">
-                    Connect {o} to
-                  </label>
-                  {/* Choosing is separate from connecting, so arrowing through the list is harmless. */}
-                  <div className="mt-1 flex gap-1.5">
-                    <select
+                // Choosing is separate from connecting, so arrowing through the list is harmless.
+                <Item size="xs" className="flex-nowrap gap-1.5 p-0">
+                  <ItemContent className="min-w-0">
+                    <label htmlFor={selectId} className="sr-only">
+                      Connect {o} to
+                    </label>
+                    <NativeSelect
                       id={selectId}
                       value={picks[o] ?? ''}
                       onChange={(e) => setPicks((p) => ({ ...p, [o]: e.target.value }))}
-                      className="h-8 min-w-0 flex-1 rounded-4xl border border-input bg-input/30 px-3 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className="h-8"
+                      wrapperClassName="w-full"
                     >
-                      <option value="">Connect to…</option>
+                      <NativeSelectOption value="">Connect to…</NativeSelectOption>
                       {options.map((n) => (
-                        <option key={n.id} value={n.id}>
+                        <NativeSelectOption key={n.id} value={n.id}>
                           {n.label} ({n.id})
-                        </option>
+                        </NativeSelectOption>
                       ))}
-                    </select>
+                    </NativeSelect>
+                  </ItemContent>
+                  <ItemActions>
                     <Button
                       type="button"
                       size="sm"
@@ -119,13 +137,13 @@ export function Connections({
                     >
                       Connect
                     </Button>
-                  </div>
-                </>
+                  </ItemActions>
+                </Item>
               ) : null}
             </li>
           );
         })}
       </ul>
-    </div>
+    </Section>
   );
 }

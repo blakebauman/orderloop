@@ -4,6 +4,16 @@
  */
 
 import { ROLE_LABELS, type Role } from '@orderloop/core';
+import { Button } from '@orderloop/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@orderloop/ui/empty';
+import { FileQuestion, ShieldX, TriangleAlert } from 'lucide-react';
 import { isRouteErrorResponse, Link, Outlet, useRouteLoaderData } from 'react-router';
 import { useMe } from '~/lib/use-me';
 import type { Route } from './+types/in-app';
@@ -26,12 +36,12 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   if (status === 403 && need && me) {
     return (
-      <Refused title="Not with your role">
-        <p className="mt-2 text-muted-foreground">
+      <Refused title="Not with your role" icon={<ShieldX aria-hidden="true" />}>
+        <p>
           This page needs the {ROLE_LABELS[need]} role. You’re {article(ROLE_LABELS[me.role])}{' '}
           {ROLE_LABELS[me.role]}.
         </p>
-        <p className="mt-2 text-muted-foreground text-sm">
+        <p className="mt-2">
           {admins.length ? (
             <>
               An admin can change your role:{' '}
@@ -54,33 +64,46 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
   if (status === 404) {
     return (
-      <Refused title="Not found">
-        <p className="mt-2 text-muted-foreground">
-          {said ?? 'That page does not exist, or what it showed has been removed.'}
-        </p>
+      <Refused title="Not found" icon={<FileQuestion aria-hidden="true" />}>
+        <p>{said ?? 'That page does not exist, or what it showed has been removed.'}</p>
       </Refused>
     );
   }
   return (
-    <Refused title="Something went wrong">
-      <p className="mt-2 text-muted-foreground">
-        {said ?? 'This page couldn’t load. Try again, or go back to the overview.'}
-      </p>
+    <Refused title="Something went wrong" icon={<TriangleAlert aria-hidden="true" />}>
+      <p>{said ?? 'This page couldn’t load. Try again, or go back to the overview.'}</p>
     </Refused>
   );
 }
 
 const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
 
-function Refused({ title, children }: { title: string; children: React.ReactNode }) {
+function Refused({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="mx-auto max-w-page px-4 pt-7 pb-10 sm:px-6">
       <title>{`${title} · OrderLoop`}</title>
-      <h1 className="font-semibold tracking-title text-[1.75rem] leading-tight">{title}</h1>
-      <div className="max-w-measure">{children}</div>
-      <Link to="/" className="mt-6 inline-block font-medium text-link text-sm hover:underline">
-        Back to the overview
-      </Link>
+      <Empty className="gap-5 pt-[10vh]">
+        <EmptyHeader className="max-w-measure">
+          <EmptyMedia variant="icon">{icon}</EmptyMedia>
+          <EmptyTitle>
+            <h1 className="font-semibold tracking-title text-[1.75rem] leading-tight">{title}</h1>
+          </EmptyTitle>
+          <EmptyDescription>{children}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link to="/">Back to the overview</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     </div>
   );
 }

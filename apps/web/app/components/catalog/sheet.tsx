@@ -16,6 +16,7 @@ import {
 } from '@orderloop/ui/card';
 import { Field, FieldContent, FieldDescription, FieldTitle } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import {
@@ -263,43 +264,50 @@ export function ProductSheetView({
                   </CardDescription>
                 </CardHeader>
                 {/* A phone stacks each field's locales; anything wider sets them side by side. */}
-                <div className="flex flex-col divide-y border-t px-(--card-spacing) sm:hidden">
+                <ul className="flex flex-col gap-1 border-t p-2 sm:hidden">
                   {rows.map((base) => (
-                    <div key={fieldId(base as FieldRef)} className="py-3">
-                      <p className="mb-2 font-medium text-sm">
-                        {label(base)}
-                        {base.field === 'attribute' ? (
-                          <span className="ml-2 font-mono font-normal text-2xs text-muted-foreground">
-                            {base.code}
-                          </span>
-                        ) : null}
-                        {base.field === 'mediaAlt' ? (
-                          <span className="ml-2 font-mono font-normal text-2xs text-muted-foreground">
-                            {base.src?.split('/').at(-1)}
-                          </span>
-                        ) : null}
-                      </p>
-                      <dl className="flex flex-col gap-3">
-                        {locales.map((locale) => (
-                          <div key={locale} className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
-                            <dt className="pt-0.5 font-mono text-muted-foreground text-xs">
-                              {locale}
-                            </dt>
-                            <dd className="min-w-0">
-                              <FieldCell
-                                sheet={sheet}
-                                fieldRef={{ ...base, locale } as FieldRef}
-                                canEdit={canEdit}
-                                focused={false}
-                                anchor={false}
-                              />
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
+                    <Item asChild key={fieldId(base as FieldRef)} size="sm" className="px-2">
+                      <li>
+                        <ItemContent className="min-w-0 gap-2">
+                          <ItemTitle className="line-clamp-none w-full flex-wrap gap-x-2 gap-y-0">
+                            {label(base)}
+                            {base.field === 'attribute' ? (
+                              <span className="font-mono font-normal text-2xs text-muted-foreground">
+                                {base.code}
+                              </span>
+                            ) : null}
+                            {base.field === 'mediaAlt' ? (
+                              <span className="font-mono font-normal text-2xs text-muted-foreground">
+                                {base.src?.split('/').at(-1)}
+                              </span>
+                            ) : null}
+                          </ItemTitle>
+                          <dl className="flex flex-col gap-3">
+                            {locales.map((locale) => (
+                              <div
+                                key={locale}
+                                className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2"
+                              >
+                                <dt className="pt-0.5 font-mono text-muted-foreground text-xs">
+                                  {locale}
+                                </dt>
+                                <dd className="min-w-0">
+                                  <FieldCell
+                                    sheet={sheet}
+                                    fieldRef={{ ...base, locale } as FieldRef}
+                                    canEdit={canEdit}
+                                    focused={false}
+                                    anchor={false}
+                                  />
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </ItemContent>
+                      </li>
+                    </Item>
                   ))}
-                </div>
+                </ul>
                 <div data-strip className="overflow-x-auto border-t max-sm:hidden">
                   <Table edge="card" className="w-full">
                     <TableHead>
@@ -828,26 +836,43 @@ function History({ sheet }: { sheet: ProductSheet }) {
             </h3>
           </CardTitle>
         </CardHeader>
-        <ol className="flex flex-col divide-y border-t px-(--card-spacing) text-sm">
+        <ol className="flex flex-col gap-0.5 border-t p-1.5">
           {sheet.revisions.slice(0, 8).map((r) => (
-            <li
+            <Item
+              asChild
               key={`${refKey(r.ref)}:${r.at}`}
-              className="flex flex-wrap items-baseline gap-x-2 py-1.5"
+              size="xs"
+              className="flex-nowrap items-start"
             >
-              {r.source === 'assistant' ? (
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
-              ) : null}
-              <span className="font-medium">
-                {label(r.ref)}
-                {r.ref.locale ? (
-                  <span className="font-mono text-muted-foreground text-xs"> {r.ref.locale}</span>
+              <li>
+                {r.source === 'assistant' ? (
+                  <ItemMedia>
+                    <span aria-hidden="true" className="mt-1.5 size-1.5 rounded-full bg-ai" />
+                  </ItemMedia>
                 ) : null}
-              </span>
-              <span className="text-muted-foreground">
-                {r.op === 'clear' ? 'back to the feed value' : r.value === null ? 'removed' : 'set'}
-                {r.source === 'assistant' ? ' from a draft' : ''} by {r.by}, <Ago ms={r.at} />
-              </span>
-            </li>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="line-clamp-none">
+                    <span>
+                      {label(r.ref)}
+                      {r.ref.locale ? (
+                        <span className="font-mono font-normal text-muted-foreground text-xs">
+                          {' '}
+                          {r.ref.locale}
+                        </span>
+                      ) : null}
+                    </span>
+                  </ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    {r.op === 'clear'
+                      ? 'back to the feed value'
+                      : r.value === null
+                        ? 'removed'
+                        : 'set'}
+                    {r.source === 'assistant' ? ' from a draft' : ''} by {r.by}, <Ago ms={r.at} />
+                  </ItemDescription>
+                </ItemContent>
+              </li>
+            </Item>
           ))}
         </ol>
       </Card>
