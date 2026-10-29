@@ -48,7 +48,11 @@ const fakeDb = {
   insert: () => ({
     values: (v: { id: string }) => ({
       onConflictDoNothing: () => ({
-        returning: async () => (receipts.has(v.id) ? [] : (receipts.add(v.id), [v])),
+        returning: async () => {
+          if (receipts.has(v.id)) return [];
+          receipts.add(v.id);
+          return [v];
+        },
       }),
     }),
   }),

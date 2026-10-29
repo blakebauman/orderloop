@@ -90,9 +90,9 @@ const totals = [
 ];
 // biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const waiting = steps.find((s) => s.live);
-// biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const label = ORDER_MODEL_LABELS[flow.model];
 // "B2B" stays as it is; "Direct to consumer" reads "direct to consumer" mid-sentence.
+// biome-ignore lint/correctness/noUnusedVariables: used in the markup
 const model = /^[A-Z0-9]+$/.test(label.split(' ')[0]!) ? label : label.toLowerCase();
 ---
 

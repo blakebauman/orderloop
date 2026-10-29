@@ -505,7 +505,7 @@ export const EXECUTORS: Record<string, Exec> = {
 
   'commerce.credit_check': async ({ env, ctx, config }) => {
     const c = await cx.getCustomer(env, ctx.order.customerId);
-    if (!c || c.kind !== 'business') {
+    if (c?.kind !== 'business') {
       const branch = str(config.noAccount, 'over_limit') === 'ok' ? 'ok' : 'over_limit';
       return {
         branches: [branch],

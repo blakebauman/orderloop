@@ -352,7 +352,6 @@ async function main() {
   const cleanupOnly = args.includes('--cleanup');
   if (!id) fail('usage: catalog-bench.ts <deployment id> [products] [--keep | --cleanup]');
   if (count < 1 || count > 10_000_000) fail('products must be between 1 and 10,000,000');
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: run by hand, not as a turbo task.
   token = process.env.ORDERLOOP_API_TOKEN ?? '';
   if (!token) fail("ORDERLOOP_API_TOKEN not set: use an operator's or admin's API token");
   const deployment = loadDeployments().find((d) => d.id === id);

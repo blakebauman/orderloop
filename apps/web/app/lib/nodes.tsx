@@ -15,7 +15,7 @@ let cached: { key: string; registry: NodeRegistry } | null = null;
 export function useNodes(): NodeRegistry {
   const plugins = usePlugins();
   const key = JSON.stringify(plugins);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by content, not identity.
+  // Keyed by content (`key`), not by the array's identity.
   return useMemo(() => {
     if (!plugins.length) return staticRegistry;
     if (cached?.key !== key) cached = { key, registry: withPlugins(plugins) };

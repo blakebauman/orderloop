@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'jsonc-parser';
 import {
-  healthCheckKey,
   foreignJobsReaching,
+  healthCheckKey,
   keysProblem,
   LOG_FIELDS,
   loadDeployments,
@@ -32,9 +32,9 @@ import {
   shellVars,
   signHealthCheck,
   toDeployment,
+  tokenMatches,
   WRITE_CHECK_ATTEMPT_MS,
   WRITE_CHECK_DEADLINE_MS,
-  tokenMatches,
   workerPlugins,
 } from './fleet.ts';
 
