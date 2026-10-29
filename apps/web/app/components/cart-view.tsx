@@ -163,6 +163,13 @@ export function CartView({
   // Staff edit through the assistant, as its own tool calls (a submit stops at its confirm card);
   // the buyer, who has no assistant, calls the cart directly.
   const assistant = useAssistantIfAny();
+  // The assistant knows which cart this is, so its Thread shows this cart's chat. By id only: a
+  // cart's title is people's words.
+  const register = assistant?.register;
+  useEffect(() => {
+    if (!register || guest) return;
+    return register(() => ({ kind: 'cart', id: cart.id, label: cart.id }));
+  }, [register, guest, cart.id]);
   async function viaAssistant(tool: 'change_cart' | 'submit_cart' | 'cancel_cart', input: unknown) {
     setBusy(true);
     setError(null);
@@ -518,29 +525,46 @@ export function CartView({
               <p className="text-muted-foreground text-sm">Connecting…</p>
             )}
           </Section>
-          <Chat
-            title={
-              guest
-                ? 'Chat with your supplier'
-                : cart.external
-                  ? 'Chat · the buyer sees it'
-                  : 'Chat'
-            }
-            messages={state.chat}
-            myId={meId}
-            typing={typingLabel(typists)}
-            // Best effort, and only on an open socket: `useAgent` queues a call made while it is
-            // down and sends it on reconnecting, by when the typing it announces is long over.
-            onTyping={() => {
-              if (agent.readyState === WebSocket.OPEN) void agent.call('typing').catch(() => {});
-            }}
-            onSay={(body) => call<{ ok: true; id: string }>('say', [body])}
-            onEdit={(id, body) => call<Result>('edit', [id, body])}
-            onDelete={(id) => call<Result>('unsay', [id])}
-            onOlder={async (before) =>
-              ((await agent.call('history', [before])) as CartChatMessage[]) ?? []
-            }
-          />
+          {/* Staff read and answer a cart's chat in the assistant panel (its Thread); the buyer,
+              who has no assistant, chats here. */}
+          {assistant && !guest ? (
+            <Section title={cart.external ? 'Chat · the buyer sees it' : 'Chat'}>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-muted-foreground">
+                  {state.chat.length
+                    ? `${state.chat.length === 1 ? '1 message' : `${state.chat.length} messages`}, the last ${state.chat.at(-1)!.authorName}’s`
+                    : 'No messages yet.'}
+                </span>
+                <Button size="sm" variant="outline" onClick={() => assistant.openThread()}>
+                  Open the thread
+                </Button>
+              </div>
+            </Section>
+          ) : (
+            <Chat
+              title={
+                guest
+                  ? 'Chat with your supplier'
+                  : cart.external
+                    ? 'Chat · the buyer sees it'
+                    : 'Chat'
+              }
+              messages={state.chat}
+              myId={meId}
+              typing={typingLabel(typists)}
+              // Best effort, and only on an open socket: `useAgent` queues a call made while it is
+              // down and sends it on reconnecting, by when the typing it announces is long over.
+              onTyping={() => {
+                if (agent.readyState === WebSocket.OPEN) void agent.call('typing').catch(() => {});
+              }}
+              onSay={(body) => call<{ ok: true; id: string }>('say', [body])}
+              onEdit={(id, body) => call<Result>('edit', [id, body])}
+              onDelete={(id) => call<Result>('unsay', [id])}
+              onOlder={async (before) =>
+                ((await agent.call('history', [before])) as CartChatMessage[]) ?? []
+              }
+            />
+          )}
         </div>
       </Body>
     </>
@@ -963,7 +987,8 @@ function AddBySku({ onAdd }: { onAdd: (sku: string, qty: number) => Promise<Resu
   );
 }
 
-function Chat({
+/** A cart's chat: the staff cart's thread in the assistant panel, and the buyer's own page. */
+export function Chat({
   title,
   messages,
   myId,
@@ -973,6 +998,7 @@ function Chat({
   onEdit,
   onDelete,
   onOlder,
+  onDraftReply,
 }: {
   /** Says who reads it: an external cart's chat is shared with its buyer. */
   title: string;
@@ -986,8 +1012,17 @@ function Chat({
   onEdit: (id: string, body: string) => Promise<Result | null>;
   onDelete: (id: string) => Promise<Result | null>;
   onOlder: (before: string) => Promise<CartChatMessage[]>;
+  /**
+   * Has the assistant draft the next message from the thread: it fills the composer, and nothing
+   * is sent until the person sends it. Staff only.
+   */
+  onDraftReply?: () => Promise<{ draft: string } | { error: string }>;
 }) {
   const [draft, setDraft] = useState('');
+  const [drafting, setDrafting] = useState(false);
+  // The assistant's draft, until the person changes it: said as such, so it's read before sending.
+  const [drafted, setDrafted] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const [older, setOlder] = useState<CartChatMessage[]>([]);
   const [noMore, setNoMore] = useState(false);
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
@@ -1086,7 +1121,9 @@ function Chat({
       >
         {/* Always there and polite, so only a change in who is writing is read out. */}
         <p aria-live="polite" className="min-h-4 truncate text-muted-foreground text-xs">
-          {typing}
+          {drafted !== null && drafted === draft
+            ? 'Drafted by the assistant: read it, and change what isn’t right, before you send it.'
+            : typing}
         </p>
         <Textarea
           aria-label="Message"
@@ -1109,9 +1146,36 @@ function Chat({
           placeholder="Message everyone on this cart"
           rows={2}
         />
-        <Button type="submit" size="sm" disabled={!draft.trim()}>
-          Send
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" size="sm" disabled={!draft.trim()}>
+            Send
+          </Button>
+          {onDraftReply ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={drafting || !shown.length}
+              onClick={async () => {
+                setDrafting(true);
+                setDraftError(null);
+                const r = await onDraftReply();
+                if ('draft' in r) {
+                  setDraft(r.draft);
+                  setDrafted(r.draft);
+                } else setDraftError(r.error);
+                setDrafting(false);
+              }}
+            >
+              {drafting ? 'Drafting…' : 'Draft a reply'}
+            </Button>
+          ) : null}
+          {draftError ? (
+            <span role="alert" className="text-bad text-xs">
+              {draftError}
+            </span>
+          ) : null}
+        </div>
       </form>
     </Section>
   );

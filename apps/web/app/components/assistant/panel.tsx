@@ -88,6 +88,7 @@ import { contextLabel, useAssistant } from '~/lib/assistant';
 import { coarse, useMedia, useShortcutLabel, useVisualViewport, WIDE } from '~/lib/device';
 import { orderRef, plural } from '~/lib/format';
 import { useMe } from '~/lib/use-me';
+import { CartThread } from './cart-thread';
 import {
   ActionCard,
   actionVerb,
@@ -115,7 +116,8 @@ import {
  * Reduced motion shows and hides both at once.
  */
 export function AssistantPanel() {
-  const { open, setOpen, acts } = useAssistant();
+  const { open, setOpen, acts, page, view, setView } = useAssistant();
+  const showThread = view === 'thread' && page.kind === 'cart';
   const [opened, setOpened] = useState(false);
   // As a sheet, it keeps its composer above the on-screen keyboard.
   const wide = useMedia(WIDE);
@@ -155,7 +157,13 @@ export function AssistantPanel() {
       >
         {opened ? (
           <Suspense fallback={<PanelFrame busy />}>
-            <Conversation />
+            {/* On a cart's page the panel also holds its chat. The conversation stays mounted
+                under it, so edits the page makes keep going through. */}
+            {page.kind === 'cart' ? <ViewSwitch view={view} setView={setView} /> : null}
+            <div className={cn('flex min-h-0 flex-1 flex-col', showThread && 'hidden')}>
+              <Conversation />
+            </div>
+            {showThread && page.kind === 'cart' ? <CartThread cartId={page.id} /> : null}
           </Suspense>
         ) : null}
       </div>
@@ -1151,6 +1159,37 @@ function Composer({
       <p className="mt-1.5 hidden px-1 text-muted-foreground text-xs fine:block">
         Enter sends · Shift+Enter for a new line · {shortcut} opens and closes
       </p>
+    </div>
+  );
+}
+
+/** The panel's two views on a cart's page: the assistant, or the cart's chat. */
+function ViewSwitch({
+  view,
+  setView,
+}: {
+  view: 'assistant' | 'thread';
+  setView: (v: 'assistant' | 'thread') => void;
+}) {
+  return (
+    <div role="tablist" aria-label="Panel" className="flex gap-1 border-b px-3 py-2">
+      {(['assistant', 'thread'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          role="tab"
+          aria-selected={view === v}
+          onClick={() => setView(v)}
+          className={cn(
+            'hit-area rounded-full px-3 py-1 text-sm',
+            view === v
+              ? 'bg-muted font-medium text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {v === 'assistant' ? 'Assistant' : 'Thread'}
+        </button>
+      ))}
     </div>
   );
 }
