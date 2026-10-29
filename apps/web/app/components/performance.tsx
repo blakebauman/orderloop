@@ -1,44 +1,26 @@
-import { BASE_CURRENCY, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
+import { ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
 import { Progress } from '@orderloop/ui/progress';
 import { Separator } from '@orderloop/ui/separator';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Empty } from '~/components/page';
-import { count, duration, money } from '~/lib/format';
+import { count, duration } from '~/lib/format';
 import type { Performance as Figures } from '~/lib/metrics.server';
 import { useNodes } from '~/lib/nodes';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
-const base = (n: number) => money(n, BASE_CURRENCY);
 
 /** Below this many ended orders a rate says more than the data does; show the counts instead. */
 const MIN_FOR_RATE = 5;
 /** Below this many runs the 95th percentile is just the slowest run. */
 const MIN_FOR_P95 = 20;
 
-/** How orders finish over the window, what share of money was refunded, and where time goes. */
+/** How orders finish over the window, by commerce model, and where time goes. */
 export function PerformanceDetail({ p }: { p: Figures }) {
   const nodes = useNodes();
   const slowest = p.nodes.slice(0, 6);
-  const { collected, refunded } = p.totals;
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {/* The one figure first, as its own card; then the two that need reading row by row. */}
-      <Card size="sm" className="min-w-0">
-        <CardHeader className="gap-1">
-          <CardDescription>
-            <h3>Refund rate</h3>
-          </CardDescription>
-          <CardTitle className="font-semibold text-2xl tabular max-md:text-xl">
-            {collected ? pct(refunded / collected) : '—'}
-          </CardTitle>
-          <CardDescription className="text-xs tabular">
-            {base(refunded)} refunded of {base(collected)} collected in the period, from orders in
-            any state
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
+    <div className="grid items-start gap-4 lg:grid-cols-2">
       <Panel title="Completion by commerce model">
         {p.completion.length ? (
           <ul className="flex flex-col">
@@ -47,30 +29,26 @@ export function PerformanceDetail({ p }: { p: Figures }) {
               const rate = c.finished ? c.completed / c.finished : 0;
               return (
                 <li key={c.model}>
-                  {i ? <Separator className="my-2.5" /> : null}
-                  <div className="flex items-baseline justify-between gap-2 text-sm">
-                    <span className="truncate text-muted-foreground">
+                  {i ? <Separator className="my-3" /> : null}
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate font-medium">
                       {ORDER_MODEL_LABELS[c.model as OrderModel] ?? c.model}
                     </span>
-                    <span className="font-semibold tabular">
-                      {enough ? pct(rate) : `${c.completed} of ${c.finished}`}
+                    <span className="shrink-0 text-muted-foreground text-xs tabular">
+                      {count(c.completed)} of {count(c.finished)} ended orders completed
                     </span>
                   </div>
                   {enough ? (
-                    <>
+                    <div className="mt-2 flex items-center gap-2">
                       <Progress
                         value={Math.round(rate * 100)}
                         aria-hidden="true"
-                        className="mt-1.5 h-1.5 *:data-[slot=progress-indicator]:bg-ok"
+                        className="flex-1 *:data-[slot=progress-indicator]:bg-ok"
                       />
-                      <div className="mt-1 text-muted-foreground text-xs tabular">
-                        {count(c.completed)} of {count(c.finished)} ended orders completed
-                      </div>
-                    </>
-                  ) : (
-                    <div className="mt-0.5 text-muted-foreground text-xs">
-                      ended orders completed; too few for a rate
+                      <span className="w-10 text-right font-medium tabular">{pct(rate)}</span>
                     </div>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground text-xs">Too few for a rate.</p>
                   )}
                 </li>
               );
