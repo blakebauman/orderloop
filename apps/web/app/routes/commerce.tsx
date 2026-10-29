@@ -191,40 +191,8 @@ export default function Commerce() {
       <PageHeader
         title="Commerce"
         subtitle="Orders waiting on the outside world, what orders have done (payments, shipments, stock held, messages), and the stock, prices, customers and sellers the commerce steps work against."
-        actions={
-          canOperate ? (
-            <Form method="post" className="flex flex-col items-end gap-1">
-              <Button type="submit" variant="outline" disabled={reviewing}>
-                <RefreshCw aria-hidden="true" />{' '}
-                {reviewing ? 'Starting review…' : 'Run stock review now'}
-              </Button>
-              <span className="max-w-64 text-right text-muted-foreground text-xs">
-                Starts a replenishment order for anything at or below its reorder point.
-              </span>
-            </Form>
-          ) : undefined
-        }
       />
       <div className="mx-auto max-w-page px-4 sm:px-6">
-        {review ? (
-          <p
-            role={review.started ? 'status' : 'alert'}
-            className={`mb-4 text-sm ${review.started ? '' : 'text-bad'}`}
-          >
-            {review.started ? (
-              <>
-                Stock review started. If any item is at or below its reorder point, a replenishment
-                order appears in{' '}
-                <Link to="/orders?model=replenishment" className="text-link hover:underline">
-                  Orders
-                </Link>
-                .
-              </>
-            ) : (
-              review.error
-            )}
-          </p>
-        ) : null}
         <Form method="get" className="mb-3 flex flex-wrap items-center gap-2" role="search">
           <Input
             name="q"
@@ -375,18 +343,7 @@ export default function Commerce() {
                 >
                   <li>
                     <ItemContent className="min-w-0">
-                      <ItemTitle className="line-clamp-none w-full flex-wrap gap-x-2 gap-y-0">
-                        <span
-                          className={`font-medium text-xs ${
-                            e.status === 'accepted'
-                              ? 'text-ok'
-                              : e.status === 'duplicate'
-                                ? 'text-muted-foreground'
-                                : 'text-bad'
-                          }`}
-                        >
-                          {humanize(e.status)}
-                        </span>
+                      <ItemTitle className="line-clamp-none w-full">
                         <span className="min-w-0 break-words">{e.subject || '(no subject)'}</span>
                       </ItemTitle>
                       <ItemDescription className="line-clamp-none break-words text-xs">
@@ -395,7 +352,13 @@ export default function Commerce() {
                         {e.reason ? ` · ${e.reason}` : ''}
                       </ItemDescription>
                     </ItemContent>
-                    <ItemActions className="shrink-0 items-baseline gap-3 self-start text-xs">
+                    <ItemActions className="shrink-0 items-center gap-3 self-start text-xs">
+                      <ToneBadge
+                        tone={
+                          e.status === 'accepted' ? 'ok' : e.status === 'duplicate' ? 'idle' : 'bad'
+                        }
+                        label={humanize(e.status)}
+                      />
                       {e.orderId ? (
                         <Link
                           to={`/orders/${e.orderId}`}
@@ -421,10 +384,41 @@ export default function Commerce() {
         <Section
           id="stock"
           title="Inventory"
-          description="Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from the store. Reserved stock is held by running orders."
-          actions={<Total list={inventory} noun="item" />}
+          description={`Warehouse stock. Stores keep their own, under Stores; a pickup or store sale draws from the store. Reserved stock is held by running orders.${canOperate ? ' A stock review starts a replenishment order for anything at or below its reorder point.' : ''}`}
+          actions={
+            <>
+              <Total list={inventory} noun="item" />
+              {canOperate ? (
+                <Form method="post" preventScrollReset>
+                  <Button type="submit" size="sm" variant="outline" disabled={reviewing}>
+                    <RefreshCw aria-hidden="true" />
+                    {reviewing ? 'Starting review…' : 'Run stock review now'}
+                  </Button>
+                </Form>
+              ) : null}
+            </>
+          }
           flush
         >
+          {review ? (
+            <p
+              role={review.started ? 'status' : 'alert'}
+              className={`px-(--card-spacing) pb-3 text-sm ${review.started ? '' : 'text-bad'}`}
+            >
+              {review.started ? (
+                <>
+                  Stock review started. If any item is at or below its reorder point, a
+                  replenishment order appears in{' '}
+                  <Link to="/orders?model=replenishment" className="text-link hover:underline">
+                    Orders
+                  </Link>
+                  .
+                </>
+              ) : (
+                review.error
+              )}
+            </p>
+          ) : null}
           {inventory.total || q ? (
             <Table stack="cards" scroll caption="Inventory">
               <TableHead>

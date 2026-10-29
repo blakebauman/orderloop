@@ -82,7 +82,7 @@ export default function Scenarios() {
         subtitle="Each one starts a real order on the demo data and takes a different path through its flow. Some fail on purpose, to show what happens then."
       />
       <Body>
-        <div className="flex max-w-[1000px] flex-col gap-4 lg:gap-6">
+        <div className="gap-6 xl:columns-2 *:mb-4 *:break-inside-avoid lg:*:mb-6">
           {groups.map((g) => (
             <Section
               key={g.model}
@@ -94,8 +94,9 @@ export default function Scenarios() {
                   <Item key={s.id} asChild variant="muted" size="sm" className="items-start">
                     <li>
                       <ItemMedia variant="icon" className="mt-0.5 self-start">
+                        {/* Nothing has failed yet, so not in `bad`: red stays for what did. */}
                         {s.fails ? (
-                          <TriangleAlert className="text-bad" aria-hidden="true" />
+                          <TriangleAlert className="text-muted-foreground" aria-hidden="true" />
                         ) : (
                           <Play className="text-muted-foreground" aria-hidden="true" />
                         )}
@@ -109,7 +110,13 @@ export default function Scenarios() {
                           <span className="text-muted-foreground">
                             {s.flow ?? 'Flow not published'}
                           </span>
-                          {s.fails ? <span className="text-bad"> · Fails: {s.fails}</span> : null}
+                          {s.fails ? (
+                            <span className="text-muted-foreground">
+                              {' · '}
+                              <span className="font-medium text-foreground">Fails on purpose:</span>{' '}
+                              {s.fails}
+                            </span>
+                          ) : null}
                         </p>
                         {data?.id === s.id && data.error ? (
                           <p className="text-bad text-xs" role="alert">

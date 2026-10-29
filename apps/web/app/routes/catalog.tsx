@@ -16,6 +16,7 @@ import {
 import { Badge } from '@orderloop/ui/badge';
 import { Button } from '@orderloop/ui/button';
 import { Card, CardAction, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@orderloop/ui/collapsible';
 import {
   Item,
   ItemActions,
@@ -406,71 +407,70 @@ function GapSection({
   const canDraft = canEdit && group.id === 'missing';
   const id = `gap-${group.id}`;
   return (
-    <section aria-labelledby={id}>
-      <div className="flex items-center gap-2 px-4 pt-3 pb-1.5">
-        <button
-          type="button"
-          id={id}
-          aria-expanded={!closed}
-          onClick={toggle}
-          className="hit-area caption -ml-1 flex items-center gap-1 rounded-full px-1 hover:text-foreground"
-        >
-          <ChevronRight
-            aria-hidden="true"
-            className={cn('size-3.5 transition-[rotate] duration-200', !closed && 'rotate-90')}
-          />
-          {GROUP_LABEL[group.id]}
-          <span className="tabular">· {count(group.products)}</span>
-        </button>
-        {canDraft && !closed ? (
-          <Button
-            size="xs"
-            variant="ghost"
-            className="ml-auto max-lg:hidden"
-            disabled={busy}
-            onClick={() => onDraftAll(cards)}
-            title="Have the assistant draft each product shown here, one after another"
+    <Collapsible asChild open={!closed} onOpenChange={toggle}>
+      <section aria-labelledby={id}>
+        <div className="flex items-center gap-2 px-4 pt-3 pb-1.5">
+          <CollapsibleTrigger
+            id={id}
+            className="hit-area caption -ml-1 flex items-center gap-1 rounded-full px-1 hover:text-foreground"
           >
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
-            {more.cursor || cards.length < group.products
-              ? `Draft the ${cards.length} shown`
-              : `Draft these ${cards.length}`}
-          </Button>
+            <ChevronRight
+              aria-hidden="true"
+              className={cn('size-3.5 transition-[rotate] duration-200', !closed && 'rotate-90')}
+            />
+            {GROUP_LABEL[group.id]}
+            <span className="tabular">· {count(group.products)}</span>
+          </CollapsibleTrigger>
+          {canDraft && !closed ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="ml-auto max-lg:hidden"
+              disabled={busy}
+              onClick={() => onDraftAll(cards)}
+              title="Have the assistant draft each product shown here, one after another"
+            >
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
+              {more.cursor || cards.length < group.products
+                ? `Draft the ${cards.length} shown`
+                : `Draft these ${cards.length}`}
+            </Button>
+          ) : null}
+        </div>
+        {batch ? (
+          <p
+            role="status"
+            className="flex items-center gap-2 px-4 pb-1.5 text-muted-foreground text-xs"
+          >
+            {batch.done < batch.total
+              ? `Drafting ${batch.done + 1} of ${batch.total}…`
+              : `Drafted ${Object.values(batch.rows).filter((r) => r === 'done').length} of ${batch.total}; they’re in Drafted.`}
+            {batch.done === batch.total ? (
+              <button type="button" className="text-link hover:underline" onClick={onClearBatch}>
+                Dismiss
+              </button>
+            ) : null}
+          </p>
         ) : null}
-      </div>
-      {batch ? (
-        <p
-          role="status"
-          className="flex items-center gap-2 px-4 pb-1.5 text-muted-foreground text-xs"
-        >
-          {batch.done < batch.total
-            ? `Drafting ${batch.done + 1} of ${batch.total}…`
-            : `Drafted ${Object.values(batch.rows).filter((r) => r === 'done').length} of ${batch.total}; they’re in Drafted.`}
-          {batch.done === batch.total ? (
-            <button type="button" className="text-link hover:underline" onClick={onClearBatch}>
-              Dismiss
+        <CollapsibleContent>
+          <ul className="flex flex-col gap-0.5 px-1.5 pb-1">
+            {cards.map((c) => (
+              <CardRow key={c.key} card={c} canEdit={canEdit} flip state={batch?.rows[c.key]} />
+            ))}
+          </ul>
+          {more.cursor ? (
+            <button
+              type="button"
+              className="hit-area px-4 pt-1 pb-3 text-link text-xs hover:underline disabled:opacity-60"
+              disabled={more.loading}
+              onClick={more.load}
+            >
+              {more.loading ? 'Loading…' : 'Show more'}
             </button>
           ) : null}
-        </p>
-      ) : null}
-      {closed ? null : (
-        <ul className="flex flex-col gap-0.5 px-1.5 pb-1">
-          {cards.map((c) => (
-            <CardRow key={c.key} card={c} canEdit={canEdit} flip state={batch?.rows[c.key]} />
-          ))}
-        </ul>
-      )}
-      {!closed && more.cursor ? (
-        <button
-          type="button"
-          className="hit-area px-4 pt-1 pb-3 text-link text-xs hover:underline disabled:opacity-60"
-          disabled={more.loading}
-          onClick={more.load}
-        >
-          {more.loading ? 'Loading…' : 'Show more'}
-        </button>
-      ) : null}
-    </section>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 

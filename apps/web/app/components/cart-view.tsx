@@ -61,6 +61,7 @@ import { Clock, FileText } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
+import { Confirm } from '~/components/confirm';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
 import {
@@ -1302,6 +1303,9 @@ function Attachments({
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The file whose removal is being confirmed.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   if (!files.length && !canAdd) return null;
   async function upload(file: File) {
@@ -1353,11 +1357,41 @@ function Attachments({
                     <button
                       type="button"
                       className="hit-area text-muted-foreground text-xs hover:underline"
-                      onClick={() => void onRemove(a.id)}
+                      aria-expanded={confirming === a.id}
+                      onClick={() => setConfirming(a.id)}
                     >
                       Remove
                     </button>
                   </ItemActions>
+                ) : null}
+                {/* Removing can't be undone, so it asks first, on its own line under the file. */}
+                {confirming === a.id ? (
+                  <Item variant="outline" size="xs" className="basis-full bg-muted/40">
+                    <Confirm
+                      message={`Remove ${a.name}?`}
+                      note="It goes for everyone on the cart."
+                      cancelLabel="Keep"
+                      onCancel={() => setConfirming(null)}
+                      className="flex-1"
+                    >
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={removing}
+                        onClick={async () => {
+                          setRemoving(true);
+                          try {
+                            await onRemove(a.id);
+                          } finally {
+                            setRemoving(false);
+                            setConfirming(null);
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </Confirm>
+                  </Item>
                 ) : null}
               </li>
             </Item>
@@ -1371,7 +1405,7 @@ function Attachments({
           <label htmlFor={`attach-${cartId}`} className="caption">
             Add a file (PDF, image, CSV, text, Excel or Word; up to 10 MB)
           </label>
-          <input
+          <Input
             ref={input}
             id={`attach-${cartId}`}
             type="file"
@@ -1381,7 +1415,6 @@ function Attachments({
               const f = e.currentTarget.files?.[0];
               if (f) void upload(f);
             }}
-            className="text-sm"
           />
           {uploading ? <p className="text-muted-foreground text-xs">Uploading…</p> : null}
           {error ? (

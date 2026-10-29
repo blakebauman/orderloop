@@ -5,22 +5,24 @@
  * (`commerce.tax`). Buyers never claim one.
  */
 
-import { newId, taxCertificateState } from '@orderloop/core';
+import { newId, ORDER_MODEL_LABELS, type OrderModel, taxCertificateState } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Card, CardContent, CardDescription, CardTitle } from '@orderloop/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
-import { ToneBadge } from '~/components/status';
+import { StatusBadge, ToneBadge } from '~/components/status';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { addCertificate, changeCertificate, customerById } from '~/lib/customers.server';
 import { engine } from '~/lib/env.server';
-import { count, dateTime, humanize, money } from '~/lib/format';
+import { count, dateTime, humanize, liveStatus, money, orderRef } from '~/lib/format';
+import { countOrders, listOrders } from '~/lib/orders.server';
 import { CERTIFICATE_STATES, expiryDay, placesLabel } from '~/lib/tax-certificates';
 import { useCan } from '~/lib/use-me';
 import { useNow } from '~/lib/use-now';
@@ -30,16 +32,28 @@ export const meta = ({ loaderData: d }: Route.MetaArgs) => [
   { title: `${d?.customer.name ?? 'Customer'} · Customers · OrderLoop` },
 ];
 
+/** How many of the customer's orders the page lists, most recently changed first. */
+const RECENT_ORDERS = 6;
+
 export async function loader({ request, params }: Route.LoaderArgs) {
   await requireUser(request);
-  const [customer, certificates] = await Promise.all([
+  const [customer, certificates, recent, ordered] = await Promise.all([
     customerById(params.customerId),
     engine().taxCertificates(params.customerId),
+    listOrders({ customer: params.customerId, sort: 'updated' }, RECENT_ORDERS),
+    countOrders({ customer: params.customerId }),
   ]);
   if (!customer || !certificates) throw data('Customer not found', { status: 404 });
   const { stripeCustomerId: _c, stripePaymentMethodId: _pm, ...shown } = customer;
-  // The next certificate's id, minted here so a form sent twice adds it once.
-  return { customer: shown, certificates, nextId: newId('txc') };
+  return {
+    customer: shown,
+    certificates,
+    // An open order with no run reads "recorded", never waiting (`liveStatus`).
+    recent: recent.map((o) => ({ ...o, status: liveStatus(o) })),
+    ordered,
+    // The next certificate's id, minted here so a form sent twice adds it once.
+    nextId: newId('txc'),
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -67,7 +81,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function CustomerPage() {
-  const { customer: c, certificates, nextId } = useLoaderData<typeof loader>();
+  const { customer: c, certificates, recent, ordered, nextId } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state === 'submitting';
   const canOperate = useCan('operator');
@@ -231,8 +245,70 @@ export default function CustomerPage() {
             </p>
           ) : null}
         </Section>
+        <Section
+          title="Recent orders"
+          description={
+            ordered.n
+              ? `The ${Math.min(recent.length, ordered.n)} most recently changed of ${ordered.more ? `${count(ordered.n)}+` : count(ordered.n)} orders.`
+              : undefined
+          }
+          actions={
+            ordered.n > recent.length ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/orders?q=${encodeURIComponent(c.name)}`}>All orders</Link>
+              </Button>
+            ) : undefined
+          }
+        >
+          {recent.length ? (
+            <ul className="-mx-2 flex flex-col gap-0.5">
+              {recent.map((o) => (
+                <OrderItem key={o.id} o={o} />
+              ))}
+            </ul>
+          ) : (
+            <Empty>No orders yet.</Empty>
+          )}
+        </Section>
       </Body>
     </>
+  );
+}
+
+/** One of the customer's orders: where it is, linked to its page, with its total and last change. */
+function OrderItem({
+  o,
+}: {
+  o: ReturnType<typeof useLoaderData<typeof loader>>['recent'][number];
+}) {
+  const model = ORDER_MODEL_LABELS[o.model as OrderModel] ?? o.model;
+  return (
+    <Item asChild size="xs" className="relative items-start px-2 hover:bg-muted/60">
+      <li>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full">
+            <Link
+              to={`/orders/${o.id}`}
+              className="truncate after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+            >
+              {o.title || o.externalId || model}{' '}
+              <span className="font-mono font-normal text-muted-foreground text-xs">
+                {orderRef(o.id)}
+              </span>
+            </Link>
+          </ItemTitle>
+          <ItemDescription className="text-xs">
+            {model}
+            {o.waitingAt && o.status === 'waiting' ? ` · waiting at ${o.waitingAt}` : ''}
+            {o.stoppedAt && o.status !== 'completed' ? ` · stopped at ${o.stoppedAt}` : ''}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions className="flex-col items-end gap-1 self-start">
+          <span className="font-medium text-sm tabular">{money(o.total, o.currency)}</span>
+          <StatusBadge status={o.status} />
+        </ItemActions>
+      </li>
+    </Item>
   );
 }
 
@@ -322,13 +398,12 @@ function AddCertificate({
         </Field>
         <Field className="gap-2">
           <FieldLabel htmlFor="cert-file">The certificate (optional)</FieldLabel>
-          <input
+          <Input
             id="cert-file"
             name="file"
             type="file"
             accept="application/pdf,image/png,image/jpeg,image/webp"
             aria-describedby="cert-file-hint"
-            className="text-base"
           />
           <FieldDescription id="cert-file-hint">PDF or image, up to 10 MB.</FieldDescription>
         </Field>

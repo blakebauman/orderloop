@@ -1,4 +1,5 @@
 import { isRole, ROLE_LABELS } from '@orderloop/core';
+import { Alert, AlertDescription, AlertTitle } from '@orderloop/ui/alert';
 import { Button } from '@orderloop/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
@@ -12,7 +13,7 @@ import {
   ItemTitle,
 } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
-import { Download, Monitor, Plug } from 'lucide-react';
+import { Download, Monitor, Plug, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   data,
@@ -187,17 +188,23 @@ export default function Account() {
         <div className="max-w-2xl space-y-6">
           {/* Not alerts: they are there when the page loads, so they're read in order. */}
           {me.passwordChangeDue ? (
-            <p className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
-              <span className="font-medium">Choose your own password to continue.</span> You signed
-              in with a temporary password an admin gave you; the rest of OrderLoop opens once you
-              replace it.
-            </p>
+            <Alert variant="warning" role="note">
+              <TriangleAlert aria-hidden="true" />
+              <AlertTitle>Choose your own password to continue.</AlertTitle>
+              <AlertDescription>
+                You signed in with a temporary password an admin gave you; the rest of OrderLoop
+                opens once you replace it.
+              </AlertDescription>
+            </Alert>
           ) : null}
           {me.twoFactorDue ? (
-            <p className="rounded-lg border border-wait/40 bg-wait/10 p-4 text-sm">
-              <span className="font-medium">Set up two-factor sign-in to continue.</span> Your role
-              needs it in this workspace; the rest of OrderLoop opens once it is on.
-            </p>
+            <Alert variant="warning" role="note">
+              <TriangleAlert aria-hidden="true" />
+              <AlertTitle>Set up two-factor sign-in to continue.</AlertTitle>
+              <AlertDescription>
+                Your role needs it in this workspace; the rest of OrderLoop opens once it is on.
+              </AlertDescription>
+            </Alert>
           ) : null}
           {result && 'ok' in result && result.welcome ? (
             <Card role="status" size="sm">

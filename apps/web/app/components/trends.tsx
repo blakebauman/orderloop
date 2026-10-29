@@ -1,6 +1,14 @@
 import { BASE_CURRENCY } from '@orderloop/core';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
 import type { ChartConfig } from '@orderloop/ui/chart';
+import { cn } from '@orderloop/ui/lib/utils';
 import { lazy, Suspense } from 'react';
 import { Empty } from '~/components/page';
 import { count, money, plural } from '~/lib/format';
@@ -31,7 +39,12 @@ const paymentsConfig = {
   refunded: { label: 'Refunded', color: 'var(--chart-3)' },
 } satisfies ChartConfig;
 
-/** Per-day area charts over the window: revenue, how orders ended, and money in and out. */
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+/**
+ * Per-day area charts over the window: revenue, how orders ended, and money in and out. Each card
+ * ends in the figures its chart adds up to (shadcn's power-usage card).
+ */
 export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'totals' | 'days'>) {
   const { revenue, collected, refunded, completed, stopped, failed } = totals;
   const ended = completed + stopped + failed;
@@ -42,6 +55,17 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
         title="Revenue"
         figure={base(revenue)}
         summary={`${base(revenue)} from orders completed ${period}, in ${BASE_CURRENCY}.`}
+        stats={
+          revenue
+            ? [
+                { label: 'Completed orders', value: count(completed) },
+                {
+                  label: 'Per completed order',
+                  value: completed ? base(revenue / completed) : '—',
+                },
+              ]
+            : undefined
+        }
       >
         {revenue ? (
           <Chart days={daily} config={revenueConfig} format={base} />
@@ -53,6 +77,15 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
         title="Orders ended"
         figure={count(ended)}
         summary={`${plural(ended, 'order')} ended ${period}: ${count(completed)} completed, ${count(stopped)} declined or cancelled, ${count(failed)} failed or rolled back.`}
+        stats={
+          ended
+            ? [
+                { label: 'Completed', value: count(completed) },
+                { label: 'Declined or cancelled', value: count(stopped) },
+                { label: 'Failed or rolled back', value: count(failed), bad: failed > 0 },
+              ]
+            : undefined
+        }
       >
         {ended ? (
           <Chart days={daily} config={outcomeConfig} format={count} stacked />
@@ -64,6 +97,15 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
         title="Collected and refunded"
         figure={base(collected)}
         summary={`${base(collected)} collected and ${base(refunded)} refunded ${period}.`}
+        stats={
+          collected || refunded
+            ? [
+                { label: 'Refunded', value: base(refunded) },
+                { label: 'Refund rate', value: collected ? pct(refunded / collected) : '—' },
+              ]
+            : undefined
+        }
+        note={collected || refunded ? 'Refunds count from orders in any state.' : undefined}
       >
         {collected || refunded ? (
           <Chart days={daily} config={paymentsConfig} format={base} />
@@ -75,19 +117,26 @@ export function Trends({ daily, totals, days }: Pick<Performance, 'daily' | 'tot
   );
 }
 
+type Stat = { label: string; value: string; bad?: boolean };
+
 /**
- * One window figure as a card (the preview cards' stock tile): its label, the figure set large, and
- * under it the chart that adds up to it.
+ * One window figure as a card (the preview cards' stock tile and power usage): its label, the
+ * figure set large, the chart that adds up to it, and under a rule the figures it breaks into
+ * (left out while there is nothing to chart).
  */
 function Panel({
   title,
   figure,
   summary,
+  stats,
+  note,
   children,
 }: {
   title: string;
   figure: string;
   summary: string;
+  stats?: Stat[];
+  note?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -99,7 +148,20 @@ function Panel({
         <CardTitle className="font-semibold text-2xl tabular max-md:text-xl">{figure}</CardTitle>
         <p className="sr-only">{summary}</p>
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="flex-1">{children}</CardContent>
+      {stats ? (
+        <CardFooter className="flex-col items-stretch gap-2 border-t">
+          <dl className={cn('grid gap-3', stats.length > 2 ? 'grid-cols-3' : 'grid-cols-2')}>
+            {stats.map((s) => (
+              <div key={s.label} className="flex min-w-0 flex-col gap-0.5">
+                <dt className="text-muted-foreground text-xs">{s.label}</dt>
+                <dd className={cn('font-semibold tabular', s.bad && 'text-bad')}>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
+          {note ? <p className="text-muted-foreground text-xs">{note}</p> : null}
+        </CardFooter>
+      ) : null}
     </Card>
   );
 }

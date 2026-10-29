@@ -26,7 +26,7 @@ import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'r
 import { Ago } from '~/components/ago';
 import { Code } from '~/components/code';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
-import { StatusDot } from '~/components/status';
+import { StatusDot, ToneBadge } from '~/components/status';
 import { StepUpField } from '~/components/step-up-field';
 import { requireUser, type StepUpMethod, stepUpMethod } from '~/lib/auth.server';
 import { BodyTooLarge, readText } from '~/lib/body';
@@ -311,7 +311,7 @@ function Review({
           </span>
         </>
       }
-      className="ring-wait/40"
+      actions={<ToneBadge tone="wait" label="Waiting for approval" />}
     >
       <p className="mb-3 text-sm">
         Not running yet. Check what it adds and what it reaches before you approve it: once

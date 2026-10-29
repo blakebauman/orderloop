@@ -35,9 +35,10 @@ step's timeout is on time, and a timer is never overdue. **Ended badly this week
 where orders failed or rolled back, how many orders at each, with the latest reason. Every figure opens the matching orders.
 
 The **Performance** page shows, in USD, how the business did over the last 7, 30 or 90 days:
-revenue, orders ended and money collected and refunded day by day, then completion by model (as
-counts until a model has five ended orders), refund rate, and the slowest steps, waits included,
-with how many runs each has.
+revenue, orders ended and money collected and refunded day by day, each with the figures it breaks
+into (completed orders and the average per order; completed, declined or cancelled, and failed or
+rolled back; the amount refunded and the refund rate), then completion by model (as counts until a
+model has five ended orders) and the slowest steps, waits included, with how many runs each has.
 
 Some orders stop at an approval or wait for an event. Decide approvals from the order page or the
 **Approvals** inbox; deliver events (for example `payment.received`) from the order page, the
